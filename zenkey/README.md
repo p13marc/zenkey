@@ -1,7 +1,7 @@
-# zensight-keyspace
+# zenkey
 
 The executable form of the **keyspace-v2 convention**
-([`docs/rfcs/keyspace-v2/`](../docs/rfcs/keyspace-v2/00-index.md), v1).
+([`rfcs/`](../rfcs/00-index.md), v1).
 Producers and consumers emit and parse conforming keys through this crate and
 never spell raw key strings.
 

@@ -1,6 +1,6 @@
 //! Chunk lexical rules, reserved tokens, and structural key assembly/parsing.
 //!
-//! Normative source: RFC 03 (`docs/rfcs/keyspace-v2/03-grammar.md`). Every
+//! Normative source: RFC 03 (`rfcs/03-grammar.md`). Every
 //! rule here cites its section. Keys are **base-relative**: they start at the
 //! `v1` version chunk; the deployment base rides the session namespace
 //! (RFC 03 §1.1) and never appears in application-built keys.
@@ -563,7 +563,7 @@ pub fn with_base(base: &str, key_or_selector: &str) -> String {
 /// the meaningful answer: the key belongs to another deployment.
 ///
 /// ```
-/// use zensight_keyspace::grammar::strip_base;
+/// use zenkey::grammar::strip_base;
 ///
 /// assert_eq!(
 ///     strip_base("zensight", "zensight/v1/h-3fa9c2d41b7e/state/sysinfo/health"),

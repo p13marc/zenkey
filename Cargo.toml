@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = [
+    "zenkey",
+    # "zenctl" is temporarily out of the build: it depends on zensight-common
+    # (payload type table + keyexpr wrappers), which must first point at this
+    # repo's `zenkey` crate on zensight master — otherwise two copies of the
+    # keyspace crate meet across the API and types mismatch. Once zensight
+    # master consumes `zenkey` via git, re-enable the member together with:
+    #   [patch."https://github.com/p13marc/zenkey"]
+    #   zenkey = { path = "zenkey" }
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/p13marc/zenkey"
+authors = ["Marc Pardo <p13marc@gmail.com>"]
+
+[workspace.dependencies]
+zenoh = { version = "1.9", features = ["unstable"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Internal
+zenkey = { path = "zenkey" }

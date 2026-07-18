@@ -3,7 +3,7 @@
 **Status: v1.0 (ratified)** · informative chapter
 
 This RFC exists because ZenSight's shipped keyspace — documented in
-[`docs/KEYSPACE.md`](../../KEYSPACE.md), which remains authoritative for
+[`docs/KEYSPACE.md`](https://github.com/p13marc/zensight/blob/master/docs/KEYSPACE.md), which remains authoritative for
 what is deployed — has reached the limits of its shape. It works, it is
 well-guarded by tests, and its plane separation (`@`-verbatim) is sound.
 But eight structural problems recur, and each traces back to two original

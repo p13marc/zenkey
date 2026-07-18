@@ -1,7 +1,7 @@
 //! The zenoh-ext `@adv` publisher-detection token must be parseable.
 //!
 //! This is the test that keeps the advanced tier alive, and it is why
-//! [`VERSION_CHUNK`](zensight_keyspace::grammar::VERSION_CHUNK) is a plain `v1`
+//! [`VERSION_CHUNK`](zenkey::grammar::VERSION_CHUNK) is a plain `v1`
 //! rather than a verbatim `@v1`.
 //!
 //! zenoh-ext parks a liveliness token at `<key>/@adv/pub/<zid>/<eid>/<meta>` for
@@ -27,9 +27,9 @@
 //! AdvancedPublisher ever publishes on them (the catalog uses a plain
 //! `declare_publisher`). Only the version chunk had to give.
 
+use zenkey::grammar::VERSION_CHUNK;
 use zenoh::key_expr::format::kedefine;
 use zenoh::key_expr::keyexpr;
-use zensight_keyspace::grammar::VERSION_CHUNK;
 
 // Verbatim copy of zenoh-ext 1.9's `ke_liveliness` — it is `pub(crate)` there,
 // so replicating the format is the only way to pin behaviour we depend on. If a

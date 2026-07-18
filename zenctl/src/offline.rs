@@ -6,8 +6,8 @@
 //! (see the note on rest-variables in [`topic_list`]).
 
 use anyhow::{Result, anyhow};
-use zensight_keyspace::registry::REGISTRIES;
-use zensight_keyspace::{RegistrySlice, parse_slice};
+use zenkey::registry::REGISTRIES;
+use zenkey::{RegistrySlice, parse_slice};
 
 /// The offline default source: the registry slices this binary compiled
 /// against, parsed. Both the offline commands and `doctor` share the same
@@ -115,8 +115,8 @@ pub fn topic_info(base: &str, key: &str) -> Result<()> {
                  Either the producer is publishing something it never declared, or this build's \
                  registry is older than the fleet's (try `zenctl doctor`).",
                 match s.class {
-                    zensight_keyspace::grammar::ClassOrPlane::Class(c) => c.chunk(),
-                    zensight_keyspace::grammar::ClassOrPlane::Plane(p) => p.chunk(),
+                    zenkey::grammar::ClassOrPlane::Class(c) => c.chunk(),
+                    zenkey::grammar::ClassOrPlane::Plane(p) => p.chunk(),
                 }
             )),
             None => Err(anyhow!(
@@ -171,11 +171,11 @@ pub fn topic_info(base: &str, key: &str) -> Result<()> {
 /// registry grammar, which only knows this app's subjects. Against a foreign app
 /// we cannot, so we parse the key **structurally** (grammar only, no registry)
 /// and match its subject tail against the producer's served slice. A served
-/// [`SubjectDecl`](zensight_keyspace::slice::SubjectDecl) carries less than a
+/// [`SubjectDecl`](zenkey::slice::SubjectDecl) carries less than a
 /// compiled subject — no unit/qos/ttl/rate — which is the honest limit of what a
 /// slice off the wire says.
 pub fn topic_info_bus(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()> {
-    use zensight_keyspace::grammar::ClassOrPlane;
+    use zenkey::grammar::ClassOrPlane;
 
     let Some(parsed) = zensight_common::keyexpr::parse_full_key(base, key) else {
         return Err(anyhow!(
@@ -346,7 +346,7 @@ pub fn interface_show(type_name: &str) -> Result<()> {
     // Which subjects actually carry it — the reverse of the registry's binding.
     let mut carriers: Vec<(String, String, String)> = Vec::new();
     for (name, toml_src) in REGISTRIES {
-        let slice = zensight_keyspace::parse_slice(toml_src)
+        let slice = zenkey::parse_slice(toml_src)
             .map_err(|e| anyhow!("registry slice for {name} does not parse: {e}"))?;
         for s in &slice.subjects {
             if s.type_name == type_name {
@@ -390,7 +390,7 @@ mod tests {
     fn topic_info_refines_a_concrete_key() {
         // A registered sysinfo state subject.
         topic_info(
-            zensight_keyspace::DEFAULT_BASE,
+            zenkey::DEFAULT_BASE,
             "zensight/v1/h-3fa9c2d41b7e/state/sysinfo/health",
         )
         .unwrap();
@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn topic_info_rejects_a_non_v1_key() {
         let err = topic_info(
-            zensight_keyspace::DEFAULT_BASE,
+            zenkey::DEFAULT_BASE,
             "zensight/snmp/router-1/if/eth0/rx",
         )
         .unwrap_err();
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn topic_info_distinguishes_unregistered_from_malformed() {
         let err = topic_info(
-            zensight_keyspace::DEFAULT_BASE,
+            zenkey::DEFAULT_BASE,
             "zensight/v1/h-3fa9c2d41b7e/state/sysinfo/not_a_real_subject",
         )
         .unwrap_err();

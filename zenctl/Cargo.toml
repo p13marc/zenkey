@@ -11,8 +11,8 @@ name = "zenctl"
 path = "src/main.rs"
 
 [dependencies]
-zensight-common = { path = "../zensight-common" }
-zensight-keyspace = { workspace = true }
+zensight-common = { git = "https://github.com/p13marc/zensight", branch = "master" }
+zenkey = { workspace = true }
 
 zenoh = { workspace = true }
 tokio = { workspace = true }

@@ -190,7 +190,7 @@ struct BusArgs {
     /// un-namespaced so it sees the wire as it really is, including traffic
     /// from outside the deployment (RFC 09 §5) — which is what lets it spot a
     /// leak. So it has to be told what the base is.
-    #[arg(long, default_value = zensight_keyspace::DEFAULT_BASE)]
+    #[arg(long, default_value = zenkey::DEFAULT_BASE)]
     base: String,
 }
 
@@ -204,7 +204,7 @@ impl BusArgs {
     /// Compose a base-relative key from `zensight-common` into the full wire
     /// key this un-namespaced tool must actually use.
     fn wire(&self, relative: &str) -> String {
-        zensight_keyspace::grammar::with_base(&self.base, relative)
+        zenkey::grammar::with_base(&self.base, relative)
     }
 }
 
@@ -280,10 +280,10 @@ async fn main() -> Result<()> {
 ///
 /// Yes when the operator asks (`--from-bus`), and yes automatically when
 /// `--base` names an app other than the one this build compiled in: a foreign
-/// app's subjects are not in [`REGISTRIES`](zensight_keyspace::registry), so the
+/// app's subjects are not in [`REGISTRIES`](zenkey::registry), so the
 /// only honest source is what that fleet introspects (RFC 08 §6).
 fn wants_bus(from_bus: bool, base: &str) -> bool {
-    from_bus || base != zensight_keyspace::DEFAULT_BASE
+    from_bus || base != zenkey::DEFAULT_BASE
 }
 
 /// Registry slices from whichever source the flags select. The bus path fans a
@@ -293,7 +293,7 @@ fn wants_bus(from_bus: bool, base: &str) -> bool {
 async fn registry_slices(
     from_bus: bool,
     args: &BusArgs,
-) -> Result<Vec<zensight_keyspace::RegistrySlice>> {
+) -> Result<Vec<zenkey::RegistrySlice>> {
     if wants_bus(from_bus, &args.base) {
         let session = args.session().await?;
         let pairs = bus::fleet_registry(&session, &args.base, args.timeout()).await?;
@@ -487,7 +487,7 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
     let mut findings = 0usize;
     let mut answered = 0usize;
 
-    for (name, local_toml) in zensight_keyspace::registry::REGISTRIES {
+    for (name, local_toml) in zenkey::registry::REGISTRIES {
         // `@catalog` is a service origin: a verbatim `@` chunk is structurally
         // unmatchable by the `*` of a fleet selector (property D4), so it takes
         // its own key. That is the grammar working, not an exception to it.
@@ -498,7 +498,7 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
         };
 
         let answers = bus::fleet_get(&session, &args.base, &key, None, args.timeout()).await?;
-        let local = zensight_keyspace::parse_slice(local_toml)
+        let local = zenkey::parse_slice(local_toml)
             .map_err(|e| anyhow::anyhow!("local slice for {name} does not parse: {e}"))?;
 
         for answer in &answers {
@@ -507,7 +507,7 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
             };
             answered += 1;
             let served_toml = String::from_utf8_lossy(bytes);
-            let served = match zensight_keyspace::parse_slice(&served_toml) {
+            let served = match zenkey::parse_slice(&served_toml) {
                 Ok(s) => s,
                 Err(e) => {
                     println!(
@@ -518,7 +518,7 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
                     continue;
                 }
             };
-            let diff = zensight_keyspace::slice::diff(&served, &local);
+            let diff = zenkey::slice::diff(&served, &local);
             if diff.is_empty() {
                 println!(
                     "✓ {}/{name}: in sync (registry {})",
@@ -562,8 +562,8 @@ mod tests {
 
     #[test]
     fn wants_bus_switches_on_foreign_base() {
-        assert!(!wants_bus(false, zensight_keyspace::DEFAULT_BASE));
-        assert!(wants_bus(true, zensight_keyspace::DEFAULT_BASE));
+        assert!(!wants_bus(false, zenkey::DEFAULT_BASE));
+        assert!(wants_bus(true, zenkey::DEFAULT_BASE));
         assert!(wants_bus(false, "tcgui"));
     }
 

@@ -265,8 +265,8 @@ fn selector_precision() {
 /// Crate builders emit exactly the base-relative forms of the example set.
 #[test]
 fn builders_match_examples() {
-    use zensight_keyspace::grammar::{self, Class, Origin, Producer};
-    use zensight_keyspace::origin::HostId;
+    use zenkey::grammar::{self, Class, Origin, Producer};
+    use zenkey::origin::HostId;
 
     let host = Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap());
     let netlink = Producer::new("netlink").unwrap();

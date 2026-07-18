@@ -11,8 +11,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use zenoh::Session;
 use zenoh::query::{ConsolidationMode, QueryTarget};
-use zensight_keyspace::grammar::with_base;
-use zensight_keyspace::{RegistrySlice, parse_slice};
+use zenkey::grammar::with_base;
+use zenkey::{RegistrySlice, parse_slice};
 
 /// How a producer answered a procedure call.
 pub enum Answer {

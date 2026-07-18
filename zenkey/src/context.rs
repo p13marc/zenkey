@@ -1,5 +1,5 @@
 //! The v1 keyspace context: base + origin + producer in one value
-//! (epic #453, RFC `docs/rfcs/keyspace-v2/`).
+//! (epic #453, RFC `rfcs/`).
 //!
 //! One value carries everything a producer needs to build conforming keys:
 //! the deployment base, the host origin (`h-<12hex>`, minted once per

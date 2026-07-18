@@ -1,9 +1,9 @@
 //! Registry codegen round-trip tests (RFC 08 §1): build → parse identity,
 //! parse precedence, procedure keys, introspection slice.
 
-use zensight_keyspace::grammar::{self, Class, ClassOrPlane, Origin, Plane, Producer};
-use zensight_keyspace::origin::HostId;
-use zensight_keyspace::registry::{self, netring};
+use zenkey::grammar::{self, Class, ClassOrPlane, Origin, Plane, Producer};
+use zenkey::origin::HostId;
+use zenkey::registry::{self, netring};
 
 fn host() -> Origin {
     Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap())
@@ -125,13 +125,13 @@ fn subject_metadata() {
     let alert = netring::Subject::Alert {
         alert_key: "x".into(),
     };
-    assert_eq!(alert.qos(), zensight_keyspace::QosProfile::Alert);
+    assert_eq!(alert.qos(), zenkey::QosProfile::Alert);
     assert_eq!(alert.ttl_s(), Some(900));
     assert_eq!(alert.pattern(), "alert/{alert_key}");
     let flow = netring::Subject::FlowRed {
         quantile: "p50_ms".into(),
     };
-    assert_eq!(flow.qos(), zensight_keyspace::QosProfile::Sampled);
+    assert_eq!(flow.qos(), zenkey::QosProfile::Sampled);
     assert_eq!(flow.ttl_s(), None);
 }
 

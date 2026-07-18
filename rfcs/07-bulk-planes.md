@@ -94,7 +94,7 @@ The chunk after `@blob` is a reserved **tier token** (`artifact` | `tree` |
 `store`), not a producer chunk ([03-grammar.md §1.5](03-grammar.md)) —
 content-addressed data has no owning component. All three tiers are
 **queryables** served by the origin (pull-only — a consumer that never asks
-never pays a byte), fronted by a resumable client (reference: `zenoh-blob`
+never pays a byte), fronted by a resumable client (reference: [`zblob`](https://github.com/p13marc/zblob)
 — manifest + ranged chunk GETs, hash verification, resume by have-set).
 
 - **Tier-1 (`artifact/<id>`)**: whole-file delivery of a one-off artifact

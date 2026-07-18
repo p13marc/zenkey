@@ -1,6 +1,6 @@
 //! Executable form of the keyspace-v2 convention.
 //!
-//! The convention is specified in `docs/rfcs/keyspace-v2/` (v1). This crate is
+//! The convention is specified in `rfcs/` (v1). This crate is
 //! its enforcement layer: everything a producer or consumer needs to emit and
 //! parse conforming keys without ever spelling a raw key string.
 //!

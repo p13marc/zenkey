@@ -211,9 +211,9 @@ publisher ever publishes on those, so none of them is affected.
 **Cost, stated plainly.** An un-versioned `<base>/**` selector now reaches v1
 keys. A deployment coexisting with a pre-convention keyspace must separate the
 two by `<base>`, not by key algebra. Pinned by
-`zensight-keyspace/tests/guard.rs::d1_version_isolation` (which asserts the loss
+`zenkey/tests/guard.rs::d1_version_isolation` (which asserts the loss
 explicitly, so it is a decision and not a drift) and
-`zensight-keyspace/tests/adv_token.rs` (the token must parse).
+`zenkey/tests/adv_token.rs` (the token must parse).
 
 **Revisit trigger.** Zenoh gains a wildcard that crosses verbatim chunks, or
 zenoh-ext stops locating its sidecars by keyexpr match — either would let the

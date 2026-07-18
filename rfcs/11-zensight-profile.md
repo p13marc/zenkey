@@ -112,7 +112,7 @@ zensight/v1/@catalog/@rpc/names?ip=93.184.216.34
 ## 3. Mapping: every shipped family → its convention home
 
 Conceptual correspondence (shipped grammar per
-[`docs/KEYSPACE.md`](../../KEYSPACE.md)):
+[`docs/KEYSPACE.md`](https://github.com/p13marc/zensight/blob/master/docs/KEYSPACE.md)):
 
 | Shipped family | Convention home | Notes |
 |---|---|---|

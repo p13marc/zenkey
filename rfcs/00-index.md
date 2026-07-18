@@ -2,7 +2,7 @@
 
 **Status: v1.4 — RATIFIED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
-enforcement crate `zensight-keyspace`).
+enforcement crate `zenkey`).
 
 > **v1.4 (2026-07-18, actuator-adoption amendments, issue
 > [tcgui#43](https://github.com/p13marc/tcgui/issues/43))** — six additive
@@ -89,7 +89,7 @@ opt-in tier); round 4 all open questions decided
 ([12-open-questions.md](12-open-questions.md) is the decision record). ·
 supersedes the exploratory drafts in `zensight-key-semantic/` (credited in
 [03 §6.2](03-grammar.md)) · does **not** replace
-[`docs/KEYSPACE.md`](../../KEYSPACE.md), which remains authoritative for
+[`docs/KEYSPACE.md`](https://github.com/p13marc/zensight/blob/master/docs/KEYSPACE.md), which remains authoritative for
 the shipped keyspace.
 
 A key-space convention for Zenoh applications: how to shape key
