@@ -9,10 +9,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use zenoh::Session;
-use zenoh::query::{ConsolidationMode, QueryTarget};
 use zenkey::grammar::with_base;
 use zenkey::{RegistrySlice, parse_slice};
+use zenoh::Session;
+use zenoh::query::{ConsolidationMode, QueryTarget};
 
 /// How a producer answered a procedure call.
 pub enum Answer {

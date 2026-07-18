@@ -36,7 +36,11 @@ pub fn compiled_slices() -> Result<Vec<RegistrySlice>> {
 /// `{device}/{path...}` by design, because their metric tree belongs to the
 /// polled device, not to us. For those, this command can only tell you the
 /// shape. `zenctl topic echo` is what tells you the members.
-pub fn topic_list(slices: &[RegistrySlice], producer: Option<&str>, class: Option<&str>) -> Result<()> {
+pub fn topic_list(
+    slices: &[RegistrySlice],
+    producer: Option<&str>,
+    class: Option<&str>,
+) -> Result<()> {
     if let Some(c) = class
         && !["telemetry", "state", "events"].contains(&c)
     {
@@ -398,11 +402,8 @@ mod tests {
 
     #[test]
     fn topic_info_rejects_a_non_v1_key() {
-        let err = topic_info(
-            zenkey::DEFAULT_BASE,
-            "zensight/snmp/router-1/if/eth0/rx",
-        )
-        .unwrap_err();
+        let err =
+            topic_info(zenkey::DEFAULT_BASE, "zensight/snmp/router-1/if/eth0/rx").unwrap_err();
         assert!(err.to_string().contains("not a v1 key"), "got: {err}");
     }
 
