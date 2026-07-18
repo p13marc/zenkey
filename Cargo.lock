@@ -3767,6 +3767,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "zblob"
+version = "0.1.0"
+source = "git+https://github.com/p13marc/zblob#bd6988d734ecae8020924254280d37c123db54f2"
+dependencies = [
+ "ciborium",
+ "fastcdc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "zenoh",
+]
+
+[[package]]
 name = "zenctl"
 version = "0.1.0"
 dependencies = [
@@ -3842,21 +3857,6 @@ dependencies = [
  "zenoh-task",
  "zenoh-transport",
  "zenoh-util",
-]
-
-[[package]]
-name = "zenoh-blob"
-version = "0.8.0"
-source = "git+https://github.com/p13marc/zensight?branch=master#e9f41501686a8e4acf081699e249ed29a81b89b3"
-dependencies = [
- "ciborium",
- "fastcdc",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "tokio",
- "zenoh",
 ]
 
 [[package]]
@@ -4322,7 +4322,7 @@ dependencies = [
 [[package]]
 name = "zensight-common"
 version = "0.8.0"
-source = "git+https://github.com/p13marc/zensight?branch=master#e9f41501686a8e4acf081699e249ed29a81b89b3"
+source = "git+https://github.com/p13marc/zensight?branch=master#2365cab7e3da3c6e0319bf5cca0d20f2a1ff6b19"
 dependencies = [
  "ciborium",
  "json5",
@@ -4333,23 +4333,9 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "zblob",
+ "zenkey",
  "zenoh",
- "zenoh-blob",
- "zensight-keyspace",
-]
-
-[[package]]
-name = "zensight-keyspace"
-version = "0.8.0"
-source = "git+https://github.com/p13marc/zensight?branch=master#e9f41501686a8e4acf081699e249ed29a81b89b3"
-dependencies = [
- "dirs 5.0.1",
- "sha2",
- "thiserror 2.0.18",
- "toml 0.8.23",
- "tracing",
- "zenoh",
- "zenoh-keyexpr",
 ]
 
 [[package]]
