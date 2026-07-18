@@ -290,10 +290,7 @@ fn wants_bus(from_bus: bool, base: &str) -> bool {
 /// wildcard `introspect` GET across the fleet ([`bus::fleet_registry`]); the
 /// offline path parses the compiled-in registry ([`offline::compiled_slices`]).
 /// Both yield the same `&[RegistrySlice]`, so every renderer is source-agnostic.
-async fn registry_slices(
-    from_bus: bool,
-    args: &BusArgs,
-) -> Result<Vec<zenkey::RegistrySlice>> {
+async fn registry_slices(from_bus: bool, args: &BusArgs) -> Result<Vec<zenkey::RegistrySlice>> {
     if wants_bus(from_bus, &args.base) {
         let session = args.session().await?;
         let pairs = bus::fleet_registry(&session, &args.base, args.timeout()).await?;

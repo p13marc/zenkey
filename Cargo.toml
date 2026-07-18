@@ -2,13 +2,7 @@
 resolver = "2"
 members = [
     "zenkey",
-    # "zenctl" is temporarily out of the build: it depends on zensight-common
-    # (payload type table + keyexpr wrappers), which must first point at this
-    # repo's `zenkey` crate on zensight master — otherwise two copies of the
-    # keyspace crate meet across the API and types mismatch. Once zensight
-    # master consumes `zenkey` via git, re-enable the member together with:
-    #   [patch."https://github.com/p13marc/zenkey"]
-    #   zenkey = { path = "zenkey" }
+    "zenctl",
 ]
 
 [workspace.package]
@@ -31,4 +25,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Internal
+zenkey = { path = "zenkey" }
+
+# zenctl pulls zensight-common from the zensight repo, whose zenkey dependency
+# is this very repo (git). Patch that git source to the local path so exactly
+# one copy of zenkey exists — types cross the zensight-common API
+# (refine_full_key returns StructuralKey/AnySubject), so two copies would
+# mismatch (#3).
+[patch."https://github.com/p13marc/zenkey"]
 zenkey = { path = "zenkey" }
