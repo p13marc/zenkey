@@ -3,31 +3,34 @@
 //! RFC 08 §6 names this tool: runtime introspection exists so that "generic
 //! explorer tooling — the `busctl`/`d-feet` equivalent — needs no compiled-in
 //! registry". Every producer MUST serve `@rpc/<producer>/introspect`, so a
-//! fleet can describe itself.
+//! fleet can describe itself. `zenctl` is app-neutral: nothing
+//! application-specific is compiled in, and any conformant fleet is
+//! explorable.
 //!
-//! The commands split in two:
+//! Registry knowledge comes from one of two sources:
 //!
-//! * **offline** (`topic list`, `topic info`, `interface show`, `service list`)
-//!   answer from the registry this binary compiled against. They work with the
-//!   fleet down, and they describe what *may* exist.
-//! * **on-bus** (`node list`, `topic echo`, `service call`, `doctor`) ask the
-//!   fleet. They describe what *does* exist.
+//! * **the live bus** (the default): each producer's served `introspect`
+//!   slice — what the fleet *actually* serves;
+//! * **`--registry <dir>`** (repeatable): local `registry/*.toml` files — what
+//!   a checked-out application *declares*. Works with the fleet down.
 //!
-//! Keeping the two visibly distinct is deliberate: the gap between them is
-//! exactly where drift lives, and `doctor` is the command that reports it.
+//! The gap between the two is drift, and `doctor` (bus + `--registry`) is the
+//! command that reports it.
 
 mod bus;
 mod offline;
 
+use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::{Args, Parser, Subcommand};
+use zenkey::RegistrySlice;
 
 #[derive(Parser)]
 #[command(
     name = "zenctl",
-    about = "Explore a ZenSight keyspace-v2 bus (RFC 08 §6)",
+    about = "Explore a keyspace-v2 Zenoh bus (RFC 08 §6)",
     version
 )]
 struct Cli {
@@ -46,13 +49,15 @@ enum Command {
     /// Procedures on the `@rpc` plane.
     #[command(subcommand)]
     Service(ServiceCmd),
-    /// Payload types (the RFC 08 §5 type table).
+    /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
-    /// Diff what the fleet *serves* against what this build *expects*.
+    /// Diff what the fleet *serves* against local registry files.
     ///
     /// RFC 08 §6: "A disagreement between introspection and the checked-in TOML
-    /// is a finding, not an ambiguity." This prints the findings.
+    /// is a finding, not an ambiguity." This prints the findings. The local
+    /// truth comes from `--registry <dir>`; without it only the
+    /// roster-vs-introspect check runs.
     Doctor(BusArgs),
 }
 
@@ -60,10 +65,9 @@ enum Command {
 enum TopicCmd {
     /// List registered subjects.
     ///
-    /// Sources from the compiled-in registry by default (offline, fast). When
-    /// `--base` names an app other than this build's, or `--from-bus` is set, it
-    /// instead reads each producer's served introspect slice off the live bus —
-    /// so it works against *any* keyspace-v2 fleet (RFC 08 §6).
+    /// Reads each producer's served introspect slice off the live bus by
+    /// default — so it works against *any* keyspace-v2 fleet (RFC 08 §6).
+    /// With `--registry <dir>` it answers offline from local registry TOMLs.
     List {
         /// Only this producer.
         #[arg(long)]
@@ -71,34 +75,25 @@ enum TopicCmd {
         /// Only this class: telemetry, state, or events.
         #[arg(long)]
         class: Option<String>,
-        /// Read slices from the live bus instead of the compiled-in registry.
-        /// Auto-enabled when `--base` names a non-default app.
-        #[arg(long)]
-        from_bus: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
     /// Describe one key or subject pattern.
     ///
-    /// Accepts a full wire key (`zensight/v1/h-abc.../telemetry/sysinfo/cpu/usage`)
-    /// and refines it through the registry's parse direction. Uses the compiled-in
-    /// registry by default; against a foreign `--base` (or with `--from-bus`) it
-    /// refines against the producer's served slice instead.
+    /// Accepts a full wire key (`<base>/v1/h-abc.../telemetry/sysinfo/cpu/usage`)
+    /// and refines it against the producer's registry slice (bus-served, or
+    /// local with `--registry`).
     Info {
         /// A concrete wire key, as it appears on the bus.
         key: String,
-        /// Read the slice from the live bus instead of the compiled-in registry.
-        /// Auto-enabled when `--base` names a non-default app.
-        #[arg(long)]
-        from_bus: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
     /// Subscribe and print decoded samples (on-bus).
     Echo {
-        /// Key expression to subscribe to. Defaults to all v1 data.
-        #[arg(default_value = "zensight/v1/**")]
-        selector: String,
+        /// Key expression to subscribe to. Defaults to all v1 data under the
+        /// base: `<base>/v1/**`.
+        selector: Option<String>,
         /// Print raw payload bytes as hex instead of decoding.
         #[arg(long)]
         raw: bool,
@@ -118,25 +113,18 @@ enum NodeCmd {
 
 #[derive(Subcommand)]
 enum ServiceCmd {
-    /// List registered procedures.
-    ///
-    /// Compiled-in registry by default; a foreign `--base` (or `--from-bus`)
-    /// reads each producer's served introspect slice off the live bus instead.
+    /// List registered procedures (bus-served slices, or `--registry`).
     List {
         /// Only this producer.
         #[arg(long)]
         producer: Option<String>,
-        /// Read slices from the live bus instead of the compiled-in registry.
-        /// Auto-enabled when `--base` names a non-default app.
-        #[arg(long)]
-        from_bus: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
     /// Call a procedure (on-bus).
     Call {
         /// Origin to target: a host id (`h-3fa9c2d41b7e`), `*` for the whole
-        /// fleet, or `@catalog` for the identity service.
+        /// fleet, or `@catalog` for a service origin.
         origin: String,
         /// Producer name. Omit for a service origin, which has no producer chunk.
         producer: String,
@@ -155,18 +143,38 @@ enum ServiceCmd {
 
 #[derive(Subcommand)]
 enum InterfaceCmd {
-    /// List every payload type in the type table (offline).
-    List,
-    /// Show one payload type and where it is defined (offline).
+    /// List every payload type the registry slices declare.
+    List {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Show one payload type and every subject that carries it.
     Show {
         /// Type name, e.g. `TelemetryPoint`.
         type_name: String,
+        #[command(flatten)]
+        bus: BusArgs,
     },
 }
 
-/// Connection options shared by every on-bus command.
+/// Options shared by every command: the deployment base, the registry source,
+/// and the connection.
 #[derive(Args, Clone)]
 struct BusArgs {
+    /// The deployment base — the first chunk(s) of every key on the wire.
+    ///
+    /// Applications set this as their Zenoh session `namespace` and never
+    /// spell it. `zenctl` deliberately does **not**: a debug tool runs
+    /// un-namespaced so it sees the wire as it really is, including traffic
+    /// from outside the deployment (RFC 09 §5) — which is what lets it spot a
+    /// leak. So it has to be told what the base is.
+    #[arg(long, env = "ZENCTL_BASE")]
+    base: String,
+    /// Local registry directory (`registry/*.toml`), repeatable. When given,
+    /// registry-sourced commands answer offline from these files instead of
+    /// the live bus.
+    #[arg(long, value_name = "DIR")]
+    registry: Vec<PathBuf>,
     /// Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
     #[arg(long, short = 'c')]
     connect: Vec<String>,
@@ -183,15 +191,6 @@ struct BusArgs {
     /// Seconds to wait for replies / to watch the bus.
     #[arg(long, default_value_t = 5)]
     timeout: u64,
-    /// The deployment base — the first chunk(s) of every key on the wire.
-    ///
-    /// Applications set this as their Zenoh session `namespace` and never
-    /// spell it (#466). `zenctl` deliberately does **not**: a debug tool runs
-    /// un-namespaced so it sees the wire as it really is, including traffic
-    /// from outside the deployment (RFC 09 §5) — which is what lets it spot a
-    /// leak. So it has to be told what the base is.
-    #[arg(long, default_value = zenkey::DEFAULT_BASE)]
-    base: String,
 }
 
 impl BusArgs {
@@ -201,10 +200,30 @@ impl BusArgs {
     fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout)
     }
-    /// Compose a base-relative key from `zensight-common` into the full wire
-    /// key this un-namespaced tool must actually use.
+    /// Compose a base-relative key into the full wire key this un-namespaced
+    /// tool must actually use.
     fn wire(&self, relative: &str) -> String {
         zenkey::grammar::with_base(&self.base, relative)
+    }
+    /// Registry slices from whichever source the flags select: local
+    /// `--registry` dirs when given (offline), otherwise the live bus
+    /// (RFC 08 §6 introspection). Both yield the same `Vec<RegistrySlice>`,
+    /// so every renderer is source-agnostic.
+    async fn slices(&self) -> Result<Vec<RegistrySlice>> {
+        if !self.registry.is_empty() {
+            return offline::load_slices(&self.registry);
+        }
+        let session = self.session().await?;
+        let pairs = bus::fleet_registry(&session, &self.base, self.timeout()).await?;
+        if pairs.is_empty() {
+            eprintln!(
+                "no introspect slices on base {:?} — an empty set is not a verdict (RFC 05 §3.1); \
+                 `zenctl node list --base {}` says who is actually up.\n\
+                 (offline alternative: --registry <dir> with the app's registry TOMLs)",
+                self.base, self.base
+            );
+        }
+        Ok(pairs.into_iter().map(|(_, slice)| slice).collect())
     }
 }
 
@@ -222,33 +241,24 @@ async fn main() -> Result<()> {
         Command::Topic(TopicCmd::List {
             producer,
             class,
-            from_bus,
             bus,
         }) => {
-            let slices = registry_slices(from_bus, &bus).await?;
+            let slices = bus.slices().await?;
             offline::topic_list(&slices, producer.as_deref(), class.as_deref())
         }
-        Command::Topic(TopicCmd::Info { key, from_bus, bus }) => {
-            if wants_bus(from_bus, &bus.base) {
-                let slices = registry_slices(from_bus, &bus).await?;
-                offline::topic_info_bus(&bus.base, &key, &slices)
-            } else {
-                offline::topic_info(&bus.base, &key)
-            }
+        Command::Topic(TopicCmd::Info { key, bus }) => {
+            let slices = bus.slices().await?;
+            offline::topic_info(&bus.base, &key, &slices)
         }
         Command::Topic(TopicCmd::Echo {
             selector,
             raw,
             count,
             bus,
-        }) => cmd_echo(&selector, raw, count, &bus).await,
+        }) => cmd_echo(selector.as_deref(), raw, count, &bus).await,
         Command::Node(NodeCmd::List(bus)) => cmd_node_list(&bus).await,
-        Command::Service(ServiceCmd::List {
-            producer,
-            from_bus,
-            bus,
-        }) => {
-            let slices = registry_slices(from_bus, &bus).await?;
+        Command::Service(ServiceCmd::List { producer, bus }) => {
+            let slices = bus.slices().await?;
             offline::service_list(&slices, producer.as_deref())
         }
         Command::Service(ServiceCmd::Call {
@@ -269,41 +279,15 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::Interface(InterfaceCmd::List) => offline::interface_list(),
-        Command::Interface(InterfaceCmd::Show { type_name }) => offline::interface_show(&type_name),
-        Command::Doctor(bus) => cmd_doctor(&bus).await,
-    }
-}
-
-/// Should this command source registry slices from the live bus rather than the
-/// compiled-in registry?
-///
-/// Yes when the operator asks (`--from-bus`), and yes automatically when
-/// `--base` names an app other than the one this build compiled in: a foreign
-/// app's subjects are not in [`REGISTRIES`](zenkey::registry), so the
-/// only honest source is what that fleet introspects (RFC 08 §6).
-fn wants_bus(from_bus: bool, base: &str) -> bool {
-    from_bus || base != zenkey::DEFAULT_BASE
-}
-
-/// Registry slices from whichever source the flags select. The bus path fans a
-/// wildcard `introspect` GET across the fleet ([`bus::fleet_registry`]); the
-/// offline path parses the compiled-in registry ([`offline::compiled_slices`]).
-/// Both yield the same `&[RegistrySlice]`, so every renderer is source-agnostic.
-async fn registry_slices(from_bus: bool, args: &BusArgs) -> Result<Vec<zenkey::RegistrySlice>> {
-    if wants_bus(from_bus, &args.base) {
-        let session = args.session().await?;
-        let pairs = bus::fleet_registry(&session, &args.base, args.timeout()).await?;
-        if pairs.is_empty() {
-            eprintln!(
-                "no introspect slices on base {:?} — an empty set is not a verdict (RFC 05 §3.1); \
-                 `zenctl node list --base {}` says who is actually up.",
-                args.base, args.base
-            );
+        Command::Interface(InterfaceCmd::List { bus }) => {
+            let slices = bus.slices().await?;
+            offline::interface_list(&slices)
         }
-        Ok(pairs.into_iter().map(|(_, slice)| slice).collect())
-    } else {
-        offline::compiled_slices()
+        Command::Interface(InterfaceCmd::Show { type_name, bus }) => {
+            let slices = bus.slices().await?;
+            offline::interface_show(&slices, &type_name)
+        }
+        Command::Doctor(bus) => cmd_doctor(&bus).await,
     }
 }
 
@@ -316,7 +300,7 @@ async fn cmd_node_list(args: &BusArgs) -> Result<()> {
         println!("no live producers.");
         println!(
             "\nnothing held a liveliness token on {}.",
-            zensight_common::all_liveliness_wildcard()
+            zenkey::grammar::all_liveliness_wildcard()
         );
         println!("if you expected some, check --connect (and that they are actually running).");
         return Ok(());
@@ -333,17 +317,31 @@ async fn cmd_node_list(args: &BusArgs) -> Result<()> {
     Ok(())
 }
 
-/// `topic echo` — subscribe, refine each key through the registry, decode.
+/// `topic echo` — subscribe, refine each key against the registry slices,
+/// render the payload generically.
 ///
 /// Subscribe-first is not a style choice: RFC 04 §3.2 forbids GET-then-subscribe
 /// (it drops everything published in the gap). This only subscribes, so it is
 /// trivially correct — but a `--seed` flag would have to keep that order.
-async fn cmd_echo(selector: &str, raw: bool, count: usize, args: &BusArgs) -> Result<()> {
+async fn cmd_echo(selector: Option<&str>, raw: bool, count: usize, args: &BusArgs) -> Result<()> {
+    let selector = selector
+        .map(str::to_string)
+        .unwrap_or_else(|| args.wire("v1/**"));
+
+    // Slices first (a single introspect fan-in), then subscribe: the slice
+    // set names each subject's payload type, which is what makes the rendered
+    // lines legible without anything compiled in.
+    let slices = if raw {
+        Vec::new()
+    } else {
+        args.slices().await?
+    };
+
     let session = args.session().await?;
     let subscriber = session
-        .declare_subscriber(selector)
+        .declare_subscriber(&selector)
         .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(|e| anyhow!("{e}"))?;
 
     eprintln!("echoing {selector} (ctrl-c to stop)");
     let mut seen = 0usize;
@@ -354,10 +352,7 @@ async fn cmd_echo(selector: &str, raw: bool, count: usize, args: &BusArgs) -> Re
         if raw {
             println!("{key}\n  {}", hex(&bytes));
         } else {
-            match render(&args.base, &key, &bytes) {
-                Ok(line) => println!("{key}\n  {line}"),
-                Err(why) => println!("{key}\n  <{why}>"),
-            }
+            println!("{key}\n  {}", render(&args.base, &key, &bytes, &slices));
         }
 
         seen += 1;
@@ -368,31 +363,53 @@ async fn cmd_echo(selector: &str, raw: bool, count: usize, args: &BusArgs) -> Re
     Ok(())
 }
 
-/// Wire key → subject → payload type → value, with nothing producer-specific
-/// compiled in. This is the whole point of the registry's parse direction.
-fn render(base: &str, key: &str, bytes: &[u8]) -> std::result::Result<String, String> {
-    let (_, _, subject) = zensight_common::keyexpr::refine_full_key(base, key)
-        .ok_or_else(|| "unregistered subject — not in this build's registry".to_string())?;
-    let type_name = subject.payload_type();
-    match zensight_common::decode_payload(type_name, bytes) {
-        Ok(value) => Ok(serde_json::to_string(&value).unwrap_or_default()),
-        // A generic explorer cannot synthesize a foreign app's Rust types
-        // (RFC 08 §5 keeps schema definitions in the owning crates), so a type
-        // this build has no arm for is the honest limit — not an error. Show the
-        // bytes as they are, tagged with the type they *claim* to be.
-        Err(_) => Ok(undecoded(type_name, bytes)),
-    }
+/// Wire key → subject (via the slices) → generically rendered value, with
+/// nothing app-specific compiled in.
+fn render(base: &str, key: &str, bytes: &[u8], slices: &[RegistrySlice]) -> String {
+    let type_name = zenkey::grammar::parse_full(base, key)
+        .and_then(|parsed| {
+            let producer = parsed.producer.as_ref().map(|p| p.name().to_string())?;
+            let slice = slices.iter().find(|s| s.name == producer)?;
+            let class = match parsed.class {
+                zenkey::grammar::ClassOrPlane::Class(c) => c.chunk(),
+                zenkey::grammar::ClassOrPlane::Plane(p) => p.chunk(),
+            };
+            let tail: Vec<&str> = parsed.subject.iter().map(String::as_str).collect();
+            slice
+                .subjects
+                .iter()
+                .find(|s| s.class == class && offline::match_subject(&s.path, &tail).is_some())
+                .map(|s| s.type_name.clone())
+        })
+        .unwrap_or_else(|| "unregistered".to_string());
+    format!("<{type_name}> {}", render_value(bytes))
 }
 
-/// Best-effort rendering of a payload this build cannot decode: valid UTF-8 as
-/// text, otherwise hex, always tagged with the declared type and byte length so
-/// the reader knows exactly what they are looking at.
-fn undecoded(type_name: &str, bytes: &[u8]) -> String {
-    let body = match std::str::from_utf8(bytes) {
-        Ok(text) => text.to_string(),
-        Err(_) => hex(bytes),
-    };
-    format!("<undecoded {type_name}: {} bytes> {body}", bytes.len())
+/// Best-effort generic payload rendering. The convention's profile default is
+/// CBOR with a first-byte sniff for JSON interop, so: payloads that look like
+/// JSON text parse as JSON; otherwise CBOR → JSON diagnostic; otherwise UTF-8
+/// text; otherwise hex. A generic explorer cannot synthesize a foreign app's
+/// Rust types (RFC 08 §5 keeps schema definitions in the owning crates) —
+/// this shows the *structure*, which is what the wire honestly says.
+fn render_value(bytes: &[u8]) -> String {
+    let looks_json = bytes.first().is_some_and(|b| {
+        matches!(
+            b,
+            b'{' | b'[' | b'"' | b' ' | b'-' | b'0'..=b'9' | b't' | b'f' | b'n'
+        )
+    });
+    if looks_json && let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
+        return serde_json::to_string(&v).unwrap_or_default();
+    }
+    if let Ok(v) = ciborium::from_reader::<ciborium::Value, _>(bytes)
+        && let Ok(text) = serde_json::to_string(&v)
+    {
+        return text;
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) if !text.is_empty() => text.to_string(),
+        _ => format!("<{} bytes> {}", bytes.len(), hex(bytes)),
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -413,7 +430,7 @@ async fn cmd_service_call(
     args: &BusArgs,
 ) -> Result<()> {
     // A service origin (`@catalog`) carries no producer chunk (RFC 03 §1.5).
-    // Un-namespaced tool ⇒ full keys, composed off the configured base (#466).
+    // Un-namespaced tool ⇒ full keys, composed off the configured base.
     let mut key = if origin.starts_with('@') {
         args.wire(&format!("v1/{origin}/@rpc/{procedure}"))
     } else {
@@ -446,37 +463,29 @@ async fn cmd_service_call(
         return Ok(());
     }
 
-    for FleetAnswerRef { origin, answer } in answers.iter().map(|a| FleetAnswerRef {
-        origin: &a.origin,
-        answer: &a.answer,
-    }) {
-        match answer {
+    for a in &answers {
+        match &a.answer {
             bus::Answer::Value(bytes) => {
-                // Read replies are JSON today; introspect replies raw TOML.
-                // Print what parses, fall back to the text.
+                // Read replies are JSON by convention; introspect replies raw
+                // TOML. Print what parses, fall back to the text.
                 let text = match serde_json::from_slice::<serde_json::Value>(bytes) {
                     Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
                     Err(_) => String::from_utf8_lossy(bytes).to_string(),
                 };
-                println!("── {origin} ──\n{text}");
+                println!("── {} ──\n{text}", a.origin);
             }
             bus::Answer::Error { name, message } => {
                 // RFC 05 §3: an error reply always means failure. Never dress
                 // one up as success.
-                eprintln!("── {origin} ── {name}: {message}");
+                eprintln!("── {} ── {name}: {message}", a.origin);
             }
         }
     }
     Ok(())
 }
 
-struct FleetAnswerRef<'a> {
-    origin: &'a str,
-    answer: &'a bus::Answer,
-}
-
-/// `doctor` — fan `introspect` across the fleet and diff each reply against the
-/// slice this build compiled in (RFC 08 §6).
+/// `doctor` — fan `introspect` across the fleet and diff each reply against
+/// the local registry files (RFC 08 §6).
 async fn cmd_doctor(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let roster = bus::roster(&session, &args.base, args.timeout()).await?;
@@ -484,19 +493,29 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
     let mut findings = 0usize;
     let mut answered = 0usize;
 
-    for (name, local_toml) in zenkey::registry::REGISTRIES {
-        // `@catalog` is a service origin: a verbatim `@` chunk is structurally
-        // unmatchable by the `*` of a fleet selector (property D4), so it takes
-        // its own key. That is the grammar working, not an exception to it.
-        let key = if *name == "catalog" {
-            zensight_common::catalog_rpc_key("introspect")
-        } else {
-            zensight_common::fleet_rpc_key(name, "introspect")
+    if args.registry.is_empty() {
+        eprintln!(
+            "note: no --registry <dir> given — skipping the served-vs-declared diff; only the \
+             roster-vs-introspect check runs."
+        );
+    }
+    let locals = offline::load_slices(&args.registry)?;
+
+    for local in &locals {
+        // A service origin's verbatim `@` chunk is structurally unmatchable by
+        // the `*` of a fleet selector (property D4), so it takes its own key.
+        // That is the grammar working, not an exception to it.
+        let key = match &local.service_origin {
+            Some(origin) => {
+                let o = zenkey::grammar::Origin::service(origin).map_err(|e| {
+                    anyhow!("bad service origin in local slice {}: {e}", local.name)
+                })?;
+                args.wire(&zenkey::grammar::service_rpc_key(&o, "introspect")?)
+            }
+            None => args.wire(&zenkey::grammar::fleet_rpc_key(&local.name, "introspect")),
         };
 
         let answers = bus::fleet_get(&session, &args.base, &key, None, args.timeout()).await?;
-        let local = zenkey::parse_slice(local_toml)
-            .map_err(|e| anyhow::anyhow!("local slice for {name} does not parse: {e}"))?;
 
         for answer in &answers {
             let bus::Answer::Value(bytes) = &answer.answer else {
@@ -508,26 +527,33 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
                 Ok(s) => s,
                 Err(e) => {
                     println!(
-                        "✗ {}/{name}: served slice does not parse: {e}",
-                        answer.origin
+                        "✗ {}/{}: served slice does not parse: {e}",
+                        answer.origin, local.name
                     );
                     findings += 1;
                     continue;
                 }
             };
-            let diff = zenkey::slice::diff(&served, &local);
+            let diff = zenkey::slice::diff(&served, local);
             if diff.is_empty() {
                 println!(
-                    "✓ {}/{name}: in sync (registry {})",
-                    answer.origin, served.version
+                    "✓ {}/{}: in sync (registry {})",
+                    answer.origin, local.name, served.version
                 );
             } else {
                 for f in &diff {
-                    println!("✗ {}/{name}: {}", answer.origin, f.summary());
+                    println!("✗ {}/{}: {}", answer.origin, local.name, f.summary());
                     findings += 1;
                 }
             }
         }
+    }
+
+    // With no local registry the only introspect coverage we can count is the
+    // fleet-wide wildcard.
+    if locals.is_empty() {
+        let pairs = bus::fleet_registry(&session, &args.base, args.timeout()).await?;
+        answered = pairs.len();
     }
 
     // The roster is what makes silence legible (RFC 05 §3.1): a producer that
@@ -558,20 +584,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wants_bus_switches_on_foreign_base() {
-        assert!(!wants_bus(false, zenkey::DEFAULT_BASE));
-        assert!(wants_bus(true, zenkey::DEFAULT_BASE));
-        assert!(wants_bus(false, "tcgui"));
+    fn render_value_sniffs_json_cbor_text_and_bytes() {
+        // JSON text renders as JSON.
+        assert_eq!(render_value(br#"{"a":1}"#), r#"{"a":1}"#);
+        // CBOR renders as its JSON diagnostic.
+        let mut cbor = Vec::new();
+        ciborium::into_writer(&serde_json::json!({"b": 2}), &mut cbor).unwrap();
+        assert_eq!(render_value(&cbor), r#"{"b":2}"#);
+        // Plain text stays text; binary falls back to hex.
+        assert_eq!(render_value(b"plain text"), "plain text");
+        assert!(render_value(&[0xff, 0x00, 0x9c]).contains("ff 00 9c"));
     }
 
     #[test]
-    fn undecoded_prefers_utf8_then_hex() {
-        // Valid UTF-8 → shown as text, tagged with the foreign type name.
-        let text = undecoded("NetworkInterface", b"eth0 up");
-        assert_eq!(text, "<undecoded NetworkInterface: 7 bytes> eth0 up");
+    fn render_tags_the_declared_type_and_unregistered() {
+        let slice = zenkey::parse_slice(
+            r#"
+            [registry]
+            version = "0.3"
+            app = "tcgui"
+            convention = 1
+            [producer]
+            name = "tc"
+            [[subject]]
+            path = "iface/{iface}/state"
+            class = "state"
+            type = "NetworkInterface"
+            "#,
+        )
+        .unwrap();
+        let slices = vec![slice];
+        let line = render(
+            "tcgui",
+            "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
+            br#"{"up":true}"#,
+            &slices,
+        );
+        assert_eq!(line, r#"<NetworkInterface> {"up":true}"#);
 
-        // Non-UTF-8 → hex, still tagged.
-        let bin = undecoded("BackendHealthStatus", &[0xff, 0x00, 0x9c]);
-        assert_eq!(bin, "<undecoded BackendHealthStatus: 3 bytes> ff 00 9c");
+        let missing = render(
+            "tcgui",
+            "tcgui/v1/h-3fa9c2d41b7e/state/tc/bogus",
+            b"x",
+            &slices,
+        );
+        assert!(missing.starts_with("<unregistered>"), "got: {missing}");
     }
 }

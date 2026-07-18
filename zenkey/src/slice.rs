@@ -7,7 +7,8 @@
 //!
 //! A slice is what one build *says* it serves. The point of having it is the
 //! diff: compare a host's served slice against the slice this build compiled
-//! in ([`REGISTRIES`](crate::registry::REGISTRIES)) and a disagreement is a
+//! in (the application's `zenkey-build`-generated `REGISTRIES` table) and a
+//! disagreement is a
 //! **finding** — a version skew, a subject the fleet serves that we cannot
 //! name, or a subject we expect that nothing out there publishes. RFC 08 §6 is
 //! explicit that this is a finding and not an ambiguity, which is why the
@@ -28,6 +29,16 @@ pub struct SubjectDecl {
     /// Registry version this subject first appeared in.
     pub since: Option<String>,
     pub description: Option<String>,
+    /// The declared QoS profile name (RFC 04 §3), when the slice carries one.
+    pub qos: Option<String>,
+    /// State-subject freshness bound (RFC 04 §1.2), when declared.
+    pub ttl_s: Option<i64>,
+    /// The subject's unit (RFC 08 §4), when declared.
+    pub unit: Option<String>,
+    /// Events rate class (RFC 04 §1.3), when declared.
+    pub rate: Option<String>,
+    /// The declared key-population bound, when declared.
+    pub cardinality: Option<i64>,
 }
 
 /// One `[[procedure]]` entry of a served registry slice.
@@ -154,6 +165,11 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             type_name: s(e.get("type")).unwrap_or_default(),
             since: s(e.get("since")),
             description: s(e.get("description")),
+            qos: s(e.get("qos")),
+            ttl_s: e.get("ttl_s").and_then(|v| v.as_integer()),
+            unit: s(e.get("unit")),
+            rate: s(e.get("rate")),
+            cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
         });
     }
 
@@ -303,41 +319,54 @@ pub fn diff(served: &RegistrySlice, local: &RegistrySlice) -> Vec<SliceFinding> 
 mod tests {
     use super::*;
 
-    /// The slices this build compiled in must all parse — they are the ones we
-    /// serve, so if they do not round-trip, every `introspect` reply on the bus
-    /// is unreadable.
-    #[test]
-    fn every_compiled_slice_parses() {
-        assert!(!crate::registry::REGISTRIES.is_empty());
-        for (name, toml_src) in crate::registry::REGISTRIES {
-            let slice = parse_slice(toml_src)
-                .unwrap_or_else(|e| panic!("registry slice {name} does not parse: {e}"));
-            assert_eq!(&slice.name, name);
-            assert_eq!(slice.convention, 1);
-            assert!(
-                slice.serves_procedure("introspect"),
-                "{name} must serve introspect — it is how this slice reaches a consumer"
-            );
-        }
-    }
+    // Corpus-level coverage ("every compiled slice parses") lives in
+    // zenkey-build's fixture tests — this crate no longer bundles a registry.
 
     #[test]
-    fn catalog_is_a_service_and_carries_its_origin() {
-        let (_, toml_src) = crate::registry::REGISTRIES
-            .iter()
-            .find(|(n, _)| *n == "catalog")
-            .expect("catalog registry");
-        let slice = parse_slice(toml_src).unwrap();
+    fn a_service_slice_carries_its_origin() {
+        let slice = parse_slice(
+            r#"
+            [registry]
+            version = "1.0"
+            app = "acme"
+            convention = 1
+            [service]
+            name = "catalog"
+            origin = "@catalog"
+            [[subject]]
+            path = "entity/{entity_id}"
+            class = "state"
+            type = "Entity"
+            [[procedure]]
+            path = "introspect"
+            kind = "read"
+            "#,
+        )
+        .unwrap();
         assert_eq!(slice.service_origin.as_deref(), Some("@catalog"));
+        assert!(slice.serves_procedure("introspect"));
     }
 
     #[test]
     fn a_slice_identical_to_ours_is_no_finding() {
-        let (_, toml_src) = crate::registry::REGISTRIES
-            .iter()
-            .find(|(n, _)| *n == "sysinfo")
-            .expect("sysinfo registry");
-        let slice = parse_slice(toml_src).unwrap();
+        let slice = parse_slice(
+            r#"
+            [registry]
+            version = "1.0"
+            app = "acme"
+            convention = 1
+            [producer]
+            name = "sysinfo"
+            [[subject]]
+            path = "cpu/usage"
+            class = "telemetry"
+            type = "TelemetryPoint"
+            [[procedure]]
+            path = "introspect"
+            kind = "read"
+            "#,
+        )
+        .unwrap();
         assert!(diff(&slice, &slice).is_empty());
     }
 

@@ -76,7 +76,7 @@ target it does not run, it publishes under a **registered service origin**
 with the target host as the first subject chunk:
 
 ```
-<base>/v1/@tcdesired/state/h-3fa9c2d41b7e/config/eth0/desired
+<base>/v1/@desired/state/h-3fa9c2d41b7e/config/eth0/desired
 ```
 
 This is grammar-legal with **zero new mechanism** — it is the

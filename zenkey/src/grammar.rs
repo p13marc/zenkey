@@ -79,7 +79,54 @@ pub enum KeyError {
     Parse(String),
 }
 
-include!("chunk_rules.rs");
+// Chunk lexical rules (RFC 03 §2, §1.3). The registry linter (`zenkey-build`)
+// calls these same functions, so codegen and runtime validate with
+// byte-identical rules.
+
+/// RFC 03 §2: `[a-z0-9]([a-z0-9._-]*[a-z0-9])?` — lowercase, must start and
+/// end alphanumeric, no wildcards, no `%`, no uppercase.
+pub fn is_valid_plain_chunk(chunk: &str) -> bool {
+    let bytes = chunk.as_bytes();
+    let alnum = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    match bytes {
+        [] => false,
+        [one] => alnum(*one),
+        [first, mid @ .., last] => {
+            alnum(*first)
+                && alnum(*last)
+                && mid
+                    .iter()
+                    .all(|&b| alnum(b) || b == b'.' || b == b'_' || b == b'-')
+        }
+    }
+}
+
+/// RFC 03 §2: `@[a-z0-9][a-z0-9_-]*` (the `@v<int>` version form is a special
+/// case of this shape).
+pub fn is_valid_verbatim_chunk(chunk: &str) -> bool {
+    let Some(rest) = chunk.strip_prefix('@') else {
+        return false;
+    };
+    let bytes = rest.as_bytes();
+    let alnum = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    match bytes {
+        [] => false,
+        [first, rest @ ..] => {
+            alnum(*first) && rest.iter().all(|&b| alnum(b) || b == b'_' || b == b'-')
+        }
+    }
+}
+
+/// RFC 03 §1.3: host origins MUST match `h-[0-9a-f]{12}` exactly.
+pub fn is_valid_host_origin(chunk: &str) -> bool {
+    let Some(hex) = chunk.strip_prefix("h-") else {
+        return false;
+    };
+    hex.len() == 12
+        && hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
 
 /// The publishing identity in position 3 (RFC 03 §1.3).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -578,6 +625,58 @@ pub fn with_base(base: &str, key_or_selector: &str) -> String {
 /// ```
 pub fn strip_base<'k>(base: &str, key: &'k str) -> Option<&'k str> {
     key.strip_prefix(base)?.strip_prefix('/')
+}
+
+/// Structurally parse a **full** key as it appears on the wire, given the
+/// deployment base — for un-namespaced observers only (bus explorers,
+/// router-side tooling; RFC 09 §5). A *namespaced* session never sees the
+/// base and must call [`parse`] directly.
+///
+/// `None` when the key belongs to another deployment (a different base) or
+/// does not parse — for an observer both are the meaningful answer rather
+/// than an error.
+pub fn parse_full(base: &str, key: &str) -> Option<StructuralKey> {
+    parse(strip_base(base, key)?).ok()
+}
+
+/// Caller-side fleet procedure selector (RFC 05 §2): a GET on
+/// `v1/*/@rpc/<producer>/<procedure>` reaches every host serving the
+/// producer. Callers MUST use query target `All` (RFC 05 §2.1) —
+/// `BestMatching` can short-circuit the fan-in.
+pub fn fleet_rpc_key(producer: &str, procedure: &str) -> String {
+    format!("{VERSION_CHUNK}/*/{PLANE_RPC}/{producer}/{procedure}")
+}
+
+/// A service origin's procedure key (RFC 05, RFC 06 §5): service origins omit
+/// the producer chunk — `v1/@<service>/@rpc/<procedure>`. Errors on a host
+/// origin, whose procedures ride under a producer chunk ([`rpc_key`]).
+pub fn service_rpc_key(origin: &Origin, procedure: &str) -> Result<String, KeyError> {
+    if origin.has_producer_chunk() {
+        return Err(KeyError::Parse(
+            "service_rpc_key takes a service origin; host origins use rpc_key (RFC 03 §1.5)"
+                .to_string(),
+        ));
+    }
+    Ok(format!(
+        "{VERSION_CHUNK}/{}/{PLANE_RPC}/{procedure}",
+        origin.chunk()
+    ))
+}
+
+/// The whole fleet's producer liveliness tokens (RFC 04 §5) —
+/// `v1/*/state/*/alive`: who is up and what they run, zero payload bytes.
+///
+/// `*` in the origin position can never match a verbatim service origin
+/// (design property D4), so a service's own token ([`service_alive_key`]) is
+/// **not** in this set and must be asked for by name.
+pub fn all_liveliness_wildcard() -> String {
+    format!("{VERSION_CHUNK}/*/{CLASS_STATE}/*/{SUBJECT_ALIVE}")
+}
+
+/// A service origin's liveliness token key (RFC 04 §5):
+/// `v1/@<service>/state/alive`. Errors on a host origin ([`alive_key`]).
+pub fn service_alive_key(origin: &Origin) -> Result<String, KeyError> {
+    alive_key(origin, None)
 }
 
 #[cfg(test)]

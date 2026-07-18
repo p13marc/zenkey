@@ -729,12 +729,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastcdc"
-version = "4.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77af40d8a8dadb92dc178569a5f5edb5f3056e98255c2de48ab5d59a52892e0c"
-
-[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1989,18 +1983,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
 dependencies = [
  "libc",
- "rand_chacha 0.3.1",
+ "rand_chacha",
  "rand_core 0.6.4",
-]
-
-[[package]]
-name = "rand"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
-dependencies = [
- "rand_chacha 0.9.0",
- "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -2025,31 +2009,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "rand_chacha"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
-dependencies = [
- "ppv-lite86",
- "rand_core 0.9.5",
-]
-
-[[package]]
 name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
-dependencies = [
- "getrandom 0.3.4",
 ]
 
 [[package]]
@@ -3221,17 +3186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ulid"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "470dbf6591da1b39d43c14523b2b469c86879a53e8b758c8e090a470fe7b1fbe"
-dependencies = [
- "rand 0.9.5",
- "serde",
- "web-time",
-]
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3767,37 +3721,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "zblob"
-version = "0.1.0"
-source = "git+https://github.com/p13marc/zblob#bd6988d734ecae8020924254280d37c123db54f2"
-dependencies = [
- "ciborium",
- "fastcdc",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "tokio",
- "zenoh",
-]
-
-[[package]]
 name = "zenctl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ciborium",
  "clap",
  "serde_json",
  "tokio",
  "tracing-subscriber",
  "zenkey",
  "zenoh",
- "zensight-common",
 ]
 
 [[package]]
 name = "zenkey"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs 5.0.1",
  "sha2",
@@ -3806,6 +3745,23 @@ dependencies = [
  "tracing",
  "zenoh",
  "zenoh-keyexpr",
+]
+
+[[package]]
+name = "zenkey-build"
+version = "0.2.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+ "zenkey",
+]
+
+[[package]]
+name = "zenkey-fixture-tests"
+version = "0.2.0"
+dependencies = [
+ "zenkey",
+ "zenkey-build",
 ]
 
 [[package]]
@@ -3936,7 +3892,7 @@ dependencies = [
  "aes",
  "hmac",
  "rand 0.8.7",
- "rand_chacha 0.3.1",
+ "rand_chacha",
  "sha3",
  "zenoh-result",
 ]
@@ -4317,25 +4273,6 @@ dependencies = [
  "winapi",
  "zenoh-core",
  "zenoh-result",
-]
-
-[[package]]
-name = "zensight-common"
-version = "0.8.0"
-source = "git+https://github.com/p13marc/zensight?branch=master#2365cab7e3da3c6e0319bf5cca0d20f2a1ff6b19"
-dependencies = [
- "ciborium",
- "json5",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "ulid",
- "zblob",
- "zenkey",
- "zenoh",
 ]
 
 [[package]]

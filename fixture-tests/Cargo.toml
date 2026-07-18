@@ -1,0 +1,16 @@
+# The codegen regression corpus: the ZenSight registry as it stood at
+# graduation, compiled through zenkey-build and exercised by the round-trip
+# tests. Not published — it exists so a codegen change that breaks generated
+# code fails in this workspace, not in a downstream consumer.
+[package]
+name = "zenkey-fixture-tests"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+zenkey = { workspace = true }
+
+[build-dependencies]
+zenkey-build = { workspace = true }

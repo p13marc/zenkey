@@ -1,18 +1,25 @@
 [package]
 name = "zenkey"
-description = "Executable form of the keyspace-v2 Zenoh semantic convention (see rfcs/): grammar, origin minting, slugs, QoS profiles, registry codegen"
+description = "Executable form of the keyspace-v2 Zenoh semantic convention: typed key grammar, origin minting, slugs, QoS profiles, registry slices"
 readme = "README.md"
 keywords = ["zenoh", "keyspace", "semantic-convention", "pubsub"]
 categories = ["network-programming"]
+rust-version = "1.88"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = ["zenoh"]
+# QosProfile -> zenoh QoS triple mappings. Off in build scripts (zenkey-build
+# depends on this crate with default-features = false) so codegen never pulls
+# the zenoh stack into build-dependencies.
+zenoh = ["dep:zenoh"]
+
 [dependencies]
-zenoh = { workspace = true }
-zenoh-keyexpr = "1"
+zenoh = { workspace = true, optional = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 dirs = { workspace = true }
@@ -21,7 +28,5 @@ tracing = { workspace = true }
 # consumer needs the TOML parser to read one (RFC 08 §6, issue #469).
 toml = "0.8"
 
-[build-dependencies]
-toml = "0.8"
-
 [dev-dependencies]
+zenoh-keyexpr = "1"

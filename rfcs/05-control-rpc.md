@@ -166,7 +166,7 @@ is desired-state reconciliation — the controller publishes
 (re)connect. When the controller does **not** run on the target host, it
 authors that desired-state under a **registered service origin** with the
 target as the first subject chunk
-(`<base>/v1/@tcdesired/state/h-xxx/config/<if>/desired`) — the
+(`<base>/v1/@desired/state/h-xxx/config/<if>/desired`) — the
 service-origin carve-out in [07-bulk-planes.md §3](07-bulk-planes.md),
 grammar-legal with zero new mechanism. No current channel needs it; decided
 (RPC-only, escape hatch sanctioned) in

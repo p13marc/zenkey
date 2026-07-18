@@ -3,7 +3,7 @@
 
 use zenkey::grammar::{self, Class, ClassOrPlane, Origin, Plane, Producer};
 use zenkey::origin::HostId;
-use zenkey::registry::{self, netring};
+use zenkey_fixture_tests::registry::{self, netring};
 
 fn host() -> Origin {
     Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap())
@@ -164,4 +164,52 @@ fn instance_suffixed_producer_keys() {
 fn introspection_slice_is_the_registry_file() {
     assert!(netring::REGISTRY_TOML.contains("flow/red/{quantile}"));
     assert!(netring::REGISTRY_TOML.contains("[registry]"));
+}
+
+#[test]
+fn common_state_refines_from_the_common_field() {
+    use zenkey::CommonState as C;
+    let health = registry::AnySubject::Netring(netring::Subject::Health);
+    assert_eq!(health.common_state(), Some(C::Health));
+    let alert = registry::AnySubject::Netring(netring::Subject::Alert {
+        alert_key: "9f2c81ab04d7e3f1".into(),
+    });
+    assert_eq!(
+        alert.common_state(),
+        Some(C::Alert {
+            alert_key: "9f2c81ab04d7e3f1"
+        })
+    );
+    // A subject without a `common =` declaration refines to nothing.
+    let flow = registry::AnySubject::Netring(netring::Subject::FlowRed {
+        quantile: "p95_ms".into(),
+    });
+    assert_eq!(flow.common_state(), None);
+}
+
+#[test]
+fn registry_toml_and_registries_agree() {
+    assert!(!registry::REGISTRIES.is_empty());
+    for (name, toml_src) in registry::REGISTRIES {
+        assert_eq!(registry::registry_toml(name), Some(*toml_src));
+        // Every served slice parses back through the runtime slice reader.
+        let slice = zenkey::parse_slice(toml_src)
+            .unwrap_or_else(|e| panic!("registry slice {name} does not parse: {e}"));
+        assert_eq!(&slice.name, name);
+        assert!(
+            slice.serves_procedure("introspect"),
+            "{name} must serve introspect"
+        );
+    }
+}
+
+#[test]
+fn telemetry_guard() {
+    assert!(registry::is_registered_telemetry(
+        "netring",
+        "flow/red/p95_ms"
+    ));
+    assert!(!registry::is_registered_telemetry("netring", "flow/bogus"));
+    // Device-defined metric trees keep a rest-var by design: always true.
+    assert!(registry::is_registered_telemetry("snmp", "anything/at/all"));
 }

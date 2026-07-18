@@ -1,4 +1,4 @@
-# Subject registry: snmp (device poller). RFC 08 §2; migration epic #453.
+# Subject registry: gnmi (subscription collector). RFC 08 §2; migration epic #453.
 # Telemetry metric trees register as {metric...} families (one payload type,
 # TelemetryPoint) — typed per-metric refinement is additive (registry MINOR).
 
@@ -8,18 +8,19 @@ app = "zensight"
 convention = 1
 
 [producer]
-name = "snmp"
-description = "SNMP device poller (proxy producer: observed device = first subject chunk)"
+name = "gnmi"
+description = "gNMI subscription collector (proxy producer; bracketed path elements ride literally in the key)"
 
 [[subject]]
-path = "{device}/{metric...}"
+path = "{device}/{path...}"
 class = "telemetry"
 type = "TelemetryPoint"
 cardinality = 10000
 since = "1.0"
-description = "polled device metric tree"
+description = "gNMI subscription paths, slugged; original path travels in the payload"
 [[subject]]
 path = "health"
+common = "health"
 class = "state"
 type = "HealthSnapshot"
 ttl_s = 120
@@ -28,6 +29,7 @@ description = "sensor health document (framework; absorbs the legacy @/status ru
 
 [[subject]]
 path = "errors"
+common = "errors"
 class = "state"
 type = "ErrorReport"
 ttl_s = 300
@@ -36,6 +38,7 @@ description = "rolling error window (framework)"
 
 [[subject]]
 path = "sensor"
+common = "sensor"
 class = "state"
 type = "SensorInfo"
 ttl_s = 900
@@ -44,6 +47,7 @@ description = "registration document: identity, version, capabilities (framework
 
 [[subject]]
 path = "evidence/self"
+common = "evidence_self"
 class = "state"
 type = "HostEvidence"
 ttl_s = 900

@@ -1,47 +1,25 @@
-//! The v1 keyspace context: base + origin + producer in one value
-//! (epic #453, RFC `rfcs/`).
+//! The v1 keyspace context: origin + producer in one value.
 //!
 //! One value carries everything a producer needs to build conforming keys:
-//! the deployment base, the host origin (`h-<12hex>`, minted once per
-//! process), and the producer chunk. All framework keys flow through here —
-//! sensors never spell `v1` by hand.
-//!
-//! Contexts are built [`V1Context::for_producer`] from the producer name
-//! alone — the legacy config `key_prefix` is retired (#465).
+//! the host origin (`h-<12hex>`, minted once per process via the application's
+//! [`AppProfile`]) and the producer chunk. All framework keys flow through
+//! here — producers never spell `v1` by hand.
 //!
 //! **Keys built here are base-relative** — they start at the `v1` chunk. The
-//! deployment base rides the Zenoh session `namespace`
-//! ([`crate::DEFAULT_BASE`], RFC 03 §1.1 / 09 §0, issue #466), which prefixes
-//! it on egress and strips it on ingress. So there is deliberately no way to
-//! ask a context for the base: application code has no vocabulary for it, and
-//! that is the point — a base you cannot spell is a base you cannot spell
-//! *wrong*.
-
-use std::path::PathBuf;
-use std::sync::OnceLock;
+//! deployment base rides the Zenoh session `namespace` (RFC 03 §1.1 / 09 §0),
+//! which prefixes it on egress and strips it on ingress. So there is
+//! deliberately no way to ask a context for the base: application code has no
+//! vocabulary for it, and that is the point — a base you cannot spell is a
+//! base you cannot spell *wrong*.
 
 use crate::grammar::{self, Class, Origin, Producer};
-use crate::origin::HostId;
+use crate::profile::AppProfile;
 use crate::slug::chunk_slug;
-
-/// The process-wide host origin (RFC 06 §1): `/etc/machine-id` + the
-/// application salt, with the persisted-random fallback. Minted once.
-pub fn host_id() -> &'static HostId {
-    static HOST_ID: OnceLock<HostId> = OnceLock::new();
-    HOST_ID.get_or_init(|| {
-        let fallback = dirs::state_dir()
-            .map(|d| d.join("zensight/host-id"))
-            .unwrap_or_else(|| PathBuf::from("/var/lib/zensight/host-id"));
-        let id = HostId::mint_system(&fallback);
-        tracing::info!(origin = %id, "host origin minted");
-        id
-    })
-}
 
 /// Everything needed to build this producer's v1 keys.
 ///
 /// Note what is *not* here: the deployment base. Every key below is
-/// base-relative (`v1/…`); the session namespace supplies the rest (#466).
+/// base-relative (`v1/…`); the session namespace supplies the rest.
 #[derive(Debug, Clone)]
 pub struct V1Context {
     origin: Origin,
@@ -49,20 +27,23 @@ pub struct V1Context {
 }
 
 impl V1Context {
-    /// Build the context for one producer on this host: origin = the local
-    /// minted host id, producer = `name` (slugged to a valid chunk when
-    /// necessary; a degenerate name falls back to `sensor`).
-    pub fn for_producer(name: &str) -> Self {
+    /// Build the context for one producer on this host: origin = the host id
+    /// minted through `profile`, producer = `name` (slugged to a valid chunk
+    /// when necessary; a degenerate name falls back to `sensor`).
+    pub fn for_producer(profile: &'static AppProfile, name: &str) -> Self {
+        Self::with_origin(Origin::Host(profile.host_id().clone()), name)
+    }
+
+    /// As [`for_producer`](Self::for_producer) with an explicit origin — for
+    /// tests, and for consumers that mint their identity differently.
+    pub fn with_origin(origin: Origin, name: &str) -> Self {
         let producer = Producer::new(name).unwrap_or_else(|_| {
             let slug = chunk_slug(name);
             Producer::parse_chunk(&slug)
                 .or_else(|_| Producer::new("sensor"))
                 .expect("fallback producer name is valid")
         });
-        Self {
-            origin: Origin::Host(host_id().clone()),
-            producer,
-        }
+        Self { origin, producer }
     }
 
     /// As [`for_producer`](Self::for_producer) with an explicit producer
@@ -125,10 +106,6 @@ impl V1Context {
         self.state_key(&["evidence", "device", device])
     }
 
-    pub fn artifact_status_key(&self, kind: &str) -> String {
-        self.state_key(&["artifact", kind])
-    }
-
     /// Liveliness token key (RFC 04 §5) — machinery, not a data subject.
     pub fn alive_key(&self) -> String {
         grammar::alive_key(&self.origin, Some(&self.producer)).expect("producer context is valid")
@@ -162,13 +139,22 @@ impl V1Context {
             .expect("slugged stream chunks are valid")
     }
 
+    /// A general `@media/<producer>/<stream...>` key (RFC 07 §1). Chunks are
+    /// slugged where not already legal.
+    pub fn media_key(&self, stream: &[&str]) -> String {
+        let slugged: Vec<String> = stream.iter().map(|c| chunk_slug(c)).collect();
+        let refs: Vec<&str> = slugged.iter().map(String::as_str).collect();
+        grammar::media_key(&self.origin, &self.producer, &refs)
+            .expect("slugged stream chunks are valid")
+    }
+
     /// The `@blob` tier prefix (RFC 07 §2): `v1/<origin>/@blob/<tier>` —
     /// Tier-1 `artifact`, Tier-2 `tree`/`store`.
     ///
-    /// Note this value travels **inside payloads** (`artifact::Delivery`), so
-    /// it is a base-relative keyexpr in a document: meaningful only to a
-    /// session set to the same deployment namespace. An un-namespaced reader
-    /// must [`grammar::with_base`] it (#466).
+    /// Note this value travels **inside payloads**, so it is a base-relative
+    /// keyexpr in a document: meaningful only to a session set to the same
+    /// deployment namespace. An un-namespaced reader must
+    /// [`grammar::with_base`] it.
     pub fn blob_prefix(&self, tier: grammar::BlobTier) -> String {
         format!(
             "{}/{}/{}/{}",
@@ -178,23 +164,18 @@ impl V1Context {
             tier.chunk()
         )
     }
-
-    pub fn media_preview_key(&self, stream: &str) -> String {
-        let chunks = [chunk_slug(stream), "preview".into(), "jpeg".into()];
-        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
-        grammar::media_key(&self.origin, &self.producer, &refs)
-            .expect("slugged stream chunks are valid")
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::origin::HostId;
 
     fn ctx() -> V1Context {
-        let mut c = V1Context::for_producer("sysinfo");
-        c.origin = Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap());
-        c
+        V1Context::with_origin(
+            Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap()),
+            "sysinfo",
+        )
     }
 
     #[test]
@@ -227,9 +208,9 @@ mod tests {
         );
     }
 
-    /// #466: application keys are base-relative. The base is the session
-    /// namespace, so a context has no way to spell it — which is what makes it
-    /// impossible to spell wrong.
+    /// Application keys are base-relative. The base is the session namespace,
+    /// so a context has no way to spell it — which is what makes it impossible
+    /// to spell wrong.
     #[test]
     fn keys_are_base_relative() {
         let c = ctx();
@@ -238,29 +219,25 @@ mod tests {
             c.health_key(),
             c.alive_key(),
             c.rpc_key(&["introspect"]),
-            c.media_preview_key("cam0"),
+            c.media_key(&["cam0", "preview", "jpeg"]),
             c.blob_prefix(grammar::BlobTier::Store),
         ] {
             assert!(
                 key.starts_with("v1/"),
                 "an application key must start at the version chunk: {key}"
             );
-            assert!(
-                !key.starts_with(crate::DEFAULT_BASE),
-                "the deployment base leaked into an application key: {key}"
-            );
         }
     }
 
     /// The base composes back on for the parties that genuinely see the wire:
     /// router storages, ACL rules, and un-namespaced debug tools (RFC 09 §0/§5).
-    /// Multi-chunk bases are legal, and are now a *config* value, not an API.
+    /// Multi-chunk bases are legal, and are a *config* value, not an API.
     #[test]
     fn the_base_composes_back_on_for_the_wire_view() {
         let c = ctx();
         assert_eq!(
-            grammar::with_base(crate::DEFAULT_BASE, &c.telemetry_prefix()),
-            "zensight/v1/h-3fa9c2d41b7e/telemetry/sysinfo"
+            grammar::with_base("acme", &c.telemetry_prefix()),
+            "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo"
         );
         assert_eq!(
             grammar::with_base("acme/fleet-a", &c.telemetry_prefix()),
@@ -272,5 +249,15 @@ mod tests {
             grammar::strip_base("acme/fleet-a", &wire),
             Some(c.telemetry_prefix().as_str())
         );
+    }
+
+    /// `for_producer` mints through the profile — end to end, once.
+    #[test]
+    fn for_producer_uses_profile_origin() {
+        static PROFILE: AppProfile = AppProfile::new("zenkey-ctx-test", "ctx-test-salt");
+        let a = V1Context::for_producer(&PROFILE, "sysinfo");
+        let b = V1Context::for_producer(&PROFILE, "netlink");
+        assert_eq!(a.origin(), b.origin());
+        assert!(a.health_key().starts_with("v1/h-"));
     }
 }

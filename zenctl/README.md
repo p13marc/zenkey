@@ -1,44 +1,48 @@
 # zenctl
 
-A bus explorer for the keyspace-v2 convention — `busctl` / `d-feet` / `ros2` for a
-ZenSight fleet.
+A bus explorer for the keyspace-v2 convention — `busctl` / `d-feet` / `ros2` for
+any conformant Zenoh fleet.
 
 RFC 08 §6 specifies this tool into existence. Every producer MUST serve
 `@rpc/<producer>/introspect`, returning the registry slice it was *compiled
 against*; the point of that requirement is that "generic explorer tooling — the
 `busctl`/`d-feet` equivalent — **needs no compiled-in registry**". `zenctl` is
-that tooling.
+that tooling: nothing application-specific is compiled in.
 
 ```bash
-cargo run -p zenctl -- node list -c tcp/127.0.0.1:7447
+zenctl node list --base acme -c tcp/127.0.0.1:7447
 ```
 
-## Two halves, kept visibly apart
+`--base` (or `ZENCTL_BASE`) names the deployment base — the first chunk(s) of
+every key on the wire. Applications set it as their session namespace and never
+spell it; `zenctl` runs un-namespaced on purpose (RFC 09 §5), so it must be
+told.
+
+## Two registry sources, kept visibly apart
 
 | | Answers from | Works when the fleet is down | Tells you |
 |---|---|---|---|
-| **offline** | the compiled-in registry | yes | what *may* exist (declared) |
-| **on-bus** | the live fleet | no | what *does* exist (observed) |
+| **`--registry <dir>`** | local `registry/*.toml` files | yes | what *should* exist (declared) |
+| **the bus** (default) | each producer's served introspect slice | no | what *does* exist (served) |
 
-The gap between those two is where drift lives, and `doctor` is the command that
-reports it. That is why the halves are not blended.
-
-### Offline
+The gap between those two is where drift lives, and `doctor` is the command
+that reports it.
 
 ```bash
-zenctl topic list [--producer netring] [--class telemetry]
-zenctl topic info zensight/v1/h-3fa9c2d41b7e/state/netring/alert/abc123
-zenctl service list [--producer netlink]
-zenctl interface list
-zenctl interface show TelemetryPoint
+zenctl topic list --base acme [--producer sysinfo] [--class telemetry]
+zenctl topic info --base acme acme/v1/h-3fa9c2d41b7e/state/sysinfo/health
+zenctl service list --base acme [--producer sysinfo]
+zenctl interface list --base acme
+zenctl interface show --base acme TelemetryPoint
+# any of the above, offline:  --registry path/to/registry
 ```
 
-`topic info` runs the registry's **parse** direction (RFC 08 §1) — the thing that
-replaced positional `split('/')` re-parsing. Variables come back *named*:
+`topic info` runs the registry's **parse** direction (RFC 08 §1) — the thing
+that replaced positional `split('/')` re-parsing. Variables come back *named*:
 
 ```
-$ zenctl topic info zensight/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/usage_percent
-key       zensight/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/usage_percent
+$ zenctl topic info --base acme acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/usage_percent
+key       acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/usage_percent
 origin    h-3fa9c2d41b7e
 producer  sysinfo
 class     telemetry
@@ -46,63 +50,58 @@ subject   disk/{mount}/usage_percent
 variables
   mount = root
 payload   TelemetryPoint
-  defined at zensight_common::telemetry::TelemetryPoint
-qos       Sampled
+  (schema lives with the owning application — RFC 08 §5)
+qos       sampled
 cardinality  ~512 keys expected
 ```
 
 **Declared is not observed.** A pattern with a trailing rest-variable
-(`{device}/{path...}`) fixes a *shape*, not its members — the four proxy
-producers (snmp/modbus/gnmi/netflow) register that way by design, because their
-metric tree belongs to the polled device. `topic list` flags those
-`[open-ended]`; `topic echo` is what enumerates them.
+(`{device}/{path...}`) fixes a *shape*, not its members — proxy producers
+register that way by design, because their metric tree belongs to the polled
+device. `topic list` flags those `[open-ended]`; `topic echo` is what
+enumerates them.
 
-### On-bus
+## On-bus commands
 
 ```bash
-zenctl node list                        # the liveliness roster
-zenctl topic echo 'zensight/v1/**'     # subscribe + decode
-zenctl service call '*' sysinfo processes --param sort=cpu --param top=5
-zenctl service call h-3fa9 netring capture/trigger --body @trigger.json
-zenctl doctor                           # fleet vs. this build
+zenctl node list --base acme            # the liveliness roster
+zenctl topic echo --base acme           # subscribe + decode (defaults to <base>/v1/**)
+zenctl service call --base acme '*' sysinfo processes --param sort=cpu
+zenctl service call --base acme h-3fa9 netring capture/trigger --body @trigger.json
+zenctl doctor --base acme --registry path/to/registry
 ```
 
-`node list` is a liveliness query on `zensight/v1/*/state/*/alive` — RFC 04 §5's
+`node list` is a liveliness query on `<base>/v1/*/state/*/alive` — RFC 04 §5's
 "entire fleet-presence protocol, zero payload bytes". The token *key* is the
-record. (The RFC took this from rmw_zenoh's `@ros2_lv` discovery space, which is
-what `ros2 node list` reads.)
+record.
 
 `topic echo` walks wire key → subject → payload type → value with nothing
-producer-specific compiled in: the registry binds one payload type per subject
-(P5), and the RFC 08 §5 type table (`zensight_common::payload`) turns that name
-into a decoder.
+compiled in: the registry slices bind one payload type per subject (P5), and
+the value renders generically (JSON, CBOR→JSON diagnostic, text, or hex —
+tagged with the declared type name).
 
 ## `doctor` — the one `ros2` has no answer for
 
-`ros2 interface show` reads a static type description. `introspect` is served by
-the *running binary*, from the same source as its key constants — so it cannot
-drift from behavior. RFC 08 §6:
+`introspect` is served by the *running binary*, from the same source as its key
+constants — so it cannot drift from behavior. RFC 08 §6:
 
 > A disagreement between introspection and the checked-in TOML is a **finding,
 > not an ambiguity**: the TOML says what *should* run, the introspection says
 > what *does*.
 
-`doctor` fans `introspect` across the fleet and prints those findings:
+`doctor` fans `introspect` across the fleet and diffs each reply against the
+`--registry` TOMLs:
 
 ```
-$ zenctl doctor -c tcp/127.0.0.1:7447
+$ zenctl doctor --base acme --registry registry -c tcp/127.0.0.1:7447
 ✗ h-9706b31ddad3/sysinfo: registry 1.1 (we compiled 1.2)
 ✗ h-9706b31ddad3/sysinfo: does not serve telemetry thermal/{zone}/temp_celsius
 2 finding(s).
 ```
 
-Version skew, subjects a host serves that we cannot name, subjects we expect that
-it does not publish, and hosts still serving a deprecated subject — in one round
-trip, without SSH.
-
-(rmw_zenoh puts a type *hash* in the key instead, which makes a schema mismatch
-silent non-communication with no operator signal. RFC 10 §3 rejected that
-explicitly. This is what we bought with the rejection.)
+Version skew, subjects a host serves that we cannot name, subjects we expect
+that it does not publish, and hosts still serving a deprecated subject — in one
+round trip, without SSH.
 
 ## Things it will not do, on purpose
 
@@ -118,8 +117,8 @@ explicitly. This is what we bought with the rejection.)
   find, which is how a throwaway session ends up talking to a production fleet.
   `--scouting` is opt-in, and you should mean it.
 - **Field-level payload schemas.** RFC 01 §5 keeps payload definitions with the
-  owning crates; `interface show` points you at the definition rather than
-  pretending to reproduce it.
+  owning applications; `interface show` maps the type vocabulary rather than
+  pretending to reproduce the shapes.
 
 ## Fan-in discipline
 
@@ -132,6 +131,10 @@ requirements fail *silently* when forgotten:
 - **consolidation = None** — default consolidation keeps one reply per reply key;
 - **attribution by the reply's own concrete key**, never by the key we asked on.
 
-Note `*` in the origin position can never match a verbatim service origin (design
-property D4), so `@catalog` is always asked for by name. That is the grammar
-working, not an exception to it.
+Note `*` in the origin position can never match a verbatim service origin
+(design property D4), so `@catalog` is always asked for by name. That is the
+grammar working, not an exception to it.
+
+## License
+
+Apache-2.0.

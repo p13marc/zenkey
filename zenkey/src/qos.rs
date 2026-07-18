@@ -2,6 +2,7 @@
 //! registry entries reference these by name and publishers set QoS only
 //! through them.
 
+#[cfg(feature = "zenoh")]
 use zenoh::qos::{CongestionControl, Priority, Reliability};
 
 /// A named QoS profile: reliability × congestion control × priority.
@@ -41,6 +42,7 @@ impl QosProfile {
         }
     }
 
+    #[cfg(feature = "zenoh")]
     pub fn reliability(self) -> Reliability {
         match self {
             Self::Sampled | Self::Refreshed | Self::Frame => Reliability::BestEffort,
@@ -48,6 +50,7 @@ impl QosProfile {
         }
     }
 
+    #[cfg(feature = "zenoh")]
     pub fn congestion_control(self) -> CongestionControl {
         match self {
             Self::Sampled | Self::Refreshed | Self::Frame => CongestionControl::Drop,
@@ -55,6 +58,7 @@ impl QosProfile {
         }
     }
 
+    #[cfg(feature = "zenoh")]
     pub fn priority(self) -> Priority {
         match self {
             Self::Sampled => Priority::DataLow,
@@ -83,6 +87,7 @@ mod tests {
     }
 
     /// Pins the RFC 04 §3 table.
+    #[cfg(feature = "zenoh")]
     #[test]
     fn profile_table() {
         assert_eq!(QosProfile::Sampled.priority(), Priority::DataLow);

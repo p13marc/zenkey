@@ -2,11 +2,13 @@
 resolver = "2"
 members = [
     "zenkey",
+    "zenkey-build",
+    "fixture-tests",
     "zenctl",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/p13marc/zenkey"
@@ -19,18 +21,12 @@ serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 dirs = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+ciborium = "0.2"
 
 # Internal
-zenkey = { path = "zenkey" }
-
-# zenctl pulls zensight-common from the zensight repo, whose zenkey dependency
-# is this very repo (git). Patch that git source to the local path so exactly
-# one copy of zenkey exists — types cross the zensight-common API
-# (refine_full_key returns StructuralKey/AnySubject), so two copies would
-# mismatch (#3).
-[patch."https://github.com/p13marc/zenkey"]
-zenkey = { path = "zenkey" }
+zenkey = { version = "0.2.0", path = "zenkey" }
+zenkey-build = { version = "0.2.0", path = "zenkey-build" }

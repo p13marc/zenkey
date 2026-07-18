@@ -173,7 +173,7 @@ is asserting *its own* service identity as the author of an instruction —
 so it does not need a `*`, and MUST NOT use one.
 
 > A **registered service origin** (a verbatim origin minted for a service,
-> e.g. `@tcdesired`) MAY publish desired-state on behalf of a target host.
+> e.g. `@desired`) MAY publish desired-state on behalf of a target host.
 > When it does, it MUST place the **target host id as the first subject
 > chunk**, exactly as a proxy producer places its observed device
 > ([03-grammar.md §1.6](03-grammar.md), "the observed device as the first
@@ -181,7 +181,7 @@ so it does not need a `*`, and MUST NOT use one.
 > the target is subject matter, never the origin.
 
 ```
-<base>/v1/@tcdesired/state/h-3fa9c2d41b7e/config/eth0/desired
+<base>/v1/@desired/state/h-3fa9c2d41b7e/config/eth0/desired
 ```
 
 This is grammar-legal with **zero new mechanism**: it is the §1.6

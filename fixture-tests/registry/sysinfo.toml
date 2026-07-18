@@ -911,6 +911,7 @@ description = "charging status"
 # ── state ───────────────────────────────────────────────────────────────────
 [[subject]]
 path = "health"
+common = "health"
 class = "state"
 type = "HealthSnapshot"
 ttl_s = 120
@@ -919,6 +920,7 @@ description = "sensor health document (framework; absorbs the legacy @/status ru
 
 [[subject]]
 path = "errors"
+common = "errors"
 class = "state"
 type = "ErrorReport"
 ttl_s = 300
@@ -927,6 +929,7 @@ description = "rolling error window (framework)"
 
 [[subject]]
 path = "sensor"
+common = "sensor"
 class = "state"
 type = "SensorInfo"
 ttl_s = 900
@@ -935,6 +938,7 @@ description = "registration document: identity, version, capabilities (framework
 
 [[subject]]
 path = "evidence/self"
+common = "evidence_self"
 class = "state"
 type = "HostEvidence"
 ttl_s = 900
@@ -943,6 +947,7 @@ description = "self-identity claim (RFC 06 §4)"
 
 [[subject]]
 path = "alert/{alert_key}"
+common = "alert"
 class = "state"
 type = "Alert"
 qos = "alert"

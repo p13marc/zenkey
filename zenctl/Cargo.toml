@@ -1,9 +1,14 @@
 [package]
 name = "zenctl"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
-description = "Bus explorer for the keyspace-v2 convention — the busctl/d-feet equivalent (RFC 08 §6)"
+repository.workspace = true
+description = "Bus explorer for the keyspace-v2 Zenoh convention — the busctl/d-feet equivalent (RFC 08 §6)"
+readme = "README.md"
+keywords = ["zenoh", "keyspace", "cli", "introspection"]
+categories = ["command-line-utilities", "network-programming"]
+rust-version = "1.88"
 license = "Apache-2.0"
 
 [[bin]]
@@ -11,7 +16,6 @@ name = "zenctl"
 path = "src/main.rs"
 
 [dependencies]
-zensight-common = { git = "https://github.com/p13marc/zensight", branch = "master" }
 zenkey = { workspace = true }
 
 zenoh = { workspace = true }
@@ -19,4 +23,5 @@ tokio = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
+ciborium = { workspace = true }
 tracing-subscriber = { workspace = true }

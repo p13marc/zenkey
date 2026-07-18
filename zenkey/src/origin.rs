@@ -9,9 +9,10 @@
 //! origin  = "h-" ++ lowercase_hex(sha256(input))[0..12]
 //! ```
 //!
-//! The salt is an **application constant** (RFC 06 §1); ZenSight's is
-//! [`ZENSIGHT_SALT`] — compiled in, not operator-configurable, identical
-//! across deployments. Changing it re-keys every fleet.
+//! The salt is an **application constant** (RFC 06 §1), declared in the
+//! application's [`crate::AppProfile`] — compiled in, not
+//! operator-configurable, identical across deployments. Changing it re-keys
+//! every fleet.
 
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -19,11 +20,6 @@ use std::io::Write as _;
 use std::path::Path;
 
 use crate::grammar::{KeyError, is_valid_host_origin};
-
-/// ZenSight's application salt. Same value the shipped correlator has always
-/// used for `host_id` — the v1 origin equals the entity id (RFC 06 §2), only
-/// the separator changes (`h_` → `h-`).
-pub const ZENSIGHT_SALT: &str = "zensight-host-id-v1";
 
 /// A validated `h-<12hex>` host origin id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -84,12 +80,6 @@ impl HostId {
             }
         }
         Self::mint_persisted(fallback_path)
-    }
-
-    /// System default paths: `/etc/machine-id`, falling back to a persisted id
-    /// under the application state directory.
-    pub fn mint_system(fallback_path: &Path) -> Self {
-        Self::mint(Path::new("/etc/machine-id"), fallback_path, ZENSIGHT_SALT)
     }
 
     fn mint_persisted(path: &Path) -> Self {

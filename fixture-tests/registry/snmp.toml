@@ -1,4 +1,4 @@
-# Subject registry: netflow (flow receiver — REDESIGNED per RFC 11 §3). RFC 08 §2; migration epic #453.
+# Subject registry: snmp (device poller). RFC 08 §2; migration epic #453.
 # Telemetry metric trees register as {metric...} families (one payload type,
 # TelemetryPoint) — typed per-metric refinement is additive (registry MINOR).
 
@@ -8,18 +8,19 @@ app = "zensight"
 convention = 1
 
 [producer]
-name = "netflow"
-description = "NetFlow receiver; shipped per-flow-pair keys are redesigned into bounded rollups + on-demand detail (RFC 04 R3)"
+name = "snmp"
+description = "SNMP device poller (proxy producer: observed device = first subject chunk)"
 
 [[subject]]
-path = "{exporter}/{metric...}"
+path = "{device}/{metric...}"
 class = "telemetry"
 type = "TelemetryPoint"
-cardinality = 1000
+cardinality = 10000
 since = "1.0"
-description = "per-exporter rollups (flows_per_second, top talkers, ...) — NOT per-pair keys"
+description = "polled device metric tree"
 [[subject]]
 path = "health"
+common = "health"
 class = "state"
 type = "HealthSnapshot"
 ttl_s = 120
@@ -28,6 +29,7 @@ description = "sensor health document (framework; absorbs the legacy @/status ru
 
 [[subject]]
 path = "errors"
+common = "errors"
 class = "state"
 type = "ErrorReport"
 ttl_s = 300
@@ -36,6 +38,7 @@ description = "rolling error window (framework)"
 
 [[subject]]
 path = "sensor"
+common = "sensor"
 class = "state"
 type = "SensorInfo"
 ttl_s = 900
@@ -44,6 +47,7 @@ description = "registration document: identity, version, capabilities (framework
 
 [[subject]]
 path = "evidence/self"
+common = "evidence_self"
 class = "state"
 type = "HostEvidence"
 ttl_s = 900
@@ -89,10 +93,3 @@ reply = "ArtifactStatus"
 idempotent = true
 since = "1.0"
 description = "advertised artifact kinds + the in-flight/ready state per kind (RFC 05 §3)"
-[[procedure]]
-path = "flows"
-kind = "read"
-reply = "Vec<FlowRecord>"
-idempotent = true
-since = "1.0"
-description = "on-demand flow detail (?src=;dst=;max=)"

@@ -90,8 +90,11 @@ what a builder does when it has nothing better.
 ## 2. Entry format
 
 One TOML document per producer (or service), checked into the repository
-that owns the producer. Example (fields annotated inline, normative field
-table below):
+that owns the producer — the application repo, not the convention repo.
+The `zenkey-build` crate compiles a `registry/` directory into typed
+builders/parsers from the owning application's build script; the `zenkey`
+runtime crate ships no registry. Example (fields annotated inline,
+normative field table below):
 
 ```toml
 # registry/netring.toml

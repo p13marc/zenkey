@@ -1,0 +1,19 @@
+[package]
+name = "zenkey-build"
+description = "Registry codegen for the zenkey keyspace-v2 convention: lint registry TOMLs (RFC 08 §5) and generate typed subject/procedure builders from your build script"
+readme = "README.md"
+keywords = ["zenoh", "keyspace", "codegen", "semantic-convention"]
+categories = ["development-tools::build-utils", "network-programming"]
+rust-version = "1.88"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+# default-features = false: codegen needs only the chunk rules, never the
+# zenoh stack — a consumer's build-dependencies stay light.
+zenkey = { version = "0.2.0", path = "../zenkey", default-features = false }
+thiserror = { workspace = true }
+toml = "0.8"

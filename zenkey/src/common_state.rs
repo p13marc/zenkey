@@ -7,10 +7,13 @@
 //! separately would trade a positional parse for a combinatorial one.
 //!
 //! Almost all of the state class is the *same* small set of subjects on every
-//! producer — health, errors, the registration doc, alerts, evidence, artifact
-//! progress. [`CommonState`] is that set, and [`crate::registry::AnySubject::common_state`]
-//! (generated from the registry, so it cannot drift from it) refines any
-//! producer's subject into it.
+//! producer — health, errors, the registration doc, alerts, evidence.
+//! [`CommonState`] is that set — the subjects the RFCs themselves name
+//! (RFC 04 §1.2/§5, RFC 06 §4/§5). The registry codegen (`zenkey-build`)
+//! generates `AnySubject::common_state()` from the `common =` field on a
+//! consumer's registry entries, so the mapping cannot drift from the registry.
+//! App-specific state groupings beyond this set are the consumer's to define
+//! as a wrapper over its generated `AnySubject`.
 //!
 //! A consumer therefore writes one match over a dozen typed variants, with the
 //! variables already extracted and named, and gets a compile error if the
@@ -35,22 +38,16 @@ pub enum CommonState<'a> {
     Sensor,
     /// `alert/{alert_key}` — firing→resolved on one key; a delete is a tombstone.
     Alert { alert_key: &'a str },
-    /// `artifact/{kind}` — per-kind artifact progress.
-    Artifact { kind: &'a str },
     /// `evidence/self` — the producer's own identity claim (RFC 06 §4).
     EvidenceSelf,
     /// `evidence/device/{device}` — an observed device's identity claim.
     EvidenceDevice { device: &'a str },
     /// `evidence/names/{ip_slug}` — a passive-DNS name observation.
     EvidenceNames { ip_slug: &'a str },
-    /// `stream/{stream}` — a parallax per-stream status document.
-    Stream { stream: &'a str },
-    /// `@catalog` `entity/{entity_id}` — the merged entity document.
+    /// `@catalog` `entity/{entity_id}` — the merged entity document (RFC 06 §5).
     CatalogEntity { entity_id: &'a str },
-    /// `@catalog` `alias/{old_id}` — old-id → entity-id re-pointing.
+    /// `@catalog` `alias/{old_id}` — old-id → entity-id re-pointing (RFC 06 §5).
     CatalogAlias { old_id: &'a str },
-    /// `@catalog` `pdns/{ip_slug}` — the accumulated IP↔name record.
+    /// `@catalog` `pdns/{ip_slug}` — the accumulated IP↔name record (RFC 06 §5).
     CatalogPdns { ip_slug: &'a str },
-    /// `@catalog` `assertion/{id}` — an operator identity assertion (#473).
-    CatalogAssertion { id: &'a str },
 }
