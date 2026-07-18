@@ -377,7 +377,14 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             );
             let _ = writeln!(out, "            match self {{");
             for p in &f.procedures {
-                let list: Vec<String> = p.chunks.iter().map(|c| format!("{c:?}")).collect();
+                let list: Vec<String> = p
+                    .chunks
+                    .iter()
+                    .map(|c| match c {
+                        Chunk::Literal(l) => format!("{l:?}"),
+                        Chunk::Var(v) | Chunk::Rest(v) => format!("{:?}", format!("{{{v}}}")),
+                    })
+                    .collect();
                 let _ = writeln!(
                     out,
                     "                Self::{} => &[{}],",
@@ -432,14 +439,19 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             if f.service_origin.is_some() {
                 let _ = writeln!(
                     out,
-                    "    /// Base-relative `@rpc` key for this service's procedure.\n    pub fn rpc_key(p: ProcedureId) -> Result<String, KeyError> {{\n        grammar::rpc_key(&origin(), None, p.chunks())\n    }}"
+                    "    /// Base-relative `@rpc` key for this service's procedure.\n    /// Errs on a `{{var}}`-bearing pattern — use [`rpc_key_with`].\n    pub fn rpc_key(p: ProcedureId) -> Result<String, KeyError> {{\n        grammar::rpc_key(&origin(), None, p.chunks())\n    }}\n\n    /// As [`rpc_key`], substituting the pattern's `{{var}}` chunks in order\n    /// (RFC 09 G6: the actuated resource rides the path, typed).\n    pub fn rpc_key_with(p: ProcedureId, vars: &[&str]) -> Result<String, KeyError> {{\n        let chunks = substitute_procedure_vars(p, vars)?;\n        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();\n        grammar::rpc_key(&origin(), None, &refs)\n    }}\n\n    /// The serve-side selector: every `{{var}}` becomes `*`. A selector, not a\n    /// buildable key.\n    pub fn rpc_serve_key(p: ProcedureId) -> String {{\n        let mut key = format!(\"{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, origin().chunk(), grammar::PLANE_RPC);\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        key\n    }}"
                 );
             } else {
                 let _ = writeln!(
                     out,
-                    "    /// Base-relative `@rpc` key for this producer's procedure.\n    pub fn rpc_key(origin: &Origin, p: ProcedureId) -> Result<String, KeyError> {{\n        grammar::rpc_key(origin, Some(&producer()), p.chunks())\n    }}"
+                    "    /// Base-relative `@rpc` key for this producer's procedure.\n    /// Errs on a `{{var}}`-bearing pattern — use [`rpc_key_with`].\n    pub fn rpc_key(origin: &Origin, p: ProcedureId) -> Result<String, KeyError> {{\n        grammar::rpc_key(origin, Some(&producer()), p.chunks())\n    }}\n\n    /// As [`rpc_key`], substituting the pattern's `{{var}}` chunks in order\n    /// (RFC 09 G6: the actuated resource rides the path, typed).\n    pub fn rpc_key_with(origin: &Origin, p: ProcedureId, vars: &[&str]) -> Result<String, KeyError> {{\n        let chunks = substitute_procedure_vars(p, vars)?;\n        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();\n        grammar::rpc_key(origin, Some(&producer()), &refs)\n    }}\n\n    /// The serve-side selector: every `{{var}}` becomes `*`. A selector, not a\n    /// buildable key.\n    pub fn rpc_serve_key(origin: &Origin, p: ProcedureId) -> String {{\n        let mut key = format!(\"{{}}/{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, origin.chunk(), grammar::PLANE_RPC, producer().chunk());\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        key\n    }}"
                 );
             }
+            // Shared var-substitution helper for rpc_key_with.
+            let _ = writeln!(
+                out,
+                "\n    fn substitute_procedure_vars(p: ProcedureId, vars: &[&str]) -> Result<Vec<String>, KeyError> {{\n        let needed = p.chunks().iter().filter(|c| c.starts_with('{{')).count();\n        if needed != vars.len() {{\n            return Err(KeyError::Parse(format!(\n                \"procedure {{}} takes {{needed}} variable(s), got {{}}\", p.path(), vars.len()\n            )));\n        }}\n        let mut vi = 0usize;\n        Ok(p.chunks().iter().map(|c| {{\n            if c.starts_with('{{') {{ let v = vars[vi].to_string(); vi += 1; v }} else {{ (*c).to_string() }}\n        }}).collect())\n    }}"
+            );
         }
 
         let _ = writeln!(out, "}}\n");

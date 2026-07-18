@@ -83,7 +83,8 @@ pub(crate) struct SubjectEntry {
 
 pub(crate) struct ProcedureEntry {
     pub path: String,
-    pub chunks: Vec<String>,
+    /// Literal and `{var}` chunks (rest-vars are illegal in procedure paths).
+    pub chunks: Vec<Chunk>,
     pub kind: String,
     pub request: Option<String>,
     pub reply: Option<String>,
@@ -587,16 +588,16 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 .get("path")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| lint(&fname, "[[procedure]] missing path"))?;
-            let chunks: Vec<String> = ppath.split('/').map(str::to_string).collect();
-            for c in &chunks {
-                if !is_valid_plain_chunk(c) {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "procedure {ppath:?}: chunk {c:?} violates RFC 03 §2 (procedure paths are literal; parameters ride the selector)"
-                        ),
-                    ));
-                }
+            // Literal and `{var}` chunks: RFC 09 (v1.4, amendment G6) requires
+            // the actuated resource as a path chunk, so parameterized write
+            // procedures are legal. Rest-vars are not — a procedure names one
+            // operation, never an open family.
+            let chunks = parse_pattern(&fname, ppath)?;
+            if chunks.iter().any(|c| matches!(c, Chunk::Rest(_))) {
+                return Err(lint(
+                    &fname,
+                    format!("procedure {ppath:?}: {{var...}} rest-variables are not allowed in procedure paths"),
+                ));
             }
             let kind = entry
                 .get("kind")
@@ -608,7 +609,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     format!("procedure {ppath:?}: unknown kind {kind:?}"),
                 ));
             }
-            let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+            let refs: Vec<&str> = ppath.split('/').collect();
             procedures.push(ProcedureEntry {
                 path: ppath.to_string(),
                 variant: camel(&refs),
