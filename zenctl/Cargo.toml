@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 zenkey = { workspace = true }
+zenkey-fleet = { workspace = true }
 
 zenoh = { workspace = true }
 tokio = { workspace = true }

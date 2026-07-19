@@ -17,7 +17,6 @@
 //! The gap between the two is drift, and `doctor` (bus + `--registry`) is the
 //! command that reports it.
 
-mod bus;
 mod context;
 mod offline;
 mod output;
@@ -29,6 +28,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use clap::{Args, Parser, Subcommand};
 use zenkey::RegistrySlice;
+use zenkey_fleet as bus;
 
 #[derive(Parser)]
 #[command(

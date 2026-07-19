@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "zenkey",
     "zenkey-build",
+    "zenkey-fleet",
     "fixture-tests",
     "zenctl",
 ]
@@ -16,6 +17,7 @@ authors = ["Marc Pardo <p13marc@gmail.com>"]
 
 [workspace.dependencies]
 zenoh = { version = "1.9", features = ["unstable"] }
+zenoh-ext = { version = "1.9", features = ["unstable"] }
 # Standalone key-expression crate (same type zenoh re-exports; no tokio, no
 # networking) — light enough for build scripts, which is why `Key` can wrap
 # OwnedKeyExpr unconditionally (docs/redesign-2026-07.md §13).
@@ -28,6 +30,7 @@ thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
+arc-swap = "1"
 dirs = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -41,3 +44,4 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 # Internal
 zenkey = { version = "0.3.0", path = "zenkey" }
 zenkey-build = { version = "0.3.0", path = "zenkey-build" }
+zenkey-fleet = { version = "0.1.0", path = "zenkey-fleet" }

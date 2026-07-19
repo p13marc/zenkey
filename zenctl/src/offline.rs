@@ -9,7 +9,9 @@
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use zenkey::{RegistrySlice, parse_slice};
+use zenkey::RegistrySlice;
+#[cfg(test)]
+use zenkey::parse_slice;
 
 use crate::report::{
     CarrierRow, InterfaceList, InterfaceShow, InterfaceTypeRow, ServiceList, ServiceRow, TopicInfo,
@@ -20,27 +22,8 @@ use crate::report::{
 /// source. What a checked-out application *declares*, as opposed to what a
 /// live fleet *serves*.
 pub fn load_slices(dirs: &[PathBuf]) -> Result<Vec<RegistrySlice>> {
-    let mut out = Vec::new();
-    for dir in dirs {
-        let mut paths: Vec<_> = std::fs::read_dir(dir)
-            .map_err(|e| anyhow!("--registry {}: {e}", dir.display()))?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
-            .collect();
-        paths.sort();
-        for path in paths {
-            let text =
-                std::fs::read_to_string(&path).map_err(|e| anyhow!("{}: {e}", path.display()))?;
-            let slice = parse_slice(&text).map_err(|e| {
-                anyhow!(
-                    "{}: does not parse as a registry slice: {e}",
-                    path.display()
-                )
-            })?;
-            out.push(slice);
-        }
-    }
-    Ok(out)
+    // Delegates to the fleet engine (issue #15): one loader for CLI and GUI.
+    Ok(zenkey_fleet::SliceSet::from_dirs(dirs)?.slices().to_vec())
 }
 
 /// `topic list` — every registered subject in the given slices.

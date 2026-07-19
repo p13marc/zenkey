@@ -1,11 +1,6 @@
-//! The bus half: session setup and the one fan-in call helper.
-//!
-//! RFC 05 §2.1 makes fleet GETs a discipline, not a default — get it wrong and
-//! the failure is silent (one reply instead of the fleet, and no error). So the
-//! discipline lives here, in [`fleet_get`], and no subcommand issues a raw
-//! `session.get()`.
+//! The fan-in query discipline (RFC 05 §2.1) — moved verbatim from
+//! zenctl's `bus.rs`; this stays the single chokepoint for fleet GETs.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -27,41 +22,6 @@ pub enum Answer {
 pub struct FleetAnswer {
     pub origin: String,
     pub answer: Answer,
-}
-
-/// Open a session for a read-only explorer.
-///
-/// RFC 09 §5: debug tools run *without* the session namespace and spell full
-/// keys — "which is also the honest view of what is on the wire". So we never
-/// set `namespace`, and every key this tool prints is the real one.
-///
-/// Scouting defaults to **off**. A bus explorer that multicast-scouts will join
-/// whatever mesh it can find, which is how a throwaway session ends up
-/// contaminating a live fleet; opt in explicitly with `--scouting` when you
-/// mean it.
-pub async fn open(connect: &[String], listen: &[String], scouting: bool) -> Result<Session> {
-    let mut config = zenoh::Config::default();
-    let json_list = |v: &[String]| {
-        let items: Vec<String> = v.iter().map(|e| format!("{e:?}")).collect();
-        format!("[{}]", items.join(","))
-    };
-    config
-        .insert_json5("scouting/multicast/enabled", &scouting.to_string())
-        .ok();
-    if !connect.is_empty() {
-        config
-            .insert_json5("connect/endpoints", &json_list(connect))
-            .ok();
-    }
-    if !listen.is_empty() {
-        config
-            .insert_json5("listen/endpoints", &json_list(listen))
-            .ok();
-    }
-    zenoh::open(config)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
-        .context("failed to open Zenoh session")
 }
 
 /// Call a procedure and collect **every** reply, attributed by origin.
@@ -176,6 +136,20 @@ pub async fn fleet_registry(
     base: &str,
     timeout: Duration,
 ) -> Result<Vec<(String, RegistrySlice)>> {
+    Ok(fleet_registry_raw(session, base, timeout)
+        .await?
+        .into_iter()
+        .map(|(slice, _)| (slice.name.clone(), slice))
+        .collect())
+}
+
+/// As [`fleet_registry`], additionally yielding each reply's raw TOML text
+/// (the artifact the slice cache persists).
+pub async fn fleet_registry_raw(
+    session: &Session,
+    base: &str,
+    timeout: Duration,
+) -> Result<Vec<(RegistrySlice, String)>> {
     // This session is un-namespaced on purpose (RFC 09 §5), so it must
     // spell the base itself — exactly as `service call` composes its full key.
     let key = with_base(base, zenkey::selector::fleet_rpc("*", &["introspect"]));
@@ -186,63 +160,14 @@ pub async fn fleet_registry(
         let Answer::Value(bytes) = answer.answer else {
             continue;
         };
-        let served_toml = String::from_utf8_lossy(&bytes);
+        let served_toml = String::from_utf8_lossy(&bytes).to_string();
         match parse_slice(&served_toml) {
-            Ok(slice) => slices.push((slice.name.clone(), slice)),
-            Err(e) => eprintln!(
-                "warning: {}: introspect reply did not parse, skipping: {e}",
-                answer.origin
+            Ok(slice) => slices.push((slice, served_toml)),
+            Err(e) => tracing::warn!(
+                origin = %answer.origin,
+                "introspect reply did not parse, skipping: {e}"
             ),
         }
     }
     Ok(slices)
-}
-
-/// The fleet-presence roster: who is up, and what they run.
-///
-/// RFC 04 §5 — a liveliness query on `<base>/v1/*/state/*/alive`. Zero
-/// payload bytes: the token *key* is the record. `@catalog` is asked for by
-/// name because `*` can never match a verbatim service origin (property D4).
-pub async fn roster(
-    session: &Session,
-    base: &str,
-    timeout: Duration,
-) -> Result<BTreeMap<String, Vec<String>>> {
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-
-    let catalog_alive = zenkey::selector::service_alive(&zenkey::ServiceOrigin::catalog());
-    // The builders are base-relative; this session is deliberately
-    // un-namespaced, so it must spell the base itself.
-    for expr in [
-        with_base(
-            base,
-            zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet()),
-        ),
-        with_base(base, catalog_alive),
-    ] {
-        let Ok(replies) = session.liveliness().get(&expr).timeout(timeout).await else {
-            continue;
-        };
-        while let Ok(reply) = replies.recv_async().await {
-            let Ok(sample) = reply.result() else { continue };
-            let key = sample.key_expr().as_str();
-            let Some(parsed) = zenkey::grammar::parse_full(base, key) else {
-                continue;
-            };
-            let origin = parsed.origin.chunk().to_string();
-            // `@catalog`'s token has no producer chunk — the service *is* the
-            // producer. Everything else names its producer in position 5.
-            let producer = parsed
-                .producer
-                .as_ref()
-                .map(|p| p.chunk())
-                .unwrap_or_else(|| origin.trim_start_matches('@').to_string());
-            out.entry(origin).or_default().push(producer);
-        }
-    }
-    for producers in out.values_mut() {
-        producers.sort();
-        producers.dedup();
-    }
-    Ok(out)
 }
