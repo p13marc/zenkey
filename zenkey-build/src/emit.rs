@@ -3,9 +3,24 @@
 use std::fmt::Write as _;
 
 use crate::{
-    COMMON_STATE, Chunk, ProcedureEntry, RegistryFile, SubjectEntry, camel, precedence_rank,
-    producer_module, snake,
+    COMMON_STATE, Chunk, ProcedureEntry, RegistryFile, SubjectEntry, camel, producer_module, snake,
 };
+
+/// CamelCase -> snake_case for generated constructor/builder fn names.
+pub(crate) fn camel_to_snake(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    for (i, ch) in name.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
 
 pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
     let mut out =
@@ -16,8 +31,9 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         let _ = writeln!(out, "    #[allow(unused_imports)]");
         let _ = writeln!(
             out,
-            "    use {zk}::grammar::{{self, Class, KeyError, Origin, Producer}};\n    use {zk}::key::Key;"
+            "    use {zk}::grammar::{{self, Class, KeyError, Origin, Producer}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key, Selector}};\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin, LocalOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::selector::Scope;"
         );
+        let _ = writeln!(out, "    #[allow(unused_imports)]");
         let _ = writeln!(out, "    use {zk}::qos::QosProfile;");
         let _ = writeln!(
             out,
@@ -45,10 +61,10 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             for c in &s.chunks {
                 match c {
                     Chunk::Var(v) => {
-                        let _ = write!(fields, "{}: String, ", snake(v));
+                        let _ = write!(fields, "{}: Chunk, ", snake(v));
                     }
                     Chunk::Rest(v) => {
-                        let _ = write!(fields, "{}: Vec<String>, ", snake(v));
+                        let _ = write!(fields, "{}: Vec<Chunk>, ", snake(v));
                     }
                     Chunk::Literal(_) => {}
                 }
@@ -63,6 +79,44 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
 
         // impl Subject.
         let _ = writeln!(out, "    impl Subject {{");
+
+        // Slug-at-boundary constructors (RFC 08 §1.2): call sites pass raw
+        // application values, the constructor slugs — `slug_key_chunk()` at
+        // call sites is retired. `{host}` vars in service registries take a
+        // typed HostId (H4).
+        for s in &f.subjects {
+            if s.chunks.iter().all(|c| matches!(c, Chunk::Literal(_))) {
+                continue;
+            }
+            let fn_name = camel_to_snake(&s.variant);
+            let mut args = String::new();
+            let mut inits = String::new();
+            for c in &s.chunks {
+                match c {
+                    Chunk::Var(v) => {
+                        let n = snake(v);
+                        if f.service_origin.is_some() && v == "host" {
+                            let _ = write!(args, "{n}: &{zk}::origin::HostId, ");
+                            let _ = write!(inits, "{n}: Chunk::from_valid({n}.as_str()), ");
+                        } else {
+                            let _ = write!(args, "{n}: impl AsRef<str>, ");
+                            let _ = write!(inits, "{n}: Chunk::slug({n}), ");
+                        }
+                    }
+                    Chunk::Rest(v) => {
+                        let n = snake(v);
+                        let _ = write!(args, "{n}: impl IntoIterator<Item = impl AsRef<str>>, ");
+                        let _ = write!(inits, "{n}: {n}.into_iter().map(Chunk::slug).collect(), ");
+                    }
+                    Chunk::Literal(_) => {}
+                }
+            }
+            let _ = writeln!(
+                out,
+                "        /// Construct [`Subject::{}`], slugging variables (RFC 03 §2).\n        pub fn {fn_name}({args}) -> Self {{ Self::{} {{ {inits}}} }}\n",
+                s.variant, s.variant
+            );
+        }
 
         // class()
         let _ = writeln!(out, "        pub fn class(&self) -> Class {{");
@@ -190,40 +244,6 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         }
         let _ = writeln!(out, "            }}\n        }}\n");
 
-        // chunks()
-        let _ = writeln!(out, "        pub fn chunks(&self) -> Vec<String> {{");
-        let _ = writeln!(out, "            match self {{");
-        for s in &f.subjects {
-            let mut binds = String::new();
-            let mut body = String::from("vec![");
-            for c in &s.chunks {
-                match c {
-                    Chunk::Literal(l) => {
-                        let _ = write!(body, "{l:?}.to_string(), ");
-                    }
-                    Chunk::Var(v) => {
-                        let n = snake(v);
-                        let _ = write!(binds, "{n}, ");
-                        let _ = write!(body, "{n}.clone(), ");
-                    }
-                    Chunk::Rest(_) => {}
-                }
-            }
-            body.push(']');
-            if let Some(Chunk::Rest(v)) = s.chunks.last() {
-                let n = snake(v);
-                let _ = write!(binds, "{n}, ");
-                body = format!("{{ let mut c = {body}; c.extend({n}.iter().cloned()); c }}");
-            }
-            let pat = if binds.is_empty() {
-                format!("Self::{}", s.variant)
-            } else {
-                format!("Self::{} {{ {binds}}}", s.variant)
-            };
-            let _ = writeln!(out, "                {pat} => {body},");
-        }
-        let _ = writeln!(out, "            }}\n        }}\n");
-
         // vars() — the variable bindings, in pattern order. A `{var...}` rest
         // binds as its chunks rejoined with `/`.
         let _ = writeln!(
@@ -244,12 +264,15 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                     Chunk::Var(v) => {
                         let n = snake(v);
                         let _ = write!(binds, "{n}, ");
-                        let _ = write!(body, "({v:?}, {n}.clone()), ");
+                        let _ = write!(body, "({v:?}, {n}.to_string()), ");
                     }
                     Chunk::Rest(v) => {
                         let n = snake(v);
                         let _ = write!(binds, "{n}, ");
-                        let _ = write!(body, "({v:?}, {n}.join(\"/\")), ");
+                        let _ = write!(
+                            body,
+                            "({v:?}, {n}.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(\"/\")), "
+                        );
                     }
                 }
             }
@@ -263,12 +286,15 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         }
         let _ = writeln!(out, "            }}\n        }}\n");
 
-        // parse(), precedence-ordered (RFC 08 §1: literal beats {var} beats {var...}).
+        // parse(), precedence-ordered (RFC 08 §1: literal beats {var} beats
+        // {var...}). Ordering is derived through `zenkey::pattern` — the same
+        // primitive runtime tools match with — so generator and runtime can
+        // never disagree (the parity test in fixture-tests pins it).
         let mut ordered: Vec<&SubjectEntry> = f.subjects.iter().collect();
         ordered.sort_by(|a, b| {
-            let ranks =
-                |s: &SubjectEntry| -> Vec<u8> { s.chunks.iter().map(precedence_rank).collect() };
-            ranks(a).cmp(&ranks(b)).then_with(|| a.path.cmp(&b.path))
+            let pa = zenkey::pattern::SubjectPattern::parse(&a.path).expect("linted");
+            let pb = zenkey::pattern::SubjectPattern::parse(&b.path).expect("linted");
+            pa.precedence().cmp(&pb.precedence())
         });
         let _ = writeln!(
             out,
@@ -305,12 +331,12 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             for (i, c) in s.chunks.iter().enumerate() {
                 match c {
                     Chunk::Var(v) => {
-                        let _ = write!(fields, "{}: tail[{i}].to_string(), ", snake(v));
+                        let _ = write!(fields, "{}: Chunk::from_valid(tail[{i}]), ", snake(v));
                     }
                     Chunk::Rest(v) => {
                         let _ = write!(
                             fields,
-                            "{}: tail[{i}..].iter().map(|c| c.to_string()).collect(), ",
+                            "{}: tail[{i}..].iter().map(|c| Chunk::from_valid(c)).collect(), ",
                             snake(v)
                         );
                     }
@@ -339,21 +365,208 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         );
         let _ = writeln!(
             out,
-            "        pub fn parse_metric(metric: &str) -> Option<Self> {{\n            let tail: Vec<&str> = metric.split('/').collect();\n            Self::parse(Class::Telemetry, &tail)\n        }}"
+            "        pub fn parse_metric(metric: &str) -> Option<Self> {{\n            let tail: Vec<&str> = metric.split('/').collect();\n            Self::parse(Class::Telemetry, &tail)\n        }}\n"
         );
-        let _ = writeln!(out, "    }}\n");
 
-        // Full-key builder.
-        if f.service_origin.is_some() {
+        // family() — the fieldless mirror (RFC 08 §1.2).
+        let _ = writeln!(
+            out,
+            "        /// This subject's family (the variant without its variables)."
+        );
+        let _ = writeln!(out, "        pub fn family(&self) -> Family {{");
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
             let _ = writeln!(
                 out,
-                "    /// Base-relative data key for this service's subject.\n    pub fn key(subject: &Subject) -> Result<Key, KeyError> {{\n        let chunks = subject.chunks();\n        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();\n        grammar::data_key(&origin(), subject.class(), None, &refs)\n    }}"
+                "                Self::{} {{ .. }} => Family::{},",
+                s.variant, s.variant
             );
+        }
+        let _ = writeln!(out, "            }}\n        }}");
+        let _ = writeln!(out, "    }}\n");
+
+        // Family — consumer routing tables stop re-encoding the registry
+        // (RFC 08 §1.2): fieldless ids with per-family selector builders.
+        let _ = writeln!(
+            out,
+            "    /// Fieldless subject-family ids, with per-family selectors."
+        );
+        let _ = writeln!(
+            out,
+            "    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]"
+        );
+        let _ = writeln!(out, "    pub enum Family {{");
+        for s in &f.subjects {
+            let _ = writeln!(out, "        /// `{}` ({})", s.path, s.class);
+            let _ = writeln!(out, "        {},", s.variant);
+        }
+        let _ = writeln!(out, "    }}\n");
+        let _ = writeln!(out, "    impl Family {{");
+        let _ = writeln!(out, "        pub const ALL: &[Family] = &[");
+        for s in &f.subjects {
+            let _ = writeln!(out, "            Family::{},", s.variant);
+        }
+        let _ = writeln!(out, "        ];\n");
+        let _ = writeln!(out, "        pub fn class(self) -> Class {{");
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let class = match s.class.as_str() {
+                "telemetry" => "Class::Telemetry",
+                "state" => "Class::State",
+                _ => "Class::Events",
+            };
+            let _ = writeln!(out, "                Self::{} => {class},", s.variant);
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
+        let _ = writeln!(out, "        pub fn pattern(self) -> &'static str {{");
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let _ = writeln!(out, "                Self::{} => {:?},", s.variant, s.path);
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
+        // selector(): {var} -> *, {var...} -> **, precomputed at build time.
+        let selector_tail = |chunks: &[Chunk]| -> String {
+            let parts: Vec<&str> = chunks
+                .iter()
+                .map(|c| match c {
+                    Chunk::Literal(l) => l.as_str(),
+                    Chunk::Var(_) => "*",
+                    Chunk::Rest(_) => "**",
+                })
+                .collect();
+            parts.join("/")
+        };
+        if let Some(origin) = &f.service_origin {
+            let _ = writeln!(
+                out,
+                "        /// The family's selector (service origin is fixed; RFC 08 §1.2)."
+            );
+            let _ = writeln!(out, "        pub fn selector(self) -> Selector {{");
+            let _ = writeln!(out, "            match self {{");
+            for s in &f.subjects {
+                let class = &s.class;
+                let tail = selector_tail(&s.chunks);
+                let sel = format!("v1/{origin}/{class}/{tail}");
+                let _ = writeln!(
+                    out,
+                    "                Self::{} => Selector::from_canonical({sel:?}.to_string()),",
+                    s.variant
+                );
+            }
+            let _ = writeln!(out, "            }}\n        }}");
         } else {
             let _ = writeln!(
                 out,
-                "    /// Base-relative data key for this producer's subject.\n    pub fn key(origin: &Origin, subject: &Subject) -> Result<Key, KeyError> {{\n        key_as(origin, &producer(), subject)\n    }}\n\n    /// As [`key`], for an instance-suffixed producer (RFC 03 §1.5).\n    pub fn key_as(origin: &Origin, producer: &Producer, subject: &Subject) -> Result<Key, KeyError> {{\n        let chunks = subject.chunks();\n        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();\n        grammar::data_key(origin, subject.class(), Some(producer), &refs)\n    }}"
+                "        /// The family's selector in a scope: `{{var}}` -> `*`, `{{var...}}` -> `**` (RFC 08 §1.2)."
             );
+            let _ = writeln!(
+                out,
+                "        pub fn selector(self, scope: Scope) -> Selector {{"
+            );
+            let _ = writeln!(out, "            match self {{");
+            for s in &f.subjects {
+                let class = &s.class;
+                let tail = selector_tail(&s.chunks);
+                let suffix = format!("/{class}/{}/{tail}", f.name);
+                let _ = writeln!(
+                    out,
+                    "                Self::{} => Selector::from_canonical(format!(\"v1/{{}}{suffix}\", scope.chunk())),",
+                    s.variant
+                );
+            }
+            let _ = writeln!(out, "            }}\n        }}");
+        }
+        let _ = writeln!(out, "    }}\n");
+
+        // Full-key builders: single-pass, infallible (fields are validated
+        // Chunks; class/producer are registry constants). Publishing takes
+        // the typed LocalOrigin (G5); addressing takes any host origin.
+        let emit_subject_arms = |out: &mut String, subjects: &[SubjectEntry]| {
+            for s in subjects {
+                let mut binds = String::new();
+                let mut body = String::new();
+                let mut pending = String::new();
+                let state_guard = s.class == "state";
+                for c in &s.chunks {
+                    match c {
+                        Chunk::Literal(l) => {
+                            pending.push('/');
+                            pending.push_str(l);
+                        }
+                        Chunk::Var(v) => {
+                            let n = snake(v);
+                            let _ = write!(binds, "{n}, ");
+                            pending.push('/');
+                            if pending == "/" {
+                                let _ = write!(body, "k.push('/'); ");
+                            } else {
+                                let _ = write!(body, "k.push_str({pending:?}); ");
+                            }
+                            pending.clear();
+                            if state_guard {
+                                let _ = write!(
+                                    body,
+                                    "assert!({n}.as_str() != \"alive\", \"reserved `alive` leaf (RFC 03 §3)\"); "
+                                );
+                            }
+                            let _ = write!(body, "k.push_str({n}); ");
+                        }
+                        Chunk::Rest(v) => {
+                            let n = snake(v);
+                            let _ = write!(binds, "{n}, ");
+                            if pending == "/" {
+                                let _ = write!(body, "k.push('/'); ");
+                                pending.clear();
+                            } else if !pending.is_empty() {
+                                let _ = write!(body, "k.push_str({pending:?}); ");
+                                pending.clear();
+                            }
+                            if state_guard {
+                                let _ = write!(
+                                    body,
+                                    "for c in {n} {{ assert!(c.as_str() != \"alive\", \"reserved `alive` leaf (RFC 03 §3)\"); k.push('/'); k.push_str(c); }} "
+                                );
+                            } else {
+                                let _ =
+                                    write!(body, "for c in {n} {{ k.push('/'); k.push_str(c); }} ");
+                            }
+                        }
+                    }
+                }
+                if !pending.is_empty() {
+                    let _ = write!(body, "k.push_str({pending:?}); ");
+                }
+                let pat = if binds.is_empty() {
+                    format!("Subject::{}", s.variant)
+                } else {
+                    format!("Subject::{} {{ {binds}}}", s.variant)
+                };
+                let _ = writeln!(out, "            {pat} => {{ {body}}}");
+            }
+        };
+        if let Some(origin) = &f.service_origin {
+            let _ = writeln!(
+                out,
+                "    /// Base-relative data key for this service's subject (origin is fixed).\n    pub fn key(subject: &Subject) -> Key {{"
+            );
+            let _ = writeln!(
+                out,
+                "        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/{origin}/\");\n        k.push_str(subject.class().chunk());\n        match subject {{"
+            );
+            emit_subject_arms(&mut out, &f.subjects);
+            let _ = writeln!(out, "        }}\n        Key::from_canonical(k)\n    }}");
+        } else {
+            let _ = writeln!(
+                out,
+                "    /// Base-relative data key, published under this process's own origin\n    /// (RFC 08 §1.1/G5: publishing is Local by type).\n    pub fn key(o: &LocalOrigin, subject: &Subject) -> Key {{\n        key_impl(o.chunk(), {:?}, subject)\n    }}\n\n    /// Address one specific host's document (drill-down GETs, exact subscriptions).\n    pub fn key_at(o: &impl HostOrigin, subject: &Subject) -> Key {{\n        key_impl(o.chunk(), {:?}, subject)\n    }}\n\n    /// As [`key`], for an instance-suffixed producer (RFC 03 §1.5).\n    pub fn key_as(o: &LocalOrigin, producer: &Producer, subject: &Subject) -> Key {{\n        key_impl(o.chunk(), &producer.chunk(), subject)\n    }}",
+                f.name, f.name
+            );
+            let _ = writeln!(
+                out,
+                "\n    fn key_impl(origin: &str, producer: &str, subject: &Subject) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/\");\n        k.push_str(origin);\n        k.push('/');\n        k.push_str(subject.class().chunk());\n        k.push('/');\n        k.push_str(producer);\n        match subject {{"
+            );
+            emit_subject_arms(&mut out, &f.subjects);
+            let _ = writeln!(out, "        }}\n        Key::from_canonical(k)\n    }}");
         }
 
         // Procedures.

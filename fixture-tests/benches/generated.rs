@@ -4,21 +4,19 @@
 //! rewrite; numbers in `docs/bench-baseline.md`.
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use zenkey::grammar::{Class, Origin};
-use zenkey::origin::HostId;
+use zenkey::grammar::Class;
+use zenkey::origin::{HostId, LocalOrigin};
 use zenkey_fixture_tests::registry::{self, netring};
 
-fn host() -> Origin {
-    Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap())
+fn host() -> LocalOrigin {
+    LocalOrigin::from_host_id(HostId::parse("h-3fa9c2d41b7e").unwrap())
 }
 
 fn bench_generated(c: &mut Criterion) {
     let origin = host();
-    let subject = netring::Subject::FlowRed {
-        quantile: "p95_ms".into(),
-    };
+    let subject = netring::Subject::flow_red("p95_ms");
     c.bench_function("generated/key_build", |b| {
-        b.iter(|| netring::key(black_box(&origin), black_box(&subject)).unwrap())
+        b.iter(|| netring::key(black_box(&origin), black_box(&subject)))
     });
     c.bench_function("generated/subject_parse_hit", |b| {
         b.iter(|| netring::Subject::parse(Class::Telemetry, black_box(&["flow", "red", "p95_ms"])))

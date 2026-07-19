@@ -339,16 +339,6 @@ pub(crate) fn producer_module(name: &str) -> String {
     snake(name)
 }
 
-/// Parse-precedence: at the first differing position, literal beats var
-/// beats rest; shorter fixed arity ties break by pattern text (stable).
-pub(crate) fn precedence_rank(c: &Chunk) -> u8 {
-    match c {
-        Chunk::Literal(_) => 0,
-        Chunk::Var(_) => 1,
-        Chunk::Rest(_) => 2,
-    }
-}
-
 fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
     let mut files = Vec::new();
     let mut paths: Vec<_> = std::fs::read_dir(dir)

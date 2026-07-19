@@ -38,7 +38,9 @@ impl Scope {
         Scope(ScopeInner::Origin(o.chunk().to_string()))
     }
 
-    fn chunk(&self) -> &str {
+    /// The origin-position chunk this scope selects (`*` for the fleet).
+    /// Public for generated `Family::selector` implementations.
+    pub fn chunk(&self) -> &str {
         match &self.0 {
             ScopeInner::Fleet => "*",
             ScopeInner::Origin(c) => c,

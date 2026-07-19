@@ -193,6 +193,20 @@ impl AsRef<str> for Chunk {
     }
 }
 
+impl From<&str> for Chunk {
+    /// Slugs — total, like [`Chunk::slug`]; struct-literal construction of
+    /// generated subjects stays boundary-safe.
+    fn from(v: &str) -> Chunk {
+        Chunk::slug(v)
+    }
+}
+
+impl From<String> for Chunk {
+    fn from(v: String) -> Chunk {
+        Chunk::slug(&v)
+    }
+}
+
 impl PartialEq<str> for Chunk {
     fn eq(&self, other: &str) -> bool {
         self.0 == other
