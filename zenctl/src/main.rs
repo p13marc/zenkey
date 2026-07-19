@@ -18,6 +18,7 @@
 //! command that reports it.
 
 mod bus;
+mod context;
 mod offline;
 
 use std::path::PathBuf;
@@ -52,6 +53,9 @@ enum Command {
     /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
+    /// Manage named connection contexts (config file).
+    #[command(subcommand)]
+    Context(ContextCmd),
     /// Diff what the fleet *serves* against local registry files.
     ///
     /// RFC 08 §6: "A disagreement between introspection and the checked-in TOML
@@ -59,6 +63,43 @@ enum Command {
     /// truth comes from `--registry <dir>`; without it only the
     /// roster-vs-introspect check runs.
     Doctor(BusArgs),
+}
+
+#[derive(Subcommand)]
+enum ContextCmd {
+    /// Create (or update) a named context.
+    Create {
+        name: String,
+        /// The deployment base this context pins.
+        #[arg(long)]
+        base: Option<String>,
+        /// Endpoint to connect to, repeatable.
+        #[arg(long, short = 'c')]
+        connect: Vec<String>,
+        /// Endpoint to listen on, repeatable.
+        #[arg(long, short = 'l')]
+        listen: Vec<String>,
+        /// Registry dir, repeatable (offline slice source).
+        #[arg(long, value_name = "DIR")]
+        registry: Vec<PathBuf>,
+        /// Enable multicast scouting for this context.
+        #[arg(long)]
+        scouting: bool,
+        /// Default reply timeout in seconds.
+        #[arg(long)]
+        timeout: Option<u64>,
+        /// Select it as the current context.
+        #[arg(long)]
+        select: bool,
+    },
+    /// List contexts (the `*` marks the current one).
+    List,
+    /// Show one context (default: the current one).
+    Show { name: Option<String> },
+    /// Select the current context.
+    Select { name: String },
+    /// Remove a context.
+    Rm { name: String },
 }
 
 #[derive(Subcommand)]
@@ -168,8 +209,14 @@ struct BusArgs {
     /// un-namespaced so it sees the wire as it really is, including traffic
     /// from outside the deployment (RFC 09 §5) — which is what lets it spot a
     /// leak. So it has to be told what the base is.
+    /// Optional since v1.5: resolution is flag > env > active context
+    /// (`zenctl context …`).
     #[arg(long, env = "ZENCTL_BASE")]
-    base: String,
+    base: Option<String>,
+    /// Use a named context from the config file for this invocation
+    /// (default: the file's `current` pointer; env `ZENCTL_CONTEXT`).
+    #[arg(long, value_name = "NAME")]
+    context: Option<String>,
     /// Local registry directory (`registry/*.toml`), repeatable. When given,
     /// registry-sourced commands answer offline from these files instead of
     /// the live bus.
@@ -188,39 +235,96 @@ struct BusArgs {
     /// session ends up talking to a production fleet.
     #[arg(long)]
     scouting: bool,
-    /// Seconds to wait for replies / to watch the bus.
-    #[arg(long, default_value_t = 5)]
-    timeout: u64,
+    /// Seconds to wait for replies / to watch the bus (default 5; a
+    /// context may override the default).
+    #[arg(long)]
+    timeout: Option<u64>,
 }
 
 impl BusArgs {
+    /// The active stored context, loaded once per process (one BusArgs is
+    /// ever used per invocation). A bad --context/ZENCTL_CONTEXT is fatal.
+    fn stored(&self) -> Option<&'static context::StoredContext> {
+        static ACTIVE: std::sync::OnceLock<Option<context::StoredContext>> =
+            std::sync::OnceLock::new();
+        ACTIVE
+            .get_or_init(|| match context::active(self.context.as_deref()) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(2);
+                }
+            })
+            .as_ref()
+    }
+    /// The deployment base: flag > env > active context.
+    fn base(&self) -> Result<&str> {
+        if let Some(b) = &self.base {
+            return Ok(b.as_str());
+        }
+        self.stored()
+            .and_then(|c| c.base.as_deref())
+            .ok_or_else(|| {
+                anyhow!(
+                    "no base: pass --base, set ZENCTL_BASE, or create a context \
+                     (`zenctl context create lab --base <base> -c <endpoint>`)"
+                )
+            })
+    }
     async fn session(&self) -> Result<zenoh::Session> {
-        bus::open(&self.connect, &self.listen, self.scouting).await
+        let (connect, listen);
+        let stored = self.stored();
+        connect = if self.connect.is_empty() {
+            stored.map(|c| c.connect.clone()).unwrap_or_default()
+        } else {
+            self.connect.clone()
+        };
+        listen = if self.listen.is_empty() {
+            stored.map(|c| c.listen.clone()).unwrap_or_default()
+        } else {
+            self.listen.clone()
+        };
+        let scouting = self.scouting || stored.and_then(|c| c.scouting).unwrap_or(false);
+        bus::open(&connect, &listen, scouting).await
     }
     fn timeout(&self) -> Duration {
-        Duration::from_secs(self.timeout)
+        Duration::from_secs(
+            self.timeout
+                .or_else(|| self.stored().and_then(|c| c.timeout))
+                .unwrap_or(5),
+        )
+    }
+    fn registry_dirs(&self) -> Vec<PathBuf> {
+        if !self.registry.is_empty() {
+            self.registry.clone()
+        } else {
+            self.stored()
+                .map(|c| c.registry.clone())
+                .unwrap_or_default()
+        }
     }
     /// Compose a base-relative key into the full wire key this un-namespaced
     /// tool must actually use.
-    fn wire(&self, relative: impl AsRef<str>) -> String {
-        zenkey::grammar::with_base(&self.base, relative)
+    fn wire(&self, relative: impl AsRef<str>) -> Result<String> {
+        Ok(zenkey::grammar::with_base(self.base()?, relative))
     }
     /// Registry slices from whichever source the flags select: local
     /// `--registry` dirs when given (offline), otherwise the live bus
     /// (RFC 08 §6 introspection). Both yield the same `Vec<RegistrySlice>`,
     /// so every renderer is source-agnostic.
     async fn slices(&self) -> Result<Vec<RegistrySlice>> {
-        if !self.registry.is_empty() {
-            return offline::load_slices(&self.registry);
+        let dirs = self.registry_dirs();
+        if !dirs.is_empty() {
+            return offline::load_slices(&dirs);
         }
         let session = self.session().await?;
-        let pairs = bus::fleet_registry(&session, &self.base, self.timeout()).await?;
+        let base = self.base()?;
+        let pairs = bus::fleet_registry(&session, base, self.timeout()).await?;
         if pairs.is_empty() {
             eprintln!(
-                "no introspect slices on base {:?} — an empty set is not a verdict (RFC 05 §3.1); \
-                 `zenctl node list --base {}` says who is actually up.\n\
-                 (offline alternative: --registry <dir> with the app's registry TOMLs)",
-                self.base, self.base
+                "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
+                 `zenctl node list --base {base}` says who is actually up.\n\
+                 (offline alternative: --registry <dir> with the app's registry TOMLs)"
             );
         }
         Ok(pairs.into_iter().map(|(_, slice)| slice).collect())
@@ -248,7 +352,7 @@ async fn main() -> Result<()> {
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
             let slices = bus.slices().await?;
-            offline::topic_info(&bus.base, &key, &slices)
+            offline::topic_info(bus.base()?, &key, &slices)
         }
         Command::Topic(TopicCmd::Echo {
             selector,
@@ -287,6 +391,33 @@ async fn main() -> Result<()> {
             let slices = bus.slices().await?;
             offline::interface_show(&slices, &type_name)
         }
+        Command::Context(cmd) => match cmd {
+            ContextCmd::Create {
+                name,
+                base,
+                connect,
+                listen,
+                registry,
+                scouting,
+                timeout,
+                select,
+            } => context::create(
+                &name,
+                context::StoredContext {
+                    base,
+                    connect,
+                    listen,
+                    registry,
+                    scouting: scouting.then_some(true),
+                    timeout,
+                },
+                select,
+            ),
+            ContextCmd::List => context::list(),
+            ContextCmd::Show { name } => context::show(name.as_deref()),
+            ContextCmd::Select { name } => context::select(&name),
+            ContextCmd::Rm { name } => context::remove(&name),
+        },
         Command::Doctor(bus) => cmd_doctor(&bus).await,
     }
 }
@@ -294,7 +425,7 @@ async fn main() -> Result<()> {
 /// `node list` — the liveliness roster (RFC 04 §5).
 async fn cmd_node_list(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
-    let roster = bus::roster(&session, &args.base, args.timeout()).await?;
+    let roster = bus::roster(&session, args.base()?, args.timeout()).await?;
 
     if roster.is_empty() {
         println!("no live producers.");
@@ -326,7 +457,8 @@ async fn cmd_node_list(args: &BusArgs) -> Result<()> {
 async fn cmd_echo(selector: Option<&str>, raw: bool, count: usize, args: &BusArgs) -> Result<()> {
     let selector = selector
         .map(str::to_string)
-        .unwrap_or_else(|| args.wire("v1/**"));
+        .map(Ok)
+        .unwrap_or_else(|| args.wire("v1/**"))?;
 
     // Slices first (a single introspect fan-in), then subscribe: the slice
     // set names each subject's payload type, which is what makes the rendered
@@ -352,7 +484,7 @@ async fn cmd_echo(selector: Option<&str>, raw: bool, count: usize, args: &BusArg
         if raw {
             println!("{key}\n  {}", hex(&bytes));
         } else {
-            println!("{key}\n  {}", render(&args.base, &key, &bytes, &slices));
+            println!("{key}\n  {}", render(args.base()?, &key, &bytes, &slices));
         }
 
         seen += 1;
@@ -432,9 +564,9 @@ async fn cmd_service_call(
     // A service origin (`@catalog`) carries no producer chunk (RFC 03 §1.5).
     // Un-namespaced tool ⇒ full keys, composed off the configured base.
     let mut key = if origin.starts_with('@') {
-        args.wire(format!("v1/{origin}/@rpc/{procedure}"))
+        args.wire(format!("v1/{origin}/@rpc/{procedure}"))?
     } else {
-        args.wire(format!("v1/{origin}/@rpc/{producer}/{procedure}"))
+        args.wire(format!("v1/{origin}/@rpc/{producer}/{procedure}"))?
     };
     if !params.is_empty() {
         key.push('?');
@@ -451,7 +583,7 @@ async fn cmd_service_call(
 
     let session = args.session().await?;
     eprintln!("GET {key}");
-    let answers = bus::fleet_get(&session, &args.base, &key, payload, args.timeout()).await?;
+    let answers = bus::fleet_get(&session, args.base()?, &key, payload, args.timeout()).await?;
 
     if answers.is_empty() {
         // RFC 05 §3.1: "no reply" is not one condition, and callers "MUST NOT
@@ -488,7 +620,7 @@ async fn cmd_service_call(
 /// the local registry files (RFC 08 §6).
 async fn cmd_doctor(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
-    let roster = bus::roster(&session, &args.base, args.timeout()).await?;
+    let roster = bus::roster(&session, args.base()?, args.timeout()).await?;
 
     let mut findings = 0usize;
     let mut answered = 0usize;
@@ -510,12 +642,12 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
                 let o = zenkey::ServiceOrigin::new(origin).map_err(|e| {
                     anyhow!("bad service origin in local slice {}: {e}", local.name)
                 })?;
-                args.wire(zenkey::selector::service_rpc(&o, &["introspect"]))
+                args.wire(zenkey::selector::service_rpc(&o, &["introspect"]))?
             }
-            None => args.wire(zenkey::selector::fleet_rpc(&local.name, &["introspect"])),
+            None => args.wire(zenkey::selector::fleet_rpc(&local.name, &["introspect"]))?,
         };
 
-        let answers = bus::fleet_get(&session, &args.base, &key, None, args.timeout()).await?;
+        let answers = bus::fleet_get(&session, args.base()?, &key, None, args.timeout()).await?;
 
         for answer in &answers {
             let bus::Answer::Value(bytes) = &answer.answer else {
@@ -552,7 +684,7 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
     // With no local registry the only introspect coverage we can count is the
     // fleet-wide wildcard.
     if locals.is_empty() {
-        let pairs = bus::fleet_registry(&session, &args.base, args.timeout()).await?;
+        let pairs = bus::fleet_registry(&session, args.base()?, args.timeout()).await?;
         answered = pairs.len();
     }
 
