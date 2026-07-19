@@ -227,31 +227,19 @@ pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()>
 /// `None` if the shapes disagree — the slice-level equivalent of a compiled
 /// registry's parse direction, done without a compiled subject.
 pub fn match_subject(pattern: &str, tail: &[&str]) -> Option<Vec<(String, String)>> {
-    let pchunks: Vec<&str> = pattern.split('/').collect();
-    let mut vars = Vec::new();
-    let mut ti = 0usize;
-    for (pi, pc) in pchunks.iter().enumerate() {
-        if let Some(var) = pc.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
-            if let Some(name) = var.strip_suffix("...") {
-                // A rest-variable is legal only as the final chunk; it swallows
-                // whatever is left (possibly nothing).
-                if pi != pchunks.len() - 1 {
-                    return None;
-                }
-                vars.push((name.to_string(), tail[ti..].join("/")));
-                return Some(vars);
-            }
-            let chunk = tail.get(ti)?;
-            vars.push((var.to_string(), (*chunk).to_string()));
-            ti += 1;
-        } else {
-            if tail.get(ti) != Some(pc) {
-                return None;
-            }
-            ti += 1;
-        }
-    }
-    (ti == tail.len()).then_some(vars)
+    // Delegates to `zenkey::pattern` (v1.5, issue #7): the same matcher the
+    // codegen orders its parse arms by, so this tool and generated consumers
+    // can never disagree on which pattern a tail refines to. (The previous
+    // local copy here allowed an *empty* rest — a real divergence from the
+    // generated semantics, which require >= 1 chunk. The shared matcher is
+    // authoritative.)
+    let p = zenkey::pattern::SubjectPattern::parse(pattern).ok()?;
+    Some(
+        p.matches(tail)?
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect(),
+    )
 }
 
 /// `service list` — every registered procedure on the `@rpc` plane, from the
