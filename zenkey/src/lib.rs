@@ -51,6 +51,7 @@ pub mod context;
 pub mod grammar;
 pub mod key;
 pub mod origin;
+pub mod pattern;
 pub mod profile;
 pub mod qos;
 pub mod slice;
