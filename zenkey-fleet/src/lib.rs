@@ -15,6 +15,9 @@ pub mod query;
 pub mod registry;
 pub mod roster;
 pub mod session;
+pub mod stats;
+pub mod sub;
+pub mod tree;
 
 #[cfg(feature = "decode")]
 pub mod decode;
@@ -23,3 +26,5 @@ pub use query::{Answer, FleetAnswer, fleet_get, fleet_registry};
 pub use registry::SliceSet;
 pub use roster::roster;
 pub use session::open;
+pub use sub::{EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem};
+pub use tree::KeyTreeSnapshot;
