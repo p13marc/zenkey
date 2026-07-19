@@ -11,6 +11,7 @@
 //! explorer sees the wire as it really is, full keys included — that is what
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 
+pub mod admin;
 pub mod query;
 pub mod registry;
 pub mod roster;
@@ -22,6 +23,7 @@ pub mod tree;
 #[cfg(feature = "decode")]
 pub mod decode;
 
+pub use admin::{AdminEntry, RouterInfo, admin_get, routers};
 pub use query::{Answer, FleetAnswer, fleet_get, fleet_registry};
 pub use registry::SliceSet;
 pub use roster::roster;

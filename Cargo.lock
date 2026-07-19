@@ -3968,6 +3968,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "ciborium",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

@@ -55,6 +55,9 @@ enum Command {
     /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
+    /// Zenoh admin space (`@/**`) — the middleware's own introspection.
+    #[command(subcommand)]
+    Admin(AdminCmd),
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
     Context(ContextCmd),
@@ -69,6 +72,27 @@ enum Command {
     /// truth comes from `--registry <dir>`; without it only the
     /// roster-vs-introspect check runs.
     Doctor(BusArgs),
+}
+
+#[derive(Subcommand)]
+enum AdminCmd {
+    /// GET an admin selector and print key/value pairs.
+    ///
+    /// Admin key layouts vary between zenoh versions — this is a raw,
+    /// honest browse. Requires an un-namespaced session (which zenctl
+    /// always runs, RFC 09 §5).
+    Get {
+        /// Admin selector.
+        #[arg(default_value = "@/**")]
+        selector: String,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Enumerate routers/peers (zid, version, locators).
+    Routers {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -220,7 +244,14 @@ enum TopicCmd {
 #[derive(Subcommand)]
 enum NodeCmd {
     /// List live producers from the liveliness roster (on-bus).
-    List(BusArgs),
+    List {
+        /// Join each producer against its served introspect slice (app +
+        /// registry version).
+        #[arg(long)]
+        verbose: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -504,7 +535,65 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::Node(NodeCmd::List(bus)) => cmd_node_list(&bus).await,
+        Command::Node(NodeCmd::List { verbose, bus }) => cmd_node_list(verbose, &bus).await,
+        Command::Admin(AdminCmd::Get { selector, bus }) => {
+            let session = bus.session().await?;
+            let entries = zenkey_fleet::admin_get(&session, &selector, bus.timeout()).await?;
+            match bus.format.resolved() {
+                output::Format::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &entries
+                            .iter()
+                            .map(|e| serde_json::json!({"key": e.key, "value": e.value}))
+                            .collect::<Vec<_>>()
+                    )?
+                ),
+                output::Format::Ndjson => {
+                    for e in &entries {
+                        println!("{}", serde_json::json!({"key": e.key, "value": e.value}));
+                    }
+                }
+                _ => {
+                    for e in &entries {
+                        println!("{}\n  {}", e.key, e.value);
+                    }
+                    eprintln!("{} admin entr(ies)", entries.len());
+                }
+            }
+            Ok(())
+        }
+        Command::Admin(AdminCmd::Routers { bus }) => {
+            let session = bus.session().await?;
+            let routers = zenkey_fleet::routers(&session, bus.timeout()).await?;
+            match bus.format.resolved() {
+                output::Format::Json => {
+                    println!("{}", serde_json::to_string_pretty(&routers)?)
+                }
+                output::Format::Ndjson => {
+                    for r in &routers {
+                        println!("{}", serde_json::to_string(r)?);
+                    }
+                }
+                _ => {
+                    if routers.is_empty() {
+                        println!(
+                            "no routers answered @/*/router — a peer-only mesh, or the admin \
+                             space is disabled."
+                        );
+                    }
+                    for r in &routers {
+                        println!(
+                            "{}  {}  {}",
+                            r.zid,
+                            r.version.as_deref().unwrap_or("-"),
+                            r.locators.join(", ")
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let slices = bus.slices().await?;
             let report = offline::service_list(&slices, producer.as_deref())?;
@@ -574,10 +663,11 @@ async fn main() -> Result<()> {
     }
 }
 
-/// `node list` — the liveliness roster (RFC 04 §5).
-async fn cmd_node_list(args: &BusArgs) -> Result<()> {
+/// `node list` — the liveliness roster (RFC 04 §5); `--verbose` joins each
+/// producer against its served introspect slice.
+async fn cmd_node_list(verbose: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
-    let roster = bus::roster(&session, args.base()?, args.timeout()).await?;
+    let mut roster = bus::roster(&session, args.base()?, args.timeout()).await?;
 
     if roster.is_empty() {
         eprintln!(
@@ -585,6 +675,22 @@ async fn cmd_node_list(args: &BusArgs) -> Result<()> {
              producers are actually running).",
             zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet())
         );
+    }
+    if verbose {
+        let slices = args.slice_set().await?;
+        for producers in roster.values_mut() {
+            for p in producers.iter_mut() {
+                // Instance suffixes share the base slice (RFC 03 §1.5).
+                let base_name = zenkey::grammar::Producer::parse_chunk(p)
+                    .map(|pr| pr.name().to_string())
+                    .unwrap_or_else(|_| p.clone());
+                if let Some(slice) = slices.get(&base_name) {
+                    *p = format!("{p}  (app {}, registry {})", slice.app, slice.version);
+                } else {
+                    *p = format!("{p}  (no served slice)");
+                }
+            }
+        }
     }
     output::node_list(&report::NodeList { origins: roster }, args.format)
 }
