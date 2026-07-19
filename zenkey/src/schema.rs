@@ -14,6 +14,9 @@
 //! retained-but-opaque, unknown fields ignored — one exotic type must not
 //! blind a tool to the rest of the set.
 
+#[cfg(feature = "decode")]
+pub mod decode;
+
 use std::collections::BTreeMap;
 use std::fmt;
 
