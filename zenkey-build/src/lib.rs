@@ -79,6 +79,8 @@ pub(crate) struct SubjectEntry {
     /// `common = "..."` — the RFC-defined framework state subject this entry
     /// declares itself as (drives `AnySubject::common_state()`).
     pub common: Option<String>,
+    /// Optional declared payload encoding (RFC 08 §2, v1.5).
+    pub encoding: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,11 +100,11 @@ pub(crate) struct ProcedureEntry {
     pub reply: Option<String>,
     pub variant: String,
     /// RFC 08 §2 (v1.4 G2): default `Forbidden` for `kind = "write"`.
-    #[allow(dead_code)] // consumed by the procedure-codegen commit (#9)
     pub fanout: Fanout,
     /// Whether a retried call is safe (RFC 05 §3).
-    #[allow(dead_code)] // consumed by the procedure-codegen commit (#9)
     pub idempotent: bool,
+    /// Optional declared payload encoding (RFC 08 §2, v1.5).
+    pub encoding: Option<String>,
 }
 
 /// One `[[media]]` entry (RFC 08 §2; modeled since v1.5 — H2 delivers the
@@ -238,6 +240,7 @@ impl Config {
             .clone()
             .unwrap_or_else(|| self.registry_dir.join("deprecated.lock"));
         check_deprecation_ledger(&ledger, &files)?;
+        check_type_table(&self.registry_dir, &files)?;
         Ok(emit::emit(&files, &self.zenkey_path))
     }
 }
@@ -345,6 +348,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
         .map_err(|e| Error::Io(dir.to_path_buf(), e))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+        .filter(|p| p.file_name().is_none_or(|n| n != "types.toml"))
         .collect();
     paths.sort();
     for path in paths {
@@ -573,6 +577,10 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 ttl_s,
                 rate,
                 common,
+                encoding: entry
+                    .get("encoding")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
             });
         }
 
@@ -671,6 +679,10 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     .map(str::to_string),
                 fanout,
                 idempotent,
+                encoding: entry
+                    .get("encoding")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
             });
         }
 
@@ -826,6 +838,63 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
 /// `<producer>\t<path>`. A ledger line without its TOML entry = someone
 /// deleted a deprecation; a TOML deprecation missing from the ledger = the
 /// ledger append was forgotten. Both fail the build.
+/// The RFC 08 §5 type-table resolution lint (v1.5, H6): when
+/// `registry/types.toml` exists, every `type`/`request`/`reply`/`attachment`
+/// name across the registry set must resolve in it. Absent file = lint
+/// inactive (activation-on-existence, so adoption is incremental).
+fn check_type_table(dir: &Path, files: &[RegistryFile]) -> Result<(), Error> {
+    let path = dir.join("types.toml");
+    let Ok(src) = std::fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let fname = "types.toml";
+    let doc: toml::Value = src
+        .parse()
+        .map_err(|e| lint(fname, format!("does not parse: {e}")))?;
+    let table = doc
+        .get("types")
+        .and_then(|v| v.as_table())
+        .ok_or_else(|| lint(fname, "missing [types.*] table"))?;
+    for (name, entry) in table {
+        if entry.get("kind").and_then(|v| v.as_str()).is_none() {
+            return Err(lint(fname, format!("[types.{name}] missing kind")));
+        }
+    }
+    let mut missing = std::collections::BTreeSet::new();
+    let mut check = |t: &str| {
+        if !table.contains_key(t) {
+            missing.insert(t.to_string());
+        }
+    };
+    for f in files {
+        for s in &f.subjects {
+            check(&s.payload_type);
+        }
+        for p in &f.procedures {
+            if let Some(t) = &p.request {
+                check(t);
+            }
+            if let Some(t) = &p.reply {
+                check(t);
+            }
+        }
+        for m in &f.media {
+            check(&m.attachment);
+        }
+    }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(lint(
+            fname,
+            format!(
+                "registry type name(s) not in the type table (RFC 08 §5): {}",
+                missing.into_iter().collect::<Vec<_>>().join(", ")
+            ),
+        ))
+    }
+}
+
 fn check_deprecation_ledger(ledger_path: &Path, files: &[RegistryFile]) -> Result<(), Error> {
     let ledger = std::fs::read_to_string(ledger_path).unwrap_or_default();
     let mut ledger_entries: Vec<(&str, &str)> = Vec::new();
@@ -921,6 +990,42 @@ mod tests {
             "{HEADER}[service]\nname = \"desired\"\norigin = \"@desired\"\n\n[[subject]]\npath = \"{{host}}/config/x\"\nclass = \"state\"\ntype = \"Doc\"\nttl_s = 60\ncardinality = 100\nsince = \"1.0\"\ndescription = \"d\"\n"
         );
         lint_one(&ok).unwrap();
+    }
+
+    #[test]
+    fn type_table_lint_activates_on_existence() {
+        let dir = std::env::temp_dir().join(format!(
+            "zenkey-build-types-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"health\"\nclass = \"state\"\ntype = \"HealthSnapshot\"\nttl_s = 60\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        std::fs::write(dir.join("t.toml"), &reg).unwrap();
+        // No types.toml: lint inactive.
+        Config::new().registry_dir(&dir).generate_string().unwrap();
+        // types.toml missing the referenced name: build fails.
+        std::fs::write(
+            dir.join("types.toml"),
+            "[types.Other]\nkind = \"json-schema\"\n",
+        )
+        .unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .generate_string()
+            .unwrap_err();
+        assert!(err.to_string().contains("HealthSnapshot"), "{err}");
+        // Resolving table: build passes.
+        std::fs::write(
+            dir.join("types.toml"),
+            "[types.HealthSnapshot]\nkind = \"json-schema\"\n",
+        )
+        .unwrap();
+        Config::new().registry_dir(&dir).generate_string().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

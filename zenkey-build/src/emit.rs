@@ -220,6 +220,29 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         }
         let _ = writeln!(out, "            }}\n        }}\n");
 
+        // encoding() — the declared payload framing (RFC 08 §2, v1.5).
+        let _ = writeln!(
+            out,
+            "        /// The declared payload encoding, when the registry declares one\n        /// (resolution: sample `Encoding` > this > sniff; RFC 08 §7)."
+        );
+        let _ = writeln!(
+            out,
+            "        pub fn encoding(&self) -> Option<&'static str> {{"
+        );
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let enc = match &s.encoding {
+                Some(e) => format!("Some({e:?})"),
+                None => "None".to_string(),
+            };
+            let _ = writeln!(
+                out,
+                "                Self::{} {{ .. }} => {enc},",
+                s.variant
+            );
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
+
         // cardinality() — the key-population bound the budget review enforces.
         let _ = writeln!(out, "        pub fn cardinality(&self) -> Option<u64> {{");
         let _ = writeln!(out, "            match self {{");
@@ -674,6 +697,23 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 );
             }
             let _ = writeln!(out, "            }}\n        }}\n");
+            let _ = writeln!(
+                out,
+                "        /// The declared request/reply encoding, when declared (RFC 08 §2, v1.5)."
+            );
+            let _ = writeln!(
+                out,
+                "        pub fn encoding(self) -> Option<&'static str> {{"
+            );
+            let _ = writeln!(out, "            match self {{");
+            for p in &f.procedures {
+                let enc = match &p.encoding {
+                    Some(e) => format!("Some({e:?})"),
+                    None => "None".to_string(),
+                };
+                let _ = writeln!(out, "                Self::{} => {enc},", p.variant);
+            }
+            let _ = writeln!(out, "            }}\n        }}\n");
             let _ = writeln!(out, "    }}\n");
 
             // FleetProcedureId — the fanout-allowed subset. A forbidden-fanout
@@ -1108,6 +1148,9 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         "/// As [`refine_key`], for a full wire key seen by an un-namespaced\n/// observer (strips `base` first; RFC 09 §5).\npub fn refine_full_key<'k>(base: &str, key: &'k str) -> Option<Refined<'k>> {{\n    refine_key({zk}::grammar::strip_base(base, key)?)\n}}\n"
     );
 
+    // TYPE_NAMES + zenkey_for_each_payload_type! — the type table as data
+    // and as a macro (RFC 08 §5/§7).
+    // (TYPE_NAMES is emitted after type_names is computed, below.)
     // zenkey_for_each_payload_type! — the decode-dispatch hook: invokes the
     // caller's macro once per distinct type name across the registry set
     // (subjects, procedure request/reply, media attachments).
@@ -1130,6 +1173,15 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
     }
     type_names.sort_unstable();
     type_names.dedup();
+    let _ = writeln!(
+        out,
+        "/// Every distinct payload type name this registry set references\n/// (subjects, procedure request/reply, media attachments) — sorted."
+    );
+    let _ = writeln!(out, "pub const TYPE_NAMES: &[&str] = &[");
+    for t in &type_names {
+        let _ = writeln!(out, "    {t:?},");
+    }
+    let _ = writeln!(out, "];\n");
     let _ = writeln!(
         out,
         "/// Invoke `$cb!(\"TypeName\")` once per distinct payload type name across\n/// every registry in this build (RFC 08 §5's type table, mechanically).\n#[macro_export]\nmacro_rules! zenkey_for_each_payload_type {{\n    ($cb:ident) => {{"

@@ -331,3 +331,37 @@ fn payload_type_macro_is_total_and_deduped() {
     sorted.dedup();
     assert_eq!(names, sorted, "sorted and deduped");
 }
+
+#[test]
+fn type_names_const_matches_the_macro_and_covers_a_schema_set() {
+    // TYPE_NAMES and the macro are the same list.
+    let mut from_macro: Vec<&str> = Vec::new();
+    macro_rules! push {
+        ($name:literal) => {
+            from_macro.push($name);
+        };
+    }
+    zenkey_fixture_tests::zenkey_for_each_payload_type!(push);
+    assert_eq!(registry::TYPE_NAMES, from_macro.as_slice());
+
+    // End-to-end totality (RFC 08 §7): a SchemaSet built over TYPE_NAMES
+    // passes verify_covers — the generic replacement for hand-written
+    // types_are_total tests.
+    let mut b = zenkey::schema::SchemaSet::builder("zensight");
+    for name in registry::TYPE_NAMES {
+        b = b.entry(
+            *name,
+            zenkey::schema::TypeSchema::json_schema(serde_json::json!({ "type": "object" })),
+        );
+    }
+    let set = b.build_verified(registry::TYPE_NAMES);
+    assert_eq!(set.len(), registry::TYPE_NAMES.len());
+}
+
+#[test]
+fn encoding_defaults_to_none_in_the_fixture_corpus() {
+    // The fixtures predate the encoding field; the accessor exists and is
+    // honestly empty (resolution then falls through registry -> sniff).
+    assert_eq!(netring::Subject::Health.encoding(), None);
+    assert_eq!(netring::ProcedureId::Introspect.encoding(), None);
+}

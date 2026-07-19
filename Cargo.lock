@@ -3927,6 +3927,7 @@ name = "zenkey-fixture-tests"
 version = "0.3.0"
 dependencies = [
  "criterion",
+ "serde_json",
  "zenkey",
  "zenkey-build",
 ]
