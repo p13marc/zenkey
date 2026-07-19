@@ -3,17 +3,13 @@
 //! generated surface (RFC 08 §1.2: Chunk fields, slug-at-boundary
 //! constructors, Family, infallible single-pass key builders).
 
-use zenkey::grammar::{self, Class, ClassOrPlane, Origin, Plane, Producer};
+use zenkey::grammar::{self, Class, ClassOrPlane, Plane, Producer};
 use zenkey::origin::{HostId, LocalOrigin, RemoteOrigin};
 use zenkey::selector::Scope;
 use zenkey_fixture_tests::registry::{self, netring};
 
 fn local() -> LocalOrigin {
     LocalOrigin::from_host_id(HostId::parse("h-3fa9c2d41b7e").unwrap())
-}
-
-fn host_origin() -> Origin {
-    Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap())
 }
 
 #[test]
@@ -155,8 +151,15 @@ fn state_keys_reject_the_reserved_alive_leaf() {
 
 #[test]
 fn procedures() {
+    let remote = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
+    // The generic form takes a typed host origin (RFC 08 §1.1)…
     assert_eq!(
-        netring::rpc_key(&host_origin(), netring::ProcedureId::CaptureDiskSet).unwrap(),
+        netring::rpc_key(&remote, netring::ProcedureId::CaptureDiskSet).unwrap(),
+        "v1/h-3fa9c2d41b7e/@rpc/netring/capture_disk/set"
+    );
+    // …and the named per-procedure builder agrees.
+    assert_eq!(
+        netring::capture_disk_set_key(&remote),
         "v1/h-3fa9c2d41b7e/@rpc/netring/capture_disk/set"
     );
     assert_eq!(netring::ProcedureId::CaptureDiskSet.kind(), "write");
@@ -164,6 +167,46 @@ fn procedures() {
     assert!(netring::ProcedureId::ALL.contains(&netring::ProcedureId::Introspect));
     let parsed = grammar::parse("v1/h-3fa9c2d41b7e/@rpc/netring/capture_disk/set").unwrap();
     assert_eq!(parsed.class, ClassOrPlane::Plane(Plane::Rpc));
+}
+
+#[test]
+fn fleet_spellings_exist_only_for_allowed_fanout() {
+    // Reads are fleet-addressable…
+    assert_eq!(
+        netring::rpc_fleet_selector(netring::FleetProcedureId::Introspect),
+        "v1/*/@rpc/netring/introspect"
+    );
+    // The subset is exactly the fanout-allowed procedures: every member is
+    // allowed, and the counts agree — so the forbidden write CaptureDiskSet
+    // has no fleet spelling anywhere in the module (G2 as a type-level fact).
+    for p in netring::FleetProcedureId::ALL {
+        assert!(netring::ProcedureId::from(*p).fanout_allowed());
+    }
+    let allowed_count = netring::ProcedureId::ALL
+        .iter()
+        .filter(|p| p.fanout_allowed())
+        .count();
+    assert_eq!(netring::FleetProcedureId::ALL.len(), allowed_count);
+}
+
+#[test]
+fn serve_side_selectors() {
+    let sel = netring::rpc_serve_key(&local(), netring::ProcedureId::CaptureDiskSet);
+    assert_eq!(sel, "v1/h-3fa9c2d41b7e/@rpc/netring/capture_disk/set");
+    // A concrete call key intersects its serve selector.
+    let call = netring::capture_disk_set_key(&RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap());
+    assert!(sel.intersects(&call));
+}
+
+#[test]
+fn fanout_and_idempotent_metadata() {
+    // kind = "write" defaults to forbidden fan-out (G2).
+    assert!(!netring::ProcedureId::CaptureDiskSet.fanout_allowed());
+    assert!(netring::ProcedureId::Introspect.fanout_allowed());
+    // Parsed from the TOML: `introspect` declares idempotent = true,
+    // `capture_disk/set` declares nothing (defaults false).
+    assert!(netring::ProcedureId::Introspect.idempotent());
+    assert!(!netring::ProcedureId::CaptureDiskSet.idempotent());
 }
 
 #[test]

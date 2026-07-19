@@ -648,23 +648,155 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 }
                 let _ = writeln!(out, "            }}\n        }}\n");
             }
+            // fanout()/idempotent() (RFC 08 §2, parsed since v1.5 — #9).
+            let _ = writeln!(
+                out,
+                "        /// May a `*`-origin fan-out call target this procedure? (RFC 08 §2, G2)"
+            );
+            let _ = writeln!(out, "        pub fn fanout_allowed(self) -> bool {{");
+            let _ = writeln!(out, "            match self {{");
+            for p in &f.procedures {
+                let v = matches!(p.fanout, crate::Fanout::Allowed);
+                let _ = writeln!(out, "                Self::{} => {v},", p.variant);
+            }
+            let _ = writeln!(out, "            }}\n        }}\n");
+            let _ = writeln!(
+                out,
+                "        /// Whether a retried call is safe (RFC 05 §3)."
+            );
+            let _ = writeln!(out, "        pub fn idempotent(self) -> bool {{");
+            let _ = writeln!(out, "            match self {{");
+            for p in &f.procedures {
+                let _ = writeln!(
+                    out,
+                    "                Self::{} => {},",
+                    p.variant, p.idempotent
+                );
+            }
+            let _ = writeln!(out, "            }}\n        }}\n");
             let _ = writeln!(out, "    }}\n");
+
+            // FleetProcedureId — the fanout-allowed subset. A forbidden-fanout
+            // write has NO fleet spelling anywhere in this module (G2 as a
+            // type-level fact). Service registries skip it: `*` never matches
+            // a verbatim service origin (D4).
+            let allowed: Vec<&ProcedureEntry> = f
+                .procedures
+                .iter()
+                .filter(|p| matches!(p.fanout, crate::Fanout::Allowed))
+                .collect();
+            if f.service_origin.is_none() && !allowed.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "    /// The fanout-allowed subset of [`ProcedureId`] (RFC 08 §2, G2):\n    /// fleet selectors exist only for these — a forbidden-fanout write is\n    /// unspellable."
+                );
+                let _ = writeln!(out, "    #[derive(Debug, Clone, Copy, PartialEq, Eq)]");
+                let _ = writeln!(out, "    pub enum FleetProcedureId {{");
+                for p in &allowed {
+                    let _ = writeln!(out, "        /// `{}` ({})", p.path, p.kind);
+                    let _ = writeln!(out, "        {},", p.variant);
+                }
+                let _ = writeln!(out, "    }}\n");
+                let _ = writeln!(out, "    impl FleetProcedureId {{");
+                let _ = writeln!(out, "        pub const ALL: &[FleetProcedureId] = &[");
+                for p in &allowed {
+                    let _ = writeln!(out, "            FleetProcedureId::{},", p.variant);
+                }
+                let _ = writeln!(out, "        ];\n    }}\n");
+                let _ = writeln!(
+                    out,
+                    "    impl From<FleetProcedureId> for ProcedureId {{\n        fn from(p: FleetProcedureId) -> ProcedureId {{\n            match p {{"
+                );
+                for p in &allowed {
+                    let _ = writeln!(
+                        out,
+                        "                FleetProcedureId::{} => ProcedureId::{},",
+                        p.variant, p.variant
+                    );
+                }
+                let _ = writeln!(out, "            }}\n        }}\n    }}\n");
+                let _ = writeln!(
+                    out,
+                    "    /// Fleet fan-in selector: `v1/*/@rpc/{}/<path>` with `{{var}}` -> `*`.\n    /// Callers MUST use query target `All` (RFC 05 §2.1).\n    pub fn rpc_fleet_selector(p: FleetProcedureId) -> Selector {{\n        match p {{",
+                    f.name
+                );
+                for p in &allowed {
+                    let tail: Vec<&str> = p
+                        .chunks
+                        .iter()
+                        .map(|c| match c {
+                            Chunk::Literal(l) => l.as_str(),
+                            _ => "*",
+                        })
+                        .collect();
+                    let sel = format!("v1/*/@rpc/{}/{}", f.name, tail.join("/"));
+                    let _ = writeln!(
+                        out,
+                        "            FleetProcedureId::{} => Selector::from_canonical({sel:?}.to_string()),",
+                        p.variant
+                    );
+                }
+                let _ = writeln!(out, "        }}\n    }}\n");
+            }
+
             if f.service_origin.is_some() {
                 let _ = writeln!(
                     out,
-                    "    /// Base-relative `@rpc` key for this service's procedure.\n    /// Errs on a `{{var}}`-bearing pattern — use [`rpc_key_with`].\n    pub fn rpc_key(p: ProcedureId) -> Result<Key, KeyError> {{\n        grammar::rpc_key(&origin(), None, p.chunks())\n    }}\n\n    /// As [`rpc_key`], substituting the pattern's `{{var}}` chunks in order\n    /// (RFC 09 G6: the actuated resource rides the path, typed).\n    pub fn rpc_key_with(p: ProcedureId, vars: &[&str]) -> Result<Key, KeyError> {{\n        let chunks = substitute_procedure_vars(p, vars)?;\n        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();\n        grammar::rpc_key(&origin(), None, &refs)\n    }}\n\n    /// The serve-side selector: every `{{var}}` becomes `*`. A selector, not a\n    /// buildable key.\n    pub fn rpc_serve_key(p: ProcedureId) -> String {{\n        let mut key = format!(\"{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, origin().chunk(), grammar::PLANE_RPC);\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        key\n    }}"
+                    "    /// Base-relative `@rpc` key for this service's procedure (origin fixed).\n    /// Errs on a `{{var}}`-bearing pattern — use the named per-procedure builder.\n    pub fn rpc_key(p: ProcedureId) -> Result<Key, KeyError> {{\n        if p.chunks().iter().any(|c| c.starts_with('{{')) {{\n            return Err(KeyError::Parse(format!(\"procedure {{}} has variables; use its named builder\", p.path())));\n        }}\n        grammar::rpc_key(&origin(), None, p.chunks())\n    }}\n\n    /// The serve-side selector: every `{{var}}` becomes `*`.\n    pub fn rpc_serve_key(p: ProcedureId) -> Selector {{\n        let mut key = format!(\"{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, origin().chunk(), grammar::PLANE_RPC);\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        Selector::from_canonical(key)\n    }}"
                 );
             } else {
                 let _ = writeln!(
                     out,
-                    "    /// Base-relative `@rpc` key for this producer's procedure.\n    /// Errs on a `{{var}}`-bearing pattern — use [`rpc_key_with`].\n    pub fn rpc_key(origin: &Origin, p: ProcedureId) -> Result<Key, KeyError> {{\n        grammar::rpc_key(origin, Some(&producer()), p.chunks())\n    }}\n\n    /// As [`rpc_key`], substituting the pattern's `{{var}}` chunks in order\n    /// (RFC 09 G6: the actuated resource rides the path, typed).\n    pub fn rpc_key_with(origin: &Origin, p: ProcedureId, vars: &[&str]) -> Result<Key, KeyError> {{\n        let chunks = substitute_procedure_vars(p, vars)?;\n        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();\n        grammar::rpc_key(origin, Some(&producer()), &refs)\n    }}\n\n    /// The serve-side selector: every `{{var}}` becomes `*`. A selector, not a\n    /// buildable key.\n    pub fn rpc_serve_key(origin: &Origin, p: ProcedureId) -> String {{\n        let mut key = format!(\"{{}}/{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, origin.chunk(), grammar::PLANE_RPC, producer().chunk());\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        key\n    }}"
+                    "    /// Base-relative `@rpc` key for this producer's procedure at one host\n    /// (RFC 08 §1.1: the origin is typed and concrete — never a fleet).\n    /// Errs on a `{{var}}`-bearing pattern — use the named per-procedure builder.\n    pub fn rpc_key(o: &impl HostOrigin, p: ProcedureId) -> Result<Key, KeyError> {{\n        if p.chunks().iter().any(|c| c.starts_with('{{')) {{\n            return Err(KeyError::Parse(format!(\"procedure {{}} has variables; use its named builder\", p.path())));\n        }}\n        grammar::rpc_key(&o.to_origin(), Some(&producer()), p.chunks())\n    }}\n\n    /// The serve-side selector (this process's own queryable): every\n    /// `{{var}}` becomes `*`.\n    pub fn rpc_serve_key(o: &LocalOrigin, p: ProcedureId) -> Selector {{\n        let mut key = format!(\"{{}}/{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, o.chunk(), grammar::PLANE_RPC, producer().chunk());\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        Selector::from_canonical(key)\n    }}"
                 );
             }
-            // Shared var-substitution helper for rpc_key_with.
-            let _ = writeln!(
-                out,
-                "\n    fn substitute_procedure_vars(p: ProcedureId, vars: &[&str]) -> Result<Vec<String>, KeyError> {{\n        let needed = p.chunks().iter().filter(|c| c.starts_with('{{')).count();\n        if needed != vars.len() {{\n            return Err(KeyError::Parse(format!(\n                \"procedure {{}} takes {{needed}} variable(s), got {{}}\", p.path(), vars.len()\n            )));\n        }}\n        let mut vi = 0usize;\n        Ok(p.chunks().iter().map(|c| {{\n            if c.starts_with('{{') {{ let v = vars[vi].to_string(); vi += 1; v }} else {{ (*c).to_string() }}\n        }}).collect())\n    }}"
-            );
+
+            // Named-arg per-procedure builders (G6: the actuated resource is
+            // a typed path argument, slugged at the boundary).
+            for p in &f.procedures {
+                let fn_base = camel_to_snake(&p.variant);
+                let mut args = String::new();
+                let mut body = String::new();
+                let mut pending = String::new();
+                for c in &p.chunks {
+                    match c {
+                        Chunk::Literal(l) => {
+                            pending.push('/');
+                            pending.push_str(l);
+                        }
+                        Chunk::Var(v) => {
+                            let n = snake(v);
+                            let _ = write!(args, "{n}: impl AsRef<str>, ");
+                            pending.push('/');
+                            if pending == "/" {
+                                let _ = write!(body, "k.push('/'); ");
+                            } else {
+                                let _ = write!(body, "k.push_str({pending:?}); ");
+                            }
+                            pending.clear();
+                            let _ = write!(body, "k.push_str(&Chunk::slug({n})); ");
+                        }
+                        Chunk::Rest(_) => unreachable!("linted: no rest in procedures"),
+                    }
+                }
+                if !pending.is_empty() {
+                    let _ = write!(body, "k.push_str({pending:?}); ");
+                }
+                if f.service_origin.is_some() {
+                    let origin = f.service_origin.as_deref().unwrap();
+                    let _ = writeln!(
+                        out,
+                        "    /// Call key for `{}` (origin fixed; args slugged, RFC 03 §2).\n    pub fn {fn_base}_key({args}) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/{origin}/@rpc\");\n        {body}\n        Key::from_canonical(k)\n    }}\n",
+                        p.path
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "    /// Call key for `{}` at one host (typed origin, G5; args slugged).\n    pub fn {fn_base}_key(o: &impl HostOrigin, {args}) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/\");\n        k.push_str(o.chunk());\n        k.push_str(\"/@rpc/{}\");\n        {body}\n        Key::from_canonical(k)\n    }}\n",
+                        p.path, f.name
+                    );
+                }
+            }
         }
 
         let _ = writeln!(out, "}}\n");
