@@ -455,6 +455,17 @@ binary (CBOR in the reference application); high-cardinality detail stays
 pull-only; `@media` crosses only for an explicitly subscribed stream (and
 can simply not be allowed on the link at all).
 
+**Base handling is the session's job (v1.5).** The session `namespace`
+prefixes the base onto *every* egress — publications, subscriptions,
+queries, replies, declarations, liveliness tokens — and strips it on
+ingress. An application running a namespaced session therefore has **no
+legitimate use** for manual base composition: the enforcement crate's
+`with_base`/`strip_base`/`parse_full` are **observer-side tools** —
+un-namespaced explorers (`zenctl`, `zengui`), router artifacts (storage
+selectors, ACL rules — §2/§3), and tests. Application code that reaches
+for them has re-implemented what the session already does, in the one way
+that can drift from it.
+
 ## 5. Debugging etiquette
 
 - `z_sub 'zensight/v1/*/state/**'` shows fleet truth; add

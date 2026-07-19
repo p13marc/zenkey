@@ -211,6 +211,14 @@ router policy — one overwrite rule per class prefix
 into infrastructure guarantee. This is the QoS counterpart of storage
 selection: one more infrastructure concern the grammar made a config file.
 
+**Encoding declaration (v1.5).** Publishers SHOULD set the middleware
+`Encoding` on every sample, using the predefined MIME-ish constants
+(`application/cbor`, `application/json`, `application/protobuf`) — pure
+metadata, free on the wire, and the first thing a generic consumer
+consults; the registry MAY declare a per-entry `encoding`
+([08-registry.md §2](08-registry.md)). Resolution order is
+**sample > registry > sniff** ([08-registry.md §7](08-registry.md)).
+
 ### 3.1 Delivery contracts per class
 
 QoS says how samples travel; this section says what consumers are
@@ -383,6 +391,30 @@ The split mirrors §3's QoS design: **entitlements in the registry,
 mechanisms in deployment/build config.** A subject's row in the registry
 says what consumers may rely on; whether a cache or a storage delivers it
 is invisible to the keys and to the wire contract.
+
+### 3.5 Late-joiner seeding is delegated for volatile state (v1.5)
+
+The middleware's advanced tier (§3.3) is now the **normative seeding
+mechanism for volatile state**: a publisher of `refreshed`/`transition`
+state (and last-value telemetry, where seeded at all) meets its `seed`
+entitlement with the advanced publisher's **cache** and the subscriber's
+**history/recovery** — the mechanism the middleware ecosystem has
+consolidated on (its older cache/querying-subscriber APIs are deprecated
+upstream, and the seeding entitlement predates that consolidation).
+Storage-backed seeding remains correct where a deployment already runs the
+storage for *durable* reasons; what changes is the default answer to "how
+does a late joiner see current state" — a producer-side cache, not a
+router deployment dependency.
+
+**What does not change:** the storage-manager remains authoritative for
+durable at-rest data (§4 — event logs, state history, the catalog);
+`seed`/`detect_s` registry semantics are untouched (entitlements in the
+registry, mechanisms in deployment — §3.4's split holds); and local
+durability layers (a constrained leaf's on-disk backfill store) are a
+different concern entirely. The hard dependency this rests on is the
+plain version chunk: the advanced tier's `@adv` liveliness tokens must
+remain structurally parseable ([03-grammar.md §1.2](03-grammar.md)) —
+the enforcement crate pins it with executable tests.
 
 ---
 

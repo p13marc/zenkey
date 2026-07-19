@@ -227,6 +227,7 @@ Normative field table (`[[subject]]`; `[[procedure]]`/`[[media]]` analogous):
 | `detect_s` | integer | no (live `state` only; default = `ttl_s`) | max latency to detect a missed transition; values ≪ `ttl_s` require the advanced tier ([04-planes.md §3.3](04-planes.md)) |
 | `replay` | `none` \| `window(t)` | `events` only | how far back events must stay queryable (met by the events storage) |
 | `delivery` | `full` (default) \| `invalidate` | no | oversized-state pattern ([04-planes.md §1.2](04-planes.md)) |
+| `encoding` | MIME-ish string (`application/cbor`, `application/json`, `application/protobuf`) | no (RECOMMENDED, v1.5) | the payload encoding a consumer should expect; resolution order is sample `Encoding` > this field > sniff ([04-planes.md §3](04-planes.md), §7) |
 | `since` / `gone` / `replaced_by` | registry versions / path | `since` yes | lifecycle (§3) |
 | `description` | string | yes | one line, human |
 
@@ -268,6 +269,7 @@ they too have their own normative field table:
 | `idempotent` | bool | `write`/`long-running` only | whether a retried call is safe; documented per 05 §3 |
 | `fanout` | enum `forbidden \| allowed` | no (default: `write` → `forbidden`, `read`/`long-running` → `allowed`) | may a `*`-origin fan-out call target this procedure? A `write` that broadcasts actuates the whole fleet, so `forbidden` is the default and the only sound value for a side-effecting write ([05-control-rpc.md §2.1](05-control-rpc.md)) |
 | `cardinality` | integer | yes if `path` has any `{var}` | key-population bound, budget-reviewed — same rule as `[[subject]]` |
+| `encoding` | MIME-ish string | no (RECOMMENDED, v1.5) | request/reply payload encoding — same semantics as the `[[subject]]` field (§7) |
 | `since` / `gone` / `replaced_by` | registry versions / path | `since` yes | lifecycle (§3) |
 | `description` | string | yes | one line, human |
 
@@ -361,12 +363,23 @@ registry version to coordinate.
 ## 5. Ownership and process
 
 - Each producer's registry file lives with the producer's code; the
-  convention repository holds the **shared type table** — one TOML/JSON
-  document mapping each `type` name to its schema location (crate + item
-  in the reference implementation, or a schema URL) — and the
-  reserved-token list ([03-grammar.md §3](03-grammar.md)). A `type` name
-  not present in the type table fails CI; that is what makes
+  application's registry directory holds the **type table** —
+  `registry/types.toml`, mapping each `type` name to its kind and schema
+  location (v1.5: this materializes what earlier text placed as "a
+  document in the convention repository", which never existed as an
+  artifact; the table lives where the types live) — and the convention
+  repository holds the reserved-token list
+  ([03-grammar.md §3](03-grammar.md)). A `type`/`request`/`reply`/
+  `attachment` name not present in the type table fails CI (the
+  `zenkey-build` resolution lint); that is what makes
   `type = "TelemetryPoint"` resolvable for a second application.
+
+  ```toml
+  # registry/types.toml
+  [types.TelemetryPoint]
+  kind = "json-schema"                       # schema kind served by describe (§7)
+  rust = "zensight_common::telemetry::TelemetryPoint"   # informational location
+  ```
 - Prefix ownership is the collision rule at the vocabulary level: a
   producer may only register subjects under its own producer chunk
   (OTel's namespace-squatting rule, adapted).
@@ -454,3 +467,82 @@ unserved entry is dead code rather than a lie.
 
 An entry for a surface that is merely *planned* is not a registry entry.
 It is a diff, and it lands the day the code does.
+
+## 7. Payload self-description (v1.5)
+
+*The gap this closes: the registry binds one payload **type name** per
+subject (§2, P5), and `introspect` (§6) tells a generic tool which name a
+key carries — but nothing anywhere said what the **bytes look like**. A
+foreign explorer could render anonymous CBOR structure and nothing more;
+a non-self-describing encoding (protobuf) would be fully opaque. Schema
+*contents* stay application-owned; this section standardizes only their
+**transport**.*
+
+Every producer **SHOULD** serve a read procedure `@rpc/<producer>/describe`
+— and **MUST**, if any type its slice references rides a
+non-self-describing encoding (a tool can degrade to structural rendering
+of CBOR/JSON; it cannot degrade protobuf) — replying with a **SchemaSet**
+JSON document:
+
+```json
+{
+  "schema_version": 1,
+  "app": "zensight",
+  "types": {
+    "TelemetryPoint": {
+      "kind": "json-schema",
+      "hash": "sha256:ab12…",
+      "schema": { "$schema": "https://json-schema.org/draft/2020-12/schema", "…": "…" }
+    },
+    "FlowRecord": {
+      "kind": "protobuf",
+      "hash": "sha256:cd34…",
+      "message": "zensight.flow.FlowRecord",
+      "descriptor_b64": "<base64 FileDescriptorSet>"
+    }
+  }
+}
+```
+
+Normative points:
+
+- **Totality.** The set MUST cover every type name the producer's
+  `introspect` slice references (`type`, `request`, `reply`,
+  `attachment`); a superset is fine. §6.1 binds `describe` exactly as it
+  binds `introspect`: serving a schema for bytes the build does not emit
+  is a lie.
+- **Kinds are an open vocabulary.** This RFC registers `json-schema`
+  (JSON Schema draft 2020-12; describes the *data model*, so it covers
+  both JSON and CBOR framings of the same serde model) and `protobuf`
+  (a base64 `FileDescriptorSet` plus the fully-qualified `message` name —
+  exactly what a dynamic-message decoder needs). A consumer MUST skip an
+  unknown `kind` without discarding the rest of the set, and MUST ignore
+  unknown fields (the same forward-compat posture as the slice parser,
+  §6).
+- **Hash.** `hash` is `sha256:` over the schema's canonical bytes (JCS
+  for JSON documents; the raw descriptor bytes for protobuf). It exists
+  for client caching and for drift detection (two producers serving the
+  same type name with different hashes is a `doctor` finding).
+- **No per-sample schema ids.** Evolution stays additive-only under one
+  name; an incompatible change is a **new suffixed sibling name** (§3's
+  rule, unchanged). This deliberately rejects the Kafka wire-prefix model
+  — it would break every existing payload and reintroduce the envelope
+  [07 §1](07-bulk-planes.md) forbids. Rejected alternatives, recorded:
+  schemas embedded in the introspect TOML (bloats the fleet-inventory
+  fan-in); a retained "birth certificate" key (assumes storage/retained
+  semantics the convention does not guarantee); a central schema-registry
+  service (a new availability singleton in a deliberately peer-served
+  design).
+- **Encoding is a separate axis.** Producers SHOULD set the middleware
+  `Encoding` on every sample (`application/cbor`, `application/json`,
+  `application/protobuf` — the predefined constants); the registry MAY
+  declare a per-entry `encoding` (§2). Consumers resolve
+  **sample > registry > sniff**, and the first-byte sniff remains the
+  honest last resort — mixed fleets keep working.
+
+The decode contract for a generic tool is then mechanical: wire key →
+structural parse → slice refine → type name (+ encoding) → SchemaSet
+lookup (fetch `describe` on first miss, cache by hash) → decode into
+named fields. A tool that cannot resolve a schema falls back to what it
+could always do — structural rendering tagged with the declared type
+name, or an honest `<undecoded TypeName: N bytes>`.
