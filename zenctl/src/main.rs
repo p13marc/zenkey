@@ -20,6 +20,8 @@
 mod bus;
 mod context;
 mod offline;
+mod output;
+mod report;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -239,6 +241,10 @@ struct BusArgs {
     /// context may override the default).
     #[arg(long)]
     timeout: Option<u64>,
+    /// Output format: table for humans, json (one document) or ndjson (one
+    /// object per row) for scripts; auto = table on a tty, ndjson piped.
+    #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+    format: output::Format,
 }
 
 impl BusArgs {
@@ -348,11 +354,13 @@ async fn main() -> Result<()> {
             bus,
         }) => {
             let slices = bus.slices().await?;
-            offline::topic_list(&slices, producer.as_deref(), class.as_deref())
+            let report = offline::topic_list(&slices, producer.as_deref(), class.as_deref())?;
+            output::topic_list(&report, bus.format)
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
             let slices = bus.slices().await?;
-            offline::topic_info(bus.base()?, &key, &slices)
+            let report = offline::topic_info(bus.base()?, &key, &slices)?;
+            output::topic_info(&report, bus.format)
         }
         Command::Topic(TopicCmd::Echo {
             selector,
@@ -363,7 +371,8 @@ async fn main() -> Result<()> {
         Command::Node(NodeCmd::List(bus)) => cmd_node_list(&bus).await,
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let slices = bus.slices().await?;
-            offline::service_list(&slices, producer.as_deref())
+            let report = offline::service_list(&slices, producer.as_deref())?;
+            output::service_list(&report, bus.format)
         }
         Command::Service(ServiceCmd::Call {
             origin,
@@ -385,11 +394,13 @@ async fn main() -> Result<()> {
         }
         Command::Interface(InterfaceCmd::List { bus }) => {
             let slices = bus.slices().await?;
-            offline::interface_list(&slices)
+            let report = offline::interface_list(&slices)?;
+            output::interface_list(&report, bus.format)
         }
         Command::Interface(InterfaceCmd::Show { type_name, bus }) => {
             let slices = bus.slices().await?;
-            offline::interface_show(&slices, &type_name)
+            let report = offline::interface_show(&slices, &type_name)?;
+            output::interface_show(&report, bus.format)
         }
         Command::Context(cmd) => match cmd {
             ContextCmd::Create {
@@ -428,24 +439,13 @@ async fn cmd_node_list(args: &BusArgs) -> Result<()> {
     let roster = bus::roster(&session, args.base()?, args.timeout()).await?;
 
     if roster.is_empty() {
-        println!("no live producers.");
-        println!(
-            "\nnothing held a liveliness token on {}.",
+        eprintln!(
+            "nothing held a liveliness token on {} — check --connect (and that \
+             producers are actually running).",
             zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet())
         );
-        println!("if you expected some, check --connect (and that they are actually running).");
-        return Ok(());
     }
-
-    for (origin, producers) in &roster {
-        println!("{origin}");
-        for p in producers {
-            println!("  {p}");
-        }
-    }
-    let total: usize = roster.values().map(Vec::len).sum();
-    println!("\n{total} producer(s) on {} origin(s).", roster.len());
-    Ok(())
+    output::node_list(&report::NodeList { origins: roster }, args.format)
 }
 
 /// `topic echo` — subscribe, refine each key against the registry slices,
@@ -582,36 +582,58 @@ async fn cmd_service_call(
     };
 
     let session = args.session().await?;
-    eprintln!("GET {key}");
     let answers = bus::fleet_get(&session, args.base()?, &key, payload, args.timeout()).await?;
 
-    if answers.is_empty() {
-        // RFC 05 §3.1: "no reply" is not one condition, and callers "MUST NOT
-        // treat 'empty reply set' as a verdict about any specific host".
-        println!("no replies.");
-        println!("\nthat is not a verdict: an empty set means no queryable matched — an offline");
-        println!("host, a mistyped origin, or a procedure this producer does not serve.");
-        println!("`zenctl node list` says who is actually up.");
-        return Ok(());
-    }
-
-    for a in &answers {
-        match &a.answer {
-            bus::Answer::Value(bytes) => {
-                // Read replies are JSON by convention; introspect replies raw
-                // TOML. Print what parses, fall back to the text.
-                let text = match serde_json::from_slice::<serde_json::Value>(bytes) {
-                    Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
-                    Err(_) => String::from_utf8_lossy(bytes).to_string(),
-                };
-                println!("── {} ──\n{text}", a.origin);
-            }
-            bus::Answer::Error { name, message } => {
-                // RFC 05 §3: an error reply always means failure. Never dress
-                // one up as success.
-                eprintln!("── {} ── {name}: {message}", a.origin);
-            }
-        }
+    // Assemble the typed report (issue #12): value replies parse as JSON when
+    // they are JSON (read replies, by convention) and ride as text otherwise
+    // (introspect replies raw TOML). An error reply is a failure, never
+    // dressed up as success (RFC 05 §3).
+    let report = report::CallReport {
+        key: key.clone(),
+        answers: answers
+            .iter()
+            .map(|a| match &a.answer {
+                bus::Answer::Value(bytes) => {
+                    match serde_json::from_slice::<serde_json::Value>(bytes) {
+                        Ok(v) => report::CallAnswer {
+                            origin: a.origin.clone(),
+                            ok: true,
+                            value: Some(v),
+                            text: None,
+                            error: None,
+                        },
+                        Err(_) => report::CallAnswer {
+                            origin: a.origin.clone(),
+                            ok: true,
+                            value: None,
+                            text: Some(String::from_utf8_lossy(bytes).to_string()),
+                            error: None,
+                        },
+                    }
+                }
+                bus::Answer::Error { name, message } => report::CallAnswer {
+                    origin: a.origin.clone(),
+                    ok: false,
+                    value: None,
+                    text: None,
+                    error: Some(report::CallError {
+                        name: name.clone(),
+                        message: message.clone(),
+                    }),
+                },
+            })
+            .collect(),
+    };
+    output::call(&report, args.format, |a| match (&a.value, &a.text) {
+        (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
+        (None, Some(t)) => t.clone(),
+        _ => String::new(),
+    });
+    // Exit-code discipline: 1 = an error reply, 2 = zero replies (silence
+    // stays a distinct non-verdict).
+    let code = report.exit_code();
+    if code != 0 {
+        std::process::exit(code);
     }
     Ok(())
 }
