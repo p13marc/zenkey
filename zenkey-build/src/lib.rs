@@ -596,7 +596,9 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             if chunks.iter().any(|c| matches!(c, Chunk::Rest(_))) {
                 return Err(lint(
                     &fname,
-                    format!("procedure {ppath:?}: {{var...}} rest-variables are not allowed in procedure paths"),
+                    format!(
+                        "procedure {ppath:?}: {{var...}} rest-variables are not allowed in procedure paths"
+                    ),
                 ));
             }
             let kind = entry

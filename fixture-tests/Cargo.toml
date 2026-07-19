@@ -14,3 +14,10 @@ zenkey = { workspace = true }
 
 [build-dependencies]
 zenkey-build = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "generated"
+harness = false

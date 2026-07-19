@@ -30,3 +30,8 @@ toml = "0.8"
 
 [dev-dependencies]
 zenoh-keyexpr = "1"
+criterion = { workspace = true }
+
+[[bench]]
+name = "keys"
+harness = false
