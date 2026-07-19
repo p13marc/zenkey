@@ -365,7 +365,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         );
         let _ = writeln!(
             out,
-            "        pub fn parse_metric(metric: &str) -> Option<Self> {{\n            let tail: Vec<&str> = metric.split('/').collect();\n            Self::parse(Class::Telemetry, &tail)\n        }}\n"
+            "        pub fn parse_metric(metric: &str) -> Option<Self> {{\n            // Stack buffer: no per-decode Vec for the common case (fixture\n            // max depth is 8; >16 chunks falls back to a heap collect).\n            let mut buf: [&str; 16] = [\"\"; 16];\n            let mut n = 0usize;\n            for c in metric.split('/') {{\n                if n == buf.len() {{\n                    let tail: Vec<&str> = metric.split('/').collect();\n                    return Self::parse(Class::Telemetry, &tail);\n                }}\n                buf[n] = c;\n                n += 1;\n            }}\n            Self::parse(Class::Telemetry, &buf[..n])\n        }}\n"
         );
 
         // family() — the fieldless mirror (RFC 08 §1.2).
@@ -799,6 +799,145 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             }
         }
 
+        // Media plane (RFC 07 §1, RFC 08 §2 — H2 delivers the v1.3 promise).
+        // Deliberately NO wildcard/Family-style selector: a viewer subscribes
+        // to exactly one tier (the v1.3 tier-wildcard revocation).
+        if !f.media.is_empty() && f.service_origin.is_none() {
+            let _ = writeln!(
+                out,
+                "    /// Media-plane subjects (RFC 07 §1). No wildcard selector on purpose."
+            );
+            let _ = writeln!(out, "    #[derive(Debug, Clone, PartialEq, Eq)]");
+            let _ = writeln!(out, "    pub enum Media {{");
+            for m in &f.media {
+                let mut fields = String::new();
+                for c in &m.chunks {
+                    if let Chunk::Var(v) = c {
+                        let _ = write!(fields, "{}: Chunk, ", snake(v));
+                    }
+                }
+                let _ = writeln!(out, "        /// `{}` ({})", m.path, m.encoding);
+                if fields.is_empty() {
+                    let _ = writeln!(out, "        {},", m.variant);
+                } else {
+                    let _ = writeln!(out, "        {} {{ {}}},", m.variant, fields);
+                }
+            }
+            let _ = writeln!(out, "    }}\n");
+            let _ = writeln!(out, "    impl Media {{");
+            for m in &f.media {
+                if m.chunks.iter().all(|c| matches!(c, Chunk::Literal(_))) {
+                    continue;
+                }
+                let fn_name = camel_to_snake(&m.variant);
+                let mut args = String::new();
+                let mut inits = String::new();
+                for c in &m.chunks {
+                    if let Chunk::Var(v) = c {
+                        let n = snake(v);
+                        let _ = write!(args, "{n}: impl AsRef<str>, ");
+                        let _ = write!(inits, "{n}: Chunk::slug({n}), ");
+                    }
+                }
+                let _ = writeln!(
+                    out,
+                    "        /// Construct [`Media::{}`], slugging variables (RFC 03 §2).\n        pub fn {fn_name}({args}) -> Self {{ Self::{} {{ {inits}}} }}\n",
+                    m.variant, m.variant
+                );
+            }
+            for (method, get) in [
+                (
+                    "encoding",
+                    &(|m: &crate::MediaEntry| m.encoding.clone())
+                        as &dyn Fn(&crate::MediaEntry) -> String,
+                ),
+                ("attachment_type", &|m: &crate::MediaEntry| {
+                    m.attachment.clone()
+                }),
+                ("pattern", &|m: &crate::MediaEntry| m.path.clone()),
+            ] {
+                let doc = match method {
+                    "encoding" => "The wire `Encoding` declared for every sample (RFC 08 §2).",
+                    "attachment_type" => "The per-frame attachment sidecar type (RFC 08 §2).",
+                    _ => "The registered path pattern.",
+                };
+                let _ = writeln!(out, "        /// {doc}");
+                let _ = writeln!(
+                    out,
+                    "        pub fn {method}(&self) -> &'static str {{\n            match self {{"
+                );
+                for m in &f.media {
+                    let _ = writeln!(
+                        out,
+                        "                Self::{} {{ .. }} => {:?},",
+                        m.variant,
+                        get(m)
+                    );
+                }
+                let _ = writeln!(out, "            }}\n        }}\n");
+            }
+            let _ = writeln!(out, "        pub fn cardinality(&self) -> Option<u64> {{");
+            let _ = writeln!(out, "            match self {{");
+            for m in &f.media {
+                let c = match m.cardinality {
+                    Some(c) => format!("Some({c})"),
+                    None => "None".to_string(),
+                };
+                let _ = writeln!(out, "                Self::{} {{ .. }} => {c},", m.variant);
+            }
+            let _ = writeln!(out, "            }}\n        }}\n    }}\n");
+            // Builders: publish under the local origin; view one host's
+            // stream by exact key (RemoteOrigin — never a wildcard).
+            let emit_media_impl = |out: &mut String, f: &RegistryFile| {
+                let _ = writeln!(
+                    out,
+                    "    fn media_key_impl(origin: &str, m: &Media) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/\");\n        k.push_str(origin);\n        k.push_str(\"/@media/{}\");\n        match m {{",
+                    f.name
+                );
+                for m in &f.media {
+                    let mut binds = String::new();
+                    let mut body = String::new();
+                    let mut pending = String::new();
+                    for c in &m.chunks {
+                        match c {
+                            Chunk::Literal(l) => {
+                                pending.push('/');
+                                pending.push_str(l);
+                            }
+                            Chunk::Var(v) => {
+                                let n = snake(v);
+                                let _ = write!(binds, "{n}, ");
+                                pending.push('/');
+                                if pending == "/" {
+                                    let _ = write!(body, "k.push('/'); ");
+                                } else {
+                                    let _ = write!(body, "k.push_str({pending:?}); ");
+                                }
+                                pending.clear();
+                                let _ = write!(body, "k.push_str({n}); ");
+                            }
+                            Chunk::Rest(_) => unreachable!("linted: no rest in media"),
+                        }
+                    }
+                    if !pending.is_empty() {
+                        let _ = write!(body, "k.push_str({pending:?}); ");
+                    }
+                    let pat = if binds.is_empty() {
+                        format!("Media::{}", m.variant)
+                    } else {
+                        format!("Media::{} {{ {binds}}}", m.variant)
+                    };
+                    let _ = writeln!(out, "            {pat} => {{ {body}}}");
+                }
+                let _ = writeln!(out, "        }}\n        Key::from_canonical(k)\n    }}");
+            };
+            let _ = writeln!(
+                out,
+                "    /// Publish key for a media subject under this process's own origin.\n    pub fn media_key(o: &LocalOrigin, m: &Media) -> Key {{\n        media_key_impl(o.chunk(), m)\n    }}\n\n    /// One host's media key, exact (RFC 07 §3: viewers never wildcard a\n    /// chunk the catalogue publishes).\n    pub fn media_key_at(o: &{zk}::origin::RemoteOrigin, m: &Media) -> Key {{\n        media_key_impl(ConcreteOrigin::chunk(o), m)\n    }}"
+            );
+            emit_media_impl(&mut out, f);
+        }
+
         let _ = writeln!(out, "}}\n");
     }
 
@@ -953,6 +1092,52 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         );
     }
     let _ = writeln!(out, "        _ => None,\n    }}\n}}\n");
+
+    // Refined + refine_key/refine_full_key (RFC 08 §1 parse direction,
+    // generated since v1.5 — deletes the hand-written copies consumers kept).
+    let _ = writeln!(
+        out,
+        "/// A wire key refined against this build's registries.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub struct Refined<'k> {{\n    pub key: {zk}::grammar::StructuralKey<'k>,\n    /// Producer (or service) base name.\n    pub producer: &'static str,\n    pub subject: AnySubject,\n}}\n"
+    );
+    let _ = writeln!(
+        out,
+        "/// Refine a base-relative wire key into its registered subject.\npub fn refine_key(key: &str) -> Option<Refined<'_>> {{\n    let parsed = {zk}::grammar::parse(key).ok()?;\n    let {zk}::grammar::ClassOrPlane::Class(class) = parsed.class else {{ return None; }};\n    let name: &str = match (&parsed.producer, &parsed.origin) {{\n        (Some(p), _) => p.name(),\n        (None, {zk}::grammar::Origin::Service(s)) => s.trim_start_matches('@'),\n        _ => return None,\n    }};\n    let subject = parse_subject(name, class, &parsed.subject)?;\n    let producer = subject.producer_name();\n    Some(Refined {{ key: parsed, producer, subject }})\n}}\n"
+    );
+    let _ = writeln!(
+        out,
+        "/// As [`refine_key`], for a full wire key seen by an un-namespaced\n/// observer (strips `base` first; RFC 09 §5).\npub fn refine_full_key<'k>(base: &str, key: &'k str) -> Option<Refined<'k>> {{\n    refine_key({zk}::grammar::strip_base(base, key)?)\n}}\n"
+    );
+
+    // zenkey_for_each_payload_type! — the decode-dispatch hook: invokes the
+    // caller's macro once per distinct type name across the registry set
+    // (subjects, procedure request/reply, media attachments).
+    let mut type_names: Vec<&str> = Vec::new();
+    for f in files {
+        for s in &f.subjects {
+            type_names.push(&s.payload_type);
+        }
+        for p in &f.procedures {
+            if let Some(t) = &p.request {
+                type_names.push(t);
+            }
+            if let Some(t) = &p.reply {
+                type_names.push(t);
+            }
+        }
+        for m in &f.media {
+            type_names.push(&m.attachment);
+        }
+    }
+    type_names.sort_unstable();
+    type_names.dedup();
+    let _ = writeln!(
+        out,
+        "/// Invoke `$cb!(\"TypeName\")` once per distinct payload type name across\n/// every registry in this build (RFC 08 §5's type table, mechanically).\n#[macro_export]\nmacro_rules! zenkey_for_each_payload_type {{\n    ($cb:ident) => {{"
+    );
+    for t in &type_names {
+        let _ = writeln!(out, "        $cb!({t:?});");
+    }
+    let _ = writeln!(out, "    }};\n}}\n");
 
     // is_registered_telemetry() — the check that makes RFC 08 §5's lint
     // non-vacuous.

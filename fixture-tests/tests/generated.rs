@@ -275,3 +275,59 @@ fn service_registry_keys_have_no_producer_chunk() {
     assert_eq!(sel, "v1/@catalog/state/entity/*");
     assert!(sel.intersects(&key));
 }
+
+#[test]
+fn media_builders_round_trip() {
+    use zenkey_fixture_tests::registry::parallax;
+    let media = parallax::Media::video("front", "h264", "low");
+    assert_eq!(media.encoding(), "video/*");
+    assert_eq!(media.attachment_type(), "FrameMeta");
+    let key = parallax::media_key(&local(), &media);
+    assert_eq!(
+        key,
+        "v1/h-3fa9c2d41b7e/@media/parallax/front/video/h264/low"
+    );
+    // Viewer side: exact key at a remote host — and sibling tiers never
+    // intersect (the v1.3 tier-wildcard revocation, by API shape: there is
+    // no Media selector to get this wrong with).
+    let remote = RemoteOrigin::parse("h-aaaaaaaaaaaa").unwrap();
+    let at = parallax::media_key_at(&remote, &parallax::Media::video("front", "h264", "high"));
+    assert!(!at.intersects(&key));
+}
+
+#[test]
+fn refine_key_dispatches_across_producers() {
+    let key = netring::key(&local(), &netring::Subject::flow_red("p95_ms"));
+    let refined = registry::refine_key(key.as_str()).unwrap();
+    assert_eq!(refined.producer, "netring");
+    assert_eq!(refined.subject.payload_type(), "TelemetryPoint");
+    // Full wire key via an un-namespaced observer.
+    let wire = zenkey::grammar::with_base("zensight", &key);
+    let refined = registry::refine_full_key("zensight", &wire).unwrap();
+    assert_eq!(refined.producer, "netring");
+    // Service keys refine too.
+    use zenkey_fixture_tests::registry::catalog;
+    let ckey = catalog::key(&catalog::Subject::entity("abc"));
+    let refined = registry::refine_key(ckey.as_str()).unwrap();
+    assert_eq!(refined.producer, "catalog");
+    // Unregistered keys refine to nothing.
+    assert!(registry::refine_key("v1/h-3fa9c2d41b7e/state/netring/bogus").is_none());
+}
+
+#[test]
+fn payload_type_macro_is_total_and_deduped() {
+    let mut names: Vec<&str> = Vec::new();
+    macro_rules! push {
+        ($name:literal) => {
+            names.push($name);
+        };
+    }
+    zenkey_fixture_tests::zenkey_for_each_payload_type!(push);
+    assert!(names.contains(&"TelemetryPoint"));
+    assert!(names.contains(&"RegistrySlice"));
+    assert!(names.contains(&"FrameMeta"), "media attachments included");
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(names, sorted, "sorted and deduped");
+}
