@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/p13marc/zenkey"
@@ -34,5 +34,5 @@ ciborium = "0.2"
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 
 # Internal
-zenkey = { version = "0.2.0", path = "zenkey" }
-zenkey-build = { version = "0.2.0", path = "zenkey-build" }
+zenkey = { version = "0.3.0", path = "zenkey" }
+zenkey-build = { version = "0.3.0", path = "zenkey-build" }

@@ -3816,7 +3816,7 @@ dependencies = [
 
 [[package]]
 name = "zenctl"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "ciborium",
@@ -3830,7 +3830,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "dirs 5.0.1",
@@ -3845,7 +3845,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-build"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
@@ -3854,7 +3854,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fixture-tests"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "zenkey",
