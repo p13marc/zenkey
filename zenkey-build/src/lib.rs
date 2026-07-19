@@ -81,6 +81,14 @@ pub(crate) struct SubjectEntry {
     pub common: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fanout {
+    /// A `*`-origin fan-out call may target this procedure.
+    Allowed,
+    /// Fleet spellings are not generated for this procedure (RFC 05 §2.1, G2).
+    Forbidden,
+}
+
 pub(crate) struct ProcedureEntry {
     pub path: String,
     /// Literal and `{var}` chunks (rest-vars are illegal in procedure paths).
@@ -88,6 +96,24 @@ pub(crate) struct ProcedureEntry {
     pub kind: String,
     pub request: Option<String>,
     pub reply: Option<String>,
+    pub variant: String,
+    /// RFC 08 §2 (v1.4 G2): default `Forbidden` for `kind = "write"`.
+    #[allow(dead_code)] // consumed by the procedure-codegen commit (#9)
+    pub fanout: Fanout,
+    /// Whether a retried call is safe (RFC 05 §3).
+    #[allow(dead_code)] // consumed by the procedure-codegen commit (#9)
+    pub idempotent: bool,
+}
+
+/// One `[[media]]` entry (RFC 08 §2; modeled since v1.5 — H2 delivers the
+/// v1.3 builder-codegen promise).
+#[allow(dead_code)] // consumed by the media-codegen commit (#10)
+pub(crate) struct MediaEntry {
+    pub path: String,
+    pub chunks: Vec<Chunk>,
+    pub encoding: String,
+    pub attachment: String,
+    pub cardinality: Option<i64>,
     pub variant: String,
 }
 
@@ -99,6 +125,8 @@ pub(crate) struct RegistryFile {
     pub toml_path: String,
     pub subjects: Vec<SubjectEntry>,
     pub procedures: Vec<ProcedureEntry>,
+    #[allow(dead_code)] // consumed by the media-codegen commit (#10)
+    pub media: Vec<MediaEntry>,
     pub deprecated: Vec<String>,
 }
 
@@ -611,6 +639,32 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     format!("procedure {ppath:?}: unknown kind {kind:?}"),
                 ));
             }
+            // fanout (RFC 08 §2, v1.4 G2): default Forbidden for writes,
+            // Allowed for read/long-running; an explicit value must be one of
+            // the two. Parsed since v1.5 (#9) — the builder-level refusal.
+            let fanout = match entry.get("fanout").and_then(|v| v.as_str()) {
+                Some("allowed") => Fanout::Allowed,
+                Some("forbidden") => Fanout::Forbidden,
+                Some(other) => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "procedure {ppath:?}: unknown fanout {other:?} (allowed|forbidden)"
+                        ),
+                    ));
+                }
+                None => {
+                    if kind == "write" {
+                        Fanout::Forbidden
+                    } else {
+                        Fanout::Allowed
+                    }
+                }
+            };
+            let idempotent = entry
+                .get("idempotent")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let refs: Vec<&str> = ppath.split('/').collect();
             procedures.push(ProcedureEntry {
                 path: ppath.to_string(),
@@ -625,14 +679,17 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     .get("reply")
                     .and_then(|v| v.as_str())
                     .map(str::to_string),
+                fanout,
+                idempotent,
             });
         }
 
         // [[media]] entries (RFC 08 §2): patterns validated; a `{var}`-bearing
         // media path MUST declare a `cardinality` (the highest-bandwidth plane
         // must bound its fan-out — the `{tier}` chunk multiplies it), and every
-        // entry MUST name an `attachment` type. No builder codegen yet; media
-        // key builders are hand-written in `zenkey::V1Context`.
+        // entry MUST name an `attachment` type. Modeled since v1.5 (H2) so
+        // builders can be generated.
+        let mut media_entries = Vec::new();
         if let Some(media) = doc.get("media").and_then(|v| v.as_array()) {
             for entry in media {
                 let mpath = entry
@@ -640,6 +697,12 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| lint(&fname, "[[media]] missing path"))?;
                 let chunks = parse_pattern(&fname, mpath)?;
+                if chunks.iter().any(|c| matches!(c, Chunk::Rest(_))) {
+                    return Err(lint(
+                        &fname,
+                        format!("[[media]] {mpath:?}: {{var...}} rest-variables are not allowed"),
+                    ));
+                }
                 let has_var = chunks.iter().any(|c| !matches!(c, Chunk::Literal(_)));
                 let cardinality = entry.get("cardinality").and_then(|v| v.as_integer());
                 if has_var && cardinality.is_none() {
@@ -651,10 +714,80 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                         ),
                     ));
                 }
-                if entry.get("attachment").and_then(|v| v.as_str()).is_none() {
+                let attachment = entry
+                    .get("attachment")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        lint(
+                            &fname,
+                            format!("[[media]] {mpath:?}: missing attachment type (RFC 08 §2)"),
+                        )
+                    })?;
+                let encoding = entry
+                    .get("encoding")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        lint(
+                            &fname,
+                            format!("[[media]] {mpath:?}: missing encoding (RFC 08 §2)"),
+                        )
+                    })?;
+                let variant = match entry.get("variant").and_then(|v| v.as_str()) {
+                    Some(v) if is_valid_variant(v) => v.to_string(),
+                    Some(v) => {
+                        return Err(lint(
+                            &fname,
+                            format!("[[media]] {mpath:?}: variant {v:?} is not CamelCase"),
+                        ));
+                    }
+                    None => variant_name(&chunks),
+                };
+                media_entries.push(MediaEntry {
+                    path: mpath.to_string(),
+                    chunks,
+                    encoding: encoding.to_string(),
+                    attachment: attachment.to_string(),
+                    cardinality,
+                    variant,
+                });
+            }
+        }
+        // Media variant collisions (same rule as subjects).
+        {
+            let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
+            for m in &media_entries {
+                if let Some(other) = seen.insert(m.variant.as_str(), m.path.as_str()) {
                     return Err(lint(
                         &fname,
-                        format!("[[media]] {mpath:?}: missing attachment type (RFC 08 §2)"),
+                        format!(
+                            "media {other:?} and {:?} collide on variant {:?}",
+                            m.path, m.variant
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // H4 (RFC 08 §5, v1.5): in a service registry, a subject pattern
+        // containing the variable `{host}` must lead with it — the G1
+        // desired-state proxy rule (the target host is addressing, and
+        // addressing lives where ACL prefix rules can reach it).
+        if service_origin.is_some() {
+            for s in &subjects {
+                let host_pos = s
+                    .chunks
+                    .iter()
+                    .position(|c| matches!(c, Chunk::Var(v) | Chunk::Rest(v) if v == "host"));
+                if let Some(pos) = host_pos
+                    && pos != 0
+                {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "service subject {:?}: {{host}} must be the FIRST chunk \
+                             (RFC 08 §5 H4, 07 §3)",
+                            s.path
+                        ),
                     ));
                 }
             }
@@ -692,6 +825,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 .to_string(),
             subjects,
             procedures,
+            media: media_entries,
             deprecated,
         });
     }
@@ -744,4 +878,71 @@ fn check_deprecation_ledger(ledger_path: &Path, files: &[RegistryFile]) -> Resul
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Write `content` as `registry/<name>.toml` in a fresh temp dir and run
+    /// the linter via `generate_string`.
+    fn lint_one(content: &str) -> Result<String, Error> {
+        let dir = std::env::temp_dir().join(format!(
+            "zenkey-build-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("t.toml"), content).unwrap();
+        let out = Config::new().registry_dir(&dir).generate_string();
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    }
+
+    const HEADER: &str = "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n";
+
+    #[test]
+    fn fanout_rejects_unknown_values() {
+        let toml = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[procedure]]\npath = \"x/set\"\nkind = \"write\"\nreply = \"Ack\"\nfanout = \"sometimes\"\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        let err = lint_one(&toml).unwrap_err();
+        assert!(err.to_string().contains("unknown fanout"), "{err}");
+    }
+
+    #[test]
+    fn explicit_fanout_values_parse() {
+        let toml = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[procedure]]\npath = \"x/set\"\nkind = \"write\"\nreply = \"Ack\"\nfanout = \"allowed\"\nidempotent = true\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        lint_one(&toml).unwrap();
+    }
+
+    #[test]
+    fn service_host_var_must_lead() {
+        let toml = format!(
+            "{HEADER}[service]\nname = \"desired\"\norigin = \"@desired\"\n\n[[subject]]\npath = \"config/{{host}}/x\"\nclass = \"state\"\ntype = \"Doc\"\nttl_s = 60\ncardinality = 100\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        let err = lint_one(&toml).unwrap_err();
+        assert!(err.to_string().contains("{host}"), "{err}");
+        // Leading {host} is the legal spelling (G1/H4).
+        let ok = format!(
+            "{HEADER}[service]\nname = \"desired\"\norigin = \"@desired\"\n\n[[subject]]\npath = \"{{host}}/config/x\"\nclass = \"state\"\ntype = \"Doc\"\nttl_s = 60\ncardinality = 100\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        lint_one(&ok).unwrap();
+    }
+
+    #[test]
+    fn media_needs_encoding_and_no_rest() {
+        let base = format!("{HEADER}[producer]\nname = \"cam\"\n\n");
+        let missing_encoding = format!(
+            "{base}[[media]]\npath = \"front/video/h264/low\"\nattachment = \"FrameMeta\"\nsince = \"1.0\"\n"
+        );
+        assert!(lint_one(&missing_encoding).is_err());
+        let rest = format!(
+            "{base}[[media]]\npath = \"front/{{rest...}}\"\nencoding = \"video/h264\"\nattachment = \"FrameMeta\"\nsince = \"1.0\"\n"
+        );
+        assert!(lint_one(&rest).is_err());
+    }
 }
