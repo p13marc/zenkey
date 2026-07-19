@@ -16,6 +16,10 @@ authors = ["Marc Pardo <p13marc@gmail.com>"]
 
 [workspace.dependencies]
 zenoh = { version = "1.9", features = ["unstable"] }
+# Standalone key-expression crate (same type zenoh re-exports; no tokio, no
+# networking) — light enough for build scripts, which is why `Key` can wrap
+# OwnedKeyExpr unconditionally (docs/redesign-2026-07.md §13).
+zenoh-keyexpr = "1.9"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 sha2 = "0.10"

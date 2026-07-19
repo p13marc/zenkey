@@ -20,6 +20,9 @@ zenoh = ["dep:zenoh"]
 
 [dependencies]
 zenoh = { workspace = true, optional = true }
+# Unconditional: `Key`/`Selector` wrap OwnedKeyExpr (RFC 08 §1.2). The
+# standalone crate is std-only — safe in build-dependency graphs.
+zenoh-keyexpr = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 dirs = { workspace = true }
@@ -29,7 +32,6 @@ tracing = { workspace = true }
 toml = "0.8"
 
 [dev-dependencies]
-zenoh-keyexpr = "1"
 criterion = { workspace = true }
 
 [[bench]]
