@@ -77,11 +77,13 @@ impl SchemaStore {
         // Any well-formed reply will do; hashes make same-name drift a
         // doctor finding, not a decode concern.
         for a in answers {
-            if let crate::query::Answer::Value(bytes) = a.answer
-                && let Ok(text) = std::str::from_utf8(&bytes)
-                && let Ok(set) = SchemaSet::parse(text)
-            {
-                return Some(set);
+            if let crate::query::Answer::Value(bytes) = a.answer {
+                let cow = bytes.to_bytes();
+                if let Ok(text) = std::str::from_utf8(&cow)
+                    && let Ok(set) = SchemaSet::parse(text)
+                {
+                    return Some(set);
+                }
             }
         }
         None

@@ -12,7 +12,12 @@ use zenoh::query::{ConsolidationMode, QueryTarget};
 /// How a producer answered a procedure call.
 pub enum Answer {
     /// A value reply — RFC 05 §3: "a reply always indicates success".
-    Value(Vec<u8>),
+    /// Carried as zenoh's refcounted buffer: cloning is a refcount bump,
+    /// and consumers decode via `reader()`/`to_bytes()` (a `Cow` — it
+    /// copies only when the payload arrived fragmented). Report §14's
+    /// zero-copy discipline: the old `to_bytes().to_vec()` double copy per
+    /// reply is retired.
+    Value(zenoh::bytes::ZBytes),
     /// An error reply (`reply_err`), carrying the `{error, message}` envelope
     /// when it parses. RFC 05 §3: "an error always indicates failure".
     Error { name: String, message: String },
@@ -68,7 +73,7 @@ pub async fn fleet_get(
                 let origin = origin_of(base, sample.key_expr().as_str());
                 out.push(FleetAnswer {
                     origin,
-                    answer: Answer::Value(sample.payload().to_bytes().to_vec()),
+                    answer: Answer::Value(sample.payload().clone()),
                 });
             }
             Err(err) => {
@@ -76,7 +81,7 @@ pub async fn fleet_get(
                 // (RFC 05 §3), with reserved names like `error/not-found`. If it
                 // does not parse we still surface the bytes — an unreadable
                 // refusal is still a refusal.
-                let bytes = err.payload().to_bytes().to_vec();
+                let bytes = err.payload().to_bytes();
                 let (name, message) = match serde_json::from_slice::<serde_json::Value>(&bytes) {
                     Ok(v) => (
                         v.get("error")
@@ -160,7 +165,7 @@ pub async fn fleet_registry_raw(
         let Answer::Value(bytes) = answer.answer else {
             continue;
         };
-        let served_toml = String::from_utf8_lossy(&bytes).to_string();
+        let served_toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
         match parse_slice(&served_toml) {
             Ok(slice) => slices.push((slice, served_toml)),
             Err(e) => tracing::warn!(

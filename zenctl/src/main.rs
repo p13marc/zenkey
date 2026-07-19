@@ -1060,7 +1060,8 @@ async fn cmd_service_call(
             .iter()
             .map(|a| match &a.answer {
                 bus::Answer::Value(bytes) => {
-                    match serde_json::from_slice::<serde_json::Value>(bytes) {
+                    let bytes = bytes.to_bytes();
+                    match serde_json::from_slice::<serde_json::Value>(&bytes) {
                         Ok(v) => report::CallAnswer {
                             origin: a.origin.clone(),
                             ok: true,
@@ -1072,7 +1073,7 @@ async fn cmd_service_call(
                             origin: a.origin.clone(),
                             ok: true,
                             value: None,
-                            text: Some(String::from_utf8_lossy(bytes).to_string()),
+                            text: Some(String::from_utf8_lossy(&bytes).to_string()),
                             error: None,
                         },
                     }
@@ -1142,7 +1143,8 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
                 continue;
             };
             answered += 1;
-            let served_toml = String::from_utf8_lossy(bytes);
+            let served_toml = bytes.to_bytes();
+            let served_toml = String::from_utf8_lossy(&served_toml);
             let served = match zenkey::parse_slice(&served_toml) {
                 Ok(s) => s,
                 Err(e) => {
