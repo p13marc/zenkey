@@ -58,6 +58,9 @@ enum Command {
     /// Zenoh admin space (`@/**`) — the middleware's own introspection.
     #[command(subcommand)]
     Admin(AdminCmd),
+    /// Storages: what the mesh persists, joined against declared state.
+    #[command(subcommand)]
+    Storage(StorageCmd),
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
     Context(ContextCmd),
@@ -71,7 +74,15 @@ enum Command {
     /// is a finding, not an ambiguity." This prints the findings. The local
     /// truth comes from `--registry <dir>`; without it only the
     /// roster-vs-introspect check runs.
-    Doctor(BusArgs),
+    Doctor {
+        /// Additionally GET current state to check freshness against each
+        /// subject's ttl (RFC 04 §1.2) and judge storage coverage — adds
+        /// fleet query load.
+        #[arg(long)]
+        deep: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -90,6 +101,16 @@ enum AdminCmd {
     },
     /// Enumerate routers/peers (zid, version, locators).
     Routers {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum StorageCmd {
+    /// List configured storages and judge declared state families against
+    /// them (covered / partial / uncovered — RFC 04 §4, issue #14).
+    List {
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -536,6 +557,20 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Node(NodeCmd::List { verbose, bus }) => cmd_node_list(verbose, &bus).await,
+        Command::Storage(StorageCmd::List { bus }) => {
+            let session = bus.session().await?;
+            let storages = zenkey_fleet::storages(&session, bus.timeout()).await?;
+            // The coverage join needs slices; degrade to storages-only when
+            // none resolve (fleet down and no --registry).
+            let coverage = match bus.slice_set().await {
+                Ok(slices) => zenkey_fleet::state_coverage(&slices, bus.base()?, &storages),
+                Err(e) => {
+                    eprintln!("note: no slices for the coverage join ({e})");
+                    Vec::new()
+                }
+            };
+            output::storage_list(&report::StorageList { storages, coverage }, bus.format)
+        }
         Command::Admin(AdminCmd::Get { selector, bus }) => {
             let session = bus.session().await?;
             let entries = zenkey_fleet::admin_get(&session, &selector, bus.timeout()).await?;
@@ -659,7 +694,7 @@ async fn main() -> Result<()> {
             clap_complete::generate(shell, &mut Cli::command(), "zenctl", &mut std::io::stdout());
             Ok(())
         }
-        Command::Doctor(bus) => cmd_doctor(&bus).await,
+        Command::Doctor { deep, bus } => cmd_doctor(deep, &bus).await,
     }
 }
 
@@ -1107,7 +1142,7 @@ async fn cmd_service_call(
 
 /// `doctor` — fan `introspect` across the fleet and diff each reply against
 /// the local registry files (RFC 08 §6).
-async fn cmd_doctor(args: &BusArgs) -> Result<()> {
+async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let roster = bus::roster(&session, args.base()?, args.timeout()).await?;
 
@@ -1193,12 +1228,217 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
         findings += live - answered;
     }
 
-    if findings == 0 {
-        println!("no findings — the fleet agrees with this build.");
+    // --- Admin reachability (issue #14) -------------------------------
+    let routers = zenkey_fleet::routers(&session, args.timeout())
+        .await
+        .unwrap_or_default();
+    if routers.is_empty() {
+        println!(
+            "\nadmin: no routers answered @/*/router (peer-only mesh, or the admin \
+             space is disabled) — storage/version checks skipped."
+        );
     } else {
-        println!("{findings} finding(s).");
+        let versions: std::collections::BTreeSet<&str> = routers
+            .iter()
+            .filter_map(|r| r.version.as_deref())
+            .collect();
+        if versions.len() > 1 {
+            println!(
+                "✗ admin: router version skew across the mesh: {:?}",
+                versions
+            );
+            findings += 1;
+        } else {
+            println!(
+                "\nadmin: {} router(s), version {}",
+                routers.len(),
+                versions.iter().next().copied().unwrap_or("-")
+            );
+        }
+    }
+
+    // --- Schema conformance (RFC 08 §7, issue #14) --------------------
+    // Which slices to judge: the locals when given, else what the fleet
+    // serves.
+    let schema_slices: Vec<RegistrySlice> = if locals.is_empty() {
+        bus::fleet_registry(&session, args.base()?, args.timeout())
+            .await?
+            .into_iter()
+            .map(|(_, s)| s)
+            .collect()
+    } else {
+        locals.clone()
+    };
+    let mut described: Vec<(String, zenkey::schema::SchemaSet)> = Vec::new();
+    let mut undescribed = 0usize;
+    for slice in &schema_slices {
+        let key = match &slice.service_origin {
+            Some(origin) => {
+                let o = zenkey::ServiceOrigin::new(origin)
+                    .map_err(|e| anyhow!("bad service origin in slice {}: {e}", slice.name))?;
+                args.wire(zenkey::selector::service_rpc(&o, &["describe"]))?
+            }
+            None => args.wire(zenkey::selector::fleet_rpc(&slice.name, &["describe"]))?,
+        };
+        let answers = bus::fleet_get(&session, args.base()?, &key, None, args.timeout()).await?;
+        let set = answers.into_iter().find_map(|a| match a.answer {
+            bus::Answer::Value(bytes) => {
+                let cow = bytes.to_bytes();
+                std::str::from_utf8(&cow)
+                    .ok()
+                    .and_then(|t| zenkey::schema::SchemaSet::parse(t).ok())
+            }
+            bus::Answer::Error { .. } => None,
+        });
+        match set {
+            Some(set) => {
+                let names = referenced_type_names(slice);
+                let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                if let Err(e) = set.verify_covers(&refs) {
+                    println!("✗ {}: describe is not total: {e}", slice.name);
+                    findings += 1;
+                }
+                described.push((slice.name.clone(), set));
+            }
+            None => undescribed += 1,
+        }
+    }
+    for drift in schema_drift(&described) {
+        println!("✗ {drift}");
+        findings += 1;
+    }
+    if undescribed > 0 {
+        println!(
+            "schema: {undescribed} producer(s) serve no describe (a SHOULD — RFC 08 §7; \
+             generic tools render their payloads structurally)."
+        );
+    }
+    if !described.is_empty() {
+        println!("schema: {} producer(s) serve describe.", described.len());
+    }
+
+    // --- --deep: freshness + storage coverage -------------------------
+    if deep {
+        let now = std::time::SystemTime::now();
+        let mut unstamped = 0usize;
+        for slice in &schema_slices {
+            for subject in &slice.subjects {
+                let (Some(ttl), "state") = (subject.ttl_s, subject.class.as_str()) else {
+                    continue;
+                };
+                let Ok(pattern) = zenkey::pattern::SubjectPattern::parse(&subject.path) else {
+                    continue;
+                };
+                let selector = match &slice.service_origin {
+                    Some(origin) => {
+                        args.wire(format!("v1/{origin}/state/{}", pattern.selector_tail()))?
+                    }
+                    None => args.wire(format!(
+                        "v1/*/state/{}/{}",
+                        slice.name,
+                        pattern.selector_tail()
+                    ))?,
+                };
+                for sample in bus::state_snapshot(&session, &selector, args.timeout()).await? {
+                    match sample.timestamp {
+                        Some(ts) => {
+                            let stamped = ts.get_time().to_system_time();
+                            if let Ok(age) = now.duration_since(stamped)
+                                && age.as_secs() as i64 > ttl
+                            {
+                                println!(
+                                    "✗ stale state: {} is {}s old against ttl {ttl}s \
+                                     (RFC 04 §1.2: refresh <= ttl/2)",
+                                    sample.key,
+                                    age.as_secs()
+                                );
+                                findings += 1;
+                            }
+                        }
+                        None => unstamped += 1,
+                    }
+                }
+            }
+        }
+        if unstamped > 0 {
+            println!(
+                "⚠ {unstamped} state sample(s) carry no HLC timestamp — the deployment \
+                 lacks timestamping, which RFC 04 §4 requires for LWW; freshness is \
+                 unjudgeable for them."
+            );
+        }
+        let storages = zenkey_fleet::storages(&session, args.timeout())
+            .await
+            .unwrap_or_default();
+        let coverage = zenkey_fleet::state_coverage(
+            &zenkey_fleet::SliceSet::from_slices(schema_slices.clone()),
+            args.base()?,
+            &storages,
+        );
+        let uncovered: Vec<&zenkey_fleet::CoverageRow> = coverage
+            .iter()
+            .filter(|r| r.coverage == zenkey_fleet::Coverage::Uncovered)
+            .collect();
+        if !uncovered.is_empty() {
+            println!(
+                "storage: {} state famil(y|ies) have no storage coverage (informational — \
+                 volatile seeding may ride the advanced-pub/sub cache, RFC 04 §3.5): {}",
+                uncovered.len(),
+                uncovered
+                    .iter()
+                    .map(|r| format!("{}/{}", r.producer, r.path))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
+
+    if findings == 0 {
+        println!("\nno findings — the fleet agrees with this build.");
+    } else {
+        println!("\n{findings} finding(s).");
     }
     Ok(())
+}
+
+/// Every type name a slice references (subjects + procedure request/reply) —
+/// the RFC 08 §7 totality bound's right-hand side.
+fn referenced_type_names(slice: &RegistrySlice) -> Vec<String> {
+    let mut names: Vec<String> = slice
+        .subjects
+        .iter()
+        .map(|s| s.type_name.clone())
+        .filter(|t| !t.is_empty())
+        .chain(slice.procedures.iter().filter_map(|p| p.request.clone()))
+        .chain(slice.procedures.iter().filter_map(|p| p.reply.clone()))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// Cross-producer schema drift (issue #14): the same type name served with
+/// different hashes is exactly what the RFC 08 §7 hashes exist to catch.
+fn schema_drift(described: &[(String, zenkey::schema::SchemaSet)]) -> Vec<String> {
+    use std::collections::BTreeMap;
+    let mut seen: BTreeMap<&str, (&str, &str)> = BTreeMap::new(); // type -> (producer, hash)
+    let mut findings = Vec::new();
+    for (producer, set) in described {
+        for (name, schema) in set.iter() {
+            match seen.get(name) {
+                Some((other, hash)) if *hash != schema.hash() => findings.push(format!(
+                    "schema drift: type {name:?} served by {other} ({hash}) and {producer} ({}) \
+                     with different schemas",
+                    schema.hash()
+                )),
+                Some(_) => {}
+                None => {
+                    seen.insert(name, (producer, schema.hash()));
+                }
+            }
+        }
+    }
+    findings
 }
 
 #[cfg(test)]
@@ -1237,6 +1477,58 @@ mod tests {
             ),
             "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
         );
+    }
+
+    #[test]
+    fn schema_drift_catches_same_name_different_hash() {
+        use zenkey::schema::{SchemaSet, TypeSchema};
+        let a = SchemaSet::builder("app")
+            .entry(
+                "Point",
+                TypeSchema::json_schema(serde_json::json!({"a": 1})),
+            )
+            .build();
+        let same = SchemaSet::builder("app")
+            .entry(
+                "Point",
+                TypeSchema::json_schema(serde_json::json!({"a": 1})),
+            )
+            .build();
+        let different = SchemaSet::builder("app")
+            .entry(
+                "Point",
+                TypeSchema::json_schema(serde_json::json!({"a": 2})),
+            )
+            .build();
+        assert!(schema_drift(&[("p1".into(), a.clone()), ("p2".into(), same)]).is_empty());
+        let findings = schema_drift(&[("p1".into(), a), ("p3".into(), different)]);
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].contains("Point"), "{findings:?}");
+    }
+
+    #[test]
+    fn referenced_type_names_are_total_and_deduped() {
+        let slice = zenkey::parse_slice(
+            r#"
+            [registry]
+            version = "1.0"
+            app = "t"
+            convention = 1
+            [producer]
+            name = "tc"
+            [[subject]]
+            path = "health"
+            class = "state"
+            type = "Health"
+            [[procedure]]
+            path = "x/set"
+            kind = "write"
+            request = "Cmd"
+            reply = "Health"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(referenced_type_names(&slice), vec!["Cmd", "Health"]);
     }
 
     #[test]

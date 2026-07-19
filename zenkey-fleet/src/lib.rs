@@ -23,8 +23,11 @@ pub mod tree;
 #[cfg(feature = "decode")]
 pub mod decode;
 
-pub use admin::{AdminEntry, RouterInfo, admin_get, routers};
-pub use query::{Answer, FleetAnswer, fleet_get, fleet_registry};
+pub use admin::{
+    AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,
+    storages,
+};
+pub use query::{Answer, FleetAnswer, StateSample, fleet_get, fleet_registry, state_snapshot};
 pub use registry::SliceSet;
 pub use roster::roster;
 pub use session::open;

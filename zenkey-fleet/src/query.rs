@@ -176,3 +176,44 @@ pub async fn fleet_registry_raw(
     }
     Ok(slices)
 }
+
+/// One state sample from a snapshot GET.
+#[derive(Debug, Clone)]
+pub struct StateSample {
+    /// Full wire key.
+    pub key: String,
+    /// HLC timestamp, when the deployment stamps samples (RFC 04 §4
+    /// requires it for LWW to be meaningful — its absence is itself a
+    /// doctor-grade observation).
+    pub timestamp: Option<zenoh::time::Timestamp>,
+    pub payload_len: usize,
+}
+
+/// GET the current state under a selector with the fan-in discipline
+/// (target All, consolidation None) — the doctor's freshness check
+/// (RFC 04 §1.2) consumes the timestamps. Same chokepoint posture as
+/// [`fleet_get`]: no subcommand issues a raw `session.get`.
+pub async fn state_snapshot(
+    session: &Session,
+    selector: &str,
+    timeout: Duration,
+) -> Result<Vec<StateSample>> {
+    let replies = session
+        .get(selector)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .with_context(|| format!("state snapshot failed: {selector}"))?;
+    let mut out = Vec::new();
+    while let Ok(reply) = replies.recv_async().await {
+        let Ok(sample) = reply.result() else { continue };
+        out.push(StateSample {
+            key: sample.key_expr().as_str().to_string(),
+            timestamp: sample.timestamp().copied(),
+            payload_len: sample.payload().len(),
+        });
+    }
+    Ok(out)
+}

@@ -100,6 +100,12 @@ pub struct NodeList {
 }
 
 #[derive(Debug, Serialize)]
+pub struct StorageList {
+    pub storages: Vec<zenkey_fleet::StorageInfo>,
+    pub coverage: Vec<zenkey_fleet::CoverageRow>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct CallError {
     pub name: String,
     pub message: String,

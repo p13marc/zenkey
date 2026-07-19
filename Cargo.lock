@@ -3904,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "zenctl"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "ciborium",
@@ -3963,7 +3963,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fleet"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
