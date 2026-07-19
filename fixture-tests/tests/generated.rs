@@ -116,6 +116,33 @@ fn class_disambiguates() {
     assert!(netring::Subject::parse(Class::State, &["bogus"]).is_none());
 }
 
+/// Wire input is untrusted: an illegal chunk in a var position is "not a
+/// registered subject" (`None`), never a panic — a foreign or malformed key
+/// on the bus must not crash a consumer that refines it (RFC 08 §1).
+#[test]
+fn illegal_chunk_in_var_position_is_none_not_panic() {
+    // Uppercase (grammar-illegal) in a `{proto}` var slot.
+    assert!(
+        netring::Subject::parse(Class::Telemetry, &["bandwidth", "HTTPS", "bytes_per_sec"])
+            .is_none()
+    );
+    // A bare `_` (illegal boundary byte) in an `{alert_key}` var slot.
+    assert!(netring::Subject::parse(Class::State, &["alert", "_"]).is_none());
+    // Illegal chunk inside a rest-var tail.
+    assert!(
+        registry::parse_subject("snmp", Class::Telemetry, &["device", "d1", "IF-MIB"]).is_none()
+    );
+    // Dispatch-level refinement stays total too.
+    assert!(
+        registry::parse_subject(
+            "netring",
+            Class::Telemetry,
+            &["bandwidth", "HTTPS", "bytes_per_sec"]
+        )
+        .is_none()
+    );
+}
+
 #[test]
 fn literal_beats_var_precedence() {
     assert_eq!(
