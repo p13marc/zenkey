@@ -157,13 +157,22 @@ QoS is declared per subject as a **named profile** in the registry
 a default profile. The profile vocabulary is closed — these five, mapping
 to Zenoh reliability × congestion control × priority:
 
-| Profile | Reliability | Congestion | Priority | Default for |
-|---|---|---|---|---|
-| `sampled` | best-effort | drop | data-low | `telemetry` |
-| `refreshed` | best-effort | drop | data | `state` that self-heals (see rule below) |
-| `transition` | reliable | block | data | `state` written on transition; `events` |
-| `alert` | reliable | block | interactive-high | `state/*/alert/*` |
-| `frame` | best-effort | drop | interactive-high | `@media` (a stale frame is worthless; the encoder must never block) |
+| Profile | Reliability | Congestion | Priority | Express | Default for |
+|---|---|---|---|---|---|
+| `sampled` | best-effort | drop | data-low | no | `telemetry` |
+| `refreshed` | best-effort | drop | data | no | `state` that self-heals (see rule below) |
+| `transition` | reliable | block | data | no | `state` written on transition; `events` |
+| `alert` | reliable | block | interactive-high | **yes** | `state/*/alert/*` |
+| `frame` | best-effort | drop | interactive-high | **yes** | `@media` (a stale frame is worthless; the encoder must never block) |
+
+**The `express` axis (v1.5).** Zenoh's per-message `express` flag bypasses
+transport batching for lower latency at the cost of batching efficiency. It
+is a fourth axis of the profile table, not a per-key knob: `alert` and
+`frame` — the two profiles whose whole point is latency — set it; the three
+throughput-shaped profiles do not. The vocabulary stays closed at five
+profiles; the rejected alternative (a per-key `express` override in the
+registry) is recorded in the v1.5 changelog — it would reopen the exact
+per-key QoS bikeshed the closed profile set exists to prevent.
 
 The `refreshed`/`transition` split inside `state` is about the **cost of
 waiting out a missed write**, not about self-healing: *all* live state

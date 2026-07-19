@@ -1,8 +1,31 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.4 — RATIFIED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.5 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
-enforcement crate `zenkey`).
+enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
+branch).
+
+> **v1.5 (2026-07-19, the 0.3 redesign amendments, issues
+> [#5](https://github.com/p13marc/zenkey/issues/5)–[#21](https://github.com/p13marc/zenkey/issues/21),
+> design record in [docs/redesign-2026-07.md](../docs/redesign-2026-07.md))**
+> — the convention's enforcement crate grew up: typed everywhere the RFCs
+> already demanded it, delegating to the middleware everywhere Zenoh 1.9
+> provides the mechanism natively.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **H1** | [08 §1.2](08-registry.md) *(new)* | **The generated surface.** Builders return a **validated key type** (canonical, concrete, base-relative), never `String`; generated constructors **slug at the API boundary** so key construction from a well-formed subject is infallible; the §1.1 typed origins (`LocalOrigin`/`RemoteOrigin`/service/fleet) live in the enforcement crate itself; G2 becomes **structural** — a forbidden-fanout write has *no fleet spelling in the generated surface*; each subject family generates a fieldless family id with per-family selector builders. |
+> | **H2** | [08 §2](08-registry.md) | **Media codegen delivered.** The v1.3 promise ("generated key builders" for `[[media]]`) is implemented: media value type, slugging constructors, local-origin publish builder, remote-origin viewer builder — and deliberately **no** wildcard/family selector (the 07 §1 tier-wildcard revocation). `variant` becomes legal on media entries. |
+> | **H4** | [08 §5](08-registry.md) | **Desired-state `{host}` lint.** In a service registry, a subject pattern containing `{host}` MUST lead with it (G1's proxy rule as CI), and generated constructors type it as a host id. |
+> | **E1** | [04 §3](04-planes.md) | **The `express` axis.** Zenoh's per-message `express` flag joins the profile table as a fourth axis: `alert` and `frame` set it, the throughput-shaped profiles do not. Rejected alternative: a per-key `express` registry override — it would reopen the per-key QoS bikeshed the closed five-profile vocabulary exists to prevent. |
+>
+> **What did *not* change.** No grammar change — position count, chunk
+> lexical rules, the plain `v1` version chunk, and design properties D1–D6
+> are untouched (the D1–D6 guard tests and the `@adv`-token test pass
+> unmodified). The registry TOML format is extended only additively
+> (`variant` on media); no existing registry file needs an edit. Payloads
+> are untouched by this half of v1.5 (payload self-description arrives in
+> the H5–H7 rows, appended when that part of the branch lands).
 
 > **v1.4 (2026-07-18, actuator-adoption amendments, issue
 > [tcgui#43](https://github.com/p13marc/tcgui/issues/43))** — six additive

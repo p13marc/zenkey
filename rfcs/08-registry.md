@@ -87,6 +87,39 @@ fleet selector, it pairs with query target **All**
 planes ([07-bulk-planes.md §3](07-bulk-planes.md)), and it must never be
 what a builder does when it has nothing better.
 
+### 1.2 The generated surface (v1.5)
+
+*Added in v1.5 (H1). §1 and §1.1 state the contract; this section pins how
+the enforcement crate realizes it, so implementations stop re-deriving it.*
+
+- **Keys are values of a validated key type**, not strings. Every builder —
+  hand-written or generated — returns a type whose existence proves the key
+  is canonical, concrete, and base-relative. Consumers convert to the
+  middleware's key-expression type by moving the value, never by re-parsing
+  a `String` (the re-parse-and-`expect` wrapper every adopter wrote is the
+  bug this retires).
+- **Variables are slugged at the API boundary.** Generated constructors take
+  raw application values and apply the [03 §2](03-grammar.md) slug
+  themselves; a subject value cannot hold an illegal chunk, so key
+  construction from a well-formed subject is **infallible**. Call-site
+  slugging (the adopters' `slug_key_chunk(...)` habit) is retired — a missed
+  call was a latent grammar violation.
+- **The typed origins of §1.1 live in the enforcement crate itself** —
+  `LocalOrigin` (mintable only from the app profile), `RemoteOrigin`
+  (parseable only from wire data), the service origin, and the deliberate
+  fleet marker — so every application shares one implementation and the
+  sealed origin-kind trait, instead of hoisting its own copy.
+- **G2 is structural, not advisory**: generated modules emit fleet
+  spellings (a fleet procedure id and its selector builder) **only for
+  `fanout = allowed` procedures**. A forbidden-fanout write has *no fleet
+  spelling anywhere in the generated surface* — the refusal MUST of
+  [05 §2.1](05-control-rpc.md) becomes unrepresentable rather than checked.
+- **Each subject family also generates a fieldless family id** (the
+  variant set without its variables) with a per-family *selector* builder
+  (`{var}` → `*`, `{var...}` → `**`, scoped to one origin or the fleet), so
+  consumer-side routing tables and subscriptions stop re-encoding the
+  registry by hand.
+
 ## 2. Entry format
 
 One TOML document per producer (or service), checked into the repository
@@ -208,6 +241,7 @@ normative field table:
 | `attachment` | type-table name | yes | the per-frame sidecar type on the Zenoh attachment (`FrameMeta`); **CI-resolved against the shared type table** ([§5](#5-ownership-and-process)), exactly like a `[[subject]]` `type`, so a typo or a drifted schema fails the build |
 | `cardinality` | integer | yes if `path` has any `{var}` | key-population bound, budget-reviewed — the same rule as `[[subject]]`, and it now binds the highest-bandwidth plane, whose `{tier}` chunk multiplies its key count |
 | `since` / `gone` / `replaced_by` | registry versions / path | `since` yes | lifecycle (§3) |
+| `variant` | CamelCase string | no | generated-variant name override, same rule as `[[subject]]` (v1.5) |
 | `description` | string | recommended | one line, human |
 
 A `[[media]]` entry has **no** `class`/`qos`/`ttl_s`/`seed` — those are
@@ -215,6 +249,11 @@ data-class concepts; `@media` QoS is fixed by RFC 07 §1
 (best-effort · drop · interactive-high) and is not a per-entry knob. Media key
 builders are generated from these entries the same way subject/procedure
 builders are, so a hand-written `media_*_key()` cannot drift from the registry.
+(Promised in v1.3, delivered in v1.5: the generated media surface is a media
+value type with slugging constructors, a publish builder taking the local
+origin, and a viewer builder taking a remote origin — and deliberately **no**
+wildcard/family selector, per the [07 §1](07-bulk-planes.md) tier-wildcard
+revocation: a viewer subscribes to exactly one tier.)
 
 `[[procedure]]` entries (the `@rpc` plane, RFC 05) are the third shape and,
 like `[[media]]`, carry request/reply *types* rather than a class payload, so
@@ -343,6 +382,12 @@ registry version to coordinate.
   and no `[[deprecated]]` entry is ever deleted; every `events` entry has
   a `rate`; every `{var}`-bearing entry has a `cardinality`; every live
   `state` entry has a `ttl_s`.
+- CI MUST enforce (v1.5, H4): in a **service** registry, a subject pattern
+  containing the variable `{host}` places it as the **first** chunk — the
+  G1 desired-state proxy rule ([07 §3](07-bulk-planes.md)): the target host
+  is addressing, and addressing lives at the front of the subject, where
+  ACL prefix rules can reach it ([09 §3](09-operations.md)). Generated
+  constructors type that variable as a host id, not a free string.
 - CI **MUST** enforce the **reverse direction**: *every registered subject
   and procedure is actually served by the build that advertises it*
   (§6). Note this is a distinct check, not the mirror image of the first
