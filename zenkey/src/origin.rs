@@ -258,6 +258,14 @@ pub trait ConcreteOrigin: sealed::Sealed {
     fn to_origin(&self) -> crate::grammar::Origin;
 }
 
+/// A concrete **host** origin (`h-…`): [`LocalOrigin`] or [`RemoteOrigin`],
+/// never a service. Host-shaped builders (producer keys, producer `@rpc`)
+/// take this — a service origin has no producer chunk, so passing one would
+/// be grammar-illegal; the trait split makes it unrepresentable.
+pub trait HostOrigin: ConcreteOrigin {}
+impl HostOrigin for LocalOrigin {}
+impl HostOrigin for RemoteOrigin {}
+
 impl ConcreteOrigin for LocalOrigin {
     fn chunk(&self) -> &str {
         self.0.as_str()

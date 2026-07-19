@@ -202,7 +202,7 @@ impl BusArgs {
     }
     /// Compose a base-relative key into the full wire key this un-namespaced
     /// tool must actually use.
-    fn wire(&self, relative: &str) -> String {
+    fn wire(&self, relative: impl AsRef<str>) -> String {
         zenkey::grammar::with_base(&self.base, relative)
     }
     /// Registry slices from whichever source the flags select: local
@@ -300,7 +300,7 @@ async fn cmd_node_list(args: &BusArgs) -> Result<()> {
         println!("no live producers.");
         println!(
             "\nnothing held a liveliness token on {}.",
-            zenkey::grammar::all_liveliness_wildcard()
+            zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet())
         );
         println!("if you expected some, check --connect (and that they are actually running).");
         return Ok(());
@@ -432,9 +432,9 @@ async fn cmd_service_call(
     // A service origin (`@catalog`) carries no producer chunk (RFC 03 §1.5).
     // Un-namespaced tool ⇒ full keys, composed off the configured base.
     let mut key = if origin.starts_with('@') {
-        args.wire(&format!("v1/{origin}/@rpc/{procedure}"))
+        args.wire(format!("v1/{origin}/@rpc/{procedure}"))
     } else {
-        args.wire(&format!("v1/{origin}/@rpc/{producer}/{procedure}"))
+        args.wire(format!("v1/{origin}/@rpc/{producer}/{procedure}"))
     };
     if !params.is_empty() {
         key.push('?');
@@ -507,12 +507,12 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
         // That is the grammar working, not an exception to it.
         let key = match &local.service_origin {
             Some(origin) => {
-                let o = zenkey::grammar::Origin::service(origin).map_err(|e| {
+                let o = zenkey::ServiceOrigin::new(origin).map_err(|e| {
                     anyhow!("bad service origin in local slice {}: {e}", local.name)
                 })?;
-                args.wire(&zenkey::grammar::service_rpc_key(&o, "introspect")?)
+                args.wire(zenkey::selector::service_rpc(&o, &["introspect"]))
             }
-            None => args.wire(&zenkey::grammar::fleet_rpc_key(&local.name, "introspect")),
+            None => args.wire(zenkey::selector::fleet_rpc(&local.name, &["introspect"])),
         };
 
         let answers = bus::fleet_get(&session, &args.base, &key, None, args.timeout()).await?;

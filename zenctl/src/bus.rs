@@ -178,7 +178,7 @@ pub async fn fleet_registry(
 ) -> Result<Vec<(String, RegistrySlice)>> {
     // This session is un-namespaced on purpose (RFC 09 §5), so it must
     // spell the base itself — exactly as `service call` composes its full key.
-    let key = with_base(base, &zenkey::grammar::fleet_rpc_key("*", "introspect"));
+    let key = with_base(base, zenkey::selector::fleet_rpc("*", &["introspect"]));
     let answers = fleet_get(session, base, &key, None, timeout).await?;
 
     let mut slices = Vec::new();
@@ -210,13 +210,15 @@ pub async fn roster(
 ) -> Result<BTreeMap<String, Vec<String>>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    let catalog_alive = zenkey::grammar::service_alive_key(&zenkey::grammar::Origin::catalog())
-        .expect("catalog is a service origin");
+    let catalog_alive = zenkey::selector::service_alive(&zenkey::ServiceOrigin::catalog());
     // The builders are base-relative; this session is deliberately
     // un-namespaced, so it must spell the base itself.
     for expr in [
-        with_base(base, &zenkey::grammar::all_liveliness_wildcard()),
-        with_base(base, &catalog_alive),
+        with_base(
+            base,
+            zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet()),
+        ),
+        with_base(base, catalog_alive),
     ] {
         let Ok(replies) = session.liveliness().get(&expr).timeout(timeout).await else {
             continue;

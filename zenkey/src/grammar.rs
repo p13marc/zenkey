@@ -605,8 +605,8 @@ pub fn parse(key: &str) -> Result<StructuralKey, KeyError> {
 /// Prepend an explicit base — for router-side artifacts (storage selectors,
 /// ACL rules) and tests. Application sessions use the namespace instead
 /// (RFC 09 §0).
-pub fn with_base(base: &str, key_or_selector: &str) -> String {
-    format!("{base}/{key_or_selector}")
+pub fn with_base(base: &str, key_or_selector: impl AsRef<str>) -> String {
+    format!("{base}/{}", key_or_selector.as_ref())
 }
 
 /// Strip an explicit base from a **full** (wire-form) key — the inverse of
@@ -651,45 +651,10 @@ pub fn parse_full(base: &str, key: &str) -> Option<StructuralKey> {
     parse(strip_base(base, key)?).ok()
 }
 
-/// Caller-side fleet procedure selector (RFC 05 §2): a GET on
-/// `v1/*/@rpc/<producer>/<procedure>` reaches every host serving the
-/// producer. Callers MUST use query target `All` (RFC 05 §2.1) —
-/// `BestMatching` can short-circuit the fan-in.
-pub fn fleet_rpc_key(producer: &str, procedure: &str) -> String {
-    format!("{VERSION_CHUNK}/*/{PLANE_RPC}/{producer}/{procedure}")
-}
-
-/// A service origin's procedure key (RFC 05, RFC 06 §5): service origins omit
-/// the producer chunk — `v1/@<service>/@rpc/<procedure>`. Errors on a host
-/// origin, whose procedures ride under a producer chunk ([`rpc_key`]).
-pub fn service_rpc_key(origin: &Origin, procedure: &str) -> Result<String, KeyError> {
-    if origin.has_producer_chunk() {
-        return Err(KeyError::Parse(
-            "service_rpc_key takes a service origin; host origins use rpc_key (RFC 03 §1.5)"
-                .to_string(),
-        ));
-    }
-    Ok(format!(
-        "{VERSION_CHUNK}/{}/{PLANE_RPC}/{procedure}",
-        origin.chunk()
-    ))
-}
-
-/// The whole fleet's producer liveliness tokens (RFC 04 §5) —
-/// `v1/*/state/*/alive`: who is up and what they run, zero payload bytes.
-///
-/// `*` in the origin position can never match a verbatim service origin
-/// (design property D4), so a service's own token ([`service_alive_key`]) is
-/// **not** in this set and must be asked for by name.
-pub fn all_liveliness_wildcard() -> String {
-    format!("{VERSION_CHUNK}/*/{CLASS_STATE}/*/{SUBJECT_ALIVE}")
-}
-
-/// A service origin's liveliness token key (RFC 04 §5):
-/// `v1/@<service>/state/alive`. Errors on a host origin ([`alive_key`]).
-pub fn service_alive_key(origin: &Origin) -> Result<String, KeyError> {
-    alive_key(origin, None)
-}
+// The wire-observer wildcard helpers (`fleet_rpc_key`, `service_rpc_key`,
+// `all_liveliness_wildcard`, `service_alive_key`) moved to the typed
+// [`crate::selector`] module in v1.5 (issue #7) — selectors are values of
+// [`crate::Selector`], not ad-hoc strings.
 
 #[cfg(test)]
 mod tests {

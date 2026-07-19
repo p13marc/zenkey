@@ -236,15 +236,15 @@ mod tests {
     fn the_base_composes_back_on_for_the_wire_view() {
         let c = ctx();
         assert_eq!(
-            grammar::with_base("acme", &c.telemetry_prefix()),
+            grammar::with_base("acme", c.telemetry_prefix()),
             "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo"
         );
         assert_eq!(
-            grammar::with_base("acme/fleet-a", &c.telemetry_prefix()),
+            grammar::with_base("acme/fleet-a", c.telemetry_prefix()),
             "acme/fleet-a/v1/h-3fa9c2d41b7e/telemetry/sysinfo"
         );
         // ...and back off again, losslessly.
-        let wire = grammar::with_base("acme/fleet-a", &c.telemetry_prefix());
+        let wire = grammar::with_base("acme/fleet-a", c.telemetry_prefix());
         assert_eq!(
             grammar::strip_base("acme/fleet-a", &wire),
             Some(c.telemetry_prefix().as_str())

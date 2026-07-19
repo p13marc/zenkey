@@ -54,6 +54,7 @@ pub mod origin;
 pub mod pattern;
 pub mod profile;
 pub mod qos;
+pub mod selector;
 pub mod slice;
 pub mod slug;
 
