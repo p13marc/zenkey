@@ -12,6 +12,8 @@
 //! ```
 //!
 //! Layer map:
+//! - [`key`] — [`Key`]/[`Selector`]/[`Chunk`]: validated key value types over
+//!   `zenoh_keyexpr::OwnedKeyExpr` (RFC 08 §1.2).
 //! - [`grammar`] — chunk lexical rules, reserved tokens, structural key
 //!   assembly and parsing (RFC 03).
 //! - [`origin`] — `h-<12hex>` host-origin minting (RFC 06 §1).
@@ -47,9 +49,14 @@
 pub mod common_state;
 pub mod context;
 pub mod grammar;
+pub mod key;
 pub mod origin;
+pub mod pattern;
 pub mod profile;
 pub mod qos;
+#[cfg(feature = "schema")]
+pub mod schema;
+pub mod selector;
 pub mod slice;
 pub mod slug;
 
@@ -58,7 +65,8 @@ pub use context::V1Context;
 pub use grammar::{
     Class, ClassOrPlane, KeyError, Origin, Plane, Producer, StructuralKey, VERSION_CHUNK,
 };
-pub use origin::HostId;
+pub use key::{Chunk, Key, Selector};
+pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};
 pub use profile::AppProfile;
 pub use qos::QosProfile;
 pub use slice::{RegistrySlice, SliceFinding, parse_slice};

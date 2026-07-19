@@ -273,3 +273,17 @@ failure mode does not spare the people who wrote the spec.
 
 **Revisit trigger.** None. A rejected amendment reopens only if the chapter it
 was rejected against changes.
+
+## 9. Matching-status introspection — DEFERRED (v1.5)
+
+The middleware exposes per-publisher/per-querier **matching status** ("is
+anyone listening / is anyone serving"). Fleet tooling adopts it for
+entities it declares itself (a live explorer showing "has consumers"
+badges on its own subscriptions and queries). What is deferred is a
+**doctor-grade check of foreign publishers**: probing whether *someone
+else's* publisher has subscribers cannot be done from outside without
+publishing on their key, and reading it from router internals is
+version-dependent surface. Revisit when the middleware exposes remote
+matching status as stable admin-space data; until then, tooling reports
+what it can observe honestly (its own matches) and never infers a
+fleet-wide verdict from silence.

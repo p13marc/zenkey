@@ -1,0 +1,56 @@
+# Release lanes (issue #16, publication policy in docs/redesign-2026-07.md §15):
+#
+#   lane 1 — crates.io, LIB CRATES ONLY, in dependency order:
+#            zenkey → zenkey-build → zenkey-fleet
+#   lane 2 — zenctl (and later zengui) ship as GitHub release BINARIES;
+#            they are not published to crates.io (zenctl 0.1.x stays there,
+#            un-yanked, pointing here).
+#
+# Manual dispatch on purpose: publishing is a decision, not a side effect.
+# Requires the CARGO_REGISTRY_TOKEN secret for lane 1.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "What to release"
+        required: true
+        type: choice
+        options: [crates-io-libs, zenctl-binary]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  crates-io-libs:
+    if: inputs.lane == 'crates-io-libs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - name: publish in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish -p zenkey
+          # crates.io index propagation between dependent publishes.
+          sleep 30
+          cargo publish -p zenkey-build
+          sleep 30
+          cargo publish -p zenkey-fleet
+
+  zenctl-binary:
+    if: inputs.lane == 'zenctl-binary'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p zenctl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenctl-linux-x86_64
+          path: target/release/zenctl

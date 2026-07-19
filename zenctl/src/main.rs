@@ -17,8 +17,10 @@
 //! The gap between the two is drift, and `doctor` (bus + `--registry`) is the
 //! command that reports it.
 
-mod bus;
+mod context;
 mod offline;
+mod output;
+mod report;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -26,6 +28,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use clap::{Args, Parser, Subcommand};
 use zenkey::RegistrySlice;
+use zenkey_fleet as bus;
 
 #[derive(Parser)]
 #[command(
@@ -52,6 +55,16 @@ enum Command {
     /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
+    /// Zenoh admin space (`@/**`) — the middleware's own introspection.
+    #[command(subcommand)]
+    Admin(AdminCmd),
+    /// Manage named connection contexts (config file).
+    #[command(subcommand)]
+    Context(ContextCmd),
+    /// Generate shell completions (bash, zsh, fish, elvish, powershell).
+    ///
+    /// e.g. `zenctl completions bash > ~/.local/share/bash-completion/completions/zenctl`
+    Completions { shell: clap_complete::Shell },
     /// Diff what the fleet *serves* against local registry files.
     ///
     /// RFC 08 §6: "A disagreement between introspection and the checked-in TOML
@@ -59,6 +72,64 @@ enum Command {
     /// truth comes from `--registry <dir>`; without it only the
     /// roster-vs-introspect check runs.
     Doctor(BusArgs),
+}
+
+#[derive(Subcommand)]
+enum AdminCmd {
+    /// GET an admin selector and print key/value pairs.
+    ///
+    /// Admin key layouts vary between zenoh versions — this is a raw,
+    /// honest browse. Requires an un-namespaced session (which zenctl
+    /// always runs, RFC 09 §5).
+    Get {
+        /// Admin selector.
+        #[arg(default_value = "@/**")]
+        selector: String,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Enumerate routers/peers (zid, version, locators).
+    Routers {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContextCmd {
+    /// Create (or update) a named context.
+    Create {
+        name: String,
+        /// The deployment base this context pins.
+        #[arg(long)]
+        base: Option<String>,
+        /// Endpoint to connect to, repeatable.
+        #[arg(long, short = 'c')]
+        connect: Vec<String>,
+        /// Endpoint to listen on, repeatable.
+        #[arg(long, short = 'l')]
+        listen: Vec<String>,
+        /// Registry dir, repeatable (offline slice source).
+        #[arg(long, value_name = "DIR")]
+        registry: Vec<PathBuf>,
+        /// Enable multicast scouting for this context.
+        #[arg(long)]
+        scouting: bool,
+        /// Default reply timeout in seconds.
+        #[arg(long)]
+        timeout: Option<u64>,
+        /// Select it as the current context.
+        #[arg(long)]
+        select: bool,
+    },
+    /// List contexts (the `*` marks the current one).
+    List,
+    /// Show one context (default: the current one).
+    Show { name: Option<String> },
+    /// Select the current context.
+    Select { name: String },
+    /// Remove a context.
+    Rm { name: String },
 }
 
 #[derive(Subcommand)]
@@ -90,16 +161,81 @@ enum TopicCmd {
         bus: BusArgs,
     },
     /// Subscribe and print decoded samples (on-bus).
+    ///
+    /// With a served `describe` schema (RFC 08 §7) payloads decode into
+    /// named fields; otherwise they render structurally, tagged with the
+    /// registry-declared type. --origin/--class/--producer compose the
+    /// selector server-side — never client-side filtering the grammar can
+    /// express by position.
     Echo {
-        /// Key expression to subscribe to. Defaults to all v1 data under the
-        /// base: `<base>/v1/**`.
+        /// Explicit key expression (overrides --origin/--class/--producer).
+        /// Defaults to all v1 data under the base: `<base>/v1/**`.
         selector: Option<String>,
+        /// Only this origin (`h-…` or `@service`).
+        #[arg(long)]
+        origin: Option<String>,
+        /// Only this class: telemetry, state, or events.
+        #[arg(long)]
+        class: Option<String>,
+        /// Only this producer.
+        #[arg(long)]
+        producer: Option<String>,
+        /// kcat-style format string: %k wire key, %K base-relative, %o origin,
+        /// %c class, %p producer, %s subject, %t type, %v value, %e encoding,
+        /// %l payload bytes, %n counter, %T timestamp, %% literal percent.
+        #[arg(long)]
+        fmt: Option<String>,
         /// Print raw payload bytes as hex instead of decoding.
         #[arg(long)]
         raw: bool,
+        /// Skip schema decode (structural rendering only).
+        #[arg(long)]
+        no_decode: bool,
         /// Stop after this many samples (0 = run until interrupted).
         #[arg(long, default_value_t = 0)]
         count: usize,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Measure publish rate over a window (ros2-style).
+    Hz {
+        /// Key expression (or use --origin/--class/--producer composition).
+        selector: Option<String>,
+        #[arg(long)]
+        origin: Option<String>,
+        #[arg(long)]
+        class: Option<String>,
+        #[arg(long)]
+        producer: Option<String>,
+        /// Measurement window, seconds.
+        #[arg(long, default_value_t = 10)]
+        window: u64,
+        /// Report each concrete key separately.
+        #[arg(long)]
+        per_key: bool,
+        /// Also report source-sequence gaps (needs publishers that attach
+        /// SourceInfo; absent info reads as zero, honestly labeled).
+        #[arg(long)]
+        loss: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Measure payload bandwidth over a window.
+    Bw {
+        /// Key expression (or use --origin/--class/--producer composition).
+        selector: Option<String>,
+        #[arg(long)]
+        origin: Option<String>,
+        #[arg(long)]
+        class: Option<String>,
+        #[arg(long)]
+        producer: Option<String>,
+        /// Measurement window, seconds.
+        #[arg(long, default_value_t = 10)]
+        window: u64,
+        /// Report each concrete key separately.
+        #[arg(long)]
+        per_key: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -108,7 +244,14 @@ enum TopicCmd {
 #[derive(Subcommand)]
 enum NodeCmd {
     /// List live producers from the liveliness roster (on-bus).
-    List(BusArgs),
+    List {
+        /// Join each producer against its served introspect slice (app +
+        /// registry version).
+        #[arg(long)]
+        verbose: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -168,8 +311,14 @@ struct BusArgs {
     /// un-namespaced so it sees the wire as it really is, including traffic
     /// from outside the deployment (RFC 09 §5) — which is what lets it spot a
     /// leak. So it has to be told what the base is.
+    /// Optional since v1.5: resolution is flag > env > active context
+    /// (`zenctl context …`).
     #[arg(long, env = "ZENCTL_BASE")]
-    base: String,
+    base: Option<String>,
+    /// Use a named context from the config file for this invocation
+    /// (default: the file's `current` pointer; env `ZENCTL_CONTEXT`).
+    #[arg(long, value_name = "NAME")]
+    context: Option<String>,
     /// Local registry directory (`registry/*.toml`), repeatable. When given,
     /// registry-sourced commands answer offline from these files instead of
     /// the live bus.
@@ -188,42 +337,107 @@ struct BusArgs {
     /// session ends up talking to a production fleet.
     #[arg(long)]
     scouting: bool,
-    /// Seconds to wait for replies / to watch the bus.
-    #[arg(long, default_value_t = 5)]
-    timeout: u64,
+    /// Seconds to wait for replies / to watch the bus (default 5; a
+    /// context may override the default).
+    #[arg(long)]
+    timeout: Option<u64>,
+    /// Output format: table for humans, json (one document) or ndjson (one
+    /// object per row) for scripts; auto = table on a tty, ndjson piped.
+    #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+    format: output::Format,
 }
 
 impl BusArgs {
+    /// The active stored context, loaded once per process (one BusArgs is
+    /// ever used per invocation). A bad --context/ZENCTL_CONTEXT is fatal.
+    fn stored(&self) -> Option<&'static context::StoredContext> {
+        static ACTIVE: std::sync::OnceLock<Option<context::StoredContext>> =
+            std::sync::OnceLock::new();
+        ACTIVE
+            .get_or_init(|| match context::active(self.context.as_deref()) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(2);
+                }
+            })
+            .as_ref()
+    }
+    /// The deployment base: flag > env > active context.
+    fn base(&self) -> Result<&str> {
+        if let Some(b) = &self.base {
+            return Ok(b.as_str());
+        }
+        self.stored()
+            .and_then(|c| c.base.as_deref())
+            .ok_or_else(|| {
+                anyhow!(
+                    "no base: pass --base, set ZENCTL_BASE, or create a context \
+                     (`zenctl context create lab --base <base> -c <endpoint>`)"
+                )
+            })
+    }
     async fn session(&self) -> Result<zenoh::Session> {
-        bus::open(&self.connect, &self.listen, self.scouting).await
+        let (connect, listen);
+        let stored = self.stored();
+        connect = if self.connect.is_empty() {
+            stored.map(|c| c.connect.clone()).unwrap_or_default()
+        } else {
+            self.connect.clone()
+        };
+        listen = if self.listen.is_empty() {
+            stored.map(|c| c.listen.clone()).unwrap_or_default()
+        } else {
+            self.listen.clone()
+        };
+        let scouting = self.scouting || stored.and_then(|c| c.scouting).unwrap_or(false);
+        bus::open(&connect, &listen, scouting).await
     }
     fn timeout(&self) -> Duration {
-        Duration::from_secs(self.timeout)
+        Duration::from_secs(
+            self.timeout
+                .or_else(|| self.stored().and_then(|c| c.timeout))
+                .unwrap_or(5),
+        )
+    }
+    fn registry_dirs(&self) -> Vec<PathBuf> {
+        if !self.registry.is_empty() {
+            self.registry.clone()
+        } else {
+            self.stored()
+                .map(|c| c.registry.clone())
+                .unwrap_or_default()
+        }
     }
     /// Compose a base-relative key into the full wire key this un-namespaced
     /// tool must actually use.
-    fn wire(&self, relative: &str) -> String {
-        zenkey::grammar::with_base(&self.base, relative)
+    fn wire(&self, relative: impl AsRef<str>) -> Result<String> {
+        Ok(zenkey::grammar::with_base(self.base()?, relative))
     }
     /// Registry slices from whichever source the flags select: local
     /// `--registry` dirs when given (offline), otherwise the live bus
     /// (RFC 08 §6 introspection). Both yield the same `Vec<RegistrySlice>`,
     /// so every renderer is source-agnostic.
     async fn slices(&self) -> Result<Vec<RegistrySlice>> {
-        if !self.registry.is_empty() {
-            return offline::load_slices(&self.registry);
+        Ok(self.slice_set().await?.slices().to_vec())
+    }
+    /// The same, as the fleet engine's indexed set (echo's decode path).
+    async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
+        let dirs = self.registry_dirs();
+        if !dirs.is_empty() {
+            return zenkey_fleet::SliceSet::from_dirs(&dirs);
         }
         let session = self.session().await?;
-        let pairs = bus::fleet_registry(&session, &self.base, self.timeout()).await?;
-        if pairs.is_empty() {
+        let base = self.base()?;
+        let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
+        if set.slices().is_empty() {
             eprintln!(
-                "no introspect slices on base {:?} — an empty set is not a verdict (RFC 05 §3.1); \
-                 `zenctl node list --base {}` says who is actually up.\n\
-                 (offline alternative: --registry <dir> with the app's registry TOMLs)",
-                self.base, self.base
+                "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
+                 `zenctl node list --base {base}` says who is actually up.\n\
+                 (offline alternative: --registry <dir> with the app's registry TOMLs)"
             );
         }
-        Ok(pairs.into_iter().map(|(_, slice)| slice).collect())
+        Ok(set)
     }
 }
 
@@ -244,22 +458,146 @@ async fn main() -> Result<()> {
             bus,
         }) => {
             let slices = bus.slices().await?;
-            offline::topic_list(&slices, producer.as_deref(), class.as_deref())
+            let report = offline::topic_list(&slices, producer.as_deref(), class.as_deref())?;
+            output::topic_list(&report, bus.format)
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
             let slices = bus.slices().await?;
-            offline::topic_info(&bus.base, &key, &slices)
+            let report = offline::topic_info(bus.base()?, &key, &slices)?;
+            output::topic_info(&report, bus.format)
         }
         Command::Topic(TopicCmd::Echo {
             selector,
+            origin,
+            class,
+            producer,
+            fmt,
             raw,
+            no_decode,
             count,
             bus,
-        }) => cmd_echo(selector.as_deref(), raw, count, &bus).await,
-        Command::Node(NodeCmd::List(bus)) => cmd_node_list(&bus).await,
+        }) => {
+            cmd_echo(
+                selector.as_deref(),
+                origin.as_deref(),
+                class.as_deref(),
+                producer.as_deref(),
+                fmt.as_deref(),
+                raw,
+                no_decode,
+                count,
+                &bus,
+            )
+            .await
+        }
+        Command::Topic(TopicCmd::Hz {
+            selector,
+            origin,
+            class,
+            producer,
+            window,
+            per_key,
+            loss,
+            bus,
+        }) => {
+            cmd_rate(
+                selector.as_deref(),
+                origin.as_deref(),
+                class.as_deref(),
+                producer.as_deref(),
+                window,
+                per_key,
+                loss,
+                false,
+                &bus,
+            )
+            .await
+        }
+        Command::Topic(TopicCmd::Bw {
+            selector,
+            origin,
+            class,
+            producer,
+            window,
+            per_key,
+            bus,
+        }) => {
+            cmd_rate(
+                selector.as_deref(),
+                origin.as_deref(),
+                class.as_deref(),
+                producer.as_deref(),
+                window,
+                per_key,
+                false,
+                true,
+                &bus,
+            )
+            .await
+        }
+        Command::Node(NodeCmd::List { verbose, bus }) => cmd_node_list(verbose, &bus).await,
+        Command::Admin(AdminCmd::Get { selector, bus }) => {
+            let session = bus.session().await?;
+            let entries = zenkey_fleet::admin_get(&session, &selector, bus.timeout()).await?;
+            match bus.format.resolved() {
+                output::Format::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &entries
+                            .iter()
+                            .map(|e| serde_json::json!({"key": e.key, "value": e.value}))
+                            .collect::<Vec<_>>()
+                    )?
+                ),
+                output::Format::Ndjson => {
+                    for e in &entries {
+                        println!("{}", serde_json::json!({"key": e.key, "value": e.value}));
+                    }
+                }
+                _ => {
+                    for e in &entries {
+                        println!("{}\n  {}", e.key, e.value);
+                    }
+                    eprintln!("{} admin entr(ies)", entries.len());
+                }
+            }
+            Ok(())
+        }
+        Command::Admin(AdminCmd::Routers { bus }) => {
+            let session = bus.session().await?;
+            let routers = zenkey_fleet::routers(&session, bus.timeout()).await?;
+            match bus.format.resolved() {
+                output::Format::Json => {
+                    println!("{}", serde_json::to_string_pretty(&routers)?)
+                }
+                output::Format::Ndjson => {
+                    for r in &routers {
+                        println!("{}", serde_json::to_string(r)?);
+                    }
+                }
+                _ => {
+                    if routers.is_empty() {
+                        println!(
+                            "no routers answered @/*/router — a peer-only mesh, or the admin \
+                             space is disabled."
+                        );
+                    }
+                    for r in &routers {
+                        println!(
+                            "{}  {}  {}",
+                            r.zid,
+                            r.version.as_deref().unwrap_or("-"),
+                            r.locators.join(", ")
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let slices = bus.slices().await?;
-            offline::service_list(&slices, producer.as_deref())
+            let report = offline::service_list(&slices, producer.as_deref())?;
+            output::service_list(&report, bus.format)
         }
         Command::Service(ServiceCmd::Call {
             origin,
@@ -281,61 +619,221 @@ async fn main() -> Result<()> {
         }
         Command::Interface(InterfaceCmd::List { bus }) => {
             let slices = bus.slices().await?;
-            offline::interface_list(&slices)
+            let report = offline::interface_list(&slices)?;
+            output::interface_list(&report, bus.format)
         }
         Command::Interface(InterfaceCmd::Show { type_name, bus }) => {
             let slices = bus.slices().await?;
-            offline::interface_show(&slices, &type_name)
+            let report = offline::interface_show(&slices, &type_name)?;
+            output::interface_show(&report, bus.format)
+        }
+        Command::Context(cmd) => match cmd {
+            ContextCmd::Create {
+                name,
+                base,
+                connect,
+                listen,
+                registry,
+                scouting,
+                timeout,
+                select,
+            } => context::create(
+                &name,
+                context::StoredContext {
+                    base,
+                    connect,
+                    listen,
+                    registry,
+                    scouting: scouting.then_some(true),
+                    timeout,
+                },
+                select,
+            ),
+            ContextCmd::List => context::list(),
+            ContextCmd::Show { name } => context::show(name.as_deref()),
+            ContextCmd::Select { name } => context::select(&name),
+            ContextCmd::Rm { name } => context::remove(&name),
+        },
+        Command::Completions { shell } => {
+            use clap::CommandFactory as _;
+            clap_complete::generate(shell, &mut Cli::command(), "zenctl", &mut std::io::stdout());
+            Ok(())
         }
         Command::Doctor(bus) => cmd_doctor(&bus).await,
     }
 }
 
-/// `node list` — the liveliness roster (RFC 04 §5).
-async fn cmd_node_list(args: &BusArgs) -> Result<()> {
+/// `node list` — the liveliness roster (RFC 04 §5); `--verbose` joins each
+/// producer against its served introspect slice.
+async fn cmd_node_list(verbose: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
-    let roster = bus::roster(&session, &args.base, args.timeout()).await?;
+    let mut roster = bus::roster(&session, args.base()?, args.timeout()).await?;
 
     if roster.is_empty() {
-        println!("no live producers.");
-        println!(
-            "\nnothing held a liveliness token on {}.",
-            zenkey::grammar::all_liveliness_wildcard()
+        eprintln!(
+            "nothing held a liveliness token on {} — check --connect (and that \
+             producers are actually running).",
+            zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet())
         );
-        println!("if you expected some, check --connect (and that they are actually running).");
-        return Ok(());
     }
-
-    for (origin, producers) in &roster {
-        println!("{origin}");
-        for p in producers {
-            println!("  {p}");
+    if verbose {
+        let slices = args.slice_set().await?;
+        for producers in roster.values_mut() {
+            for p in producers.iter_mut() {
+                // Instance suffixes share the base slice (RFC 03 §1.5).
+                let base_name = zenkey::grammar::Producer::parse_chunk(p)
+                    .map(|pr| pr.name().to_string())
+                    .unwrap_or_else(|_| p.clone());
+                if let Some(slice) = slices.get(&base_name) {
+                    *p = format!("{p}  (app {}, registry {})", slice.app, slice.version);
+                } else {
+                    *p = format!("{p}  (no served slice)");
+                }
+            }
         }
     }
-    let total: usize = roster.values().map(Vec::len).sum();
-    println!("\n{total} producer(s) on {} origin(s).", roster.len());
-    Ok(())
+    output::node_list(&report::NodeList { origins: roster }, args.format)
 }
 
-/// `topic echo` — subscribe, refine each key against the registry slices,
-/// render the payload generically.
+/// Compose a server-side selector from origin/class/producer positions
+/// (RFC 03: positions, not filters — never client-filter what the grammar
+/// can say). `None` positions wildcard.
+fn compose_selector(
+    args: &BusArgs,
+    origin: Option<&str>,
+    class: Option<&str>,
+    producer: Option<&str>,
+) -> Result<String> {
+    if let Some(c) = class
+        && !["telemetry", "state", "events"].contains(&c)
+    {
+        return Err(anyhow!(
+            "unknown class {c:?} — the classes are telemetry, state, events (RFC 04 §1)"
+        ));
+    }
+    let origin = origin.unwrap_or("*");
+    let class = class.unwrap_or("*");
+    let rel = match producer {
+        Some(p) => format!("v1/{origin}/{class}/{p}/**"),
+        None if class == "*" => format!("v1/{origin}/**"),
+        None => format!("v1/{origin}/{class}/**"),
+    };
+    args.wire(rel)
+}
+
+/// One decoded/rendered sample line for echo.
+#[allow(clippy::too_many_arguments)]
+fn format_sample(
+    fmt: &str,
+    n: usize,
+    wire_key: &str,
+    base: &str,
+    type_name: Option<&str>,
+    encoding: &str,
+    payload_len: usize,
+    timestamp: Option<&str>,
+    value: &str,
+) -> String {
+    let parsed = zenkey::grammar::parse_full(base, wire_key);
+    let mut out = String::with_capacity(fmt.len() + value.len());
+    let mut chars = fmt.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some(other) => out.push(other),
+                None => {}
+            }
+            continue;
+        }
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('k') => out.push_str(wire_key),
+            Some('K') => {
+                out.push_str(zenkey::grammar::strip_base(base, wire_key).unwrap_or(wire_key))
+            }
+            Some('o') => {
+                if let Some(p) = &parsed {
+                    out.push_str(p.origin.chunk());
+                }
+            }
+            Some('c') => {
+                if let Some(p) = &parsed {
+                    out.push_str(match &p.class {
+                        zenkey::grammar::ClassOrPlane::Class(c) => c.chunk(),
+                        zenkey::grammar::ClassOrPlane::Plane(pl) => pl.chunk(),
+                    });
+                }
+            }
+            Some('p') => {
+                if let Some(name) = parsed.as_ref().and_then(|p| p.producer.as_ref()) {
+                    out.push_str(name.name());
+                }
+            }
+            Some('s') => {
+                if let Some(p) = &parsed {
+                    out.push_str(&p.subject.join("/"));
+                }
+            }
+            Some('t') => out.push_str(type_name.unwrap_or("unregistered")),
+            Some('v') => out.push_str(value),
+            Some('e') => out.push_str(encoding),
+            Some('l') => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "{payload_len}");
+            }
+            Some('n') => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "{n}");
+            }
+            Some('T') => out.push_str(timestamp.unwrap_or("-")),
+            Some('%') => out.push('%'),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+            }
+            None => out.push('%'),
+        }
+    }
+    out
+}
+
+/// `topic echo` v2 — subscribe, refine, schema-decode (RFC 08 §7) with
+/// honest structural fallback.
 ///
-/// Subscribe-first is not a style choice: RFC 04 §3.2 forbids GET-then-subscribe
-/// (it drops everything published in the gap). This only subscribes, so it is
-/// trivially correct — but a `--seed` flag would have to keep that order.
-async fn cmd_echo(selector: Option<&str>, raw: bool, count: usize, args: &BusArgs) -> Result<()> {
-    let selector = selector
-        .map(str::to_string)
-        .unwrap_or_else(|| args.wire("v1/**"));
+/// Subscribe-first is not a style choice: RFC 04 §3.2 forbids
+/// GET-then-subscribe (it drops everything published in the gap).
+#[allow(clippy::too_many_arguments)]
+async fn cmd_echo(
+    selector: Option<&str>,
+    origin: Option<&str>,
+    class: Option<&str>,
+    producer: Option<&str>,
+    fmt: Option<&str>,
+    raw: bool,
+    no_decode: bool,
+    count: usize,
+    args: &BusArgs,
+) -> Result<()> {
+    let selector = match selector {
+        Some(s) => s.to_string(),
+        None => compose_selector(args, origin, class, producer)?,
+    };
+    let base = args.base()?.to_string();
 
     // Slices first (a single introspect fan-in), then subscribe: the slice
-    // set names each subject's payload type, which is what makes the rendered
-    // lines legible without anything compiled in.
+    // set names each subject's payload type; the schema store fetches
+    // `describe` lazily on first decode miss.
     let slices = if raw {
-        Vec::new()
+        zenkey_fleet::SliceSet::default()
     } else {
-        args.slices().await?
+        args.slice_set().await?
     };
+    let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
 
     let session = args.session().await?;
     let subscriber = session
@@ -343,19 +841,92 @@ async fn cmd_echo(selector: Option<&str>, raw: bool, count: usize, args: &BusArg
         .await
         .map_err(|e| anyhow!("{e}"))?;
 
-    eprintln!("echoing {selector} (ctrl-c to stop)");
+    let ndjson = matches!(args.format.resolved(), output::Format::Ndjson);
+    if !ndjson {
+        eprintln!("echoing {selector} (ctrl-c to stop)");
+    }
     let mut seen = 0usize;
     while let Ok(sample) = subscriber.recv_async().await {
+        seen += 1;
         let key = sample.key_expr().as_str().to_string();
         let bytes = sample.payload().to_bytes();
+        let encoding = sample.encoding().to_string();
+        let timestamp = sample.timestamp().map(|t| t.to_string());
 
         if raw {
             println!("{key}\n  {}", hex(&bytes));
         } else {
-            println!("{key}\n  {}", render(&args.base, &key, &bytes, &slices));
+            let (type_name, rendering) = if no_decode {
+                (
+                    None,
+                    zenkey_fleet::decode::Rendering::Structural(zenkey_fleet::decode::structural(
+                        &bytes,
+                    )),
+                )
+            } else {
+                zenkey_fleet::decode::decode_sample(
+                    &store,
+                    &session,
+                    &slices,
+                    &base,
+                    &key,
+                    Some(&encoding),
+                    &bytes,
+                )
+                .await
+            };
+            let (value, typed, notes) = match &rendering {
+                zenkey_fleet::decode::Rendering::Typed(d) => (
+                    serde_json::to_string(&d.value).unwrap_or_default(),
+                    true,
+                    d.notes.clone(),
+                ),
+                zenkey_fleet::decode::Rendering::Structural(text) => {
+                    (text.clone(), false, Vec::new())
+                }
+            };
+            if ndjson {
+                let parsed = zenkey::grammar::parse_full(&base, &key);
+                let obj = serde_json::json!({
+                    "key": key,
+                    "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
+                    "subject": parsed.as_ref().map(|p| p.subject.join("/")),
+                    "type": type_name,
+                    "typed": typed,
+                    "encoding": encoding,
+                    "timestamp": timestamp,
+                    "value": serde_json::from_str::<serde_json::Value>(&value)
+                        .unwrap_or(serde_json::Value::String(value.clone())),
+                });
+                println!("{obj}");
+            } else if let Some(fmt) = fmt {
+                println!(
+                    "{}",
+                    format_sample(
+                        fmt,
+                        seen,
+                        &key,
+                        &base,
+                        type_name.as_deref(),
+                        &encoding,
+                        bytes.len(),
+                        timestamp.as_deref(),
+                        &value,
+                    )
+                );
+            } else {
+                let tag = match (&type_name, typed) {
+                    (Some(t), true) => format!("<{t}>"),
+                    (Some(t), false) => format!("<{t}?>"),
+                    (None, _) => "<unregistered>".to_string(),
+                };
+                println!("{key}\n  {tag} {value}");
+                for note in notes {
+                    eprintln!("  note: {note}");
+                }
+            }
         }
 
-        seen += 1;
         if count > 0 && seen >= count {
             break;
         }
@@ -363,53 +934,80 @@ async fn cmd_echo(selector: Option<&str>, raw: bool, count: usize, args: &BusArg
     Ok(())
 }
 
-/// Wire key → subject (via the slices) → generically rendered value, with
-/// nothing app-specific compiled in.
-fn render(base: &str, key: &str, bytes: &[u8], slices: &[RegistrySlice]) -> String {
-    let type_name = zenkey::grammar::parse_full(base, key)
-        .and_then(|parsed| {
-            let producer = parsed.producer.as_ref().map(|p| p.name().to_string())?;
-            let slice = slices.iter().find(|s| s.name == producer)?;
-            let class = match parsed.class {
-                zenkey::grammar::ClassOrPlane::Class(c) => c.chunk(),
-                zenkey::grammar::ClassOrPlane::Plane(p) => p.chunk(),
-            };
-            let tail: Vec<&str> = parsed.subject.iter().map(String::as_str).collect();
-            slice
-                .subjects
-                .iter()
-                .find(|s| s.class == class && offline::match_subject(&s.path, &tail).is_some())
-                .map(|s| s.type_name.clone())
-        })
-        .unwrap_or_else(|| "unregistered".to_string());
-    format!("<{type_name}> {}", render_value(bytes))
-}
+/// `topic hz` / `topic bw` — watch a window, report rates (ros2-style).
+#[allow(clippy::too_many_arguments)]
+async fn cmd_rate(
+    selector: Option<&str>,
+    origin: Option<&str>,
+    class: Option<&str>,
+    producer: Option<&str>,
+    window: u64,
+    per_key: bool,
+    loss: bool,
+    bandwidth: bool,
+    args: &BusArgs,
+) -> Result<()> {
+    let selector = match selector {
+        Some(s) => s.to_string(),
+        None => compose_selector(args, origin, class, producer)?,
+    };
+    let session = args.session().await?;
+    let monitor = zenkey_fleet::Monitor::start(
+        &session,
+        zenkey_fleet::MonitorSpec {
+            selectors: vec![selector.clone()],
+            ..Default::default()
+        },
+    )
+    .await?;
 
-/// Best-effort generic payload rendering. The convention's profile default is
-/// CBOR with a first-byte sniff for JSON interop, so: payloads that look like
-/// JSON text parse as JSON; otherwise CBOR → JSON diagnostic; otherwise UTF-8
-/// text; otherwise hex. A generic explorer cannot synthesize a foreign app's
-/// Rust types (RFC 08 §5 keeps schema definitions in the owning crates) —
-/// this shows the *structure*, which is what the wire honestly says.
-fn render_value(bytes: &[u8]) -> String {
-    let looks_json = bytes.first().is_some_and(|b| {
-        matches!(
-            b,
-            b'{' | b'[' | b'"' | b' ' | b'-' | b'0'..=b'9' | b't' | b'f' | b'n'
-        )
+    eprintln!("measuring {selector} for {window}s…");
+    tokio::time::sleep(Duration::from_secs(window)).await;
+
+    let secs = window as f64;
+    monitor.core().with_stats(|stats| {
+        let (count, bytes, _) = stats.totals();
+        if per_key {
+            let mut rows: Vec<(String, u64, u64, u64)> = stats
+                .iter()
+                .map(|(k, s)| (k.to_string(), s.count, s.bytes, s.sn_gaps))
+                .collect();
+            rows.sort_by_key(|r| std::cmp::Reverse(r.1));
+            for (key, count, bytes, gaps) in rows {
+                if bandwidth {
+                    println!("{:>12.1} B/s  {key}", bytes as f64 / secs);
+                } else {
+                    print!("{:>8.2} Hz  {key}", count as f64 / secs);
+                    if loss {
+                        print!("  ({gaps} sn gap(s))");
+                    }
+                    println!();
+                }
+            }
+        }
+        if bandwidth {
+            println!(
+                "total: {:.1} B/s over {} key(s) ({bytes} bytes / {window}s)",
+                bytes as f64 / secs,
+                stats.len()
+            );
+        } else {
+            print!(
+                "total: {:.2} Hz over {} key(s) ({count} samples / {window}s)",
+                count as f64 / secs,
+                stats.len()
+            );
+            if loss {
+                let gaps: u64 = stats.iter().map(|(_, s)| s.sn_gaps).sum();
+                print!(
+                    "  — {gaps} source-sn gap(s) (zero also means \"publishers attach no SourceInfo\")"
+                );
+            }
+            println!();
+        }
     });
-    if looks_json && let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
-        return serde_json::to_string(&v).unwrap_or_default();
-    }
-    if let Ok(v) = ciborium::from_reader::<ciborium::Value, _>(bytes)
-        && let Ok(text) = serde_json::to_string(&v)
-    {
-        return text;
-    }
-    match std::str::from_utf8(bytes) {
-        Ok(text) if !text.is_empty() => text.to_string(),
-        _ => format!("<{} bytes> {}", bytes.len(), hex(bytes)),
-    }
+    monitor.stop();
+    Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -432,9 +1030,9 @@ async fn cmd_service_call(
     // A service origin (`@catalog`) carries no producer chunk (RFC 03 §1.5).
     // Un-namespaced tool ⇒ full keys, composed off the configured base.
     let mut key = if origin.starts_with('@') {
-        args.wire(&format!("v1/{origin}/@rpc/{procedure}"))
+        args.wire(format!("v1/{origin}/@rpc/{procedure}"))?
     } else {
-        args.wire(&format!("v1/{origin}/@rpc/{producer}/{procedure}"))
+        args.wire(format!("v1/{origin}/@rpc/{producer}/{procedure}"))?
     };
     if !params.is_empty() {
         key.push('?');
@@ -450,36 +1048,59 @@ async fn cmd_service_call(
     };
 
     let session = args.session().await?;
-    eprintln!("GET {key}");
-    let answers = bus::fleet_get(&session, &args.base, &key, payload, args.timeout()).await?;
+    let answers = bus::fleet_get(&session, args.base()?, &key, payload, args.timeout()).await?;
 
-    if answers.is_empty() {
-        // RFC 05 §3.1: "no reply" is not one condition, and callers "MUST NOT
-        // treat 'empty reply set' as a verdict about any specific host".
-        println!("no replies.");
-        println!("\nthat is not a verdict: an empty set means no queryable matched — an offline");
-        println!("host, a mistyped origin, or a procedure this producer does not serve.");
-        println!("`zenctl node list` says who is actually up.");
-        return Ok(());
-    }
-
-    for a in &answers {
-        match &a.answer {
-            bus::Answer::Value(bytes) => {
-                // Read replies are JSON by convention; introspect replies raw
-                // TOML. Print what parses, fall back to the text.
-                let text = match serde_json::from_slice::<serde_json::Value>(bytes) {
-                    Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
-                    Err(_) => String::from_utf8_lossy(bytes).to_string(),
-                };
-                println!("── {} ──\n{text}", a.origin);
-            }
-            bus::Answer::Error { name, message } => {
-                // RFC 05 §3: an error reply always means failure. Never dress
-                // one up as success.
-                eprintln!("── {} ── {name}: {message}", a.origin);
-            }
-        }
+    // Assemble the typed report (issue #12): value replies parse as JSON when
+    // they are JSON (read replies, by convention) and ride as text otherwise
+    // (introspect replies raw TOML). An error reply is a failure, never
+    // dressed up as success (RFC 05 §3).
+    let report = report::CallReport {
+        key: key.clone(),
+        answers: answers
+            .iter()
+            .map(|a| match &a.answer {
+                bus::Answer::Value(bytes) => {
+                    let bytes = bytes.to_bytes();
+                    match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                        Ok(v) => report::CallAnswer {
+                            origin: a.origin.clone(),
+                            ok: true,
+                            value: Some(v),
+                            text: None,
+                            error: None,
+                        },
+                        Err(_) => report::CallAnswer {
+                            origin: a.origin.clone(),
+                            ok: true,
+                            value: None,
+                            text: Some(String::from_utf8_lossy(&bytes).to_string()),
+                            error: None,
+                        },
+                    }
+                }
+                bus::Answer::Error { name, message } => report::CallAnswer {
+                    origin: a.origin.clone(),
+                    ok: false,
+                    value: None,
+                    text: None,
+                    error: Some(report::CallError {
+                        name: name.clone(),
+                        message: message.clone(),
+                    }),
+                },
+            })
+            .collect(),
+    };
+    output::call(&report, args.format, |a| match (&a.value, &a.text) {
+        (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
+        (None, Some(t)) => t.clone(),
+        _ => String::new(),
+    });
+    // Exit-code discipline: 1 = an error reply, 2 = zero replies (silence
+    // stays a distinct non-verdict).
+    let code = report.exit_code();
+    if code != 0 {
+        std::process::exit(code);
     }
     Ok(())
 }
@@ -488,7 +1109,7 @@ async fn cmd_service_call(
 /// the local registry files (RFC 08 §6).
 async fn cmd_doctor(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
-    let roster = bus::roster(&session, &args.base, args.timeout()).await?;
+    let roster = bus::roster(&session, args.base()?, args.timeout()).await?;
 
     let mut findings = 0usize;
     let mut answered = 0usize;
@@ -507,22 +1128,23 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
         // That is the grammar working, not an exception to it.
         let key = match &local.service_origin {
             Some(origin) => {
-                let o = zenkey::grammar::Origin::service(origin).map_err(|e| {
+                let o = zenkey::ServiceOrigin::new(origin).map_err(|e| {
                     anyhow!("bad service origin in local slice {}: {e}", local.name)
                 })?;
-                args.wire(&zenkey::grammar::service_rpc_key(&o, "introspect")?)
+                args.wire(zenkey::selector::service_rpc(&o, &["introspect"]))?
             }
-            None => args.wire(&zenkey::grammar::fleet_rpc_key(&local.name, "introspect")),
+            None => args.wire(zenkey::selector::fleet_rpc(&local.name, &["introspect"]))?,
         };
 
-        let answers = bus::fleet_get(&session, &args.base, &key, None, args.timeout()).await?;
+        let answers = bus::fleet_get(&session, args.base()?, &key, None, args.timeout()).await?;
 
         for answer in &answers {
             let bus::Answer::Value(bytes) = &answer.answer else {
                 continue;
             };
             answered += 1;
-            let served_toml = String::from_utf8_lossy(bytes);
+            let served_toml = bytes.to_bytes();
+            let served_toml = String::from_utf8_lossy(&served_toml);
             let served = match zenkey::parse_slice(&served_toml) {
                 Ok(s) => s,
                 Err(e) => {
@@ -552,7 +1174,7 @@ async fn cmd_doctor(args: &BusArgs) -> Result<()> {
     // With no local registry the only introspect coverage we can count is the
     // fleet-wide wildcard.
     if locals.is_empty() {
-        let pairs = bus::fleet_registry(&session, &args.base, args.timeout()).await?;
+        let pairs = bus::fleet_registry(&session, args.base()?, args.timeout()).await?;
         answered = pairs.len();
     }
 
@@ -584,50 +1206,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_value_sniffs_json_cbor_text_and_bytes() {
-        // JSON text renders as JSON.
-        assert_eq!(render_value(br#"{"a":1}"#), r#"{"a":1}"#);
-        // CBOR renders as its JSON diagnostic.
-        let mut cbor = Vec::new();
-        ciborium::into_writer(&serde_json::json!({"b": 2}), &mut cbor).unwrap();
-        assert_eq!(render_value(&cbor), r#"{"b":2}"#);
-        // Plain text stays text; binary falls back to hex.
-        assert_eq!(render_value(b"plain text"), "plain text");
-        assert!(render_value(&[0xff, 0x00, 0x9c]).contains("ff 00 9c"));
+    fn format_sample_expands_fields() {
+        let line = format_sample(
+            "%n %o %c/%p %s <%t> %v (%l B, %e)",
+            3,
+            "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
+            "tcgui",
+            Some("NetworkInterface"),
+            "application/json",
+            12,
+            None,
+            r#"{"up":true}"#,
+        );
+        assert_eq!(
+            line,
+            r#"3 h-3fa9c2d41b7e state/tc iface/eth0/state <NetworkInterface> {"up":true} (12 B, application/json)"#
+        );
+        // Escapes and literals.
+        assert_eq!(
+            format_sample(
+                "%%|%K\\t.",
+                1,
+                "b/v1/h-3fa9c2d41b7e/state/tc/x",
+                "b",
+                None,
+                "e",
+                0,
+                None,
+                "v"
+            ),
+            "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
+        );
     }
 
     #[test]
-    fn render_tags_the_declared_type_and_unregistered() {
-        let slice = zenkey::parse_slice(
-            r#"
-            [registry]
-            version = "0.3"
-            app = "tcgui"
-            convention = 1
-            [producer]
-            name = "tc"
-            [[subject]]
-            path = "iface/{iface}/state"
-            class = "state"
-            type = "NetworkInterface"
-            "#,
-        )
-        .unwrap();
-        let slices = vec![slice];
-        let line = render(
-            "tcgui",
-            "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
-            br#"{"up":true}"#,
-            &slices,
+    fn compose_selector_places_positions() {
+        let args = BusArgs {
+            base: Some("zs".into()),
+            context: None,
+            registry: vec![],
+            connect: vec![],
+            listen: vec![],
+            scouting: false,
+            timeout: None,
+            format: output::Format::Table,
+        };
+        assert_eq!(
+            compose_selector(&args, None, None, None).unwrap(),
+            "zs/v1/*/**"
         );
-        assert_eq!(line, r#"<NetworkInterface> {"up":true}"#);
-
-        let missing = render(
-            "tcgui",
-            "tcgui/v1/h-3fa9c2d41b7e/state/tc/bogus",
-            b"x",
-            &slices,
+        assert_eq!(
+            compose_selector(&args, Some("h-3fa9c2d41b7e"), Some("state"), None).unwrap(),
+            "zs/v1/h-3fa9c2d41b7e/state/**"
         );
-        assert!(missing.starts_with("<unregistered>"), "got: {missing}");
+        assert_eq!(
+            compose_selector(&args, None, None, Some("tc")).unwrap(),
+            "zs/v1/*/*/tc/**"
+        );
+        assert!(compose_selector(&args, None, Some("alerts"), None).is_err());
     }
 }

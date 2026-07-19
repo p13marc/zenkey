@@ -39,6 +39,9 @@ pub struct SubjectDecl {
     pub rate: Option<String>,
     /// The declared key-population bound, when declared.
     pub cardinality: Option<i64>,
+    /// The declared payload encoding (`application/cbor`, …), when declared
+    /// (RFC 08 §2, v1.5). Resolution: sample `Encoding` > this > sniff.
+    pub encoding: Option<String>,
 }
 
 /// One `[[procedure]]` entry of a served registry slice.
@@ -49,6 +52,10 @@ pub struct ProcedureDecl {
     /// `read` | `write`.
     pub kind: String,
     pub reply: Option<String>,
+    /// The declared request type name, when declared.
+    pub request: Option<String>,
+    /// The declared payload encoding (RFC 08 §2, v1.5).
+    pub encoding: Option<String>,
     pub since: Option<String>,
     pub description: Option<String>,
 }
@@ -170,6 +177,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             unit: s(e.get("unit")),
             rate: s(e.get("rate")),
             cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
+            encoding: s(e.get("encoding")),
         });
     }
 
@@ -179,6 +187,8 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             path: s(e.get("path")).ok_or_else(|| err("[[procedure]] missing path"))?,
             kind: s(e.get("kind")).unwrap_or_default(),
             reply: s(e.get("reply")),
+            request: s(e.get("request")),
+            encoding: s(e.get("encoding")),
             since: s(e.get("since")),
             description: s(e.get("description")),
         });

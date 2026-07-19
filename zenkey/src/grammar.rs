@@ -7,6 +7,8 @@
 
 use std::fmt;
 
+use crate::key::Key;
+
 /// The convention major this crate implements (RFC 03 §1.2).
 ///
 /// **Plain, not verbatim** — and that is load-bearing, not an oversight.
@@ -256,6 +258,16 @@ impl Producer {
         self.instance
     }
 
+    /// Append the producer chunk to a key under construction without an
+    /// intermediate allocation (the builders' hot path).
+    pub(crate) fn push_chunk(&self, out: &mut String) {
+        out.push_str(&self.name);
+        if let Some(i) = self.instance {
+            use std::fmt::Write as _;
+            let _ = write!(out, "-{i}");
+        }
+    }
+
     pub fn chunk(&self) -> String {
         match self.instance {
             None => self.name.clone(),
@@ -365,10 +377,14 @@ fn validate_subject(subject: &[&str]) -> Result<(), KeyError> {
 }
 
 fn push_key(parts: &mut String, chunk: &str) {
+    push_key_sep(parts);
+    parts.push_str(chunk);
+}
+
+fn push_key_sep(parts: &mut String) {
     if !parts.is_empty() {
         parts.push('/');
     }
-    parts.push_str(chunk);
 }
 
 /// Build a data-class key: `v1/<origin>/<class>[/<producer>]/<subject...>`.
@@ -379,7 +395,7 @@ pub fn data_key(
     class: Class,
     producer: Option<&Producer>,
     subject: &[&str],
-) -> Result<String, KeyError> {
+) -> Result<Key, KeyError> {
     validate_subject(subject)?;
     if origin.has_producer_chunk() != producer.is_some() {
         return Err(KeyError::Parse(
@@ -400,12 +416,13 @@ pub fn data_key(
     push_key(&mut key, origin.chunk());
     push_key(&mut key, class.chunk());
     if let Some(p) = producer {
-        push_key(&mut key, &p.chunk());
+        push_key_sep(&mut key);
+        p.push_chunk(&mut key);
     }
     for chunk in subject {
         push_key(&mut key, chunk);
     }
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Build an `@rpc` procedure key: `v1/<origin>/@rpc[/<producer>]/<procedure...>`.
@@ -413,7 +430,7 @@ pub fn rpc_key(
     origin: &Origin,
     producer: Option<&Producer>,
     procedure: &[&str],
-) -> Result<String, KeyError> {
+) -> Result<Key, KeyError> {
     validate_subject(procedure)?;
     if origin.has_producer_chunk() != producer.is_some() {
         return Err(KeyError::Parse(
@@ -426,34 +443,32 @@ pub fn rpc_key(
     push_key(&mut key, origin.chunk());
     push_key(&mut key, PLANE_RPC);
     if let Some(p) = producer {
-        push_key(&mut key, &p.chunk());
+        push_key_sep(&mut key);
+        p.push_chunk(&mut key);
     }
     for chunk in procedure {
         push_key(&mut key, chunk);
     }
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Build an `@media` key: `v1/<origin>/@media/<producer>/<stream...>`.
-pub fn media_key(
-    origin: &Origin,
-    producer: &Producer,
-    stream: &[&str],
-) -> Result<String, KeyError> {
+pub fn media_key(origin: &Origin, producer: &Producer, stream: &[&str]) -> Result<Key, KeyError> {
     validate_subject(stream)?;
     let mut key = String::new();
     push_key(&mut key, VERSION_CHUNK);
     push_key(&mut key, origin.chunk());
     push_key(&mut key, PLANE_MEDIA);
-    push_key(&mut key, &producer.chunk());
+    push_key_sep(&mut key);
+    producer.push_chunk(&mut key);
     for chunk in stream {
         push_key(&mut key, chunk);
     }
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Build an `@blob` key: `v1/<origin>/@blob/<tier>/<rest...>` (RFC 07 §2).
-pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<String, KeyError> {
+pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<Key, KeyError> {
     validate_subject(rest)?;
     let mut key = String::new();
     push_key(&mut key, VERSION_CHUNK);
@@ -463,12 +478,12 @@ pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<String
     for chunk in rest {
         push_key(&mut key, chunk);
     }
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Liveliness token key for a producer: `v1/<origin>/state/<producer>/alive`
 /// (RFC 04 §5). Service origins: `v1/@<service>/state/alive`.
-pub fn alive_key(origin: &Origin, producer: Option<&Producer>) -> Result<String, KeyError> {
+pub fn alive_key(origin: &Origin, producer: Option<&Producer>) -> Result<Key, KeyError> {
     if origin.has_producer_chunk() != producer.is_some() {
         return Err(KeyError::Parse(
             "host origins require a producer chunk; service origins forbid one (RFC 03 §1.5)"
@@ -480,10 +495,11 @@ pub fn alive_key(origin: &Origin, producer: Option<&Producer>) -> Result<String,
     push_key(&mut key, origin.chunk());
     push_key(&mut key, CLASS_STATE);
     if let Some(p) = producer {
-        push_key(&mut key, &p.chunk());
+        push_key_sep(&mut key);
+        p.push_chunk(&mut key);
     }
     push_key(&mut key, SUBJECT_ALIVE);
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Liveliness token key for a tracked downstream device (RFC 04 §5):
@@ -492,7 +508,7 @@ pub fn device_alive_key(
     origin: &Origin,
     producer: &Producer,
     device: &str,
-) -> Result<String, KeyError> {
+) -> Result<Key, KeyError> {
     if !is_valid_plain_chunk(device) {
         return Err(KeyError::InvalidPlainChunk(device.to_string()));
     }
@@ -500,30 +516,46 @@ pub fn device_alive_key(
     push_key(&mut key, VERSION_CHUNK);
     push_key(&mut key, origin.chunk());
     push_key(&mut key, CLASS_STATE);
-    push_key(&mut key, &producer.chunk());
+    push_key_sep(&mut key);
+    producer.push_chunk(&mut key);
     push_key(&mut key, "device");
     push_key(&mut key, device);
     push_key(&mut key, SUBJECT_ALIVE);
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// A structurally parsed v1 key (positions 2–5; the subject tail is opaque
 /// here — registry-generated parsers refine it).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructuralKey {
+pub struct StructuralKey<'k> {
     pub origin: Origin,
     pub class: ClassOrPlane,
     /// `None` for service origins and for `@blob` (tier token instead).
     pub producer: Option<Producer>,
     /// Tier token, only under `@blob`.
     pub blob_tier: Option<BlobTier>,
-    /// Everything after the producer/tier position.
-    pub subject: Vec<String>,
+    /// Everything after the producer/tier position, borrowed from the parsed
+    /// key (v1.5 perf: parsing allocates no per-chunk `String`s — the parse
+    /// result lives within the key string's scope, which is how every known
+    /// caller uses it).
+    pub subject: Vec<&'k str>,
+}
+
+impl StructuralKey<'_> {
+    /// The typed remote origin, when this key came from a host (RFC 08
+    /// §1.1's parse-side bridge): a parsed wire key is exactly where a
+    /// consumer legitimately obtains a [`crate::origin::RemoteOrigin`].
+    pub fn remote_origin(&self) -> Option<crate::origin::RemoteOrigin> {
+        match &self.origin {
+            Origin::Host(id) => Some(crate::origin::RemoteOrigin::from_host(id.clone())),
+            Origin::Service(_) => None,
+        }
+    }
 }
 
 /// Parse a base-relative v1 key (`v1/...`). Structural only: subject tails
 /// stay opaque (RFC 03 §1). Rejects anything that is not under `v1`.
-pub fn parse(key: &str) -> Result<StructuralKey, KeyError> {
+pub fn parse(key: &str) -> Result<StructuralKey<'_>, KeyError> {
     let mut chunks = key.split('/');
     let version = chunks
         .next()
@@ -577,7 +609,7 @@ pub fn parse(key: &str) -> Result<StructuralKey, KeyError> {
         (Origin::Service(_), _) => {}
     }
 
-    let subject: Vec<String> = chunks.map(str::to_string).collect();
+    let subject: Vec<&str> = chunks.collect();
     if subject.is_empty() {
         return Err(KeyError::EmptySubject);
     }
@@ -593,8 +625,8 @@ pub fn parse(key: &str) -> Result<StructuralKey, KeyError> {
 /// Prepend an explicit base — for router-side artifacts (storage selectors,
 /// ACL rules) and tests. Application sessions use the namespace instead
 /// (RFC 09 §0).
-pub fn with_base(base: &str, key_or_selector: &str) -> String {
-    format!("{base}/{key_or_selector}")
+pub fn with_base(base: &str, key_or_selector: impl AsRef<str>) -> String {
+    format!("{base}/{}", key_or_selector.as_ref())
 }
 
 /// Strip an explicit base from a **full** (wire-form) key — the inverse of
@@ -635,49 +667,14 @@ pub fn strip_base<'k>(base: &str, key: &'k str) -> Option<&'k str> {
 /// `None` when the key belongs to another deployment (a different base) or
 /// does not parse — for an observer both are the meaningful answer rather
 /// than an error.
-pub fn parse_full(base: &str, key: &str) -> Option<StructuralKey> {
+pub fn parse_full<'k>(base: &str, key: &'k str) -> Option<StructuralKey<'k>> {
     parse(strip_base(base, key)?).ok()
 }
 
-/// Caller-side fleet procedure selector (RFC 05 §2): a GET on
-/// `v1/*/@rpc/<producer>/<procedure>` reaches every host serving the
-/// producer. Callers MUST use query target `All` (RFC 05 §2.1) —
-/// `BestMatching` can short-circuit the fan-in.
-pub fn fleet_rpc_key(producer: &str, procedure: &str) -> String {
-    format!("{VERSION_CHUNK}/*/{PLANE_RPC}/{producer}/{procedure}")
-}
-
-/// A service origin's procedure key (RFC 05, RFC 06 §5): service origins omit
-/// the producer chunk — `v1/@<service>/@rpc/<procedure>`. Errors on a host
-/// origin, whose procedures ride under a producer chunk ([`rpc_key`]).
-pub fn service_rpc_key(origin: &Origin, procedure: &str) -> Result<String, KeyError> {
-    if origin.has_producer_chunk() {
-        return Err(KeyError::Parse(
-            "service_rpc_key takes a service origin; host origins use rpc_key (RFC 03 §1.5)"
-                .to_string(),
-        ));
-    }
-    Ok(format!(
-        "{VERSION_CHUNK}/{}/{PLANE_RPC}/{procedure}",
-        origin.chunk()
-    ))
-}
-
-/// The whole fleet's producer liveliness tokens (RFC 04 §5) —
-/// `v1/*/state/*/alive`: who is up and what they run, zero payload bytes.
-///
-/// `*` in the origin position can never match a verbatim service origin
-/// (design property D4), so a service's own token ([`service_alive_key`]) is
-/// **not** in this set and must be asked for by name.
-pub fn all_liveliness_wildcard() -> String {
-    format!("{VERSION_CHUNK}/*/{CLASS_STATE}/*/{SUBJECT_ALIVE}")
-}
-
-/// A service origin's liveliness token key (RFC 04 §5):
-/// `v1/@<service>/state/alive`. Errors on a host origin ([`alive_key`]).
-pub fn service_alive_key(origin: &Origin) -> Result<String, KeyError> {
-    alive_key(origin, None)
-}
+// The wire-observer wildcard helpers (`fleet_rpc_key`, `service_rpc_key`,
+// `all_liveliness_wildcard`, `service_alive_key`) moved to the typed
+// [`crate::selector`] module in v1.5 (issue #7) — selectors are values of
+// [`crate::Selector`], not ad-hoc strings.
 
 #[cfg(test)]
 mod tests {
@@ -816,19 +813,19 @@ mod tests {
             assert_eq!(built, want);
             let parsed = parse(built).unwrap();
             // Rebuild from parts must reproduce the key (canon round-trip).
-            let subject: Vec<&str> = parsed.subject.iter().map(String::as_str).collect();
+            let subject = &parsed.subject;
             let rebuilt = match parsed.class {
                 ClassOrPlane::Class(c) => {
-                    data_key(&parsed.origin, c, parsed.producer.as_ref(), &subject).unwrap()
+                    data_key(&parsed.origin, c, parsed.producer.as_ref(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Rpc) => {
-                    rpc_key(&parsed.origin, parsed.producer.as_ref(), &subject).unwrap()
+                    rpc_key(&parsed.origin, parsed.producer.as_ref(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Media) => {
-                    media_key(&parsed.origin, parsed.producer.as_ref().unwrap(), &subject).unwrap()
+                    media_key(&parsed.origin, parsed.producer.as_ref().unwrap(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Blob) => {
-                    blob_key(&parsed.origin, parsed.blob_tier.unwrap(), &subject).unwrap()
+                    blob_key(&parsed.origin, parsed.blob_tier.unwrap(), subject).unwrap()
                 }
             };
             assert_eq!(&rebuilt, want);

@@ -22,7 +22,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use crate::origin::HostId;
+use crate::origin::{HostId, LocalOrigin};
 
 /// An application's identity constants plus its process-wide host origin.
 ///
@@ -78,6 +78,13 @@ impl AppProfile {
             tracing::info!(origin = %id, app = self.app, "host origin minted");
             id
         })
+    }
+
+    /// This process's typed local origin (RFC 08 §1.1) — the only
+    /// non-explicit constructor of [`LocalOrigin`], so a call path cannot
+    /// mint one by accident.
+    pub fn local_origin(&'static self) -> LocalOrigin {
+        LocalOrigin::from_host_id(self.host_id().clone())
     }
 }
 

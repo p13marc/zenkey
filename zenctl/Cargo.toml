@@ -1,6 +1,10 @@
 [package]
 name = "zenctl"
-version = "0.1.0"
+version = "0.2.0"
+# Publication policy (docs/redesign-2026-07.md §15): zenctl ships as a
+# GitHub release binary / `cargo install --git`; new versions are NOT
+# published to crates.io (0.1.x stays there, un-yanked, pointing here).
+publish = false
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -17,11 +21,16 @@ path = "src/main.rs"
 
 [dependencies]
 zenkey = { workspace = true }
+zenkey-fleet = { workspace = true }
 
 zenoh = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
+clap_complete = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+toml = "0.8"
+dirs = { workspace = true }
 ciborium = { workspace = true }
 tracing-subscriber = { workspace = true }

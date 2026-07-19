@@ -157,13 +157,22 @@ QoS is declared per subject as a **named profile** in the registry
 a default profile. The profile vocabulary is closed — these five, mapping
 to Zenoh reliability × congestion control × priority:
 
-| Profile | Reliability | Congestion | Priority | Default for |
-|---|---|---|---|---|
-| `sampled` | best-effort | drop | data-low | `telemetry` |
-| `refreshed` | best-effort | drop | data | `state` that self-heals (see rule below) |
-| `transition` | reliable | block | data | `state` written on transition; `events` |
-| `alert` | reliable | block | interactive-high | `state/*/alert/*` |
-| `frame` | best-effort | drop | interactive-high | `@media` (a stale frame is worthless; the encoder must never block) |
+| Profile | Reliability | Congestion | Priority | Express | Default for |
+|---|---|---|---|---|---|
+| `sampled` | best-effort | drop | data-low | no | `telemetry` |
+| `refreshed` | best-effort | drop | data | no | `state` that self-heals (see rule below) |
+| `transition` | reliable | block | data | no | `state` written on transition; `events` |
+| `alert` | reliable | block | interactive-high | **yes** | `state/*/alert/*` |
+| `frame` | best-effort | drop | interactive-high | **yes** | `@media` (a stale frame is worthless; the encoder must never block) |
+
+**The `express` axis (v1.5).** Zenoh's per-message `express` flag bypasses
+transport batching for lower latency at the cost of batching efficiency. It
+is a fourth axis of the profile table, not a per-key knob: `alert` and
+`frame` — the two profiles whose whole point is latency — set it; the three
+throughput-shaped profiles do not. The vocabulary stays closed at five
+profiles; the rejected alternative (a per-key `express` override in the
+registry) is recorded in the v1.5 changelog — it would reopen the exact
+per-key QoS bikeshed the closed profile set exists to prevent.
 
 The `refreshed`/`transition` split inside `state` is about the **cost of
 waiting out a missed write**, not about self-healing: *all* live state
@@ -201,6 +210,14 @@ router policy — one overwrite rule per class prefix
 ([09-operations.md §4](09-operations.md)) — turning publisher discipline
 into infrastructure guarantee. This is the QoS counterpart of storage
 selection: one more infrastructure concern the grammar made a config file.
+
+**Encoding declaration (v1.5).** Publishers SHOULD set the middleware
+`Encoding` on every sample, using the predefined MIME-ish constants
+(`application/cbor`, `application/json`, `application/protobuf`) — pure
+metadata, free on the wire, and the first thing a generic consumer
+consults; the registry MAY declare a per-entry `encoding`
+([08-registry.md §2](08-registry.md)). Resolution order is
+**sample > registry > sniff** ([08-registry.md §7](08-registry.md)).
 
 ### 3.1 Delivery contracts per class
 
@@ -374,6 +391,30 @@ The split mirrors §3's QoS design: **entitlements in the registry,
 mechanisms in deployment/build config.** A subject's row in the registry
 says what consumers may rely on; whether a cache or a storage delivers it
 is invisible to the keys and to the wire contract.
+
+### 3.5 Late-joiner seeding is delegated for volatile state (v1.5)
+
+The middleware's advanced tier (§3.3) is now the **normative seeding
+mechanism for volatile state**: a publisher of `refreshed`/`transition`
+state (and last-value telemetry, where seeded at all) meets its `seed`
+entitlement with the advanced publisher's **cache** and the subscriber's
+**history/recovery** — the mechanism the middleware ecosystem has
+consolidated on (its older cache/querying-subscriber APIs are deprecated
+upstream, and the seeding entitlement predates that consolidation).
+Storage-backed seeding remains correct where a deployment already runs the
+storage for *durable* reasons; what changes is the default answer to "how
+does a late joiner see current state" — a producer-side cache, not a
+router deployment dependency.
+
+**What does not change:** the storage-manager remains authoritative for
+durable at-rest data (§4 — event logs, state history, the catalog);
+`seed`/`detect_s` registry semantics are untouched (entitlements in the
+registry, mechanisms in deployment — §3.4's split holds); and local
+durability layers (a constrained leaf's on-disk backfill store) are a
+different concern entirely. The hard dependency this rests on is the
+plain version chunk: the advanced tier's `@adv` liveliness tokens must
+remain structurally parseable ([03-grammar.md §1.2](03-grammar.md)) —
+the enforcement crate pins it with executable tests.
 
 ---
 

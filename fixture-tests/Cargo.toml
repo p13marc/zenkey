@@ -10,7 +10,15 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-zenkey = { workspace = true }
+zenkey = { workspace = true, features = ["schemars", "decode"] }
 
 [build-dependencies]
 zenkey-build = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+serde_json = { workspace = true }
+
+[[bench]]
+name = "generated"
+harness = false

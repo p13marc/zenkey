@@ -42,6 +42,13 @@ impl QosProfile {
         }
     }
 
+    /// The `express` axis (RFC 04 §3, v1.5/E1): bypass transport batching
+    /// for the two latency-shaped profiles. Plain metadata, so not gated on
+    /// the `zenoh` feature.
+    pub fn express(self) -> bool {
+        matches!(self, Self::Alert | Self::Frame)
+    }
+
     #[cfg(feature = "zenoh")]
     pub fn reliability(self) -> Reliability {
         match self {
@@ -71,6 +78,15 @@ impl QosProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn express_is_the_latency_pair() {
+        assert!(QosProfile::Alert.express());
+        assert!(QosProfile::Frame.express());
+        assert!(!QosProfile::Sampled.express());
+        assert!(!QosProfile::Refreshed.express());
+        assert!(!QosProfile::Transition.express());
+    }
 
     #[test]
     fn names_round_trip() {

@@ -9,33 +9,21 @@
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use zenkey::{RegistrySlice, parse_slice};
+use zenkey::RegistrySlice;
+#[cfg(test)]
+use zenkey::parse_slice;
+
+use crate::report::{
+    CarrierRow, InterfaceList, InterfaceShow, InterfaceTypeRow, ServiceList, ServiceRow, TopicInfo,
+    TopicList, TopicRow,
+};
 
 /// Load registry slices from local `registry/*.toml` dirs — the offline
 /// source. What a checked-out application *declares*, as opposed to what a
 /// live fleet *serves*.
 pub fn load_slices(dirs: &[PathBuf]) -> Result<Vec<RegistrySlice>> {
-    let mut out = Vec::new();
-    for dir in dirs {
-        let mut paths: Vec<_> = std::fs::read_dir(dir)
-            .map_err(|e| anyhow!("--registry {}: {e}", dir.display()))?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
-            .collect();
-        paths.sort();
-        for path in paths {
-            let text =
-                std::fs::read_to_string(&path).map_err(|e| anyhow!("{}: {e}", path.display()))?;
-            let slice = parse_slice(&text).map_err(|e| {
-                anyhow!(
-                    "{}: does not parse as a registry slice: {e}",
-                    path.display()
-                )
-            })?;
-            out.push(slice);
-        }
-    }
-    Ok(out)
+    // Delegates to the fleet engine (issue #15): one loader for CLI and GUI.
+    Ok(zenkey_fleet::SliceSet::from_dirs(dirs)?.slices().to_vec())
 }
 
 /// `topic list` — every registered subject in the given slices.
@@ -50,7 +38,7 @@ pub fn topic_list(
     slices: &[RegistrySlice],
     producer: Option<&str>,
     class: Option<&str>,
-) -> Result<()> {
+) -> Result<TopicList> {
     if let Some(c) = class
         && !["telemetry", "state", "events"].contains(&c)
     {
@@ -58,55 +46,27 @@ pub fn topic_list(
             "unknown class {c:?} — the classes are telemetry, state, events (RFC 04 §1)"
         ));
     }
-
-    let mut total = 0usize;
-    let mut open_ended = 0usize;
-
+    let mut subjects = Vec::new();
     for slice in slices {
-        let name = &slice.name;
-        if producer.is_some_and(|p| p != name) {
+        if producer.is_some_and(|p| p != slice.name) {
             continue;
         }
-
-        let subjects: Vec<_> = slice
+        for s in slice
             .subjects
             .iter()
             .filter(|s| class.is_none_or(|c| c == s.class))
-            .collect();
-        if subjects.is_empty() {
-            continue;
-        }
-
-        println!("\n{name}  (registry {})", slice.version);
-        for s in subjects {
-            let open = s.path.contains("...");
-            if open {
-                open_ended += 1;
-            }
-            println!(
-                "  {:<10} {:<44} {}{}",
-                s.class,
-                s.path,
-                s.type_name,
-                if open { "  [open-ended]" } else { "" }
-            );
-            total += 1;
+        {
+            subjects.push(TopicRow {
+                producer: slice.name.clone(),
+                registry_version: slice.version.clone(),
+                class: s.class.clone(),
+                path: s.path.clone(),
+                type_name: s.type_name.clone(),
+                open_ended: s.path.contains("..."),
+            });
         }
     }
-
-    if total == 0 {
-        println!("no subjects match.");
-        return Ok(());
-    }
-    println!("\n{total} registered subject(s).");
-    if open_ended > 0 {
-        let is = if open_ended == 1 { "is" } else { "are" };
-        println!(
-            "{open_ended} {is} open-ended ({{var...}}): the registry fixes their shape, not their\n\
-             members. Use `zenctl topic echo` to see what a live fleet actually publishes."
-        );
-    }
-    Ok(())
+    Ok(TopicList { subjects })
 }
 
 /// `topic info` — refine one concrete wire key against the registry slices.
@@ -115,7 +75,7 @@ pub fn topic_list(
 /// **structurally** (grammar only), then its subject tail is matched against
 /// the producer's slice, binding variables by name — which is why the output
 /// can say `mount=root` rather than `parts[6]`.
-pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()> {
+pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<TopicInfo> {
     use zenkey::grammar::ClassOrPlane;
 
     let Some(parsed) = zenkey::grammar::parse_full(base, key) else {
@@ -154,7 +114,7 @@ pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()>
             }
         }
     };
-    let tail: Vec<&str> = parsed.subject.iter().map(String::as_str).collect();
+    let tail: &[&str] = &parsed.subject;
 
     let Some(slice) = slices.iter().find(|s| s.name == producer) else {
         return Err(anyhow!(
@@ -167,7 +127,7 @@ pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()>
         if s.class != class.chunk() {
             return None;
         }
-        match_subject(&s.path, &tail).map(|vars| (s, vars))
+        match_subject(&s.path, tail).map(|vars| (s, vars))
     });
     let Some((subject, vars)) = hit else {
         return Err(anyhow!(
@@ -179,45 +139,23 @@ pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()>
         ));
     };
 
-    println!("key       {key}");
-    println!("origin    {}", parsed.origin.chunk());
-    println!("producer  {producer}");
-    println!("class     {}", subject.class);
-    println!("subject   {}", subject.path);
-    if !vars.is_empty() {
-        println!("variables");
-        for (name, value) in &vars {
-            println!("  {name} = {value}");
-        }
-    }
-    println!("payload   {}", subject.type_name);
-    println!("  (schema lives with the owning application — RFC 08 §5)");
-    if let Some(unit) = &subject.unit {
-        println!("unit      {unit}");
-    }
-    if let Some(qos) = &subject.qos {
-        println!("qos       {qos}");
-    }
-    if let Some(ttl) = subject.ttl_s {
-        // RFC 04 §1.2: publishers refresh at <= ttl/2, consumers age out at ttl.
-        println!(
-            "ttl       {ttl}s  (refresh <= {}s; stale after {ttl}s)",
-            ttl / 2
-        );
-    }
-    if let Some(rate) = &subject.rate {
-        println!("rate      {rate}");
-    }
-    if let Some(c) = subject.cardinality {
-        println!("cardinality  ~{c} keys expected");
-    }
-    if let Some(since) = &subject.since {
-        println!("since     {since}");
-    }
-    if let Some(desc) = &subject.description {
-        println!("note      {desc}");
-    }
-    Ok(())
+    Ok(TopicInfo {
+        key: key.to_string(),
+        origin: parsed.origin.chunk().to_string(),
+        producer,
+        class: subject.class.clone(),
+        subject: subject.path.clone(),
+        variables: vars.into_iter().collect(),
+        payload_type: subject.type_name.clone(),
+        unit: subject.unit.clone(),
+        qos: subject.qos.clone(),
+        ttl_s: subject.ttl_s,
+        rate: subject.rate.clone(),
+        cardinality: subject.cardinality,
+        encoding: subject.encoding.clone(),
+        since: subject.since.clone(),
+        description: subject.description.clone(),
+    })
 }
 
 /// Match a concrete subject tail against a registry pattern, binding variables.
@@ -227,67 +165,48 @@ pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()>
 /// `None` if the shapes disagree — the slice-level equivalent of a compiled
 /// registry's parse direction, done without a compiled subject.
 pub fn match_subject(pattern: &str, tail: &[&str]) -> Option<Vec<(String, String)>> {
-    let pchunks: Vec<&str> = pattern.split('/').collect();
-    let mut vars = Vec::new();
-    let mut ti = 0usize;
-    for (pi, pc) in pchunks.iter().enumerate() {
-        if let Some(var) = pc.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
-            if let Some(name) = var.strip_suffix("...") {
-                // A rest-variable is legal only as the final chunk; it swallows
-                // whatever is left (possibly nothing).
-                if pi != pchunks.len() - 1 {
-                    return None;
-                }
-                vars.push((name.to_string(), tail[ti..].join("/")));
-                return Some(vars);
-            }
-            let chunk = tail.get(ti)?;
-            vars.push((var.to_string(), (*chunk).to_string()));
-            ti += 1;
-        } else {
-            if tail.get(ti) != Some(pc) {
-                return None;
-            }
-            ti += 1;
-        }
-    }
-    (ti == tail.len()).then_some(vars)
+    // Delegates to `zenkey::pattern` (v1.5, issue #7): the same matcher the
+    // codegen orders its parse arms by, so this tool and generated consumers
+    // can never disagree on which pattern a tail refines to. (The previous
+    // local copy here allowed an *empty* rest — a real divergence from the
+    // generated semantics, which require >= 1 chunk. The shared matcher is
+    // authoritative.)
+    let p = zenkey::pattern::SubjectPattern::parse(pattern).ok()?;
+    Some(
+        p.matches(tail)?
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect(),
+    )
 }
 
 /// `service list` — every registered procedure on the `@rpc` plane, from the
 /// given slices.
-pub fn service_list(slices: &[RegistrySlice], producer: Option<&str>) -> Result<()> {
-    let mut total = 0usize;
+pub fn service_list(slices: &[RegistrySlice], producer: Option<&str>) -> Result<ServiceList> {
+    let mut procedures = Vec::new();
     for slice in slices {
-        let name = &slice.name;
-        if producer.is_some_and(|p| p != name) {
+        if producer.is_some_and(|p| p != slice.name) {
             continue;
         }
-        if slice.procedures.is_empty() {
-            continue;
-        }
-
-        println!("\n{name}  (registry {})", slice.version);
         for p in &slice.procedures {
-            let reply = p.reply.as_deref().unwrap_or("-");
-            println!("  {:<6} {:<24} → {}", p.kind, p.path, reply);
-            total += 1;
+            procedures.push(ServiceRow {
+                producer: slice.name.clone(),
+                registry_version: slice.version.clone(),
+                kind: p.kind.clone(),
+                path: p.path.clone(),
+                request: p.request.clone(),
+                reply: p.reply.clone(),
+            });
         }
     }
-    if total == 0 {
-        println!("no procedures match.");
-        return Ok(());
-    }
-    println!("\n{total} registered procedure(s).");
-    println!("call one with: zenctl service call <origin|*> <producer> <procedure>");
-    Ok(())
+    Ok(ServiceList { procedures })
 }
 
 /// `interface list` — every payload type the slices declare, with carrier
 /// counts. Field-level schema is deliberately absent: type definitions stay
 /// with the owning application (RFC 08 §5), so this maps the vocabulary, not
 /// the shapes.
-pub fn interface_list(slices: &[RegistrySlice]) -> Result<()> {
+pub fn interface_list(slices: &[RegistrySlice]) -> Result<InterfaceList> {
     use std::collections::BTreeMap;
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for slice in slices {
@@ -302,34 +221,38 @@ pub fn interface_list(slices: &[RegistrySlice]) -> Result<()> {
             }
         }
     }
-    if counts.is_empty() {
-        println!("no payload types declared.");
-        return Ok(());
-    }
-    println!("payload types declared by {} slice(s):\n", slices.len());
-    for (name, n) in &counts {
-        println!("  {name:<24} {n} carrier(s)");
-    }
-    println!(
-        "\n{} type(s). Schema definitions live with the owning application (RFC 08 §5).",
-        counts.len()
-    );
-    Ok(())
+    Ok(InterfaceList {
+        types: counts
+            .into_iter()
+            .map(|(name, carriers)| InterfaceTypeRow {
+                name: name.to_string(),
+                carriers,
+            })
+            .collect(),
+    })
 }
 
 /// `interface show` — one payload type, and every subject/procedure that
 /// carries it (the reverse of the registry's binding).
-pub fn interface_show(slices: &[RegistrySlice], type_name: &str) -> Result<()> {
-    let mut carriers: Vec<(String, String, String)> = Vec::new();
+pub fn interface_show(slices: &[RegistrySlice], type_name: &str) -> Result<InterfaceShow> {
+    let mut carriers: Vec<CarrierRow> = Vec::new();
     for slice in slices {
         for s in &slice.subjects {
             if s.type_name == type_name {
-                carriers.push((slice.name.clone(), s.class.clone(), s.path.clone()));
+                carriers.push(CarrierRow {
+                    producer: slice.name.clone(),
+                    class: s.class.clone(),
+                    path: s.path.clone(),
+                });
             }
         }
         for p in &slice.procedures {
             if p.reply.as_deref() == Some(type_name) {
-                carriers.push((slice.name.clone(), "@rpc".to_string(), p.path.clone()));
+                carriers.push(CarrierRow {
+                    producer: slice.name.clone(),
+                    class: "@rpc".to_string(),
+                    path: p.path.clone(),
+                });
             }
         }
     }
@@ -348,18 +271,10 @@ pub fn interface_show(slices: &[RegistrySlice], type_name: &str) -> Result<()> {
         ));
     }
 
-    println!("type      {type_name}");
-    println!("          (schema lives with the owning application — RFC 08 §5)");
-    // A type on hundreds of subjects (TelemetryPoint) is noise if fully listed;
-    // the count is the useful fact, and a sample shows the shape.
-    println!("\ncarried by {} subject(s)/procedure(s):", carriers.len());
-    for (producer, class, path) in carriers.iter().take(20) {
-        println!("  {producer:<10} {class:<10} {path}");
-    }
-    if carriers.len() > 20 {
-        println!("  … and {} more", carriers.len() - 20);
-    }
-    Ok(())
+    Ok(InterfaceShow {
+        type_name: type_name.to_string(),
+        carriers,
+    })
 }
 
 #[cfg(test)]
@@ -443,6 +358,36 @@ mod tests {
             &slices,
         )
         .unwrap();
+    }
+
+    /// The golden JSON contract (issue #12): `--format json` output is
+    /// stable serde of these reports — pinned here so the fleet extraction
+    /// cannot silently change behavior.
+    #[test]
+    fn reports_serialize_to_stable_json() {
+        let slices = tcgui_slices();
+        let list = topic_list(&slices, Some("tc"), Some("state")).unwrap();
+        let json = serde_json::to_value(&list).unwrap();
+        assert_eq!(json["subjects"][0]["producer"], "tc");
+        assert_eq!(json["subjects"][0]["path"], "iface/{iface}/state");
+        assert_eq!(json["subjects"][0]["type_name"], "NetworkInterface");
+        assert_eq!(json["subjects"][0]["open_ended"], false);
+
+        let info = topic_info(
+            "tcgui",
+            "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
+            &slices,
+        )
+        .unwrap();
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["variables"]["iface"], "eth0");
+        assert_eq!(json["payload_type"], "NetworkInterface");
+        assert_eq!(json["ttl_s"], 30);
+
+        let services = service_list(&slices, None).unwrap();
+        let json = serde_json::to_value(&services).unwrap();
+        assert_eq!(json["procedures"][0]["kind"], "write");
+        assert_eq!(json["procedures"][0]["reply"], "Ack");
     }
 
     #[test]

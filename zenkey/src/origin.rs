@@ -139,9 +139,236 @@ impl fmt::Display for HostId {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Typed origins (RFC 08 §1.1, amendments B/G5; hoisted from the tcgui
+// reference implementation in v1.5/H1). The kind of an origin is a *type*:
+// "I built a key for my own host by accident" is a compile error, and a
+// fan-out *write* is unspellable because [`Fleet`] is not a [`ConcreteOrigin`].
+// ---------------------------------------------------------------------------
+
+/// This process's own minted origin. Publish/serve builders take exactly this;
+/// obtain it from [`crate::AppProfile::local_origin`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LocalOrigin(HostId);
+
+impl LocalOrigin {
+    /// Wrap an explicitly minted [`HostId`] (tests, or an application that
+    /// minted through its own ladder). The type distinction is a discipline,
+    /// not a secret: the point is that *call* paths never mint one by
+    /// accident, because every other constructor lives on the profile.
+    pub fn from_host_id(id: HostId) -> Self {
+        LocalOrigin(id)
+    }
+
+    /// Derive from an explicit seed with the application's salt (tests,
+    /// containers, operator-provided ids).
+    pub fn from_seed(seed: &str, salt: &str) -> Self {
+        LocalOrigin(HostId::from_machine_id(seed, salt))
+    }
+
+    /// The underlying host id.
+    pub fn host_id(&self) -> &HostId {
+        &self.0
+    }
+}
+
+/// An origin this process *read from the wire* — a received key, a health
+/// document, a catalog entity. Call/address builders take `&impl
+/// ConcreteOrigin`; this is the consumer-side implementation (identity
+/// bridge, RFC 06 §6: display the payload name, key on the host id).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RemoteOrigin(HostId);
+
+impl RemoteOrigin {
+    /// Parse a concrete host origin received over the wire. Rejects
+    /// wildcards, service origins, and malformed values — a `RemoteOrigin` is
+    /// always one concrete host, which is what keeps a fan-out write
+    /// unspellable (G2).
+    pub fn parse(s: &str) -> Result<Self, KeyError> {
+        HostId::parse(s).map(RemoteOrigin)
+    }
+
+    /// Wrap an already-validated [`HostId`] (e.g. from
+    /// [`crate::StructuralKey::remote_origin`]).
+    pub fn from_host(id: HostId) -> Self {
+        RemoteOrigin(id)
+    }
+
+    /// The underlying host id.
+    pub fn host_id(&self) -> &HostId {
+        &self.0
+    }
+}
+
+/// A registered service origin (`@catalog`, `@desired`, …) — a verbatim
+/// chunk, single logical writer (RFC 06 §5, 07 §3).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ServiceOrigin(String);
+
+impl ServiceOrigin {
+    /// Validate a verbatim service-origin chunk (`@name`).
+    pub fn new(chunk: &str) -> Result<Self, KeyError> {
+        if crate::grammar::is_valid_verbatim_chunk(chunk) {
+            Ok(ServiceOrigin(chunk.to_string()))
+        } else {
+            Err(KeyError::InvalidVerbatimChunk(chunk.to_string()))
+        }
+    }
+
+    /// The `@catalog` identity service (RFC 06 §5).
+    pub fn catalog() -> Self {
+        ServiceOrigin(crate::grammar::SERVICE_CATALOG.to_string())
+    }
+
+    /// The origin chunk as it appears in a key.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ServiceOrigin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The deliberate `*` — a fleet of hosts. Spellable only where the grammar
+/// allows fan-out: selector builders and fanout-allowed procedures. Not a
+/// [`ConcreteOrigin`], by design (RFC 08 §1.1: a `*` origin is reachable only
+/// by asking for it by name).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Fleet;
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::LocalOrigin {}
+    impl Sealed for super::RemoteOrigin {}
+    impl Sealed for super::ServiceOrigin {}
+}
+
+/// A **concrete** (never wildcard) origin. Sealed: exactly [`LocalOrigin`],
+/// [`RemoteOrigin`], and [`ServiceOrigin`] implement it — a fleet selector
+/// does not, which is what makes a fan-out write a type error (G2/G5).
+pub trait ConcreteOrigin: sealed::Sealed {
+    /// The origin chunk to place in the key.
+    fn chunk(&self) -> &str;
+
+    /// The parse-side [`crate::Origin`] equivalent, for interop with the
+    /// grammar's structural types.
+    fn to_origin(&self) -> crate::grammar::Origin;
+}
+
+/// A concrete **host** origin (`h-…`): [`LocalOrigin`] or [`RemoteOrigin`],
+/// never a service. Host-shaped builders (producer keys, producer `@rpc`)
+/// take this — a service origin has no producer chunk, so passing one would
+/// be grammar-illegal; the trait split makes it unrepresentable.
+pub trait HostOrigin: ConcreteOrigin {}
+impl HostOrigin for LocalOrigin {}
+impl HostOrigin for RemoteOrigin {}
+
+impl ConcreteOrigin for LocalOrigin {
+    fn chunk(&self) -> &str {
+        self.0.as_str()
+    }
+    fn to_origin(&self) -> crate::grammar::Origin {
+        crate::grammar::Origin::Host(self.0.clone())
+    }
+}
+
+impl ConcreteOrigin for RemoteOrigin {
+    fn chunk(&self) -> &str {
+        self.0.as_str()
+    }
+    fn to_origin(&self) -> crate::grammar::Origin {
+        crate::grammar::Origin::Host(self.0.clone())
+    }
+}
+
+impl ConcreteOrigin for ServiceOrigin {
+    fn chunk(&self) -> &str {
+        &self.0
+    }
+    fn to_origin(&self) -> crate::grammar::Origin {
+        crate::grammar::Origin::Service(self.0.clone())
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impls {
+    //! Wire representations (feature `serde`): plain strings, validated on
+    //! deserialize. Applications carry origins in health documents (RFC 06
+    //! §6 — the payload `host_id` *is* the origin id).
+    use super::{HostId, RemoteOrigin};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+
+    impl Serialize for HostId {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_str(self.as_str())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for HostId {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let raw = String::deserialize(d)?;
+            HostId::parse(&raw).map_err(D::Error::custom)
+        }
+    }
+
+    impl Serialize for RemoteOrigin {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_str(self.host_id().as_str())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for RemoteOrigin {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            HostId::deserialize(d).map(RemoteOrigin::from_host)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_origin_rejects_wildcards_services_and_junk() {
+        assert!(RemoteOrigin::parse("h-3fa9c2d41b7e").is_ok());
+        assert!(RemoteOrigin::parse("*").is_err());
+        assert!(RemoteOrigin::parse("@catalog").is_err());
+        assert!(RemoteOrigin::parse("lab-router").is_err());
+        assert!(RemoteOrigin::parse("h-3fa9c2d41b7").is_err()); // 11 hex
+        assert!(RemoteOrigin::parse("h-3FA9C2D41B7E").is_err()); // uppercase
+    }
+
+    #[test]
+    fn concrete_origin_chunks_and_bridges() {
+        let local = LocalOrigin::from_seed("machine-a", "example-salt-v1");
+        let remote = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
+        let svc = ServiceOrigin::catalog();
+        fn chunk_of(o: &impl ConcreteOrigin) -> String {
+            o.chunk().to_string()
+        }
+        assert!(chunk_of(&local).starts_with("h-"));
+        assert_eq!(chunk_of(&remote), "h-3fa9c2d41b7e");
+        assert_eq!(chunk_of(&svc), "@catalog");
+        assert_eq!(
+            svc.to_origin(),
+            crate::grammar::Origin::Service("@catalog".into())
+        );
+        // Parse-side bridge: a parsed host key yields a RemoteOrigin.
+        let parsed = crate::grammar::parse("v1/h-3fa9c2d41b7e/state/tc/health").unwrap();
+        assert_eq!(parsed.remote_origin(), Some(remote));
+        let svc_key = crate::grammar::parse("v1/@catalog/state/entity/x").unwrap();
+        assert_eq!(svc_key.remote_origin(), None);
+    }
+
+    #[test]
+    fn service_origin_validates_verbatim() {
+        assert!(ServiceOrigin::new("@desired").is_ok());
+        assert!(ServiceOrigin::new("desired").is_err());
+        assert!(ServiceOrigin::new("@Desired").is_err());
+    }
 
     /// The RFC 06 §1 normative test vector: implementations MUST reproduce it.
     #[test]
