@@ -17,12 +17,16 @@ default = ["zenoh"]
 # depends on this crate with default-features = false) so codegen never pulls
 # the zenoh stack into build-dependencies.
 zenoh = ["dep:zenoh"]
+# Wire representations for HostId/RemoteOrigin (plain strings, validated on
+# deserialize) — applications carry origins in health documents (RFC 06 §6).
+serde = ["dep:serde"]
 
 [dependencies]
 zenoh = { workspace = true, optional = true }
 # Unconditional: `Key`/`Selector` wrap OwnedKeyExpr (RFC 08 §1.2). The
 # standalone crate is std-only — safe in build-dependency graphs.
 zenoh-keyexpr = { workspace = true }
+serde = { workspace = true, optional = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 dirs = { workspace = true }

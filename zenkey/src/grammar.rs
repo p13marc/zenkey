@@ -521,6 +521,18 @@ pub struct StructuralKey {
     pub subject: Vec<String>,
 }
 
+impl StructuralKey {
+    /// The typed remote origin, when this key came from a host (RFC 08
+    /// §1.1's parse-side bridge): a parsed wire key is exactly where a
+    /// consumer legitimately obtains a [`crate::origin::RemoteOrigin`].
+    pub fn remote_origin(&self) -> Option<crate::origin::RemoteOrigin> {
+        match &self.origin {
+            Origin::Host(id) => Some(crate::origin::RemoteOrigin::from_host(id.clone())),
+            Origin::Service(_) => None,
+        }
+    }
+}
+
 /// Parse a base-relative v1 key (`v1/...`). Structural only: subject tails
 /// stay opaque (RFC 03 §1). Rejects anything that is not under `v1`.
 pub fn parse(key: &str) -> Result<StructuralKey, KeyError> {

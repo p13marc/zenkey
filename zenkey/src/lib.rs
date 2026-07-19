@@ -62,7 +62,7 @@ pub use grammar::{
     Class, ClassOrPlane, KeyError, Origin, Plane, Producer, StructuralKey, VERSION_CHUNK,
 };
 pub use key::{Chunk, Key, Selector};
-pub use origin::HostId;
+pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};
 pub use profile::AppProfile;
 pub use qos::QosProfile;
 pub use slice::{RegistrySlice, SliceFinding, parse_slice};

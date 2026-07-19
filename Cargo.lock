@@ -3834,6 +3834,7 @@ version = "0.2.0"
 dependencies = [
  "criterion",
  "dirs 5.0.1",
+ "serde",
  "sha2",
  "thiserror 2.0.18",
  "toml 0.8.23",
