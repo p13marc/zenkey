@@ -20,9 +20,17 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   build script; registry lints (RFC 08 §5) and the deprecation-ledger check fail
   the *consumer's* build. Generates `Subject`/`ProcedureId` enums, parsers,
   `AnySubject` dispatch, `REGISTRIES`, `is_registered_telemetry`.
-- `zenctl/` — the **bus explorer CLI** (Apache-2.0, crates.io): app-neutral;
-  registry knowledge comes from the live bus (RFC 08 §6 introspection) or
-  `--registry <dir>` TOMLs. `--base` is required (env `ZENCTL_BASE`).
+- `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0, crates.io): the
+  shared core of zenctl and the future zengui — `fleet_get` (the RFC 05 §2.1
+  chokepoint, moved verbatim from zenctl), `SliceSet`, the RFC 08 §7
+  schema-decode pipeline (`SchemaStore`/`decode_sample`), `Monitor` with
+  bounded broadcast + `Dropped(n)` honesty and ArcSwap key-tree snapshots.
+- `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
+  GitHub release binaries / `cargo install --git`; 0.1.x stays on crates.io
+  un-yanked): app-neutral; registry knowledge comes from the live bus
+  (RFC 08 §6 introspection) or `--registry <dir>` TOMLs. `--base` resolves
+  flag > env `ZENCTL_BASE` > the active named context
+  (`zenctl context create …`, `~/.config/zenctl/config.toml`).
 
 Plus `fixture-tests/` (unpublished): the ZenSight registry snapshot compiled
 through zenkey-build — the codegen regression corpus. **Do not add features
@@ -140,5 +148,6 @@ never a verdict. Scouting is opt-in.
   the RFC explicitly (with a changelog entry in `00-index.md`) — never silently
   drift. Doc comments cite RFC sections (`RFC 03 §2`) and issues; keep that habit.
 - Rust edition 2024, Zenoh 1.9 (`unstable` feature), tokio.
-- Publishing: `zenkey` → `zenkey-build` → `zenctl` (in that order; zenkey-build
-  version-locks to zenkey 0.x).
+- Publishing (crates.io, LIB CRATES ONLY): `zenkey` → `zenkey-build` →
+  `zenkey-fleet` (in that order; zenkey-build version-locks to zenkey 0.x).
+  Binaries (zenctl, zengui) ship via the `release.yml` binary lane.

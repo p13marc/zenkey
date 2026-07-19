@@ -1,6 +1,10 @@
 [package]
 name = "zenctl"
 version = "0.2.0"
+# Publication policy (docs/redesign-2026-07.md §15): zenctl ships as a
+# GitHub release binary / `cargo install --git`; new versions are NOT
+# published to crates.io (0.1.x stays there, un-yanked, pointing here).
+publish = false
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true

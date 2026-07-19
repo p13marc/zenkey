@@ -13,7 +13,8 @@ any of it — is left to every application to invent.
 | [`rfcs/`](rfcs/00-index.md) | — | The **keyspace-v2 convention** — a normative RFC set. Grammar `<base>/v1/<origin>/<class>/<producer>/<subject...>`, planes (`@rpc`/`@media`/`@blob`), identity/`@catalog`, registry + introspection, operations. Chapters 02–10 are application-neutral; chapter 11 is a reference application profile ([ZenSight](https://github.com/p13marc/zensight)). |
 | [`zenkey/`](zenkey/) | [zenkey](https://crates.io/crates/zenkey) | The **runtime crate**: typed key grammar, origin minting, application profiles, slugs, QoS profiles, registry slices. Keys are built through types, not `format!`. App-neutral — ships no registry. |
 | [`zenkey-build/`](zenkey-build/) | [zenkey-build](https://crates.io/crates/zenkey-build) | The **codegen crate**: lints your application's `registry/*.toml` (RFC 08 §5, build errors in *your* build) and generates typed subject/procedure builders + parsers from your build script. |
-| [`zenctl/`](zenctl/) | [zenctl](https://crates.io/crates/zenctl) | The **bus explorer CLI** — the `busctl`/`d-feet` equivalent for a convention-conformant bus: `topic list/info/echo`, `node list`, `service list/call`, `doctor`. Discovers any conformant fleet live via `introspect` (RFC 08 §6), or reads local registry TOMLs via `--registry`. |
+| [`zenkey-fleet/`](zenkey-fleet/) | [zenkey-fleet](https://crates.io/crates/zenkey-fleet) | The **fleet engine**: disciplined fan-in queries, liveliness roster, registry-slice sets, the RFC 08 §7 schema-decode pipeline, and the live key-tree monitor — the shared core of `zenctl` and the future `zengui` explorer. |
+| [`zenctl/`](zenctl/) | *(binaries only)* | The **bus explorer CLI** — the `busctl`/`d-feet` equivalent for a convention-conformant bus: contexts, `topic list/info/echo/hz/bw`, `node list`, `service list/call`, `admin get/routers`, `doctor`, shell completions, `--format json/ndjson`. Discovers any conformant fleet live via `introspect` (RFC 08 §6), or reads local registry TOMLs via `--registry`. Ships as GitHub release binaries / `cargo install --git`; not published to crates.io (0.1.x remains there un-yanked). |
 
 (`fixture-tests/` is an unpublished workspace member: the ZenSight registry as
 codegen regression corpus.)
@@ -41,8 +42,8 @@ See the [zenkey crate README](zenkey/README.md) for the full adoption story.
 
 ## Status
 
-The convention is ratified as **v1** (see the RFC index for the current
-amendment level) and deployed by
+The convention is at **v1.5 (proposed — ratifies on merge of the 0.3
+redesign)**; see the RFC index for the amendment ledger. Deployed by
 [ZenSight](https://github.com/p13marc/zensight) (reference profile, ch. 11)
 and [tcgui](https://github.com/p13marc/tcgui). The registry is fully
 **consumer-supplied** since 0.2.0: each application owns its `registry/*.toml`
@@ -51,4 +52,6 @@ monorepo in 2026-07 with history preserved.
 
 ## License
 
-`zenkey`, `zenkey-build` (libs): MIT. `zenctl` (CLI): Apache-2.0.
+`zenkey`, `zenkey-build` (libs): MIT. `zenkey-fleet` (lib), `zenctl` (CLI):
+Apache-2.0. crates.io receives the lib crates only (publish order: zenkey →
+zenkey-build → zenkey-fleet); binaries ride GitHub releases.
