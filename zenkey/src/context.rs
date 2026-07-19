@@ -13,6 +13,7 @@
 //! base you cannot spell *wrong*.
 
 use crate::grammar::{self, Class, Origin, Producer};
+use crate::key::Key;
 use crate::profile::AppProfile;
 use crate::slug::chunk_slug;
 
@@ -66,60 +67,60 @@ impl V1Context {
     /// The telemetry prefix: `v1/<origin>/telemetry/<producer>`.
     /// Metric suffixes append below it ({metric...} / {device}/{metric...}
     /// registry families).
-    pub fn telemetry_prefix(&self) -> String {
-        format!(
+    pub fn telemetry_prefix(&self) -> Key {
+        Key::from_canonical(format!(
             "{}/{}/{}/{}",
             grammar::VERSION_CHUNK,
             self.origin.chunk(),
             grammar::CLASS_TELEMETRY,
             self.producer.chunk()
-        )
+        ))
     }
 
     /// A `state/<producer>/<subject...>` key. Subject chunks are slugged
     /// where not already legal.
-    pub fn state_key(&self, subject: &[&str]) -> String {
+    pub fn state_key(&self, subject: &[&str]) -> Key {
         let slugged: Vec<String> = subject.iter().map(|c| chunk_slug(c)).collect();
         let refs: Vec<&str> = slugged.iter().map(String::as_str).collect();
         grammar::data_key(&self.origin, Class::State, Some(&self.producer), &refs)
             .expect("slugged subject chunks are valid")
     }
 
-    pub fn health_key(&self) -> String {
+    pub fn health_key(&self) -> Key {
         self.state_key(&["health"])
     }
 
-    pub fn errors_key(&self) -> String {
+    pub fn errors_key(&self) -> Key {
         self.state_key(&["errors"])
     }
 
     /// The registration document (RFC: `state/<producer>/sensor`).
-    pub fn sensor_info_key(&self) -> String {
+    pub fn sensor_info_key(&self) -> Key {
         self.state_key(&["sensor"])
     }
 
-    pub fn evidence_self_key(&self) -> String {
+    pub fn evidence_self_key(&self) -> Key {
         self.state_key(&["evidence", "self"])
     }
 
-    pub fn evidence_device_key(&self, device: &str) -> String {
+    pub fn evidence_device_key(&self, device: &str) -> Key {
         self.state_key(&["evidence", "device", device])
     }
 
     /// Liveliness token key (RFC 04 §5) — machinery, not a data subject.
-    pub fn alive_key(&self) -> String {
+    pub fn alive_key(&self) -> Key {
         grammar::alive_key(&self.origin, Some(&self.producer)).expect("producer context is valid")
     }
 
     /// Device liveliness token key (RFC 04 §5).
-    pub fn device_alive_key(&self, device: &str) -> String {
+    pub fn device_alive_key(&self, device: &str) -> Key {
         let device = chunk_slug(device);
         grammar::device_alive_key(&self.origin, &self.producer, &device)
             .expect("slugged device chunk is valid")
     }
 
     /// An `@rpc/<producer>/<procedure...>` key (RFC 05).
-    pub fn rpc_key(&self, procedure: &[&str]) -> String {
+    pub fn rpc_key(&self, procedure: &[&str]) -> Key {
         grammar::rpc_key(&self.origin, Some(&self.producer), procedure)
             .expect("registry procedure chunks are valid")
     }
@@ -127,7 +128,7 @@ impl V1Context {
     /// Media plane video key (RFC 07 §1): the last chunk is a viewer-chosen
     /// **tier** (`low`/`medium`/`high`), not a codec profile — the viewer
     /// subscribes to it exactly (keyspace v1.3).
-    pub fn media_video_key(&self, stream: &str, codec: &str, tier: &str) -> String {
+    pub fn media_video_key(&self, stream: &str, codec: &str, tier: &str) -> Key {
         let chunks = [
             chunk_slug(stream),
             "video".into(),
@@ -141,7 +142,7 @@ impl V1Context {
 
     /// A general `@media/<producer>/<stream...>` key (RFC 07 §1). Chunks are
     /// slugged where not already legal.
-    pub fn media_key(&self, stream: &[&str]) -> String {
+    pub fn media_key(&self, stream: &[&str]) -> Key {
         let slugged: Vec<String> = stream.iter().map(|c| chunk_slug(c)).collect();
         let refs: Vec<&str> = slugged.iter().map(String::as_str).collect();
         grammar::media_key(&self.origin, &self.producer, &refs)
@@ -155,14 +156,14 @@ impl V1Context {
     /// keyexpr in a document: meaningful only to a session set to the same
     /// deployment namespace. An un-namespaced reader must
     /// [`grammar::with_base`] it.
-    pub fn blob_prefix(&self, tier: grammar::BlobTier) -> String {
-        format!(
+    pub fn blob_prefix(&self, tier: grammar::BlobTier) -> Key {
+        Key::from_canonical(format!(
             "{}/{}/{}/{}",
             grammar::VERSION_CHUNK,
             self.origin.chunk(),
             grammar::PLANE_BLOB,
             tier.chunk()
-        )
+        ))
     }
 }
 

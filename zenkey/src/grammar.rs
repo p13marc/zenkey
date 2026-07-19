@@ -7,6 +7,8 @@
 
 use std::fmt;
 
+use crate::key::Key;
+
 /// The convention major this crate implements (RFC 03 §1.2).
 ///
 /// **Plain, not verbatim** — and that is load-bearing, not an oversight.
@@ -379,7 +381,7 @@ pub fn data_key(
     class: Class,
     producer: Option<&Producer>,
     subject: &[&str],
-) -> Result<String, KeyError> {
+) -> Result<Key, KeyError> {
     validate_subject(subject)?;
     if origin.has_producer_chunk() != producer.is_some() {
         return Err(KeyError::Parse(
@@ -405,7 +407,7 @@ pub fn data_key(
     for chunk in subject {
         push_key(&mut key, chunk);
     }
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Build an `@rpc` procedure key: `v1/<origin>/@rpc[/<producer>]/<procedure...>`.
@@ -413,7 +415,7 @@ pub fn rpc_key(
     origin: &Origin,
     producer: Option<&Producer>,
     procedure: &[&str],
-) -> Result<String, KeyError> {
+) -> Result<Key, KeyError> {
     validate_subject(procedure)?;
     if origin.has_producer_chunk() != producer.is_some() {
         return Err(KeyError::Parse(
@@ -431,15 +433,11 @@ pub fn rpc_key(
     for chunk in procedure {
         push_key(&mut key, chunk);
     }
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Build an `@media` key: `v1/<origin>/@media/<producer>/<stream...>`.
-pub fn media_key(
-    origin: &Origin,
-    producer: &Producer,
-    stream: &[&str],
-) -> Result<String, KeyError> {
+pub fn media_key(origin: &Origin, producer: &Producer, stream: &[&str]) -> Result<Key, KeyError> {
     validate_subject(stream)?;
     let mut key = String::new();
     push_key(&mut key, VERSION_CHUNK);
@@ -449,11 +447,11 @@ pub fn media_key(
     for chunk in stream {
         push_key(&mut key, chunk);
     }
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Build an `@blob` key: `v1/<origin>/@blob/<tier>/<rest...>` (RFC 07 §2).
-pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<String, KeyError> {
+pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<Key, KeyError> {
     validate_subject(rest)?;
     let mut key = String::new();
     push_key(&mut key, VERSION_CHUNK);
@@ -463,12 +461,12 @@ pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<String
     for chunk in rest {
         push_key(&mut key, chunk);
     }
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Liveliness token key for a producer: `v1/<origin>/state/<producer>/alive`
 /// (RFC 04 §5). Service origins: `v1/@<service>/state/alive`.
-pub fn alive_key(origin: &Origin, producer: Option<&Producer>) -> Result<String, KeyError> {
+pub fn alive_key(origin: &Origin, producer: Option<&Producer>) -> Result<Key, KeyError> {
     if origin.has_producer_chunk() != producer.is_some() {
         return Err(KeyError::Parse(
             "host origins require a producer chunk; service origins forbid one (RFC 03 §1.5)"
@@ -483,7 +481,7 @@ pub fn alive_key(origin: &Origin, producer: Option<&Producer>) -> Result<String,
         push_key(&mut key, &p.chunk());
     }
     push_key(&mut key, SUBJECT_ALIVE);
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// Liveliness token key for a tracked downstream device (RFC 04 §5):
@@ -492,7 +490,7 @@ pub fn device_alive_key(
     origin: &Origin,
     producer: &Producer,
     device: &str,
-) -> Result<String, KeyError> {
+) -> Result<Key, KeyError> {
     if !is_valid_plain_chunk(device) {
         return Err(KeyError::InvalidPlainChunk(device.to_string()));
     }
@@ -504,7 +502,7 @@ pub fn device_alive_key(
     push_key(&mut key, "device");
     push_key(&mut key, device);
     push_key(&mut key, SUBJECT_ALIVE);
-    Ok(key)
+    Ok(Key::from_canonical(key))
 }
 
 /// A structurally parsed v1 key (positions 2–5; the subject tail is opaque
