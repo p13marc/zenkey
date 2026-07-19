@@ -354,12 +354,17 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             for (i, c) in s.chunks.iter().enumerate() {
                 match c {
                     Chunk::Var(v) => {
-                        let _ = write!(fields, "{}: Chunk::from_valid(tail[{i}]), ", snake(v));
+                        // Wire input is untrusted: an illegal chunk means "not
+                        // a registered subject" (None), never a panic. `?` is
+                        // sound as an early return — registry literals are
+                        // valid chunks, so a tail holding an illegal chunk
+                        // cannot match any other pattern either.
+                        let _ = write!(fields, "{}: Chunk::parse(tail[{i}]).ok()?, ", snake(v));
                     }
                     Chunk::Rest(v) => {
                         let _ = write!(
                             fields,
-                            "{}: tail[{i}..].iter().map(|c| Chunk::from_valid(c)).collect(), ",
+                            "{}: tail[{i}..].iter().map(|c| Chunk::parse(c).ok()).collect::<Option<Vec<_>>>()?, ",
                             snake(v)
                         );
                     }
