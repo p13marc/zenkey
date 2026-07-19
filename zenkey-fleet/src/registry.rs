@@ -124,12 +124,22 @@ impl SliceSet {
         ))
     }
 
+    /// Build from already-parsed slices (no raw TOML retained — such a set
+    /// is skipped by `write_cache`).
+    pub fn from_slices(slices: Vec<RegistrySlice>) -> SliceSet {
+        let raw = vec![String::new(); slices.len()];
+        SliceSet { slices, raw }
+    }
+
     /// Write the raw slice TOMLs to a cache dir (one file per producer).
     /// Repeated invocations and dynamic shell completion read this instead
     /// of round-tripping the bus.
     pub fn write_cache(&self, dir: &Path) -> Result<()> {
         std::fs::create_dir_all(dir)?;
         for (slice, raw) in self.slices.iter().zip(&self.raw) {
+            if raw.is_empty() {
+                continue; // from_slices sets: nothing faithful to persist
+            }
             std::fs::write(dir.join(format!("{}.toml", slice.name)), raw)?;
         }
         Ok(())
@@ -142,6 +152,16 @@ impl SliceSet {
             return SliceSet::default();
         }
         SliceSet::from_dirs(&[dir.to_path_buf()]).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+impl SliceSet {
+    /// Test constructor from one slice TOML (crate-internal).
+    pub(crate) fn from_toml_for_tests(toml: &str) -> SliceSet {
+        let mut set = SliceSet::default();
+        set.push(parse_slice(toml).unwrap(), toml.to_string());
+        set
     }
 }
 

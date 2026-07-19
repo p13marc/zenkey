@@ -253,3 +253,49 @@ pub fn call(report: &CallReport, format: Format, render_text: impl Fn(&CallAnswe
         }
     }
 }
+
+pub fn storage_list(report: &StorageList, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => {
+            report.storages.iter().for_each(json_line);
+            report.coverage.iter().for_each(json_line);
+        }
+        _ => {
+            if report.storages.is_empty() {
+                println!(
+                    "no storages found in the admin space — a peer-only mesh, a router \
+                     without the storage manager, or the admin space is disabled."
+                );
+            } else {
+                println!("configured storages:\n");
+                for s in &report.storages {
+                    println!(
+                        "  {:<16} @{}  {}",
+                        s.name,
+                        s.zid,
+                        s.key_expr.as_deref().unwrap_or("-")
+                    );
+                }
+            }
+            if !report.coverage.is_empty() {
+                println!("\ndeclared state families vs storage coverage:\n");
+                for row in &report.coverage {
+                    use zenkey_fleet::Coverage;
+                    let (mark, detail) = match &row.coverage {
+                        Coverage::Covered(s) => ("✓", format!("covered by {s}")),
+                        Coverage::Partial(s) => ("~", format!("PARTIAL via {s}")),
+                        Coverage::Uncovered => ("·", "uncovered".to_string()),
+                    };
+                    println!("  {mark} {:<10} {:<36} {}", row.producer, row.path, detail);
+                }
+                println!(
+                    "\nnote: an uncovered ttl'd family is not automatically a defect — \
+                     volatile-state seeding may ride the advanced-pub/sub cache \
+                     (RFC 04 §3.5); storage is authoritative for durable data."
+                );
+            }
+        }
+    }
+    Ok(())
+}
