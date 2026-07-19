@@ -374,11 +374,11 @@ fn render(base: &str, key: &str, bytes: &[u8], slices: &[RegistrySlice]) -> Stri
                 zenkey::grammar::ClassOrPlane::Class(c) => c.chunk(),
                 zenkey::grammar::ClassOrPlane::Plane(p) => p.chunk(),
             };
-            let tail: Vec<&str> = parsed.subject.iter().map(String::as_str).collect();
+            let tail: &[&str] = &parsed.subject;
             slice
                 .subjects
                 .iter()
-                .find(|s| s.class == class && offline::match_subject(&s.path, &tail).is_some())
+                .find(|s| s.class == class && offline::match_subject(&s.path, tail).is_some())
                 .map(|s| s.type_name.clone())
         })
         .unwrap_or_else(|| "unregistered".to_string());

@@ -37,12 +37,12 @@ fn build_parse_round_trip() {
         assert_eq!(class, subject.class(), "{key}");
         let producer = parsed.producer.unwrap();
         assert_eq!(producer.name(), "netring");
-        let tail: Vec<&str> = parsed.subject.iter().map(String::as_str).collect();
+        let tail: &[&str] = &parsed.subject;
         let refined =
-            netring::Subject::parse(class, &tail).unwrap_or_else(|| panic!("unparseable: {key}"));
+            netring::Subject::parse(class, tail).unwrap_or_else(|| panic!("unparseable: {key}"));
         assert_eq!(refined, subject, "{key}");
         // Cross-producer dispatch agrees.
-        match registry::parse_subject(producer.name(), class, &tail) {
+        match registry::parse_subject(producer.name(), class, tail) {
             Some(registry::AnySubject::Netring(s)) => assert_eq!(s, subject),
             other => panic!("dispatch failed for {key}: {other:?}"),
         }

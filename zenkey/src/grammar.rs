@@ -258,6 +258,16 @@ impl Producer {
         self.instance
     }
 
+    /// Append the producer chunk to a key under construction without an
+    /// intermediate allocation (the builders' hot path).
+    pub(crate) fn push_chunk(&self, out: &mut String) {
+        out.push_str(&self.name);
+        if let Some(i) = self.instance {
+            use std::fmt::Write as _;
+            let _ = write!(out, "-{i}");
+        }
+    }
+
     pub fn chunk(&self) -> String {
         match self.instance {
             None => self.name.clone(),
@@ -367,10 +377,14 @@ fn validate_subject(subject: &[&str]) -> Result<(), KeyError> {
 }
 
 fn push_key(parts: &mut String, chunk: &str) {
+    push_key_sep(parts);
+    parts.push_str(chunk);
+}
+
+fn push_key_sep(parts: &mut String) {
     if !parts.is_empty() {
         parts.push('/');
     }
-    parts.push_str(chunk);
 }
 
 /// Build a data-class key: `v1/<origin>/<class>[/<producer>]/<subject...>`.
@@ -402,7 +416,8 @@ pub fn data_key(
     push_key(&mut key, origin.chunk());
     push_key(&mut key, class.chunk());
     if let Some(p) = producer {
-        push_key(&mut key, &p.chunk());
+        push_key_sep(&mut key);
+        p.push_chunk(&mut key);
     }
     for chunk in subject {
         push_key(&mut key, chunk);
@@ -428,7 +443,8 @@ pub fn rpc_key(
     push_key(&mut key, origin.chunk());
     push_key(&mut key, PLANE_RPC);
     if let Some(p) = producer {
-        push_key(&mut key, &p.chunk());
+        push_key_sep(&mut key);
+        p.push_chunk(&mut key);
     }
     for chunk in procedure {
         push_key(&mut key, chunk);
@@ -443,7 +459,8 @@ pub fn media_key(origin: &Origin, producer: &Producer, stream: &[&str]) -> Resul
     push_key(&mut key, VERSION_CHUNK);
     push_key(&mut key, origin.chunk());
     push_key(&mut key, PLANE_MEDIA);
-    push_key(&mut key, &producer.chunk());
+    push_key_sep(&mut key);
+    producer.push_chunk(&mut key);
     for chunk in stream {
         push_key(&mut key, chunk);
     }
@@ -478,7 +495,8 @@ pub fn alive_key(origin: &Origin, producer: Option<&Producer>) -> Result<Key, Ke
     push_key(&mut key, origin.chunk());
     push_key(&mut key, CLASS_STATE);
     if let Some(p) = producer {
-        push_key(&mut key, &p.chunk());
+        push_key_sep(&mut key);
+        p.push_chunk(&mut key);
     }
     push_key(&mut key, SUBJECT_ALIVE);
     Ok(Key::from_canonical(key))
@@ -498,7 +516,8 @@ pub fn device_alive_key(
     push_key(&mut key, VERSION_CHUNK);
     push_key(&mut key, origin.chunk());
     push_key(&mut key, CLASS_STATE);
-    push_key(&mut key, &producer.chunk());
+    push_key_sep(&mut key);
+    producer.push_chunk(&mut key);
     push_key(&mut key, "device");
     push_key(&mut key, device);
     push_key(&mut key, SUBJECT_ALIVE);
@@ -508,18 +527,21 @@ pub fn device_alive_key(
 /// A structurally parsed v1 key (positions 2–5; the subject tail is opaque
 /// here — registry-generated parsers refine it).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructuralKey {
+pub struct StructuralKey<'k> {
     pub origin: Origin,
     pub class: ClassOrPlane,
     /// `None` for service origins and for `@blob` (tier token instead).
     pub producer: Option<Producer>,
     /// Tier token, only under `@blob`.
     pub blob_tier: Option<BlobTier>,
-    /// Everything after the producer/tier position.
-    pub subject: Vec<String>,
+    /// Everything after the producer/tier position, borrowed from the parsed
+    /// key (v1.5 perf: parsing allocates no per-chunk `String`s — the parse
+    /// result lives within the key string's scope, which is how every known
+    /// caller uses it).
+    pub subject: Vec<&'k str>,
 }
 
-impl StructuralKey {
+impl StructuralKey<'_> {
     /// The typed remote origin, when this key came from a host (RFC 08
     /// §1.1's parse-side bridge): a parsed wire key is exactly where a
     /// consumer legitimately obtains a [`crate::origin::RemoteOrigin`].
@@ -533,7 +555,7 @@ impl StructuralKey {
 
 /// Parse a base-relative v1 key (`v1/...`). Structural only: subject tails
 /// stay opaque (RFC 03 §1). Rejects anything that is not under `v1`.
-pub fn parse(key: &str) -> Result<StructuralKey, KeyError> {
+pub fn parse(key: &str) -> Result<StructuralKey<'_>, KeyError> {
     let mut chunks = key.split('/');
     let version = chunks
         .next()
@@ -587,7 +609,7 @@ pub fn parse(key: &str) -> Result<StructuralKey, KeyError> {
         (Origin::Service(_), _) => {}
     }
 
-    let subject: Vec<String> = chunks.map(str::to_string).collect();
+    let subject: Vec<&str> = chunks.collect();
     if subject.is_empty() {
         return Err(KeyError::EmptySubject);
     }
@@ -645,7 +667,7 @@ pub fn strip_base<'k>(base: &str, key: &'k str) -> Option<&'k str> {
 /// `None` when the key belongs to another deployment (a different base) or
 /// does not parse — for an observer both are the meaningful answer rather
 /// than an error.
-pub fn parse_full(base: &str, key: &str) -> Option<StructuralKey> {
+pub fn parse_full<'k>(base: &str, key: &'k str) -> Option<StructuralKey<'k>> {
     parse(strip_base(base, key)?).ok()
 }
 
@@ -791,19 +813,19 @@ mod tests {
             assert_eq!(built, want);
             let parsed = parse(built).unwrap();
             // Rebuild from parts must reproduce the key (canon round-trip).
-            let subject: Vec<&str> = parsed.subject.iter().map(String::as_str).collect();
+            let subject = &parsed.subject;
             let rebuilt = match parsed.class {
                 ClassOrPlane::Class(c) => {
-                    data_key(&parsed.origin, c, parsed.producer.as_ref(), &subject).unwrap()
+                    data_key(&parsed.origin, c, parsed.producer.as_ref(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Rpc) => {
-                    rpc_key(&parsed.origin, parsed.producer.as_ref(), &subject).unwrap()
+                    rpc_key(&parsed.origin, parsed.producer.as_ref(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Media) => {
-                    media_key(&parsed.origin, parsed.producer.as_ref().unwrap(), &subject).unwrap()
+                    media_key(&parsed.origin, parsed.producer.as_ref().unwrap(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Blob) => {
-                    blob_key(&parsed.origin, parsed.blob_tier.unwrap(), &subject).unwrap()
+                    blob_key(&parsed.origin, parsed.blob_tier.unwrap(), subject).unwrap()
                 }
             };
             assert_eq!(&rebuilt, want);

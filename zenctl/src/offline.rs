@@ -154,7 +154,7 @@ pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()>
             }
         }
     };
-    let tail: Vec<&str> = parsed.subject.iter().map(String::as_str).collect();
+    let tail: &[&str] = &parsed.subject;
 
     let Some(slice) = slices.iter().find(|s| s.name == producer) else {
         return Err(anyhow!(
@@ -167,7 +167,7 @@ pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<()>
         if s.class != class.chunk() {
             return None;
         }
-        match_subject(&s.path, &tail).map(|vars| (s, vars))
+        match_subject(&s.path, tail).map(|vars| (s, vars))
     });
     let Some((subject, vars)) = hit else {
         return Err(anyhow!(

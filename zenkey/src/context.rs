@@ -12,7 +12,7 @@
 //! vocabulary for it, and that is the point — a base you cannot spell is a
 //! base you cannot spell *wrong*.
 
-use crate::grammar::{self, Class, Origin, Producer};
+use crate::grammar::{self, Origin, Producer};
 use crate::key::Key;
 use crate::profile::AppProfile;
 use crate::slug::chunk_slug;
@@ -79,11 +79,47 @@ impl V1Context {
 
     /// A `state/<producer>/<subject...>` key. Subject chunks are slugged
     /// where not already legal.
+    ///
+    /// # Panics
+    /// On a `state` subject containing the reserved `alive` leaf (RFC 03 §3)
+    /// — liveliness keys come from [`Self::alive_key`], never here.
     pub fn state_key(&self, subject: &[&str]) -> Key {
-        let slugged: Vec<String> = subject.iter().map(|c| chunk_slug(c)).collect();
-        let refs: Vec<&str> = slugged.iter().map(String::as_str).collect();
-        grammar::data_key(&self.origin, Class::State, Some(&self.producer), &refs)
-            .expect("slugged subject chunks are valid")
+        for c in subject {
+            assert!(
+                *c != grammar::SUBJECT_ALIVE,
+                "`alive` is a reserved liveliness leaf (RFC 03 §3); use alive_key()"
+            );
+        }
+        self.build_key(grammar::CLASS_STATE, subject)
+    }
+
+    /// Single-pass slug-and-assemble (v1.5 perf: one buffer, no intermediate
+    /// Vecs — the double-`Vec` per build was a measured hotspot).
+    fn build_key(&self, class_or_plane: &str, subject: &[&str]) -> Key {
+        debug_assert!(!subject.is_empty());
+        let mut key = String::with_capacity(
+            8 + self.origin.chunk().len()
+                + class_or_plane.len()
+                + self.producer.name().len()
+                + subject.iter().map(|c| c.len() + 1).sum::<usize>()
+                + 8,
+        );
+        key.push_str(grammar::VERSION_CHUNK);
+        key.push('/');
+        key.push_str(self.origin.chunk());
+        key.push('/');
+        key.push_str(class_or_plane);
+        key.push('/');
+        self.producer.push_chunk(&mut key);
+        for c in subject {
+            key.push('/');
+            if grammar::is_valid_plain_chunk(c) {
+                key.push_str(c);
+            } else {
+                key.push_str(&chunk_slug(c));
+            }
+        }
+        Key::from_canonical(key)
     }
 
     pub fn health_key(&self) -> Key {
@@ -129,24 +165,13 @@ impl V1Context {
     /// **tier** (`low`/`medium`/`high`), not a codec profile — the viewer
     /// subscribes to it exactly (keyspace v1.3).
     pub fn media_video_key(&self, stream: &str, codec: &str, tier: &str) -> Key {
-        let chunks = [
-            chunk_slug(stream),
-            "video".into(),
-            chunk_slug(codec),
-            chunk_slug(tier),
-        ];
-        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
-        grammar::media_key(&self.origin, &self.producer, &refs)
-            .expect("slugged stream chunks are valid")
+        self.build_key(grammar::PLANE_MEDIA, &[stream, "video", codec, tier])
     }
 
     /// A general `@media/<producer>/<stream...>` key (RFC 07 §1). Chunks are
     /// slugged where not already legal.
     pub fn media_key(&self, stream: &[&str]) -> Key {
-        let slugged: Vec<String> = stream.iter().map(|c| chunk_slug(c)).collect();
-        let refs: Vec<&str> = slugged.iter().map(String::as_str).collect();
-        grammar::media_key(&self.origin, &self.producer, &refs)
-            .expect("slugged stream chunks are valid")
+        self.build_key(grammar::PLANE_MEDIA, stream)
     }
 
     /// The `@blob` tier prefix (RFC 07 §2): `v1/<origin>/@blob/<tier>` —
