@@ -58,6 +58,10 @@ enum Command {
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
     Context(ContextCmd),
+    /// Generate shell completions (bash, zsh, fish, elvish, powershell).
+    ///
+    /// e.g. `zenctl completions bash > ~/.local/share/bash-completion/completions/zenctl`
+    Completions { shell: clap_complete::Shell },
     /// Diff what the fleet *serves* against local registry files.
     ///
     /// RFC 08 §6: "A disagreement between introspection and the checked-in TOML
@@ -429,6 +433,11 @@ async fn main() -> Result<()> {
             ContextCmd::Select { name } => context::select(&name),
             ContextCmd::Rm { name } => context::remove(&name),
         },
+        Command::Completions { shell } => {
+            use clap::CommandFactory as _;
+            clap_complete::generate(shell, &mut Cli::command(), "zenctl", &mut std::io::stdout());
+            Ok(())
+        }
         Command::Doctor(bus) => cmd_doctor(&bus).await,
     }
 }
