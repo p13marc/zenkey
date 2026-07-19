@@ -31,6 +31,9 @@ dirs = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ciborium = "0.2"
+schemars = "1"
+base64 = "0.22"
+prost-reflect = "0.15"
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 
 # Internal

@@ -20,6 +20,15 @@ zenoh = ["dep:zenoh"]
 # Wire representations for HostId/RemoteOrigin (plain strings, validated on
 # deserialize) — applications carry origins in health documents (RFC 06 §6).
 serde = ["dep:serde"]
+# SchemaSet/TypeSchema — the RFC 08 §7 payload self-description types
+# (producer side: build + serve a describe reply; consumer side: parse one).
+schema = ["serde", "dep:serde_json", "dep:base64"]
+# TypeSchema::json_schema_of::<T>() — derive-driven schema production.
+schemars = ["schema", "dep:schemars"]
+# Generic decode/encode against a TypeSchema (json-schema kind: JSON + CBOR).
+decode = ["schema", "dep:ciborium"]
+# Protobuf decode via a served FileDescriptorSet (prost-reflect DynamicMessage).
+decode-protobuf = ["decode", "dep:prost-reflect"]
 
 [dependencies]
 zenoh = { workspace = true, optional = true }
@@ -27,6 +36,11 @@ zenoh = { workspace = true, optional = true }
 # standalone crate is std-only — safe in build-dependency graphs.
 zenoh-keyexpr = { workspace = true }
 serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+ciborium = { workspace = true, optional = true }
+prost-reflect = { workspace = true, optional = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 dirs = { workspace = true }

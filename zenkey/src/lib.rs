@@ -54,6 +54,8 @@ pub mod origin;
 pub mod pattern;
 pub mod profile;
 pub mod qos;
+#[cfg(feature = "schema")]
+pub mod schema;
 pub mod selector;
 pub mod slice;
 pub mod slug;
