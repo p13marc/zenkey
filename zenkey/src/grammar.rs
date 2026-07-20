@@ -626,9 +626,9 @@ pub fn parse(key: &str) -> Result<StructuralKey<'_>, KeyError> {
 /// ACL rules) and tests. Application sessions use the namespace instead
 /// (RFC 09 §0).
 ///
-/// The empty base is the identity: a wire whose keys start at `v1/` is
-/// off-convention for a deployment (RFC 03 §1.1 requires a ≥ 1-chunk base)
-/// but an observer must still be able to name it (`--base ""`; RFC 09 §5).
+/// The empty base is the identity: a wire whose keys start at `v1/` is the
+/// base-less bus-root deployment — legal, and the default, since RFC v1.6
+/// (RFC 03 §1.1) — and an observer names it with `--base ""` (RFC 09 §5).
 pub fn with_base(base: &str, key_or_selector: impl AsRef<str>) -> String {
     if base.is_empty() {
         return key_or_selector.as_ref().to_string();
@@ -661,8 +661,8 @@ pub fn with_base(base: &str, key_or_selector: impl AsRef<str>) -> String {
 /// assert_eq!(strip_base("zensight", "other/v1/h-3fa9c2d41b7e/state/sysinfo/health"), None);
 /// // Not a prefix *boundary* — `zensightly` is a different base.
 /// assert_eq!(strip_base("zensight", "zensightly/v1/x"), None);
-/// // The empty base is the identity (an off-convention wire the observer
-/// // must still be able to name — RFC 09 §5; RFC 03 §1.1 is unchanged).
+/// // The empty base is the identity — the base-less bus-root deployment,
+/// // legal since RFC v1.6 (RFC 03 §1.1; named with `--base ""`, RFC 09 §5).
 /// assert_eq!(strip_base("", "v1/x"), Some("v1/x"));
 /// ```
 pub fn strip_base<'k>(base: &str, key: &'k str) -> Option<&'k str> {
@@ -894,9 +894,9 @@ mod tests {
 
     #[test]
     fn empty_base_is_the_identity_for_observers() {
-        // RFC 09 §5: an observer must be able to name an off-convention wire
-        // whose keys start at `v1/`. RFC 03 §1.1 (deployments MUST set a
-        // ≥ 1-chunk base) is unchanged.
+        // A wire whose keys start at `v1/` is the base-less bus-root
+        // deployment — legal, and the default, since RFC v1.6 (RFC 03 §1.1);
+        // observers name it with `--base ""` (RFC 09 §5).
         let key = "v1/h-3fa9c2d41b7e/state/sysinfo/alive";
         assert_eq!(with_base("", key), key);
         assert_eq!(with_base("", "v1/*/**"), "v1/*/**");

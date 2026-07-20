@@ -55,9 +55,10 @@ mechanism is marked at first mention:
 <base>/v1/<origin>/<class>/<producer>/<subject...>
 ```
 
-Six positions. Positions 2–5 are exactly one chunk each; `<base>` is one or
+Six positions. Positions 2–5 are exactly one chunk each; `<base>` is zero or
 more literal chunks, fixed per deployment and known to every participant by
-configuration; the subject is an open-ended path of one or more chunks.
+configuration (zero chunks — the empty base — is the base-less bus-root
+deployment, §1.1); the subject is an open-ended path of one or more chunks.
 Example (reference application):
 
 ```
@@ -68,7 +69,7 @@ zensight/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage
 
 | Position | Name | Arity | Rule |
 |---|---|---|---|
-| 1 | `<base>` | ≥ 1 chunk (config-fixed) | Deployment root. Configurable per deployment; MUST be a fixed run of literal, non-verbatim chunks. |
+| 1 | `<base>` | ≥ 0 chunks (config-fixed) | Deployment root. Configurable per deployment; MUST be a fixed run of literal, non-verbatim chunks. MAY be empty (v1.6): the base-less deployment sets no session namespace and its full keys start at `v1/`. |
 | 2 | `v1` | 1 chunk | Convention major version. MUST be a **plain** chunk of the form `v<integer>` (§1.2 — it was verbatim in v1.0; the amendment explains why it is not). |
 | 3 | `<origin>` | 1 chunk | Who publishes: a **host origin** (stable opaque id) or a **service origin** (verbatim `@<service>`). |
 | 4 | `<class>` | 1 chunk | Message class: `telemetry` \| `state` \| `events`, or a verbatim plane `@rpc` \| `@media` \| `@blob`. |
@@ -80,6 +81,15 @@ zensight/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage
 - The base chunk names the *deployment*, not the software: two independent
   installations on one Zenoh network MUST use different bases (or a shared
   base behind different routers/ACLs).
+- The base MAY be **empty** (*v1.6*): a base-less deployment sets no session
+  namespace — Zenoh's own default — and its full wire keys start at `v1/…`.
+  This is the RECOMMENDED default for software adopting the convention: the
+  base is an isolation knob a deployment opts *into*, not a toll every
+  deployment pays. The empty base counts as one base value under the rule
+  above — a mismatch (empty vs. named, or two names) partitions participants
+  exactly like any other base mismatch. For the empty base the base-relative
+  and full views of a key coincide, and `with_base`/`strip_base` are
+  identities ([09-operations.md §5](09-operations.md)).
 - Multi-tenancy, realms, and sites are **deployment prefixes**, not grammar
   chunks: `acme/fleet-a` is a valid `<base>` (two chunks) as long as it is a
   fixed literal run. Nothing in the convention ever inspects the base; every
@@ -87,7 +97,8 @@ zensight/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage
   ("origin is chunk 3") MUST therefore resolve positions relative to the
   configured base, never by absolute index.
 - **The base is exactly Zenoh's session `namespace`** (stable config,
-  `namespace: "<base>"`), and setting it there is the RECOMMENDED
+  `namespace: "<base>"`; a base-less deployment simply leaves it unset), and
+  setting it there is the RECOMMENDED
   implementation: the runtime transparently prepends it to every keyexpr
   the session emits (publications, subscriptions, queries, queryables,
   liveliness tokens, `@adv` sidecars), strips it on delivery, and

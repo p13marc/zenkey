@@ -1,9 +1,29 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.5 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.6 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.6 (2026-07-20, the empty-base amendment)** — the **empty base becomes a
+> licensed deployment configuration**, superseding the v1.5 note below that
+> kept it an observed wire condition. Rationale: Zenoh's own default is *no*
+> session namespace, and a convention deployment must be able to ride a
+> default-configured session as-is — the base is an isolation knob one opts
+> *into*, not a toll every deployment pays.
+>
+> [03 §1.1](03-grammar.md): `<base>` MAY be **empty** (zero chunks). A
+> base-less deployment sets no session namespace and its full wire keys start
+> at `v1/…`; everything else in the convention is untouched (application keys
+> were base-relative already, so for the empty base the two views of a key
+> coincide). The base remains the isolation boundary for shared
+> infrastructure: two deployments on one Zenoh network MUST still use
+> distinct bases, and the empty base counts as one base value — a mismatch
+> (empty vs. named, or two names) partitions exactly like any other. Observer
+> tooling already treats the empty base as legal input (v1.5 N3:
+> `with_base`/`strip_base` are identities for it; `zenctl --base ""`) —
+> unchanged, except that a `v1/…` wire is now a legal deployment rather than
+> an off-convention condition ([09 §5](09-operations.md)).
 
 > **v1.5 (2026-07-19, the 0.3 redesign amendments, issues
 > [#5](https://github.com/p13marc/zenkey/issues/5)–[#21](https://github.com/p13marc/zenkey/issues/21),
@@ -140,7 +160,7 @@ the reference application and supplies the worked examples.
 
 | Position | Chunk | Example |
 |---|---|---|
-| 1 | **base** — deployment root (config; tenancy = deployment prefix; normally the session **namespace**, so app code never spells it) | `zensight` |
+| 1 | **base** — deployment root (config; tenancy = deployment prefix; normally the session **namespace**, so app code never spells it; MAY be empty — the base-less bus-root deployment, v1.6) | `zensight` · *(empty)* |
 | 2 | **version** — plain `v<int>`; majors are mutually invisible by key algebra | `v1` |
 | 3 | **origin** — who publishes: self-minted stable host id, or verbatim service | `h-3fa9c2d41b7e` · `@catalog` |
 | 4 | **class** — bus semantics: `telemetry` (superseded) · `state` (LWW+tombstone) · `events` (immutable) · verbatim planes `@rpc` · `@media` · `@blob` | `state` |
@@ -174,7 +194,7 @@ frames and bulk actually live there is the registry's placement rule
 
 | Term | Meaning |
 |---|---|
-| **base** | the deployment's root chunk(s); everything the convention defines lives under it |
+| **base** | the deployment's root chunk(s); everything the convention defines lives under it. MAY be empty (v1.6): the base-less deployment sets no session namespace and lives at the bus root |
 | **origin** | the publishing identity in every key — a host id or a named service |
 | **class** | the update semantics of a subtree: telemetry / state / events |
 | **plane** | a verbatim-isolated subtree no data wildcard can reach: `@rpc`, `@media`, `@blob` (the version chunk uses the same verbatim mechanism but is not a plane) |
