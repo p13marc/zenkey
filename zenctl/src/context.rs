@@ -134,11 +134,14 @@ pub fn list() -> Result<()> {
         } else {
             " "
         };
-        println!(
-            "{marker} {name}  base={}  connect={:?}",
-            c.base.as_deref().unwrap_or("-"),
-            c.connect
-        );
+        // Three distinct renderings: a stored empty base (`""`, a legal
+        // observer target) must not read like an unset one (`-`).
+        let base = match c.base.as_deref() {
+            Some("") => "\"\"",
+            Some(b) => b,
+            None => "-",
+        };
+        println!("{marker} {name}  base={base}  connect={:?}", c.connect);
     }
     Ok(())
 }
@@ -218,6 +221,15 @@ mod tests {
         remove("prod").unwrap();
         // Dangling current pointer degrades to none, not an error.
         assert!(active(None).unwrap().is_none());
+
+        // An explicitly empty base (`--base ""`, the observer identity)
+        // survives the TOML round trip as Some("") — distinct from None.
+        let empty = StoredContext {
+            base: Some(String::new()),
+            ..Default::default()
+        };
+        create("bare", empty.clone(), true).unwrap();
+        assert_eq!(active(None).unwrap(), Some(empty));
 
         unsafe { std::env::remove_var("ZENCTL_CONFIG_DIR") };
         let _ = std::fs::remove_dir_all(&dir);

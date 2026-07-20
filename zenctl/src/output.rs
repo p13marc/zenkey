@@ -229,6 +229,57 @@ pub fn node_list(report: &NodeList, format: Format) -> Result<()> {
     Ok(())
 }
 
+pub fn base_list(report: &BaseList, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => report.bases.iter().for_each(json_line),
+        _ => {
+            if report.bases.is_empty() {
+                println!(
+                    "no bases discovered — nothing held a liveliness token matching \
+                     **/v1/*/state/*/alive and no storage config names one.\n\
+                     Silence is not a verdict (RFC 05 §3.1): producers may be down, the \
+                     mesh unreachable (--connect?), or holding no tokens."
+                );
+                return Ok(());
+            }
+            let mut saw_empty = false;
+            for b in &report.bases {
+                let display = if b.base.is_empty() {
+                    saw_empty = true;
+                    "(empty)"
+                } else {
+                    b.base.as_str()
+                };
+                print!(
+                    "{display:<24} {:>3} origin(s)  {:>3} producer(s)",
+                    b.origins.len(),
+                    b.producers.len()
+                );
+                if !b.storages.is_empty() {
+                    print!("  storage: {}", b.storages.join(", "));
+                }
+                if b.origins.is_empty() {
+                    print!("  (storage config only — nothing alive)");
+                }
+                println!();
+            }
+            println!(
+                "\n{} base(s). Pin one: zenctl context create <name> --base <base> \
+                 -c <endpoint> --select",
+                report.bases.len()
+            );
+            if saw_empty {
+                println!(
+                    "the (empty) base is selected with --base \"\" (keys start at v1/ \
+                     on the wire)."
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn call(report: &CallReport, format: Format, render_text: impl Fn(&CallAnswer) -> String) {
     match format.resolved() {
         Format::Json => json_doc(report),

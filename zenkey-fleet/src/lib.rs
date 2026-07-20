@@ -12,6 +12,7 @@
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 
 pub mod admin;
+pub mod discover;
 pub mod query;
 pub mod registry;
 pub mod roster;
@@ -27,6 +28,7 @@ pub use admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,
     storages,
 };
+pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use query::{Answer, FleetAnswer, StateSample, fleet_get, fleet_registry, state_snapshot};
 pub use registry::SliceSet;
 pub use roster::roster;

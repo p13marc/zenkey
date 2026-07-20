@@ -100,6 +100,12 @@ pub struct NodeList {
 }
 
 #[derive(Debug, Serialize)]
+pub struct BaseList {
+    /// Discovered bases; `base` is a plain string, `""` for the empty base.
+    pub bases: Vec<zenkey_fleet::DiscoveredBase>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct StorageList {
     pub storages: Vec<zenkey_fleet::StorageInfo>,
     pub coverage: Vec<zenkey_fleet::CoverageRow>,

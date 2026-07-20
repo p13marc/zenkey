@@ -49,6 +49,9 @@ enum Command {
     /// Producers: who is alive on the bus.
     #[command(subcommand)]
     Node(NodeCmd),
+    /// Deployment bases discovered from the wire (needs no --base).
+    #[command(subcommand)]
+    Base(BaseCmd),
     /// Procedures on the `@rpc` plane.
     #[command(subcommand)]
     Service(ServiceCmd),
@@ -276,6 +279,21 @@ enum NodeCmd {
 }
 
 #[derive(Subcommand)]
+enum BaseCmd {
+    /// Sweep liveliness tokens and storage configs for the bases in use.
+    ///
+    /// The command to run *before* you have a base: the un-namespaced sweep
+    /// (`**/v1/*/state/*/alive`, plus `@catalog` by name and the router
+    /// storage configs) attributes every alive token to its base. An empty
+    /// base (keys start at `v1/` on the wire) is reported as `(empty)` and
+    /// selected with `--base ""`.
+    List {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
 enum ServiceCmd {
     /// List registered procedures (bus-served slices, or `--registry`).
     List {
@@ -394,7 +412,8 @@ impl BusArgs {
             .ok_or_else(|| {
                 anyhow!(
                     "no base: pass --base, set ZENCTL_BASE, or create a context \
-                     (`zenctl context create lab --base <base> -c <endpoint>`)"
+                     (`zenctl context create lab --base <base> -c <endpoint>`); \
+                     `zenctl base list` discovers what bases are on the wire"
                 )
             })
     }
@@ -454,7 +473,7 @@ impl BusArgs {
         if set.slices().is_empty() {
             eprintln!(
                 "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
-                 `zenctl node list --base {base}` says who is actually up.\n\
+                 `zenctl node list --base {base:?}` says who is actually up.\n\
                  (offline alternative: --registry <dir> with the app's registry TOMLs)"
             );
         }
@@ -557,6 +576,13 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Node(NodeCmd::List { verbose, bus }) => cmd_node_list(verbose, &bus).await,
+        Command::Base(BaseCmd::List { bus }) => {
+            // Deliberately never calls bus.base() — this is the command that
+            // answers "what would I even pass as --base?".
+            let session = bus.session().await?;
+            let bases = bus::discover_bases(&session, bus.timeout()).await?;
+            output::base_list(&report::BaseList { bases }, bus.format)
+        }
         Command::Storage(StorageCmd::List { bus }) => {
             let session = bus.session().await?;
             let storages = zenkey_fleet::storages(&session, bus.timeout()).await?;
@@ -1556,5 +1582,19 @@ mod tests {
             "zs/v1/*/*/tc/**"
         );
         assert!(compose_selector(&args, None, Some("alerts"), None).is_err());
+
+        // The empty base composes bare `v1/…` selectors (observer identity).
+        let args = BusArgs {
+            base: Some(String::new()),
+            ..args
+        };
+        assert_eq!(
+            compose_selector(&args, None, None, None).unwrap(),
+            "v1/*/**"
+        );
+        assert_eq!(
+            compose_selector(&args, None, Some("state"), None).unwrap(),
+            "v1/*/state/**"
+        );
     }
 }

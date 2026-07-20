@@ -22,6 +22,7 @@ branch).
 > | **H7** | [04 §3.5](04-planes.md) *(new)* | **Late-joiner seeding delegated.** Volatile-state seeding moves to the middleware's advanced-tier cache + history/recovery (its legacy cache APIs are deprecated upstream); the storage-manager remains authoritative for durable at-rest data. Rests on the plain version chunk (`@adv` token parseability). |
 > | **N1** | [09 §4/§5](09-operations.md) | **Base handling is the session's.** The session namespace prefixes/strips every egress/ingress; `with_base`/`strip_base`/`parse_full` are reclassified as observer-side tools (explorers, router artifacts, tests). |
 > | **N2** | [12 §9](12-open-questions.md) *(new)* | **Matching-status introspection deferred** — tooling shows its own matches, never infers fleet verdicts from foreign publishers' silence. |
+> | **N3** | [09 §5](09-operations.md) | **Base discovery + the empty-base observer.** An observer recovers the bases in use from the wire itself: a liveliness sweep with the base wildcarded (`**/v1/*/state/*/alive`, plus `@catalog` by name — D4) and the router storage configs' `key_expr`/`strip_prefix`. Observer tools MUST accept the *empty* base as input (`with_base`/`strip_base` are identities for it): an off-convention wire whose keys start at `v1/` is precisely what a debug tool must be able to see and name. |
 > | **E1** | [04 §3](04-planes.md) | **The `express` axis.** Zenoh's per-message `express` flag joins the profile table as a fourth axis: `alert` and `frame` set it, the throughput-shaped profiles do not. Rejected alternative: a per-key `express` registry override — it would reopen the per-key QoS bikeshed the closed five-profile vocabulary exists to prevent. |
 >
 > **What did *not* change.** No grammar change — position count, chunk
@@ -30,7 +31,10 @@ branch).
 > unmodified). The registry TOML format is extended only additively
 > (`variant` on media); no existing registry file needs an edit. Payloads
 > are untouched by this half of v1.5 (payload self-description arrives in
-> the H5–H7 rows, appended when that part of the branch lands).
+> the H5–H7 rows, appended when that part of the branch lands). N3 does not
+> touch [03 §1.1](03-grammar.md) either: a *deployment* still MUST set a
+> ≥ 1-chunk base — the empty base is an observed wire condition, not a
+> licensed configuration.
 
 > **v1.4 (2026-07-18, actuator-adoption amendments, issue
 > [tcgui#43](https://github.com/p13marc/tcgui/issues/43))** — six additive

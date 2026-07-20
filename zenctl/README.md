@@ -16,7 +16,9 @@ zenctl node list --base acme -c tcp/127.0.0.1:7447
 `--base` (or `ZENCTL_BASE`) names the deployment base — the first chunk(s) of
 every key on the wire. Applications set it as their session namespace and never
 spell it; `zenctl` runs un-namespaced on purpose (RFC 09 §5), so it must be
-told.
+told. Don't know the base? `zenctl base list` discovers the bases actually in
+use, and `--base ""` names the empty base (an off-convention wire whose keys
+start at `v1/`).
 
 ## Two registry sources, kept visibly apart
 
@@ -64,6 +66,7 @@ enumerates them.
 ## On-bus commands
 
 ```bash
+zenctl base list -c tcp/127.0.0.1:7447  # discover deployment bases (needs no --base)
 zenctl node list --base acme            # the liveliness roster
 zenctl topic echo --base acme           # subscribe + decode (defaults to <base>/v1/**)
 zenctl service call --base acme '*' sysinfo processes --param sort=cpu

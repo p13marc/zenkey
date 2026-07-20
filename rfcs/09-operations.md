@@ -484,6 +484,21 @@ that can drift from it.
 - If a needed selector is awkward to write, that is registry feedback —
   file it against the subject layout before inventing a client-side filter
   ([08-registry.md §5](08-registry.md)).
+- **Base discovery is an observer-side sweep (v1.5).** An observer that
+  does not know a deployment's base recovers the bases in use from the
+  wire: a liveliness query with the base wildcarded
+  (`**/v1/*/state/*/alive` — `**` spans any base depth, *including zero*;
+  `@catalog` asked by name because `*` never matches a verbatim chunk,
+  D4), joined with the router storage configs' `key_expr`/`strip_prefix`
+  (§2), which name a base even while the fleet is down. Attribution is
+  fixed-arity from the right of the alive tail, never a "first `v1`"
+  scan — a base containing a literal `v1` chunk attributes correctly.
+  Observer tools MUST treat the **empty base** as legal *input*
+  (`with_base`/`strip_base` are identities for it): a wire whose keys
+  start at `v1/` violates [03-grammar.md §1.1](03-grammar.md)'s ≥ 1-chunk
+  deployment MUST — which is unchanged — but seeing and naming an
+  off-convention wire is exactly a debug tool's job. `zenctl base list`
+  implements this sweep.
 
 ## 6. Cutover acceptance
 
