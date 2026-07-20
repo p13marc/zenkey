@@ -219,14 +219,17 @@ pub fn state_coverage(
             let Ok(pattern) = zenkey::pattern::SubjectPattern::parse(&subject.path) else {
                 continue;
             };
+            // Composed via `with_base` so the empty base stays a valid
+            // keyexpr (`format!("{base}/…")` would grow a leading slash and
+            // silently drop every family below).
             let selector = match &slice.service_origin {
-                Some(origin) => {
-                    format!("{base}/v1/{origin}/state/{}", pattern.selector_tail())
-                }
-                None => format!(
-                    "{base}/v1/*/state/{}/{}",
-                    slice.name,
-                    pattern.selector_tail()
+                Some(origin) => zenkey::grammar::with_base(
+                    base,
+                    format!("v1/{origin}/state/{}", pattern.selector_tail()),
+                ),
+                None => zenkey::grammar::with_base(
+                    base,
+                    format!("v1/*/state/{}/{}", slice.name, pattern.selector_tail()),
                 ),
             };
             let Ok(family) = keyexpr::new(selector.as_str()) else {
@@ -347,5 +350,14 @@ mod tests {
         // No storages at all.
         let rows = state_coverage(&slices, "zs", &[]);
         assert!(rows.iter().all(|r| r.coverage == Coverage::Uncovered));
+
+        // The empty base composes a valid selector (`v1/…`, no leading
+        // slash) instead of silently dropping every family.
+        let rows = state_coverage(&slices, "", &[storage("latest", "v1/*/state/**")]);
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter()
+                .all(|r| matches!(r.coverage, Coverage::Covered(_)))
+        );
     }
 }
