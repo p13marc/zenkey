@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 
-- `rfcs/` — the **normative RFC set** (v1.4, ratified). Chapters 02–10 are
+- `rfcs/` — the **normative RFC set** (v1.6 proposed; v1.4 ratified). Chapters 02–10 are
   application-neutral; chapter 11 is the ZenSight reference profile. Wire-contract
   changes go through these RFCs, amendment-style (see the changelog in
   `rfcs/00-index.md` — each amendment records what changed *and* what deliberately
@@ -30,7 +30,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   un-yanked): app-neutral; registry knowledge comes from the live bus
   (RFC 08 §6 introspection) or `--registry <dir>` TOMLs. `--base` resolves
   flag > env `ZENCTL_BASE` > the active named context
-  (`zenctl context create …`, `~/.config/zenctl/config.toml`).
+  (`zenctl context create …`, `~/.config/zenctl/config.toml`) > **empty**
+  (the base-less bus-root deployment, the RFC v1.6 default).
 
 Plus `fixture-tests/` (unpublished): the ZenSight registry snapshot compiled
 through zenkey-build — the codegen regression corpus. **Do not add features

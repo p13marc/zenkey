@@ -49,6 +49,9 @@ enum Command {
     /// Producers: who is alive on the bus.
     #[command(subcommand)]
     Node(NodeCmd),
+    /// Deployment bases discovered from the wire (needs no --base).
+    #[command(subcommand)]
+    Base(BaseCmd),
     /// Procedures on the `@rpc` plane.
     #[command(subcommand)]
     Service(ServiceCmd),
@@ -276,6 +279,21 @@ enum NodeCmd {
 }
 
 #[derive(Subcommand)]
+enum BaseCmd {
+    /// Sweep liveliness tokens and storage configs for the bases in use.
+    ///
+    /// The command to run *before* you have a base: the un-namespaced sweep
+    /// (`**/v1/*/state/*/alive`, plus `@catalog` by name and the router
+    /// storage configs) attributes every alive token to its base. An empty
+    /// base (keys start at `v1/` on the wire) is reported as `(empty)` and
+    /// selected with `--base ""`.
+    List {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
 enum ServiceCmd {
     /// List registered procedures (bus-served slices, or `--registry`).
     List {
@@ -332,8 +350,9 @@ struct BusArgs {
     /// un-namespaced so it sees the wire as it really is, including traffic
     /// from outside the deployment (RFC 09 §5) — which is what lets it spot a
     /// leak. So it has to be told what the base is.
-    /// Optional since v1.5: resolution is flag > env > active context
-    /// (`zenctl context …`).
+    /// Resolution: flag > env > active context (`zenctl context …`) > empty —
+    /// the base-less bus-root deployment, the RFC v1.6 default, whose wire
+    /// keys start at `v1/`. `zenctl base list` discovers the bases in use.
     #[arg(long, env = "ZENCTL_BASE")]
     base: Option<String>,
     /// Use a named context from the config file for this invocation
@@ -384,19 +403,13 @@ impl BusArgs {
             })
             .as_ref()
     }
-    /// The deployment base: flag > env > active context.
-    fn base(&self) -> Result<&str> {
+    /// The deployment base: flag > env > active context > empty (the
+    /// base-less bus-root deployment — the RFC v1.6 default).
+    fn base(&self) -> &str {
         if let Some(b) = &self.base {
-            return Ok(b.as_str());
+            return b.as_str();
         }
-        self.stored()
-            .and_then(|c| c.base.as_deref())
-            .ok_or_else(|| {
-                anyhow!(
-                    "no base: pass --base, set ZENCTL_BASE, or create a context \
-                     (`zenctl context create lab --base <base> -c <endpoint>`)"
-                )
-            })
+        self.stored().and_then(|c| c.base.as_deref()).unwrap_or("")
     }
     async fn session(&self) -> Result<zenoh::Session> {
         let (connect, listen);
@@ -433,7 +446,7 @@ impl BusArgs {
     /// Compose a base-relative key into the full wire key this un-namespaced
     /// tool must actually use.
     fn wire(&self, relative: impl AsRef<str>) -> Result<String> {
-        Ok(zenkey::grammar::with_base(self.base()?, relative))
+        Ok(zenkey::grammar::with_base(self.base(), relative))
     }
     /// Registry slices from whichever source the flags select: local
     /// `--registry` dirs when given (offline), otherwise the live bus
@@ -449,12 +462,12 @@ impl BusArgs {
             return zenkey_fleet::SliceSet::from_dirs(&dirs);
         }
         let session = self.session().await?;
-        let base = self.base()?;
+        let base = self.base();
         let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
         if set.slices().is_empty() {
             eprintln!(
                 "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
-                 `zenctl node list --base {base}` says who is actually up.\n\
+                 `zenctl node list --base {base:?}` says who is actually up.\n\
                  (offline alternative: --registry <dir> with the app's registry TOMLs)"
             );
         }
@@ -464,6 +477,16 @@ impl BusArgs {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Behave like a Unix filter under `zenctl … | head`: Rust masks SIGPIPE,
+    // turning a closed pipe into a mid-write panic; restore the default
+    // disposition so the process exits quietly (141) instead.
+    #[cfg(unix)]
+    // SAFETY: installing SIG_DFL (not a handler fn) is process-wide and
+    // has no safety obligations beyond the FFI call itself.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
@@ -484,7 +507,7 @@ async fn main() -> Result<()> {
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
             let slices = bus.slices().await?;
-            let report = offline::topic_info(bus.base()?, &key, &slices)?;
+            let report = offline::topic_info(bus.base(), &key, &slices)?;
             output::topic_info(&report, bus.format)
         }
         Command::Topic(TopicCmd::Echo {
@@ -557,13 +580,20 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Node(NodeCmd::List { verbose, bus }) => cmd_node_list(verbose, &bus).await,
+        Command::Base(BaseCmd::List { bus }) => {
+            // Deliberately never calls bus.base() — this is the command that
+            // answers "what would I even pass as --base?".
+            let session = bus.session().await?;
+            let bases = bus::discover_bases(&session, bus.timeout()).await?;
+            output::base_list(&report::BaseList { bases }, bus.format)
+        }
         Command::Storage(StorageCmd::List { bus }) => {
             let session = bus.session().await?;
             let storages = zenkey_fleet::storages(&session, bus.timeout()).await?;
             // The coverage join needs slices; degrade to storages-only when
             // none resolve (fleet down and no --registry).
             let coverage = match bus.slice_set().await {
-                Ok(slices) => zenkey_fleet::state_coverage(&slices, bus.base()?, &storages),
+                Ok(slices) => zenkey_fleet::state_coverage(&slices, bus.base(), &storages),
                 Err(e) => {
                     eprintln!("note: no slices for the coverage join ({e})");
                     Vec::new()
@@ -702,7 +732,7 @@ async fn main() -> Result<()> {
 /// producer against its served introspect slice.
 async fn cmd_node_list(verbose: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
-    let mut roster = bus::roster(&session, args.base()?, args.timeout()).await?;
+    let mut roster = bus::roster(&session, args.base(), args.timeout()).await?;
 
     if roster.is_empty() {
         eprintln!(
@@ -858,7 +888,7 @@ async fn cmd_echo(
         Some(s) => s.to_string(),
         None => compose_selector(args, origin, class, producer)?,
     };
-    let base = args.base()?.to_string();
+    let base = args.base().to_string();
 
     // Slices first (a single introspect fan-in), then subscribe: the slice
     // set names each subject's payload type; the schema store fetches
@@ -1083,7 +1113,7 @@ async fn cmd_service_call(
     };
 
     let session = args.session().await?;
-    let answers = bus::fleet_get(&session, args.base()?, &key, payload, args.timeout()).await?;
+    let answers = bus::fleet_get(&session, args.base(), &key, payload, args.timeout()).await?;
 
     // Assemble the typed report (issue #12): value replies parse as JSON when
     // they are JSON (read replies, by convention) and ride as text otherwise
@@ -1144,7 +1174,7 @@ async fn cmd_service_call(
 /// the local registry files (RFC 08 §6).
 async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
-    let roster = bus::roster(&session, args.base()?, args.timeout()).await?;
+    let roster = bus::roster(&session, args.base(), args.timeout()).await?;
 
     let mut findings = 0usize;
     let mut answered = 0usize;
@@ -1171,7 +1201,7 @@ async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
             None => args.wire(zenkey::selector::fleet_rpc(&local.name, &["introspect"]))?,
         };
 
-        let answers = bus::fleet_get(&session, args.base()?, &key, None, args.timeout()).await?;
+        let answers = bus::fleet_get(&session, args.base(), &key, None, args.timeout()).await?;
 
         for answer in &answers {
             let bus::Answer::Value(bytes) = &answer.answer else {
@@ -1209,7 +1239,7 @@ async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
     // With no local registry the only introspect coverage we can count is the
     // fleet-wide wildcard.
     if locals.is_empty() {
-        let pairs = bus::fleet_registry(&session, args.base()?, args.timeout()).await?;
+        let pairs = bus::fleet_registry(&session, args.base(), args.timeout()).await?;
         answered = pairs.len();
     }
 
@@ -1261,7 +1291,7 @@ async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
     // Which slices to judge: the locals when given, else what the fleet
     // serves.
     let schema_slices: Vec<RegistrySlice> = if locals.is_empty() {
-        bus::fleet_registry(&session, args.base()?, args.timeout())
+        bus::fleet_registry(&session, args.base(), args.timeout())
             .await?
             .into_iter()
             .map(|(_, s)| s)
@@ -1280,7 +1310,7 @@ async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
             }
             None => args.wire(zenkey::selector::fleet_rpc(&slice.name, &["describe"]))?,
         };
-        let answers = bus::fleet_get(&session, args.base()?, &key, None, args.timeout()).await?;
+        let answers = bus::fleet_get(&session, args.base(), &key, None, args.timeout()).await?;
         let set = answers.into_iter().find_map(|a| match a.answer {
             bus::Answer::Value(bytes) => {
                 let cow = bytes.to_bytes();
@@ -1372,7 +1402,7 @@ async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
             .unwrap_or_default();
         let coverage = zenkey_fleet::state_coverage(
             &zenkey_fleet::SliceSet::from_slices(schema_slices.clone()),
-            args.base()?,
+            args.base(),
             &storages,
         );
         let uncovered: Vec<&zenkey_fleet::CoverageRow> = coverage
@@ -1556,5 +1586,19 @@ mod tests {
             "zs/v1/*/*/tc/**"
         );
         assert!(compose_selector(&args, None, Some("alerts"), None).is_err());
+
+        // The empty base composes bare `v1/…` selectors (observer identity).
+        let args = BusArgs {
+            base: Some(String::new()),
+            ..args
+        };
+        assert_eq!(
+            compose_selector(&args, None, None, None).unwrap(),
+            "v1/*/**"
+        );
+        assert_eq!(
+            compose_selector(&args, None, Some("state"), None).unwrap(),
+            "v1/*/state/**"
+        );
     }
 }

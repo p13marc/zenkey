@@ -23,7 +23,7 @@ coexistence, and code changes are explicitly out of scope
 
 | Convention slot | ZenSight binding |
 |---|---|
-| `<base>` | `zensight` — set as the session `namespace` in the shared zenoh config block (overridable per deployment / `ZENSIGHT_ZENOH_*`), so no crate ever concatenates it ([03-grammar.md §1.1](03-grammar.md)) |
+| `<base>` | **empty by default** (*v1.6* — the base-less bus-root deployment; no session `namespace` is set). A deployment opts into isolation by setting the base (`zenoh.namespace` in the shared config block / `ZENSIGHT_ZENOH_NAMESPACE`); `zensight` is the conventional example. Either way no crate ever concatenates it ([03-grammar.md §1.1](03-grammar.md)) |
 | version | `v1` (plain, not verbatim — [03-grammar.md §1.2](03-grammar.md)) |
 | host origin | `h-<12hex>` from `sha256(machine-id + app salt)` — the same value the correlator uses today as `host_id`/`entity_id` (currently spelled `h_<12hex>`; the profile normalizes the separator to `-`) |
 | service origins | `@catalog` (implemented by `zensight-correlator`) |

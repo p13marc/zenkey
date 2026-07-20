@@ -22,6 +22,10 @@ config; [03-grammar.md §1.1](03-grammar.md)) and enables timestamping
 }
 ```
 
+A base-less deployment (*v1.6*, [03-grammar.md §1.1](03-grammar.md)) simply
+omits `namespace` — Zenoh's default — and its full wire keys start at
+`v1/…`; the timestamping requirement stands either way.
+
 With the namespace set, everything the application declares is
 base-relative (`v1/…`), and ingress from outside the namespace is
 filtered — the base is an isolation boundary, not a string convention.
@@ -484,6 +488,22 @@ that can drift from it.
 - If a needed selector is awkward to write, that is registry feedback —
   file it against the subject layout before inventing a client-side filter
   ([08-registry.md §5](08-registry.md)).
+- **Base discovery is an observer-side sweep (v1.5).** An observer that
+  does not know a deployment's base recovers the bases in use from the
+  wire: a liveliness query with the base wildcarded
+  (`**/v1/*/state/*/alive` — `**` spans any base depth, *including zero*;
+  `@catalog` asked by name because `*` never matches a verbatim chunk,
+  D4), joined with the router storage configs' `key_expr`/`strip_prefix`
+  (§2), which name a base even while the fleet is down. Attribution is
+  fixed-arity from the right of the alive tail, never a "first `v1`"
+  scan — a base containing a literal `v1` chunk attributes correctly.
+  Observer tools MUST treat the **empty base** as legal *input*
+  (`with_base`/`strip_base` are identities for it). Since *v1.6* a wire
+  whose keys start at `v1/` is not merely observable but a **legal
+  base-less deployment** ([03-grammar.md §1.1](03-grammar.md)) — the
+  default one, in fact — so an explorer that cannot see and name it is
+  blind to the common case. `zenctl base list` implements this sweep and
+  reports the empty base as `(empty)`, selected with `--base ""`.
 
 ## 6. Cutover acceptance
 
