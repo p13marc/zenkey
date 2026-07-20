@@ -15,10 +15,11 @@ zenctl node list --base acme -c tcp/127.0.0.1:7447
 
 `--base` (or `ZENCTL_BASE`) names the deployment base — the first chunk(s) of
 every key on the wire. Applications set it as their session namespace and never
-spell it; `zenctl` runs un-namespaced on purpose (RFC 09 §5), so it must be
-told. Don't know the base? `zenctl base list` discovers the bases actually in
-use, and `--base ""` names the empty base (an off-convention wire whose keys
-start at `v1/`).
+spell it; `zenctl` runs un-namespaced on purpose (RFC 09 §5), so it has to be
+told about a *named* base. Left unset, it defaults to the **empty base** — the
+base-less bus-root deployment whose keys start at `v1/`, the RFC v1.6 default —
+so against a default-configured fleet `zenctl` works with no `--base` at all.
+Don't know the base? `zenctl base list` discovers the bases actually in use.
 
 ## Two registry sources, kept visibly apart
 
