@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/p13marc/zenkey"
@@ -44,4 +44,4 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 # Internal
 zenkey = { version = "0.3.0", path = "zenkey" }
 zenkey-build = { version = "0.3.0", path = "zenkey-build" }
-zenkey-fleet = { version = "0.1.1", path = "zenkey-fleet" }
+zenkey-fleet = { version = "0.1.2", path = "zenkey-fleet" }

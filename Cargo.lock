@@ -3904,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "zenctl"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "ciborium",
@@ -3924,7 +3924,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64",
  "ciborium",
@@ -3945,7 +3945,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-build"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
@@ -3954,7 +3954,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fixture-tests"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "criterion",
  "serde_json",
@@ -3964,7 +3964,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fleet"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "arc-swap",
