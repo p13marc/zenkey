@@ -483,6 +483,16 @@ impl BusArgs {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Behave like a Unix filter under `zenctl … | head`: Rust masks SIGPIPE,
+    // turning a closed pipe into a mid-write panic; restore the default
+    // disposition so the process exits quietly (141) instead.
+    #[cfg(unix)]
+    // SAFETY: installing SIG_DFL (not a handler fn) is process-wide and
+    // has no safety obligations beyond the FFI call itself.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),

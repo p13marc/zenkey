@@ -3911,6 +3911,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "dirs 5.0.1",
+ "libc",
  "serde",
  "serde_json",
  "tokio",

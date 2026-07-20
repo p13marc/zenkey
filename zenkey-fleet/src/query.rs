@@ -133,9 +133,12 @@ fn origin_of(base: &str, key: &str) -> String {
 /// slice. The tuple's first element is the producer (or service) base name the
 /// slice declares (`slice.name`), matching the compiled path's producer column.
 ///
-/// Note: a verbatim service origin (`@catalog`) is unmatchable by the `*` of a
-/// fleet selector (grammar property D4), so pure-producer discovery does not
-/// enumerate services — `doctor` asks those by name.
+/// A verbatim service origin is unmatchable by the `*` of a fleet selector
+/// (grammar property D4), so the wildcard sweep cannot enumerate services.
+/// The well-known `@catalog` identity service (RFC 06 §5) is therefore asked
+/// by name, exactly as [`crate::roster`] does for its alive token; other
+/// service origins remain reachable only via local registry files
+/// (`doctor --registry` asks each declared `service_origin` by name).
 pub async fn fleet_registry(
     session: &Session,
     base: &str,
@@ -157,21 +160,30 @@ pub async fn fleet_registry_raw(
 ) -> Result<Vec<(RegistrySlice, String)>> {
     // This session is un-namespaced on purpose (RFC 09 §5), so it must
     // spell the base itself — exactly as `service call` composes its full key.
-    let key = with_base(base, zenkey::selector::fleet_rpc("*", &["introspect"]));
-    let answers = fleet_get(session, base, &key, None, timeout).await?;
-
+    // Two GETs: the wildcard-producer fan-out, plus `@catalog` by name (a `*`
+    // never matches a verbatim origin, D4 — the two cannot double-count).
+    let keys = [
+        with_base(base, zenkey::selector::fleet_rpc("*", &["introspect"])),
+        with_base(
+            base,
+            zenkey::selector::service_rpc(&zenkey::ServiceOrigin::catalog(), &["introspect"]),
+        ),
+    ];
     let mut slices = Vec::new();
-    for answer in answers {
-        let Answer::Value(bytes) = answer.answer else {
-            continue;
-        };
-        let served_toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
-        match parse_slice(&served_toml) {
-            Ok(slice) => slices.push((slice, served_toml)),
-            Err(e) => tracing::warn!(
-                origin = %answer.origin,
-                "introspect reply did not parse, skipping: {e}"
-            ),
+    for key in keys {
+        let answers = fleet_get(session, base, &key, None, timeout).await?;
+        for answer in answers {
+            let Answer::Value(bytes) = answer.answer else {
+                continue;
+            };
+            let served_toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
+            match parse_slice(&served_toml) {
+                Ok(slice) => slices.push((slice, served_toml)),
+                Err(e) => tracing::warn!(
+                    origin = %answer.origin,
+                    "introspect reply did not parse, skipping: {e}"
+                ),
+            }
         }
     }
     Ok(slices)
