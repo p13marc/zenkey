@@ -136,7 +136,7 @@ fn origin_of(base: &str, key: &str) -> String {
 /// A verbatim service origin is unmatchable by the `*` of a fleet selector
 /// (grammar property D4), so the wildcard sweep cannot enumerate services.
 /// The well-known `@catalog` identity service (RFC 06 §5) is therefore asked
-/// by name, exactly as [`crate::roster`] does for its alive token; other
+/// by name, exactly as [`crate::roster()`] does for its alive token; other
 /// service origins remain reachable only via local registry files
 /// (`doctor --registry` asks each declared `service_origin` by name).
 pub async fn fleet_registry(

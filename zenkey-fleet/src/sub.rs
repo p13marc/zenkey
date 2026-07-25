@@ -5,7 +5,7 @@
 //! The zengui contract, concretely:
 //! - per-sample events feed **only** sample-shaped consumers (echo panes) —
 //!   the channel is bounded, and overflow surfaces as an explicit
-//!   [`FleetEvent::Dropped`] count on the lagging receiver, never silently;
+//!   [`StreamItem::Dropped`] count on the lagging receiver, never silently;
 //! - tree/dashboard consumers redraw on [`FleetEvent::StatsTick`] by
 //!   *pulling* the immutable [`KeyTreeSnapshot`] from an `ArcSwap` — a hot
 //!   bus cannot melt a render loop.
