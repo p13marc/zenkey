@@ -23,7 +23,7 @@
 //! - [`qos`] — the five named QoS profiles (RFC 04 §3).
 //! - [`context`] — [`V1Context`]: origin + producer; producers build all
 //!   framework keys through it.
-//! - [`slice`] — [`RegistrySlice`], the `introspect` reply type + diff
+//! - [`mod@slice`] — [`RegistrySlice`], the `introspect` reply type + diff
 //!   (RFC 08 §6).
 //!
 //! The subject vocabulary itself is governed by the registry (RFC 08). It is
