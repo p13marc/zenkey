@@ -1,0 +1,29 @@
+name: Publish crates
+# Publishing is a decision, not a side effect: manual dispatch only.
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "What to publish"
+        required: true
+        type: choice
+        options:
+          - crates-io-libs
+
+jobs:
+  crates-io-libs:
+    if: inputs.lane == 'crates-io-libs'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v6
+      - uses: https://github.com/dtolnay/rust-toolchain@stable
+      - uses: https://github.com/Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+      - name: Publish in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in zenkey zenkey-build zenkey-fleet; do
+            cargo publish -p "$crate" --locked
+            sleep 30   # wait for index propagation before dependents publish
+          done
