@@ -12,7 +12,7 @@ description = "Bus explorer for the keyspace-v2 Zenoh convention — the busctl/
 readme = "README.md"
 keywords = ["zenoh", "keyspace", "cli", "introspection"]
 categories = ["command-line-utilities", "network-programming"]
-rust-version = "1.88"
+rust-version = "1.97"
 license = "Apache-2.0"
 
 [[bin]]
