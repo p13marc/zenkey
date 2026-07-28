@@ -1,9 +1,45 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.6 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.7 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.7 (2026-07-28, the `@blob` re-specification, zblob wire v2)** — the
+> bulk-transfer plane is re-specified against the reference client's
+> verified-streaming protocol. [07 §2](07-bulk-planes.md) is rewritten;
+> nothing else in the convention moves.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **B1** | [07 §2.3](07-bulk-planes.md) | **Tier-2 keys become content-addressed.** A tree index is keyed by its own root hash (`@blob/tree/<root>`), and snapshot *names* move to `state/<producer>/snapshot/<name>` carrying that root. Both [03 §3](03-grammar.md) ("tree-index ids under `@blob/tree` — the root hash of the tree they index", one of the four sanctioned unbounded-cardinality exceptions) and 07 §2 v1.2 ("tree ids are root hashes", the premise under fleet-wide cacheability, the storage PUT exemption, and no-op last-writer-wins) already *said* this — neither made it a requirement, and the reference client allowed a caller-chosen name, which falsified all three conclusions at once. v1.7 does not invent the rule; it states it normatively where the keys are defined and makes the implementation obey it. Immutable content on `@blob`, mutable names on `state` — the objects/refs split. |
+> | **B2** | [07 §2.1](07-bulk-planes.md) *(new)* | **Integrity is anchored, not assumed.** Every `@blob` reference MUST carry the identity of the bytes it names: Tier-1 references carry the content root, Tier-2 keys *are* the root (B1). Without an anchor a consumer can only trust whoever answers first — integrity holds within a transfer but not across it. Verification is per-reply and pre-disk, superseding v1.2's whole-blob check that could only fail *after* paying for everything. |
+> | **B3** | [07 §2.2](07-bulk-planes.md) | **The per-artifact endpoints are named and normative** (`manifest`, `slice/<i>`, `have`, `push/offer`, `push/slice/<i>`, `fanout`), with two corrections: `@blob` is no longer uniformly queryables — `fanout` is a *publication* (one-to-many rollout, the case where N pulls is the amplification this plane avoids) — and `push/**` is a write path expressed as a query, which MUST be authorization-gated and off by default. Resume is a persisted chunk bitfield: a hole in the middle no longer re-streams the tail. |
+> | **B4** | [07 §2.4](07-bulk-planes.md) *(new)* | **Chunk values are framed; the hash addresses the content.** A chunk value is a self-describing container (uncompressed or named compression) and `<hash>` is the hash of the *content*, so a holder MAY re-frame what it stores without changing the address — which is what keeps dedup intact across holders with different storage policies. An **encrypted** container MUST NOT appear under a fleet-reachable `store` key: encryption at rest is one disk's property, not the shared address space's. |
+> | **B5** | [07 §2.5](07-bulk-planes.md) | **Probing is a named endpoint** (`have`, returning an availability bitfield), not the vague "tiny replies" of v1.2 — a client can now choose the best-stocked holder rather than the first to answer. Also: a resolved PUT is hand-off, not retention, so a producer that intends to exit MUST read back what it published. |
+> | **B6** | [07 §2.6](07-bulk-planes.md) | **The bulk-QoS obligation is discharged by default** in the reference client rather than merely documented — a client that never touches the setting is conformant, and raising priority is the deliberate act. The `fanout` publication additionally uses blocking congestion control. |
+>
+> **What did *not* change.** No grammar change: position counts, the tier
+> tokens (`artifact` | `tree` | `store`), chunk lexical rules and design
+> properties D1–D6 are untouched (including [03 §3](03-grammar.md)'s
+> unbounded-cardinality carve-out, which already named the root hash) —
+> `tree/<root>` is still
+> `<tier-token>/<one chunk>`, only the chunk's *provenance* is now
+> normative. §1 (`@media`) is untouched. §3's wildcard rule is restated, not
+> revised: B5 names the probing mechanism the rule already assumed, and the
+> prohibition on wildcard-origin *bulk fetch* is unchanged. §4's rationale
+> for planes-not-payloads stands. Tier-1 ids remain the RPC-minted ULID.
+> The registry format is untouched — modelling `@blob` in the registry
+> remains open (it is the one plane with no entry kind). One editorial
+> touch outside 07: [03 §2](03-grammar.md)'s plane table said `@blob` is
+> "queryables"; it now reads "queryables (+ `fanout` pub)" to match B3.
+>
+> **Migration.** Wire-breaking for Tier-2 by construction: a named tree key
+> becomes a root-hash key, and the name moves to `state`. Tier-1 keys are
+> unchanged; what changes is that a reference without a root is no longer
+> conformant. Both land together with the reference client's v2 wire, which
+> is itself a clean break (BLAKE3 verified streaming, postcard control
+> messages, chunk-range resume) — so there is one migration, not two.
 
 > **v1.6 (2026-07-20, the empty-base amendment)** — the **empty base becomes a
 > licensed deployment configuration**, superseding the v1.5 note below that

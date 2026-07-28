@@ -227,7 +227,7 @@ and three verbatim planes (hermetic — no `*`/`**` reaches them):
 |---|---|---|
 | `@rpc` | queryables | request/reply; all interaction is pull ([05-control-rpc.md](05-control-rpc.md)) |
 | `@media` | plain pub | opaque high-rate frames, never on any firehose ([07-bulk-planes.md](07-bulk-planes.md)) |
-| `@blob` | queryables | bulk/content-addressed transfer ([07-bulk-planes.md](07-bulk-planes.md)) |
+| `@blob` | queryables (+ `fanout` pub) | bulk/content-addressed transfer; pull-only except the one-to-many `fanout` publication ([07-bulk-planes.md §2.2](07-bulk-planes.md)) |
 
 Full class semantics, placement rules ("is an alert state or an event?"),
 QoS, and storage mappings: [04-planes.md](04-planes.md).

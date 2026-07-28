@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2 — see [00-index.md](00-index.md)*
+**Status: v1.7 (proposed)** · normative chapter · *amended in v1.2 and v1.7 — see [00-index.md](00-index.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -84,50 +84,188 @@ Rules:
 
 ## 2. `@blob` — bulk and content-addressed transfer
 
+*Re-specified in v1.7 against the reference client's verified-streaming
+protocol. The plane's placement, position count and Tier-1 shape are
+unchanged; what changed is that Tier-2 keys are now genuinely
+content-addressed, the per-artifact endpoints are named, and integrity is
+anchored rather than assumed.*
+
 ```
-<base>/v1/<origin>/@blob/artifact/<id>/**            Tier-1: manifest + chunks of one named blob
-<base>/v1/<origin>/@blob/tree/<id>                   Tier-2: directory-tree index (depth-first entry list)
-<base>/v1/<origin>/@blob/store/<algo>/<hash>         Tier-2: content-addressed chunk (immutable)
+<base>/v1/<origin>/@blob/artifact/<id>/**             Tier-1: one named blob, verified streaming
+<base>/v1/<origin>/@blob/tree/<root>                  Tier-2: directory-tree index, keyed by its own root hash
+<base>/v1/<origin>/@blob/store/<algo>/<hash>          Tier-2: content-addressed chunk (immutable)
 ```
 
 The chunk after `@blob` is a reserved **tier token** (`artifact` | `tree` |
 `store`), not a producer chunk ([03-grammar.md §1.5](03-grammar.md)) —
-content-addressed data has no owning component. All three tiers are
-**queryables** served by the origin (pull-only — a consumer that never asks
-never pays a byte), fronted by a resumable client (reference: [`zblob`](https://github.com/p13marc/zblob)
-— manifest + ranged chunk GETs, hash verification, resume by have-set).
+content-addressed data has no owning component. The tiers are **pull-only**
+(a consumer that never asks never pays a byte), fronted by a resumable
+verifying client (reference: [`zblob`](https://github.com/p13marc/zblob)).
 
-- **Tier-1 (`artifact/<id>`)**: whole-file delivery of a one-off artifact
-  (debug bundle, pcap). The `<id>` is the ULID minted by the RPC that
-  created it ([05-control-rpc.md §3](05-control-rpc.md)); the id is
-  per-artifact, which is acceptable *here* because blob keys are
-  short-lived queryable endpoints, not published state.
-- **Tier-2 (`tree/<id>` + `store/<algo>/<hash>`)**: content-addressed
-  directory trees. The client GETs the index, diffs the needed hashes
-  against its local content store, fetches only missing chunks
-  (re-hashing on receipt), reconstructs, verifies the root. Resume *is*
-  "which hashes I already have" — it survives reconnect and restart with
-  no session state.
-- **Chunks are immutable ⇒ cacheable fleet-wide.** `store/<algo>/<hash>`
-  replies are valid from *any* holder. The normative dedup point is a
-  **router-hosted content store**: chunks and indexes MAY be PUT into
-  router storages on the `…/@blob/store/**` and `…/@blob/tree/**`
-  selectors (the sanctioned exemption from the declared-publisher rule,
-  [04-planes.md §3](04-planes.md); tree ids are root hashes, so both
-  families are content-addressed) so a producer publishes once and exits,
-  and the fleet fetches the router copy.
-  A wildcard-origin fan-out (`GET <base>/v1/*/@blob/store/sha256/<hash>`)
-  is legal but MUST NOT be the default fetch path: every holder ships the
-  full chunk (Zenoh cannot cancel remote replies in flight), so N holders
-  cost N× the bytes — amplification on exactly the links this plane
-  promises to spare. If used at all, wildcard fan-out is for *probing*
-  (manifest/existence checks with tiny replies), followed by a fetch from
-  one chosen origin's literal key.
-- **QoS: bulk yields — a client obligation.** Zenoh replies inherit the
-  *query's* QoS (server-side reply-QoS setters are no-ops), so it is the
-  `@blob` caller that MUST issue its GETs at data-low priority; that is
-  what keeps a transfer from starving telemetry or an alert on a
-  constrained link ([04-planes.md §3](04-planes.md)).
+### 2.1 Integrity is anchored, not assumed (normative)
+
+> **Every `@blob` reference handed to a consumer MUST carry the identity of
+> the bytes it names.** Tier-1: the reference MUST include the blob's
+> content root. Tier-2: the key *is* the root (§2.3), so this holds by
+> construction.
+
+A blob reference travels over the same bus as the blob. Without an anchor
+the consumer can only trust whoever answers first — integrity then holds
+*within* a transfer (a server cannot mix content) but not *across* it (the
+server still chooses which content). That is trust-on-first-use, and it is
+not what a fleet-wide content plane should offer by default.
+
+The anchor makes verification total: the reference client verifies each
+reply against the anchor **before it reaches disk**, so a wrong or tampered
+reply is discarded rather than assembled and detected later. This supersedes
+the v1.2 description ("hash verification" of a whole blob after transfer),
+which could only fail a transfer *after* paying for all of it.
+
+Practically: the RPC that mints an artifact ([05-control-rpc.md §3](05-control-rpc.md))
+MUST convey the root alongside the id and prefix, and durable state that
+advertises a tree (§2.3) advertises its root because that *is* the key.
+
+### 2.2 Tier-1 — `artifact/<id>`
+
+Whole-file delivery of a one-off artifact (debug bundle, pcap). The `<id>`
+is the ULID minted by the RPC that created it; the id is per-artifact, which
+is acceptable *here* because blob keys are short-lived queryable endpoints,
+not published state.
+
+The endpoints under `artifact/<id>/` are reserved and normative:
+
+| Key | Kind | Purpose |
+|---|---|---|
+| `<id>/manifest` | queryable | sizing + chunking + the content root |
+| `<id>/slice/<i>` | queryable | a verified slice of transfer chunk `i` |
+| `<id>/have` | queryable | availability: which chunks this origin can serve |
+| `<id>/push/offer` | queryable | upload offer (see below) |
+| `<id>/push/slice/<i>` | queryable | one uploaded slice |
+| `<id>/fanout` | **publication** | one-to-many rollout of the same blob |
+
+Two corrections to v1.2 follow from this table. First, `@blob` is no longer
+uniformly "queryables": `fanout` is a *publication* — the one-to-many case
+where N consumers each pulling the same bytes is precisely the amplification
+this plane exists to avoid, so the producer publishes once and late joiners
+recover from the publisher's cache. It is a declared publisher on the
+producer's concrete origin like any other (§3), at the bulk QoS of §2.6.
+Second, `push/**` is a **write path expressed as a query** (the payload
+rides the GET): the uploader offers a manifest, the origin answers with the
+chunk ranges it still wants, and each pushed slice is verified against the
+offered root before it is retained. This is not an exemption from the
+declared-publisher rule ([04-planes.md §3](04-planes.md)) because nothing is
+published — but it *is* a write, so it MUST be gated by an authorization
+hook on the receiving origin and MUST NOT be enabled by default.
+
+Resume is a persisted **chunk bitfield**: the client re-requests exactly the
+holes it is missing, as a chunk-range selector on the same wildcard GET. A
+missing chunk in the middle no longer re-streams everything after it.
+
+### 2.3 Tier-2 — `tree/<root>` + `store/<algo>/<hash>` (changed in v1.7)
+
+> **A tree index is keyed by its own root hash.** `<root>` is the index's
+> content root in the same hex spelling as `<hash>`. Snapshot *names* are
+> not `@blob` keys — a name is durable mutable state and belongs on `state`.
+
+v1.2 asserted that "tree ids are root hashes" and rested three conclusions
+on it: fleet-wide cacheability, the sanctioned PUT exemption, and
+last-writer-wins reconciliation being a no-op. The assertion was never
+enforced, and the reference implementation allowed a caller-chosen name
+(`tree/nightly`), which makes all three false at once: the key is mutable,
+so a cached copy can be stale, two producers publishing under one name
+silently clobber, and the "immutable ⇒ cacheable" argument evaporates
+exactly where the storage exemption needs it. v1.7 makes the assertion true
+by making it the rule.
+
+The consequence is a clean split, and it is the familiar one (git objects
+and refs; see [10-prior-art.md](10-prior-art.md)):
+
+- **Immutable content lives on `@blob`.** `tree/<root>` and
+  `store/<algo>/<hash>` are pure content addresses. Re-publishing is a
+  byte-identical no-op. Any holder's copy is as good as any other's.
+- **Mutable names live on `state`.** "Which snapshot is current" is a
+  durable fact about a producer, so it is ordinary published state —
+  `state/<producer>/snapshot/<name>` carrying the root — with the class
+  semantics, storage behaviour, and late-joiner seeding every other durable
+  fact already gets. It costs one small sample, and it is versioned,
+  cacheable and observable like the rest of the plane.
+
+A consumer therefore resolves a snapshot in two hops: read the name from
+`state` to obtain a root, then fetch `tree/<root>`. The second hop is
+self-anchoring (§2.1) — the key it asked for is the identity it must get.
+
+The transfer itself is unchanged in spirit: the client GETs the index, diffs
+the hashes it needs against its local content store, fetches only the
+missing chunks (re-hashing each on receipt), reconstructs, and verifies the
+root. Resume *is* "which hashes I already have" — it survives reconnect and
+restart with no session state.
+
+### 2.4 Chunk values are framed; the hash addresses the content (normative)
+
+`<hash>` is the hash of the chunk's **content**, not of the bytes on the
+wire. A chunk value is a self-describing container so that transport and
+at-rest concerns can vary without changing an address:
+
+- the container declares its own form (uncompressed, or a named compression);
+- a receiver unframes first, then verifies the content hash against the key;
+- an incompressible chunk is carried uncompressed rather than inflated.
+
+Two rules follow. A holder MAY re-frame a chunk it stores (e.g. compress it)
+without changing its key, because the address is unaffected — this is what
+keeps fleet-wide dedup intact across holders with different storage
+policies. And an **encrypted** container MUST NOT appear under a
+fleet-reachable `store` key: encryption at rest is a property of one
+holder's disk, not of the shared address space; publishing one would give
+every other holder an object it can neither verify nor use.
+
+`<algo>` names the hash function. A deployment SHOULD use one algorithm
+fleet-wide (dedup is per-algorithm: the same bytes under two algorithms are
+two objects); the segment exists so a migration can run both side by side.
+
+### 2.5 Fleet-wide caching and the router store
+
+**Chunks and trees are immutable ⇒ cacheable fleet-wide.** Replies are valid
+from *any* holder. The normative dedup point is a **router-hosted content
+store**: chunks and indexes MAY be PUT into router storages on the
+`…/@blob/store/**` and `…/@blob/tree/**` selectors (the sanctioned exemption
+from the declared-publisher rule, [04-planes.md §3](04-planes.md)) so a
+producer publishes once and exits, and the fleet fetches the router copy.
+§2.3 is what earns this exemption: both families are now content-addressed,
+so a storage's last-writer-wins reconciliation is genuinely a no-op.
+
+A publisher MUST NOT treat a resolved PUT as durability: it signals hand-off
+to the transport, not retention by a storage, and index and chunks may land
+on different storages with no ordering between them. A producer that intends
+to exit MUST confirm retention by reading back what it published (the index
+and a sample of chunks) before considering the snapshot available.
+
+**Probing is a named endpoint, not a wildcard convention.** A consumer that
+cannot name the origin holding a blob probes with a *tiny* reply — `have`
+(availability) or `manifest` (§2.2) — across origins, then fetches from one
+chosen origin's concrete key. This supersedes v1.2's advice to use "manifest
+/existence checks with tiny replies": the probe now has a purpose-built
+endpoint whose reply is a bitfield, and a client can use it to choose the
+best-stocked holder rather than merely the first to answer. The prohibition
+itself is unchanged and is stated once, normatively, in §3: a wildcard-origin
+*bulk fetch* remains forbidden as a default path, because every matching
+holder ships the full payload and Zenoh cannot cancel remote replies in
+flight — N holders cost N× the bytes, amplification on exactly the links
+this plane promises to spare.
+
+### 2.6 QoS: bulk yields — a client obligation
+
+Zenoh replies inherit the *query's* QoS (server-side reply-QoS setters are
+no-ops), so it is the `@blob` caller that MUST issue its GETs at data-low
+priority; that is what keeps a transfer from starving telemetry or an alert
+on a constrained link ([04-planes.md §3](04-planes.md)). The obligation is
+unchanged from v1.2 and it is easy to forget, so the reference client now
+discharges it **by default** rather than documenting it: a client that never
+touches the setting is already conformant, and raising the priority is the
+deliberate act.
+
+The `fanout` publication (§2.2) carries the same obligation on the publish
+side, plus blocking congestion control: shedding slices under local
+backpressure would trade a bounded delay for an unbounded recovery.
 
 ## 3. The wildcard rule (normative)
 
