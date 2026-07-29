@@ -61,9 +61,10 @@ pub mod slice;
 pub mod slug;
 
 pub use common_state::CommonState;
-pub use context::V1Context;
+pub use context::{BlobProbePrefix, V1Context};
 pub use grammar::{
-    Class, ClassOrPlane, KeyError, Origin, Plane, Producer, StructuralKey, VERSION_CHUNK,
+    BlobTier, Class, ClassOrPlane, ContentHash, KeyError, Origin, Plane, Producer, StructuralKey,
+    VERSION_CHUNK,
 };
 pub use key::{Chunk, Key, Selector};
 pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};

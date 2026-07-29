@@ -77,6 +77,12 @@ pub enum KeyError {
     InvalidBlobTier(String),
     #[error("reserved token {0:?} may not be used as a {1} (RFC 03 §3)")]
     ReservedToken(String, &'static str),
+    #[error(
+        "invalid content hash {0:?}: must be lowercase hex, even length, 8..=128 digits (RFC 07 §2.3/§2.4)"
+    )]
+    InvalidContentHash(String),
+    #[error("malformed @blob/{0} key: {1} (RFC 07 §2)")]
+    MalformedBlobKey(&'static str, &'static str),
     #[error("not a v1 key: {0}")]
     Parse(String),
 }
@@ -364,6 +370,128 @@ impl BlobTier {
     }
 }
 
+/// A content address: the hex digest naming an immutable `@blob` object
+/// (RFC 07 §2.3 tree roots, §2.4 chunk hashes).
+///
+/// This type exists so the convention's content-addressing rule is
+/// **structural rather than advisory** — the same move that makes a fan-out
+/// write unspellable by keeping [`Fleet`](crate::Fleet) out of
+/// [`ConcreteOrigin`](crate::ConcreteOrigin). RFC 07 v1.2 *asserted* that
+/// tree ids were root hashes and rested fleet-wide cacheability, the storage
+/// PUT exemption, and no-op last-writer-wins on it — but nothing enforced it,
+/// so a caller-chosen name (`tree/nightly`) silently falsified all three.
+/// v1.7 made the rule normative; this type is what makes it hold.
+///
+/// The check is lexical (lowercase hex, even length, 8..=128 digits): it
+/// rejects *names*, which is the realistic mistake. It is not an
+/// authenticity check — that is the consumer's job, and it is why the
+/// address must be verified against the bytes on receipt.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ContentHash(String);
+
+impl ContentHash {
+    /// Validate a hex digest.
+    pub fn parse(s: &str) -> Result<Self, KeyError> {
+        let ok = (8..=128).contains(&s.len())
+            && s.len().is_multiple_of(2)
+            && s.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if ok {
+            Ok(ContentHash(s.to_string()))
+        } else {
+            Err(KeyError::InvalidContentHash(s.to_string()))
+        }
+    }
+
+    /// The digest as it appears in a key.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ContentHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod content_addressing {
+    use super::*;
+
+    fn host() -> Origin {
+        Origin::Host(crate::origin::HostId::parse("h-3fa9c2d41b7e").unwrap())
+    }
+
+    /// RFC 07 v1.2 said tree ids were root hashes and nothing enforced it, so
+    /// `tree/nightly` was spellable and silently falsified fleet-wide
+    /// cacheability, the storage PUT exemption, and no-op last-writer-wins.
+    /// v1.7 made it normative; this asserts it is *structural* — a name has
+    /// no spelling in this crate.
+    #[test]
+    fn a_named_tree_key_is_unspellable() {
+        for name in ["nightly", "snap-1", "latest", "v2", "my.snapshot"] {
+            assert!(
+                blob_key(&host(), BlobTier::Tree, &[name]).is_err(),
+                "tree/{name} must not be constructible"
+            );
+        }
+        // A root hash is the only accepted spelling.
+        let root = ContentHash::parse(&"ab".repeat(32)).unwrap();
+        let key = blob_tree_key(&host(), &root).unwrap();
+        assert!(key.as_str().ends_with(&format!("@blob/tree/{root}")));
+        // …and the shape is fixed: no extra chunks, no missing ones.
+        assert!(blob_key(&host(), BlobTier::Tree, &[root.as_str(), "x"]).is_err());
+    }
+
+    #[test]
+    fn store_keys_are_algo_then_hash() {
+        let hash = ContentHash::parse("ab12cd34ef56").unwrap();
+        let key = blob_store_key(&host(), "blake3", &hash).unwrap();
+        assert!(key.as_str().ends_with("@blob/store/blake3/ab12cd34ef56"));
+        // Wrong arity, or a name where the hash goes, are both refused.
+        assert!(blob_key(&host(), BlobTier::Store, &["blake3"]).is_err());
+        assert!(blob_key(&host(), BlobTier::Store, &["blake3", "nightly"]).is_err());
+        assert!(
+            blob_key(
+                &host(),
+                BlobTier::Store,
+                &["blake3", &hash.to_string(), "x"]
+            )
+            .is_err()
+        );
+    }
+
+    /// Tier-1 keeps a free-form id (an RPC-minted ULID) plus an endpoint
+    /// tail — RFC 07 §2.2 is unchanged by v1.7.
+    #[test]
+    fn artifact_keys_keep_their_id_and_endpoint_tail() {
+        let key = blob_key(&host(), BlobTier::Artifact, &["01hqxk8f9c2n4p", "manifest"]).unwrap();
+        assert!(
+            key.as_str()
+                .ends_with("@blob/artifact/01hqxk8f9c2n4p/manifest")
+        );
+    }
+
+    #[test]
+    fn content_hash_rejects_names_accepts_digests() {
+        for good in ["ab12cd34ef56", &"0".repeat(64), &"f".repeat(128)] {
+            ContentHash::parse(good).unwrap_or_else(|e| panic!("{good:?}: {e}"));
+        }
+        for bad in [
+            "",               // empty
+            "cafe",           // hex but too short to be a digest
+            "nightly",        // a name
+            "AB12CD34EF56",   // uppercase: one spelling per digest
+            "ab12cd34ef5",    // odd length
+            "ab12cd34ef5g",   // non-hex digit
+            &"a".repeat(130), // implausibly long
+        ] {
+            assert!(ContentHash::parse(bad).is_err(), "{bad:?} must be refused");
+        }
+    }
+}
+
 fn validate_subject(subject: &[&str]) -> Result<(), KeyError> {
     if subject.is_empty() {
         return Err(KeyError::EmptySubject);
@@ -468,8 +596,40 @@ pub fn media_key(origin: &Origin, producer: &Producer, stream: &[&str]) -> Resul
 }
 
 /// Build an `@blob` key: `v1/<origin>/@blob/<tier>/<rest...>` (RFC 07 §2).
+///
+/// The content-addressed tiers are **shape-checked** here, so a
+/// non-conformant key has no spelling in this crate at all — not merely none
+/// in the convenience builders:
+///
+/// - `tree` takes exactly one chunk, a [`ContentHash`] (the root, RFC 07 §2.3);
+/// - `store` takes exactly two, `<algo>/<hash>` (RFC 07 §2.4);
+/// - `artifact` takes an id and any endpoint tail (RFC 07 §2.2).
+///
+/// Prefer [`blob_tree_key`] / [`blob_store_key`], which take the hash as a
+/// value and cannot be called wrongly.
 pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<Key, KeyError> {
     validate_subject(rest)?;
+    match tier {
+        BlobTier::Tree => {
+            if rest.len() != 1 {
+                return Err(KeyError::MalformedBlobKey(
+                    "tree",
+                    "expected exactly one chunk: the tree's root hash",
+                ));
+            }
+            ContentHash::parse(rest[0])?;
+        }
+        BlobTier::Store => {
+            if rest.len() != 2 {
+                return Err(KeyError::MalformedBlobKey(
+                    "store",
+                    "expected exactly two chunks: <algo>/<hash>",
+                ));
+            }
+            ContentHash::parse(rest[1])?;
+        }
+        BlobTier::Artifact => {}
+    }
     let mut key = String::new();
     push_key(&mut key, VERSION_CHUNK);
     push_key(&mut key, origin.chunk());
@@ -479,6 +639,22 @@ pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<Key, K
         push_key(&mut key, chunk);
     }
     Ok(Key::from_canonical(key))
+}
+
+/// Build a Tier-2 **tree** key: `v1/<origin>/@blob/tree/<root>` (RFC 07 §2.3).
+///
+/// A snapshot is named by its own root, so the key is immutable and the
+/// consumer's request states the identity it demands. Human snapshot names
+/// are mutable facts and belong on `state`, pointing at a root.
+pub fn blob_tree_key(origin: &Origin, root: &ContentHash) -> Result<Key, KeyError> {
+    blob_key(origin, BlobTier::Tree, &[root.as_str()])
+}
+
+/// Build a Tier-2 **chunk** key: `v1/<origin>/@blob/store/<algo>/<hash>`
+/// (RFC 07 §2.4). `hash` addresses the chunk's *content*; the value carried
+/// under the key is a self-describing container.
+pub fn blob_store_key(origin: &Origin, algo: &str, hash: &ContentHash) -> Result<Key, KeyError> {
+    blob_key(origin, BlobTier::Store, &[algo, hash.as_str()])
 }
 
 /// Liveliness token key for a producer: `v1/<origin>/state/<producer>/alive`

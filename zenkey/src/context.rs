@@ -190,6 +190,61 @@ impl V1Context {
             tier.chunk()
         ))
     }
+
+    /// A Tier-2 **tree** key under this origin (RFC 07 §2.3):
+    /// `v1/<origin>/@blob/tree/<root>`.
+    pub fn blob_tree_key(&self, root: &grammar::ContentHash) -> Result<Key, grammar::KeyError> {
+        grammar::blob_tree_key(&self.origin, root)
+    }
+
+    /// A Tier-2 **chunk** key under this origin (RFC 07 §2.4):
+    /// `v1/<origin>/@blob/store/<algo>/<hash>`.
+    pub fn blob_store_key(
+        &self,
+        algo: &str,
+        hash: &grammar::ContentHash,
+    ) -> Result<Key, grammar::KeyError> {
+        grammar::blob_store_key(&self.origin, algo, hash)
+    }
+}
+
+/// A `*`-origin `@blob` prefix, for **probing only** (RFC 07 §2.5).
+///
+/// Deliberately a distinct type from [`Key`], and deliberately not
+/// convertible into one: a fleet prefix and a concrete prefix are
+/// interchangeable as strings, which is exactly how a probe turns into a
+/// wildcard-origin *bulk fetch* — every holder ships the full payload and
+/// Zenoh cannot cancel remote replies in flight, so N holders cost N× the
+/// bytes (RFC 07 §2.5, §3). Keeping the types apart makes that mistake fail
+/// to compile rather than fail on a link.
+///
+/// The sanctioned shape is: probe across origins with a *tiny* reply
+/// (`have` availability, or a manifest), pick one origin, then fetch from
+/// that origin's concrete [`V1Context::blob_prefix`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlobProbePrefix(String);
+
+impl BlobProbePrefix {
+    /// The `*`-origin prefix for `tier`: `v1/*/@blob/<tier>`.
+    pub fn new(tier: grammar::BlobTier) -> Self {
+        BlobProbePrefix(format!(
+            "{}/*/{}/{}",
+            grammar::VERSION_CHUNK,
+            grammar::PLANE_BLOB,
+            tier.chunk()
+        ))
+    }
+
+    /// The prefix as a selector string, for handing to a probing client.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for BlobProbePrefix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 #[cfg(test)]
