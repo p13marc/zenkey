@@ -323,6 +323,141 @@ fn media_builders_round_trip() {
 }
 
 #[test]
+fn blob_builders_carry_no_producer_chunk() {
+    use zenkey_fixture_tests::registry::blob;
+    // The tier token sits where a producer chunk would be on every other
+    // plane (RFC 07 §2): content-addressed data has no owning component. The
+    // enum is app-level for the same reason — `netring` declares the artifact
+    // tier, but its name appears nowhere in the key.
+    assert_eq!(blob::Tier::Artifact.declared_by(), "netring");
+    let key = blob::artifact_manifest_key(&local(), "01jgxqz4yqk8v6txw3m9f2a7cd");
+    assert_eq!(
+        key,
+        "v1/h-3fa9c2d41b7e/@blob/artifact/01jgxqz4yqk8v6txw3m9f2a7cd/manifest"
+    );
+    assert!(
+        !key.as_str().contains("netring"),
+        "a blob key must not carry a producer chunk: {key}"
+    );
+
+    // Position 4 is the plane and position 5 is the tier token, not a
+    // producer — the structural parse is what pins that.
+    let parsed = grammar::parse(&key).unwrap();
+    assert_eq!(parsed.class, ClassOrPlane::Plane(Plane::Blob));
+    assert_eq!(parsed.producer, None);
+    assert_eq!(parsed.blob_tier, Some(grammar::BlobTier::Artifact));
+
+    // Endpoints, and only the declared ones.
+    let id = "01jgxqz4yqk8v6txw3m9f2a7cd";
+    assert!(blob::artifact_slice_key(&local(), id, 7).ends_with("/slice/7"));
+    assert!(blob::artifact_have_key(&local(), id).ends_with("/have"));
+    assert!(blob::artifact_fanout_key(&local(), id).ends_with("/fanout"));
+    assert!(blob::artifact_push_offer_key(&local(), id).ends_with("/push/offer"));
+    assert!(blob::artifact_push_slice_key(&local(), id, 2).ends_with("/push/slice/2"));
+    assert_eq!(
+        blob::Tier::Artifact.endpoints(),
+        ["manifest", "slice", "have", "push", "fanout"]
+    );
+    // Tier-2 keys *are* the endpoint, so they declare none.
+    assert!(blob::Tier::Tree.endpoints().is_empty());
+
+    // A remote host's blob key is built the same way — the origin is the only
+    // thing that moves.
+    let remote = RemoteOrigin::parse("h-aaaaaaaaaaaa").unwrap();
+    assert!(
+        blob::artifact_manifest_key(&remote, id)
+            .as_str()
+            .starts_with("v1/h-aaaaaaaaaaaa/@blob/artifact/")
+    );
+}
+
+#[test]
+fn tier_two_builders_take_a_content_hash_not_a_name() {
+    use zenkey::grammar::ContentHash;
+    use zenkey_fixture_tests::registry::blob;
+
+    // RFC 07 §2.3: a tree index is keyed by its own root. v1.7 made that
+    // normative in `zenkey`; v1.8 carries it into the generated surface, so
+    // `blob::tree_key(&o, "nightly")` is a *compile* error rather than a key
+    // that silently falsifies fleet-wide cacheability. This test asserts the
+    // half that can be asserted at runtime — the type is the other half.
+    assert!(ContentHash::parse("nightly").is_err());
+    assert!(ContentHash::parse("latest").is_err());
+
+    let root = ContentHash::parse(&"ab".repeat(32)).unwrap();
+    assert_eq!(
+        blob::tree_key(&local(), &root),
+        format!("v1/h-3fa9c2d41b7e/@blob/tree/{root}")
+    );
+
+    // The store algo comes from the registry, never the caller: dedup is
+    // per-algorithm, so a caller-supplied algo is a way to address the same
+    // bytes twice by accident.
+    assert_eq!(blob::Tier::Store.algo(), Some("blake3"));
+    let hash = ContentHash::parse("ab12cd34ef56").unwrap();
+    assert_eq!(
+        blob::store_key(&local(), &hash),
+        "v1/h-3fa9c2d41b7e/@blob/store/blake3/ab12cd34ef56"
+    );
+}
+
+#[test]
+fn the_probe_form_is_not_a_key() {
+    use zenkey_fixture_tests::registry::blob;
+    // RFC 07 §2.5/§3: probing across origins with tiny replies is sanctioned;
+    // a wildcard-origin *bulk fetch* is not. As strings the two prefixes are
+    // interchangeable, which is exactly how the first becomes the second — so
+    // the probe form is a distinct type with no conversion into `Key`.
+    let probe = blob::Tier::Artifact.probe();
+    assert_eq!(probe.as_str(), "v1/*/@blob/artifact");
+    // The concrete counterpart, which is what a fetch must use.
+    let concrete = blob::Tier::Artifact.prefix_at(&local());
+    assert_eq!(concrete, "v1/h-3fa9c2d41b7e/@blob/artifact");
+    assert_ne!(probe.as_str(), concrete.as_str());
+    // If `BlobProbePrefix` ever grew an `Into<Key>`, the type split would be
+    // decorative. Nothing here can assert a *missing* impl, so this documents
+    // the invariant next to the thing that depends on it.
+    assert!(!probe.as_str().contains("h-3fa9c2d41b7e"));
+}
+
+#[test]
+fn the_introspect_slice_carries_the_blob_tiers() {
+    // The stated point of modelling `@blob`: an explorer reads a producer's
+    // slice and learns which tiers it holds, without probing the bus for keys
+    // nobody may be serving.
+    let slice = zenkey::parse_slice(registry::registry_toml("netring").unwrap()).unwrap();
+    assert!(slice.serves_blob_tier("artifact"));
+    assert!(
+        !slice.serves_blob_tier("store"),
+        "netring declares only Tier-1"
+    );
+    let decl = slice.blob.iter().find(|b| b.tier == "artifact").unwrap();
+    assert_eq!(decl.reference.as_deref(), Some("BlobReference"));
+    assert!(decl.endpoints.iter().any(|e| e == "have"));
+
+    // Tier-2 lives in another producer's file because the `(tier, algo)` slot
+    // is app-wide: a blob key has no producer chunk, so two producers naming
+    // one tier would be declaring one key family twice.
+    let logs = zenkey::parse_slice(registry::registry_toml("logs").unwrap()).unwrap();
+    assert!(logs.serves_blob_tier("tree") && logs.serves_blob_tier("store"));
+    assert_eq!(
+        logs.blob.iter().find(|b| b.tier == "store").unwrap().algo,
+        Some("blake3".to_string())
+    );
+
+    // A diff against a build that serves no blobs is a finding, not silence.
+    let none = zenkey::parse_slice(registry::registry_toml("sysinfo").unwrap()).unwrap();
+    let findings = zenkey::slice::diff(&slice, &none);
+    assert!(
+        findings.iter().any(|f| matches!(
+            f,
+            zenkey::SliceFinding::UnknownBlobTier { tier } if tier == "artifact"
+        )),
+        "a tier the local build does not know must surface: {findings:?}"
+    );
+}
+
+#[test]
 fn refine_key_dispatches_across_producers() {
     let key = netring::key(&local(), &netring::Subject::flow_red("p95_ms"));
     let refined = registry::refine_key(key.as_str()).unwrap();
@@ -353,6 +488,13 @@ fn payload_type_macro_is_total_and_deduped() {
     assert!(names.contains(&"TelemetryPoint"));
     assert!(names.contains(&"RegistrySlice"));
     assert!(names.contains(&"FrameMeta"), "media attachments included");
+    assert!(
+        names.contains(&"BlobReference"),
+        "blob reference types included — RFC 08 §7 totality (v1.8). \
+         `BlobReference` is named only by [[blob]] entries, so this fails if \
+         the emitter stops folding them into the type list, which would make \
+         `describe` silently under-cover."
+    );
     let mut sorted = names.clone();
     sorted.sort_unstable();
     sorted.dedup();

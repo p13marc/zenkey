@@ -1431,8 +1431,10 @@ async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
     Ok(())
 }
 
-/// Every type name a slice references (subjects + procedure request/reply) —
-/// the RFC 08 §7 totality bound's right-hand side.
+/// Every type name a slice references (subjects, procedure request/reply, and
+/// since v1.8 blob `reference`s) — the RFC 08 §7 totality bound's right-hand
+/// side. This list must track §7 exactly: a name §7 requires and this omits is
+/// a coverage gap `doctor` would report as clean.
 fn referenced_type_names(slice: &RegistrySlice) -> Vec<String> {
     let mut names: Vec<String> = slice
         .subjects
@@ -1441,6 +1443,7 @@ fn referenced_type_names(slice: &RegistrySlice) -> Vec<String> {
         .filter(|t| !t.is_empty())
         .chain(slice.procedures.iter().filter_map(|p| p.request.clone()))
         .chain(slice.procedures.iter().filter_map(|p| p.reply.clone()))
+        .chain(slice.blob.iter().filter_map(|b| b.reference.clone()))
         .collect();
     names.sort_unstable();
     names.dedup();

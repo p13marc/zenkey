@@ -220,6 +220,13 @@ pub fn interface_list(slices: &[RegistrySlice]) -> Result<InterfaceList> {
                 *counts.entry(r.as_str()).or_default() += 1;
             }
         }
+        // Blob reference types (RFC 08 §2, v1.8) are carried types like any
+        // other — the payload that must convey a blob's content root.
+        for b in &slice.blob {
+            if let Some(r) = &b.reference {
+                *counts.entry(r.as_str()).or_default() += 1;
+            }
+        }
     }
     Ok(InterfaceList {
         types: counts
@@ -243,6 +250,18 @@ pub fn interface_show(slices: &[RegistrySlice], type_name: &str) -> Result<Inter
                     producer: slice.name.clone(),
                     class: s.class.clone(),
                     path: s.path.clone(),
+                });
+            }
+        }
+        // A blob entry has no path (RFC 08 §2), so the tier token stands in —
+        // it is the chunk that identifies the family, exactly as a procedure
+        // path does on `@rpc`.
+        for b in &slice.blob {
+            if b.reference.as_deref() == Some(type_name) {
+                carriers.push(CarrierRow {
+                    producer: slice.name.clone(),
+                    class: "@blob".to_string(),
+                    path: b.tier.clone(),
                 });
             }
         }
@@ -358,6 +377,48 @@ mod tests {
             &slices,
         )
         .unwrap();
+    }
+
+    /// A slice that declares `[[blob]]` (RFC 08 §2, v1.8) is readable by a
+    /// bus explorer — which is the whole reason for modelling the plane:
+    /// answering "who serves blobs, and of which tier?" without probing the
+    /// bus for keys nobody may be serving.
+    ///
+    /// The tcgui slice above is deliberately left *without* blob entries, so
+    /// the pair covers both directions: a pre-v1.8 slice still parses (blob
+    /// defaults to empty, no error), and a v1.8 slice surfaces its tiers.
+    #[test]
+    fn a_blob_bearing_slice_is_readable_by_an_explorer() {
+        let src = format!(
+            "{}\n[[blob]]\ntier = \"artifact\"\nendpoints = [\"manifest\", \"have\"]\n\
+             reference = \"Delivery\"\nsince = \"1.8\"\n\
+             [[blob]]\ntier = \"store\"\nalgo = \"blake3\"\nsince = \"1.8\"\n",
+            TCGUI_SLICE
+        );
+        let slice = parse_slice(&src).unwrap();
+        assert!(slice.serves_blob_tier("artifact"));
+        assert!(slice.serves_blob_tier("store"));
+        assert!(!slice.serves_blob_tier("tree"));
+        assert_eq!(slice.blob[0].endpoints, ["manifest", "have"]);
+        assert_eq!(slice.blob[1].algo.as_deref(), Some("blake3"));
+
+        // A blob `reference` is a carried type like any other, so it shows up
+        // in the type vocabulary with an `@blob` carrier.
+        let slices = vec![slice];
+        let types = interface_list(&slices).unwrap();
+        assert!(types.types.iter().any(|t| t.name == "Delivery"));
+        let show = interface_show(&slices, "Delivery").unwrap();
+        assert!(
+            show.carriers
+                .iter()
+                .any(|c| c.class == "@blob" && c.path == "artifact"),
+            "{:?}",
+            show.carriers
+        );
+
+        // Backward direction: the same slice minus the blob entries parses
+        // with an empty list rather than failing.
+        assert!(parse_slice(TCGUI_SLICE).unwrap().blob.is_empty());
     }
 
     /// The golden JSON contract (issue #12): `--format json` output is

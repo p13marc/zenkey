@@ -806,3 +806,17 @@ reply = "Vec<BandwidthRecord>"
 idempotent = true
 since = "1.0"
 description = "wire-level bandwidth-by-process (?top=N)"
+
+# The `@blob` plane (RFC 07 §2, RFC 08 §2 v1.8). No `path`: the key shapes are
+# fixed by the chapter and their variable chunks are content addresses. What
+# varies is which tier and endpoints this origin serves.
+#
+# `push` is declared, so the capability exists — RFC 07 §2.2 still requires the
+# receiving origin to gate it and leave it off by default.
+[[blob]]
+tier = "artifact"
+endpoints = ["manifest", "slice", "have", "push", "fanout"]
+reference = "BlobReference"
+encoding = "application/vnd.tcpdump.pcap"
+since = "1.8"
+description = "packet captures and debug bundles minted by @rpc/netring/artifact"

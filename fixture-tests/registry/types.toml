@@ -24,6 +24,9 @@ kind = "json-schema"
 [types.ArtifactStatus]
 kind = "json-schema"
 
+[types.BlobReference]
+kind = "json-schema"
+
 [types.CaptureDiskCommand]
 kind = "json-schema"
 

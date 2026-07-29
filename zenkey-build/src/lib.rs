@@ -119,6 +119,36 @@ pub(crate) struct MediaEntry {
     pub variant: String,
 }
 
+/// One `[[blob]]` entry (RFC 08 §2, v1.8).
+///
+/// Unlike every other entry kind, a blob entry has **no `path`**: the three
+/// key shapes are fixed by RFC 07 §2 and their variable chunks are content
+/// addresses, not registry vocabulary. What a deployment actually varies is
+/// which tiers and endpoints an origin serves, so that is the whole entry.
+pub(crate) struct BlobEntry {
+    /// `artifact` | `tree` | `store` — the reserved tier token (RFC 07 §2).
+    pub tier: String,
+    /// The RFC 07 §2.2 endpoints served; `artifact` only, empty elsewhere.
+    pub endpoints: Vec<String>,
+    /// The `<algo>` chunk; `store` only (RFC 07 §2.4).
+    pub algo: Option<String>,
+    /// Type conveying this blob's reference — the payload that must carry the
+    /// content root (RFC 07 §2.1). Resolved against the shared type table.
+    pub reference: Option<String>,
+    /// Encoding of the blob *content*, never of the chunk framing (which is
+    /// self-describing on the wire, RFC 07 §2.4).
+    pub encoding: Option<String>,
+    pub description: Option<String>,
+}
+
+/// The endpoints RFC 07 §2.2 reserves under `artifact/<id>/`. A closed set:
+/// the plane defines them, so an unknown name is a build error rather than an
+/// extension point.
+pub(crate) const BLOB_ENDPOINTS: &[&str] = &["manifest", "slice", "have", "push", "fanout"];
+
+/// The tier tokens RFC 07 §2 reserves at position 5 under `@blob`.
+pub(crate) const BLOB_TIERS: &[&str] = &["artifact", "tree", "store"];
+
 pub(crate) struct RegistryFile {
     /// Producer base name, or service name for `[service]` files.
     pub name: String,
@@ -129,6 +159,7 @@ pub(crate) struct RegistryFile {
     pub procedures: Vec<ProcedureEntry>,
     #[allow(dead_code)] // consumed by the media-codegen commit (#10)
     pub media: Vec<MediaEntry>,
+    pub blob: Vec<BlobEntry>,
     pub deprecated: Vec<String>,
 }
 
@@ -770,6 +801,139 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             }
         }
 
+        // [[blob]] entries (RFC 08 §2/§5, v1.8). Every vocabulary here is
+        // closed by RFC 07 §2, so every lint is decidable and none is a
+        // matter of taste. There is no `path` to validate: blob key shapes
+        // are fixed by the chapter and their variable chunks are content
+        // addresses, so what an entry declares is which tier and endpoints
+        // this origin serves.
+        let mut blob_entries: Vec<BlobEntry> = Vec::new();
+        if let Some(blobs) = doc.get("blob").and_then(|v| v.as_array()) {
+            for entry in blobs {
+                if entry.get("path").is_some() {
+                    return Err(lint(
+                        &fname,
+                        "[[blob]] takes no path — blob key shapes are fixed by RFC 07 §2 and \
+                         their variable chunks are content addresses (RFC 08 §2)",
+                    ));
+                }
+                if entry.get("cardinality").is_some() {
+                    return Err(lint(
+                        &fname,
+                        "[[blob]] takes no cardinality — RFC 03 §3 already carves blob ids and \
+                         tree roots out of the budget as unbounded families (RFC 08 §2)",
+                    ));
+                }
+                let tier = entry
+                    .get("tier")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| lint(&fname, "[[blob]] missing tier (RFC 08 §2)"))?;
+                if !BLOB_TIERS.contains(&tier) {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "[[blob]] tier {tier:?} is not a reserved tier token ({}) — RFC 07 §2",
+                            BLOB_TIERS.join(" | ")
+                        ),
+                    ));
+                }
+                let is_artifact = tier == "artifact";
+                let is_store = tier == "store";
+
+                // `endpoints` present exactly on `artifact`: the Tier-2 keys
+                // *are* the endpoint, so naming one there is a category error
+                // rather than a harmless extra.
+                let endpoints: Vec<String> = match entry.get("endpoints") {
+                    Some(v) => {
+                        if !is_artifact {
+                            return Err(lint(
+                                &fname,
+                                format!(
+                                    "[[blob]] tier {tier:?} takes no endpoints — the key is the \
+                                     endpoint (RFC 07 §2.3/§2.4)"
+                                ),
+                            ));
+                        }
+                        let arr = v.as_array().ok_or_else(|| {
+                            lint(&fname, "[[blob]] endpoints must be an array of names")
+                        })?;
+                        let mut names: Vec<String> = Vec::with_capacity(arr.len());
+                        for e in arr {
+                            let n = e.as_str().ok_or_else(|| {
+                                lint(&fname, "[[blob]] endpoints must be an array of names")
+                            })?;
+                            if !BLOB_ENDPOINTS.contains(&n) {
+                                return Err(lint(
+                                    &fname,
+                                    format!(
+                                        "[[blob]] endpoint {n:?} is not reserved by RFC 07 §2.2 \
+                                         ({})",
+                                        BLOB_ENDPOINTS.join(", ")
+                                    ),
+                                ));
+                            }
+                            if names.iter().any(|k| k == n) {
+                                return Err(lint(
+                                    &fname,
+                                    format!("[[blob]] endpoint {n:?} listed twice"),
+                                ));
+                            }
+                            names.push(n.to_string());
+                        }
+                        names
+                    }
+                    None if is_artifact => {
+                        return Err(lint(
+                            &fname,
+                            "[[blob]] tier \"artifact\" must declare its endpoints (RFC 07 §2.2)",
+                        ));
+                    }
+                    None => Vec::new(),
+                };
+
+                let algo = match entry.get("algo").and_then(|v| v.as_str()) {
+                    Some(_) if !is_store => {
+                        return Err(lint(
+                            &fname,
+                            format!("[[blob]] tier {tier:?} takes no algo (RFC 07 §2.4)"),
+                        ));
+                    }
+                    Some(a) if !is_valid_plain_chunk(a) => {
+                        return Err(lint(
+                            &fname,
+                            format!("[[blob]] algo {a:?} violates RFC 03 §2"),
+                        ));
+                    }
+                    Some(a) => Some(a.to_string()),
+                    None if is_store => {
+                        return Err(lint(
+                            &fname,
+                            "[[blob]] tier \"store\" must declare its hash algo (RFC 07 §2.4)",
+                        ));
+                    }
+                    None => None,
+                };
+
+                blob_entries.push(BlobEntry {
+                    tier: tier.to_string(),
+                    endpoints,
+                    algo,
+                    reference: entry
+                        .get("reference")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    encoding: entry
+                        .get("encoding")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    description: entry
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                });
+            }
+        }
+
         // H4 (RFC 08 §5, v1.5): in a service registry, a subject pattern
         // containing the variable `{host}` must lead with it — the G1
         // desired-state proxy rule (the target host is addressing, and
@@ -828,8 +992,35 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             subjects,
             procedures,
             media: media_entries,
+            blob: blob_entries,
             deprecated,
         });
+    }
+
+    // Blob `(tier, algo)` uniqueness is **app-wide, not per-file** — the one
+    // collision rule here that is, and for a structural reason: a blob key
+    // carries no producer chunk (RFC 07 §2), so two producers each declaring
+    // `tier = "artifact"` are declaring the same key family twice, not two
+    // families that happen to look alike.
+    {
+        let mut seen: BTreeMap<(&str, Option<&str>), &str> = BTreeMap::new();
+        for f in &files {
+            for b in &f.blob {
+                let slot = (b.tier.as_str(), b.algo.as_deref());
+                if let Some(other) = seen.insert(slot, f.name.as_str()) {
+                    let algo = b.algo.as_deref().unwrap_or("-");
+                    return Err(lint(
+                        "registry",
+                        format!(
+                            "blob tier {:?} (algo {algo}) declared by both {other:?} and {:?}; \
+                             blob keys have no producer chunk, so that is one key family \
+                             declared twice (RFC 08 §5)",
+                            b.tier, f.name
+                        ),
+                    ));
+                }
+            }
+        }
     }
     Ok(files)
 }
@@ -840,7 +1031,8 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
 /// ledger append was forgotten. Both fail the build.
 /// The RFC 08 §5 type-table resolution lint (v1.5, H6): when
 /// `registry/types.toml` exists, every `type`/`request`/`reply`/`attachment`
-/// name across the registry set must resolve in it. Absent file = lint
+/// name — and, since v1.8, every `[[blob]]` `reference` — across the registry
+/// set must resolve in it. Absent file = lint
 /// inactive (activation-on-existence, so adoption is incremental).
 fn check_type_table(dir: &Path, files: &[RegistryFile]) -> Result<(), Error> {
     let path = dir.join("types.toml");
@@ -880,6 +1072,11 @@ fn check_type_table(dir: &Path, files: &[RegistryFile]) -> Result<(), Error> {
         }
         for m in &f.media {
             check(&m.attachment);
+        }
+        for b in &f.blob {
+            if let Some(t) = &b.reference {
+                check(t);
+            }
         }
     }
     if missing.is_empty() {
@@ -1039,5 +1236,106 @@ mod tests {
             "{base}[[media]]\npath = \"front/{{rest...}}\"\nencoding = \"video/h264\"\nattachment = \"FrameMeta\"\nsince = \"1.0\"\n"
         );
         assert!(lint_one(&rest).is_err());
+    }
+
+    /// RFC 08 §5 (v1.8). Every blob vocabulary is closed by RFC 07 §2, so
+    /// every one of these is decidable at build time — which is the argument
+    /// for modelling the plane rather than leaving it to prose.
+    ///
+    /// Each case asserts the *rejection*; the accepting cases at the end are
+    /// what keep the rejections from passing for the wrong reason (a lint
+    /// that rejects everything is not a lint).
+    #[test]
+    fn blob_vocabularies_are_closed() {
+        let base = format!("{HEADER}[producer]\nname = \"netring\"\n\n");
+        let blob = |body: &str| lint_one(&format!("{base}[[blob]]\n{body}"));
+
+        // The tier token is one of three (RFC 07 §2).
+        assert!(blob("tier = \"snapshot\"\nsince = \"1.8\"\n").is_err());
+        assert!(blob("since = \"1.8\"\n").is_err(), "tier is required");
+
+        // Endpoints: required on artifact, forbidden elsewhere, closed set.
+        assert!(
+            blob("tier = \"artifact\"\nsince = \"1.8\"\n").is_err(),
+            "artifact must declare its endpoints"
+        );
+        assert!(
+            blob("tier = \"artifact\"\nendpoints = [\"manifest\", \"chunks\"]\nsince = \"1.8\"\n")
+                .is_err(),
+            "\"chunks\" is not an RFC 07 §2.2 endpoint"
+        );
+        assert!(
+            blob("tier = \"tree\"\nendpoints = [\"manifest\"]\nsince = \"1.8\"\n").is_err(),
+            "a Tier-2 key IS the endpoint"
+        );
+        assert!(
+            blob("tier = \"artifact\"\nendpoints = [\"have\", \"have\"]\nsince = \"1.8\"\n")
+                .is_err()
+        );
+
+        // algo: required on store, forbidden elsewhere.
+        assert!(blob("tier = \"store\"\nsince = \"1.8\"\n").is_err());
+        assert!(blob("tier = \"tree\"\nalgo = \"blake3\"\nsince = \"1.8\"\n").is_err());
+
+        // The two absences that are load-bearing rather than lenient: a blob
+        // entry has no path (the key shapes are fixed by the chapter) and no
+        // cardinality (RFC 03 §3 carves content addresses out of the budget).
+        assert!(blob("tier = \"tree\"\npath = \"{root}\"\nsince = \"1.8\"\n").is_err());
+        assert!(blob("tier = \"tree\"\ncardinality = 1000\nsince = \"1.8\"\n").is_err());
+
+        // …and the shapes that must be accepted.
+        assert!(
+            blob("tier = \"tree\"\nsince = \"1.8\"\ndescription = \"snapshots\"\n").is_ok(),
+            "a bare Tier-2 declaration is the minimal legal entry"
+        );
+        assert!(
+            blob(
+                "tier = \"artifact\"\nendpoints = [\"manifest\", \"slice\", \"have\", \"push\", \
+                 \"fanout\"]\nreference = \"Delivery\"\nencoding = \"application/gzip\"\n\
+                 since = \"1.8\"\ndescription = \"bundles\"\n"
+            )
+            .is_ok(),
+            "the full artifact declaration must build"
+        );
+    }
+
+    /// A blob key carries no producer chunk, so two producers each declaring
+    /// one tier are declaring the *same* key family twice. This is the one
+    /// collision rule in the crate that is app-wide rather than per-file, and
+    /// it is app-wide for that structural reason.
+    #[test]
+    fn one_blob_tier_may_be_declared_only_once_across_the_app() {
+        let dir = std::env::temp_dir().join(format!(
+            "zenkey-build-blobdup-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = "\n[[blob]]\ntier = \"tree\"\nsince = \"1.8\"\n";
+        std::fs::write(
+            dir.join("a.toml"),
+            format!("{HEADER}[producer]\nname = \"netring\"\n{entry}"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("b.toml"),
+            format!("{HEADER}[producer]\nname = \"logs\"\n{entry}"),
+        )
+        .unwrap();
+        let clashing = Config::new().registry_dir(&dir).generate_string();
+
+        // Same two files, but only one declares the tier: the pair must build,
+        // or the check above would pass merely because two files never do.
+        std::fs::write(
+            dir.join("b.toml"),
+            format!("{HEADER}[producer]\nname = \"logs\"\n"),
+        )
+        .unwrap();
+        let distinct = Config::new().registry_dir(&dir).generate_string();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(clashing.is_err(), "one tier declared twice must fail");
+        assert!(distinct.is_ok(), "{distinct:?}");
     }
 }

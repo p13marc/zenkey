@@ -482,8 +482,11 @@ registry version to coordinate.
     in it is from the reserved set of [07 §2.2](07-bulk-planes.md)
     (`manifest`, `slice`, `have`, `push`, `fanout`);
   - `algo` is present exactly when `tier = "store"`;
-  - at most one entry per `(tier, algo)` — a second entry for a tier is a
-    duplicate declaration, not a second key family;
+  - at most one entry per `(tier, algo)` **across the whole registry set**,
+    not per file. Blob keys carry no producer chunk, so two producers each
+    declaring `tier = "artifact"` are declaring the *same* key family twice —
+    the one collision rule here that is app-wide rather than
+    producer-scoped, precisely because the producer position is absent;
   - `reference`, where present, resolves in the shared type table, exactly
     as a `[[subject]]` `type` does.
 - CI MUST enforce (v1.5, H4): in a **service** registry, a subject pattern

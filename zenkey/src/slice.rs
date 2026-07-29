@@ -60,6 +60,36 @@ pub struct ProcedureDecl {
     pub description: Option<String>,
 }
 
+/// One `[[blob]]` entry of a served registry slice (RFC 08 §2, v1.8).
+///
+/// Unlike the other declarations this one has no `path`: RFC 07 §2 fixes the
+/// three blob key shapes, and their variable chunks are content addresses
+/// rather than registry vocabulary. What a slice reveals — and the reason
+/// modelling `@blob` was worth doing — is *which tiers an origin serves*, so
+/// an explorer can answer "who holds blobs, and of which kind?" without
+/// probing the bus for keys nobody may be serving.
+///
+/// Note the asymmetry, which is pre-existing rather than introduced here:
+/// `[[media]]` has had a registry field table since v1.3 and codegen since
+/// v1.5, but has never appeared in a slice. Retrofitting it is separate work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobDecl {
+    /// `artifact` | `tree` | `store` (RFC 07 §2).
+    pub tier: String,
+    /// The RFC 07 §2.2 endpoints served under `artifact/<id>/`; empty for the
+    /// Tier-2 tiers, whose key *is* the endpoint.
+    pub endpoints: Vec<String>,
+    /// The `<algo>` chunk, on the `store` tier (RFC 07 §2.4).
+    pub algo: Option<String>,
+    /// The type conveying a reference to this blob — the payload that must
+    /// carry the content root (RFC 07 §2.1).
+    pub reference: Option<String>,
+    /// The blob content's encoding, when declared.
+    pub encoding: Option<String>,
+    pub since: Option<String>,
+    pub description: Option<String>,
+}
+
 /// One `[[deprecated]]` entry — RFC 08 §3's append-only retirement ledger.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeprecationDecl {
@@ -86,6 +116,11 @@ pub struct RegistrySlice {
     pub description: Option<String>,
     pub subjects: Vec<SubjectDecl>,
     pub procedures: Vec<ProcedureDecl>,
+    /// The `@blob` tiers this build serves (RFC 08 §2/§6, v1.8). Empty for
+    /// every producer that serves no blobs, and for any slice written before
+    /// v1.8 — the parser is forward- *and* backward-tolerant here, which is
+    /// the same posture it takes to unknown keys.
+    pub blob: Vec<BlobDecl>,
     pub deprecated: Vec<DeprecationDecl>,
 }
 
@@ -103,6 +138,11 @@ impl RegistrySlice {
     /// Does this slice serve this procedure?
     pub fn serves_procedure(&self, path: &str) -> bool {
         self.procedures.iter().any(|p| p.path == path)
+    }
+
+    /// Does this slice serve this `@blob` tier (RFC 07 §2)?
+    pub fn serves_blob_tier(&self, tier: &str) -> bool {
+        self.blob.iter().any(|b| b.tier == tier)
     }
 }
 
@@ -194,6 +234,34 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         });
     }
 
+    // `[[blob]]` (RFC 08 §2, v1.8). Every field is optional except `tier`:
+    // this parser reads *foreign* slices, where the strict vocabulary checks
+    // belong to that build's own `zenkey-build`, not to ours — refusing to
+    // read the rest of a slice over a tier token we do not recognise would
+    // turn a forward-compatible addition into an outage of the view that
+    // exists to spot exactly that skew.
+    let mut blob = Vec::new();
+    for e in array("blob") {
+        blob.push(BlobDecl {
+            tier: s(e.get("tier")).ok_or_else(|| err("[[blob]] missing tier"))?,
+            endpoints: e
+                .get("endpoints")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            algo: s(e.get("algo")),
+            reference: s(e.get("reference")),
+            encoding: s(e.get("encoding")),
+            since: s(e.get("since")),
+            description: s(e.get("description")),
+        });
+    }
+
     let mut deprecated = Vec::new();
     for e in array("deprecated") {
         deprecated.push(DeprecationDecl {
@@ -212,6 +280,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         description,
         subjects,
         procedures,
+        blob,
         deprecated,
     })
 }
@@ -244,6 +313,14 @@ pub enum SliceFinding {
     MissingProcedure {
         path: String,
     },
+    /// The host serves a `@blob` tier we do not know (RFC 08 §2, v1.8).
+    UnknownBlobTier {
+        tier: String,
+    },
+    /// We know a `@blob` tier the host does not serve.
+    MissingBlobTier {
+        tier: String,
+    },
     /// The host still serves a subject its own ledger marks deprecated.
     ServesDeprecated {
         path: String,
@@ -262,6 +339,8 @@ impl SliceFinding {
             Self::MissingSubject { path, class } => format!("does not serve {class} {path}"),
             Self::UnknownProcedure { path } => format!("serves unknown procedure {path}"),
             Self::MissingProcedure { path } => format!("does not serve procedure {path}"),
+            Self::UnknownBlobTier { tier } => format!("serves unknown @blob tier {tier}"),
+            Self::MissingBlobTier { tier } => format!("does not serve @blob tier {tier}"),
             Self::ServesDeprecated { path, replaced_by } => match replaced_by {
                 Some(r) => format!("serves deprecated {path} (use {r})"),
                 None => format!("serves deprecated {path}"),
@@ -309,6 +388,20 @@ pub fn diff(served: &RegistrySlice, local: &RegistrySlice) -> Vec<SliceFinding> 
         if !served.serves_procedure(&p.path) {
             out.push(SliceFinding::MissingProcedure {
                 path: p.path.clone(),
+            });
+        }
+    }
+    for b in &served.blob {
+        if !local.serves_blob_tier(&b.tier) {
+            out.push(SliceFinding::UnknownBlobTier {
+                tier: b.tier.clone(),
+            });
+        }
+    }
+    for b in &local.blob {
+        if !served.serves_blob_tier(&b.tier) {
+            out.push(SliceFinding::MissingBlobTier {
+                tier: b.tier.clone(),
             });
         }
     }
