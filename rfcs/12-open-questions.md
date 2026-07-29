@@ -259,6 +259,24 @@ the amendment survived only after being **inverted** — it became
 [07 §3](07-bulk-planes.md), the publisher-concrete / subscriber-may-wildcard
 rule, which subsumes both cases.
 
+**Trigger fired (v1.7, 2026-07-28) — rejection re-affirmed.** The stated
+condition below is "a rejected amendment reopens only if the chapter it was
+rejected against changes", and v1.7 rewrote exactly that chapter. Re-read
+rather than recalled, per §8.1's lesson: the rewrite **strengthened** the
+rejection rather than weakening it. [07 §2.5](07-bulk-planes.md) now gives
+probing a purpose-built endpoint (`have`, an availability bitfield) instead of
+v1.2's vague "tiny replies", and states the prohibition once, normatively, in
+§3 — a wildcard-origin *bulk fetch* remains forbidden as a default path, on
+the same amplification argument, which nothing in the v2 wire changes. v1.8
+then makes the distinction structural rather than textual: the generated probe
+builder returns a probe-prefix type that a bulk-fetch call will not accept
+([08 §2](08-registry.md)). The amendment stays rejected, and it is now
+rejected by the type system as well as by the prose.
+
+*Recording this is the point of the trigger.* An unexamined trigger that
+silently never fires is indistinguishable from one whose condition was met and
+ignored — which is the failure mode §8.1 is about, one level up.
+
 ### The method, since it is the point
 
 Every v1.2 amendment was greped against the ratified chapter text before it was
@@ -271,8 +289,10 @@ instead of re-reading it*. That is also what caused the outage the amendments
 are about ([06 §6.3](06-identity.md)) — which is a tidy demonstration that the
 failure mode does not spare the people who wrote the spec.
 
-**Revisit trigger.** None. A rejected amendment reopens only if the chapter it
-was rejected against changes.
+**Revisit trigger.** None standing. A rejected amendment reopens only if the
+chapter it was rejected against changes — and when that happens the outcome is
+recorded in place, whichever way it goes (see §8.2, where v1.7's rewrite of
+chapter 07 fired the trigger and the rejection was re-affirmed).
 
 ## 9. Matching-status introspection — DEFERRED (v1.5)
 

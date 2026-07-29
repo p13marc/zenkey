@@ -267,6 +267,25 @@ The `fanout` publication (§2.2) carries the same obligation on the publish
 side, plus blocking congestion control: shedding slices under local
 backpressure would trade a bounded delay for an unbounded recovery.
 
+### 2.7 Registry modelling (added in v1.8)
+
+v1.7 left `@blob` the one plane with no registry entry kind, which meant the
+only plane carrying whole files was also the only one no build-lint and no
+bus explorer could see. [08 §2](08-registry.md) closes that with a `[[blob]]`
+entry kind: an origin declares which **tier** it serves and, for `artifact`,
+which of §2.2's endpoints — nothing more, because the key shapes above are
+fixed by this chapter and their variable chunks are content addresses rather
+than registry vocabulary.
+
+Two rules of this section become *structural* there rather than advisory.
+Generated `tree`/`store` builders take a validated content-hash type, so
+§2.3's revoked caller-chosen name has no spelling in the generated surface;
+and the §2.5 probe form returns a distinct probe-prefix type, so a probe
+prefix cannot be passed where the §3 prohibition forbids one. Declaring
+`push` in an entry remains a statement of capability — the authorization gate
+and the off-by-default posture of §2.2 are unaffected by anything a registry
+says.
+
 ## 3. The wildcard rule (normative)
 
 *Added in v1.2. The `@blob` fan-out caveat in §2 and the `@media` origin

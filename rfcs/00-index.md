@@ -1,9 +1,36 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.7 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.8 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.8 (2026-07-29, the `@blob` registry amendment)** — v1.7 re-specified
+> `@blob` and left it, by its own admission, the one plane with no registry
+> entry kind. That is a strange place to stop: the plane that moves whole
+> files was the only one no build-lint and no bus explorer could see. v1.8
+> closes it. [08 §2](08-registry.md) gains a field table; nothing else in the
+> convention moves.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **C1** | [08 §2](08-registry.md) *(new table)* | **`[[blob]]` is an entry kind.** An origin declares which **tier** it serves (`artifact` \| `tree` \| `store`) and, for `artifact`, which of [07 §2.2](07-bulk-planes.md)'s reserved endpoints (`manifest`, `slice`, `have`, `push`, `fanout`); plus `algo` on `store`, an optional `reference` type (the payload that must carry the content root, [07 §2.1](07-bulk-planes.md)), and an optional content `encoding`. Deliberately **no `path`** — alone among the kinds, blob key shapes are fixed by chapter 07 and their variable chunks are content addresses, not registry vocabulary — and **no `cardinality`**, since [03 §3](03-grammar.md) already carves blob ids and tree roots out of the budget as sanctioned unbounded families. Asking for a number would have invited a fiction and then budget-reviewed it. |
+> | **C2** | [08 §2](08-registry.md) | **Two chapter-07 rules become structural in the generated surface**, the move H1 made for forbidden-fanout writes. `tree`/`store` builders take a validated content-hash type, so [07 §2.3](07-bulk-planes.md)'s revoked caller-chosen name (`tree/nightly`) has *no spelling* in generated code; and the [§2.5](07-bulk-planes.md) probe form returns a distinct probe-prefix type, so a probe prefix cannot be passed where §3's prohibition forbids one. A rule the codegen refuses to spell is a rule nobody has to remember. |
+> | **C3** | [08 §5](08-registry.md), [§7](08-registry.md) | **Build-time enforcement and describe totality.** The blob vocabularies are closed, so all of it is decidable: `tier` in range; `endpoints` present exactly on `artifact` and drawn from the reserved set; `algo` present exactly on `store`; at most one entry per `(tier, algo)`; `reference` resolves in the shared type table. §7's totality clause now names `reference`, so a declared blob type must be covered by `describe`. |
+> | **C4** | [07 §2.7](07-bulk-planes.md) *(new)*, [08 §6](08-registry.md) | **Blob tiers reach runtime introspection** — the stated point of the exercise: an explorer can see which origins serve blobs, and of which tier. This exposes a **pre-existing** gap rather than creating one, and §6 is corrected instead of quietly widened: through v1.7 it claimed the introspect slice carried "media shapes", and it never has. Retrofitting `[[media]]` into the slice is separate work and is not bundled here. |
+> | **C5** | [12 §8.2](12-open-questions.md) | **A revisit trigger fired and is recorded.** §8.2's condition — "a rejected amendment reopens only if the chapter it was rejected against changes" — was met by v1.7's rewrite of chapter 07. Re-read rather than recalled (§8.1's own lesson): the rewrite *strengthened* the rejection, and C2 now enforces it in the type system. The amendment stays rejected. An unexamined trigger that silently never fires is indistinguishable from one whose condition was met and ignored. |
+>
+> **What did *not* change.** No grammar change and no wire change: position
+> counts, the tier tokens, chunk lexical rules and design properties D1–D6 are
+> untouched (the D1–D6 guard tests and the `@adv`-token test pass unmodified),
+> and [07 §2](07-bulk-planes.md)'s key shapes, endpoints, integrity anchoring
+> and QoS obligation are exactly as v1.7 left them — §2.7 describes how they
+> are *modelled*, and changes none of them. The registry TOML format is
+> extended purely additively: no existing registry file needs an edit, and an
+> application that serves no blobs writes nothing. `[[media]]`, `[[subject]]`
+> and `[[procedure]]` field tables are untouched. Declaring `push` remains a
+> statement of *capability*: [07 §2.2](07-bulk-planes.md)'s authorization gate
+> and off-by-default posture are unaffected by anything a registry says.
 
 > **v1.7 (2026-07-28, the `@blob` re-specification, zblob wire v2)** — the
 > bulk-transfer plane is re-specified against the reference client's
@@ -30,7 +57,8 @@ branch).
 > prohibition on wildcard-origin *bulk fetch* is unchanged. §4's rationale
 > for planes-not-payloads stands. Tier-1 ids remain the RPC-minted ULID.
 > The registry format is untouched — modelling `@blob` in the registry
-> remains open (it is the one plane with no entry kind). One editorial
+> remains open (it is the one plane with no entry kind). *(Closed by v1.8,
+> above.)* One editorial
 > touch outside 07: [03 §2](03-grammar.md)'s plane table said `@blob` is
 > "queryables"; it now reads "queryables (+ `fanout` pub)" to match B3.
 >

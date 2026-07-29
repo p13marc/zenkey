@@ -256,7 +256,86 @@ origin, and a viewer builder taking a remote origin — and deliberately **no**
 wildcard/family selector, per the [07 §1](07-bulk-planes.md) tier-wildcard
 revocation: a viewer subscribes to exactly one tier.)
 
-`[[procedure]]` entries (the `@rpc` plane, RFC 05) are the third shape and,
+`[[blob]]` entries (the `@blob` plane, [RFC 07 §2](07-bulk-planes.md)) are the
+third shape, added in **v1.8**. `@blob` was the one plane with no entry kind:
+its keys were normative but unmodellable, so the only plane carrying whole
+files was also the only one no build-lint and no bus explorer could see. A
+blob entry declares *which tiers and endpoints this origin serves*:
+
+```toml
+[[blob]]
+tier        = "artifact"
+endpoints   = ["manifest", "slice", "have", "fanout"]
+reference   = "ArtifactDelivery"
+encoding    = "application/vnd.tcpdump.pcap"
+since       = "1.8"
+description = "packet captures and debug bundles minted by @rpc/netring/artifact"
+
+[[blob]]
+tier        = "store"
+algo        = "blake3"
+since       = "1.8"
+description = "content-addressed chunks backing the tree tier"
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `tier` | enum `artifact \| tree \| store` | yes | the reserved tier token after `@blob` ([07 §2](07-bulk-planes.md)). It is a **tier token, not a producer chunk** — content-addressed data has no owning component — so a blob entry generates no producer position, unlike every other entry kind |
+| `endpoints` | list of reserved names | `artifact` only (yes) | which of [07 §2.2](07-bulk-planes.md)'s endpoints this origin serves: `manifest`, `slice`, `have`, `push`, `fanout`. `tree` and `store` have none — the key *is* the endpoint — and naming any on them is an error |
+| `algo` | hash-algorithm name | `store` only (yes) | the `<algo>` chunk ([07 §2.4](07-bulk-planes.md)). A deployment SHOULD carry one value fleet-wide; a second entry exists only while a migration runs both |
+| `reference` | type-table name | no (RECOMMENDED on `artifact`) | the payload type that conveys this blob's reference to consumers — i.e. the type that MUST carry the content root under [07 §2.1](07-bulk-planes.md). **CI-resolved against the shared type table** ([§5](#5-ownership-and-process)), exactly like a `[[subject]]` `type` |
+| `encoding` | MIME-ish string | no | the encoding of the blob *content* (`application/vnd.tcpdump.pcap`), so a consumer can choose a viewer without fetching. Never the chunk framing — that is self-describing on the wire ([07 §2.4](07-bulk-planes.md)) |
+| `since` / `gone` / `replaced_by` | registry versions / tier | `since` yes | lifecycle (§3) |
+| `variant` | CamelCase string | no | generated-variant name override, same rule as `[[subject]]` |
+| `description` | string | yes | one line, human |
+
+The negative space is larger here than for any other kind, and each absence is
+load-bearing:
+
+- **No `path`.** Alone among the entry kinds, a blob entry has no pattern. The
+  three key shapes are fixed by [07 §2](07-bulk-planes.md) and their variable
+  chunks are *content addresses* — a ULID, a root hash, a chunk hash — not
+  registry vocabulary. What actually varies between deployments is which tiers
+  and endpoints an origin serves, and that is the whole of the declaration.
+- **No `cardinality`.** [03 §3](03-grammar.md) already carves blob ids and tree
+  roots out of the cardinality budget as sanctioned unbounded families. Asking
+  for a number here would invite a fiction and then budget-review it.
+- **No `class`/`qos`/`ttl_s`/`seed`** — the same argument `[[media]]` makes:
+  these are data-class concepts, and `@blob` QoS is fixed by
+  [07 §2.6](07-bulk-planes.md) as a *client* obligation discharged by default
+  in the reference client. It is not a per-entry knob.
+
+Declaring `push` in `endpoints` states a **capability, not a policy**:
+[07 §2.2](07-bulk-planes.md) requires the receiving origin to gate `push/**`
+behind an authorization hook and to leave it off by default, and a registry
+entry does not and cannot satisfy that.
+
+Blob key builders are generated from these entries as subject/media/procedure
+builders are, with two requirements that are structural rather than
+stylistic:
+
+- **Content-address arguments are typed as content hashes, never strings.**
+  `tree` and `store` take a validated hash type, so the caller-chosen-name
+  spelling that [07 §2.3](07-bulk-planes.md) revoked (`tree/nightly`) has no
+  expression in the generated surface — the same move H1 made for
+  forbidden-fanout writes. A rule the codegen can refuse to spell does not
+  need to be remembered.
+- **The probe form is a distinct type.** [07 §2.5](07-bulk-planes.md) permits
+  a `*`-origin probe (`have`/`manifest`, tiny replies) and forbids a
+  `*`-origin bulk fetch. The generated probe builder therefore returns a
+  *probe prefix*, not a key, so a probe prefix cannot be passed where a
+  fetch prefix is expected. Probe-then-fetch becomes expressible from the
+  registry rather than being prose a caller must obey.
+
+One asymmetry is created here and recorded rather than hidden: blob entries
+appear in the **runtime introspect slice** (§6), while `[[media]]` entries —
+which have had a field table since v1.3 and codegen since v1.5 — still do
+not. That is a pre-existing gap in the slice, not a decision about `@blob`;
+retrofitting media is separate work and is deliberately not bundled here,
+because the whole stated value of modelling `@blob` is that an explorer can
+see which origins serve blobs and of which tier.
+
+`[[procedure]]` entries (the `@rpc` plane, RFC 05) are the fourth shape and,
 like `[[media]]`, carry request/reply *types* rather than a class payload, so
 they too have their own normative field table:
 
@@ -395,6 +474,18 @@ registry version to coordinate.
   and no `[[deprecated]]` entry is ever deleted; every `events` entry has
   a `rate`; every `{var}`-bearing entry has a `cardinality`; every live
   `state` entry has a `ttl_s`.
+- CI MUST enforce, for `[[blob]]` entries (v1.8) — these are closed
+  vocabularies fixed by [07 §2](07-bulk-planes.md), so every one of them is
+  decidable at build time and none is a matter of taste:
+  - `tier` is one of `artifact` | `tree` | `store`;
+  - `endpoints` is present exactly when `tier = "artifact"`, and every name
+    in it is from the reserved set of [07 §2.2](07-bulk-planes.md)
+    (`manifest`, `slice`, `have`, `push`, `fanout`);
+  - `algo` is present exactly when `tier = "store"`;
+  - at most one entry per `(tier, algo)` — a second entry for a tier is a
+    duplicate declaration, not a second key family;
+  - `reference`, where present, resolves in the shared type table, exactly
+    as a `[[subject]]` `type` does.
 - CI MUST enforce (v1.5, H4): in a **service** registry, a subject pattern
   containing the variable `{host}` places it as the **first** chunk — the
   G1 desired-state proxy rule ([07 §3](07-bulk-planes.md)): the target host
@@ -419,8 +510,10 @@ registry version to coordinate.
 The static TOML is the *authority*; a running fleet additionally serves
 the *observation* of it. Every producer MUST serve
 `@rpc/<producer>/introspect` (read, idempotent) returning the registry
-slice it was **compiled against** — its subjects, procedures, media
-shapes, and registry file version. The reply is generated from the same
+slice it was **compiled against** — its subjects, procedures, blob tiers
+(v1.8), and registry file version. (Through v1.7 this sentence also said
+"media shapes"; the slice has never carried them. v1.8 corrects the claim
+rather than quietly widening it — see the asymmetry note in §2.) The reply is generated from the same
 source as the producer's key constants, so it cannot drift from behavior
 (the reason D-Bus introspection XML is trustworthy: the implementation
 emits it — [10-prior-art.md](10-prior-art.md)).
@@ -508,7 +601,8 @@ Normative points:
 
 - **Totality.** The set MUST cover every type name the producer's
   `introspect` slice references (`type`, `request`, `reply`,
-  `attachment`); a superset is fine. §6.1 binds `describe` exactly as it
+  `attachment`, and — since v1.8 — a `[[blob]]` `reference`); a superset is
+  fine. §6.1 binds `describe` exactly as it
   binds `introspect`: serving a schema for bytes the build does not emit
   is a lie.
 - **Kinds are an open vocabulary.** This RFC registers `json-schema`
