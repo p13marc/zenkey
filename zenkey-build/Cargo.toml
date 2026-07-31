@@ -14,6 +14,6 @@ authors.workspace = true
 [dependencies]
 # default-features = false: codegen needs only the chunk rules, never the
 # zenoh stack — a consumer's build-dependencies stay light.
-zenkey = { version = "0.3.0", path = "../zenkey", default-features = false }
+zenkey = { version = "0.4.0", path = "../zenkey", default-features = false }
 thiserror = { workspace = true }
 toml = "0.8"

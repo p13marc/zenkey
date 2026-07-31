@@ -328,8 +328,11 @@ fn blob_builders_carry_no_producer_chunk() {
     // The tier token sits where a producer chunk would be on every other
     // plane (RFC 07 §2): content-addressed data has no owning component. The
     // enum is app-level for the same reason — `netring` declares the artifact
-    // tier, but its name appears nowhere in the key.
-    assert_eq!(blob::Tier::Artifact.declared_by(), "netring");
+    // tier, but its name appears nowhere in the key. A tier declared by
+    // several producers (each serves the same app-level family) dedups to one
+    // variant that records every declarer, in registry-file order.
+    assert_eq!(blob::Tier::Artifact.declared_by(), ["netring"]);
+    assert_eq!(blob::Tier::Tree.declared_by(), ["logs", "netring"]);
     let key = blob::artifact_manifest_key(&local(), "01jgxqz4yqk8v6txw3m9f2a7cd");
     assert_eq!(
         key,
@@ -428,22 +431,44 @@ fn the_introspect_slice_carries_the_blob_tiers() {
     let slice = zenkey::parse_slice(registry::registry_toml("netring").unwrap()).unwrap();
     assert!(slice.serves_blob_tier("artifact"));
     assert!(
+        slice.serves_blob_tier("tree"),
+        "netring declares the tree tier it also serves"
+    );
+    assert!(
         !slice.serves_blob_tier("store"),
-        "netring declares only Tier-1"
+        "netring does not declare store"
     );
     let decl = slice.blob.iter().find(|b| b.tier == "artifact").unwrap();
     assert_eq!(decl.reference.as_deref(), Some("BlobReference"));
     assert!(decl.endpoints.iter().any(|e| e == "have"));
 
-    // Tier-2 lives in another producer's file because the `(tier, algo)` slot
-    // is app-wide: a blob key has no producer chunk, so two producers naming
-    // one tier would be declaring one key family twice.
+    // Each producer's slice declares the tiers *it* serves — per-producer
+    // truth, even though every declarer names the same app-level key family
+    // (shapes agree by lint, codegen dedups).
     let logs = zenkey::parse_slice(registry::registry_toml("logs").unwrap()).unwrap();
     assert!(logs.serves_blob_tier("tree") && logs.serves_blob_tier("store"));
     assert_eq!(
         logs.blob.iter().find(|b| b.tier == "store").unwrap().algo,
         Some("blake3".to_string())
     );
+
+    // Between two blob-serving producers the diff is still per-producer: logs
+    // does not know netring's artifact tier, and misses no tree (both serve
+    // it) but does miss store from netring's side.
+    let cross = zenkey::slice::diff(&slice, &logs);
+    assert!(cross.iter().any(|f| matches!(
+        f,
+        zenkey::SliceFinding::UnknownBlobTier { tier } if tier == "artifact"
+    )));
+    assert!(cross.iter().any(|f| matches!(
+        f,
+        zenkey::SliceFinding::MissingBlobTier { tier } if tier == "store"
+    )));
+    assert!(!cross.iter().any(|f| matches!(
+        f,
+        zenkey::SliceFinding::UnknownBlobTier { tier }
+        | zenkey::SliceFinding::MissingBlobTier { tier } if tier == "tree"
+    )));
 
     // A diff against a build that serves no blobs is a finding, not silence.
     let none = zenkey::parse_slice(registry::registry_toml("sysinfo").unwrap()).unwrap();

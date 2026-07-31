@@ -17,8 +17,9 @@ default = ["zenoh"]
 # depends on this crate with default-features = false) so codegen never pulls
 # the zenoh stack into build-dependencies.
 zenoh = ["dep:zenoh"]
-# Wire representations for HostId/RemoteOrigin (plain strings, validated on
-# deserialize) — applications carry origins in health documents (RFC 06 §6).
+# Wire representations for HostId/RemoteOrigin/ContentHash (plain strings,
+# validated on deserialize) — applications carry origins in health documents
+# (RFC 06 §6) and content roots in blob references (RFC 07 §2.1).
 serde = ["dep:serde"]
 # SchemaSet/TypeSchema — the RFC 08 §7 payload self-description types
 # (producer side: build + serve a describe reply; consumer side: parse one).
@@ -52,6 +53,7 @@ toml = "0.8"
 
 [dev-dependencies]
 criterion = { workspace = true }
+serde_json = { workspace = true }
 
 [[bench]]
 name = "keys"

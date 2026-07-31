@@ -310,6 +310,29 @@ mod tests {
         }
     }
 
+    /// RFC 07 §2.5/§3: the probe form spells the `*`-origin prefix and only
+    /// that. It is deliberately not a `Key` and has no conversion into one —
+    /// Rust cannot assert a *missing* impl, so this pins the half that can be
+    /// asserted and documents the invariant next to what depends on it.
+    #[test]
+    fn blob_probe_prefix_spells_the_wildcard_origin_form() {
+        for (tier, token) in [
+            (grammar::BlobTier::Artifact, "artifact"),
+            (grammar::BlobTier::Tree, "tree"),
+            (grammar::BlobTier::Store, "store"),
+        ] {
+            let probe = BlobProbePrefix::new(tier);
+            assert_eq!(probe.as_str(), format!("v1/*/@blob/{token}"));
+            assert_eq!(probe.to_string(), probe.as_str());
+        }
+        // The concrete counterpart differs exactly at the origin chunk.
+        let concrete = ctx().blob_prefix(grammar::BlobTier::Store);
+        assert_ne!(
+            BlobProbePrefix::new(grammar::BlobTier::Store).as_str(),
+            concrete.as_str()
+        );
+    }
+
     /// The base composes back on for the parties that genuinely see the wire:
     /// router storages, ACL rules, and un-namespaced debug tools (RFC 09 §0/§5).
     /// Multi-chunk bases are legal, and are a *config* value, not an API.

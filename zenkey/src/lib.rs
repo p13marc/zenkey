@@ -15,14 +15,18 @@
 //! - [`key`] — [`Key`]/[`Selector`]/[`Chunk`]: validated key value types over
 //!   `zenoh_keyexpr::OwnedKeyExpr` (RFC 08 §1.2).
 //! - [`grammar`] — chunk lexical rules, reserved tokens, structural key
-//!   assembly and parsing (RFC 03).
+//!   assembly and parsing (RFC 03); [`ContentHash`], the validated digest
+//!   type that makes `@blob` Tier-2 content-addressing structural (RFC 07
+//!   §2.3, v1.7).
 //! - [`origin`] — `h-<12hex>` host-origin minting (RFC 06 §1).
 //! - [`profile`] — the application profile: app name + origin salt, the two
 //!   constants an adopting application declares (RFC 06 §1, RFC 11 §4).
 //! - [`slug`] — canonical, injective slugging of foreign values (RFC 03 §2).
 //! - [`qos`] — the five named QoS profiles (RFC 04 §3).
 //! - [`context`] — [`V1Context`]: origin + producer; producers build all
-//!   framework keys through it.
+//!   framework keys through it. [`BlobProbePrefix`], the `*`-origin `@blob`
+//!   probe form — deliberately not a [`Key`], so a probe cannot be passed
+//!   where a fetch prefix is expected (RFC 07 §2.5/§3).
 //! - [`mod@slice`] — [`RegistrySlice`], the `introspect` reply type + diff
 //!   (RFC 08 §6).
 //!

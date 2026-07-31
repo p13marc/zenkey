@@ -1,7 +1,7 @@
 name: Release
 on:
   push:
-    tags: ['[0-9]+.[0-9]+.[0-9]+']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
 
 env:
   # shared compiler cache: sccache (mounted from the runner VM) -> garage S3

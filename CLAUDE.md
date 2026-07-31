@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 
-- `rfcs/` — the **normative RFC set** (v1.6 proposed; v1.4 ratified). Chapters 02–10 are
+- `rfcs/` — the **normative RFC set** (v1.8 proposed; v1.4 ratified). Chapters 02–10 are
   application-neutral; chapter 11 is the ZenSight reference profile. Wire-contract
   changes go through these RFCs, amendment-style (see the changelog in
   `rfcs/00-index.md` — each amendment records what changed *and* what deliberately
@@ -19,15 +19,18 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `zenkey_build::Config::new().registry_dir("registry").generate()` from their
   build script; registry lints (RFC 08 §5) and the deprecation-ledger check fail
   the *consumer's* build. Generates `Subject`/`ProcedureId` enums, parsers,
-  `AnySubject` dispatch, `REGISTRIES`, `is_registered_telemetry`.
+  `AnySubject` dispatch, `REGISTRIES`, `is_registered_telemetry`, and — when
+  the registry declares `[[blob]]` entries (v1.8) — an app-level `blob`
+  module (deduped `Tier` enum across all declaring producers, typed key
+  builders, the probe form).
 - `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0, crates.io): the
   shared core of zenctl and the future zengui — `fleet_get` (the RFC 05 §2.1
   chokepoint, moved verbatim from zenctl), `SliceSet`, the RFC 08 §7
   schema-decode pipeline (`SchemaStore`/`decode_sample`), `Monitor` with
   bounded broadcast + `Dropped(n)` honesty and ArcSwap key-tree snapshots.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
-  GitHub release binaries / `cargo install --git`; 0.1.x stays on crates.io
-  un-yanked): app-neutral; registry knowledge comes from the live bus
+  Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
+  stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus
   (RFC 08 §6 introspection) or `--registry <dir>` TOMLs. `--base` resolves
   flag > env `ZENCTL_BASE` > the active named context
   (`zenctl context create …`, `~/.config/zenctl/config.toml`) > **empty**
@@ -55,7 +58,12 @@ cargo run -p zenctl -- node list --base zensight -c tcp/127.0.0.1:7447
 cargo run -p zenctl -- topic list --base zensight --registry ../zensight/zensight-common/registry
 ```
 
-CI (`.github/workflows/ci.yml`) runs exactly: build, test, fmt check, clippy `-D warnings`.
+CI (`.forgejo/workflows/ci.yml`, Forgejo Actions) runs: fmt check, clippy
+`-D warnings` (all features), build + test (workspace, plus `-p zenkey
+--all-features`), an MSRV job (rustc pinned), and rustdoc with `-D warnings`.
+`release.yml` (tag push `vX.Y.Z`) builds the zenctl binary + source tarball as
+a Forgejo release; `publish-crates.yml` (manual dispatch) publishes the lib
+crates to crates.io.
 
 ## Architecture
 
@@ -99,9 +107,10 @@ un-namespaced debug tools (`zenctl`) ever see full keys
   zenkey with `default-features = false`).
 - `context` — `V1Context` bundles origin + producer; producers build all keys
   through it.
-- `slice` — `RegistrySlice`, the `introspect` reply type + diff (RFC 08 §6).
-  Optional metadata fields (qos/ttl/unit/rate/cardinality) must stay
-  **optional** — forward-compat is pinned by zenctl's foreign-slice test.
+- `slice` — `RegistrySlice`, the `introspect` reply type + diff (RFC 08 §6),
+  including per-producer `[[blob]]` tier declarations (v1.8). Optional
+  metadata fields (qos/ttl/unit/rate/cardinality) must stay **optional** —
+  forward-compat is pinned by zenctl's foreign-slice test.
 - `tests/guard.rs` — RFC 03 §4 design properties D1–D6 pinned as executable
   tests. If a grammar change breaks these, the change is wrong (or needs an RFC
   amendment).

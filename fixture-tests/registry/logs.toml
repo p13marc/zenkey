@@ -366,9 +366,10 @@ since = "2.0"
 reason = "the producer chunk already names the producer (#470)"
 
 
-# Tier-2 (RFC 07 §2.3/§2.4). Declared here rather than on netring because the
-# `(tier, algo)` slot is app-wide: a blob key has no producer chunk, so two
-# producers declaring one tier would be declaring one key family twice.
+# Tier-2 (RFC 07 §2.3/§2.4). Each producer declares the tiers *it* serves —
+# the introspect slice is per-producer truth — and a blob key has no producer
+# chunk, so every declarer names the same app-level key family: shapes must
+# agree across files (netring also declares `tree`), and codegen dedups them.
 [[blob]]
 tier = "tree"
 reference = "BlobReference"

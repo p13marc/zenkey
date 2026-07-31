@@ -415,6 +415,45 @@ impl std::fmt::Display for ContentHash {
     }
 }
 
+#[cfg(feature = "serde")]
+mod content_hash_serde {
+    //! Wire representation (feature `serde`): the plain hex digest, validated
+    //! on deserialize — same posture as the origin types. Payloads that
+    //! reference a blob carry its content root (RFC 07 §2.1), so the address
+    //! is checked where it enters the program, not at each use site.
+    use super::ContentHash;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+
+    impl Serialize for ContentHash {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_str(self.as_str())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for ContentHash {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let raw = String::deserialize(d)?;
+            ContentHash::parse(&raw).map_err(D::Error::custom)
+        }
+    }
+}
+
+/// The schema mirrors [`ContentHash::parse`] exactly: lowercase hex pairs,
+/// 8..=128 digits.
+#[cfg(feature = "schemars")]
+impl schemars::JsonSchema for ContentHash {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ContentHash".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": "^(?:[0-9a-f]{2}){4,64}$"
+        })
+    }
+}
+
 #[cfg(test)]
 mod content_addressing {
     use super::*;
@@ -489,6 +528,32 @@ mod content_addressing {
         ] {
             assert!(ContentHash::parse(bad).is_err(), "{bad:?} must be refused");
         }
+    }
+
+    /// The wire form is the plain digest, and deserialization runs the same
+    /// gate as [`ContentHash::parse`] — a name cannot enter through a payload.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn content_hash_serde_round_trips_through_parse() {
+        let hash = ContentHash::parse("ab12cd34ef56").unwrap();
+        let json = serde_json::to_string(&hash).unwrap();
+        assert_eq!(json, "\"ab12cd34ef56\"");
+        let back: ContentHash = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, hash);
+        for bad in ["\"nightly\"", "\"AB12CD34EF56\"", "\"ab12cd34ef5\""] {
+            assert!(
+                serde_json::from_str::<ContentHash>(bad).is_err(),
+                "{bad} must be refused on deserialize"
+            );
+        }
+    }
+
+    #[cfg(feature = "schemars")]
+    #[test]
+    fn content_hash_schema_is_a_patterned_string() {
+        let schema = serde_json::to_value(schemars::schema_for!(ContentHash)).unwrap();
+        assert_eq!(schema["type"], "string");
+        assert_eq!(schema["pattern"], "^(?:[0-9a-f]{2}){4,64}$");
     }
 }
 
