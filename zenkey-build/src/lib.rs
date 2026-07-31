@@ -21,7 +21,12 @@
 //! typed constructors and a precedence-ordered parser, a `ProcedureId` enum
 //! with `@rpc` key builders, and the raw registry slice served by
 //! `introspect` (RFC 08 §6); plus the cross-producer `AnySubject` dispatch,
-//! `REGISTRIES`, `registry_toml()`, and `is_registered_telemetry()`.
+//! `REGISTRIES`, `registry_toml()`, and `is_registered_telemetry()`. When the
+//! registry declares `[[blob]]` entries (RFC 08 §2, v1.8), an app-level
+//! `blob` module is emitted as well — a deduped `Tier` enum over every
+//! declared tier (blob keys carry no producer chunk, so the surface is
+//! app-level and `Tier::declared_by()` names every declaring producer) with
+//! typed per-tier key builders and the `*`-origin probe form.
 //!
 //! Lints (RFC 08 §5) are errors returned from [`Config::generate`] — a
 //! violating registry file fails the *consumer's* build, where the TOML was

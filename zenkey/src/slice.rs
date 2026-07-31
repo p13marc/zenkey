@@ -450,6 +450,80 @@ mod tests {
         assert!(slice.serves_procedure("introspect"));
     }
 
+    /// This parser reads *foreign* slices (RFC 08 §6), so its posture is the
+    /// opposite of zenkey-build's: only `tier` is required, and an
+    /// unrecognised tier token is kept rather than rejected — refusing to
+    /// read the rest of a slice over a forward-compatible addition would turn
+    /// skew into an outage of the view that exists to spot skew.
+    #[test]
+    fn blob_entries_parse_lax_with_only_tier_required() {
+        let header = r#"
+            [registry]
+            version = "1.8"
+            app = "acme"
+            convention = 1
+            [producer]
+            name = "netring"
+        "#;
+        let slice = parse_slice(&format!(
+            r#"{header}
+            [[blob]]
+            tier = "artifact"
+            endpoints = ["manifest", "have"]
+            reference = "Delivery"
+            [[blob]]
+            tier = "flux"
+            "#
+        ))
+        .unwrap();
+        assert!(slice.serves_blob_tier("artifact"));
+        let decl = slice.blob.iter().find(|b| b.tier == "artifact").unwrap();
+        assert_eq!(decl.endpoints, ["manifest", "have"]);
+        assert_eq!(decl.reference.as_deref(), Some("Delivery"));
+        assert_eq!(decl.algo, None);
+        // The unknown tier is kept, so a diff can surface it as skew.
+        assert!(slice.serves_blob_tier("flux"));
+
+        // `tier` itself is the one hard requirement.
+        assert!(parse_slice(&format!("{header}\n[[blob]]\nalgo = \"blake3\"\n")).is_err());
+
+        // Pre-v1.8 slices simply carry no blob entries.
+        let old = parse_slice(header).unwrap();
+        assert!(old.blob.is_empty());
+        assert!(!old.serves_blob_tier("artifact"));
+    }
+
+    /// Blob tier drift is a finding in both directions, straight from
+    /// `diff()` — the corpus-level version lives in fixture-tests, but this
+    /// crate publishes standalone and must pin it locally.
+    #[test]
+    fn blob_tier_drift_is_a_finding() {
+        let with = |tiers: &[&str]| {
+            let mut src = String::from(
+                "[registry]\nversion = \"1.8\"\napp = \"acme\"\nconvention = 1\n\
+                 [producer]\nname = \"netring\"\n",
+            );
+            for t in tiers {
+                src.push_str(&format!("[[blob]]\ntier = {t:?}\n"));
+            }
+            parse_slice(&src).unwrap()
+        };
+        let served = with(&["artifact", "tree"]);
+        let local = with(&["tree", "store"]);
+        let findings = diff(&served, &local);
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f, SliceFinding::UnknownBlobTier { tier } if tier == "artifact"))
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f, SliceFinding::MissingBlobTier { tier } if tier == "store"))
+        );
+        assert!(diff(&served, &served).is_empty());
+    }
+
     #[test]
     fn a_slice_identical_to_ours_is_no_finding() {
         let slice = parse_slice(
