@@ -1222,12 +1222,22 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
 /// content-addressed data has no owning component. Nesting these builders
 /// inside a producer module would have implied a chunk that is not there.
 fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
-    // (tier entry, declaring producer) in registry order.
-    let entries: Vec<(&crate::BlobEntry, &str)> = files
-        .iter()
-        .flat_map(|f| f.blob.iter().map(move |b| (b, f.name.as_str())))
-        .collect();
-    if entries.is_empty() {
+    // One group per distinct tier, in first-appearance order (files are read
+    // in sorted path order, so declarer lists are alphabetical by file).
+    // Several producers may declare one tier — each serves the same app-level
+    // key family — and the shape-agreement lint has already guaranteed the
+    // declarations agree, so the first one is canonical for everything but
+    // the declarer list.
+    let mut groups: Vec<(&crate::BlobEntry, Vec<(&str, &crate::BlobEntry)>)> = Vec::new();
+    for f in files {
+        for b in &f.blob {
+            match groups.iter_mut().find(|(first, _)| first.tier == b.tier) {
+                Some((_, declarers)) => declarers.push((f.name.as_str(), b)),
+                None => groups.push((b, vec![(f.name.as_str(), b)])),
+            }
+        }
+    }
+    if groups.is_empty() {
         return;
     }
     let variant = |b: &crate::BlobEntry| camel(&[b.tier.as_str()]);
@@ -1250,13 +1260,12 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
         "    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]"
     );
     let _ = writeln!(out, "    pub enum Tier {{");
-    for (b, producer) in &entries {
-        let desc = b.description.as_deref().unwrap_or("(no description)");
-        let _ = writeln!(
-            out,
-            "        /// `{}` — {desc} (declared by `{producer}`)",
-            b.tier
-        );
+    for (b, declarers) in &groups {
+        let _ = writeln!(out, "        /// `{}` — declared by:", b.tier);
+        for (producer, decl) in declarers {
+            let desc = decl.description.as_deref().unwrap_or("(no description)");
+            let _ = writeln!(out, "        /// - `{producer}`: {desc}");
+        }
         let _ = writeln!(out, "        {},", variant(b));
     }
     let _ = writeln!(out, "    }}\n");
@@ -1266,7 +1275,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
         "    /// Every blob tier this build declares, in registry order."
     );
     let _ = writeln!(out, "    pub const TIERS: &[Tier] = &[");
-    for (b, _) in &entries {
+    for (b, _) in &groups {
         let _ = writeln!(out, "        Tier::{},", variant(b));
     }
     let _ = writeln!(out, "    ];\n");
@@ -1283,8 +1292,8 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
         ),
         (
             "declared_by",
-            "&'static str",
-            "The producer whose registry file declares this tier.",
+            "&'static [&'static str]",
+            "The producers whose registry files declare this tier — every\n        /// declarer serves the same app-level key family (blob keys carry no\n        /// producer chunk, RFC 07 §2). Alphabetical by registry file.",
         ),
         (
             "algo",
@@ -1308,14 +1317,21 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
             out,
             "        pub fn {name}(self) -> {ret} {{\n            match self {{"
         );
-        for (b, producer) in &entries {
+        for (b, declarers) in &groups {
             let opt = |v: &Option<String>| match v {
                 Some(s) => format!("Some({s:?})"),
                 None => "None".to_string(),
             };
             let value = match name {
                 "token" => format!("{:?}", b.tier),
-                "declared_by" => format!("{producer:?}"),
+                "declared_by" => format!(
+                    "&[{}]",
+                    declarers
+                        .iter()
+                        .map(|(p, _)| format!("{p:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
                 "algo" => opt(&b.algo),
                 "reference_type" => opt(&b.reference),
                 _ => opt(&b.encoding),
@@ -1329,7 +1345,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
         out,
         "        /// The RFC 07 §2.2 endpoints served under `artifact/<id>/`; empty for\n        /// the Tier-2 tiers, whose key *is* the endpoint.\n        ///\n        /// Listing `push` states a **capability, not a policy**: RFC 07 §2.2\n        /// still requires the receiving origin to gate `push/**` behind an\n        /// authorization hook and to leave it off by default, and nothing a\n        /// registry says can discharge that.\n        pub fn endpoints(self) -> &'static [&'static str] {{\n            match self {{"
     );
-    for (b, _) in &entries {
+    for (b, _) in &groups {
         let list = b
             .endpoints
             .iter()
@@ -1344,7 +1360,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
         out,
         "        /// The middleware tier token.\n        pub fn blob_tier(self) -> BlobTier {{\n            match self {{"
     );
-    for (b, _) in &entries {
+    for (b, _) in &groups {
         let bt = camel(&[b.tier.as_str()]);
         let _ = writeln!(
             out,
@@ -1366,7 +1382,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
     // Per-tier key builders. Every one is infallible: ids are slugged at the
     // boundary (RFC 08 §1.2) and content addresses arrive already validated,
     // so a well-formed argument cannot fail to build a key.
-    for (b, _) in &entries {
+    for (b, _) in &groups {
         match b.tier.as_str() {
             "artifact" => {
                 let _ = writeln!(
@@ -1414,7 +1430,10 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
                 );
             }
             _ => {
-                let algo = b.algo.as_deref().unwrap_or("blake3");
+                let algo = b
+                    .algo
+                    .as_deref()
+                    .expect("store entries carry algo — linted at parse time");
                 let _ = writeln!(
                     out,
                     "    /// Tier-2 chunk at one host: `…/@blob/store/{algo}/<hash>` (RFC 07 §2.4).\n    ///\n    /// The `<algo>` chunk comes from the registry, not from the caller, so one\n    /// build cannot address the same bytes under two algorithms by accident\n    /// (dedup is per-algorithm). `hash` addresses the chunk's *content*; the\n    /// value carried under the key is a self-describing container.\n    pub fn store_key(o: &impl HostOrigin, hash: &ContentHash) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"store\");\n        k.push_str(\"/{algo}/\");\n        k.push_str(hash.as_str());\n        Key::from_canonical(k)\n    }}\n"

@@ -289,6 +289,14 @@ description = "content-addressed chunks backing the tree tier"
 | `variant` | CamelCase string | no | generated-variant name override, same rule as `[[subject]]` |
 | `description` | string | yes | one line, human |
 
+Several producer files MAY each declare one tier — a producer declares the
+tiers *it* serves, and the introspect slice (§6) is per-producer truth. All
+declarations of a tier MUST agree in shape (`endpoints` as a set,
+`reference`, `encoding`); `since`/`description` are per-declaration. Codegen
+dedups the declarations into one app-level surface recording every declarer,
+because the underlying key family is one family: blob keys carry no producer
+chunk ([§5](#5-ownership-and-process)).
+
 The negative space is larger here than for any other kind, and each absence is
 load-bearing:
 
@@ -482,11 +490,27 @@ registry version to coordinate.
     in it is from the reserved set of [07 §2.2](07-bulk-planes.md)
     (`manifest`, `slice`, `have`, `push`, `fanout`);
   - `algo` is present exactly when `tier = "store"`;
-  - at most one entry per `(tier, algo)` **across the whole registry set**,
-    not per file. Blob keys carry no producer chunk, so two producers each
-    declaring `tier = "artifact"` are declaring the *same* key family twice —
-    the one collision rule here that is app-wide rather than
-    producer-scoped, precisely because the producer position is absent;
+  - `since` and `description` are present (the §2 table marks both
+    required); they are per-declaration prose — each declarer says why *it*
+    serves the tier — and are the only fields free to differ between
+    declarations of one tier;
+  - each producer file declares the tiers **that producer serves**, and
+    several files MAY declare one tier: the introspect slice (§6) is
+    per-producer truth, and "does this producer serve blobs?" must be
+    answerable per producer. Blob keys still carry no producer chunk, so
+    every declaration of one tier names the *same* app-level key family —
+    which is why all declarations of a tier MUST agree in **shape**
+    (`endpoints` compared as a set, `reference`, `encoding`), the one rule
+    here that is app-wide rather than producer-scoped, and why codegen
+    dedups them into a single generated surface that records every
+    declarer;
+  - the same `(tier, algo)` MUST NOT appear twice in **one** file — within
+    a file, repetition is a copy-paste error, not a second serving
+    producer;
+  - the reference codegen currently rejects two concurrent `store` algos:
+    the §2 migration form is accepted by the registry *format*, but the
+    generated builders bake a single algo into `store_key`, so a second
+    algo is a build diagnostic until per-algo builders exist;
   - `reference`, where present, resolves in the shared type table, exactly
     as a `[[subject]]` `type` does.
 - CI MUST enforce (v1.5, H4): in a **service** registry, a subject pattern

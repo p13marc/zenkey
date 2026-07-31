@@ -914,6 +914,18 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     None => None,
                 };
 
+                // Required metadata, same rule as every other entry kind
+                // (RFC 08 §2). Prose is per-declaration — each declarer says
+                // why *it* serves the tier — but it must exist.
+                if entry.get("description").and_then(|v| v.as_str()).is_none()
+                    || entry.get("since").and_then(|v| v.as_str()).is_none()
+                {
+                    return Err(lint(
+                        &fname,
+                        format!("[[blob]] tier {tier:?}: missing description/since"),
+                    ));
+                }
+
                 blob_entries.push(BlobEntry {
                     tier: tier.to_string(),
                     endpoints,
@@ -931,6 +943,22 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                         .and_then(|v| v.as_str())
                         .map(str::to_string),
                 });
+            }
+        }
+
+        // The same `(tier, algo)` twice in *one* file is a copy-paste error.
+        // Cross-file repetition is legitimate — each producer declares the
+        // tiers it serves — and is shape-checked app-wide after all files
+        // are read.
+        {
+            let mut seen: BTreeSet<(&str, Option<&str>)> = BTreeSet::new();
+            for b in &blob_entries {
+                if !seen.insert((b.tier.as_str(), b.algo.as_deref())) {
+                    return Err(lint(
+                        &fname,
+                        format!("[[blob]] tier {:?} declared twice in one file", b.tier),
+                    ));
+                }
             }
         }
 
@@ -997,29 +1025,74 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
         });
     }
 
-    // Blob `(tier, algo)` uniqueness is **app-wide, not per-file** — the one
-    // collision rule here that is, and for a structural reason: a blob key
-    // carries no producer chunk (RFC 07 §2), so two producers each declaring
-    // `tier = "artifact"` are declaring the same key family twice, not two
-    // families that happen to look alike.
+    // Blob shape agreement is **app-wide** — the one cross-file rule here,
+    // and for a structural reason: a blob key carries no producer chunk
+    // (RFC 07 §2), so every declaration of one tier names the same app-level
+    // key family. Several producers MAY each declare a tier — the introspect
+    // slice is per-producer truth (RFC 08 §6), and "does this producer serve
+    // blobs?" must be answerable per producer — but the family has one
+    // shape, so the declarations must agree on it: endpoints (as a set),
+    // reference, encoding. `since` and `description` are per-declaration
+    // prose and free to differ.
     {
-        let mut seen: BTreeMap<(&str, Option<&str>), &str> = BTreeMap::new();
+        fn sorted(v: &[String]) -> Vec<&str> {
+            let mut s: Vec<&str> = v.iter().map(String::as_str).collect();
+            s.sort_unstable();
+            s
+        }
+        let mut canon: BTreeMap<&str, (&BlobEntry, &str)> = BTreeMap::new();
         for f in &files {
             for b in &f.blob {
-                let slot = (b.tier.as_str(), b.algo.as_deref());
-                if let Some(other) = seen.insert(slot, f.name.as_str()) {
-                    let algo = b.algo.as_deref().unwrap_or("-");
+                let Some(&(first, first_file)) = canon.get(b.tier.as_str()) else {
+                    canon.insert(b.tier.as_str(), (b, f.name.as_str()));
+                    continue;
+                };
+                let field = if sorted(&first.endpoints) != sorted(&b.endpoints) {
+                    Some("endpoints")
+                } else if first.reference != b.reference {
+                    Some("reference")
+                } else if first.encoding != b.encoding {
+                    Some("encoding")
+                } else {
+                    None
+                };
+                if let Some(field) = field {
                     return Err(lint(
                         "registry",
                         format!(
-                            "blob tier {:?} (algo {algo}) declared by both {other:?} and {:?}; \
-                             blob keys have no producer chunk, so that is one key family \
-                             declared twice (RFC 08 §5)",
+                            "blob tier {:?}: {:?} declares a different {field} than \
+                             {first_file:?}; blob keys have no producer chunk, so every \
+                             declarer serves one app-level key family and shapes must \
+                             agree (RFC 08 §5)",
                             b.tier, f.name
                         ),
                     ));
                 }
             }
+        }
+        // `algo` is deliberately not part of the shape: it is the store
+        // tier's migration axis (RFC 08 §2 sanctions a second algo while a
+        // hash migration runs both). But the generated builders bake a single
+        // algo into `store_key`, so until codegen learns per-algo builders a
+        // second algo must be a diagnostic rather than uncompilable output.
+        let mut algos: BTreeSet<&str> = BTreeSet::new();
+        for f in &files {
+            for b in &f.blob {
+                if let Some(a) = b.algo.as_deref() {
+                    algos.insert(a);
+                }
+            }
+        }
+        if algos.len() > 1 {
+            let list = algos.into_iter().collect::<Vec<_>>().join(", ");
+            return Err(lint(
+                "registry",
+                format!(
+                    "blob tier \"store\" declares two algos ({list}); RFC 08 §2 permits both \
+                     during a hash migration, but codegen does not yet emit per-algo store \
+                     builders — declare one algo"
+                ),
+            ));
         }
     }
     Ok(files)
@@ -1248,94 +1321,198 @@ mod tests {
     #[test]
     fn blob_vocabularies_are_closed() {
         let base = format!("{HEADER}[producer]\nname = \"netring\"\n\n");
-        let blob = |body: &str| lint_one(&format!("{base}[[blob]]\n{body}"));
+        // Every body carries description/since so each case fails only for
+        // its targeted reason, not for missing metadata.
+        let blob = |body: &str| {
+            lint_one(&format!(
+                "{base}[[blob]]\n{body}since = \"1.8\"\ndescription = \"x\"\n"
+            ))
+        };
 
         // The tier token is one of three (RFC 07 §2).
-        assert!(blob("tier = \"snapshot\"\nsince = \"1.8\"\n").is_err());
-        assert!(blob("since = \"1.8\"\n").is_err(), "tier is required");
+        assert!(blob("tier = \"snapshot\"\n").is_err());
+        assert!(blob("").is_err(), "tier is required");
 
         // Endpoints: required on artifact, forbidden elsewhere, closed set.
         assert!(
-            blob("tier = \"artifact\"\nsince = \"1.8\"\n").is_err(),
+            blob("tier = \"artifact\"\n").is_err(),
             "artifact must declare its endpoints"
         );
         assert!(
-            blob("tier = \"artifact\"\nendpoints = [\"manifest\", \"chunks\"]\nsince = \"1.8\"\n")
-                .is_err(),
+            blob("tier = \"artifact\"\nendpoints = [\"manifest\", \"chunks\"]\n").is_err(),
             "\"chunks\" is not an RFC 07 §2.2 endpoint"
         );
         assert!(
-            blob("tier = \"tree\"\nendpoints = [\"manifest\"]\nsince = \"1.8\"\n").is_err(),
+            blob("tier = \"tree\"\nendpoints = [\"manifest\"]\n").is_err(),
             "a Tier-2 key IS the endpoint"
         );
-        assert!(
-            blob("tier = \"artifact\"\nendpoints = [\"have\", \"have\"]\nsince = \"1.8\"\n")
-                .is_err()
-        );
+        assert!(blob("tier = \"artifact\"\nendpoints = [\"have\", \"have\"]\n").is_err());
 
         // algo: required on store, forbidden elsewhere.
-        assert!(blob("tier = \"store\"\nsince = \"1.8\"\n").is_err());
-        assert!(blob("tier = \"tree\"\nalgo = \"blake3\"\nsince = \"1.8\"\n").is_err());
+        assert!(blob("tier = \"store\"\n").is_err());
+        assert!(blob("tier = \"tree\"\nalgo = \"blake3\"\n").is_err());
 
         // The two absences that are load-bearing rather than lenient: a blob
         // entry has no path (the key shapes are fixed by the chapter) and no
         // cardinality (RFC 03 §3 carves content addresses out of the budget).
-        assert!(blob("tier = \"tree\"\npath = \"{root}\"\nsince = \"1.8\"\n").is_err());
-        assert!(blob("tier = \"tree\"\ncardinality = 1000\nsince = \"1.8\"\n").is_err());
+        assert!(blob("tier = \"tree\"\npath = \"{root}\"\n").is_err());
+        assert!(blob("tier = \"tree\"\ncardinality = 1000\n").is_err());
+
+        // description/since are required (RFC 08 §2) — per-declaration prose,
+        // but it must exist.
+        let bare = |body: &str| lint_one(&format!("{base}[[blob]]\n{body}"));
+        assert!(
+            bare("tier = \"tree\"\nsince = \"1.8\"\n").is_err(),
+            "description is required"
+        );
+        assert!(
+            bare("tier = \"tree\"\ndescription = \"snapshots\"\n").is_err(),
+            "since is required"
+        );
 
         // …and the shapes that must be accepted.
         assert!(
-            blob("tier = \"tree\"\nsince = \"1.8\"\ndescription = \"snapshots\"\n").is_ok(),
+            blob("tier = \"tree\"\n").is_ok(),
             "a bare Tier-2 declaration is the minimal legal entry"
         );
         assert!(
             blob(
                 "tier = \"artifact\"\nendpoints = [\"manifest\", \"slice\", \"have\", \"push\", \
-                 \"fanout\"]\nreference = \"Delivery\"\nencoding = \"application/gzip\"\n\
-                 since = \"1.8\"\ndescription = \"bundles\"\n"
+                 \"fanout\"]\nreference = \"Delivery\"\nencoding = \"application/gzip\"\n"
             )
             .is_ok(),
             "the full artifact declaration must build"
         );
     }
 
-    /// A blob key carries no producer chunk, so two producers each declaring
-    /// one tier are declaring the *same* key family twice. This is the one
-    /// collision rule in the crate that is app-wide rather than per-file, and
-    /// it is app-wide for that structural reason.
-    #[test]
-    fn one_blob_tier_may_be_declared_only_once_across_the_app() {
+    /// Build a registry from (file name, producer name, [[blob]] bodies) and
+    /// return the generated source or the lint error.
+    fn blob_registry(tag: &str, files: &[(&str, &str, &[&str])]) -> Result<String, Error> {
         let dir = std::env::temp_dir().join(format!(
-            "zenkey-build-blobdup-{}-{:?}",
+            "zenkey-build-{tag}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let entry = "\n[[blob]]\ntier = \"tree\"\nsince = \"1.8\"\n";
-        std::fs::write(
-            dir.join("a.toml"),
-            format!("{HEADER}[producer]\nname = \"netring\"\n{entry}"),
-        )
-        .unwrap();
-        std::fs::write(
-            dir.join("b.toml"),
-            format!("{HEADER}[producer]\nname = \"logs\"\n{entry}"),
-        )
-        .unwrap();
-        let clashing = Config::new().registry_dir(&dir).generate_string();
-
-        // Same two files, but only one declares the tier: the pair must build,
-        // or the check above would pass merely because two files never do.
-        std::fs::write(
-            dir.join("b.toml"),
-            format!("{HEADER}[producer]\nname = \"logs\"\n"),
-        )
-        .unwrap();
-        let distinct = Config::new().registry_dir(&dir).generate_string();
+        for (fname, producer, entries) in files {
+            let mut src = format!("{HEADER}[producer]\nname = {producer:?}\n");
+            for body in *entries {
+                src.push_str(&format!("\n[[blob]]\n{body}"));
+            }
+            std::fs::write(dir.join(fname), src).unwrap();
+        }
+        let out = Config::new().registry_dir(&dir).generate_string();
         let _ = std::fs::remove_dir_all(&dir);
+        out
+    }
 
-        assert!(clashing.is_err(), "one tier declared twice must fail");
-        assert!(distinct.is_ok(), "{distinct:?}");
+    /// A blob key carries no producer chunk, so every declaration of one tier
+    /// names the *same* app-level key family. Several producers may each
+    /// declare a tier — the introspect slice is per-producer truth — but the
+    /// declarations must agree on the family's shape, and codegen dedups them
+    /// into one surface that records every declarer.
+    #[test]
+    fn blob_tier_shapes_must_agree_across_the_app() {
+        let tree = "tier = \"tree\"\nsince = \"1.8\"\ndescription = \"snapshots\"\n";
+
+        // Same shape in two files: builds, one variant, every declarer named.
+        let out = blob_registry(
+            "blobagree",
+            &[("a.toml", "netring", &[tree]), ("b.toml", "logs", &[tree])],
+        )
+        .unwrap();
+        assert_eq!(
+            out.matches("        Tree,").count(),
+            1,
+            "shape-identical declarations dedup to one variant"
+        );
+        assert_eq!(out.matches("pub fn tree_key").count(), 1);
+        assert!(
+            out.contains("&[\"netring\", \"logs\"]"),
+            "declared_by lists every declarer in file order"
+        );
+
+        // Prose may differ per declaration — each declarer says why *it*
+        // serves the tier.
+        let other_prose = "tier = \"tree\"\nsince = \"1.9\"\ndescription = \"log bundles\"\n";
+        assert!(
+            blob_registry(
+                "blobprose",
+                &[
+                    ("a.toml", "netring", &[tree]),
+                    ("b.toml", "logs", &[other_prose]),
+                ],
+            )
+            .is_ok()
+        );
+
+        // Shape fields may not: the family has one shape.
+        let with_ref = "tier = \"tree\"\nreference = \"Delivery\"\nsince = \"1.8\"\n\
+                        description = \"snapshots\"\n";
+        let err = blob_registry(
+            "blobref",
+            &[
+                ("a.toml", "netring", &[tree]),
+                ("b.toml", "logs", &[with_ref]),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("reference"), "{err}");
+
+        let with_enc = "tier = \"tree\"\nencoding = \"application/zstd\"\nsince = \"1.8\"\n\
+                        description = \"snapshots\"\n";
+        let err = blob_registry(
+            "blobenc",
+            &[
+                ("a.toml", "netring", &[tree]),
+                ("b.toml", "logs", &[with_enc]),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("encoding"), "{err}");
+    }
+
+    /// RFC 08 §2 sanctions a second store algo while a hash migration runs
+    /// both, but the generated builders bake a single algo into `store_key` —
+    /// so until codegen learns per-algo builders, a second algo must be a
+    /// diagnostic rather than uncompilable generated code.
+    #[test]
+    fn two_store_algos_are_rejected_until_codegen_learns_them() {
+        let blake3 = "tier = \"store\"\nalgo = \"blake3\"\nsince = \"1.8\"\n\
+                      description = \"chunks\"\n";
+        let sha256 = "tier = \"store\"\nalgo = \"sha256\"\nsince = \"1.8\"\n\
+                      description = \"chunks\"\n";
+        let err = blob_registry(
+            "blobalgo",
+            &[
+                ("a.toml", "netring", &[blake3]),
+                ("b.toml", "logs", &[sha256]),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("declare one algo"), "{err}");
+
+        // The same algo everywhere is the intended steady state.
+        assert!(
+            blob_registry(
+                "blobalgook",
+                &[
+                    ("a.toml", "netring", &[blake3]),
+                    ("b.toml", "logs", &[blake3]),
+                ],
+            )
+            .is_ok()
+        );
+    }
+
+    /// Cross-file repetition is a producer declaring what it serves; the same
+    /// tier twice in *one* file is a copy-paste error.
+    #[test]
+    fn a_blob_tier_declared_twice_in_one_file_is_rejected() {
+        let tree = "tier = \"tree\"\nsince = \"1.8\"\ndescription = \"snapshots\"\n";
+        let err =
+            blob_registry("blobdupfile", &[("a.toml", "netring", &[tree, tree])]).unwrap_err();
+        assert!(err.to_string().contains("twice in one file"), "{err}");
     }
 }
