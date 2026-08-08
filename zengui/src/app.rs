@@ -1,11 +1,22 @@
 //! The Elm loop: state, `update`, `view`, `subscription`.
+//!
+//! **Lazy by default** (issue #85): connecting builds the *skeleton* — the
+//! declared keyspace from registry + liveliness + admin metadata — and starts
+//! a monitor with **zero data-plane watches**. Observation is opt-in per
+//! subtree (the tree's watch toggles) or per scope (the toolbar's "observe
+//! scope" toggle — the old eager mode made explicit); a selection fetches one
+//! value on demand. `--eager` restores the bootstrap behavior from the
+//! command line, labelled by its cost.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use iced::widget::{column, pick_list, row, text};
 use iced::{Element, Length, Subscription, Task};
-use zenkey_fleet::{DiscoveredBase, KeyTreeSnapshot, SliceSet};
+use zenkey_fleet::{
+    DiscoveredBase, FetchOutcome, KeyTreeSnapshot, Monitor, MonitorSpec, Skeleton, SliceSet,
+    WatchId,
+};
 
 use crate::config::Settings;
 use crate::echo::EchoRing;
@@ -17,28 +28,36 @@ use crate::view;
 use crate::view::status::{SliceSource, Status};
 use crate::view::tokens::space;
 
-/// Cap on tree rows built per frame.
+/// Cap on tree rows built per flatten.
 const MAX_ROWS: usize = 2000;
 
 pub struct Zengui {
     settings: Settings,
     session: Option<zenoh::Session>,
+    monitor: Option<Arc<Monitor>>,
     link: LinkState,
-    /// Bumped to force the subscription to restart.
+    /// Bumped per monitor generation — the pump's identity.
     epoch: u64,
 
-    tree: Arc<KeyTreeSnapshot>,
-    /// The flattened tree, rebuilt when the snapshot or the expansion set
-    /// changes — never per frame. Rebuilding view state every frame is what
-    /// pegged zensight's UI thread; the same mistake is cheap to avoid here.
+    observed: Arc<KeyTreeSnapshot>,
+    skeleton: Option<Arc<Skeleton>>,
+    /// Active watch selectors, as the last tick reported them (coverage, O5).
+    watched: Vec<String>,
+    /// This app's per-subtree watches: display path → watch id.
+    my_watches: HashMap<String, WatchId>,
+    /// The same key set, cached for the view (a borrowed pane cannot borrow
+    /// a per-frame local).
+    my_watch_paths: BTreeSet<String>,
+    /// The scope-preset watch ids, when "observe scope" is on.
+    scope_watches: Vec<WatchId>,
     flat: view::tree::Flattened,
     echo: EchoRing,
     expanded: BTreeSet<String>,
     selected: Option<String>,
+    /// The last on-demand fetch: (key, outcome-or-error).
+    fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     echo_filter: String,
 
-    /// Projections, computed once per newly-seen key and invalidated wholesale
-    /// when the base changes (the base is an input to the projection).
     facts: HashMap<String, KeyFacts>,
     slices: Option<Arc<SliceSet>>,
     slice_source: SliceSource,
@@ -46,6 +65,7 @@ pub struct Zengui {
     bases: Vec<DiscoveredBase>,
     keys: usize,
     keys_evicted: u64,
+    keys_unwatched: u64,
     totals: (u64, u64, f64),
 }
 
@@ -58,9 +78,15 @@ impl Zengui {
         let app = Zengui {
             settings,
             session: None,
+            monitor: None,
             link: LinkState::Connecting,
             epoch: 0,
-            tree: Arc::new(KeyTreeSnapshot::default()),
+            observed: Arc::new(KeyTreeSnapshot::default()),
+            skeleton: None,
+            watched: Vec::new(),
+            my_watches: HashMap::new(),
+            my_watch_paths: BTreeSet::new(),
+            scope_watches: Vec::new(),
             flat: view::tree::Flattened {
                 rows: Vec::new(),
                 truncated: 0,
@@ -68,6 +94,7 @@ impl Zengui {
             echo,
             expanded: BTreeSet::new(),
             selected: None,
+            fetched: None,
             echo_filter: String::new(),
             facts: HashMap::new(),
             slices: None,
@@ -75,6 +102,7 @@ impl Zengui {
             bases: Vec::new(),
             keys: 0,
             keys_evicted: 0,
+            keys_unwatched: 0,
             totals: (0, 0, 0.0),
         };
         let open = Task::perform(
@@ -100,7 +128,6 @@ impl Zengui {
         match message {
             Message::SessionOpened(Ok(session)) => {
                 self.session = Some(session.clone());
-                self.epoch += 1;
                 let timeout = self.settings.timeout();
                 let discover = Task::perform(
                     {
@@ -113,17 +140,37 @@ impl Zengui {
                     },
                     Message::BasesDiscovered,
                 );
-                Task::batch([discover, self.load_slices()])
+                Task::batch([discover, self.start_monitor(), self.load_slices()])
             }
             Message::SessionOpened(Err(e)) => {
                 self.link = LinkState::Failed(e);
+                Task::none()
+            }
+            Message::MonitorStarted(Ok(monitor)) => {
+                self.monitor = Some(Arc::clone(&monitor));
+                self.epoch += 1;
+                if self.settings.eager {
+                    return self.watch_scope();
+                }
+                Task::none()
+            }
+            Message::MonitorStarted(Err(e)) => {
+                self.link = LinkState::Failed(e);
+                Task::none()
+            }
+            Message::SkeletonBuilt(Ok(skeleton)) => {
+                self.skeleton = Some(skeleton);
+                self.reflatten();
+                Task::none()
+            }
+            Message::SkeletonBuilt(Err(e)) => {
+                tracing::warn!("skeleton build failed: {e}");
                 Task::none()
             }
             Message::BasesDiscovered(Ok(bases)) => {
                 self.bases = bases;
                 Task::none()
             }
-            // A failed sweep is reported, not treated as "no bases".
             Message::BasesDiscovered(Err(e)) => {
                 tracing::warn!("base discovery failed: {e}");
                 Task::none()
@@ -140,7 +187,8 @@ impl Zengui {
                 };
                 self.slices = Some(slices);
                 self.reresolve_registrations();
-                Task::none()
+                // The skeleton is built FROM the slices — (re)build it now.
+                self.build_skeleton()
             }
             Message::SlicesLoaded(Err(e)) => {
                 self.slice_source = SliceSource::Failed(e);
@@ -154,32 +202,62 @@ impl Zengui {
                 self.apply_tick(&tick);
                 Task::none()
             }
+            Message::WatchToggled(path) => self.toggle_watch(path),
+            Message::WatchStarted(path, Ok(id)) => {
+                self.my_watch_paths.insert(path.clone());
+                self.my_watches.insert(path, id);
+                Task::none()
+            }
+            Message::WatchStarted(path, Err(e)) => {
+                tracing::warn!("watch {path} failed: {e}");
+                Task::none()
+            }
+            Message::ScopeWatchesStarted(ids) => {
+                self.scope_watches = ids;
+                Task::none()
+            }
+            Message::WatchReleased(_, Ok(())) => Task::none(),
+            Message::WatchReleased(path, Err(e)) => {
+                tracing::warn!("unwatch {path} failed: {e}");
+                Task::none()
+            }
+            Message::ScopeWatchToggled => {
+                if self.scope_watches.is_empty() {
+                    self.watch_scope()
+                } else {
+                    self.unwatch_scope()
+                }
+            }
+            Message::ValueFetched(key, outcome) => {
+                self.fetched = Some((key, outcome));
+                Task::none()
+            }
             Message::BaseSelected(base) => {
                 if base == self.settings.base {
                     return Task::none();
                 }
                 self.settings.base = base;
-                // The base is an input to every projection, so they all die.
-                // Wholesale invalidation is cheaper and more obviously correct
-                // than trying to repair them in place.
+                // The base is an input to every projection and to the
+                // skeleton, and watch selectors are base-relative: a fresh
+                // monitor is the obviously-correct restart.
                 self.facts.clear();
-                // Chunk roles are base-relative too, so the rows are stale.
+                self.my_watches.clear();
+                self.my_watch_paths.clear();
+                self.scope_watches.clear();
                 self.reflatten();
-                // A base-relative scope now means something different.
-                if self.settings.scope != ScopePreset::Everything {
-                    self.epoch += 1;
-                }
-                self.load_slices()
+                Task::batch([self.start_monitor(), self.load_slices()])
             }
             Message::ScopeSelected(scope) => {
                 if scope == self.settings.scope {
                     return Task::none();
                 }
                 self.settings.scope = scope;
-                // Changing the hashed LinkKey is the restart: iced tears the
-                // old stream down, dropping the Monitor (and, thanks to its
-                // Drop impl, its subscriber tasks).
-                self.epoch += 1;
+                // If the scope is being observed, re-point the observation.
+                if !self.scope_watches.is_empty() {
+                    let release = self.unwatch_scope();
+                    let acquire = self.watch_scope();
+                    return Task::batch([release, acquire]);
+                }
                 Task::none()
             }
             Message::ToggleNode(path) => {
@@ -190,32 +268,172 @@ impl Zengui {
                 Task::none()
             }
             Message::SelectKey(key) => {
-                self.selected = key;
-                Task::none()
+                self.selected = key.clone();
+                let (Some(session), Some(key)) = (self.session.clone(), key) else {
+                    return Task::none();
+                };
+                // Lazy value-on-demand: one fetch per selection, nothing
+                // ambient (issue #85). Symbolic skeleton paths have no
+                // concrete value to fetch.
+                if key.contains('{') {
+                    return Task::none();
+                }
+                Task::perform(
+                    async move {
+                        let out = zenkey_fleet::fetch_value(
+                            &session,
+                            &key,
+                            zenkey_fleet::FetchSpec::default(),
+                        )
+                        .await
+                        .map(Arc::new)
+                        .map_err(|e| e.to_string());
+                        (key, out)
+                    },
+                    |(key, out)| Message::ValueFetched(key, out),
+                )
             }
             Message::EchoFilterChanged(f) => {
                 self.echo_filter = f;
                 Task::none()
             }
             Message::ClearEcho => {
-                // Clears the lines but deliberately not the loss counters:
-                // laundering a known gap into a clean scrollback would be the
-                // dishonesty the counters exist to prevent.
                 self.echo.clear();
                 Task::none()
             }
             Message::Reconnect => {
-                self.epoch += 1;
-                Task::none()
+                self.my_watches.clear();
+                self.my_watch_paths.clear();
+                self.scope_watches.clear();
+                self.start_monitor()
             }
         }
     }
 
+    fn start_monitor(&mut self) -> Task<Message> {
+        let Some(session) = self.session.clone() else {
+            return Task::none();
+        };
+        // Liveliness is always on — zero payload by construction (RFC 04 §5)
+        // — and needs both the fleet sweep and @catalog by name (D4).
+        let liveliness = if self.settings.base.is_empty() && self.bases.is_empty() {
+            scope::liveliness_any_base()
+        } else {
+            scope::liveliness_selectors(&self.settings.base)
+        };
+        let max_keys = self.settings.max_keys;
+        Task::perform(
+            async move {
+                Monitor::start(
+                    &session,
+                    MonitorSpec {
+                        selectors: vec![], // lazy: no data-plane watches
+                        liveliness,
+                        max_keys,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+            },
+            Message::MonitorStarted,
+        )
+    }
+
+    /// (Re)build the skeleton: slices are already loaded; roster + admin are
+    /// gathered inside the task (both metadata-only).
+    fn build_skeleton(&self) -> Task<Message> {
+        let (Some(session), Some(slices)) = (self.session.clone(), self.slices.clone()) else {
+            return Task::none();
+        };
+        let base = self.settings.base.clone();
+        let timeout = self.settings.timeout();
+        Task::perform(
+            async move {
+                let roster = zenkey_fleet::roster(&session, &base, timeout)
+                    .await
+                    .unwrap_or_default();
+                let admin = zenkey_fleet::declared_entities(&session, timeout)
+                    .await
+                    .unwrap_or(None);
+                Ok(Arc::new(Skeleton::build(
+                    &base,
+                    &slices,
+                    &roster,
+                    admin.as_ref(),
+                )))
+            },
+            Message::SkeletonBuilt,
+        )
+    }
+
+    fn toggle_watch(&mut self, path: String) -> Task<Message> {
+        let Some(monitor) = self.monitor.clone() else {
+            return Task::none();
+        };
+        if let Some(id) = self.my_watches.remove(&path) {
+            self.my_watch_paths.remove(&path);
+            return Task::perform(
+                async move { monitor.unwatch(id).await.map_err(|e| e.to_string()) },
+                move |r| Message::WatchReleased(path.clone(), r),
+            );
+        }
+        let selector = scope::subtree_selector(&path);
+        Task::perform(
+            async move { monitor.watch(&selector).await.map_err(|e| e.to_string()) },
+            move |r| Message::WatchStarted(path.clone(), r),
+        )
+    }
+
+    fn watch_scope(&mut self) -> Task<Message> {
+        let Some(monitor) = self.monitor.clone() else {
+            return Task::none();
+        };
+        let selectors = self
+            .settings
+            .scope
+            .selectors(&self.settings.base, &self.settings.selectors);
+        Task::perform(
+            async move {
+                let mut ids = Vec::new();
+                for sel in &selectors {
+                    match monitor.watch(sel).await {
+                        Ok(id) => ids.push(id),
+                        Err(e) => tracing::warn!("scope watch {sel}: {e}"),
+                    }
+                }
+                ids
+            },
+            Message::ScopeWatchesStarted,
+        )
+    }
+
+    fn unwatch_scope(&mut self) -> Task<Message> {
+        let Some(monitor) = self.monitor.clone() else {
+            return Task::none();
+        };
+        let ids = std::mem::take(&mut self.scope_watches);
+        Task::perform(
+            async move {
+                for id in ids {
+                    if let Err(e) = monitor.unwatch(id).await {
+                        tracing::warn!("scope unwatch: {e}");
+                    }
+                }
+                Ok(())
+            },
+            |r| Message::WatchReleased("(scope)".into(), r),
+        )
+    }
+
     fn apply_tick(&mut self, tick: &BusTick) {
-        self.tree = Arc::clone(&tick.tree);
+        self.observed = Arc::clone(&tick.tree);
         self.keys = tick.keys;
         self.keys_evicted = tick.keys_evicted;
+        self.keys_unwatched = tick.keys_unwatched;
         self.totals = tick.totals;
+        self.watched = tick.watched.clone();
         self.echo.record_lag(tick.lagged + tick.coalesced);
         for sample in &tick.samples {
             self.ensure_facts(&sample.key);
@@ -228,10 +446,23 @@ impl Zengui {
     }
 
     fn reflatten(&mut self) {
-        self.flat = view::tree::flatten(&self.tree, &self.settings.base, &self.expanded, MAX_ROWS);
+        let empty_skeleton;
+        let skeleton = match &self.skeleton {
+            Some(s) => s.as_ref(),
+            None => {
+                empty_skeleton = Skeleton::build(
+                    &self.settings.base,
+                    &SliceSet::default(),
+                    &std::collections::BTreeMap::new(),
+                    None,
+                );
+                &empty_skeleton
+            }
+        };
+        let merged = zenkey_fleet::skeleton::merge(skeleton, &self.observed, &self.watched);
+        self.flat = view::tree::flatten(&merged, &self.settings.base, &self.expanded, MAX_ROWS);
     }
 
-    /// Project a key the first time it is seen, and never again.
     fn ensure_facts(&mut self, key: &str) {
         if self.facts.contains_key(key) {
             return;
@@ -243,8 +474,6 @@ impl Zengui {
         self.facts.insert(key.to_string(), facts);
     }
 
-    /// Re-run registry resolution over every known key. Cheap: the structural
-    /// projection is untouched, only the registration changes.
     fn reresolve_registrations(&mut self) {
         let Some(slices) = self.slices.clone() else {
             return;
@@ -284,28 +513,12 @@ impl Zengui {
         )
     }
 
-    /// The selectors currently in force.
-    fn selectors(&self) -> Vec<String> {
-        self.settings
-            .scope
-            .selectors(&self.settings.base, &self.settings.selectors)
-    }
-
     pub fn subscription(&self) -> Subscription<Message> {
-        let Some(session) = self.session.clone() else {
+        let Some(monitor) = self.monitor.clone() else {
             return Subscription::none();
         };
         link::subscribe(LinkKey {
-            session,
-            selectors: self.selectors(),
-            // Presence needs both the fleet sweep and @catalog by name (D4).
-            // Before a base is chosen, sweep every base at once.
-            liveliness: if self.settings.base.is_empty() && self.bases.is_empty() {
-                scope::liveliness_any_base()
-            } else {
-                scope::liveliness_selectors(&self.settings.base)
-            },
-            max_keys: self.settings.max_keys,
+            monitor,
             epoch: self.epoch,
         })
     }
@@ -315,7 +528,8 @@ impl Zengui {
             iced::widget::container(view::tree::pane(
                 &self.flat,
                 &self.facts,
-                self.selected.as_deref()
+                self.selected.as_deref(),
+                &self.my_watch_paths,
             ))
             .width(Length::FillPortion(1))
             .height(Length::Fill),
@@ -338,6 +552,10 @@ impl Zengui {
                 scope_label: self.settings.scope.short(),
                 keys: self.keys,
                 keys_evicted: self.keys_evicted,
+                keys_unwatched: self.keys_unwatched,
+                watched: &self.watched,
+                skeleton: self.skeleton.as_deref().map(|s| s.coverage),
+                fetched: self.fetched.as_ref(),
                 totals: self.totals,
                 slices: &self.slice_source,
                 unreachable: self.settings.is_unreachable(),
@@ -349,8 +567,6 @@ impl Zengui {
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
-        // The empty base is a real deployment, not a blank entry, so it is
-        // always offered even when the sweep found nothing (RFC 09 §5).
         let mut options: Vec<String> = vec![String::new()];
         options.extend(self.bases.iter().map(|b| b.base.clone()));
         options.dedup();
@@ -373,11 +589,25 @@ impl Zengui {
         let scope_picker = pick_list(scopes, Some(self.settings.scope), Message::ScopeSelected)
             .text_size(crate::view::tokens::font::CAPTION);
 
+        // Observation is opt-in and labelled by its cost (issue #85).
+        let observing = !self.scope_watches.is_empty();
+        let observe = iced::widget::button(
+            text(if observing {
+                "stop observing scope"
+            } else {
+                "observe scope"
+            })
+            .size(crate::view::tokens::font::CAPTION),
+        )
+        .on_press(Message::ScopeWatchToggled)
+        .padding(4);
+
         row![
             text("base").size(crate::view::tokens::font::CAPTION),
             base_picker,
             text("scope").size(crate::view::tokens::font::CAPTION),
             scope_picker,
+            observe,
             crate::view::kit::muted(self.settings.scope.label()),
             iced::widget::space::horizontal(),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))

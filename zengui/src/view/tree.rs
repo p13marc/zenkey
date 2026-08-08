@@ -16,8 +16,7 @@ use std::collections::BTreeSet;
 
 use iced::widget::{Column, button, column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet::KeyTreeSnapshot;
-use zenkey_fleet::tree::TreeNode;
+use zenkey_fleet::skeleton::{MergedNode, NodeStatus};
 
 use crate::keyfacts::{KeyFacts, Registration};
 use crate::message::Message;
@@ -53,11 +52,14 @@ impl Role {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TreeRow {
     pub depth: usize,
+    /// Display chunk — a symbolic skeleton position renders as `{var}`.
     pub chunk: String,
-    /// The full wire-key prefix this row stands for.
+    /// The full display-path prefix this row stands for.
     pub path: String,
     pub has_children: bool,
     pub expanded: bool,
+    /// The declared/observed state (issue #85's typed acceptance criterion).
+    pub status: NodeStatus,
     /// Traffic landed on exactly this key.
     pub is_leaf: bool,
     pub count: u64,
@@ -69,6 +71,8 @@ pub struct TreeRow {
     pub subtree_rate_hz: f64,
     /// `None` for any chunk outside a recognised v1 subtree.
     pub role: Option<Role>,
+    /// The registry-declared payload type, when the skeleton knows one.
+    pub decl_type: Option<String>,
 }
 
 /// The flattened tree, plus what was left out.
@@ -85,7 +89,7 @@ pub struct Flattened {
 /// chunks to skip before looking for `v1`. `expanded` holds the paths the user
 /// has opened; everything else collapses.
 pub fn flatten(
-    snapshot: &KeyTreeSnapshot,
+    merged: &MergedNode,
     base: &str,
     expanded: &BTreeSet<String>,
     max_rows: usize,
@@ -98,7 +102,7 @@ pub fn flatten(
     let mut rows = Vec::new();
     let mut truncated = 0;
     walk(
-        &snapshot.root,
+        merged,
         &mut Ctx {
             expanded,
             max_rows,
@@ -148,7 +152,7 @@ enum Expect {
     Foreign,
 }
 
-fn walk(node: &TreeNode, ctx: &mut Ctx<'_>, path: String, depth: usize, expect: Expect) {
+fn walk(node: &MergedNode, ctx: &mut Ctx<'_>, path: String, depth: usize, expect: Expect) {
     for (chunk, child) in &node.children {
         let child_path = if path.is_empty() {
             chunk.clone()
@@ -161,21 +165,24 @@ fn walk(node: &TreeNode, ctx: &mut Ctx<'_>, path: String, depth: usize, expect: 
             *ctx.truncated += 1;
         } else {
             let expanded = ctx.expanded.contains(&child_path);
+            let stats = child.stats;
             ctx.rows.push(TreeRow {
                 depth,
                 chunk: chunk.clone(),
                 path: child_path.clone(),
                 has_children: !child.children.is_empty(),
                 expanded,
-                is_leaf: child.count > 0,
-                count: child.count,
-                bytes: child.bytes,
-                rate_hz: child.rate_hz,
-                subtree_count: child.subtree_count,
-                subtree_bytes: child.subtree_bytes,
-                subtree_keys: child.subtree_keys,
-                subtree_rate_hz: child.subtree_rate_hz,
+                status: child.status,
+                is_leaf: stats.map(|s| s.count > 0).unwrap_or(false),
+                count: stats.map(|s| s.count).unwrap_or(0),
+                bytes: stats.map(|s| s.bytes).unwrap_or(0),
+                rate_hz: stats.map(|s| s.rate_hz).unwrap_or(0.0),
+                subtree_count: stats.map(|s| s.subtree_count).unwrap_or(0),
+                subtree_bytes: stats.map(|s| s.subtree_bytes).unwrap_or(0),
+                subtree_keys: stats.map(|s| s.subtree_keys).unwrap_or(0),
+                subtree_rate_hz: stats.map(|s| s.subtree_rate_hz).unwrap_or(0.0),
                 role,
+                decl_type: child.decl.as_ref().map(|d| d.type_name.clone()),
             });
             if expanded {
                 walk(child, ctx, child_path, depth + 1, next_expect);
@@ -202,8 +209,11 @@ fn classify(chunk: &str, expect: Expect) -> (Option<Role>, Expect) {
         }
         Expect::Origin => {
             // RFC 03 §1.3 licenses tooling to use this shape, and §1.5 makes it
-            // the sole discriminator for the producer position.
-            let host = zenkey::grammar::is_valid_host_origin(chunk);
+            // the sole discriminator for the producer position. A *symbolic*
+            // origin (`{origin}`) exists only for host slices — the skeleton
+            // never symbolizes a service origin (those are literal `@x`) — so
+            // it classifies as host-like.
+            let host = zenkey::grammar::is_valid_host_origin(chunk) || chunk.starts_with('{');
             (Some(Role::Origin), Expect::Class { host })
         }
         Expect::Class { host } => {
@@ -259,6 +269,7 @@ pub fn tree_view<'a>(
     flat: &'a Flattened,
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
+    watched_paths: &'a BTreeSet<String>,
 ) -> Element<'a, Message> {
     if flat.rows.is_empty() {
         return kit::empty_state(
@@ -270,7 +281,7 @@ pub fn tree_view<'a>(
 
     let mut col = Column::new().spacing(1);
     for r in &flat.rows {
-        col = col.push(row_view(r, facts, selected));
+        col = col.push(row_view(r, facts, selected, watched_paths));
     }
     if flat.truncated > 0 {
         col = col.push(kit::muted(format!(
@@ -285,6 +296,7 @@ fn row_view<'a>(
     r: &'a TreeRow,
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
+    watched_paths: &'a BTreeSet<String>,
 ) -> Element<'a, Message> {
     let indent = iced::widget::Space::new().width(Length::Fixed(r.depth as f32 * 14.0));
 
@@ -312,6 +324,30 @@ fn row_view<'a>(
 
     if let Some(role) = r.role {
         line = line.push(kit::muted(role.label()));
+    }
+
+    // The declared/observed state (issue #85): "declared" must never read
+    // like "quiet", and "unwatched" like neither.
+    match r.status {
+        NodeStatus::DeclaredOnly(_) => {
+            line = line.push(kit::tone_badge(
+                crate::view::theme::RegistrationTone::Unknown,
+                "declared",
+            ));
+        }
+        NodeStatus::WatchedQuiet(_) => {
+            line = line.push(kit::muted("quiet"));
+        }
+        NodeStatus::Unwatched(_) => {
+            line = line.push(kit::tone_badge(
+                crate::view::theme::RegistrationTone::Unregistered,
+                "unwatched",
+            ));
+        }
+        NodeStatus::Observed(_) => {}
+    }
+    if let Some(ty) = &r.decl_type {
+        line = line.push(kit::muted(ty.clone()));
     }
 
     line = line.push(iced::widget::space::horizontal());
@@ -345,7 +381,19 @@ fn row_view<'a>(
         )));
     }
 
-    button(line)
+    // Observation is opt-in, per subtree (issue #85). The toggle reflects
+    // *this app's* watches, not global coverage.
+    let watch_label = if watched_paths.contains(&r.path) {
+        "◉"
+    } else {
+        "○"
+    };
+    let watch = button(text(watch_label).size(font::CAPTION))
+        .padding(2)
+        .style(button::text)
+        .on_press(Message::WatchToggled(r.path.clone()));
+
+    let body = button(line)
         .width(Length::Fill)
         .padding(2)
         .style(|_theme: &iced::Theme, _status| button::Style {
@@ -357,7 +405,10 @@ fn row_view<'a>(
             Message::ToggleNode(r.path.clone())
         } else {
             Message::SelectKey(Some(r.path.clone()))
-        })
+        });
+    row![watch, body]
+        .spacing(space::XS)
+        .align_y(iced::Alignment::Center)
         .into()
 }
 
@@ -366,10 +417,11 @@ pub fn pane<'a>(
     flat: &'a Flattened,
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
+    watched_paths: &'a BTreeSet<String>,
 ) -> Element<'a, Message> {
     column![
         kit::section_header("Keys", None),
-        tree_view(flat, facts, selected)
+        tree_view(flat, facts, selected, watched_paths)
     ]
     .spacing(space::SM)
     .into()
@@ -381,13 +433,21 @@ mod tests {
     use std::time::Instant;
     use zenkey_fleet::stats::StatsTable;
 
-    fn snapshot(keys: &[&str]) -> KeyTreeSnapshot {
+    fn snapshot(keys: &[&str]) -> MergedNode {
         let mut stats = StatsTable::new();
         let now = Instant::now();
         for k in keys {
             stats.record(k, 8, None, now);
         }
-        KeyTreeSnapshot::build(&stats)
+        let observed = zenkey_fleet::KeyTreeSnapshot::build(&stats);
+        // Tests watch everything: every observed node reads Observed.
+        let skel = zenkey_fleet::Skeleton::build(
+            "",
+            &zenkey_fleet::SliceSet::default(),
+            &std::collections::BTreeMap::new(),
+            None,
+        );
+        zenkey_fleet::skeleton::merge(&skel, &observed, &["**".to_string()])
     }
 
     fn expand(paths: &[&str]) -> BTreeSet<String> {

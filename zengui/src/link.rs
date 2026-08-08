@@ -1,35 +1,30 @@
-//! The bus link: one tokio task owning a [`Monitor`], fanned into iced.
+//! The bus link: a pure event pump over an **app-owned** monitor.
 //!
-//! # Where things live, and why
+//! # The seam, since the lazy rework (#84/#85)
 //!
-//! The **session** lives in app state: base discovery and registry fetches are
-//! one-shot tasks against it, and re-scoping a subscription must not churn the
-//! session. The **monitor** lives inside the subscription: it must be created
-//! in an async context and torn down when the scope changes, both of which
-//! `Subscription::run_with` already does.
+//! The app owns `Arc<Monitor>`; this subscription only pumps its events into
+//! iced. Watch/unwatch are ordinary `Task::perform` futures from `update()` —
+//! nothing in the subscription's identity changes on a watch toggle, so the
+//! stream **provably never restarts** for one, and the session is never
+//! churned. (The bootstrap's stream owned the monitor and re-scoped by
+//! restarting the world; the runtime watch set made that obsolete.)
 //!
-//! That teardown is why `zenkey-fleet` grew `impl Drop for Monitor`. A
-//! `JoinHandle` merely detaches on drop, so without it every re-scope would
-//! leak a live subscriber for the lifetime of the session.
+//! # The three properties this pump preserves
 //!
-//! # The three properties this bridge exists to preserve
-//!
-//! 1. **The tree is pulled, never accumulated.** On each stats tick the task
-//!    does one `ArcSwap` load and ships the `Arc<KeyTreeSnapshot>`. Sample
-//!    events never maintain tree state, so a 100 kHz bus and a 10 Hz bus cost
-//!    the render loop exactly the same.
-//! 2. **~4 messages per second regardless of sample rate.** Samples are
-//!    coalesced into the tick. A per-sample `Message` would melt the Elm loop.
-//! 3. **Backpressure terminates in a visible counter.** Sending blocks the
-//!    task when iced is behind → the bounded broadcast lags → `Dropped(n)` →
-//!    `lagged` on the next tick → the status strip. Memory never grows
-//!    silently, and the loss is reported (RFC 05 §3.1).
+//! 1. **The tree is pulled, never accumulated.** On each stats tick: one
+//!    `ArcSwap` load, shipped as an `Arc`. Sample events never maintain tree
+//!    state — a 100 kHz bus and a 10 Hz bus cost the render loop the same.
+//! 2. **~4 messages per second regardless of sample rate.** Samples coalesce
+//!    into the tick; a per-sample `Message` would melt the Elm loop.
+//! 3. **Backpressure terminates in visible counters.** Slow UI → bounded
+//!    broadcast lags → `Dropped(n)` → `lagged`; the batch cap → `coalesced`;
+//!    released watches → `keys_unwatched`. Nothing disappears silently
+//!    (RFC 09 §5.1 O6).
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use iced::Subscription;
-use zenkey_fleet::{FleetEvent, Monitor, MonitorSpec, StreamItem};
+use zenkey_fleet::{FleetEvent, Monitor, StreamItem};
 
 use crate::message::{BusTick, LinkState, Message};
 
@@ -38,63 +33,40 @@ use crate::message::{BusTick, LinkState, Message};
 /// 250 ms, and an honest counter beats an unbounded `Vec`.
 const BATCH_CAP: usize = 512;
 
-/// What the link watches. `Hash` is the subscription's identity: change any
-/// hashed field and iced tears the old stream down and starts a new one, which
-/// is exactly how re-scoping works. The session is carried but *not* hashed —
-/// a redraw must not restart a healthy stream.
+/// The subscription's identity. Only `epoch` is hashed: a new epoch means a
+/// new monitor (reconnect, base change) and restarts the pump; a redraw or a
+/// watch toggle changes nothing and provably keeps the stream.
 #[derive(Clone)]
 pub struct LinkKey {
-    pub session: zenoh::Session,
-    pub selectors: Vec<String>,
-    pub liveliness: Vec<String>,
-    /// Distinct keys the stats table may hold (RFC 09 §5.1 O6).
-    pub max_keys: usize,
-    /// Bumped to force a restart (a manual reconnect).
+    pub monitor: Arc<Monitor>,
     pub epoch: u64,
 }
 
 impl std::hash::Hash for LinkKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.selectors.hash(state);
-        self.liveliness.hash(state);
-        self.max_keys.hash(state);
         self.epoch.hash(state);
     }
 }
 
-/// Subscribe to the bus.
+/// Pump the monitor's events into iced.
 ///
 /// Note `run_with`'s builder is a plain `fn` pointer, not a closure — nothing
 /// can be captured, so everything the stream needs rides in [`LinkKey`].
 pub fn subscribe(key: LinkKey) -> Subscription<Message> {
-    Subscription::run_with(key, |key| stream(key.clone()))
+    Subscription::run_with(key, |key| pump(key.clone()))
 }
 
-fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
+fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
     async_stream::stream! {
-        let selectors = key.selectors.clone();
-        yield Message::Link(LinkState::Connecting);
-
-        let spec = MonitorSpec {
-            selectors: key.selectors,
-            liveliness: key.liveliness,
-            stats_tick: Duration::from_millis(250),
-            capacity: 2048,
-            max_keys: key.max_keys,
-        };
-        let monitor = match Monitor::start(&key.session, spec).await {
-            Ok(m) => m,
-            Err(e) => {
-                yield Message::Link(LinkState::Failed(e.to_string()));
-                return;
-            }
-        };
-        yield Message::Link(LinkState::Watching { selectors });
+        let monitor = key.monitor;
+        yield Message::Link(LinkState::Pumping);
 
         let mut events = monitor.events();
         let mut samples = Vec::with_capacity(BATCH_CAP);
         let mut nodes = Vec::new();
         let (mut lagged, mut coalesced) = (0u64, 0u64);
+        let mut watched: Vec<String> =
+            monitor.watched().await.into_iter().map(|(_, s)| s).collect();
 
         while let Some(item) = events.recv().await {
             match item {
@@ -109,10 +81,14 @@ fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                 }
                 StreamItem::Event(FleetEvent::NodeUp(k)) => nodes.push((k, true)),
                 StreamItem::Event(FleetEvent::NodeDown(k)) => nodes.push((k, false)),
+                StreamItem::Event(FleetEvent::WatchChanged) => {
+                    watched = monitor.watched().await.into_iter().map(|(_, s)| s).collect();
+                }
                 StreamItem::Event(FleetEvent::StatsTick) => {
-                    let (keys, totals, keys_evicted) = monitor
-                        .core()
-                        .with_stats(|s| (s.len(), s.totals(), s.evicted()));
+                    let (keys, totals, keys_evicted, keys_unwatched) =
+                        monitor.core().with_stats(|s| {
+                            (s.len(), s.totals(), s.evicted(), s.unwatched())
+                        });
                     yield Message::Tick(Arc::new(BusTick {
                         // One lock-free load. The tree is never rebuilt here.
                         tree: monitor.tree(),
@@ -122,12 +98,13 @@ fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         nodes: std::mem::take(&mut nodes),
                         keys,
                         keys_evicted,
+                        keys_unwatched,
+                        watched: watched.clone(),
                         totals,
                     }));
                 }
             }
         }
         yield Message::Link(LinkState::Ended);
-        // `monitor` drops here; its Drop aborts the subscriber tasks.
     }
 }

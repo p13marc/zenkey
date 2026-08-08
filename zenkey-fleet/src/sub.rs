@@ -247,6 +247,12 @@ pub struct Monitor {
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
+impl std::fmt::Debug for Monitor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Monitor").finish_non_exhaustive()
+    }
+}
+
 impl Monitor {
     /// Declare the spec's subscribers on `session` and start watching.
     /// `spec.selectors` are simply the *initial* watches — `[]` is the lazy
