@@ -55,9 +55,17 @@ pub enum FleetEvent {
 pub struct MonitorSpec {
     /// Full wire selectors to subscribe to.
     pub selectors: Vec<String>,
-    /// Also watch the fleet liveliness roster (with history: current tokens
+    /// Also watch these liveliness selectors (with history: current tokens
     /// arrive on join — no separate seed GET).
-    pub liveliness: Option<String>,
+    ///
+    /// A list, not a single selector, because one selector cannot express the
+    /// roster: `*` in the origin position never matches a verbatim service
+    /// origin (RFC 03 §4 **D4**), so the fleet sweep
+    /// `<base>/v1/*/state/*/alive` and `<base>/v1/@catalog/state/alive` are
+    /// necessarily two entries. A dashboard that watches only the first
+    /// renders "catalog dead" and "no entities" identically — the false
+    /// verdict RFC 05 §3.1 forbids.
+    pub liveliness: Vec<String>,
     /// Snapshot cadence.
     pub stats_tick: Duration,
     /// Broadcast capacity: bound it to what an echo pane can drain; lag is
@@ -69,7 +77,7 @@ impl Default for MonitorSpec {
     fn default() -> Self {
         MonitorSpec {
             selectors: Vec::new(),
-            liveliness: None,
+            liveliness: Vec::new(),
             stats_tick: Duration::from_millis(250),
             capacity: 1024,
         }
@@ -215,7 +223,7 @@ impl Monitor {
             }));
         }
 
-        if let Some(liveliness_sel) = &spec.liveliness {
+        for liveliness_sel in &spec.liveliness {
             let subscriber = session
                 .liveliness()
                 .declare_subscriber(liveliness_sel)
@@ -259,8 +267,24 @@ impl Monitor {
         self.core.tree()
     }
 
-    /// Stop watching (aborts the tasks; subscribers undeclare on drop).
+    /// Stop watching. Equivalent to dropping the monitor — kept as an explicit
+    /// verb for call sites that want to say so.
     pub fn stop(self) {
+        drop(self);
+    }
+}
+
+/// Dropping a monitor stops it: the ingest tasks are aborted and the
+/// subscribers undeclare.
+///
+/// This is not a nicety. A `JoinHandle` merely *detaches* on drop, so without
+/// this impl every monitor that goes out of scope leaks a live subscriber and
+/// its ingest task for the lifetime of the session. `zenctl` never noticed —
+/// it calls [`Monitor::stop`] once and exits — but a GUI re-scopes its
+/// subscription whenever the user changes what they are watching, dropping and
+/// rebuilding the monitor each time.
+impl Drop for Monitor {
+    fn drop(&mut self) {
         for t in &self.tasks {
             t.abort();
         }
