@@ -366,3 +366,132 @@ pub fn storage_list(report: &StorageList, format: Format) -> Result<()> {
     }
     Ok(())
 }
+
+/// `topic hz` / `topic bw` (issue #46): the typed report renders through the
+/// global `--format` like every other command; the O6 eviction note prints in
+/// every mode.
+pub fn rate(report: &RateReport, format: Format, bandwidth: bool, loss: bool) {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => {
+            report.rows.iter().for_each(json_line);
+            // The totals ride a final object so a stream consumer gets them
+            // (and the eviction honesty) without re-summing.
+            json_line(&serde_json::json!({
+                "selector": report.selector,
+                "window_s": report.window_s,
+                "total_count": report.total_count,
+                "total_bytes": report.total_bytes,
+                "keys": report.keys,
+                "evicted": report.evicted,
+                "max_keys": report.max_keys,
+                "sn_gaps": report.sn_gaps,
+            }));
+        }
+        _ => {
+            let secs = report.window_s as f64;
+            for row in &report.rows {
+                if bandwidth {
+                    println!("{:>12.1} B/s  {}", row.bytes as f64 / secs, row.key);
+                } else {
+                    print!("{:>8.2} Hz  {}", row.count as f64 / secs, row.key);
+                    if loss {
+                        print!("  ({} sn gap(s))", row.sn_gaps);
+                    }
+                    println!();
+                }
+            }
+            if report.evicted > 0 {
+                // The table is bounded; a shrunken key set must say so (O6).
+                eprintln!(
+                    "note: {} key(s) retired to stay within the {}-key bound — totals \
+                     cover the retained set",
+                    report.evicted, report.max_keys
+                );
+            }
+            if bandwidth {
+                println!(
+                    "total: {:.1} B/s over {} key(s) ({} bytes / {}s)",
+                    report.total_bytes as f64 / secs,
+                    report.keys,
+                    report.total_bytes,
+                    report.window_s
+                );
+            } else {
+                print!(
+                    "total: {:.2} Hz over {} key(s) ({} samples / {}s)",
+                    report.total_count as f64 / secs,
+                    report.keys,
+                    report.total_count,
+                    report.window_s
+                );
+                if let Some(gaps) = report.sn_gaps {
+                    print!(
+                        "  — {gaps} source-sn gap(s) (zero also means \"publishers attach \
+                         no SourceInfo\")"
+                    );
+                }
+                println!();
+            }
+        }
+    }
+}
+
+/// `doctor` (issue #46): findings as a table (severity mark, check id,
+/// subject, evidence, citation) or as the whole typed report in JSON —
+/// `zenctl doctor --format json | jq '.findings[]'` is the contract.
+pub fn doctor(report: &DoctorReport, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => {
+            report.findings.iter().for_each(json_line);
+        }
+        _ => {
+            for s in &report.synced {
+                println!("✓ {s}: in sync");
+            }
+            for f in &report.findings {
+                let mark = match f.severity {
+                    DoctorSeverity::Error => "✗",
+                    DoctorSeverity::Warning => "⚠",
+                    DoctorSeverity::Info => "·",
+                };
+                let citation = f
+                    .citation
+                    .as_deref()
+                    .map(|c| format!("  [{c}]"))
+                    .unwrap_or_default();
+                println!(
+                    "{mark} {}: {} — {}{citation}",
+                    f.check, f.subject, f.evidence
+                );
+            }
+            println!(
+                "\n{} introspect repl(y|ies) from {} live producer(s); {} producer(s) \
+                 serve describe, {} do not; {} router(s){}.",
+                report.introspect_answered,
+                report.live_producers,
+                report.describe_served,
+                report.describe_missing,
+                report.routers,
+                report
+                    .router_version
+                    .as_deref()
+                    .map(|v| format!(" (version {v})"))
+                    .unwrap_or_default(),
+            );
+            let errors = report.count(DoctorSeverity::Error);
+            let warnings = report.count(DoctorSeverity::Warning);
+            if errors == 0 && warnings == 0 {
+                println!("no findings — the fleet agrees with this build.");
+            } else {
+                println!(
+                    "{} finding(s): {errors} error(s), {warnings} warning(s), {} info.",
+                    report.findings.len(),
+                    report.count(DoctorSeverity::Info)
+                );
+            }
+        }
+    }
+    Ok(())
+}

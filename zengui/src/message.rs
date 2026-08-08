@@ -59,6 +59,13 @@ pub enum Message {
     ScopeSelected(ScopePreset),
     ToggleNode(String),
     SelectKey(Option<String>),
+    /// The tree pivot changed (issue #65).
+    PivotSelected(crate::view::tree::Pivot),
+    /// The find-in-tree query changed (issue #65).
+    TreeSearchChanged(String),
+    /// The tree scrolled: (absolute y offset, viewport height) — what the
+    /// virtualized window renders against (issue #65).
+    TreeScrolled(f32, f32),
     EchoFilterChanged(String),
     ClearEcho,
     /// Switch the right-hand pane (echo ↔ call).

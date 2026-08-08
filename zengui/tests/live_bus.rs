@@ -210,7 +210,7 @@ async fn the_tree_carries_foreign_traffic() {
         None,
     );
     let merged = zenkey_fleet::skeleton::merge(&skel, &snapshot, &["**".to_string()]);
-    let flat = tree::flatten(&merged, "", &expanded, 500);
+    let flat = tree::flatten(&merged, "", &expanded, 500, std::time::Instant::now());
 
     let demo = flat
         .rows

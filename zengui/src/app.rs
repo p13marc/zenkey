@@ -28,8 +28,10 @@ use crate::view;
 use crate::view::status::{SliceSource, Status};
 use crate::view::tokens::space;
 
-/// Cap on tree rows built per flatten.
-const MAX_ROWS: usize = 2000;
+/// Cap on tree rows built per flatten. With virtualized rendering (issue
+/// #65) this is a memory bound, not a display truncation — the view builds
+/// only the scrolled-into window.
+const MAX_ROWS: usize = 50_000;
 
 /// The right-hand pane switch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +61,12 @@ pub struct Zengui {
     /// The scope-preset watch ids, when "observe scope" is on.
     scope_watches: Vec<WatchId>,
     flat: view::tree::Flattened,
+    /// How the tree groups its entries (issue #65).
+    pivot: view::tree::Pivot,
+    /// The find-in-tree query; empty = no filter.
+    tree_search: String,
+    /// Scroll position + viewport height, driving the virtual window.
+    tree_scroll: (f32, f32),
     echo: EchoRing,
     expanded: BTreeSet<String>,
     selected: Option<String>,
@@ -102,10 +110,10 @@ impl Zengui {
             my_watches: HashMap::new(),
             my_watch_paths: BTreeSet::new(),
             scope_watches: Vec::new(),
-            flat: view::tree::Flattened {
-                rows: Vec::new(),
-                truncated: 0,
-            },
+            flat: view::tree::Flattened::empty(),
+            pivot: view::tree::Pivot::default(),
+            tree_search: String::new(),
+            tree_scroll: (0.0, 600.0),
             echo,
             expanded: BTreeSet::new(),
             selected: None,
@@ -343,6 +351,23 @@ impl Zengui {
                     let acquire = self.watch_scope();
                     return Task::batch([release, acquire]);
                 }
+                Task::none()
+            }
+            Message::PivotSelected(pivot) => {
+                self.pivot = pivot;
+                self.tree_scroll.0 = 0.0;
+                self.reflatten();
+                Task::none()
+            }
+            Message::TreeSearchChanged(q) => {
+                self.tree_search = q;
+                self.tree_scroll.0 = 0.0;
+                self.reflatten();
+                Task::none()
+            }
+            Message::TreeScrolled(y, h) => {
+                // View-only state: the next frame renders the new window.
+                self.tree_scroll = (y, h.max(100.0));
                 Task::none()
             }
             Message::ToggleNode(path) => {
@@ -635,7 +660,30 @@ impl Zengui {
             }
         };
         let merged = zenkey_fleet::skeleton::merge(skeleton, &self.observed, &self.watched);
-        self.flat = view::tree::flatten(&merged, &self.settings.base, &self.expanded, MAX_ROWS);
+        let now = std::time::Instant::now();
+        // Pivot and filter re-key the flattened entries here — the hot tree
+        // stays registry-blind (issue #65).
+        self.flat = match (self.pivot, self.tree_search.is_empty()) {
+            (view::tree::Pivot::Chunks, true) => {
+                view::tree::flatten(&merged, &self.settings.base, &self.expanded, MAX_ROWS, now)
+            }
+            (view::tree::Pivot::Chunks, false) => view::tree::search_flatten(
+                &merged,
+                &self.settings.base,
+                &self.tree_search,
+                MAX_ROWS,
+                now,
+            ),
+            (pivot, _) => view::tree::pivot_flatten(
+                &merged,
+                &self.settings.base,
+                pivot,
+                &self.expanded,
+                &self.tree_search,
+                MAX_ROWS,
+                now,
+            ),
+        };
     }
 
     fn ensure_facts(&mut self, key: &str) {
@@ -713,6 +761,10 @@ impl Zengui {
                 &self.facts,
                 self.selected.as_deref(),
                 &self.my_watch_paths,
+                self.pivot,
+                &self.tree_search,
+                self.tree_scroll.0,
+                self.tree_scroll.1,
             ))
             .width(Length::FillPortion(1))
             .height(Length::Fill),
