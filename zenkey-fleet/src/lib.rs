@@ -12,6 +12,7 @@
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 
 pub mod admin;
+pub mod context_store;
 pub mod discover;
 pub mod facts;
 pub mod query;
@@ -30,6 +31,7 @@ pub use admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,
     storages,
 };
+pub use context_store::StoredContext;
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{Answer, FleetAnswer, StateSample, fleet_get, fleet_registry, state_snapshot};

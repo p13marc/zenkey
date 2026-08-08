@@ -30,6 +30,14 @@ pub struct Cli {
     #[arg(long, env = "ZENGUI_BASE")]
     pub base: Option<String>,
 
+    /// Use a named context from the shared explorer config
+    /// (`~/.config/zenkey-explorer/config.toml`, with a read-fallback to the
+    /// legacy zenctl location). Flags always override context values.
+    /// Default: the file's `current` pointer, or the
+    /// `ZENKEY_EXPLORER_CONTEXT`/`ZENCTL_CONTEXT` env vars.
+    #[arg(long, value_name = "NAME")]
+    pub context: Option<String>,
+
     /// Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
     #[arg(long, short = 'c', value_name = "ENDPOINT")]
     pub connect: Vec<String>,
@@ -52,9 +60,10 @@ pub struct Cli {
     #[arg(long, value_name = "DIR")]
     pub registry: Vec<PathBuf>,
 
-    /// Query timeout in seconds.
-    #[arg(long, default_value_t = 5)]
-    pub timeout: u64,
+    /// Query timeout in seconds (default 5; a context may override the
+    /// default, an explicit flag overrides the context).
+    #[arg(long)]
+    pub timeout: Option<u64>,
 
     /// What to watch.
     #[arg(long, value_enum, default_value_t = ScopePreset::Everything)]
@@ -94,8 +103,20 @@ pub struct Settings {
 }
 
 impl Cli {
-    /// Resolve into settings, or explain why not.
+    /// Resolve into settings, or explain why not: loads the active shared
+    /// context (issue #35) and layers flags over it.
     pub fn settings(self) -> anyhow::Result<Settings> {
+        let context = zenkey_fleet::context_store::active(self.context.as_deref())?;
+        self.settings_with(context)
+    }
+
+    /// The pure half: `context` supplies defaults, flags override. Split from
+    /// [`Cli::settings`] so tests never touch the user's real config file.
+    pub fn settings_with(
+        self,
+        context: Option<zenkey_fleet::StoredContext>,
+    ) -> anyhow::Result<Settings> {
+        let context = context.unwrap_or_default();
         let scope = if self.selector.is_empty() {
             self.scope
         } else {
@@ -114,14 +135,26 @@ impl Cli {
             anyhow::bail!("--max-keys must be at least 1");
         }
         Ok(Settings {
-            // Unset and `--base ""` both mean the bus root. There is no config
-            // file yet, so the distinction has nowhere to live.
-            base: self.base.unwrap_or_default(),
-            connect: self.connect,
-            listen: self.listen,
-            scouting: self.scouting,
-            registry: self.registry,
-            timeout_secs: self.timeout,
+            // Flag/env > context > "" (the bus root). Unset and `--base ""`
+            // both resolve to the empty base — a real deployment, not a blank.
+            base: self.base.or(context.base).unwrap_or_default(),
+            connect: if self.connect.is_empty() {
+                context.connect
+            } else {
+                self.connect
+            },
+            listen: if self.listen.is_empty() {
+                context.listen
+            } else {
+                self.listen
+            },
+            scouting: self.scouting || context.scouting.unwrap_or(false),
+            registry: if self.registry.is_empty() {
+                context.registry
+            } else {
+                self.registry
+            },
+            timeout_secs: self.timeout.or(context.timeout).unwrap_or(5),
             scope,
             selectors: self.selector,
             echo_lines: self.echo_lines,
@@ -164,7 +197,10 @@ mod tests {
     use super::*;
 
     fn parse(args: &[&str]) -> anyhow::Result<Settings> {
-        Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied()))?.settings()
+        // settings_with(None), not settings(): tests must never read the
+        // user's real config file.
+        Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied()))?
+            .settings_with(None)
     }
 
     #[test]
@@ -230,5 +266,34 @@ mod tests {
                 .is_unreachable()
         );
         assert!(!parse(&["--scouting"]).unwrap().is_unreachable());
+    }
+
+    /// Context supplies defaults; flags override (issue #35).
+    #[test]
+    fn context_supplies_defaults_and_flags_override() {
+        let ctx = zenkey_fleet::StoredContext {
+            base: Some("zensight".into()),
+            connect: vec!["tcp/10.0.0.1:7447".into()],
+            listen: vec![],
+            registry: vec![],
+            scouting: Some(true),
+            timeout: Some(9),
+        };
+        let cli = |args: &[&str]| {
+            Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied())).unwrap()
+        };
+        // No flags: the context wins everywhere.
+        let s = cli(&[]).settings_with(Some(ctx.clone())).unwrap();
+        assert_eq!(s.base, "zensight");
+        assert_eq!(s.connect, ["tcp/10.0.0.1:7447"]);
+        assert!(s.scouting);
+        assert_eq!(s.timeout_secs, 9);
+        // Flags override field-by-field, including an explicit empty base.
+        let s = cli(&["--base", "", "-c", "tcp/127.0.0.1:7447", "--timeout", "2"])
+            .settings_with(Some(ctx))
+            .unwrap();
+        assert_eq!(s.base, "");
+        assert_eq!(s.connect, ["tcp/127.0.0.1:7447"]);
+        assert_eq!(s.timeout_secs, 2);
     }
 }

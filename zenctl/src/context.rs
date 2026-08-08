@@ -1,104 +1,14 @@
-//! Named connection contexts (issue #12) — the nats-CLI model.
+//! Named connection contexts — zenctl's verbs over the shared store.
 //!
-//! `~/.config/zenctl/config.toml` holds named contexts (base, endpoints,
-//! registry dirs, scouting, timeout) and a `current` pointer, so `--base` and
-//! `-c` stop being required on every invocation. Flags always override
-//! context values; `ZENCTL_CONFIG_DIR` overrides the directory (tests,
-//! multi-config setups).
-//!
-//! ```toml
-//! current = "lab"
-//!
-//! [context.lab]
-//! base = "zensight"
-//! connect = ["tcp/127.0.0.1:7447"]
-//! # listen = [], scouting = false, timeout = 5, registry = ["/abs/registry"]
-//! ```
-
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+//! The store itself (format, paths, `load`/`save`/`active`) moved to
+//! `zenkey_fleet::context_store` (issue #35) so zengui resolves the same
+//! contexts. Reads fall back to the legacy `~/.config/zenctl/` location;
+//! writes go to the neutral `~/.config/zenkey-explorer/` — see the store's
+//! module docs for the migration policy.
 
 use anyhow::{Context as _, Result, anyhow, bail};
-use serde::{Deserialize, Serialize};
 
-/// One named context's stored settings. All optional: a context only pins
-/// what it pins; flags fill the rest.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct StoredContext {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub connect: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub listen: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub registry: Vec<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scouting: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<u64>,
-}
-
-/// The whole config file.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ConfigFile {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub current: Option<String>,
-    #[serde(
-        default,
-        rename = "context",
-        skip_serializing_if = "BTreeMap::is_empty"
-    )]
-    pub contexts: BTreeMap<String, StoredContext>,
-}
-
-pub fn config_path() -> PathBuf {
-    let dir = std::env::var_os("ZENCTL_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(|| dirs::config_dir().map(|d| d.join("zenctl")))
-        .unwrap_or_else(|| PathBuf::from(".zenctl"));
-    dir.join("config.toml")
-}
-
-pub fn load() -> Result<ConfigFile> {
-    let path = config_path();
-    let Ok(src) = std::fs::read_to_string(&path) else {
-        return Ok(ConfigFile::default());
-    };
-    toml::from_str(&src).with_context(|| format!("bad config file {}", path.display()))
-}
-
-pub fn save(config: &ConfigFile) -> Result<()> {
-    let path = config_path();
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
-    }
-    let rendered = toml::to_string_pretty(config).context("config serializes")?;
-    std::fs::write(&path, rendered).with_context(|| format!("cannot write {}", path.display()))
-}
-
-/// The context the current invocation should use: `--context`/`ZENCTL_CONTEXT`
-/// by name, else the file's `current` pointer, else nothing.
-pub fn active(explicit: Option<&str>) -> Result<Option<StoredContext>> {
-    let config = load()?;
-    let name = explicit
-        .map(str::to_string)
-        .or_else(|| std::env::var("ZENCTL_CONTEXT").ok())
-        .or(config.current.clone());
-    let Some(name) = name else { return Ok(None) };
-    match config.contexts.get(&name) {
-        Some(c) => Ok(Some(c.clone())),
-        None if explicit.is_some() || std::env::var("ZENCTL_CONTEXT").is_ok() => {
-            bail!(
-                "context {name:?} not found in {} — `zenctl context list`",
-                config_path().display()
-            )
-        }
-        // A dangling `current` pointer is a stale file, not a hard error.
-        None => Ok(None),
-    }
-}
+pub use zenkey_fleet::context_store::{StoredContext, active, load, save};
 
 /// `zenctl context <verb>` handlers.
 pub fn create(name: &str, stored: StoredContext, select: bool) -> Result<()> {
