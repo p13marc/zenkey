@@ -1,0 +1,358 @@
+//! Typed reports — the shared contract between the engine and every frontend.
+//!
+//! Moved from zenctl (issue #34; the redesign doc called this move "one
+//! refactor unlocking scripting, tests, GUI parity"). A report struct is the
+//! stable output shape: zenctl renders it as a table or serde JSON/NDJSON,
+//! zengui renders it as widgets, and both stay in agreement because neither
+//! owns it.
+
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+
+use crate::facts::{KeyDescription, KeyShape, Registration};
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TopicRow {
+    pub producer: String,
+    pub registry_version: String,
+    pub class: String,
+    pub path: String,
+    pub type_name: String,
+    /// Trailing `{var...}` family: the registry fixes the shape, not the
+    /// members.
+    pub open_ended: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TopicList {
+    pub subjects: Vec<TopicRow>,
+}
+
+/// One key, described as far as the RFC 09 §5.1 ladder reached.
+///
+/// Redesigned in issue #34 from an all-or-nothing struct (whose builder
+/// hard-errored on any key that was not a registered v1 data subject — an O1
+/// violation) into a **partial** report: every key yields one, and `verdict`
+/// says how far it got. Fields below the ladder's failure point are absent,
+/// never defaulted.
+#[derive(Debug, Clone, Serialize)]
+pub struct TopicInfo {
+    pub key: String,
+    /// The ladder verdict, machine-stable (see [`TopicVerdict`]).
+    pub verdict: TopicVerdict,
+    /// Human-readable elaboration of the verdict (why, and what would answer
+    /// it) — rendered, never parsed.
+    pub note: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub producer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub variables: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qos: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_s: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cardinality: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Where the ladder stopped. Serialized snake_case; stable for scripts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TopicVerdict {
+    /// Parses, refines, declared — the full story is present.
+    Registered,
+    /// Parses as a v1 data key; the producer's slice does not declare it.
+    Unregistered,
+    /// Parses; no loaded slice covers this producer (or service origin).
+    NoSliceForProducer,
+    /// Parses, but onto a verbatim plane — there is no `[[subject]]` surface
+    /// to consult (RFC 03 §1.4).
+    NotADataClass,
+    /// A legal Zenoh key that is not this convention's (O1: a fact).
+    NotV1,
+    /// Sits under a different deployment base than the one configured.
+    NotUnderBase,
+    /// Parses as a data key, but no registry has been loaded — "not asked"
+    /// is not "answered no" (O4).
+    RegistryNotLoaded,
+}
+
+impl TopicInfo {
+    /// Render a [`KeyDescription`] into the report shape.
+    pub fn from_description(d: &KeyDescription) -> TopicInfo {
+        let mut info = TopicInfo {
+            key: d.key.clone(),
+            verdict: TopicVerdict::NotV1,
+            note: String::new(),
+            origin: None,
+            producer: None,
+            class: None,
+            subject: None,
+            variables: BTreeMap::new(),
+            payload_type: None,
+            unit: None,
+            qos: None,
+            ttl_s: None,
+            rate: None,
+            cardinality: None,
+            encoding: None,
+            since: None,
+            description: None,
+        };
+        match &d.facts.shape {
+            KeyShape::NotUnderBase => {
+                info.verdict = TopicVerdict::NotUnderBase;
+                info.note = "under a different deployment base than the configured one \
+                             (RFC 03 §1.1); `zenctl base list` discovers the bases in use"
+                    .into();
+                return info;
+            }
+            KeyShape::Unparsed { reason } => {
+                info.verdict = TopicVerdict::NotV1;
+                info.note = format!(
+                    "not a keyspace-v2 key — a fact, not an error (RFC 09 §5.1 O1): {reason}"
+                );
+                return info;
+            }
+            KeyShape::V1(v) => {
+                info.origin = Some(v.origin.clone());
+                info.class = Some(v.class.clone());
+                info.producer = v.producer.clone();
+            }
+        }
+        match &d.facts.registration {
+            Registration::Registered(s) => {
+                info.verdict = TopicVerdict::Registered;
+                info.subject = Some(s.path.clone());
+                info.variables = s.vars.iter().cloned().collect();
+                info.payload_type = Some(s.type_name.clone());
+                info.unit = s.unit.clone();
+                info.qos = s.qos.clone();
+                info.encoding = s.encoding.clone();
+                info.ttl_s = s.ttl_s;
+            }
+            Registration::Unregistered => {
+                info.verdict = TopicVerdict::Unregistered;
+                info.note = "parses as a v1 data key, but the producer's slice does not \
+                             declare this subject — for a conforming producer, a subject \
+                             that is not registered does not exist (RFC 08)"
+                    .into();
+            }
+            Registration::NoSliceForProducer => {
+                info.verdict = TopicVerdict::NoSliceForProducer;
+                info.note = "no loaded registry slice covers this producer — `--registry \
+                             <dir>` supplies slices offline; on-bus they come from \
+                             introspect (RFC 08 §6)"
+                    .into();
+            }
+            Registration::Unknown => {
+                info.verdict = TopicVerdict::RegistryNotLoaded;
+                info.note = "no registry loaded — \"not asked\" is not \"answered no\" \
+                             (RFC 09 §5.1 O4)"
+                    .into();
+            }
+            Registration::NotApplicable => {
+                info.verdict = TopicVerdict::NotADataClass;
+                info.note = "a verbatim plane, not a data class — there is no [[subject]] \
+                             surface to describe (RFC 03 §1.4)"
+                    .into();
+            }
+        }
+        info
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ServiceRow {
+    pub producer: String,
+    pub registry_version: String,
+    pub kind: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ServiceList {
+    pub procedures: Vec<ServiceRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InterfaceTypeRow {
+    pub name: String,
+    pub carriers: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InterfaceList {
+    pub types: Vec<InterfaceTypeRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CarrierRow {
+    pub producer: String,
+    pub class: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InterfaceShow {
+    pub type_name: String,
+    pub carriers: Vec<CarrierRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeList {
+    /// origin → live producer names (from liveliness tokens; zero payload).
+    pub origins: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaseList {
+    /// Discovered bases; `base` is a plain string, `""` for the empty base.
+    pub bases: Vec<crate::DiscoveredBase>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StorageList {
+    pub storages: Vec<crate::StorageInfo>,
+    pub coverage: Vec<crate::CoverageRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallError {
+    pub name: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallAnswer {
+    pub origin: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+    /// Raw text when the value is not JSON-shaped (TOML introspect replies…).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<CallError>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallReport {
+    pub key: String,
+    pub answers: Vec<CallAnswer>,
+}
+
+impl CallReport {
+    /// The process exit code discipline (issue #12): 0 = at least one answer
+    /// and no error replies; 1 = at least one error reply; 2 = zero replies
+    /// (silence stays a distinct non-verdict — RFC 05 §3.1).
+    pub fn exit_code(&self) -> i32 {
+        if self.answers.is_empty() {
+            2
+        } else if self.answers.iter().any(|a| !a.ok) {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::facts::describe_key;
+    use crate::registry::SliceSet;
+
+    #[test]
+    fn call_exit_codes() {
+        let mut r = CallReport {
+            key: "k".into(),
+            answers: vec![],
+        };
+        assert_eq!(r.exit_code(), 2, "silence is its own exit code");
+        r.answers.push(CallAnswer {
+            origin: "h-1".into(),
+            ok: true,
+            value: None,
+            text: Some("x".into()),
+            error: None,
+        });
+        assert_eq!(r.exit_code(), 0);
+        r.answers.push(CallAnswer {
+            origin: "h-2".into(),
+            ok: false,
+            value: None,
+            text: None,
+            error: Some(CallError {
+                name: "error/busy".into(),
+                message: "later".into(),
+            }),
+        });
+        assert_eq!(r.exit_code(), 1, "any refusal fails the invocation");
+    }
+
+    /// O1/O2 end to end: every kind of key yields a TopicInfo, and the
+    /// verdicts are distinct.
+    #[test]
+    fn topic_info_is_partial_never_absent() {
+        let cases = [
+            ("demo/example/foo", TopicVerdict::NotV1),
+            (
+                "v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect",
+                TopicVerdict::NotADataClass,
+            ),
+            (
+                "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+                TopicVerdict::RegistryNotLoaded,
+            ),
+        ];
+        for (key, want) in cases {
+            let info = TopicInfo::from_description(&describe_key("", key, None));
+            assert_eq!(info.verdict, want, "{key}");
+            assert!(!info.note.is_empty(), "{key} must explain itself");
+        }
+        let info = TopicInfo::from_description(&describe_key(
+            "zensight",
+            "other/v1/h-3fa9c2d41b7e/state/x/y",
+            None,
+        ));
+        assert_eq!(info.verdict, TopicVerdict::NotUnderBase);
+        // Partial means partial: nothing below the failure point is invented.
+        assert!(info.origin.is_none() && info.payload_type.is_none());
+        // Loaded-and-empty is a different fact from not-loaded (O4).
+        let empty = SliceSet::default();
+        let info = TopicInfo::from_description(&describe_key(
+            "",
+            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+            Some(&empty),
+        ));
+        assert_eq!(info.verdict, TopicVerdict::NoSliceForProducer);
+        // The ladder reached the parse rung, so structural facts ARE present…
+        assert_eq!(info.origin.as_deref(), Some("h-3fa9c2d41b7e"));
+        // …but no registry facts were invented.
+        assert!(info.payload_type.is_none());
+    }
+}

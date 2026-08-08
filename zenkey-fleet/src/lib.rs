@@ -13,8 +13,10 @@
 
 pub mod admin;
 pub mod discover;
+pub mod facts;
 pub mod query;
 pub mod registry;
+pub mod report;
 pub mod roster;
 pub mod session;
 pub mod stats;
@@ -29,6 +31,7 @@ pub use admin::{
     storages,
 };
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
+pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{Answer, FleetAnswer, StateSample, fleet_get, fleet_registry, state_snapshot};
 pub use registry::SliceSet;
 pub use roster::roster;

@@ -507,7 +507,7 @@ async fn main() -> Result<()> {
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
             let slices = bus.slices().await?;
-            let report = offline::topic_info(bus.base(), &key, &slices)?;
+            let report = offline::topic_info(bus.base(), &key, &slices);
             output::topic_info(&report, bus.format)
         }
         Command::Topic(TopicCmd::Echo {
