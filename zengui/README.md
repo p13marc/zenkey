@@ -47,21 +47,43 @@ because otherwise "catalog dead" and "no entities" would look identical.
 no publish/call pane, no node dashboard, no schema-decoded payload inspector
 yet.
 
-## Development
+## Try it
 
 ```bash
-cargo test -p zengui                      # unit + registry-overlay tests
-
-# End-to-end, against a real bus with both conforming and foreign traffic:
-zenohd -l tcp/127.0.0.1:7449 --no-multicast-scouting &
-cargo run -p zengui --example spray -- -c tcp/127.0.0.1:7449 &
-cargo test -p zengui --test live_bus -- --ignored --nocapture
-cargo run  -p zengui -- -c tcp/127.0.0.1:7449
+just gui-demo
 ```
+
+That is the whole thing: it builds, starts a traffic generator, and opens the
+GUI against it. No router and nothing else to install — `spray` listens and
+zengui connects straight to it. Ctrl-C stops both.
+
+What to look at:
+
+- Expand `v1` — chunks are labelled origin / class / producer / subject, and
+  leaves carry a registration badge plus the registry-declared type.
+- Expand `demo`, `two`, `v2`, `someotherbase` — foreign keys with real counts
+  and rates, deliberately *unlabelled* rather than mislabelled.
+  `someotherbase/…` is another deployment's traffic, visible because an
+  explorer runs un-namespaced (RFC 09 §5).
+- Switch scope to `deployment` and watch `@catalog` appear — see the note above
+  on why `**` cannot see it.
+- `just gui-demo-bounded` trips the key bound immediately, so the status strip
+  reads `N keys (+M retired — bound reached)`.
+- `just gui-demo-no-registry` withholds the registry, so every badge reads `—`
+  ("not asked") rather than "unregistered".
 
 `examples/spray.rs` exists because neither zenkey nor zensight can emit
 non-conforming traffic — that is the point of them — so it is the only way to
 exercise the key-agnostic path for real.
+
+## Development
+
+```bash
+cargo test -p zengui        # unit, registry-overlay and pane-rendering tests
+just spray                  # traffic in one terminal…
+just test-live              # …live-bus tests in another
+just ci                     # everything CI runs
+```
 
 ## Distribution
 

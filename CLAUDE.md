@@ -69,6 +69,19 @@ cargo run -p zenctl -- node list --base zensight -c tcp/127.0.0.1:7447
 cargo run -p zenctl -- topic list --base zensight --registry ../zensight/zensight-common/registry
 ```
 
+Plain cargo is still the build system; the `justfile` only covers what needs
+more than one command — chiefly running the GUI against traffic to look at.
+The demo is self-contained (no `zenohd`): `spray` listens and zengui connects
+straight to it.
+
+```bash
+just gui-demo               # zengui + generated conforming/foreign traffic
+just gui-demo-bounded       # the same, with the key bound tripping immediately
+just gui-demo-no-registry   # the same, with badges reading "not asked"
+just spray                  # traffic only; then `just test-live` elsewhere
+just ci                     # everything CI runs, in the same order
+```
+
 CI (`.forgejo/workflows/ci.yml`, Forgejo Actions) runs: fmt check, clippy
 `-D warnings` (all features), build + test (workspace, plus `-p zenkey
 --all-features`), an MSRV job (rustc pinned), and rustdoc with `-D warnings`.

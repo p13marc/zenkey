@@ -14,7 +14,8 @@
 //!   D2) — if it shows up in the tree, the scope design is broken.
 //!
 //! ```text
-//! cargo run -p zengui --example spray -- -c tcp/127.0.0.1:7447
+//! cargo run -p zengui --example spray -- -l tcp/127.0.0.1:7449   # listen, no router
+//! cargo run -p zengui --example spray -- -c tcp/127.0.0.1:7447   # or join one
 //! ```
 
 use std::time::Duration;
@@ -27,6 +28,12 @@ struct Args {
     /// Endpoint to connect to, repeatable.
     #[arg(long, short = 'c')]
     connect: Vec<String>,
+    /// Endpoint to listen on, repeatable.
+    ///
+    /// Listening lets zengui connect straight to this process, so the demo
+    /// needs no router: two cargo commands and nothing else installed.
+    #[arg(long, short = 'l')]
+    listen: Vec<String>,
     /// Deployment base for the conforming keys. Empty = the bus root.
     #[arg(long, default_value = "")]
     base: String,
@@ -43,10 +50,18 @@ async fn main() -> anyhow::Result<()> {
     config
         .insert_json5("scouting/multicast/enabled", "false")
         .ok();
+    let json_list = |v: &[String]| {
+        let items: Vec<String> = v.iter().map(|e| format!("{e:?}")).collect();
+        format!("[{}]", items.join(","))
+    };
     if !args.connect.is_empty() {
-        let eps: Vec<String> = args.connect.iter().map(|e| format!("{e:?}")).collect();
         config
-            .insert_json5("connect/endpoints", &format!("[{}]", eps.join(",")))
+            .insert_json5("connect/endpoints", &json_list(&args.connect))
+            .ok();
+    }
+    if !args.listen.is_empty() {
+        config
+            .insert_json5("listen/endpoints", &json_list(&args.listen))
             .ok();
     }
     let session = zenoh::open(config)

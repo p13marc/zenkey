@@ -1,10 +1,10 @@
-//! End-to-end checks against a real bus. Ignored by default — they need a
-//! router and the `spray` example running:
+//! End-to-end checks against a real bus. Ignored by default — they need the
+//! `spray` example publishing. No router: `spray` listens and these connect
+//! straight to it.
 //!
 //! ```text
-//! zenohd -l tcp/127.0.0.1:7449 --no-multicast-scouting &
-//! cargo run -p zengui --example spray -- -c tcp/127.0.0.1:7449 &
-//! cargo test -p zengui --test live_bus -- --ignored --nocapture
+//! just spray                 # or: cargo run -p zengui --example spray -- -l tcp/127.0.0.1:7449
+//! just test-live             # or: cargo test -p zengui --test live_bus -- --ignored --nocapture
 //! ```
 //!
 //! These exercise everything under the widgets: scope selectors, the monitor,
@@ -21,11 +21,15 @@ use zengui::scope::{self, ScopePreset};
 use zengui::view::tree;
 use zenkey_fleet::{Monitor, MonitorSpec, SliceSet};
 
-const ENDPOINT: &str = "tcp/127.0.0.1:7449";
+/// Where the traffic is. `just gui-demo` uses 7449; override with
+/// `ZENGUI_TEST_ENDPOINT` to point these at an existing bus instead.
+fn endpoint() -> String {
+    std::env::var("ZENGUI_TEST_ENDPOINT").unwrap_or_else(|_| "tcp/127.0.0.1:7449".to_string())
+}
 const SETTLE: Duration = Duration::from_secs(3);
 
 async fn watch(selectors: Vec<String>) -> (zenkey_fleet::KeyTreeSnapshot, Vec<String>) {
-    let session = zenkey_fleet::session::open(&[ENDPOINT.to_string()], &[], false)
+    let session = zenkey_fleet::session::open(&[endpoint()], &[], false)
         .await
         .expect("open session");
     let monitor = Monitor::start(
@@ -163,7 +167,7 @@ async fn the_overlay_classifies_real_traffic_correctly() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs a live bus; see the module docs"]
 async fn a_bounded_observer_reports_what_it_retired() {
-    let session = zenkey_fleet::session::open(&[ENDPOINT.to_string()], &[], false)
+    let session = zenkey_fleet::session::open(&[endpoint()], &[], false)
         .await
         .expect("open session");
     let monitor = Monitor::start(
