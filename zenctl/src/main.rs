@@ -1675,8 +1675,17 @@ async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
             None => undescribed += 1,
         }
     }
-    for drift in schema_drift(&described) {
-        println!("✗ {drift}");
+    for drift in zenkey_fleet::schema_drift(&described) {
+        let servers: Vec<String> = drift
+            .servers
+            .iter()
+            .map(|(p, h)| format!("{p} ({h})"))
+            .collect();
+        println!(
+            "✗ schema drift: type {:?} served with different schemas by {}",
+            drift.type_name,
+            servers.join(", ")
+        );
         findings += 1;
     }
     if undescribed > 0 {
@@ -1792,30 +1801,6 @@ fn referenced_type_names(slice: &RegistrySlice) -> Vec<String> {
     names
 }
 
-/// Cross-producer schema drift (issue #14): the same type name served with
-/// different hashes is exactly what the RFC 08 §7 hashes exist to catch.
-fn schema_drift(described: &[(String, zenkey::schema::SchemaSet)]) -> Vec<String> {
-    use std::collections::BTreeMap;
-    let mut seen: BTreeMap<&str, (&str, &str)> = BTreeMap::new(); // type -> (producer, hash)
-    let mut findings = Vec::new();
-    for (producer, set) in described {
-        for (name, schema) in set.iter() {
-            match seen.get(name) {
-                Some((other, hash)) if *hash != schema.hash() => findings.push(format!(
-                    "schema drift: type {name:?} served by {other} ({hash}) and {producer} ({}) \
-                     with different schemas",
-                    schema.hash()
-                )),
-                Some(_) => {}
-                None => {
-                    seen.insert(name, (producer, schema.hash()));
-                }
-            }
-        }
-    }
-    findings
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1868,33 +1853,6 @@ mod tests {
             ),
             "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
         );
-    }
-
-    #[test]
-    fn schema_drift_catches_same_name_different_hash() {
-        use zenkey::schema::{SchemaSet, TypeSchema};
-        let a = SchemaSet::builder("app")
-            .entry(
-                "Point",
-                TypeSchema::json_schema(serde_json::json!({"a": 1})),
-            )
-            .build();
-        let same = SchemaSet::builder("app")
-            .entry(
-                "Point",
-                TypeSchema::json_schema(serde_json::json!({"a": 1})),
-            )
-            .build();
-        let different = SchemaSet::builder("app")
-            .entry(
-                "Point",
-                TypeSchema::json_schema(serde_json::json!({"a": 2})),
-            )
-            .build();
-        assert!(schema_drift(&[("p1".into(), a.clone()), ("p2".into(), same)]).is_empty());
-        let findings = schema_drift(&[("p1".into(), a), ("p3".into(), different)]);
-        assert_eq!(findings.len(), 1);
-        assert!(findings[0].contains("Point"), "{findings:?}");
     }
 
     #[test]

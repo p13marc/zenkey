@@ -28,6 +28,8 @@ pub mod write;
 
 #[cfg(feature = "decode")]
 pub mod decode;
+#[cfg(feature = "decode")]
+pub use decode::{SchemaDrift, TotalityGap, schema_drift, totality_gaps};
 
 pub use admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,

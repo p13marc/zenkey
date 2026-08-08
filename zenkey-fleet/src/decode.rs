@@ -23,10 +23,15 @@ use crate::registry::SliceSet;
 pub struct SchemaStore {
     base: String,
     timeout: Duration,
-    /// producer → served set (None = asked and not served; don't re-ask).
-    sets: Mutex<HashMap<String, Option<SchemaSet>>>,
+    /// producer → (served set or None = asked-and-not-served, with the ask
+    /// instant — a `None` expires after [`NOT_SERVED_TTL`], so a producer
+    /// that *starts* serving describe is noticed without a restart).
+    sets: Mutex<HashMap<String, (Option<SchemaSet>, std::time::Instant)>>,
     decoders: DecoderRegistry,
 }
+
+/// How long "asked, not served" stays authoritative before re-asking.
+const NOT_SERVED_TTL: Duration = Duration::from_secs(60);
 
 impl SchemaStore {
     pub fn new(base: impl Into<String>, timeout: Duration) -> Self {
@@ -56,14 +61,20 @@ impl SchemaStore {
     ) -> Option<TypeSchema> {
         {
             let sets = self.sets.lock().expect("store lock");
-            if let Some(cached) = sets.get(producer) {
-                return cached.as_ref().and_then(|s| s.get(type_name).cloned());
+            if let Some((cached, asked)) = sets.get(producer) {
+                let expired = cached.is_none() && asked.elapsed() > NOT_SERVED_TTL;
+                if !expired {
+                    return cached.as_ref().and_then(|s| s.get(type_name).cloned());
+                }
             }
         }
         let fetched = self.fetch(session, producer).await;
         let mut sets = self.sets.lock().expect("store lock");
-        let entry = sets.entry(producer.to_string()).or_insert(fetched);
-        entry.as_ref().and_then(|s| s.get(type_name).cloned())
+        let entry = sets.insert(producer.to_string(), (fetched, std::time::Instant::now()));
+        let _ = entry;
+        sets.get(producer)
+            .and_then(|(s, _)| s.as_ref())
+            .and_then(|s| s.get(type_name).cloned())
     }
 
     async fn fetch(&self, session: &Session, producer: &str) -> Option<SchemaSet> {
@@ -98,6 +109,82 @@ impl SchemaStore {
     ) -> Result<DecodedPayload, DecodeError> {
         self.decoders.decode(schema, encoding, bytes)
     }
+}
+
+/// Two producers serving one type name with different hashes — "a `doctor`
+/// finding" by RFC 08 §7's own words (issue #41).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SchemaDrift {
+    pub type_name: String,
+    /// Every (producer, hash) pair observed for the name.
+    pub servers: Vec<(String, String)>,
+}
+
+/// A type the producer's slice references that its served describe set does
+/// not cover — a violation of RFC 08 §7's totality clause.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TotalityGap {
+    pub producer: String,
+    pub missing: Vec<String>,
+}
+
+/// Compute drift across a described fleet. Pure — feed it whatever describe
+/// replies were gathered (the store's cache, or a fresh sweep).
+pub fn schema_drift(described: &[(String, SchemaSet)]) -> Vec<SchemaDrift> {
+    use std::collections::BTreeMap;
+    let mut by_name: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
+    for (producer, set) in described {
+        for (name, schema) in set.iter() {
+            by_name
+                .entry(name)
+                .or_default()
+                .push((producer.clone(), schema.hash().to_string()));
+        }
+    }
+    by_name
+        .into_iter()
+        .filter(|(_, servers)| servers.iter().any(|(_, h)| h != &servers[0].1))
+        .map(|(name, servers)| SchemaDrift {
+            type_name: name.to_string(),
+            servers,
+        })
+        .collect()
+}
+
+/// Totality per producer: every type name the slice references (subjects,
+/// procedure request/reply, blob references) must appear in the served set
+/// (RFC 08 §7). A producer that served no describe at all is NOT a gap here —
+/// that is "describe absent", a different finding with a different fix.
+pub fn totality_gaps(described: &[(String, SchemaSet)], slices: &SliceSet) -> Vec<TotalityGap> {
+    let mut gaps = Vec::new();
+    for (producer, set) in described {
+        let Some(slice) = slices.get(producer) else {
+            continue;
+        };
+        let mut names: Vec<&str> = Vec::new();
+        names.extend(slice.subjects.iter().map(|s| s.type_name.as_str()));
+        for p in &slice.procedures {
+            names.extend(p.request.as_deref());
+            names.extend(p.reply.as_deref());
+        }
+        for b in &slice.blob {
+            names.extend(b.reference.as_deref());
+        }
+        names.sort();
+        names.dedup();
+        let missing: Vec<String> = names
+            .into_iter()
+            .filter(|n| set.get(n).is_none())
+            .map(str::to_string)
+            .collect();
+        if !missing.is_empty() {
+            gaps.push(TotalityGap {
+                producer: producer.clone(),
+                missing,
+            });
+        }
+    }
+    gaps
 }
 
 /// How a rendered payload was produced — a tool surfaces this honestly
@@ -320,5 +407,106 @@ mod tests {
         assert!(cbor_whole(&cbor).is_some());
         cbor.push(0x00);
         assert!(cbor_whole(&cbor).is_none(), "trailing byte must reject");
+    }
+
+    fn set_with(name: &str, schema: serde_json::Value) -> SchemaSet {
+        SchemaSet::builder("app")
+            .entry(name, zenkey::schema::TypeSchema::json_schema(schema))
+            .build()
+    }
+
+    /// RFC 08 §7: same name, different hash, across producers — one finding
+    /// listing every server; agreement is silent.
+    #[test]
+    fn drift_findings_name_every_server() {
+        let a = SchemaSet::builder("app")
+            .entry(
+                "T",
+                zenkey::schema::TypeSchema::json_schema(serde_json::json!({"type":"object"})),
+            )
+            .build();
+        let b = SchemaSet::builder("app")
+            .entry(
+                "T",
+                zenkey::schema::TypeSchema::json_schema(serde_json::json!({"type":"string"})),
+            )
+            .build();
+        let c = SchemaSet::builder("app")
+            .entry(
+                "T",
+                zenkey::schema::TypeSchema::json_schema(serde_json::json!({"type":"object"})),
+            )
+            .build();
+        let described = vec![
+            ("p1".to_string(), a),
+            ("p2".to_string(), b),
+            ("p3".to_string(), c),
+        ];
+        let drift = schema_drift(&described);
+        assert_eq!(drift.len(), 1);
+        assert_eq!(drift[0].type_name, "T");
+        assert_eq!(drift[0].servers.len(), 3, "every server is named");
+        // p1 and p3 agree; p2 is the odd one out — the caller can see which.
+        assert_eq!(drift[0].servers[0].1, drift[0].servers[2].1);
+        assert_ne!(drift[0].servers[0].1, drift[0].servers[1].1);
+
+        // All agreeing: no finding.
+        let described = vec![
+            (
+                "p1".to_string(),
+                set_with("T", serde_json::json!({"type":"object"})),
+            ),
+            (
+                "p3".to_string(),
+                set_with("T", serde_json::json!({"type":"object"})),
+            ),
+        ];
+        assert!(schema_drift(&described).is_empty());
+    }
+
+    /// Totality: a slice-referenced type absent from the served describe is a
+    /// gap; a producer that served no describe is not judged here.
+    #[test]
+    fn totality_gaps_check_only_served_producers() {
+        use zenkey::slice::{RegistrySlice, SubjectDecl};
+        let slice = RegistrySlice {
+            version: "1".into(),
+            app: "a".into(),
+            convention: 1,
+            name: "sysinfo".into(),
+            service_origin: None,
+            description: None,
+            subjects: vec![SubjectDecl {
+                path: "cpu".into(),
+                class: "telemetry".into(),
+                type_name: "TelemetryPoint".into(),
+                since: None,
+                description: None,
+                qos: None,
+                ttl_s: None,
+                unit: None,
+                rate: None,
+                cardinality: None,
+                encoding: None,
+            }],
+            procedures: vec![],
+            blob: vec![],
+            deprecated: vec![],
+        };
+        let slices = crate::registry::SliceSet::from_slices(vec![slice]);
+
+        // Served describe missing the referenced type: one gap.
+        let incomplete = SchemaSet::builder("a")
+            .entry(
+                "Other",
+                zenkey::schema::TypeSchema::json_schema(serde_json::json!({"type":"object"})),
+            )
+            .build();
+        let gaps = totality_gaps(&[("sysinfo".to_string(), incomplete)], &slices);
+        assert_eq!(gaps.len(), 1);
+        assert_eq!(gaps[0].missing, ["TelemetryPoint"]);
+
+        // No describe served at all: not judged by totality.
+        assert!(totality_gaps(&[], &slices).is_empty());
     }
 }
