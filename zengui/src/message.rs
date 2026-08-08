@@ -29,6 +29,8 @@ pub enum Message {
     BasesDiscovered(Result<Vec<DiscoveredBase>, String>),
     /// Registry slices arrived, from the bus or from `--registry` dirs.
     SlicesLoaded(Result<Arc<SliceSet>, String>),
+    /// The §6.1 union arrived: (set, from_bus, dirs_only, disagreements).
+    SlicesUnionLoaded(Result<(Arc<SliceSet>, usize, usize, usize), String>),
 
     /// The user toggled observation of one subtree (the tree's watch button).
     /// Carries the row's display path.

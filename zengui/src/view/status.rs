@@ -25,6 +25,12 @@ pub enum SliceSource {
     Dirs {
         count: usize,
     },
+    /// The §6.1 union: served wins, dirs fill, disagreement is data.
+    Union {
+        from_bus: usize,
+        dirs_only: usize,
+        disagreements: usize,
+    },
     Failed(String),
 }
 
@@ -34,6 +40,18 @@ impl SliceSource {
             SliceSource::None => "registry: not loaded".to_string(),
             SliceSource::Bus { count } => format!("registry: bus · {count} slices"),
             SliceSource::Dirs { count } => format!("registry: dirs · {count} slices"),
+            SliceSource::Union {
+                from_bus,
+                dirs_only,
+                disagreements,
+            } => {
+                let mut label =
+                    format!("registry: union · {from_bus} served + {dirs_only} dirs-only");
+                if *disagreements > 0 {
+                    label.push_str(&format!(" · {disagreements} DISAGREE"));
+                }
+                label
+            }
             SliceSource::Failed(e) => format!("registry: failed — {e}"),
         }
     }

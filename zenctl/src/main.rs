@@ -301,6 +301,15 @@ enum TopicCmd {
 #[derive(Subcommand)]
 enum NodeCmd {
     /// List live producers from the liveliness roster (on-bus).
+    /// One node's full story: producers, versions, capabilities, freshness
+    /// (issue #49; RFC 08 §6's capability-and-version inventory, per node).
+    Info {
+        /// The origin id (`h-<12hex>`). A hostname is refused — resolve it
+        /// through the catalog first (RFC 06 §6).
+        origin: String,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     List {
         /// Join each producer against its served introspect slice (app +
         /// registry version).
@@ -495,11 +504,30 @@ impl BusArgs {
     /// The same, as the fleet engine's indexed set (echo's decode path).
     async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
         let dirs = self.registry_dirs();
-        if !dirs.is_empty() {
-            return zenkey_fleet::SliceSet::from_dirs(&dirs);
-        }
         let session = self.session().await?;
         let base = self.base();
+        if !dirs.is_empty() {
+            // §6.1's decision, delivered by issue #43: --registry and the bus
+            // stop being exclusive. Union: served wins per producer, dirs
+            // fill the gaps, disagreement is reported — never silently
+            // overwritten.
+            let out =
+                zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
+            for d in &out.disagreements {
+                eprintln!(
+                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{}                      (served wins; `zenctl registry diff` details it)",
+                    d.producer,
+                    d.bus_version,
+                    d.dirs_version,
+                    if d.shape_differs {
+                        ", shapes differ"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            return Ok(out.set);
+        }
         let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
         if set.slices().is_empty() {
             eprintln!(
@@ -642,6 +670,7 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Command::Node(NodeCmd::Info { origin, bus }) => cmd_node_info(&origin, &bus).await,
         Command::Node(NodeCmd::List { verbose, bus }) => cmd_node_list(verbose, &bus).await,
         Command::Base(BaseCmd::List { bus }) => {
             // Deliberately never calls bus.base() — this is the command that
@@ -795,6 +824,75 @@ async fn main() -> Result<()> {
 
 /// `node list` — the liveliness roster (RFC 04 §5); `--verbose` joins each
 /// producer against its served introspect slice.
+/// `node info <origin>` — the per-node capability inventory (issue #49).
+async fn cmd_node_info(origin: &str, args: &BusArgs) -> Result<()> {
+    // The identity bridge, enforced: an origin id or nothing (RFC 06 §6).
+    if !zenkey::grammar::is_valid_host_origin(origin) && !origin.starts_with('@') {
+        return Err(anyhow!(
+            "{origin:?} is not an origin id — a hostname must be resolved to its              origin first (RFC 06 §6); `zenctl node list` shows the roster"
+        ));
+    }
+    let session = args.session().await?;
+    let info = zenkey_fleet::node_info(&session, args.base(), origin, args.timeout(), true).await?;
+
+    match args.format.resolved() {
+        output::Format::Json | output::Format::Ndjson => {
+            println!("{}", serde_json::to_string_pretty(&info)?);
+        }
+        _ => {
+            println!("origin    {}", info.origin);
+            if info.producers.is_empty() {
+                println!(
+                    "  no liveliness token and no introspect reply — not on the                      roster (which is not proof it does not exist; RFC 05 §3.1)"
+                );
+            }
+            for p in &info.producers {
+                let alive = if p.alive { "alive" } else { "no token" };
+                match (&p.app, &p.registry_version) {
+                    (Some(app), Some(v)) => println!(
+                        "  {}  [{alive}]  app {app} · registry v{v} · {} subject(s) ·                          {} procedure(s){}{}",
+                        p.name,
+                        p.subjects,
+                        p.procedures,
+                        if p.blob_tiers.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · blob: {}", p.blob_tiers.join(","))
+                        },
+                        if p.deprecated_served > 0 {
+                            format!(" · {} DEPRECATED still served", p.deprecated_served)
+                        } else {
+                            String::new()
+                        },
+                    ),
+                    _ => println!(
+                        "  {}  [{alive}]  (no introspect reply — capabilities unknown,                          not absent)",
+                        p.name
+                    ),
+                }
+            }
+            if !info.freshness.is_empty() {
+                println!("state freshness (declared ttl_s):");
+                for f in &info.freshness {
+                    let age = f
+                        .age_s
+                        .map(|a| format!("{a}s old"))
+                        .unwrap_or_else(|| "no sample seen".into());
+                    println!(
+                        "  {}/{}  {}  (ttl {}s){}",
+                        f.producer,
+                        f.path,
+                        age,
+                        f.ttl_s,
+                        if f.stale { "  STALE" } else { "" }
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn cmd_node_list(verbose: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let mut roster = bus::roster(&session, args.base(), args.timeout()).await?;
@@ -1577,8 +1675,17 @@ async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
             None => undescribed += 1,
         }
     }
-    for drift in schema_drift(&described) {
-        println!("✗ {drift}");
+    for drift in zenkey_fleet::schema_drift(&described) {
+        let servers: Vec<String> = drift
+            .servers
+            .iter()
+            .map(|(p, h)| format!("{p} ({h})"))
+            .collect();
+        println!(
+            "✗ schema drift: type {:?} served with different schemas by {}",
+            drift.type_name,
+            servers.join(", ")
+        );
         findings += 1;
     }
     if undescribed > 0 {
@@ -1694,30 +1801,6 @@ fn referenced_type_names(slice: &RegistrySlice) -> Vec<String> {
     names
 }
 
-/// Cross-producer schema drift (issue #14): the same type name served with
-/// different hashes is exactly what the RFC 08 §7 hashes exist to catch.
-fn schema_drift(described: &[(String, zenkey::schema::SchemaSet)]) -> Vec<String> {
-    use std::collections::BTreeMap;
-    let mut seen: BTreeMap<&str, (&str, &str)> = BTreeMap::new(); // type -> (producer, hash)
-    let mut findings = Vec::new();
-    for (producer, set) in described {
-        for (name, schema) in set.iter() {
-            match seen.get(name) {
-                Some((other, hash)) if *hash != schema.hash() => findings.push(format!(
-                    "schema drift: type {name:?} served by {other} ({hash}) and {producer} ({}) \
-                     with different schemas",
-                    schema.hash()
-                )),
-                Some(_) => {}
-                None => {
-                    seen.insert(name, (producer, schema.hash()));
-                }
-            }
-        }
-    }
-    findings
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1770,33 +1853,6 @@ mod tests {
             ),
             "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
         );
-    }
-
-    #[test]
-    fn schema_drift_catches_same_name_different_hash() {
-        use zenkey::schema::{SchemaSet, TypeSchema};
-        let a = SchemaSet::builder("app")
-            .entry(
-                "Point",
-                TypeSchema::json_schema(serde_json::json!({"a": 1})),
-            )
-            .build();
-        let same = SchemaSet::builder("app")
-            .entry(
-                "Point",
-                TypeSchema::json_schema(serde_json::json!({"a": 1})),
-            )
-            .build();
-        let different = SchemaSet::builder("app")
-            .entry(
-                "Point",
-                TypeSchema::json_schema(serde_json::json!({"a": 2})),
-            )
-            .build();
-        assert!(schema_drift(&[("p1".into(), a.clone()), ("p2".into(), same)]).is_empty());
-        let findings = schema_drift(&[("p1".into(), a), ("p3".into(), different)]);
-        assert_eq!(findings.len(), 1);
-        assert!(findings[0].contains("Point"), "{findings:?}");
     }
 
     #[test]

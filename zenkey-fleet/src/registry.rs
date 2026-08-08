@@ -155,6 +155,105 @@ impl SliceSet {
     }
 }
 
+/// Where a slice set came from — the §6.1 decision made typed: `--registry`
+/// and the bus stop being exclusive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliceSource {
+    Bus,
+    Dirs,
+    Union,
+}
+
+/// One producer where the served slice and the on-disk slice disagree.
+///
+/// A disagreement is **data**, not an error: served wins in the union (the
+/// bus is the runtime truth, RFC 08 §6.1), and the difference is retained for
+/// `doctor` / `registry diff` to report instead of being silently overwritten.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SliceDisagreement {
+    pub producer: String,
+    pub bus_version: String,
+    pub dirs_version: String,
+    /// Whether anything beyond the version string differs (subjects,
+    /// procedures, blob tiers).
+    pub shape_differs: bool,
+}
+
+/// A union load's full outcome.
+#[derive(Debug, Clone)]
+pub struct UnionOutcome {
+    pub set: SliceSet,
+    /// Producers whose slice came from the bus.
+    pub from_bus: Vec<String>,
+    /// Producers only the dirs supplied.
+    pub dirs_only: Vec<String>,
+    pub disagreements: Vec<SliceDisagreement>,
+}
+
+impl SliceSet {
+    /// Load the union of the live bus and local dirs: **served wins per
+    /// producer**, dirs fill the gaps, and every producer where the two
+    /// disagree is retained as a [`SliceDisagreement`].
+    ///
+    /// Degrades honestly: an unreachable bus yields a dirs-only union (the
+    /// outcome's `from_bus` is empty — the caller can see which case it got).
+    pub async fn from_union(
+        session: &zenoh::Session,
+        base: &str,
+        dirs: &[std::path::PathBuf],
+        timeout: std::time::Duration,
+    ) -> Result<UnionOutcome> {
+        let bus = SliceSet::from_bus(session, base, timeout)
+            .await
+            .unwrap_or_default();
+        let disk = if dirs.is_empty() {
+            SliceSet::default()
+        } else {
+            SliceSet::from_dirs(dirs)?
+        };
+
+        let mut merged: Vec<RegistrySlice> = Vec::new();
+        let mut from_bus = Vec::new();
+        let mut dirs_only = Vec::new();
+        let mut disagreements = Vec::new();
+
+        for served in bus.slices() {
+            from_bus.push(served.name.clone());
+            if let Some(local) = disk.get(&served.name)
+                && (local.version != served.version || local != served)
+            {
+                disagreements.push(SliceDisagreement {
+                    producer: served.name.clone(),
+                    bus_version: served.version.clone(),
+                    dirs_version: local.version.clone(),
+                    shape_differs: {
+                        // Same version but different content is the worse lie.
+                        let mut a = served.clone();
+                        let mut b = local.clone();
+                        a.version = String::new();
+                        b.version = String::new();
+                        a != b
+                    },
+                });
+            }
+            merged.push(served.clone());
+        }
+        for local in disk.slices() {
+            if bus.get(&local.name).is_none() {
+                dirs_only.push(local.name.clone());
+                merged.push(local.clone());
+            }
+        }
+
+        Ok(UnionOutcome {
+            set: SliceSet::from_slices(merged),
+            from_bus,
+            dirs_only,
+            disagreements,
+        })
+    }
+}
+
 #[cfg(test)]
 impl SliceSet {
     /// Test constructor from one slice TOML (crate-internal).
@@ -223,5 +322,21 @@ mod tests {
                 .slices()
                 .is_empty()
         );
+    }
+
+    /// Union semantics without a bus: dirs fill everything, nothing claimed
+    /// from the bus, no invented disagreements.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn union_degrades_to_dirs_when_the_bus_is_silent() {
+        let session = crate::session::open(&[], &[], false).await.unwrap();
+        let dir =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
+        let out = SliceSet::from_union(&session, "", &[dir], std::time::Duration::from_millis(200))
+            .await
+            .unwrap();
+        assert!(out.from_bus.is_empty(), "no bus answered");
+        assert!(!out.dirs_only.is_empty(), "dirs supplied the slices");
+        assert!(out.disagreements.is_empty());
+        assert_eq!(out.set.slices().len(), out.dirs_only.len());
     }
 }
