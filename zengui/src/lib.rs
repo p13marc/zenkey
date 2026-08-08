@@ -17,5 +17,8 @@
 //! see traffic a namespaced application is blind to.
 
 pub mod config;
+pub mod echo;
 pub mod keyfacts;
+pub mod link;
+pub mod message;
 pub mod scope;
