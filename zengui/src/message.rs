@@ -45,12 +45,19 @@ pub enum Message {
     /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
     ValueFetched(String, Result<Arc<FetchOutcome>, String>),
 
+    /// Publish/call pane interactions (issue #60).
+    Call(crate::view::call::CallMsg),
+    /// A call finished.
+    CallDone(Result<Arc<zenkey_fleet::report::CallReport>, String>),
+
     BaseSelected(String),
     ScopeSelected(ScopePreset),
     ToggleNode(String),
     SelectKey(Option<String>),
     EchoFilterChanged(String),
     ClearEcho,
+    /// Switch the right-hand pane (echo ↔ call).
+    PaneToggled,
     Reconnect,
 }
 
