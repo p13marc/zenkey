@@ -73,7 +73,7 @@ fn index(keys: &[&str], with_slices: bool) -> FactsIndex {
 
 fn render(keys: &[&str], with_slices: bool) -> (tree::Flattened, FactsIndex) {
     let snap = snapshot(keys);
-    let flat = tree::flatten(&snap, "", &expand_all(keys), 500);
+    let flat = tree::flatten(&snap, "", &expand_all(keys), 500, std::time::Instant::now());
     (flat, index(keys, with_slices))
 }
 
@@ -84,7 +84,16 @@ fn the_tree_renders_the_registration_state() {
     let keys = [REGISTERED, UNREGISTERED, FOREIGN];
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None, &watches));
+    let mut ui = simulator::<Message, _, _>(tree::pane(
+        &flat,
+        &facts,
+        None,
+        &watches,
+        tree::Pivot::Chunks,
+        "",
+        0.0,
+        600.0,
+    ));
 
     assert!(
         ui.find("registered").is_ok(),
@@ -112,7 +121,16 @@ fn an_unresolved_tree_claims_neither_way() {
     let keys = [REGISTERED];
     let (flat, facts) = render(&keys, false);
     let watches = BTreeSet::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None, &watches));
+    let mut ui = simulator::<Message, _, _>(tree::pane(
+        &flat,
+        &facts,
+        None,
+        &watches,
+        tree::Pivot::Chunks,
+        "",
+        0.0,
+        600.0,
+    ));
 
     assert!(
         ui.find("unregistered").is_err(),
@@ -130,7 +148,16 @@ fn foreign_keys_render_without_convention_labels() {
     let keys = [FOREIGN];
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None, &watches));
+    let mut ui = simulator::<Message, _, _>(tree::pane(
+        &flat,
+        &facts,
+        None,
+        &watches,
+        tree::Pivot::Chunks,
+        "",
+        0.0,
+        600.0,
+    ));
 
     for role in ["version", "origin", "class", "producer", "subject"] {
         assert!(
@@ -146,13 +173,19 @@ fn foreign_keys_render_without_convention_labels() {
 /// (RFC 05 §3.1).
 #[test]
 fn the_empty_tree_explains_itself() {
-    let flat = tree::Flattened {
-        rows: Vec::new(),
-        truncated: 0,
-    };
+    let flat = tree::Flattened::empty();
     let facts = FactsIndex::new();
     let watches = BTreeSet::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None, &watches));
+    let mut ui = simulator::<Message, _, _>(tree::pane(
+        &flat,
+        &facts,
+        None,
+        &watches,
+        tree::Pivot::Chunks,
+        "",
+        0.0,
+        600.0,
+    ));
 
     assert!(ui.find("Nothing observed yet").is_ok());
     // Selectors match a widget's whole text, so this is the full disclaimer.

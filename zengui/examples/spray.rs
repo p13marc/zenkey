@@ -40,6 +40,12 @@ struct Args {
     /// Publications per second, per key.
     #[arg(long, default_value_t = 5.0)]
     hz: f64,
+    /// Extra synthetic telemetry keys (`v1/<host>/telemetry/synth/g<n>/k<i>`,
+    /// grouped in hundreds) — the big-tree soak for issue #65. Each publishes
+    /// once at startup so the tree fills, then a rotating slice refreshes on
+    /// every tick so freshness dots keep moving.
+    #[arg(long, default_value_t = 0)]
+    keys: usize,
 }
 
 #[tokio::main]
@@ -128,14 +134,36 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("declare {key}: {e}"))?;
         publishers.push((p, payload));
     }
+    // The synthetic fan: bulk keys via ad-hoc puts (this is a test fixture,
+    // not a conforming producer — 50k declared publishers would prove
+    // nothing about the tree).
+    let synth: Vec<String> = (0..args.keys)
+        .map(|i| with_base(&format!("v1/{host}/telemetry/synth/g{}/k{i}", i / 100)))
+        .collect();
+    if !synth.is_empty() {
+        println!("seeding {} synthetic keys…", synth.len());
+        for key in &synth {
+            let _ = session.put(key, b"1".to_vec()).await;
+        }
+        println!("…seeded.");
+    }
     println!("\nCtrl-C to stop.");
 
     let period = Duration::from_secs_f64(1.0 / args.hz.max(0.1));
     let mut ticker = tokio::time::interval(period);
+    let refresh_per_tick = (args.keys / 1000).max(1);
+    let mut cursor = 0usize;
     loop {
         ticker.tick().await;
         for (p, payload) in &publishers {
             let _ = p.put(payload.clone()).await;
+        }
+        if !synth.is_empty() {
+            for _ in 0..refresh_per_tick {
+                let key = &synth[cursor % synth.len()];
+                let _ = session.put(key, b"1".to_vec()).await;
+                cursor += 1;
+            }
         }
     }
 }

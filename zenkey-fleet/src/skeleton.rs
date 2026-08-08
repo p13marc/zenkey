@@ -347,6 +347,10 @@ pub struct NodeStats {
     pub subtree_bytes: u64,
     pub subtree_rate_hz: f64,
     pub subtree_keys: usize,
+    /// Newest sample anywhere in the subtree — the per-node freshness signal
+    /// (issue #65; computed by the snapshot since the beginning, now carried
+    /// through the merge instead of dropped).
+    pub subtree_last_seen: Option<std::time::Instant>,
 }
 
 impl NodeStats {
@@ -359,6 +363,7 @@ impl NodeStats {
             subtree_bytes: node.subtree_bytes,
             subtree_rate_hz: node.subtree_rate_hz,
             subtree_keys: node.subtree_keys,
+            subtree_last_seen: node.subtree_last_seen,
         }
     }
 }
