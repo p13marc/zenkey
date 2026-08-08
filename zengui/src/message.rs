@@ -3,7 +3,9 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet::{DiscoveredBase, KeyTreeSnapshot, SampleView, SliceSet};
+use zenkey_fleet::{
+    DiscoveredBase, FetchOutcome, KeyTreeSnapshot, Monitor, SampleView, Skeleton, SliceSet, WatchId,
+};
 
 use crate::scope::ScopePreset;
 
@@ -19,10 +21,29 @@ pub enum Message {
     Link(LinkState),
     /// A session was opened (or could not be).
     SessionOpened(Result<zenoh::Session, String>),
+    /// The monitor started (lazily — no data-plane watches yet unless eager).
+    MonitorStarted(Result<Arc<Monitor>, String>),
+    /// The declared-keyspace skeleton was (re)built.
+    SkeletonBuilt(Result<Arc<Skeleton>, String>),
     /// The base sweep finished. An empty list is *not* a verdict (RFC 05 §3.1).
     BasesDiscovered(Result<Vec<DiscoveredBase>, String>),
     /// Registry slices arrived, from the bus or from `--registry` dirs.
     SlicesLoaded(Result<Arc<SliceSet>, String>),
+
+    /// The user toggled observation of one subtree (the tree's watch button).
+    /// Carries the row's display path.
+    WatchToggled(String),
+    /// A watch was declared for the given display path.
+    WatchStarted(String, Result<WatchId, String>),
+    /// A watch was released for the given display path.
+    WatchReleased(String, Result<(), String>),
+    /// The scope preset's watches were declared (the eager set).
+    ScopeWatchesStarted(Vec<WatchId>),
+    /// Apply/release the scope preset's selectors as watches — the eager
+    /// mode, made explicit and labelled by its cost.
+    ScopeWatchToggled,
+    /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
+    ValueFetched(String, Result<Arc<FetchOutcome>, String>),
 
     BaseSelected(String),
     ScopeSelected(ScopePreset),
@@ -37,11 +58,8 @@ pub enum Message {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkState {
     Connecting,
-    /// Subscribed and receiving. Carries what it is actually watching, so the
-    /// status strip can state coverage rather than imply it.
-    Watching {
-        selectors: Vec<String>,
-    },
+    /// The event pump is running; coverage comes from [`BusTick::watched`].
+    Pumping,
     /// The stream ended; `Subscription::run_with` will restart it.
     Ended,
     Failed(String),
@@ -51,7 +69,7 @@ pub enum LinkState {
 ///
 /// The monitor ticks at 250 ms, so this is ~4 messages/second **regardless of
 /// sample rate** — the single most important perf property of the bridge. A
-/// per-sample `Message` would melt the Elm loop on any real bus.
+/// per-sample `Message` would melt the Elm loop.
 #[derive(Debug)]
 pub struct BusTick {
     /// Pulled from the monitor's `ArcSwap` on the tick — never accumulated
@@ -68,10 +86,15 @@ pub struct BusTick {
     /// Liveliness transitions: `(token key, is_up)`.
     pub nodes: Vec<(String, bool)>,
     /// Distinct keys the monitor is *currently* tracking. Not cumulative:
-    /// the table is bounded, and `keys_evicted` is what it cost.
+    /// the table is bounded, and the counters below say what that costs.
     pub keys: usize,
     /// Keys retired to stay within the table's bound (RFC 09 §5.1 O6).
     pub keys_evicted: u64,
+    /// Keys retired because their watch was released — "stopped looking, by
+    /// request", the third O6 category.
+    pub keys_unwatched: u64,
+    /// The active watch selectors — the coverage statement (O5).
+    pub watched: Vec<String>,
     /// `(samples, bytes, rate_hz)` across everything watched.
     pub totals: (u64, u64, f64),
 }

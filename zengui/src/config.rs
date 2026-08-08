@@ -73,6 +73,14 @@ pub struct Cli {
     #[arg(long, value_name = "KEYEXPR")]
     pub selector: Vec<String>,
 
+    /// Start observing the scope immediately (the pre-lazy behavior).
+    ///
+    /// Without it zengui starts from the declared skeleton with zero
+    /// data-plane subscriptions; observation is opt-in per subtree or via
+    /// the "observe scope" toggle (issue #85).
+    #[arg(long)]
+    pub eager: bool,
+
     /// How many echo lines to retain.
     #[arg(long, default_value_t = 2000)]
     pub echo_lines: usize,
@@ -98,6 +106,7 @@ pub struct Settings {
     pub timeout_secs: u64,
     pub scope: ScopePreset,
     pub selectors: Vec<String>,
+    pub eager: bool,
     pub echo_lines: usize,
     pub max_keys: usize,
 }
@@ -157,6 +166,7 @@ impl Cli {
             timeout_secs: self.timeout.or(context.timeout).unwrap_or(5),
             scope,
             selectors: self.selector,
+            eager: self.eager,
             echo_lines: self.echo_lines,
             max_keys: self.max_keys,
         })
@@ -227,6 +237,7 @@ mod tests {
         assert_eq!(s.timeout(), Duration::from_secs(5));
         assert!(!s.scouting, "scouting is opt-in (RFC 09 §0.1)");
         assert_eq!(s.scope, ScopePreset::Everything);
+        assert!(!s.eager, "lazy is the default (issue #85)");
         assert_eq!(s.echo_lines, 2000);
         assert_eq!(s.max_keys, zenkey_fleet::stats::DEFAULT_MAX_KEYS);
     }

@@ -256,6 +256,122 @@ pub fn state_coverage(
     rows
 }
 
+/// What kind of declared entity an admin reply describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityKind {
+    Subscriber,
+    Publisher,
+    Queryable,
+    Querier,
+    Token,
+}
+
+impl EntityKind {
+    fn from_chunk(chunk: &str) -> Option<EntityKind> {
+        Some(match chunk {
+            "subscriber" => EntityKind::Subscriber,
+            "publisher" => EntityKind::Publisher,
+            "queryable" => EntityKind::Queryable,
+            "querier" => EntityKind::Querier,
+            "token" => EntityKind::Token,
+            _ => return None,
+        })
+    }
+
+    fn chunk(self) -> &'static str {
+        match self {
+            EntityKind::Subscriber => "subscriber",
+            EntityKind::Publisher => "publisher",
+            EntityKind::Queryable => "queryable",
+            EntityKind::Querier => "querier",
+            EntityKind::Token => "token",
+        }
+    }
+}
+
+/// One declared entity, as the admin space reports it: the reply key is
+/// `@/<zid>/<whatami>/<kind>/<declared-keyexpr...>`, so the keyexpr every
+/// session declared is readable **without subscribing to any data** — the
+/// payload-free discovery leg of issue #84.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DeclaredEntity {
+    pub kind: EntityKind,
+    /// The declared key expression, verbatim.
+    pub keyexpr: String,
+    /// The node whose admin space answered.
+    pub node_zid: String,
+    /// The raw payload (`Sources { routers, peers, clients }`-shaped in
+    /// zenoh 1.9) — kept as-is; layouts vary by version.
+    pub sources: serde_json::Value,
+}
+
+/// The declared-entity sweep result.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct DeclaredEntities {
+    pub entities: Vec<DeclaredEntity>,
+}
+
+/// Parse one admin entry (`@/<zid>/<whatami>/<kind>/<keyexpr...>`) into a
+/// declared entity. Pure; unknown shapes yield `None` (the admin space is
+/// version-dependent surface — tolerate, never fail).
+pub fn declared_from_admin_entry(key: &str, value: &serde_json::Value) -> Option<DeclaredEntity> {
+    let mut chunks = key.split('/');
+    if chunks.next()? != "@" {
+        return None;
+    }
+    let zid = chunks.next()?;
+    let _whatami = chunks.next()?;
+    let kind = EntityKind::from_chunk(chunks.next()?)?;
+    let keyexpr: Vec<&str> = chunks.collect();
+    if keyexpr.is_empty() {
+        return None;
+    }
+    Some(DeclaredEntity {
+        kind,
+        keyexpr: keyexpr.join("/"),
+        node_zid: zid.to_string(),
+        sources: value.clone(),
+    })
+}
+
+/// Enumerate declared subscribers/publishers/queryables/tokens from every
+/// reachable admin space.
+///
+/// `Ok(None)` when **nothing answered at all**: zenoh's `adminspace.enabled`
+/// defaults to *false* (routers ship with it on; a pure peer mesh has none),
+/// so an empty sweep means "not available", never "nothing declared" —
+/// callers MUST render the difference (RFC 09 §5.1 O4). A *publisher* is
+/// visible only if it was declared (P7's rule for the data planes); a bare
+/// `session.put()` never appears here.
+pub async fn declared_entities(
+    session: &Session,
+    timeout: Duration,
+) -> Result<Option<DeclaredEntities>> {
+    let mut entities = Vec::new();
+    let mut any_reply = false;
+    for kind in [
+        EntityKind::Subscriber,
+        EntityKind::Publisher,
+        EntityKind::Queryable,
+        EntityKind::Querier,
+        EntityKind::Token,
+    ] {
+        let selector = format!("@/*/*/{}/**", kind.chunk());
+        let entries = admin_get(session, &selector, timeout).await?;
+        any_reply |= !entries.is_empty();
+        entities.extend(
+            entries
+                .iter()
+                .filter_map(|e| declared_from_admin_entry(&e.key, &e.value)),
+        );
+    }
+    if !any_reply {
+        return Ok(None);
+    }
+    Ok(Some(DeclaredEntities { entities }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +475,26 @@ mod tests {
             rows.iter()
                 .all(|r| matches!(r.coverage, Coverage::Covered(_)))
         );
+    }
+
+    /// The zenoh 1.9 admin key shape (`@/<zid>/<whatami>/<kind>/<keyexpr...>`)
+    /// parses into a declared entity; foreign shapes are tolerated as None.
+    #[test]
+    fn declared_entities_parse_the_admin_key_shape() {
+        let v = serde_json::json!({"routers": [], "peers": ["p1"], "clients": []});
+        let e = declared_from_admin_entry("@/a1b2c3/router/subscriber/zensight/v1/*/state/**", &v)
+            .unwrap();
+        assert_eq!(e.kind, EntityKind::Subscriber);
+        assert_eq!(e.keyexpr, "zensight/v1/*/state/**");
+        assert_eq!(e.node_zid, "a1b2c3");
+
+        let e = declared_from_admin_entry("@/z/peer/publisher/v1/h-a/telemetry/x/m", &v).unwrap();
+        assert_eq!(e.kind, EntityKind::Publisher);
+        assert_eq!(e.keyexpr, "v1/h-a/telemetry/x/m");
+
+        // Tolerated, never fatal:
+        assert!(declared_from_admin_entry("@/z/router/config/x", &v).is_none());
+        assert!(declared_from_admin_entry("@/z/router/subscriber", &v).is_none());
+        assert!(declared_from_admin_entry("not/admin/at/all", &v).is_none());
     }
 }

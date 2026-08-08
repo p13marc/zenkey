@@ -234,3 +234,158 @@ pub async fn state_snapshot(
     }
     Ok(out)
 }
+
+/// Which rung of the fetch ladder produced a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValueSource {
+    /// A GET on the concrete key answered — a router storage (or any plain
+    /// queryable standing at that key).
+    Storage,
+    /// The publisher's AdvancedPublisher cache answered on `<key>/@adv/**`.
+    Cache,
+    /// A brief bounded subscription caught a live sample.
+    Window,
+}
+
+/// One fetched value with its provenance.
+#[derive(Debug, Clone)]
+pub struct FetchedValue {
+    /// The concrete key the value arrived on.
+    pub key: String,
+    pub payload: zenoh::bytes::ZBytes,
+    pub encoding: String,
+    pub timestamp: Option<zenoh::time::Timestamp>,
+    pub source: ValueSource,
+}
+
+/// The outcome: a value, or an attributed nothing.
+#[derive(Debug, Clone)]
+pub enum FetchOutcome {
+    Value(FetchedValue),
+    /// Every rung was tried and none answered — a non-verdict, stated with
+    /// exactly what was asked (RFC 05 §3.1: silence never becomes a claim
+    /// that no value exists).
+    None {
+        attempted: [&'static str; 3],
+    },
+}
+
+/// Fetch ladder bounds.
+#[derive(Debug, Clone, Copy)]
+pub struct FetchSpec {
+    /// Per-GET timeout (two GETs happen: concrete key, then `@adv` cache).
+    pub get_timeout: Duration,
+    /// The final subscribe-window rung's duration.
+    pub window: Duration,
+}
+
+impl Default for FetchSpec {
+    fn default() -> Self {
+        FetchSpec {
+            get_timeout: Duration::from_secs(2),
+            window: Duration::from_millis(1500),
+        }
+    }
+}
+
+/// Fetch one concrete key's current value **on demand** — the value half of
+/// the lazy-observation contract (issue #84): a selection retrieves one
+/// value; nothing is prefetched, nothing stays subscribed.
+///
+/// The ladder, each rung bounded:
+/// 1. GET the concrete key (storages answer; RFC 04 §3.2's "a plain GET does
+///    not reach publisher caches" is exactly why rung 2 exists);
+/// 2. GET `<key>/@adv/**?_max=1` — zenoh-ext's AdvancedPublisher cache
+///    declares its queryable there and replies with the cached sample on its
+///    own concrete key (`@adv` is verbatim, so no data selector ever collides
+///    with it — RFC 03 §4 D2 working in our favor);
+/// 3. a brief callback subscription on the key, first sample wins.
+///
+/// Several answers on a rung (multiple storages) resolve by latest HLC
+/// timestamp; unstamped answers lose to stamped ones (RFC 04 §1.2's LWW).
+pub async fn fetch_value(session: &Session, key: &str, spec: FetchSpec) -> Result<FetchOutcome> {
+    // Rung 1 + 2: bounded GETs.
+    for (selector, source) in [
+        (key.to_string(), ValueSource::Storage),
+        (format!("{key}/@adv/**?_max=1"), ValueSource::Cache),
+    ] {
+        if let Some(v) = get_latest(session, &selector, source, spec.get_timeout).await? {
+            return Ok(FetchOutcome::Value(v));
+        }
+    }
+
+    // Rung 3: a window. The subscriber is explicitly undeclared afterwards —
+    // the window closes, provably.
+    let (tx, rx) = tokio::sync::oneshot::channel::<FetchedValue>();
+    let tx = std::sync::Mutex::new(Some(tx));
+    let subscriber = session
+        .declare_subscriber(key)
+        .callback(move |sample| {
+            if let Some(tx) = tx.lock().expect("fetch window lock").take() {
+                let _ = tx.send(FetchedValue {
+                    key: sample.key_expr().as_str().to_string(),
+                    payload: sample.payload().clone(),
+                    encoding: sample.encoding().to_string(),
+                    timestamp: sample.timestamp().copied(),
+                    source: ValueSource::Window,
+                });
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("window subscribe {key}: {e}"))?;
+    let caught = tokio::time::timeout(spec.window, rx).await;
+    subscriber
+        .undeclare()
+        .await
+        .map_err(|e| anyhow::anyhow!("window undeclare {key}: {e}"))?;
+    if let Ok(Ok(v)) = caught {
+        return Ok(FetchOutcome::Value(v));
+    }
+
+    Ok(FetchOutcome::None {
+        attempted: ["get", "@adv cache", "subscribe window"],
+    })
+}
+
+async fn get_latest(
+    session: &Session,
+    selector: &str,
+    source: ValueSource,
+    timeout: Duration,
+) -> Result<Option<FetchedValue>> {
+    let replies = session
+        .get(selector)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        // The @adv cache replies with the cached sample on the sample's OWN
+        // key — outside the `<key>/@adv/**` selector — and zenoh drops such
+        // replies unless the caller opts in. This is the querying-subscriber
+        // pattern; harmless for the storage rung, whose replies sit inside
+        // the selector anyway.
+        .accept_replies(zenoh::query::ReplyKeyExpr::Any)
+        .timeout(timeout)
+        .await
+        .map_err(|e| anyhow::anyhow!("get {selector}: {e}"))?;
+    let mut best: Option<FetchedValue> = None;
+    while let Ok(reply) = replies.recv_async().await {
+        let Ok(sample) = reply.result() else { continue };
+        let candidate = FetchedValue {
+            key: sample.key_expr().as_str().to_string(),
+            payload: sample.payload().clone(),
+            encoding: sample.encoding().to_string(),
+            timestamp: sample.timestamp().copied(),
+            source,
+        };
+        best = Some(match best.take() {
+            None => candidate,
+            // Latest HLC wins; stamped beats unstamped (RFC 04 §1.2 LWW).
+            Some(cur) => match (cur.timestamp, candidate.timestamp) {
+                (Some(a), Some(b)) if b > a => candidate,
+                (None, Some(_)) => candidate,
+                _ => cur,
+            },
+        });
+    }
+    Ok(best)
+}

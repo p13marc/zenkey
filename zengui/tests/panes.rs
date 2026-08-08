@@ -9,7 +9,7 @@
 //! `iced_test` selects widgets by the text they contain, so `find("x")` is
 //! literally "is this on screen".
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -24,13 +24,16 @@ const REGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used"
 const UNREGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/no/such/thing";
 const FOREIGN: &str = "demo/example/foo";
 
-fn snapshot(keys: &[&str]) -> KeyTreeSnapshot {
+fn snapshot(keys: &[&str]) -> zenkey_fleet::skeleton::MergedNode {
     let mut stats = StatsTable::new();
     let now = Instant::now();
     for k in keys {
         stats.record(k, 8, None, now);
     }
-    KeyTreeSnapshot::build(&stats)
+    let observed = KeyTreeSnapshot::build(&stats);
+    // Pane tests watch everything: rows read Observed, as the bootstrap did.
+    let skel = zenkey_fleet::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
+    zenkey_fleet::skeleton::merge(&skel, &observed, &["**".to_string()])
 }
 
 fn slices() -> SliceSet {
@@ -80,7 +83,8 @@ fn render(keys: &[&str], with_slices: bool) -> (tree::Flattened, FactsIndex) {
 fn the_tree_renders_the_registration_state() {
     let keys = [REGISTERED, UNREGISTERED, FOREIGN];
     let (flat, facts) = render(&keys, true);
-    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None));
+    let watches = BTreeSet::new();
+    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None, &watches));
 
     assert!(
         ui.find("registered").is_ok(),
@@ -107,7 +111,8 @@ fn the_tree_renders_the_registration_state() {
 fn an_unresolved_tree_claims_neither_way() {
     let keys = [REGISTERED];
     let (flat, facts) = render(&keys, false);
-    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None));
+    let watches = BTreeSet::new();
+    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None, &watches));
 
     assert!(
         ui.find("unregistered").is_err(),
@@ -124,7 +129,8 @@ fn an_unresolved_tree_claims_neither_way() {
 fn foreign_keys_render_without_convention_labels() {
     let keys = [FOREIGN];
     let (flat, facts) = render(&keys, true);
-    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None));
+    let watches = BTreeSet::new();
+    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None, &watches));
 
     for role in ["version", "origin", "class", "producer", "subject"] {
         assert!(
@@ -145,7 +151,8 @@ fn the_empty_tree_explains_itself() {
         truncated: 0,
     };
     let facts = FactsIndex::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None));
+    let watches = BTreeSet::new();
+    let mut ui = simulator::<Message, _, _>(tree::pane(&flat, &facts, None, &watches));
 
     assert!(ui.find("Nothing observed yet").is_ok());
     // Selectors match a widget's whole text, so this is the full disclaimer.

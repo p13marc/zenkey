@@ -203,7 +203,14 @@ async fn the_tree_carries_foreign_traffic() {
     let expanded: BTreeSet<String> = ["demo".to_string(), "demo/example".to_string()]
         .into_iter()
         .collect();
-    let flat = tree::flatten(&snapshot, "", &expanded, 500);
+    let skel = zenkey_fleet::Skeleton::build(
+        "",
+        &zenkey_fleet::SliceSet::default(),
+        &std::collections::BTreeMap::new(),
+        None,
+    );
+    let merged = zenkey_fleet::skeleton::merge(&skel, &snapshot, &["**".to_string()]);
+    let flat = tree::flatten(&merged, "", &expanded, 500);
 
     let demo = flat
         .rows

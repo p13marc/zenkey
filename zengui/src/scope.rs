@@ -140,6 +140,32 @@ pub fn liveliness_any_base() -> Vec<String> {
     liveliness_selectors(ANY_BASE)
 }
 
+/// The watch selector for one tree subtree: symbolic skeleton chunks widen
+/// (`{var}` → `*`, `{rest...}` → `**`), and the subtree is covered with a
+/// trailing `/**`.
+///
+/// Verbatim chunks in the path are spelled literally, so watching an
+/// `@catalog` subtree works; verbatim planes *below* the subtree stay
+/// excluded by key algebra (RFC 03 §4 D2) — which the coverage label states
+/// rather than hides.
+pub fn subtree_selector(display_path: &str) -> String {
+    let mut chunks: Vec<String> = Vec::new();
+    for chunk in display_path.split('/') {
+        if chunk.starts_with('{') && chunk.ends_with("...}") {
+            chunks.push("**".to_string());
+            break; // a rest consumes the remainder
+        } else if chunk.starts_with('{') && chunk.ends_with('}') {
+            chunks.push("*".to_string());
+        } else {
+            chunks.push(chunk.to_string());
+        }
+    }
+    if chunks.last().map(|c| c.as_str()) != Some("**") {
+        chunks.push("**".to_string());
+    }
+    chunks.join("/")
+}
+
 /// Validate a user-supplied key expression.
 pub fn validate_selector(sel: &str) -> Result<()> {
     if sel.trim().is_empty() {
@@ -289,5 +315,31 @@ mod tests {
         // RFC 03 §2 forbids `$*` in selectors, not only in published keys.
         let err = validate_selector("demo/$*/x").unwrap_err().to_string();
         assert!(err.contains("RFC 03 §2"), "{err}");
+    }
+
+    /// The subtree watch selector widens symbolic chunks and covers the tail.
+    #[test]
+    fn subtree_selectors_widen_symbols() {
+        assert_eq!(
+            subtree_selector("v1/h-abc/telemetry"),
+            "v1/h-abc/telemetry/**"
+        );
+        assert_eq!(
+            subtree_selector("v1/{origin}/telemetry/sysinfo"),
+            "v1/*/telemetry/sysinfo/**"
+        );
+        assert_eq!(
+            subtree_selector("v1/h-abc/telemetry/sysinfo/disk/{mount}"),
+            "v1/h-abc/telemetry/sysinfo/disk/*/**"
+        );
+        assert_eq!(
+            subtree_selector("v1/h-abc/state/x/{path...}"),
+            "v1/h-abc/state/x/**"
+        );
+        // A verbatim origin is spelled literally.
+        assert_eq!(
+            subtree_selector("v1/@catalog/state"),
+            "v1/@catalog/state/**"
+        );
     }
 }

@@ -206,12 +206,19 @@ enum TopicCmd {
         producer: Option<String>,
         /// kcat-style format string: %k wire key, %K base-relative, %o origin,
         /// %c class, %p producer, %s subject, %t type, %v value, %e encoding,
-        /// %l payload bytes, %n counter, %T timestamp, %% literal percent.
+        /// %l payload bytes, %n counter, %T timestamp, %{a.b.c} a decoded
+        /// payload field by dot-path, %% literal percent.
         #[arg(long)]
         fmt: Option<String>,
         /// Print raw payload bytes as hex instead of decoding.
         #[arg(long)]
         raw: bool,
+        /// Decode the type tag but show the payload as hex.
+        #[arg(long)]
+        hex: bool,
+        /// Append the live aggregate sample rate to each line.
+        #[arg(long)]
+        rate: bool,
         /// Skip schema decode (structural rendering only).
         #[arg(long)]
         no_decode: bool,
@@ -517,6 +524,8 @@ async fn main() -> Result<()> {
             producer,
             fmt,
             raw,
+            hex,
+            rate,
             no_decode,
             count,
             bus,
@@ -528,6 +537,8 @@ async fn main() -> Result<()> {
                 producer.as_deref(),
                 fmt.as_deref(),
                 raw,
+                hex,
+                rate,
                 no_decode,
                 count,
                 &bus,
@@ -817,6 +828,37 @@ fn format_sample(
             continue;
         }
         match chars.next() {
+            Some('{') => {
+                // %{a.b.c}: a decoded payload field by dot-path. Unresolvable
+                // paths render as an empty field, honestly (the line shape
+                // stays stable for cut/awk).
+                let mut path = String::new();
+                for c in chars.by_ref() {
+                    if c == '}' {
+                        break;
+                    }
+                    path.push(c);
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(value) {
+                    let mut cur = &v;
+                    let mut ok = true;
+                    for seg in path.split('.') {
+                        match cur.get(seg) {
+                            Some(next) => cur = next,
+                            None => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if ok {
+                        match cur {
+                            serde_json::Value::String(s) => out.push_str(s),
+                            other => out.push_str(&other.to_string()),
+                        }
+                    }
+                }
+            }
             Some('k') => out.push_str(wire_key),
             Some('K') => {
                 out.push_str(zenkey::grammar::strip_base(base, wire_key).unwrap_or(wire_key))
@@ -880,6 +922,8 @@ async fn cmd_echo(
     producer: Option<&str>,
     fmt: Option<&str>,
     raw: bool,
+    hex_payload: bool,
+    rate: bool,
     no_decode: bool,
     count: usize,
     args: &BusArgs,
@@ -901,25 +945,71 @@ async fn cmd_echo(
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
 
     let session = args.session().await?;
-    let subscriber = session
-        .declare_subscriber(&selector)
-        .await
-        .map_err(|e| anyhow!("{e}"))?;
+    // Through the Monitor (issue #48): the same bounded broadcast the GUI
+    // uses, so a bus that outruns this terminal surfaces as an explicit
+    // dropped count instead of invisible loss (RFC 09 §5.1 O6). This is also
+    // the §6.3 promise kept: the CLI validates the engine's path.
+    let monitor = zenkey_fleet::Monitor::start(
+        &session,
+        zenkey_fleet::MonitorSpec {
+            selectors: vec![selector.clone()],
+            ..Default::default()
+        },
+    )
+    .await?;
+    let mut events = monitor.events();
 
     let ndjson = matches!(args.format.resolved(), output::Format::Ndjson);
     if !ndjson {
         eprintln!("echoing {selector} (ctrl-c to stop)");
     }
     let mut seen = 0usize;
-    while let Ok(sample) = subscriber.recv_async().await {
+    let mut dropped_total = 0u64;
+    while let Some(item) = events.recv().await {
+        let sample = match item {
+            zenkey_fleet::StreamItem::Dropped(n) => {
+                dropped_total += n;
+                if ndjson {
+                    println!("{}", serde_json::json!({ "dropped": n }));
+                } else {
+                    eprintln!("-- dropped {n} sample(s): the bus outran us --");
+                }
+                continue;
+            }
+            zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) => s,
+            zenkey_fleet::StreamItem::Event(_) => continue,
+        };
         seen += 1;
-        let key = sample.key_expr().as_str().to_string();
-        let bytes = sample.payload().to_bytes();
-        let encoding = sample.encoding().to_string();
-        let timestamp = sample.timestamp().map(|t| t.to_string());
+        let key = sample.key.clone();
+        let bytes = sample.payload.to_bytes();
+        let encoding = sample.encoding.clone();
+        let timestamp = sample.timestamp.map(|t| t.to_string());
+        let rate_suffix = if rate {
+            let (_, _, hz) = monitor.core().with_stats(|s| s.totals());
+            format!("  @ {hz:.1}/s")
+        } else {
+            String::new()
+        };
 
         if raw {
-            println!("{key}\n  {}", hex(&bytes));
+            println!("{key}\n  {}{rate_suffix}", hex(&bytes));
+        } else if hex_payload {
+            // --hex: the decode pipeline still names the type, the payload
+            // shows as bytes.
+            let (type_name, _) = zenkey_fleet::decode::decode_sample(
+                &store,
+                &session,
+                &slices,
+                &base,
+                &key,
+                Some(&encoding),
+                &bytes,
+            )
+            .await;
+            let tag = type_name
+                .map(|t| format!("<{t}>"))
+                .unwrap_or_else(|| "<unregistered>".to_string());
+            println!("{key}\n  {tag} {}{rate_suffix}", hex(&bytes));
         } else {
             let (type_name, rendering) = if no_decode {
                 (
@@ -985,7 +1075,7 @@ async fn cmd_echo(
                     (Some(t), false) => format!("<{t}?>"),
                     (None, _) => "<unregistered>".to_string(),
                 };
-                println!("{key}\n  {tag} {value}");
+                println!("{key}\n  {tag} {value}{rate_suffix}");
                 for note in notes {
                     eprintln!("  note: {note}");
                 }
@@ -995,6 +1085,16 @@ async fn cmd_echo(
         if count > 0 && seen >= count {
             break;
         }
+    }
+    if !ndjson {
+        eprintln!(
+            "{seen} sample(s) shown, {dropped_total} dropped{}",
+            if dropped_total > 0 {
+                " (the terminal could not keep up; the counts are the honest record)"
+            } else {
+                ""
+            }
+        );
     }
     Ok(())
 }
@@ -1049,6 +1149,14 @@ async fn cmd_rate(
                     println!();
                 }
             }
+        }
+        if stats.evicted() > 0 {
+            // The table is bounded; a shrunken key set must say so (O6).
+            eprintln!(
+                "note: {} key(s) retired to stay within the {}-key bound — totals cover the retained set",
+                stats.evicted(),
+                stats.max_keys()
+            );
         }
         if bandwidth {
             println!(
@@ -1477,6 +1585,22 @@ fn schema_drift(described: &[(String, zenkey::schema::SchemaSet)]) -> Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_sample_extracts_payload_fields() {
+        let line = format_sample(
+            "%{iface.name} up=%{iface.up} missing=[%{no.such}]",
+            1,
+            "k",
+            "",
+            None,
+            "application/json",
+            2,
+            None,
+            r#"{"iface":{"name":"eth0","up":true}}"#,
+        );
+        assert_eq!(line, "eth0 up=true missing=[]");
+    }
 
     #[test]
     fn format_sample_expands_fields() {

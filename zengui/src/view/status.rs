@@ -43,6 +43,17 @@ impl SliceSource {
 pub struct Status<'a> {
     pub link: &'a LinkState,
     pub base_label: &'a str,
+    /// Active watch selectors (coverage, O5).
+    pub watched: &'a [String],
+    /// What fed the skeleton, when one was built.
+    pub skeleton: Option<zenkey_fleet::skeleton::SkeletonCoverage>,
+    /// Keys retired because their watch was released (O6's third counter).
+    pub keys_unwatched: u64,
+    /// The last on-demand value fetch, for the selection.
+    pub fetched: Option<&'a (
+        String,
+        Result<std::sync::Arc<zenkey_fleet::FetchOutcome>, String>,
+    )>,
     /// The scope's short name. The long explanation lives in the toolbar; the
     /// strip must stay narrow enough to fit, or its right-hand end — which is
     /// where the registry state and the reachability warning live — clips off
@@ -89,8 +100,13 @@ pub fn keys_text(keys: usize, evicted: u64) -> String {
 pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     let (link_text, link_is_bad) = match s.link {
         LinkState::Connecting => ("connecting…".to_string(), false),
-        LinkState::Watching { selectors } => (
-            format!("watching {}", kit::plural(selectors.len(), "selector")),
+        LinkState::Pumping if s.watched.is_empty() => (
+            // The lazy resting state, stated as a posture, not an absence.
+            "skeleton only — nothing observed by choice".to_string(),
+            false,
+        ),
+        LinkState::Pumping => (
+            format!("observing {}", kit::plural(s.watched.len(), "watch")),
             false,
         ),
         LinkState::Ended => ("link ended — retrying".to_string(), true),
@@ -120,9 +136,48 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             human_rate(rate)
         )),
         kit::muted(s.slices.label()),
+        kit::muted(match s.skeleton {
+            None => "skeleton: not built".to_string(),
+            Some(c) => format!(
+                "skeleton: {} · {} · admin {}",
+                kit::plural(c.slices, "slice"),
+                kit::plural(c.roster_origins, "origin"),
+                match c.admin_entities {
+                    // Not asked / not available is not a zero (O4).
+                    None => "n/a".to_string(),
+                    Some(n) => n.to_string(),
+                }
+            ),
+        }),
     ]
     .spacing(space::MD)
     .align_y(iced::Alignment::Center);
+
+    if s.keys_unwatched > 0 {
+        r = r.push(kit::muted(format!(
+            "{} keys retired by unwatch",
+            s.keys_unwatched
+        )));
+    }
+    if let Some((key, outcome)) = s.fetched {
+        let label = match outcome {
+            Ok(out) => match out.as_ref() {
+                zenkey_fleet::FetchOutcome::Value(v) => {
+                    format!(
+                        "fetched {key}: {} bytes via {:?}",
+                        v.payload.len(),
+                        v.source
+                    )
+                }
+                zenkey_fleet::FetchOutcome::None { attempted } => format!(
+                    "no value for {key} — asked {} (not a verdict)",
+                    attempted.join(", ")
+                ),
+            },
+            Err(e) => format!("fetch {key} failed: {e}"),
+        };
+        r = r.push(kit::muted(label));
+    }
 
     // The single most misleading state a bus explorer can be in: a healthy
     // window, an empty tree, and no way to tell that the session never reached
