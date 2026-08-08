@@ -164,45 +164,81 @@ async fn a_transition_in_the_seed_window_lands_exactly_once() {
         .matching_listener()
         .await
         .expect("matching listener");
-    // A storage sim that holds the query open (replying nothing) — it keeps
-    // the seed window from closing before the in-window put below.
+    // A storage sim that holds the query open (replying nothing) and says
+    // when it arrived — the put below waits for both signals, so the seed
+    // window is *provably* open when the transition is published, even on a
+    // loaded machine.
+    let (got_query_tx, mut got_query) = tokio::sync::mpsc::unbounded_channel::<()>();
     let _slow_storage = a
         .declare_queryable("gaptest/state/**")
-        .callback(|query| {
+        .callback(move |query| {
+            let _ = got_query_tx.send(());
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(600)).await;
+                tokio::time::sleep(Duration::from_millis(2000)).await;
                 drop(query);
             });
         })
         .await
         .expect("queryable");
+    // A ready-probe declared AFTER the storage sim: same-session declarations
+    // propagate in order, so once b can query this, b can query the storage —
+    // the seed GET below provably reaches it, loaded machine or not.
+    let _ready = a
+        .declare_queryable("gaptest/ready")
+        .callback(|query| {
+            let q = query.clone();
+            tokio::spawn(async move {
+                q.reply("gaptest/ready", "ok").await.ok();
+            });
+        })
+        .await
+        .expect("ready queryable");
+    let probe_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let replies = b
+            .get("gaptest/ready")
+            .timeout(Duration::from_millis(300))
+            .await
+            .expect("probe get");
+        if replies.recv_async().await.is_ok() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < probe_deadline,
+            "routing never converged"
+        );
+    }
 
     let mut sub = seed_subscribe(
         &b,
         "gaptest/state/**",
         SeedPolicy {
             history: false, // plain publisher; the subscriber-first order is the point
-            timeout: Duration::from_millis(800),
+            timeout: Duration::from_millis(3000),
             ..SeedPolicy::default()
         },
     )
     .await
     .expect("seed subscribe");
 
-    // Wait for the subscriber's interest to reach the publishing peer (a
-    // network-propagation concern, not part of the seed contract), then
-    // publish inside the seed window.
+    // Wait until (1) the subscriber's interest reached the publishing peer
+    // (a network-propagation concern, not part of the seed contract) and
+    // (2) the storage GET is in flight — then publish inside the window.
     let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");
     assert!(ev.matching(), "the seed subscriber is a real subscriber");
+    tokio::time::timeout(Duration::from_secs(5), got_query.recv())
+        .await
+        .expect("the storage GET reaches the queryable within 5s")
+        .expect("channel alive");
     publisher.put("flank").await.expect("put");
 
     let mut before_boundary = 0;
     let mut after_boundary = 0;
     let mut done = false;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(8);
     loop {
         match tokio::time::timeout_at(deadline, sub.recv()).await {
             Ok(Some(SeedItem::Sample(v))) => {
@@ -216,6 +252,9 @@ async fn a_transition_in_the_seed_window_lands_exactly_once() {
             Ok(Some(SeedItem::SeedComplete(c))) => {
                 assert_eq!(c.history_replies, None, "history was opted out");
                 done = true;
+                // Short drain: anything late (a duplicate, a post-boundary
+                // copy) has this long to show itself.
+                deadline = tokio::time::Instant::now() + Duration::from_millis(700);
             }
             Ok(None) | Err(_) => break,
         }

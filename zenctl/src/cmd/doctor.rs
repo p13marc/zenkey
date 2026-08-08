@@ -2,9 +2,9 @@
 //! check the fleet against the RFC contracts it claims to follow.
 //!
 //! Since issue #46 every finding is a typed
-//! [`DoctorFinding`](crate::report::DoctorFinding) — severity, stable check
+//! [`DoctorFinding`] — severity, stable check
 //! id, subject, evidence, RFC citation — collected into one
-//! [`DoctorReport`](crate::report::DoctorReport) and rendered as table or
+//! [`DoctorReport`] and rendered as table or
 //! JSON. The machine-readable shape is the one the GUI doctor panel reuses.
 
 use anyhow::{Result, anyhow};
