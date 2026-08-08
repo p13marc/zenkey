@@ -64,6 +64,7 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
         let mut events = monitor.events();
         let mut samples = Vec::with_capacity(BATCH_CAP);
         let mut nodes = Vec::new();
+        let mut seeded = Vec::new();
         let (mut lagged, mut coalesced) = (0u64, 0u64);
         let mut watched: Vec<String> =
             monitor.watched().await.into_iter().map(|(_, s)| s).collect();
@@ -84,6 +85,9 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                 StreamItem::Event(FleetEvent::WatchChanged) => {
                     watched = monitor.watched().await.into_iter().map(|(_, s)| s).collect();
                 }
+                StreamItem::Event(FleetEvent::WatchSeeded { id, coverage }) => {
+                    seeded.push((id, coverage));
+                }
                 StreamItem::Event(FleetEvent::StatsTick) => {
                     let (keys, totals, keys_evicted, keys_unwatched) =
                         monitor.core().with_stats(|s| {
@@ -100,6 +104,7 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         keys_evicted,
                         keys_unwatched,
                         watched: watched.clone(),
+                        seeded: std::mem::take(&mut seeded),
                         totals,
                     }));
                 }

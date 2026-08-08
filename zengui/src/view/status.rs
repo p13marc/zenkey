@@ -82,6 +82,13 @@ pub struct Status<'a> {
     pub keys_evicted: u64,
     pub totals: (u64, u64, f64),
     pub slices: &'a SliceSource,
+    /// Watches whose seed phase has not resolved yet (issue #92).
+    pub seeding: usize,
+    /// Seed phases that have completed since connect.
+    pub seeded_watches: usize,
+    /// Cumulative seed coverage since connect: (cache replies, storage
+    /// replies, superseded).
+    pub seed_totals: (usize, usize, u64),
     pub unreachable: bool,
 }
 
@@ -171,6 +178,21 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     .spacing(space::MD)
     .align_y(iced::Alignment::Center);
 
+    // The seed phase is stated while it runs and summarized once done —
+    // zeros are observations (O4): a seed that ran and found nothing says
+    // so, it does not vanish.
+    if s.seeding > 0 {
+        r = r.push(kit::muted(format!(
+            "seeding {}…",
+            kit::plural(s.seeding, "watch")
+        )));
+    } else if s.seeded_watches > 0 {
+        let (cache, storage, superseded) = s.seed_totals;
+        r = r.push(kit::muted(format!(
+            "seeded {}: {cache} cache · {storage} storage · {superseded} superseded",
+            kit::plural(s.seeded_watches, "watch")
+        )));
+    }
     if s.keys_unwatched > 0 {
         r = r.push(kit::muted(format!(
             "{} keys retired by unwatch",

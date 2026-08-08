@@ -60,6 +60,17 @@ pub struct Zengui {
     my_watch_paths: BTreeSet<String>,
     /// The scope-preset watch ids, when "observe scope" is on.
     scope_watches: Vec<WatchId>,
+    /// Watches whose seed phase has not resolved yet (issue #92):
+    /// id → the tree display path when the watch came from a tree toggle
+    /// (`None` for scope watches, whose selectors are not tree paths).
+    seeding: HashMap<WatchId, Option<String>>,
+    /// The same tree paths as a set, for the tree's "seeding…" badges.
+    seeding_paths: BTreeSet<String>,
+    /// Cumulative seed coverage since connect: (cache replies, storage
+    /// replies, superseded) — zeros are observations (O4).
+    seed_totals: (usize, usize, u64),
+    /// Seed phases completed since connect.
+    seeded_watches: usize,
     flat: view::tree::Flattened,
     /// How the tree groups its entries (issue #65).
     pivot: view::tree::Pivot,
@@ -110,6 +121,10 @@ impl Zengui {
             my_watches: HashMap::new(),
             my_watch_paths: BTreeSet::new(),
             scope_watches: Vec::new(),
+            seeding: HashMap::new(),
+            seeding_paths: BTreeSet::new(),
+            seed_totals: (0, 0, 0),
+            seeded_watches: 0,
             flat: view::tree::Flattened::empty(),
             pivot: view::tree::Pivot::default(),
             tree_search: String::new(),
@@ -250,7 +265,10 @@ impl Zengui {
             Message::WatchToggled(path) => self.toggle_watch(path),
             Message::WatchStarted(path, Ok(id)) => {
                 self.my_watch_paths.insert(path.clone());
+                self.seeding.insert(id, Some(path.clone()));
+                self.seeding_paths.insert(path.clone());
                 self.my_watches.insert(path, id);
+                self.reflatten();
                 Task::none()
             }
             Message::WatchStarted(path, Err(e)) => {
@@ -258,6 +276,9 @@ impl Zengui {
                 Task::none()
             }
             Message::ScopeWatchesStarted(ids) => {
+                for id in &ids {
+                    self.seeding.insert(*id, None);
+                }
                 self.scope_watches = ids;
                 Task::none()
             }
@@ -332,6 +353,10 @@ impl Zengui {
                 self.my_watches.clear();
                 self.my_watch_paths.clear();
                 self.scope_watches.clear();
+                self.seeding.clear();
+                self.seeding_paths.clear();
+                self.seed_totals = (0, 0, 0);
+                self.seeded_watches = 0;
                 self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
                     &self.settings.base,
                     self.settings.timeout(),
@@ -430,6 +455,10 @@ impl Zengui {
                 self.my_watches.clear();
                 self.my_watch_paths.clear();
                 self.scope_watches.clear();
+                self.seeding.clear();
+                self.seeding_paths.clear();
+                self.seed_totals = (0, 0, 0);
+                self.seeded_watches = 0;
                 self.start_monitor()
             }
         }
@@ -574,14 +603,29 @@ impl Zengui {
         };
         if let Some(id) = self.my_watches.remove(&path) {
             self.my_watch_paths.remove(&path);
+            // A watch released mid-seed never gets its boundary (the engine
+            // aborts the seed task) — forget it here too.
+            self.seeding.remove(&id);
+            self.seeding_paths.remove(&path);
             return Task::perform(
                 async move { monitor.unwatch(id).await.map_err(|e| e.to_string()) },
                 move |r| Message::WatchReleased(path.clone(), r),
             );
         }
+        // Watching seeds (issue #92): current state arrives before live
+        // traffic, through the same merge discipline as everything else.
         let selector = scope::subtree_selector(&path);
+        let policy = zenkey_fleet::SeedPolicy {
+            timeout: self.settings.timeout(),
+            ..Default::default()
+        };
         Task::perform(
-            async move { monitor.watch(&selector).await.map_err(|e| e.to_string()) },
+            async move {
+                monitor
+                    .watch_seeded(&selector, policy)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
             move |r| Message::WatchStarted(path.clone(), r),
         )
     }
@@ -594,11 +638,17 @@ impl Zengui {
             .settings
             .scope
             .selectors(&self.settings.base, &self.settings.selectors);
+        // Scope watches seed too (issue #92) — the eager preset is "observe
+        // this scope", and current state is part of observing it.
+        let policy = zenkey_fleet::SeedPolicy {
+            timeout: self.settings.timeout(),
+            ..Default::default()
+        };
         Task::perform(
             async move {
                 let mut ids = Vec::new();
                 for sel in &selectors {
-                    match monitor.watch(sel).await {
+                    match monitor.watch_seeded(sel, policy).await {
                         Ok(id) => ids.push(id),
                         Err(e) => tracing::warn!("scope watch {sel}: {e}"),
                     }
@@ -614,6 +664,9 @@ impl Zengui {
             return Task::none();
         };
         let ids = std::mem::take(&mut self.scope_watches);
+        for id in &ids {
+            self.seeding.remove(id);
+        }
         Task::perform(
             async move {
                 for id in ids {
@@ -634,6 +687,17 @@ impl Zengui {
         self.keys_unwatched = tick.keys_unwatched;
         self.totals = tick.totals;
         self.watched = tick.watched.clone();
+        for (id, coverage) in &tick.seeded {
+            if let Some(path) = self.seeding.remove(id) {
+                if let Some(path) = path {
+                    self.seeding_paths.remove(&path);
+                }
+                self.seed_totals.0 += coverage.history_replies.unwrap_or(0);
+                self.seed_totals.1 += coverage.storage_replies.unwrap_or(0);
+                self.seed_totals.2 += coverage.superseded;
+                self.seeded_watches += 1;
+            }
+        }
         self.echo.record_lag(tick.lagged + tick.coalesced);
         for sample in &tick.samples {
             self.ensure_facts(&sample.key);
@@ -761,6 +825,7 @@ impl Zengui {
                 &self.facts,
                 self.selected.as_deref(),
                 &self.my_watch_paths,
+                &self.seeding_paths,
                 self.pivot,
                 &self.tree_search,
                 self.tree_scroll.0,
@@ -801,6 +866,9 @@ impl Zengui {
                 fetched: self.fetched.as_ref(),
                 totals: self.totals,
                 slices: &self.slice_source,
+                seeding: self.seeding.len(),
+                seeded_watches: self.seeded_watches,
+                seed_totals: self.seed_totals,
                 unreachable: self.settings.is_unreachable(),
             }),
         ]

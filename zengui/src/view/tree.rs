@@ -83,6 +83,18 @@ pub enum Pivot {
 
 impl Pivot {
     pub const ALL: [Pivot; 4] = [Pivot::Chunks, Pivot::Origin, Pivot::Producer, Pivot::Class];
+
+    /// Short stable token: expansion paths are namespaced per pivot, so a
+    /// path opened under one pivot never accidentally opens a group that
+    /// happens to share its spelling under another.
+    pub fn key(self) -> &'static str {
+        match self {
+            Pivot::Chunks => "chunks",
+            Pivot::Origin => "origin",
+            Pivot::Producer => "producer",
+            Pivot::Class => "class",
+        }
+    }
 }
 
 impl std::fmt::Display for Pivot {
@@ -559,6 +571,9 @@ struct PNode {
     role: Option<Role>,
     /// Set when an entry terminates here: (real path, own stats, decl).
     leaf: Option<(String, Option<NodeStats>, Option<DeclRef>)>,
+    /// The real wire-path prefix this group stands for, when its constraint
+    /// set is exactly contiguous (issue #93) — what watch/select act on.
+    target: Option<String>,
     status: Option<NodeStatus>,
     agg_count: u64,
     agg_bytes: u64,
@@ -617,13 +632,23 @@ pub fn pivot_flatten(
     }
     let shown_keys = entries.len();
 
+    // Chunks before the origin position in a conforming real path (base +
+    // the `v1` chunk) — what group targets are reconstructed relative to.
+    let skip = if base.is_empty() {
+        1
+    } else {
+        base.split('/').count() + 1
+    };
     let mut root = PNode::default();
     for e in &entries {
-        let chunks = pivot_chunks(e, pivot);
+        let chunks = pivot_chunks(e, pivot, skip);
         let mut node = &mut root;
-        for (chunk, role) in &chunks {
+        for (chunk, role, target) in &chunks {
             node = node.children.entry(chunk.clone()).or_default();
             node.role = *role;
+            if node.target.is_none() {
+                node.target = target.clone();
+            }
             node.status = Some(fold_status(node.status, e.status));
             if let Some(s) = &e.stats {
                 node.agg_count += s.count;
@@ -637,7 +662,16 @@ pub fn pivot_flatten(
     }
 
     let mut rows = Vec::new();
-    flatten_pnode(&root, expanded, filtered, now, String::new(), 0, &mut rows);
+    flatten_pnode(
+        &root,
+        expanded,
+        filtered,
+        now,
+        pivot.key(),
+        String::new(),
+        0,
+        &mut rows,
+    );
     let truncated = rows.len().saturating_sub(max_rows);
     rows.truncate(max_rows);
     Flattened {
@@ -649,17 +683,42 @@ pub fn pivot_flatten(
     }
 }
 
-fn pivot_chunks(e: &PivotEntry, pivot: Pivot) -> Vec<(String, Option<Role>)> {
-    let mut out: Vec<(String, Option<Role>)> = Vec::new();
+/// The re-keyed chunk list for one entry: `(display chunk, role, target)`.
+///
+/// The target is the **real wire-path prefix** the pivot node stands for,
+/// present exactly when the node's constraint set is contiguous on the wire
+/// (issue #93): coordinates accumulated so far must form a prefix of
+/// `origin / class / producer`, and subject chunks require every coordinate
+/// the entry has. Groups that genuinely span a wildcard (a producer group
+/// across origins, a class group across origins) get `None` — offering a
+/// watch there would hide a fleet-wide cost behind one click.
+fn pivot_chunks(
+    e: &PivotEntry,
+    pivot: Pivot,
+    skip: usize,
+) -> Vec<(String, Option<Role>, Option<String>)> {
+    let real: Vec<&str> = e.real_path.split('/').collect();
     let origin = e.origin.as_deref();
     let class = e.class.as_deref();
     let producer = e.producer.as_deref();
     let foreign = origin.is_none() && class.is_none();
     if foreign {
-        out.push(("(foreign)".to_string(), None));
-        out.extend(e.tail.iter().map(|c| (c.clone(), None)));
+        // Foreign keys keep their raw order, so every level below the
+        // "(foreign)" group is a real prefix.
+        let mut out: Vec<(String, Option<Role>, Option<String>)> =
+            vec![("(foreign)".to_string(), None, None)];
+        out.extend(e.tail.iter().enumerate().map(|(i, c)| {
+            (
+                c.clone(),
+                None,
+                Some(real[..(i + 1).min(real.len())].join("/")),
+            )
+        }));
         return out;
     }
+
+    // (chunk, role) first, targets derived below from the constraint chain.
+    let mut chunks: Vec<(String, Option<Role>)> = Vec::new();
     let push = |out: &mut Vec<(String, Option<Role>)>, v: Option<&str>, role: Role| {
         if let Some(v) = v {
             out.push((v.to_string(), Some(role)));
@@ -668,50 +727,78 @@ fn pivot_chunks(e: &PivotEntry, pivot: Pivot) -> Vec<(String, Option<Role>)> {
     match pivot {
         Pivot::Chunks => unreachable!("chunk order uses flatten()"),
         Pivot::Origin => {
-            push(&mut out, origin, Role::Origin);
-            push(&mut out, class, Role::Class);
-            push(&mut out, producer, Role::Producer);
+            push(&mut chunks, origin, Role::Origin);
+            push(&mut chunks, class, Role::Class);
+            push(&mut chunks, producer, Role::Producer);
         }
         Pivot::Producer => {
             // The producer when there is one; the service origin otherwise —
             // for a service origin the service IS the producer (RFC 03 §1.5).
             match (producer, origin) {
-                (Some(p), _) => out.push((p.to_string(), Some(Role::Producer))),
-                (None, Some(o)) => out.push((o.to_string(), Some(Role::Origin))),
-                (None, None) => out.push(("(no producer)".to_string(), None)),
+                (Some(p), _) => chunks.push((p.to_string(), Some(Role::Producer))),
+                (None, Some(o)) => chunks.push((o.to_string(), Some(Role::Origin))),
+                (None, None) => chunks.push(("(no producer)".to_string(), None)),
             }
             if producer.is_some() {
-                push(&mut out, origin, Role::Origin);
+                push(&mut chunks, origin, Role::Origin);
             }
-            push(&mut out, class, Role::Class);
+            push(&mut chunks, class, Role::Class);
         }
         Pivot::Class => {
-            push(&mut out, class, Role::Class);
-            push(&mut out, origin, Role::Origin);
-            push(&mut out, producer, Role::Producer);
+            push(&mut chunks, class, Role::Class);
+            push(&mut chunks, origin, Role::Origin);
+            push(&mut chunks, producer, Role::Producer);
         }
     }
-    out.extend(e.tail.iter().map(|c| (c.clone(), Some(Role::Subject))));
-    if out.is_empty() {
+    chunks.extend(e.tail.iter().map(|c| (c.clone(), Some(Role::Subject))));
+    if chunks.is_empty() {
         // An entry that *is* one of the coordinates (e.g. a declared class
         // position with no subject below it yet).
-        out.push(("(…)".to_string(), None));
+        chunks.push(("(…)".to_string(), None));
     }
-    out
+
+    // Constraint chain → target per level.
+    let coords_in_entry = usize::from(origin.is_some())
+        + usize::from(class.is_some())
+        + usize::from(producer.is_some());
+    let (mut has_o, mut has_c, mut has_p, mut tail_len) = (false, false, false, 0usize);
+    chunks
+        .into_iter()
+        .map(|(chunk, role)| {
+            match role {
+                Some(Role::Origin) => has_o = true,
+                Some(Role::Class) => has_c = true,
+                Some(Role::Producer) => has_p = true,
+                Some(Role::Subject) | Some(Role::BlobTier) => tail_len += 1,
+                Some(Role::Version) | None => tail_len += 1,
+            }
+            let present = usize::from(has_o) + usize::from(has_c) + usize::from(has_p);
+            let contiguous = if tail_len > 0 {
+                present == coords_in_entry
+            } else {
+                has_o && (!has_c || has_o) && (!has_p || has_c)
+            };
+            let target = (contiguous && present > 0)
+                .then(|| real[..(skip + present + tail_len).min(real.len())].join("/"));
+            (chunk, role, target)
+        })
+        .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flatten_pnode(
     node: &PNode,
     expanded: &BTreeSet<String>,
     auto_expand: bool,
     now: Instant,
+    pivot_key: &str,
     path: String,
     depth: usize,
     rows: &mut Vec<TreeRow>,
 ) {
     for (chunk, child) in &node.children {
         let child_path = if path.is_empty() {
-            format!("pivot:{chunk}")
+            format!("pivot:{pivot_key}:{chunk}")
         } else {
             format!("{path}/{chunk}")
         };
@@ -721,7 +808,13 @@ fn flatten_pnode(
             depth,
             chunk: chunk.clone(),
             path: child_path.clone(),
-            target: child.leaf.as_ref().map(|(p, _, _)| p.clone()),
+            // A concrete entry acts on its real path; a group acts on its
+            // contiguous wire prefix when it has one (issue #93).
+            target: child
+                .leaf
+                .as_ref()
+                .map(|(p, _, _)| p.clone())
+                .or_else(|| child.target.clone()),
             has_children: !child.children.is_empty(),
             expanded: is_open,
             status: child
@@ -750,6 +843,7 @@ fn flatten_pnode(
                 expanded,
                 auto_expand,
                 now,
+                pivot_key,
                 child_path,
                 depth + 1,
                 rows,
@@ -791,6 +885,29 @@ pub fn registration_label(reg: &Registration) -> &'static str {
 /// pane borrows app state directly instead of a temporary.
 pub type FactsIndex = std::collections::HashMap<String, KeyFacts>;
 
+/// What clicking the row body does (issue #93): concrete entries select
+/// (detail fetch acts on `target`); groups toggle. Pure, so it is testable
+/// without a renderer.
+pub fn row_press(r: &TreeRow) -> Message {
+    match (&r.target, r.is_leaf || !r.has_children) {
+        (Some(t), true) => Message::SelectKey(Some(t.clone())),
+        _ => Message::ToggleNode(r.path.clone()),
+    }
+}
+
+/// What clicking the expand marker does — its own affordance, so a concrete
+/// key that is also a prefix of deeper keys stays selectable (issue #93).
+pub fn marker_press(r: &TreeRow) -> Option<Message> {
+    r.has_children.then(|| Message::ToggleNode(r.path.clone()))
+}
+
+/// Whether a row sits at or under one of the still-seeding watch paths.
+fn under_seeding(row_path: &str, seeding: &BTreeSet<String>) -> bool {
+    seeding
+        .iter()
+        .any(|p| row_path == p || row_path.starts_with(&format!("{p}/")))
+}
+
 /// The visible row window for a scroll position: `(first, last)` indices
 /// into the flattened rows, with overscan. Pure, so it is testable without
 /// a renderer.
@@ -803,11 +920,13 @@ pub fn window(rows: usize, scroll_y: f32, viewport_h: f32) -> (usize, usize) {
 }
 
 /// Render the tree pane.
+#[allow(clippy::too_many_arguments)]
 pub fn tree_view<'a>(
     flat: &'a Flattened,
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
     watched_paths: &'a BTreeSet<String>,
+    seeding_paths: &'a BTreeSet<String>,
     scroll_y: f32,
     viewport_h: f32,
 ) -> Element<'a, Message> {
@@ -833,7 +952,7 @@ pub fn tree_view<'a>(
     }
     for r in &flat.rows[first..last] {
         col = col.push(
-            iced::widget::container(row_view(r, facts, selected, watched_paths))
+            iced::widget::container(row_view(r, facts, selected, watched_paths, seeding_paths))
                 .height(Length::Fixed(ROW_HEIGHT)),
         );
     }
@@ -862,17 +981,23 @@ fn row_view<'a>(
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
     watched_paths: &'a BTreeSet<String>,
+    seeding_paths: &'a BTreeSet<String>,
 ) -> Element<'a, Message> {
     let indent = iced::widget::Space::new().width(Length::Fixed(r.depth as f32 * 14.0));
 
-    let marker = if r.has_children {
-        if r.expanded { "▾" } else { "▸" }
-    } else {
-        " "
+    // The expand marker is its own affordance (issue #93): a concrete key
+    // that is also a prefix of deeper keys keeps body-click = select.
+    let marker: Element<'a, Message> = match marker_press(r) {
+        Some(msg) => button(text(if r.expanded { "▾" } else { "▸" }).size(font::CAPTION))
+            .padding(2)
+            .style(button::text)
+            .on_press(msg)
+            .into(),
+        None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
     };
 
     let is_selected = r.target.is_some() && selected == r.target.as_deref();
-    let name = text(format!("{marker} {}", r.chunk))
+    let name = text(r.chunk.clone())
         .size(font::CAPTION)
         .font(iced::Font::MONOSPACE)
         .style(move |theme: &iced::Theme| text::Style {
@@ -883,7 +1008,7 @@ fn row_view<'a>(
             }),
         });
 
-    let mut line = row![indent, name]
+    let mut line = row![name]
         .spacing(space::XS)
         .align_y(iced::Alignment::Center);
 
@@ -918,7 +1043,14 @@ fn row_view<'a>(
             ));
         }
         NodeStatus::WatchedQuiet(_) => {
-            line = line.push(kit::muted("quiet"));
+            // While the watch's seed phase is still running, "quiet" is not
+            // yet an observation — the seed may still deliver (issue #92).
+            let check = r.target.as_deref().unwrap_or(&r.path);
+            if under_seeding(check, seeding_paths) {
+                line = line.push(kit::muted("seeding…"));
+            } else {
+                line = line.push(kit::muted("quiet"));
+            }
         }
         NodeStatus::Unwatched(_) => {
             line = line.push(kit::tone_badge(
@@ -982,14 +1114,6 @@ fn row_view<'a>(
         None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
     };
 
-    let press = if r.has_children {
-        Message::ToggleNode(r.path.clone())
-    } else {
-        match &r.target {
-            Some(t) => Message::SelectKey(Some(t.clone())),
-            None => Message::ToggleNode(r.path.clone()),
-        }
-    };
     let body = button(line)
         .width(Length::Fill)
         .padding(2)
@@ -998,8 +1122,8 @@ fn row_view<'a>(
             text_color: iced::Color::WHITE,
             ..Default::default()
         })
-        .on_press(press);
-    row![watch, body]
+        .on_press(row_press(r));
+    row![watch, indent, marker, body]
         .spacing(space::XS)
         .align_y(iced::Alignment::Center)
         .into()
@@ -1012,6 +1136,7 @@ pub fn pane<'a>(
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
     watched_paths: &'a BTreeSet<String>,
+    seeding_paths: &'a BTreeSet<String>,
     pivot: Pivot,
     search: &'a str,
     scroll_y: f32,
@@ -1037,7 +1162,15 @@ pub fn pane<'a>(
     column![
         kit::section_header("Keys", None),
         header,
-        tree_view(flat, facts, selected, watched_paths, scroll_y, viewport_h)
+        tree_view(
+            flat,
+            facts,
+            selected,
+            watched_paths,
+            seeding_paths,
+            scroll_y,
+            viewport_h
+        )
     ]
     .spacing(space::SM)
     .into()
@@ -1428,6 +1561,205 @@ mod tests {
             Instant::now(),
         );
         assert_eq!(flat.total_keys, 2, "prefix key and deep key both count");
+    }
+
+    /// Issue #93: origin-pivot groups stand for exactly contiguous wire
+    /// subtrees, so they carry real targets — and the selector built from
+    /// one is exactly the subtree selector (the acceptance criterion).
+    #[test]
+    fn origin_pivot_groups_target_their_real_prefix() {
+        let snap = snapshot(&[
+            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+            "v1/@catalog/state/entity/x",
+        ]);
+        let flat = pivot_flatten(
+            &snap,
+            "",
+            Pivot::Origin,
+            &BTreeSet::new(),
+            "x", // filter irrelevant to targets; auto-expands everything
+            10_000,
+            Instant::now(),
+        );
+        let by_chunk = |c: &str| {
+            flat.rows
+                .iter()
+                .find(|r| r.chunk == c)
+                .unwrap_or_else(|| panic!("row {c}"))
+        };
+        assert_eq!(by_chunk("@catalog").target.as_deref(), Some("v1/@catalog"));
+        let host = pivot_flatten(
+            &snap,
+            "",
+            Pivot::Origin,
+            &BTreeSet::new(),
+            "cpu",
+            10_000,
+            Instant::now(),
+        );
+        let origin = host
+            .rows
+            .iter()
+            .find(|r| r.chunk == "h-3fa9c2d41b7e")
+            .expect("origin group");
+        assert_eq!(origin.target.as_deref(), Some("v1/h-3fa9c2d41b7e"));
+        assert_eq!(
+            crate::scope::subtree_selector(origin.target.as_deref().unwrap()),
+            "v1/h-3fa9c2d41b7e/**",
+            "watching the group declares exactly the origin subtree"
+        );
+        let class = host
+            .rows
+            .iter()
+            .find(|r| r.chunk == "telemetry")
+            .expect("class group");
+        assert_eq!(class.target.as_deref(), Some("v1/h-3fa9c2d41b7e/telemetry"));
+    }
+
+    /// Issue #93: a base-relative deployment keeps the base in the target —
+    /// the selector still spells the wire, never a bare convention path.
+    #[test]
+    fn pivot_targets_carry_the_base() {
+        let snap = snapshot(&["zs/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
+        let flat = pivot_flatten(
+            &snap,
+            "zs",
+            Pivot::Origin,
+            &BTreeSet::new(),
+            "cpu",
+            10_000,
+            Instant::now(),
+        );
+        let origin = flat
+            .rows
+            .iter()
+            .find(|r| r.chunk == "h-3fa9c2d41b7e")
+            .expect("origin group");
+        assert_eq!(origin.target.as_deref(), Some("zs/v1/h-3fa9c2d41b7e"));
+    }
+
+    /// Issue #93: groups that genuinely span a wildcard stay untargeted —
+    /// a producer group across origins is a fleet-wide watch, not one click.
+    #[test]
+    fn wildcard_spanning_groups_stay_untargeted() {
+        let snap = snapshot(&[
+            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+            "v1/h-9fa9c2d41b70/telemetry/sysinfo/cpu",
+        ]);
+        let prod = pivot_flatten(
+            &snap,
+            "",
+            Pivot::Producer,
+            &BTreeSet::new(),
+            "cpu",
+            10_000,
+            Instant::now(),
+        );
+        let group = prod.rows.iter().find(|r| r.chunk == "sysinfo").unwrap();
+        assert!(group.target.is_none(), "spans origins — no one-click watch");
+        // …but one level down the constraint chain closes: origin under
+        // producer means v1/<origin>/<class>/<producer> is NOT contiguous
+        // (class is still free), so it stays None too…
+        let origin = prod
+            .rows
+            .iter()
+            .find(|r| r.chunk == "h-3fa9c2d41b7e")
+            .unwrap();
+        assert!(origin.target.is_none(), "class position still wildcarded");
+        // …and the class level (origin+class+producer all fixed) targets
+        // the full contiguous prefix — producer chunk included, because the
+        // node means "this producer's telemetry", not "all telemetry".
+        let class = prod
+            .rows
+            .iter()
+            .filter(|r| r.chunk == "telemetry")
+            .find(|r| r.target.is_some())
+            .expect("a targeted class row");
+        assert_eq!(
+            class.target.as_deref(),
+            Some("v1/h-3fa9c2d41b7e/telemetry/sysinfo")
+        );
+
+        let by_class = pivot_flatten(
+            &snap,
+            "",
+            Pivot::Class,
+            &BTreeSet::new(),
+            "cpu",
+            10_000,
+            Instant::now(),
+        );
+        let top = by_class.rows.iter().find(|r| r.depth == 0).unwrap();
+        assert_eq!(top.chunk, "telemetry");
+        assert!(top.target.is_none(), "spans origins");
+    }
+
+    /// Issue #93: the press split — a concrete key that is also a prefix of
+    /// deeper keys stays selectable; its marker (alone) expands.
+    #[test]
+    fn a_prefix_key_row_selects_and_its_marker_expands() {
+        let snap = snapshot(&[
+            "v1/h-3fa9c2d41b7e/state/tc/iface",
+            "v1/h-3fa9c2d41b7e/state/tc/iface/eth0",
+        ]);
+        let set = expand(&[
+            "v1",
+            "v1/h-3fa9c2d41b7e",
+            "v1/h-3fa9c2d41b7e/state",
+            "v1/h-3fa9c2d41b7e/state/tc",
+        ]);
+        let flat = flat_now(&snap, "", &set, 100);
+        let prefix = flat
+            .rows
+            .iter()
+            .find(|r| r.path == "v1/h-3fa9c2d41b7e/state/tc/iface")
+            .expect("prefix row");
+        assert!(prefix.is_leaf && prefix.has_children);
+        match row_press(prefix) {
+            Message::SelectKey(Some(k)) => {
+                assert_eq!(k, "v1/h-3fa9c2d41b7e/state/tc/iface")
+            }
+            other => panic!("body must select, got {other:?}"),
+        }
+        assert!(
+            matches!(marker_press(prefix), Some(Message::ToggleNode(_))),
+            "the marker is the expand affordance"
+        );
+        // A plain group row still toggles on body click.
+        let group = flat
+            .rows
+            .iter()
+            .find(|r| r.path == "v1/h-3fa9c2d41b7e/state")
+            .expect("group row");
+        assert!(matches!(row_press(group), Message::ToggleNode(_)));
+    }
+
+    /// Issue #93: expansion paths are namespaced per pivot, so switching
+    /// pivots cannot resurrect an expansion that meant something else.
+    #[test]
+    fn pivot_expansion_paths_are_namespaced() {
+        let snap = snapshot(&["v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
+        let by_origin = pivot_flatten(
+            &snap,
+            "",
+            Pivot::Origin,
+            &BTreeSet::new(),
+            "",
+            10_000,
+            Instant::now(),
+        );
+        let by_producer = pivot_flatten(
+            &snap,
+            "",
+            Pivot::Producer,
+            &BTreeSet::new(),
+            "",
+            10_000,
+            Instant::now(),
+        );
+        assert!(by_origin.rows[0].path.starts_with("pivot:origin:"));
+        assert!(by_producer.rows[0].path.starts_with("pivot:producer:"));
     }
 
     /// The soak numbers behind issue #65's acceptance: flatten, search and

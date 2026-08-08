@@ -51,6 +51,14 @@ pub enum FleetEvent {
     /// The watch set changed ([`Monitor::watch`]/[`Monitor::unwatch`]) —
     /// coverage labels should refresh; pull the set via [`Monitor::watched`].
     WatchChanged,
+    /// A seeded watch's seed phase resolved (issue #92): both seed paths of
+    /// [`Monitor::watch_seeded`] finished, with what each contributed.
+    /// Everything on this watch after this event is live-only — "seeding"
+    /// panes flip to "live" here, never on a guess.
+    WatchSeeded {
+        id: WatchId,
+        coverage: crate::seed::SeedCoverage,
+    },
 }
 
 /// What to watch.
@@ -228,6 +236,11 @@ pub struct WatchId(u64);
 struct WatchEntry {
     selector: String,
     subscriber: zenoh::pubsub::Subscriber<()>,
+    /// The seed task, while a seeded watch's seed phase is still running.
+    /// Aborted on [`Monitor::unwatch`] so a released watch cannot keep
+    /// ingesting seed replies. (A dropped *monitor* lets it run out — it is
+    /// bounded by the seed timeout and feeds a core nobody reads.)
+    seed_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// The wired monitor: a runtime-mutable watch set + liveliness + tick task
@@ -335,6 +348,115 @@ impl Monitor {
             WatchEntry {
                 selector: selector.to_string(),
                 subscriber,
+                seed_task: None,
+            },
+        );
+        let _ = self.core.tx.send(FleetEvent::WatchChanged);
+        Ok(id)
+    }
+
+    /// Observe a selector **with a correct seed phase** (issue #92; the
+    /// RFC 04 §3.2 discipline of [`crate::seed_subscribe`], run through this
+    /// monitor's bounded broadcast):
+    ///
+    /// - the subscriber is declared first, then both seed paths run as
+    ///   bounded GETs (`@adv` caches for live publishers, the selector
+    ///   itself for router storages — the crashed-producer case);
+    /// - one per-key LWW merge spans seed *and* live samples until the
+    ///   boundary, so a transition in the seed window lands exactly once and
+    ///   a stale seed cannot regress a key. Suppressions are counted in the
+    ///   coverage, never silently absorbed (O6) — and they are *not* part of
+    ///   `Dropped(n)`, which counts only broadcast lag;
+    /// - [`FleetEvent::WatchSeeded`] fires once **both** paths resolve,
+    ///   carrying this id and the [`crate::SeedCoverage`]. After it, the
+    ///   merge is dropped and live samples flow untouched (the merge map is
+    ///   a seed-phase structure, not a per-watch leak).
+    pub async fn watch_seeded(
+        &self,
+        selector: &str,
+        policy: crate::seed::SeedPolicy,
+    ) -> Result<WatchId> {
+        use crate::seed::{Merge, SeedCoverage, cache_selector, seed_get, view_of};
+
+        // The merge gate: `Some` while seeding (both live callback and seed
+        // replies pass `admit`), swapped to `None` at the boundary.
+        let gate: Arc<arc_swap::ArcSwapOption<Merge>> =
+            Arc::new(arc_swap::ArcSwapOption::from_pointee(Merge::new()));
+
+        // 1) The subscriber, FIRST (RFC 04 §3.2).
+        let core = Arc::clone(&self.core);
+        let cb_gate = Arc::clone(&gate);
+        let subscriber = self
+            .session
+            .declare_subscriber(selector)
+            .callback(move |sample| {
+                let sn = sample.source_info().map(|si| si.source_sn());
+                let view = view_of(&sample);
+                if let Some(merge) = cb_gate.load_full()
+                    && !merge.admit(&view)
+                {
+                    return;
+                }
+                core.ingest(view, sn);
+            })
+            .await
+            .map_err(|e| anyhow!("seeded subscribe {selector}: {e}"))?;
+
+        // 2) The seed GETs, AFTER — registered as this watch's seed task so
+        //    `unwatch` during the seed phase aborts it.
+        let id = WatchId(self.next_watch.fetch_add(1, Ordering::Relaxed));
+        let seed_task = {
+            let session = self.session.clone();
+            let core = Arc::clone(&self.core);
+            let selector = selector.to_string();
+            tokio::spawn(async move {
+                let merge = gate
+                    .load_full()
+                    .expect("gate holds the merge while seeding");
+                let history = async {
+                    if policy.history {
+                        let sel = cache_selector(&selector);
+                        Some(
+                            seed_get(&session, &sel, policy.timeout, &merge, |view| {
+                                core.ingest(view, None);
+                            })
+                            .await,
+                        )
+                    } else {
+                        None
+                    }
+                };
+                let storage = async {
+                    if policy.storage {
+                        Some(
+                            seed_get(&session, &selector, policy.timeout, &merge, |view| {
+                                core.ingest(view, None);
+                            })
+                            .await,
+                        )
+                    } else {
+                        None
+                    }
+                };
+                let (history_replies, storage_replies) = tokio::join!(history, storage);
+                let coverage = SeedCoverage {
+                    history_replies,
+                    storage_replies,
+                    superseded: merge.superseded(),
+                };
+                gate.store(None);
+                // Seeded keys should be visible on the very tick that
+                // announces the boundary, not one tick later.
+                core.tick();
+                let _ = core.tx.send(FleetEvent::WatchSeeded { id, coverage });
+            })
+        };
+        self.watches.lock().await.insert(
+            id,
+            WatchEntry {
+                selector: selector.to_string(),
+                subscriber,
+                seed_task: Some(seed_task),
             },
         );
         let _ = self.core.tx.send(FleetEvent::WatchChanged);
@@ -347,12 +469,18 @@ impl Monitor {
     /// ([`crate::stats::StatsTable::unwatched`]): a shrinking key set must
     /// never read as a quieting bus (RFC 09 §5.1 O6).
     pub async fn unwatch(&self, id: WatchId) -> Result<()> {
-        let entry = {
+        let mut entry = {
             let mut watches = self.watches.lock().await;
             watches
                 .remove(&id)
                 .ok_or_else(|| anyhow!("unknown watch id {id:?}"))?
         };
+        // A released watch must not keep ingesting seed replies: the seed
+        // task dies with the watch (its boundary event simply never fires —
+        // the watch is gone, so there is nothing left to flip to "live").
+        if let Some(task) = entry.seed_task.take() {
+            task.abort();
+        }
         entry
             .subscriber
             .undeclare()
