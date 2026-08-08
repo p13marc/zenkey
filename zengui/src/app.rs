@@ -36,6 +36,7 @@ const MAX_ROWS: usize = 2000;
 enum RightPane {
     Echo,
     Call,
+    Detail,
 }
 
 pub struct Zengui {
@@ -66,6 +67,10 @@ pub struct Zengui {
     echo_filter: String,
 
     call_form: view::call::CallForm,
+    /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
+    schema_store: Option<Arc<zenkey_fleet::decode::SchemaStore>>,
+    /// The decode of the last fetched value.
+    decoded: Option<(Option<String>, zenkey_fleet::decode::Rendering)>,
     /// Which right-hand pane is showing.
     right_pane: RightPane,
     facts: HashMap<String, KeyFacts>,
@@ -107,6 +112,8 @@ impl Zengui {
             fetched: None,
             echo_filter: String::new(),
             call_form: view::call::CallForm::default(),
+            schema_store: None,
+            decoded: None,
             right_pane: RightPane::Echo,
             facts: HashMap::new(),
             slices: None,
@@ -140,6 +147,10 @@ impl Zengui {
         match message {
             Message::SessionOpened(Ok(session)) => {
                 self.session = Some(session.clone());
+                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+                    &self.settings.base,
+                    self.settings.timeout(),
+                )));
                 let timeout = self.settings.timeout();
                 let discover = Task::perform(
                     {
@@ -255,7 +266,50 @@ impl Zengui {
                 }
             }
             Message::ValueFetched(key, outcome) => {
+                self.decoded = None;
+                self.right_pane = RightPane::Detail;
+                let decode_task = match (&outcome, &self.session, &self.schema_store, &self.slices)
+                {
+                    (Ok(out), Some(session), Some(store), Some(slices)) => {
+                        if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
+                            let (session, store, slices) =
+                                (session.clone(), Arc::clone(store), Arc::clone(slices));
+                            let base = self.settings.base.clone();
+                            let (fkey, wire_key) = (key.clone(), v.key.clone());
+                            let encoding = v.encoding.clone();
+                            let bytes = v.payload.clone();
+                            // decode_sample is async (may fetch describe on
+                            // first miss) — a Task, never the render path.
+                            Task::perform(
+                                async move {
+                                    let (ty, rendering) = zenkey_fleet::decode::decode_sample(
+                                        &store,
+                                        &session,
+                                        &slices,
+                                        &base,
+                                        &wire_key,
+                                        Some(&encoding),
+                                        &bytes.to_bytes(),
+                                    )
+                                    .await;
+                                    (fkey, ty, Arc::new(rendering))
+                                },
+                                |(k, t, r)| Message::ValueDecoded(k, t, r),
+                            )
+                        } else {
+                            Task::none()
+                        }
+                    }
+                    _ => Task::none(),
+                };
                 self.fetched = Some((key, outcome));
+                decode_task
+            }
+            Message::ValueDecoded(key, type_name, rendering) => {
+                // Stale guard: only the currently selected key's decode lands.
+                if self.selected.as_deref() == Some(key.as_str()) {
+                    self.decoded = Some((type_name, (*rendering).clone()));
+                }
                 Task::none()
             }
             Message::BaseSelected(base) => {
@@ -270,6 +324,11 @@ impl Zengui {
                 self.my_watches.clear();
                 self.my_watch_paths.clear();
                 self.scope_watches.clear();
+                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+                    &self.settings.base,
+                    self.settings.timeout(),
+                )));
+                self.decoded = None;
                 self.reflatten();
                 Task::batch([self.start_monitor(), self.load_slices()])
             }
@@ -337,7 +396,8 @@ impl Zengui {
             Message::PaneToggled => {
                 self.right_pane = match self.right_pane {
                     RightPane::Echo => RightPane::Call,
-                    RightPane::Call => RightPane::Echo,
+                    RightPane::Call => RightPane::Detail,
+                    RightPane::Detail => RightPane::Echo,
                 };
                 Task::none()
             }
@@ -660,6 +720,14 @@ impl Zengui {
                 RightPane::Echo =>
                     view::echo::pane(&self.echo, &self.echo_filter, self.selected.as_deref(),),
                 RightPane::Call => view::call::pane(&self.call_form, self.slices.as_deref()),
+                RightPane::Detail => view::detail::pane(view::detail::DetailData {
+                    key: self.selected.as_deref().unwrap_or("(nothing selected)"),
+                    facts: self.selected.as_deref().and_then(|k| self.facts.get(k)),
+                    fetched: self.fetched.as_ref().and_then(|(k, o)| {
+                        (Some(k.as_str()) == self.selected.as_deref()).then_some(o)
+                    }),
+                    decoded: self.decoded.as_ref(),
+                }),
             })
             .width(Length::FillPortion(1))
             .height(Length::Fill),
@@ -734,7 +802,8 @@ impl Zengui {
             iced::widget::button(
                 text(match self.right_pane {
                     RightPane::Echo => "call pane",
-                    RightPane::Call => "echo pane",
+                    RightPane::Call => "detail pane",
+                    RightPane::Detail => "echo pane",
                 })
                 .size(crate::view::tokens::font::CAPTION)
             )
