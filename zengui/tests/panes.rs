@@ -215,3 +215,63 @@ fn the_call_pane_labels_forbidden_fanout() {
     let mut ui = simulator::<Message, _, _>(pane(&empty, None));
     assert!(ui.find("No registry loaded").is_ok());
 }
+
+/// The detail pane (§6.4 item 5 + #66): the decoded side is tagged with HOW
+/// it was produced — schema-decoded and sniffed must never look alike — and
+/// the empty fetch renders the non-verdict sentence.
+#[test]
+fn the_detail_pane_tags_decode_provenance() {
+    use std::sync::Arc;
+    use zengui::view::detail::{DetailData, pane};
+    use zenkey_fleet::decode::Rendering;
+    use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
+
+    let slices = slices();
+    let key = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
+    let mut facts = KeyFacts::project("", key);
+    facts.resolve(&slices);
+
+    let fetched: Result<Arc<FetchOutcome>, String> =
+        Ok(Arc::new(FetchOutcome::Value(FetchedValue {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(br#"{"value":42.0}"#.to_vec()),
+            encoding: "application/json".into(),
+            timestamp: None,
+            source: ValueSource::Storage,
+        })));
+
+    // Structural fallback with a declared type: the honest <T?> tag.
+    let decoded = (
+        Some("TelemetryPoint".to_string()),
+        Rendering::Structural(r#"{"value":42.0}"#.to_string()),
+    );
+    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+        key,
+        facts: Some(&facts),
+        fetched: Some(&fetched),
+        decoded: Some(&decoded),
+    }));
+    assert!(ui.find("registered").is_ok(), "the facts section renders");
+    assert!(
+        ui.find("<TelemetryPoint?> structural (schema did not decode)")
+            .is_ok(),
+        "typed-but-undecoded must say so"
+    );
+    assert!(ui.find("hex").is_ok(), "the hex side is present");
+
+    // The attributed nothing.
+    let none: Result<Arc<FetchOutcome>, String> = Ok(Arc::new(FetchOutcome::None {
+        attempted: ["get", "@adv cache", "subscribe window"],
+    }));
+    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+        key,
+        facts: Some(&facts),
+        fetched: Some(&none),
+        decoded: None,
+    }));
+    assert!(
+        ui.find("no value — asked get, @adv cache, subscribe window — a non-verdict, not proof of absence (RFC 05 §3.1)")
+            .is_ok(),
+        "silence stays attributed"
+    );
+}

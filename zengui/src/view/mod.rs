@@ -5,6 +5,7 @@
 //! pane be rendered standalone in a test (zensight's `tests/ui_tests.rs` shape).
 
 pub mod call;
+pub mod detail;
 pub mod echo;
 pub mod kit;
 pub mod status;

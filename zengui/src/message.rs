@@ -46,6 +46,9 @@ pub enum Message {
     ScopeWatchToggled,
     /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
     ValueFetched(String, Result<Arc<FetchOutcome>, String>),
+    /// The fetched value's schema decode finished (§6.4 item 5's inspector):
+    /// (key, declared type if any, rendering).
+    ValueDecoded(String, Option<String>, Arc<zenkey_fleet::decode::Rendering>),
 
     /// Publish/call pane interactions (issue #60).
     Call(crate::view::call::CallMsg),

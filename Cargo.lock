@@ -6796,6 +6796,7 @@ dependencies = [
  "clap",
  "iced",
  "iced_test",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
