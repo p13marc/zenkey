@@ -280,6 +280,110 @@ impl CallReport {
     }
 }
 
+/// One key's measured traffic over a `topic hz`/`topic bw` window.
+#[derive(Debug, Clone, Serialize)]
+pub struct RateRow {
+    pub key: String,
+    pub count: u64,
+    pub bytes: u64,
+    /// Source-sequence gaps (zero also means "publishers attach no
+    /// SourceInfo" — an observation, not proof of losslessness).
+    pub sn_gaps: u64,
+}
+
+/// The `topic hz` / `topic bw` report (issue #46) — measured counts plus the
+/// O6 bound honesty: a bounded [`StatsTable`](crate::stats::StatsTable) that retired
+/// keys must say so, or the totals silently claim more coverage than they
+/// have.
+#[derive(Debug, Clone, Serialize)]
+pub struct RateReport {
+    pub selector: String,
+    pub window_s: u64,
+    /// Rows are present only for a `--per-key` run, sorted by count
+    /// descending.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rows: Vec<RateRow>,
+    pub total_count: u64,
+    pub total_bytes: u64,
+    /// Concrete keys retained by the stats table over the window.
+    pub keys: usize,
+    /// Keys retired to stay within the table bound (RFC 09 §5.1 O6) — the
+    /// totals cover the retained set only.
+    pub evicted: u64,
+    /// The bound the table ran under.
+    pub max_keys: usize,
+    /// Total source-sequence gaps (`None` = `--loss` was not asked).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sn_gaps: Option<u64>,
+}
+
+/// How bad a doctor finding is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoctorSeverity {
+    /// A contract violation — the fleet disagrees with the RFCs or with
+    /// itself.
+    Error,
+    /// Suspicious but explainable — judgement is degraded, not wrong.
+    Warning,
+    /// Worth knowing; not a defect.
+    Info,
+}
+
+/// One machine-readable doctor finding (issue #46): what check fired, on
+/// what, with the evidence and the normative citation — the shape the GUI
+/// doctor panel renders as-is.
+#[derive(Debug, Clone, Serialize)]
+pub struct DoctorFinding {
+    pub severity: DoctorSeverity,
+    /// Stable check id (kebab-case), e.g. `slice-sync`, `introspect-coverage`,
+    /// `schema-drift`, `stale-state`.
+    pub check: String,
+    /// What the finding is about (producer, key, or mesh-level subject).
+    pub subject: String,
+    /// The observed evidence, human-readable.
+    pub evidence: String,
+    /// The RFC section that makes this a finding (`None` when the check is
+    /// operational judgement rather than a normative clause).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub citation: Option<String>,
+}
+
+/// The full doctor run: findings plus the coverage summary that makes an
+/// empty findings list legible (what was checked, not just what was found —
+/// RFC 05 §3.1: silence needs attribution).
+#[derive(Debug, Clone, Serialize)]
+pub struct DoctorReport {
+    pub findings: Vec<DoctorFinding>,
+    /// Producer slices confirmed in sync with the local registry
+    /// (`origin/producer`), when `--registry` was given.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub synced: Vec<String>,
+    /// Introspect replies received across the fleet.
+    pub introspect_answered: usize,
+    /// Producers on the liveliness roster.
+    pub live_producers: usize,
+    /// Producers serving an RFC 08 §7 `describe`.
+    pub describe_served: usize,
+    /// Producers serving no `describe` (a SHOULD, not a MUST).
+    pub describe_missing: usize,
+    /// Routers that answered the admin sweep.
+    pub routers: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub router_version: Option<String>,
+    /// Whether the `--deep` freshness/storage checks ran.
+    pub deep: bool,
+}
+
+impl DoctorReport {
+    pub fn count(&self, severity: DoctorSeverity) -> usize {
+        self.findings
+            .iter()
+            .filter(|f| f.severity == severity)
+            .count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
