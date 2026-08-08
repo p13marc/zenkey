@@ -49,18 +49,23 @@ pub enum ScopePreset {
 
 impl std::fmt::Display for ScopePreset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
+        f.write_str(self.short())
+    }
+}
+
+impl ScopePreset {
+    /// The short name, for places too narrow for [`Self::label`].
+    pub fn short(self) -> &'static str {
+        match self {
             ScopePreset::Everything => "everything",
             ScopePreset::Deployment => "deployment",
             ScopePreset::Telemetry => "telemetry",
             ScopePreset::State => "state",
             ScopePreset::Events => "events",
             ScopePreset::Custom => "custom",
-        })
+        }
     }
-}
 
-impl ScopePreset {
     /// A description precise enough that the user is not misled about coverage.
     pub fn label(self) -> &'static str {
         match self {

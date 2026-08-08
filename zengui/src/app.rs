@@ -335,7 +335,7 @@ impl Zengui {
             view::status::strip(Status {
                 link: &self.link,
                 base_label: self.settings.base_label(),
-                scope_label: self.settings.scope.label(),
+                scope_label: self.settings.scope.short(),
                 keys: self.keys,
                 keys_evicted: self.keys_evicted,
                 totals: self.totals,

@@ -337,8 +337,8 @@ fn row_view<'a>(
         }
     } else if !r.expanded && r.subtree_count > 0 {
         line = line.push(kit::muted(format!(
-            "{} keys · {} · {} · {}",
-            r.subtree_keys,
+            "{} · {} · {} · {}",
+            kit::plural(r.subtree_keys, "key"),
             r.subtree_count,
             human_bytes(r.subtree_bytes),
             human_rate(r.subtree_rate_hz)

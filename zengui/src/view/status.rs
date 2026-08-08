@@ -43,6 +43,10 @@ impl SliceSource {
 pub struct Status<'a> {
     pub link: &'a LinkState,
     pub base_label: &'a str,
+    /// The scope's short name. The long explanation lives in the toolbar; the
+    /// strip must stay narrow enough to fit, or its right-hand end — which is
+    /// where the registry state and the reachability warning live — clips off
+    /// screen exactly when something is wrong.
     pub scope_label: &'a str,
     pub keys: usize,
     /// Keys retired to stay within the table's bound.
@@ -73,18 +77,22 @@ fn keys_label<'a>(keys: usize, evicted: u64) -> Element<'a, Message> {
 /// The wording of the key count. Split from the widget so it is testable.
 pub fn keys_text(keys: usize, evicted: u64) -> String {
     if evicted == 0 {
-        format!("{keys} keys")
+        kit::plural(keys, "key")
     } else {
-        format!("{keys} keys (+{evicted} retired — bound reached)")
+        format!(
+            "{} (+{evicted} retired — bound reached)",
+            kit::plural(keys, "key")
+        )
     }
 }
 
 pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     let (link_text, link_is_bad) = match s.link {
         LinkState::Connecting => ("connecting…".to_string(), false),
-        LinkState::Watching { selectors } => {
-            (format!("watching {} selector(s)", selectors.len()), false)
-        }
+        LinkState::Watching { selectors } => (
+            format!("watching {}", kit::plural(selectors.len(), "selector")),
+            false,
+        ),
         LinkState::Ended => ("link ended — retrying".to_string(), true),
         LinkState::Failed(e) => (format!("link failed: {e}"), true),
     };

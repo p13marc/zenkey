@@ -149,6 +149,15 @@ pub fn human_bytes(n: u64) -> String {
     }
 }
 
+/// `n` of something, pluralised. "1 keys" reads as a bug in the tool.
+pub fn plural(n: usize, singular: &str) -> String {
+    if n == 1 {
+        format!("{n} {singular}")
+    } else {
+        format!("{n} {singular}s")
+    }
+}
+
 /// Human-readable rate.
 pub fn human_rate(hz: f64) -> String {
     if hz <= 0.0 {
@@ -176,6 +185,13 @@ mod tests {
         assert_eq!(human_bytes(1024 * 1024 * 1024), "1.0 GiB");
         // Saturates at the largest unit rather than running off the table.
         assert!(human_bytes(u64::MAX).ends_with("TiB"));
+    }
+
+    #[test]
+    fn counts_are_pluralised() {
+        assert_eq!(plural(0, "key"), "0 keys");
+        assert_eq!(plural(1, "key"), "1 key");
+        assert_eq!(plural(2, "key"), "2 keys");
     }
 
     /// Zero rate is "—", not "0.0/s": a key with no recent traffic has no
