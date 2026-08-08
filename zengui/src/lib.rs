@@ -16,9 +16,11 @@
 //! spells full wire keys and does its own base handling, which is what lets it
 //! see traffic a namespaced application is blind to.
 
+pub mod app;
 pub mod config;
 pub mod echo;
 pub mod keyfacts;
 pub mod link;
 pub mod message;
 pub mod scope;
+pub mod view;
