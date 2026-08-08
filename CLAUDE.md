@@ -28,6 +28,17 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   chokepoint, moved verbatim from zenctl), `SliceSet`, the RFC 08 §7
   schema-decode pipeline (`SchemaStore`/`decode_sample`), `Monitor` with
   bounded broadcast + `Dropped(n)` honesty and ArcSwap key-tree snapshots.
+- `zengui/` — the **graphical bus explorer** (Apache-2.0, **not published**;
+  Forgejo release binaries, like zenctl). The GUI sibling of zenctl over the
+  same engine, in Iced 0.14. **Key-agnostic core, RFC as overlay**: it is a
+  useful explorer on *any* Zenoh bus, and keyspace-v2 awareness lights up only
+  when a key parses — `keyfacts.rs` is the single seam where that happens, and
+  `scope.rs` the single place selectors are built (typed builders +
+  `with_base`, never `format!`). Note `**` never crosses an `@`-chunk
+  (RFC 03 §4 D2), so the raw scope is media-safe *and* cannot see `@catalog` —
+  which is why the roster always names the service token explicitly.
+  Deviation from `docs/redesign-2026-07.md` §15, deliberate: it lives here
+  rather than in a separate `p13marc/zengui` repo.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus

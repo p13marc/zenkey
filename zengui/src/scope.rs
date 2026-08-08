@@ -31,7 +31,7 @@ use zenkey::selector::{self, Scope};
 ///
 /// `**` spans any number of chunks *including zero*, so a single sweep covers
 /// every base and the base-less bus root alike (RFC 09 §5's discovery recipe).
-const ANY_BASE: &str = "**";
+pub const ANY_BASE: &str = "**";
 
 /// What to watch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]

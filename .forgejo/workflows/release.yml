@@ -24,8 +24,9 @@ jobs:
           name="${GITHUB_REPOSITORY#*/}"
           git archive --format=tar.gz --prefix="${name}-${GITHUB_REF_NAME}/" \
             -o "dist/release/${name}-${GITHUB_REF_NAME}.tar.gz" "${GITHUB_REF_NAME}"
-          cargo build --release -p zenctl --locked
+          cargo build --release -p zenctl -p zengui --locked
           cp target/release/zenctl "dist/release/zenctl-${GITHUB_REF_NAME}-linux-x86_64"
+          cp target/release/zengui "dist/release/zengui-${GITHUB_REF_NAME}-linux-x86_64"
           (cd dist/release && sha256sum * > SHA256SUMS)
       - uses: https://data.forgejo.org/actions/forgejo-release@v2
         with:

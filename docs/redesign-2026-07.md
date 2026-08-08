@@ -808,6 +808,31 @@ proving a hot bus cannot melt a zengui render loop (bounded channels + `Dropped(
   never on crates.io. Gated on #15 (zenkey-fleet); MVP scope is §6.4's checklist,
   built strictly against the zenkey-fleet API (a missing type is a zenkey-fleet
   issue, not a zengui workaround).
+
+  > **Amended on implementation (2026-08-08).** zengui was built as a member of
+  > *this* workspace (`zenkey/zengui/`), not a separate `p13marc/zengui` repo —
+  > the owner's call, for the tighter iteration loop against zenkey-fleet.
+  > Everything else in this bullet held: Apache-2.0, `publish = false`, the
+  > binary lane (`release.yml` now builds `-p zenctl -p zengui`), and the
+  > "a missing type is a zenkey-fleet issue" rule, which produced
+  > `zenkey-fleet` 0.3.0 (Monitor `Drop`, `liveliness: Vec<String>`, subtree
+  > stats on `TreeNode`) rather than GUI workarounds.
+  >
+  > Two §6.4 items were amended by contact with the RFCs:
+  > - the "registered-vs-wild **flag**" is a **tri-state**, not a bool — a bool
+  >   renders "not asked yet" identically to "not registered", which is the
+  >   false verdict RFC 05 §3.1 / RFC 12 §9 forbid;
+  > - it lives in zengui, not on `TreeNode`. The key tree is rebuilt every
+  >   250 ms and its grammar-blindness is what makes it work on an arbitrary
+  >   bus; coupling it to the registry (and to user-mutable base/slice state)
+  >   would put explorer policy in the engine.
+  >
+  > Also recorded because it inverts an assumption easy to make twice:
+  > `*`/`**` **never cross a chunk beginning with `@`** (RFC 03 §4 D2, verified
+  > against zenoh 1.9). So a `**` scope cannot pull `@media` frames — it is
+  > media-safe by key algebra, not by policy — but it equally cannot see
+  > `@catalog`, so `**` is *not* "everything" and must never be labelled as
+  > such.
 - Dependency floor: zenoh **1.9** with `unstable`; zenoh-ext 1.9 `unstable` permitted
   in any crate that needs it (zenkey core gains an optional `zenoh-ext` feature only
   where #20's helpers land).
