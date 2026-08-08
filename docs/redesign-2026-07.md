@@ -1,6 +1,6 @@
 # zenkey redesign 2026-07 — analysis, generalization, and roadmap
 
-Status: **proposal for review** (nothing here is implemented; RFC set remains at v1.4).
+Status: **largely implemented** (historical design record). Written against RFC v1.4; the RFC set is at v1.9. P0–P5 shipped through the 0.3/0.4 releases and the zengui bootstrap (PR #32); remaining rows are tracked by epic #33 ("Explorer Suite 1.0"). Kept for the rationale; where it and shipped code disagree, the code and the RFCs win.
 Scope: `zenkey`, `zenkey-build`, `zenctl`, the RFC set, and the groundwork for a future
 Iced GUI bus explorer. Backward compatibility is explicitly on the table — we are the
 only consumers today (zensight, tcgui).
@@ -859,4 +859,4 @@ proving a hot bus cannot melt a zengui render loop (bounded channels + `Dropped(
 | #20 (new) | Late-joiner seeding delegated to advanced pub/sub (RFC 04) + linked zensight issue |
 | #21 (new) | QosProfile `express` axis (RFC 04 §3) |
 
-(Issue numbers #17–#21 assigned at filing time; see tracker if they differ.)
+(Issue numbers #17–#21 verified against the tracker 2026-08-08: all five match. #19/#20/#21 closed as RFC amendments; #17 continues in epic #33's #44/#45; #18 delivered by PR #32.)

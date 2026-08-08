@@ -1,7 +1,7 @@
 //! The slice-driven half: everything answerable from a set of registry slices.
 //!
 //! A slice is a slice regardless of where it was read — each producer's served
-//! `introspect` reply off the live bus ([`crate::bus::fleet_registry`]), or a
+//! `introspect` reply off the live bus (`zenkey_fleet::fleet_registry`), or a
 //! local `registry/*.toml` file (`--registry <dir>`, [`load_slices`]). Every
 //! renderer here takes `&[RegistrySlice]` and is source-agnostic; nothing
 //! app-specific is compiled in.

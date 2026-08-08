@@ -68,11 +68,15 @@ enumerates them.
 
 ```bash
 zenctl base list -c tcp/127.0.0.1:7447  # discover deployment bases (needs no --base)
-zenctl node list --base acme            # the liveliness roster
+zenctl node list --base acme            # the liveliness roster (--verbose joins introspect)
 zenctl topic echo --base acme           # subscribe + decode (defaults to <base>/v1/**)
+zenctl topic hz --base acme             # per-key sample rates; topic bw for bytes
 zenctl service call --base acme '*' sysinfo processes --param sort=cpu
 zenctl service call --base acme h-3fa9 netring capture/trigger --body @trigger.json
+zenctl admin get                        # raw admin-space browse; admin routers
+zenctl storage list --base acme         # declared state subjects vs storage coverage
 zenctl doctor --base acme --registry path/to/registry
+zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>
 ```
 
 `node list` is a liveliness query on `<base>/v1/*/state/*/alive` — RFC 04 §5's
@@ -126,7 +130,7 @@ round trip, without SSH.
 
 ## Fan-in discipline
 
-Every fleet GET goes through one helper (`bus::fleet_get`) because RFC 05 §2.1's
+Every fleet GET goes through one helper (`zenkey_fleet::fleet_get`) because RFC 05 §2.1's
 requirements fail *silently* when forgotten:
 
 - **target = All** — the default `BestMatching` short-circuits to a single

@@ -1,7 +1,7 @@
 # zenkey-fleet
 
 The fleet engine for [keyspace-v2](https://github.com/p13marc/zenkey) Zenoh
-tooling — the shared core of `zenctl` and the future `zengui` explorer:
+tooling — the shared core of the `zenctl` and `zengui` explorers:
 
 - **`query`** — the RFC 05 §2.1 fan-in discipline (`fleet_get`: target `All`,
   consolidation `None`, attribution by the reply's own key), in exactly one
