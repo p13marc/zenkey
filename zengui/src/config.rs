@@ -67,6 +67,14 @@ pub struct Cli {
     /// How many echo lines to retain.
     #[arg(long, default_value_t = 2000)]
     pub echo_lines: usize,
+
+    /// How many distinct keys to keep statistics for.
+    ///
+    /// Least-recently-seen keys are retired past this, and the retirements are
+    /// counted and displayed — a long-running observer is bounded, and says so
+    /// (RFC 09 §5.1 O6). Raise it on a bus with a very wide key population.
+    #[arg(long, default_value_t = zenkey_fleet::stats::DEFAULT_MAX_KEYS)]
+    pub max_keys: usize,
 }
 
 /// Resolved, owned settings. No `Option` gymnastics past this point.
@@ -82,6 +90,7 @@ pub struct Settings {
     pub scope: ScopePreset,
     pub selectors: Vec<String>,
     pub echo_lines: usize,
+    pub max_keys: usize,
 }
 
 impl Cli {
@@ -101,6 +110,9 @@ impl Cli {
         if self.echo_lines == 0 {
             anyhow::bail!("--echo-lines must be at least 1");
         }
+        if self.max_keys == 0 {
+            anyhow::bail!("--max-keys must be at least 1");
+        }
         Ok(Settings {
             // Unset and `--base ""` both mean the bus root. There is no config
             // file yet, so the distinction has nowhere to live.
@@ -113,6 +125,7 @@ impl Cli {
             scope,
             selectors: self.selector,
             echo_lines: self.echo_lines,
+            max_keys: self.max_keys,
         })
     }
 }
@@ -179,6 +192,15 @@ mod tests {
         assert!(!s.scouting, "scouting is opt-in (RFC 09 §0.1)");
         assert_eq!(s.scope, ScopePreset::Everything);
         assert_eq!(s.echo_lines, 2000);
+        assert_eq!(s.max_keys, zenkey_fleet::stats::DEFAULT_MAX_KEYS);
+    }
+
+    /// The key table is bounded (RFC 09 §5.1 O6); a zero bound is rejected at
+    /// the boundary rather than silently clamped somewhere downstream.
+    #[test]
+    fn the_key_bound_is_configurable_and_must_be_positive() {
+        assert_eq!(parse(&["--max-keys", "10"]).unwrap().max_keys, 10);
+        assert!(parse(&["--max-keys", "0"]).is_err());
     }
 
     #[test]

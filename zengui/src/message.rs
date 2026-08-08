@@ -67,8 +67,11 @@ pub struct BusTick {
     pub coalesced: u64,
     /// Liveliness transitions: `(token key, is_up)`.
     pub nodes: Vec<(String, bool)>,
-    /// Distinct keys the monitor has seen since it started.
+    /// Distinct keys the monitor is *currently* tracking. Not cumulative:
+    /// the table is bounded, and `keys_evicted` is what it cost.
     pub keys: usize,
+    /// Keys retired to stay within the table's bound (RFC 09 §5.1 O6).
+    pub keys_evicted: u64,
     /// `(samples, bytes, rate_hz)` across everything watched.
     pub totals: (u64, u64, f64),
 }

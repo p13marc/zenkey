@@ -45,6 +45,7 @@ pub struct Zengui {
 
     bases: Vec<DiscoveredBase>,
     keys: usize,
+    keys_evicted: u64,
     totals: (u64, u64, f64),
 }
 
@@ -73,6 +74,7 @@ impl Zengui {
             slice_source: SliceSource::None,
             bases: Vec::new(),
             keys: 0,
+            keys_evicted: 0,
             totals: (0, 0, 0.0),
         };
         let open = Task::perform(
@@ -212,6 +214,7 @@ impl Zengui {
     fn apply_tick(&mut self, tick: &BusTick) {
         self.tree = Arc::clone(&tick.tree);
         self.keys = tick.keys;
+        self.keys_evicted = tick.keys_evicted;
         self.totals = tick.totals;
         self.echo.record_lag(tick.lagged + tick.coalesced);
         for sample in &tick.samples {
@@ -302,6 +305,7 @@ impl Zengui {
             } else {
                 scope::liveliness_selectors(&self.settings.base)
             },
+            max_keys: self.settings.max_keys,
             epoch: self.epoch,
         })
     }
@@ -333,6 +337,7 @@ impl Zengui {
                 base_label: self.settings.base_label(),
                 scope_label: self.settings.scope.label(),
                 keys: self.keys,
+                keys_evicted: self.keys_evicted,
                 totals: self.totals,
                 slices: &self.slice_source,
                 unreachable: self.settings.is_unreachable(),

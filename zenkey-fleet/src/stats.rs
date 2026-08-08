@@ -24,18 +24,85 @@ pub struct KeyStats {
 }
 
 /// The table. Feed it samples; read it per key or in aggregate.
-#[derive(Debug, Default)]
+///
+/// **Bounded.** A CLI runs for `--window` seconds and exits, so an unbounded
+/// map was fine; a GUI left open overnight on a bus carrying content-addressed
+/// or per-request keys would grow one entry per key forever. The table
+/// therefore keeps at most [`DEFAULT_MAX_KEYS`] entries, evicting the
+/// least-recently-seen first — the keys that stopped publishing are the ones a
+/// live view has least use for — and **counts every eviction**, so a shrinking
+/// key set is never mistaken for a quiet bus (RFC 09 §5.1).
+#[derive(Debug)]
 pub struct StatsTable {
     keys: HashMap<String, KeyStats>,
+    max_keys: usize,
+    evicted: u64,
+}
+
+impl Default for StatsTable {
+    fn default() -> Self {
+        StatsTable::with_capacity(DEFAULT_MAX_KEYS)
+    }
 }
 
 /// EWMA time constant (~2 s: responsive enough for a UI badge, smooth
 /// enough not to flicker); samples older than ~tau contribute e^-1.
 const TAU: Duration = Duration::from_secs(2);
 
+/// Default key bound. Large enough that no ordinary fleet reaches it — the
+/// reference application's whole telemetry fan is a few thousand keys — and
+/// small enough that a runaway key family cannot exhaust memory.
+pub const DEFAULT_MAX_KEYS: usize = 50_000;
+
+/// Fraction of the table dropped when the bound is hit.
+///
+/// Evicting in batches amortises the O(n) scan for the oldest entries across
+/// many inserts; evicting one key per insert would make every sample past the
+/// bound a full table scan.
+const EVICT_FRACTION: usize = 16;
+
 impl StatsTable {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A table bounded at `max_keys` entries.
+    pub fn with_capacity(max_keys: usize) -> Self {
+        StatsTable {
+            keys: HashMap::new(),
+            max_keys: max_keys.max(1),
+            evicted: 0,
+        }
+    }
+
+    /// Keys dropped to stay within the bound.
+    ///
+    /// Non-zero means the view is partial: some keys that carried traffic are
+    /// no longer represented in [`len`](Self::len), [`totals`](Self::totals) or
+    /// any tree built from this table.
+    pub fn evicted(&self) -> u64 {
+        self.evicted
+    }
+
+    /// The bound in force.
+    pub fn max_keys(&self) -> usize {
+        self.max_keys
+    }
+
+    /// Drop the least-recently-seen entries until there is room.
+    fn evict(&mut self) {
+        let target = self.max_keys - (self.max_keys / EVICT_FRACTION).max(1);
+        let mut seen: Vec<(Instant, String)> = self
+            .keys
+            .iter()
+            .map(|(k, s)| (s.last_seen, k.clone()))
+            .collect();
+        // Oldest first.
+        seen.sort_unstable_by_key(|(last_seen, _)| *last_seen);
+        for (_, key) in seen.into_iter().take(self.keys.len() - target) {
+            self.keys.remove(&key);
+            self.evicted += 1;
+        }
     }
 
     /// Record one sample. `now` is injected for deterministic tests.
@@ -57,6 +124,9 @@ impl StatsTable {
             }
             s.last_sn = sn;
         } else {
+            if self.keys.len() >= self.max_keys {
+                self.evict();
+            }
             self.keys.insert(
                 key.to_string(),
                 KeyStats {
@@ -98,6 +168,84 @@ impl StatsTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An unbounded table is a leak for any observer that runs for hours on a
+    /// bus with content-addressed or per-request keys.
+    #[test]
+    fn the_table_is_bounded() {
+        let mut t = StatsTable::with_capacity(100);
+        let now = Instant::now();
+        for i in 0..1000 {
+            t.record(&format!("demo/k{i}"), 4, None, now);
+        }
+        assert!(t.len() <= 100, "len {} exceeds the bound", t.len());
+        assert!(t.evicted() > 0);
+        // Nothing vanishes silently: every key seen is either present or counted.
+        assert_eq!(t.len() as u64 + t.evicted(), 1000);
+    }
+
+    /// Eviction is least-recently-seen: a key still publishing must outlive a
+    /// key that went quiet, or a live view would drop exactly what it is for.
+    #[test]
+    fn eviction_drops_the_least_recently_seen() {
+        let mut t = StatsTable::with_capacity(10);
+        let t0 = Instant::now();
+
+        // Ten keys, oldest first.
+        for i in 0..10 {
+            t.record(&format!("old/k{i}"), 4, None, t0 + Duration::from_millis(i));
+        }
+        // One of them keeps publishing, much later.
+        let fresh = t0 + Duration::from_secs(60);
+        t.record("old/k0", 4, None, fresh);
+
+        // Now push new keys in, forcing eviction. Each is strictly newer than
+        // `old/k0`'s refresh, so there is no tie for "oldest" to break.
+        for i in 1..=5 {
+            t.record(
+                &format!("new/k{i}"),
+                4,
+                None,
+                fresh + Duration::from_millis(i),
+            );
+        }
+
+        assert!(
+            t.get("old/k0").is_some(),
+            "a key that is still publishing must survive"
+        );
+        assert!(
+            t.get("old/k1").is_none(),
+            "a key that went quiet should have been evicted first"
+        );
+    }
+
+    /// Updating a known key must never evict — the bound is on distinct keys,
+    /// not on samples.
+    #[test]
+    fn repeated_keys_never_trigger_eviction() {
+        let mut t = StatsTable::with_capacity(4);
+        let t0 = Instant::now();
+        for i in 0..1000 {
+            t.record("demo/one", 4, None, t0 + Duration::from_millis(i));
+        }
+        assert_eq!(t.len(), 1);
+        assert_eq!(t.evicted(), 0);
+        assert_eq!(t.get("demo/one").unwrap().count, 1000);
+    }
+
+    /// A degenerate bound must not panic or spin.
+    #[test]
+    fn a_capacity_of_one_still_works() {
+        let mut t = StatsTable::with_capacity(1);
+        let now = Instant::now();
+        t.record("a", 1, None, now);
+        t.record("b", 1, None, now);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t.evicted(), 1);
+        // Zero is clamped rather than accepted.
+        assert_eq!(StatsTable::with_capacity(0).max_keys(), 1);
+    }
 
     #[test]
     fn rates_converge_and_gaps_count() {

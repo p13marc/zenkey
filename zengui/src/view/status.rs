@@ -45,9 +45,38 @@ pub struct Status<'a> {
     pub base_label: &'a str,
     pub scope_label: &'a str,
     pub keys: usize,
+    /// Keys retired to stay within the table's bound.
+    pub keys_evicted: u64,
     pub totals: (u64, u64, f64),
     pub slices: &'a SliceSource,
     pub unreachable: bool,
+}
+
+/// The key count, and — if the table has evicted — what that count omits.
+///
+/// A bounded observer must report what its bound cost (RFC 09 §5.1 O6): a key
+/// set that stops growing, or shrinks, is otherwise indistinguishable from a
+/// bus that went quiet.
+fn keys_label<'a>(keys: usize, evicted: u64) -> Element<'a, Message> {
+    let label = keys_text(keys, evicted);
+    if evicted == 0 {
+        return kit::muted(label);
+    }
+    text(label)
+        .size(font::CAPTION)
+        .style(|theme: &iced::Theme| text::Style {
+            color: Some(colors(theme).warning()),
+        })
+        .into()
+}
+
+/// The wording of the key count. Split from the widget so it is testable.
+pub fn keys_text(keys: usize, evicted: u64) -> String {
+    if evicted == 0 {
+        format!("{keys} keys")
+    } else {
+        format!("{keys} keys (+{evicted} retired — bound reached)")
+    }
 }
 
 pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
@@ -76,7 +105,7 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         link,
         kit::muted(format!("base: {}", s.base_label)),
         kit::muted(format!("scope: {}", s.scope_label)),
-        kit::muted(format!("{} keys", s.keys)),
+        keys_label(s.keys, s.keys_evicted),
         kit::muted(format!(
             "{count} samples · {} · {}",
             human_bytes(bytes),
@@ -120,5 +149,16 @@ mod tests {
         assert!(SliceSource::Bus { count: 3 }.label().contains('3'));
         assert!(SliceSource::Dirs { count: 7 }.label().contains("dirs"));
         assert!(SliceSource::Failed("boom".into()).label().contains("boom"));
+    }
+
+    /// RFC 09 §5.1 O6: a bounded observer reports what its bound cost. Without
+    /// this, a key count that stops growing looks like a bus that went quiet.
+    #[test]
+    fn the_key_count_discloses_eviction() {
+        assert_eq!(keys_text(120, 0), "120 keys");
+        let noted = keys_text(120, 7);
+        assert!(noted.contains("120 keys"), "{noted}");
+        assert!(noted.contains('7'), "{noted}");
+        assert!(noted.contains("retired"), "{noted}");
     }
 }

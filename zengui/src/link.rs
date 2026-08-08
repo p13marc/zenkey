@@ -47,6 +47,8 @@ pub struct LinkKey {
     pub session: zenoh::Session,
     pub selectors: Vec<String>,
     pub liveliness: Vec<String>,
+    /// Distinct keys the stats table may hold (RFC 09 §5.1 O6).
+    pub max_keys: usize,
     /// Bumped to force a restart (a manual reconnect).
     pub epoch: u64,
 }
@@ -55,6 +57,7 @@ impl std::hash::Hash for LinkKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.selectors.hash(state);
         self.liveliness.hash(state);
+        self.max_keys.hash(state);
         self.epoch.hash(state);
     }
 }
@@ -77,6 +80,7 @@ fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
             liveliness: key.liveliness,
             stats_tick: Duration::from_millis(250),
             capacity: 2048,
+            max_keys: key.max_keys,
         };
         let monitor = match Monitor::start(&key.session, spec).await {
             Ok(m) => m,
@@ -106,9 +110,9 @@ fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                 StreamItem::Event(FleetEvent::NodeUp(k)) => nodes.push((k, true)),
                 StreamItem::Event(FleetEvent::NodeDown(k)) => nodes.push((k, false)),
                 StreamItem::Event(FleetEvent::StatsTick) => {
-                    let (keys, totals) = monitor
+                    let (keys, totals, keys_evicted) = monitor
                         .core()
-                        .with_stats(|s| (s.len(), s.totals()));
+                        .with_stats(|s| (s.len(), s.totals(), s.evicted()));
                     yield Message::Tick(Arc::new(BusTick {
                         // One lock-free load. The tree is never rebuilt here.
                         tree: monitor.tree(),
@@ -117,6 +121,7 @@ fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         coalesced: std::mem::take(&mut coalesced),
                         nodes: std::mem::take(&mut nodes),
                         keys,
+                        keys_evicted,
                         totals,
                     }));
                 }
