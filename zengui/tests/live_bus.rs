@@ -157,6 +157,40 @@ async fn the_overlay_classifies_real_traffic_correctly() {
     );
 }
 
+/// RFC 09 §5.1 O6, against real traffic: a bounded observer stays bounded and
+/// says what the bound cost. `spray` publishes 9 keys the raw scope can see, so
+/// a bound of 3 must engage.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs a live bus; see the module docs"]
+async fn a_bounded_observer_reports_what_it_retired() {
+    let session = zenkey_fleet::session::open(&[ENDPOINT.to_string()], &[], false)
+        .await
+        .expect("open session");
+    let monitor = Monitor::start(
+        &session,
+        MonitorSpec {
+            selectors: ScopePreset::Everything.selectors("", &[]),
+            max_keys: 3,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("start monitor");
+
+    tokio::time::sleep(SETTLE).await;
+
+    let (len, evicted) = monitor.core().with_stats(|s| (s.len(), s.evicted()));
+    println!("bounded at 3: tracking {len} keys, retired {evicted}");
+    assert!(len <= 3, "the bound must hold, got {len}");
+    assert!(
+        evicted > 0,
+        "spray publishes more than 3 keys — eviction should have engaged"
+    );
+    // The count the UI shows must disclose the loss rather than just shrink.
+    let label = zengui::view::status::keys_text(len, evicted);
+    assert!(label.contains("retired"), "{label}");
+}
+
 /// The tree must render foreign traffic as ordinary nodes with real counts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs a live bus; see the module docs"]
