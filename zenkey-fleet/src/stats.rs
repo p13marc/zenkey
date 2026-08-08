@@ -37,6 +37,7 @@ pub struct StatsTable {
     keys: HashMap<String, KeyStats>,
     max_keys: usize,
     evicted: u64,
+    unwatched: u64,
 }
 
 impl Default for StatsTable {
@@ -72,6 +73,7 @@ impl StatsTable {
             keys: HashMap::new(),
             max_keys: max_keys.max(1),
             evicted: 0,
+            unwatched: 0,
         }
     }
 
@@ -87,6 +89,47 @@ impl StatsTable {
     /// The bound in force.
     pub fn max_keys(&self) -> usize {
         self.max_keys
+    }
+
+    /// Keys retired because no active watch covers them any more
+    /// ([`retire_unwatched`](Self::retire_unwatched)).
+    ///
+    /// The third O6 category, deliberately distinct from
+    /// [`evicted`](Self::evicted) ("chose to forget under the bound") and the
+    /// broadcast's dropped ("could not keep up"): this one is "stopped
+    /// looking, by request" — and a key set that shrinks because the user
+    /// unwatched a subtree must say so, or it reads as a quieting bus.
+    pub fn unwatched(&self) -> u64 {
+        self.unwatched
+    }
+
+    /// Retire every key that `gone` covers and no selector in `kept` still
+    /// covers, counting them under [`unwatched`](Self::unwatched). Returns
+    /// how many were retired. Selectors that fail to parse as key
+    /// expressions cover nothing (`gone`) / keep nothing (`kept`).
+    pub fn retire_unwatched(&mut self, gone: &str, kept: &[String]) -> usize {
+        use zenoh::key_expr::KeyExpr;
+        let Ok(gone) = KeyExpr::new(gone.to_string()) else {
+            return 0;
+        };
+        let kept: Vec<KeyExpr<'static>> = kept
+            .iter()
+            .filter_map(|k| KeyExpr::new(k.clone()).ok())
+            .collect();
+        let doomed: Vec<String> = self
+            .keys
+            .keys()
+            .filter(|key| match KeyExpr::new((*key).clone()) {
+                Ok(ke) => gone.intersects(&ke) && !kept.iter().any(|k| k.intersects(&ke)),
+                Err(_) => false,
+            })
+            .cloned()
+            .collect();
+        for key in &doomed {
+            self.keys.remove(key);
+        }
+        self.unwatched += doomed.len() as u64;
+        doomed.len()
     }
 
     /// Drop the least-recently-seen entries until there is room.
@@ -285,5 +328,42 @@ mod tests {
         let (count, bytes, _) = t.totals();
         assert_eq!((count, bytes), (2, 30));
         assert_eq!(t.len(), 2);
+    }
+
+    /// Unwatch retirement: covered-by-gone and not-by-kept keys leave the
+    /// table, counted separately from bound eviction (O6's third category).
+    #[test]
+    fn retire_unwatched_respects_remaining_coverage() {
+        let mut t = StatsTable::new();
+        let now = Instant::now();
+        t.record("v1/h-a/telemetry/x/m1", 4, None, now);
+        t.record("v1/h-a/state/x/health", 4, None, now);
+        t.record("v1/h-b/telemetry/y/m2", 4, None, now);
+
+        // Release the telemetry watch, but keep watching h-a entirely.
+        let retired = t.retire_unwatched("v1/*/telemetry/**", &["v1/h-a/**".to_string()]);
+        assert_eq!(retired, 1, "only h-b's telemetry loses coverage");
+        assert!(
+            t.get("v1/h-a/telemetry/x/m1").is_some(),
+            "still covered by kept"
+        );
+        assert!(t.get("v1/h-b/telemetry/y/m2").is_none());
+        assert_eq!(t.unwatched(), 1);
+
+        // Release the rest: everything goes, and the ledger adds up.
+        let retired = t.retire_unwatched("**", &[]);
+        assert_eq!(retired, 2);
+        assert_eq!(t.len(), 0);
+        assert_eq!(t.unwatched(), 3);
+    }
+
+    /// A selector that is not a valid keyexpr covers nothing — no panic, no
+    /// accidental mass retirement.
+    #[test]
+    fn retire_unwatched_tolerates_bad_selectors() {
+        let mut t = StatsTable::new();
+        t.record("a/b", 1, None, Instant::now());
+        assert_eq!(t.retire_unwatched("", &[]), 0);
+        assert_eq!(t.len(), 1);
     }
 }

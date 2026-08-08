@@ -48,6 +48,9 @@ pub enum FleetEvent {
     NodeDown(String),
     /// The tree snapshot was rebuilt — pull it via [`Monitor::tree`].
     StatsTick,
+    /// The watch set changed ([`Monitor::watch`]/[`Monitor::unwatch`]) —
+    /// coverage labels should refresh; pull the set via [`Monitor::watched`].
+    WatchChanged,
 }
 
 /// What to watch.
@@ -155,6 +158,17 @@ impl MonitorCore {
         f(&self.stats.lock().expect("stats lock"))
     }
 
+    /// Mutable access — watch retirement and tests.
+    pub fn with_stats_mut<R>(&self, f: impl FnOnce(&mut StatsTable) -> R) -> R {
+        f(&mut self.stats.lock().expect("stats lock"))
+    }
+
+    /// Keys retired from the table because their watch was released
+    /// (RFC 09 §5.1 O6 — see [`crate::stats::StatsTable::unwatched`]).
+    pub fn keys_unwatched(&self) -> u64 {
+        self.with_stats(|s| s.unwatched())
+    }
+
     /// Total events dropped across all lagging receivers so far.
     pub fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
@@ -207,40 +221,39 @@ impl EventStream {
     }
 }
 
-/// The wired monitor: subscribers + liveliness + tick task feeding a core.
+/// Opaque handle naming one active watch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct WatchId(u64);
+
+struct WatchEntry {
+    selector: String,
+    subscriber: zenoh::pubsub::Subscriber<()>,
+}
+
+/// The wired monitor: a runtime-mutable watch set + liveliness + tick task
+/// feeding a core.
+///
+/// **Lazy by construction** (issue #84): `start` with empty
+/// `spec.selectors` declares *no data-plane subscribers at all* — only the
+/// zero-payload liveliness watches and the tick. Data flows only for what
+/// [`Monitor::watch`] was asked to observe, and [`Monitor::unwatch`]
+/// provably undeclares (an explicit, awaited undeclaration — not a dropped
+/// handle racing the network).
 pub struct Monitor {
     core: Arc<MonitorCore>,
+    session: Session,
+    watches: tokio::sync::Mutex<std::collections::HashMap<WatchId, WatchEntry>>,
+    next_watch: AtomicU64,
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl Monitor {
     /// Declare the spec's subscribers on `session` and start watching.
+    /// `spec.selectors` are simply the *initial* watches — `[]` is the lazy
+    /// start.
     pub async fn start(session: &Session, spec: MonitorSpec) -> Result<Monitor> {
         let core = MonitorCore::bounded(spec.capacity, spec.max_keys);
         let mut tasks = Vec::new();
-
-        for selector in &spec.selectors {
-            let subscriber = session
-                .declare_subscriber(selector)
-                .await
-                .map_err(|e| anyhow!("subscribe {selector}: {e}"))?;
-            let core = Arc::clone(&core);
-            tasks.push(tokio::spawn(async move {
-                while let Ok(sample) = subscriber.recv_async().await {
-                    let sn = sample.source_info().map(|si| si.source_sn());
-                    core.ingest(
-                        SampleView {
-                            key: sample.key_expr().as_str().to_string(),
-                            payload: sample.payload().clone(),
-                            encoding: sample.encoding().to_string(),
-                            kind: sample.kind(),
-                            timestamp: sample.timestamp().copied(),
-                        },
-                        sn,
-                    );
-                }
-            }));
-        }
 
         for liveliness_sel in &spec.liveliness {
             let subscriber = session
@@ -271,7 +284,95 @@ impl Monitor {
             }));
         }
 
-        Ok(Monitor { core, tasks })
+        let monitor = Monitor {
+            core,
+            session: session.clone(),
+            watches: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            next_watch: AtomicU64::new(0),
+            tasks,
+        };
+        for selector in &spec.selectors {
+            monitor.watch(selector).await?;
+        }
+        Ok(monitor)
+    }
+
+    /// Observe a selector: declares a callback subscriber feeding the core.
+    ///
+    /// The callback runs on zenoh's network thread and does exactly what the
+    /// old per-selector task did — one stats lock, one bounded broadcast
+    /// send — so a slow UI still cannot exert backpressure into the network
+    /// layer beyond the channel's bound.
+    pub async fn watch(&self, selector: &str) -> Result<WatchId> {
+        let core = Arc::clone(&self.core);
+        let subscriber = self
+            .session
+            .declare_subscriber(selector)
+            .callback(move |sample| {
+                let sn = sample.source_info().map(|si| si.source_sn());
+                core.ingest(
+                    SampleView {
+                        key: sample.key_expr().as_str().to_string(),
+                        payload: sample.payload().clone(),
+                        encoding: sample.encoding().to_string(),
+                        kind: sample.kind(),
+                        timestamp: sample.timestamp().copied(),
+                    },
+                    sn,
+                );
+            })
+            .await
+            .map_err(|e| anyhow!("subscribe {selector}: {e}"))?;
+        let id = WatchId(self.next_watch.fetch_add(1, Ordering::Relaxed));
+        self.watches.lock().await.insert(
+            id,
+            WatchEntry {
+                selector: selector.to_string(),
+                subscriber,
+            },
+        );
+        let _ = self.core.tx.send(FleetEvent::WatchChanged);
+        Ok(id)
+    }
+
+    /// Stop observing: undeclares the subscriber (awaited to completion — the
+    /// teardown is acknowledged, not racing a drop), then retires statistics
+    /// for keys no remaining watch covers. Retired keys are **counted**
+    /// ([`crate::stats::StatsTable::unwatched`]): a shrinking key set must
+    /// never read as a quieting bus (RFC 09 §5.1 O6).
+    pub async fn unwatch(&self, id: WatchId) -> Result<()> {
+        let entry = {
+            let mut watches = self.watches.lock().await;
+            watches
+                .remove(&id)
+                .ok_or_else(|| anyhow!("unknown watch id {id:?}"))?
+        };
+        entry
+            .subscriber
+            .undeclare()
+            .await
+            .map_err(|e| anyhow!("undeclare {}: {e}", entry.selector))?;
+        let kept: Vec<String> = {
+            let watches = self.watches.lock().await;
+            watches.values().map(|w| w.selector.clone()).collect()
+        };
+        self.core.with_stats_mut(|stats| {
+            stats.retire_unwatched(&entry.selector, &kept);
+        });
+        self.core.tick();
+        let _ = self.core.tx.send(FleetEvent::WatchChanged);
+        Ok(())
+    }
+
+    /// The active watch set.
+    pub async fn watched(&self) -> Vec<(WatchId, String)> {
+        let watches = self.watches.lock().await;
+        let mut v: Vec<(WatchId, String)> = watches
+            .iter()
+            .map(|(id, w)| (*id, w.selector.clone()))
+            .collect();
+        v.sort();
+        v
     }
 
     pub fn core(&self) -> &Arc<MonitorCore> {

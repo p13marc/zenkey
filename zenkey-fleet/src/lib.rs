@@ -20,6 +20,7 @@ pub mod registry;
 pub mod report;
 pub mod roster;
 pub mod session;
+pub mod skeleton;
 pub mod stats;
 pub mod sub;
 pub mod tree;
@@ -31,12 +32,19 @@ pub use admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,
     storages,
 };
+pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
 pub use context_store::StoredContext;
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
-pub use query::{Answer, FleetAnswer, StateSample, fleet_get, fleet_registry, state_snapshot};
+pub use query::{
+    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, StateSample, ValueSource,
+    fetch_value, fleet_get, fleet_registry, state_snapshot,
+};
 pub use registry::SliceSet;
 pub use roster::roster;
 pub use session::open;
-pub use sub::{EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem};
+pub use skeleton::{MergedNode, NodeStatus, Skeleton};
+pub use sub::{
+    EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem, WatchId,
+};
 pub use tree::KeyTreeSnapshot;
