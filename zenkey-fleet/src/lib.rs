@@ -42,7 +42,7 @@ pub use query::{
     fetch_value, fleet_get, fleet_registry, state_snapshot,
 };
 pub use registry::SliceSet;
-pub use roster::roster;
+pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
 pub use session::open;
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use sub::{
