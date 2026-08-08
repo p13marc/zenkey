@@ -1,9 +1,10 @@
 # 09 — Operations Cookbook
 
-**Status: v1.2 (ratified)** · informative chapter · *amended in v1.2 — see [00-index.md](00-index.md)*
+**Status: v1.9 (proposed)** · informative chapter, but §5.1 is normative for tools · *amended in v1.2 and v1.9 — see [00-index.md](00-index.md)*
 
 Worked recipes for the infrastructure concerns the grammar was shaped
-around: session setup, subscriptions, storage, ACL, and constrained links.
+around: session setup, subscriptions, storage, ACL, and constrained links,
+plus the obligations of tools that only read the bus (§5.1).
 Base = `zensight` throughout; substitute your deployment's base.
 
 ---
@@ -504,6 +505,79 @@ that can drift from it.
   default one, in fact — so an explorer that cannot see and name it is
   blind to the common case. `zenctl base list` implements this sweep and
   reports the empty base as `(empty)`, selected with `--base ""`.
+
+### 5.1 Observer obligations (v1.9)
+
+*Added in v1.9. The convention told tools how to read a conformant key and
+said nothing about the other three cases an explorer actually meets: a key
+under a different base, a key that is not this convention at all, and a
+question the tool has not yet asked. Each was left to be invented per tool,
+and the obvious inventions are the dishonest ones.*
+
+An **observer** is any tool that reads the bus without publishing on it —
+`zenctl`, `zengui`, a probe, a dashboard. Observers run un-namespaced (§4),
+so they see everything on the wire, including traffic this convention does
+not govern. The rules below are what keeps that honest.
+
+**O1 — A key that does not parse is a fact, not an error.** An observer
+**MUST NOT** discard, hide, or refuse a key merely because it is not
+conformant. Non-conformant traffic is not prohibited — nothing in this
+convention binds a foreign publisher, and [03 §1.2](03-grammar.md) is a rule
+about where the *convention's* keyspace lives, not a claim on the bus. An
+observer **SHOULD** present such a key with whatever it can still establish
+(its chunks, its traffic, its payload rendered structurally per
+[08 §7](08-registry.md)) and state what it could not.
+
+**O2 — Classify by degrading, in this order.** Each rung that fails weakens
+the claim rather than discarding the key:
+
+| Rung | Question | On failure |
+|---|---|---|
+| 1 | Does it sit under the configured base (`strip_base`)? | **Not under this base.** Terminal. |
+| 2 | Does the remainder parse as `v1/…` ([03 §1](03-grammar.md))? | **Unparsed**, carrying the reason. |
+| 3 | Does a registry slice refine the subject ([08 §2](08-registry.md) precedence)? | **Unregistered**, or **no slice for this producer**. |
+
+**O3 — Do not guess another deployment's base.** An observer that finds a key
+outside its configured base **MUST NOT** attribute it to a base by scanning
+left-to-right for a `v1` chunk: a subject tail has no fixed arity, and a base
+may itself contain a literal `v1`. Naming other bases is the §5 sweep's job,
+which attributes fixed-arity *from the right*. "Not under this base" is the
+honest terminal answer.
+
+**O4 — "Not asked" is not "answered no".** An observer **MUST** distinguish a
+question it has not put to the bus from one that was answered negatively. A
+tool with no registry loaded has learned nothing about whether a subject is
+registered, and rendering that identically to "this subject is not registered"
+reports a verdict it never obtained — [05 §3.1](05-control-rpc.md)'s rule
+applied to a badge rather than to a reply set. The same holds for a roster not
+yet seeded and a schema not yet fetched.
+
+**O5 — A wildcard scope is not total coverage, and must not be presented as
+such.** `*` and `**` never match a chunk beginning with `@` (this is what
+makes §4 D2 and D4 true). A `**` subscription therefore cannot reach `@rpc`,
+`@media`, `@blob`, `@adv` sidecars, the admin space, **or any service origin**.
+The first half is a gift — a firehose subscriber cannot accidentally pull
+video frames or bulk objects. The second is a trap: an observer scoped `**`
+sees no `@catalog` traffic *by construction*, and if it labels that scope
+"everything" then a healthy catalog and a dead one look identical. An observer
+offering a wildcard scope **MUST** either name the verbatim planes it wants
+alongside it, or state that they are excluded.
+
+**O6 — A bounded observer reports what it dropped.** Any long-running observer
+bounds something — a buffer, a scrollback, a key table — and an unbounded one
+is merely a leak with better manners. Whatever the bound, the tool **MUST**
+report what it cost: samples missed while it was behind, and keys or lines
+retired to stay within the bound, counted separately, because "we could not
+keep up" and "we chose to forget" are different facts about the same window. A
+view that silently shrinks is indistinguishable from a bus that went quiet.
+
+> **Where this came from.** Every rule above is a mistake that was made and
+> caught while building `zengui` against this convention, not a hypothetical.
+> O2 and O4 replaced a boolean "registered" flag that rendered "no registry
+> loaded" as "unregistered". O3 replaced a base guess. O5 replaced a design
+> that had defended against `@media` frames arriving through a `**` scope —
+> which cannot happen — while missing that the same scope silently hid
+> `@catalog`.
 
 ## 6. Cutover acceptance
 
