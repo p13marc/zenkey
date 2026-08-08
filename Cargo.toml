@@ -28,6 +28,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
+toml = "0.8"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
@@ -54,4 +55,4 @@ async-stream = "0.3"
 # Internal
 zenkey = { version = "0.4.0", path = "zenkey" }
 zenkey-build = { version = "0.4.0", path = "zenkey-build" }
-zenkey-fleet = { version = "0.4.0", path = "zenkey-fleet" }
+zenkey-fleet = { version = "0.5.0", path = "zenkey-fleet" }

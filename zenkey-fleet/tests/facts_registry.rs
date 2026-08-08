@@ -1,13 +1,14 @@
 //! The registry half of the RFC overlay, against a real registry.
 //!
+//! Moved from zengui with the facts module (issue #34).
 //! Uses `fixture-tests/registry` — the ZenSight snapshot this repo keeps as the
 //! codegen regression corpus — so these assertions are made against registry
 //! TOMLs that actually shipped, not hand-rolled fixtures.
 
 use std::path::PathBuf;
 
-use zengui::keyfacts::{KeyFacts, Registration};
 use zenkey_fleet::SliceSet;
+use zenkey_fleet::facts::{KeyFacts, Registration};
 
 fn slices() -> SliceSet {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");

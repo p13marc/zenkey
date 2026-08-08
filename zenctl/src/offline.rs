@@ -1,7 +1,7 @@
 //! The slice-driven half: everything answerable from a set of registry slices.
 //!
 //! A slice is a slice regardless of where it was read — each producer's served
-//! `introspect` reply off the live bus ([`crate::bus::fleet_registry`]), or a
+//! `introspect` reply off the live bus (`zenkey_fleet::fleet_registry`), or a
 //! local `registry/*.toml` file (`--registry <dir>`, [`load_slices`]). Every
 //! renderer here takes `&[RegistrySlice]` and is source-agnostic; nothing
 //! app-specific is compiled in.
@@ -75,113 +75,16 @@ pub fn topic_list(
 /// **structurally** (grammar only), then its subject tail is matched against
 /// the producer's slice, binding variables by name — which is why the output
 /// can say `mount=root` rather than `parts[6]`.
-pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> Result<TopicInfo> {
-    use zenkey::grammar::ClassOrPlane;
-
-    let Some(parsed) = zenkey::grammar::parse_full(base, key) else {
-        return Err(anyhow!(
-            "not a v1 key under base {base:?}. Expected \
-             <base>/v1/<origin>/<class>/<producer>/<subject...> (RFC 03 §1)."
-        ));
-    };
-    let class = match &parsed.class {
-        ClassOrPlane::Class(c) => *c,
-        ClassOrPlane::Plane(p) => {
-            return Err(anyhow!(
-                "key is on the {} plane, not a data class — topic info describes \
-                 telemetry/state/events subjects (RFC 03 §1.5).",
-                p.chunk()
-            ));
-        }
-    };
-    // Host keys name their producer in position 4; a service origin (`@catalog`)
-    // *is* the producer, and its slice declares that origin.
-    let producer = match parsed.producer.as_ref() {
-        Some(p) => p.name().to_string(),
-        None => {
-            let origin = parsed.origin.chunk();
-            match slices
-                .iter()
-                .find(|s| s.service_origin.as_deref() == Some(origin))
-            {
-                Some(s) => s.name.clone(),
-                None => {
-                    return Err(anyhow!(
-                        "no registry slice declares service origin {origin:?} — \
-                         `zenctl topic list` lists what is known."
-                    ));
-                }
-            }
-        }
-    };
-    let tail: &[&str] = &parsed.subject;
-
-    let Some(slice) = slices.iter().find(|s| s.name == producer) else {
-        return Err(anyhow!(
-            "no registry slice for producer {producer:?} — `zenctl node list --base {base}` \
-             says who is up; `--registry <dir>` supplies local slices offline."
-        ));
-    };
-
-    let hit = slice.subjects.iter().find_map(|s| {
-        if s.class != class.chunk() {
-            return None;
-        }
-        match_subject(&s.path, tail).map(|vars| (s, vars))
-    });
-    let Some((subject, vars)) = hit else {
-        return Err(anyhow!(
-            "producer {producer:?} serves no {} subject matching {:?} — a subject that is not \
-             registered does not exist (RFC 08). `zenctl topic list --base {base}` lists what it \
-             does serve.",
-            class.chunk(),
-            tail.join("/")
-        ));
-    };
-
-    Ok(TopicInfo {
-        key: key.to_string(),
-        origin: parsed.origin.chunk().to_string(),
-        producer,
-        class: subject.class.clone(),
-        subject: subject.path.clone(),
-        variables: vars.into_iter().collect(),
-        payload_type: subject.type_name.clone(),
-        unit: subject.unit.clone(),
-        qos: subject.qos.clone(),
-        ttl_s: subject.ttl_s,
-        rate: subject.rate.clone(),
-        cardinality: subject.cardinality,
-        encoding: subject.encoding.clone(),
-        since: subject.since.clone(),
-        description: subject.description.clone(),
-    })
+pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> TopicInfo {
+    // Infallible since issue #34: the engine's describe_key implements the
+    // RFC 09 §5.1 O1/O2 ladder (a non-conformant key is a fact, not an
+    // error) with SliceSet::refine's most-literal-first precedence — the old
+    // local matcher scanned in declaration order and could disagree with
+    // generated consumers.
+    let set = zenkey_fleet::SliceSet::from_slices(slices.to_vec());
+    TopicInfo::from_description(&zenkey_fleet::describe_key(base, key, Some(&set)))
 }
 
-/// Match a concrete subject tail against a registry pattern, binding variables.
-///
-/// `{var}` matches exactly one chunk; a trailing `{var...}` matches the whole
-/// remainder (RFC 03 §1.4's rest-variable). Returns the bindings on a match, or
-/// `None` if the shapes disagree — the slice-level equivalent of a compiled
-/// registry's parse direction, done without a compiled subject.
-pub fn match_subject(pattern: &str, tail: &[&str]) -> Option<Vec<(String, String)>> {
-    // Delegates to `zenkey::pattern` (v1.5, issue #7): the same matcher the
-    // codegen orders its parse arms by, so this tool and generated consumers
-    // can never disagree on which pattern a tail refines to. (The previous
-    // local copy here allowed an *empty* rest — a real divergence from the
-    // generated semantics, which require >= 1 chunk. The shared matcher is
-    // authoritative.)
-    let p = zenkey::pattern::SubjectPattern::parse(pattern).ok()?;
-    Some(
-        p.matches(tail)?
-            .into_iter()
-            .map(|(name, value)| (name.to_string(), value))
-            .collect(),
-    )
-}
-
-/// `service list` — every registered procedure on the `@rpc` plane, from the
-/// given slices.
 pub fn service_list(slices: &[RegistrySlice], producer: Option<&str>) -> Result<ServiceList> {
     let mut procedures = Vec::new();
     for slice in slices {
@@ -371,12 +274,12 @@ mod tests {
 
         // A concrete foreign key refines against the served slice, binding the
         // `{iface}` variable.
-        topic_info(
+        let info = topic_info(
             "tcgui",
             "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
             &slices,
-        )
-        .unwrap();
+        );
+        assert_eq!(info.verdict, crate::report::TopicVerdict::Registered);
     }
 
     /// A slice that declares `[[blob]]` (RFC 08 §2, v1.8) is readable by a
@@ -438,9 +341,9 @@ mod tests {
             "tcgui",
             "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
             &slices,
-        )
-        .unwrap();
+        );
         let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["verdict"], "registered");
         assert_eq!(json["variables"]["iface"], "eth0");
         assert_eq!(json["payload_type"], "NetworkInterface");
         assert_eq!(json["ttl_s"], 30);
@@ -451,43 +354,39 @@ mod tests {
         assert_eq!(json["procedures"][0]["reply"], "Ack");
     }
 
+    /// O1 (RFC 09 §5.1, issue #34): a non-conformant key is a *described*
+    /// fact, not an error. The old builder bailed here.
     #[test]
-    fn topic_info_rejects_a_non_v1_key() {
-        let err = topic_info("tcgui", "tcgui/tc/eth0/state", &tcgui_slices()).unwrap_err();
-        assert!(err.to_string().contains("not a v1 key"), "got: {err}");
+    fn topic_info_describes_a_non_v1_key_instead_of_rejecting_it() {
+        use crate::report::TopicVerdict;
+        let info = topic_info("tcgui", "tcgui/tc/eth0/state", &tcgui_slices());
+        assert_eq!(info.verdict, TopicVerdict::NotV1);
+        assert!(info.note.contains("fact, not an error"), "{}", info.note);
+        assert!(
+            info.payload_type.is_none(),
+            "nothing below the rung is invented"
+        );
     }
 
-    /// "A subject that is not registered does not exist" — the error says so.
+    /// "A subject that is not registered does not exist" — the verdict says
+    /// so, while the structural facts stay present.
     #[test]
     fn topic_info_reports_unregistered_subjects() {
-        let err = topic_info(
+        use crate::report::TopicVerdict;
+        let info = topic_info(
             "tcgui",
             "tcgui/v1/h-3fa9c2d41b7e/state/tc/not_a_real_subject",
             &tcgui_slices(),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("not"), "got: {err}");
+        );
+        assert_eq!(info.verdict, TopicVerdict::Unregistered);
+        assert_eq!(info.producer.as_deref(), Some("tc"));
+        assert!(info.payload_type.is_none());
     }
 
     #[test]
     fn unknown_class_is_rejected() {
         let err = topic_list(&tcgui_slices(), None, Some("alerts")).unwrap_err();
         assert!(err.to_string().contains("unknown class"), "got: {err}");
-    }
-
-    /// The subject-tail matcher binds `{var}` and trailing `{var...}`, and
-    /// rejects shape mismatches — the slice-level parse direction.
-    #[test]
-    fn subject_matcher_binds_and_rejects() {
-        let vars = match_subject("iface/{iface}/state", &["iface", "eth0", "state"]).unwrap();
-        assert_eq!(vars, vec![("iface".to_string(), "eth0".to_string())]);
-
-        let rest = match_subject("dev/{path...}", &["dev", "a", "b", "c"]).unwrap();
-        assert_eq!(rest, vec![("path".to_string(), "a/b/c".to_string())]);
-
-        // Literal chunk mismatch and length mismatch both fail.
-        assert!(match_subject("health", &["health", "extra"]).is_none());
-        assert!(match_subject("iface/{iface}/state", &["iface", "eth0"]).is_none());
     }
 
     #[test]
@@ -516,11 +415,12 @@ mod tests {
             "#,
         )
         .unwrap();
-        topic_info(
+        let info = topic_info(
             "acme",
             "acme/v1/@catalog/state/entity/h-3fa9c2d41b7e",
             &[catalog],
-        )
-        .unwrap();
+        );
+        assert_eq!(info.verdict, crate::report::TopicVerdict::Registered);
+        assert_eq!(info.subject.as_deref(), Some("entity/{entity_id}"));
     }
 }

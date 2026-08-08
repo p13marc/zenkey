@@ -24,7 +24,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   module (deduped `Tier` enum across all declaring producers, typed key
   builders, the probe form).
 - `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0, crates.io): the
-  shared core of zenctl and the future zengui — `fleet_get` (the RFC 05 §2.1
+  shared core of zenctl and zengui — `fleet_get` (the RFC 05 §2.1
   chokepoint, moved verbatim from zenctl), `SliceSet`, the RFC 08 §7
   schema-decode pipeline (`SchemaStore`/`decode_sample`), `Monitor` with
   bounded broadcast + `Dropped(n)` honesty and ArcSwap key-tree snapshots.
@@ -166,11 +166,12 @@ live files in the application repos):
 
 ### zenctl: source-parameterized, app-neutral
 
-Registry slices come from the live bus (`bus::fleet_registry`, RFC 08 §6) or
+Registry slices come from the live bus (`zenkey_fleet::fleet_registry`, RFC 08 §6) or
 `--registry <dir>` (offline TOMLs) — every renderer takes `&[RegistrySlice]`
 and is source-agnostic. Payloads render generically (JSON / CBOR→JSON
 diagnostic / text / hex, tagged with the slice-declared type). Bus discipline
-(RFC 05, `zenctl/src/bus.rs`): every fleet GET goes through `bus::fleet_get`
+(RFC 05, `zenkey-fleet/src/query.rs`): every fleet GET goes through
+`zenkey_fleet::fleet_get`
 (target `All`, consolidation `None`, attribution by reply key). Silence is
 never a verdict. Scouting is opt-in.
 

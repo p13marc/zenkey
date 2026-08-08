@@ -86,21 +86,38 @@ pub fn topic_list(report: &TopicList, format: Format) -> Result<()> {
 
 pub fn topic_info(report: &TopicInfo, format: Format) -> Result<()> {
     match format.resolved() {
-        Format::Json | Format::Ndjson => json_doc(report),
+        Format::Json | Format::Ndjson => {
+            json_doc(report);
+            Ok(())
+        }
         _ => {
             println!("key       {}", report.key);
-            println!("origin    {}", report.origin);
-            println!("producer  {}", report.producer);
-            println!("class     {}", report.class);
-            println!("subject   {}", report.subject);
+            println!("verdict   {:?}", report.verdict);
+            if !report.note.is_empty() {
+                println!("          {}", report.note);
+            }
+            if let Some(origin) = &report.origin {
+                println!("origin    {origin}");
+            }
+            if let Some(producer) = &report.producer {
+                println!("producer  {producer}");
+            }
+            if let Some(class) = &report.class {
+                println!("class     {class}");
+            }
+            if let Some(subject) = &report.subject {
+                println!("subject   {subject}");
+            }
             if !report.variables.is_empty() {
                 println!("variables");
                 for (name, value) in &report.variables {
                     println!("  {name} = {value}");
                 }
             }
-            println!("payload   {}", report.payload_type);
-            println!("  (schema lives with the owning application — RFC 08 §5)");
+            if let Some(payload) = &report.payload_type {
+                println!("payload   {payload}");
+                println!("  (schema lives with the owning application — RFC 08 §5)");
+            }
             if let Some(unit) = &report.unit {
                 println!("unit      {unit}");
             }
@@ -116,23 +133,22 @@ pub fn topic_info(report: &TopicInfo, format: Format) -> Result<()> {
             if let Some(rate) = &report.rate {
                 println!("rate      {rate}");
             }
-            if let Some(c) = report.cardinality {
-                println!("cardinality  ~{c} keys expected");
+            if let Some(cardinality) = report.cardinality {
+                println!("cardinality  {cardinality}");
             }
-            if let Some(e) = &report.encoding {
-                println!("encoding  {e}");
+            if let Some(encoding) = &report.encoding {
+                println!("encoding  {encoding}");
             }
             if let Some(since) = &report.since {
                 println!("since     {since}");
             }
-            if let Some(desc) = &report.description {
-                println!("note      {desc}");
+            if let Some(description) = &report.description {
+                println!("about     {description}");
             }
+            Ok(())
         }
     }
-    Ok(())
 }
-
 pub fn service_list(report: &ServiceList, format: Format) -> Result<()> {
     match format.resolved() {
         Format::Json => json_doc(report),

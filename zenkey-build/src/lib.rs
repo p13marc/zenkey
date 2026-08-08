@@ -162,7 +162,6 @@ pub(crate) struct RegistryFile {
     pub toml_path: String,
     pub subjects: Vec<SubjectEntry>,
     pub procedures: Vec<ProcedureEntry>,
-    #[allow(dead_code)] // consumed by the media-codegen commit (#10)
     pub media: Vec<MediaEntry>,
     pub blob: Vec<BlobEntry>,
     pub deprecated: Vec<String>,
