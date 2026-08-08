@@ -139,6 +139,7 @@ pub async fn run(
     rate: bool,
     no_decode: bool,
     count: usize,
+    seed: bool,
     args: &BusArgs,
 ) -> Result<()> {
     let selector = match selector {
@@ -162,19 +163,36 @@ pub async fn run(
     // uses, so a bus that outruns this terminal surfaces as an explicit
     // dropped count instead of invisible loss (RFC 09 §5.1 O6). This is also
     // the §6.3 promise kept: the CLI validates the engine's path.
-    let monitor = zenkey_fleet::Monitor::start(
-        &session,
-        zenkey_fleet::MonitorSpec {
-            selectors: vec![selector.clone()],
-            ..Default::default()
-        },
-    )
-    .await?;
+    // --seed makes the watch a seeded one (issue #92): the monitor declares
+    // the subscriber first, then pulls both seed paths through one LWW merge;
+    // the boundary event separates seeded state from live traffic.
+    let monitor =
+        zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default()).await?;
     let mut events = monitor.events();
+    if seed {
+        monitor
+            .watch_seeded(
+                &selector,
+                zenkey_fleet::SeedPolicy {
+                    timeout: args.timeout(),
+                    ..Default::default()
+                },
+            )
+            .await?;
+    } else {
+        monitor.watch(&selector).await?;
+    }
 
     let ndjson = matches!(args.format.resolved(), output::Format::Ndjson);
     if !ndjson {
-        eprintln!("echoing {selector} (ctrl-c to stop)");
+        eprintln!(
+            "echoing {selector}{} (ctrl-c to stop)",
+            if seed {
+                " (seeding current state…)"
+            } else {
+                ""
+            }
+        );
     }
     let mut seen = 0usize;
     let mut dropped_total = 0u64;
@@ -186,6 +204,28 @@ pub async fn run(
                     println!("{}", serde_json::json!({ "dropped": n }));
                 } else {
                     eprintln!("-- dropped {n} sample(s): the bus outran us --");
+                }
+                continue;
+            }
+            zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::WatchSeeded {
+                coverage,
+                ..
+            }) => {
+                // The boundary, rendered per O4: which paths ran and what
+                // each yielded — zeros are observations, not verdicts.
+                if ndjson {
+                    println!("{}", serde_json::json!({ "seed_complete": coverage }));
+                } else {
+                    let path = |n: Option<usize>, what: &str| match n {
+                        Some(n) => format!("{n} {what}"),
+                        None => format!("{what} path off"),
+                    };
+                    eprintln!(
+                        "-- seed complete: {} · {} · {} superseded — live from here --",
+                        path(coverage.history_replies, "from caches"),
+                        path(coverage.storage_replies, "from storage"),
+                        coverage.superseded,
+                    );
                 }
                 continue;
             }

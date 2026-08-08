@@ -226,6 +226,12 @@ enum TopicCmd {
         /// Stop after this many samples (0 = run until interrupted).
         #[arg(long, default_value_t = 0)]
         count: usize,
+        /// Seed current state before going live (RFC 04 §3.2, issue #92):
+        /// subscribe first, then pull publishers' caches and router storages
+        /// through one LWW merge; a boundary line marks where the seed ends
+        /// and live begins.
+        #[arg(long)]
+        seed: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -587,6 +593,7 @@ async fn main() -> Result<()> {
             rate,
             no_decode,
             count,
+            seed,
             bus,
         }) => {
             cmd::echo::run(
@@ -600,6 +607,7 @@ async fn main() -> Result<()> {
                 rate,
                 no_decode,
                 count,
+                seed,
                 &bus,
             )
             .await

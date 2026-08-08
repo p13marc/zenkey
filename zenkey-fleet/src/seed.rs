@@ -115,13 +115,27 @@ impl SeededSubscriber {
 /// unstamped; unstamped-vs-unstamped passes through (nothing to compare — a
 /// deployment without timestamping has opted out of LWW, RFC 04 §4, and
 /// suppressing would be guessing).
-struct Merge {
+///
+/// `pub(crate)`: [`crate::Monitor::watch_seeded`] runs the same merge over
+/// its seed phase (issue #92) — one discipline, not two.
+pub(crate) struct Merge {
     latest: Mutex<HashMap<String, Option<zenoh::time::Timestamp>>>,
     superseded: std::sync::atomic::AtomicU64,
 }
 
 impl Merge {
-    fn admit(&self, view: &SampleView) -> bool {
+    pub(crate) fn new() -> Merge {
+        Merge {
+            latest: Mutex::new(HashMap::new()),
+            superseded: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    pub(crate) fn superseded(&self) -> u64 {
+        self.superseded.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn admit(&self, view: &SampleView) -> bool {
         let mut latest = self.latest.lock().expect("merge lock");
         let entry = latest.entry(view.key.clone()).or_insert(None);
         let admit = match (&entry, &view.timestamp) {
@@ -141,7 +155,7 @@ impl Merge {
     }
 }
 
-fn view_of(sample: &zenoh::sample::Sample) -> SampleView {
+pub(crate) fn view_of(sample: &zenoh::sample::Sample) -> SampleView {
     SampleView {
         key: sample.key_expr().as_str().to_string(),
         payload: sample.payload().clone(),
@@ -151,13 +165,14 @@ fn view_of(sample: &zenoh::sample::Sample) -> SampleView {
     }
 }
 
-/// Run one seed GET; every reply passes the merge; returns the reply count.
-async fn seed_get(
+/// Run one seed GET; every reply passes the merge; admitted samples go to
+/// `deliver`; returns the reply count.
+pub(crate) async fn seed_get(
     session: &Session,
     selector: &str,
     timeout: Duration,
     merge: &Merge,
-    tx: &tokio::sync::mpsc::UnboundedSender<SeedItem>,
+    mut deliver: impl FnMut(SampleView),
 ) -> usize {
     let mut n = 0usize;
     if let Ok(replies) = session
@@ -175,11 +190,17 @@ async fn seed_get(
             n += 1;
             let view = view_of(sample);
             if merge.admit(&view) {
-                let _ = tx.send(SeedItem::Sample(view));
+                deliver(view);
             }
         }
     }
     n
+}
+
+/// The history-path selector for a data selector (the `fetch_value` cache
+/// rung, applied to a whole subtree).
+pub(crate) fn cache_selector(selector: &str) -> String {
+    format!("{selector}/@adv/**")
 }
 
 /// Subscribe with a correct seed phase (RFC 04 §3.2).
@@ -198,10 +219,7 @@ pub async fn seed_subscribe(
     policy: SeedPolicy,
 ) -> Result<SeededSubscriber> {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SeedItem>();
-    let merge = Arc::new(Merge {
-        latest: Mutex::new(HashMap::new()),
-        superseded: std::sync::atomic::AtomicU64::new(0),
-    });
+    let merge = Arc::new(Merge::new());
 
     // 1) The subscriber, FIRST — anything published from here on is caught.
     let subscriber = session
@@ -228,15 +246,25 @@ pub async fn seed_subscribe(
         tokio::spawn(async move {
             let history = async {
                 if policy.history {
-                    let cache_selector = format!("{selector}/@adv/**");
-                    Some(seed_get(&session, &cache_selector, policy.timeout, &merge, &tx).await)
+                    let sel = cache_selector(&selector);
+                    Some(
+                        seed_get(&session, &sel, policy.timeout, &merge, |view| {
+                            let _ = tx.send(SeedItem::Sample(view));
+                        })
+                        .await,
+                    )
                 } else {
                     None
                 }
             };
             let storage = async {
                 if policy.storage {
-                    Some(seed_get(&session, &selector, policy.timeout, &merge, &tx).await)
+                    Some(
+                        seed_get(&session, &selector, policy.timeout, &merge, |view| {
+                            let _ = tx.send(SeedItem::Sample(view));
+                        })
+                        .await,
+                    )
                 } else {
                     None
                 }
@@ -245,7 +273,7 @@ pub async fn seed_subscribe(
             let _ = tx.send(SeedItem::SeedComplete(SeedCoverage {
                 history_replies,
                 storage_replies,
-                superseded: merge.superseded.load(std::sync::atomic::Ordering::Relaxed),
+                superseded: merge.superseded(),
             }));
         })
     };

@@ -114,6 +114,9 @@ pub struct BusTick {
     pub keys_unwatched: u64,
     /// The active watch selectors — the coverage statement (O5).
     pub watched: Vec<String>,
+    /// Seed boundaries that fired during this tick (issue #92): each seeded
+    /// watch's id and what its seed paths contributed.
+    pub seeded: Vec<(WatchId, zenkey_fleet::SeedCoverage)>,
     /// `(samples, bytes, rate_hz)` across everything watched.
     pub totals: (u64, u64, f64),
 }

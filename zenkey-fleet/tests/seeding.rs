@@ -266,3 +266,82 @@ async fn a_transition_in_the_seed_window_lands_exactly_once() {
         "the in-window transition lands exactly once, inside the seed phase"
     );
 }
+
+/// Issue #92's acceptance: a seeded watch on `…/state/**` against a
+/// publisher whose cached value predates the watch shows that value without
+/// waiting for a refresh — through the monitor's own bounded broadcast, with
+/// the boundary as a typed event carrying this watch's id and coverage.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_seeded_watch_shows_pre_existing_state() {
+    let a = timestamping_listener(7474).await;
+    let b = zenkey_fleet::session::open(&["tcp/127.0.0.1:7474".to_string()], &[], false)
+        .await
+        .expect("consumer session");
+    let publisher = a
+        .declare_publisher("wseed/state/health")
+        .cache(zenoh_ext::CacheConfig::default().max_samples(1))
+        .await
+        .expect("advanced publisher");
+    publisher.put("cached-before-watch").await.expect("put");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let monitor = zenkey_fleet::Monitor::start(&b, zenkey_fleet::MonitorSpec::default())
+        .await
+        .expect("monitor");
+    let mut events = monitor.events();
+    let id = monitor
+        .watch_seeded(
+            "wseed/state/**",
+            SeedPolicy {
+                timeout: Duration::from_millis(800),
+                ..SeedPolicy::default()
+            },
+        )
+        .await
+        .expect("seeded watch");
+
+    // Drain until the boundary; the cached value must arrive before it.
+    let mut seen = Vec::new();
+    let coverage = loop {
+        let item = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("boundary within 5s")
+            .expect("stream alive");
+        match item {
+            zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) => {
+                seen.push(String::from_utf8_lossy(&s.payload.to_bytes()).to_string());
+            }
+            zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::WatchSeeded {
+                id: seeded,
+                coverage,
+            }) => {
+                assert_eq!(seeded, id, "the boundary names the watch it closes");
+                break coverage;
+            }
+            _ => {}
+        }
+    };
+    assert_eq!(
+        seen,
+        ["cached-before-watch"],
+        "pre-existing state arrives without waiting for a refresh"
+    );
+    assert_eq!(coverage.history_replies, Some(1));
+    assert_eq!(coverage.storage_replies, Some(0));
+
+    // …and the seeded key is already in the tree at the boundary tick.
+    assert_eq!(monitor.tree().keys, 1);
+
+    // Live samples keep flowing after the boundary (the merge is gone).
+    publisher.put("live-after").await.expect("live put");
+    loop {
+        let item = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("live within 5s")
+            .expect("stream alive");
+        if let zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) = item {
+            assert_eq!(s.payload.to_bytes().as_ref(), b"live-after");
+            break;
+        }
+    }
+}
