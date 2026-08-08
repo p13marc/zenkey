@@ -6,6 +6,7 @@ members = [
     "zenkey-fleet",
     "fixture-tests",
     "zenctl",
+    "zengui",
 ]
 
 [workspace.package]
@@ -40,6 +41,15 @@ base64 = "0.22"
 prost = "0.13"
 prost-reflect = { version = "0.15", features = ["serde"] }
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+# GUI (zengui only). The `tokio` feature makes iced drive its subscriptions on a
+# tokio runtime, which is what lets the Zenoh link stream live inside an
+# `iced::Subscription`. Deliberately *not* `sipper`/`advanced`: the link is an
+# `async_stream` yielding `Message` directly (zensight's shape), not tcgui's
+# sipper-plus-remap.
+iced = { version = "0.14", features = ["tokio"] }
+iced_test = "0.14"
+async-stream = "0.3"
 
 # Internal
 zenkey = { version = "0.4.0", path = "zenkey" }
