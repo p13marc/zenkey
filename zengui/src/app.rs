@@ -31,6 +31,13 @@ use crate::view::tokens::space;
 /// Cap on tree rows built per flatten.
 const MAX_ROWS: usize = 2000;
 
+/// The right-hand pane switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RightPane {
+    Echo,
+    Call,
+}
+
 pub struct Zengui {
     settings: Settings,
     session: Option<zenoh::Session>,
@@ -58,6 +65,9 @@ pub struct Zengui {
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     echo_filter: String,
 
+    call_form: view::call::CallForm,
+    /// Which right-hand pane is showing.
+    right_pane: RightPane,
     facts: HashMap<String, KeyFacts>,
     slices: Option<Arc<SliceSet>>,
     slice_source: SliceSource,
@@ -96,6 +106,8 @@ impl Zengui {
             selected: None,
             fetched: None,
             echo_filter: String::new(),
+            call_form: view::call::CallForm::default(),
+            right_pane: RightPane::Echo,
             facts: HashMap::new(),
             slices: None,
             slice_source: SliceSource::None,
@@ -293,6 +305,13 @@ impl Zengui {
                     |(key, out)| Message::ValueFetched(key, out),
                 )
             }
+            Message::Call(msg) => self.update_call(msg),
+            Message::CallDone(outcome) => {
+                self.call_form.in_flight = false;
+                self.call_form.outcome =
+                    Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
+                Task::none()
+            }
             Message::EchoFilterChanged(f) => {
                 self.echo_filter = f;
                 Task::none()
@@ -301,11 +320,93 @@ impl Zengui {
                 self.echo.clear();
                 Task::none()
             }
+            Message::PaneToggled => {
+                self.right_pane = match self.right_pane {
+                    RightPane::Echo => RightPane::Call,
+                    RightPane::Call => RightPane::Echo,
+                };
+                Task::none()
+            }
             Message::Reconnect => {
                 self.my_watches.clear();
                 self.my_watch_paths.clear();
                 self.scope_watches.clear();
                 self.start_monitor()
+            }
+        }
+    }
+
+    fn update_call(&mut self, msg: view::call::CallMsg) -> Task<Message> {
+        use view::call::CallMsg;
+        match msg {
+            CallMsg::ProducerPicked(p) => {
+                self.call_form.producer = Some(p);
+                self.call_form.procedure = None;
+                Task::none()
+            }
+            CallMsg::ProcedurePicked(p) => {
+                self.call_form.procedure = Some(p);
+                Task::none()
+            }
+            CallMsg::TargetChanged(t) => {
+                self.call_form.target = t;
+                Task::none()
+            }
+            CallMsg::ParamsChanged(t) => {
+                self.call_form.params = t;
+                Task::none()
+            }
+            CallMsg::BodyChanged(t) => {
+                self.call_form.body = t;
+                Task::none()
+            }
+            CallMsg::Submit => {
+                let (Some(session), Some(producer), Some(procedure)) = (
+                    self.session.clone(),
+                    self.call_form.producer.clone(),
+                    self.call_form.procedure.clone(),
+                ) else {
+                    return Task::none();
+                };
+                let target = self.call_form.target.clone();
+                let params: Vec<String> = self
+                    .call_form
+                    .params
+                    .split(';')
+                    .filter(|p| !p.trim().is_empty())
+                    .map(str::to_string)
+                    .collect();
+                let body = if self.call_form.body.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.call_form.body.clone().into_bytes())
+                };
+                let base = self.settings.base.clone();
+                let timeout = self.settings.timeout();
+                let slices = self.slices.clone();
+                self.call_form.in_flight = true;
+                self.call_form.outcome = None;
+                Task::perform(
+                    async move {
+                        let target =
+                            zenkey_fleet::CallTarget::parse(&target).map_err(|e| e.to_string())?;
+                        zenkey_fleet::call(
+                            &session,
+                            &base,
+                            &target,
+                            &producer,
+                            &procedure,
+                            &params,
+                            body,
+                            timeout,
+                            slices.as_deref(),
+                        )
+                        .await
+                        .map(Arc::new)
+                        .map_err(|e| e.to_string())
+                    },
+                    Message::CallDone,
+                )
             }
         }
     }
@@ -533,11 +634,11 @@ impl Zengui {
             ))
             .width(Length::FillPortion(1))
             .height(Length::Fill),
-            iced::widget::container(view::echo::pane(
-                &self.echo,
-                &self.echo_filter,
-                self.selected.as_deref(),
-            ))
+            iced::widget::container(match self.right_pane {
+                RightPane::Echo =>
+                    view::echo::pane(&self.echo, &self.echo_filter, self.selected.as_deref(),),
+                RightPane::Call => view::call::pane(&self.call_form, self.slices.as_deref()),
+            })
             .width(Length::FillPortion(1))
             .height(Length::Fill),
         ]
@@ -608,6 +709,15 @@ impl Zengui {
             text("scope").size(crate::view::tokens::font::CAPTION),
             scope_picker,
             observe,
+            iced::widget::button(
+                text(match self.right_pane {
+                    RightPane::Echo => "call pane",
+                    RightPane::Call => "echo pane",
+                })
+                .size(crate::view::tokens::font::CAPTION)
+            )
+            .on_press(Message::PaneToggled)
+            .padding(4),
             crate::view::kit::muted(self.settings.scope.label()),
             iced::widget::space::horizontal(),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))

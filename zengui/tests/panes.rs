@@ -165,3 +165,53 @@ fn the_empty_tree_explains_itself() {
         "the empty state must disclaim, not just name the emptiness"
     );
 }
+
+/// The call pane scaffolds from slices and labels the fanout refusal
+/// (issue #60): the visual layer of the three-layer guard.
+#[test]
+fn the_call_pane_labels_forbidden_fanout() {
+    use zengui::view::call::{CallForm, pane};
+    use zenkey::slice::{ProcedureDecl, RegistrySlice};
+
+    let slice = RegistrySlice {
+        version: "1.0".into(),
+        app: "t".into(),
+        convention: 1,
+        name: "netring".into(),
+        service_origin: None,
+        description: None,
+        subjects: vec![],
+        procedures: vec![ProcedureDecl {
+            path: "capture/trigger".into(),
+            kind: "write".into(),
+            reply: Some("Ack".into()),
+            request: None,
+            encoding: None,
+            fanout: Some("forbidden".into()),
+            idempotent: Some(false),
+            since: None,
+            description: None,
+        }],
+        blob: vec![],
+        deprecated: vec![],
+    };
+    let slices = SliceSet::from_slices(vec![slice]);
+
+    let form = CallForm {
+        producer: Some("netring".into()),
+        procedure: Some("capture/trigger".into()),
+        target: "*".into(),
+        ..CallForm::default()
+    };
+    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices)));
+    assert!(
+        ui.find("fanout = \"forbidden\" — a fleet (*) target is refused (RFC 05 §2.1)")
+            .is_ok(),
+        "the refusal must be visible before any send"
+    );
+
+    // Without a registry the pane says "not asked", not empty dropdowns.
+    let empty = CallForm::default();
+    let mut ui = simulator::<Message, _, _>(pane(&empty, None));
+    assert!(ui.find("No registry loaded").is_ok());
+}
