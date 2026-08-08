@@ -308,8 +308,9 @@ fn instance_base(producer: &str) -> &str {
 /// | **has stats**  | `Observed`         | `Unwatched` (leftover) |
 /// | **no stats**   | `WatchedQuiet`     | `DeclaredOnly`         |
 ///
-/// `Unwatched` is transient by construction — [`Monitor::unwatch`]
-/// (crate::Monitor::unwatch) retires uncovered stats immediately — but the
+/// `Unwatched` is transient by construction —
+/// [`Monitor::unwatch`](crate::Monitor::unwatch) retires uncovered stats
+/// immediately — but the
 /// state exists so the interval between release and retirement never renders
 /// as live observation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
