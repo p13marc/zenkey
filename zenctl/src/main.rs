@@ -495,11 +495,30 @@ impl BusArgs {
     /// The same, as the fleet engine's indexed set (echo's decode path).
     async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
         let dirs = self.registry_dirs();
-        if !dirs.is_empty() {
-            return zenkey_fleet::SliceSet::from_dirs(&dirs);
-        }
         let session = self.session().await?;
         let base = self.base();
+        if !dirs.is_empty() {
+            // §6.1's decision, delivered by issue #43: --registry and the bus
+            // stop being exclusive. Union: served wins per producer, dirs
+            // fill the gaps, disagreement is reported — never silently
+            // overwritten.
+            let out =
+                zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
+            for d in &out.disagreements {
+                eprintln!(
+                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{}                      (served wins; `zenctl registry diff` details it)",
+                    d.producer,
+                    d.bus_version,
+                    d.dirs_version,
+                    if d.shape_differs {
+                        ", shapes differ"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            return Ok(out.set);
+        }
         let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
         if set.slices().is_empty() {
             eprintln!(

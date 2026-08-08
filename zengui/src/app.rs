@@ -202,6 +202,20 @@ impl Zengui {
                 // The skeleton is built FROM the slices — (re)build it now.
                 self.build_skeleton()
             }
+            Message::SlicesUnionLoaded(Ok((slices, from_bus, dirs_only, disagreements))) => {
+                self.slice_source = SliceSource::Union {
+                    from_bus,
+                    dirs_only,
+                    disagreements,
+                };
+                self.slices = Some(slices);
+                self.reresolve_registrations();
+                self.build_skeleton()
+            }
+            Message::SlicesUnionLoaded(Err(e)) => {
+                self.slice_source = SliceSource::Failed(e);
+                Task::none()
+            }
             Message::SlicesLoaded(Err(e)) => {
                 self.slice_source = SliceSource::Failed(e);
                 Task::none()
@@ -586,23 +600,31 @@ impl Zengui {
 
     fn load_slices(&self) -> Task<Message> {
         let dirs = self.settings.registry.clone();
-        if !dirs.is_empty() {
-            return Task::perform(
-                async move {
-                    tokio::task::spawn_blocking(move || SliceSet::from_dirs(&dirs))
-                        .await
-                        .map_err(|e| e.to_string())?
-                        .map(Arc::new)
-                        .map_err(|e| e.to_string())
-                },
-                Message::SlicesLoaded,
-            );
-        }
         let Some(session) = self.session.clone() else {
             return Task::none();
         };
         let base = self.settings.base.clone();
         let timeout = self.settings.timeout();
+        if !dirs.is_empty() {
+            // The §6.1 union (issue #43): served wins, dirs fill, and the
+            // disagreement count reaches the status strip as data.
+            return Task::perform(
+                async move {
+                    SliceSet::from_union(&session, &base, &dirs, timeout)
+                        .await
+                        .map(|out| {
+                            (
+                                Arc::new(out.set),
+                                out.from_bus.len(),
+                                out.dirs_only.len(),
+                                out.disagreements.len(),
+                            )
+                        })
+                        .map_err(|e| e.to_string())
+                },
+                Message::SlicesUnionLoaded,
+            );
+        }
         Task::perform(
             async move {
                 SliceSet::from_bus(&session, &base, timeout)
