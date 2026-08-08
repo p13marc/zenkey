@@ -149,15 +149,42 @@ pub fn structural(bytes: &[u8]) -> String {
     if looks_json && let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
         return serde_json::to_string(&v).unwrap_or_default();
     }
-    if let Ok(v) = ciborium::from_reader::<ciborium::Value, _>(bytes)
+    let utf8 = std::str::from_utf8(bytes).ok().filter(|t| !t.is_empty());
+    if let Some(v) = cbor_whole(bytes)
+        // A bare CBOR scalar over bytes that are *also* valid text is the
+        // ambiguous case, and plain text is the likelier reading on a bus that
+        // carries anything. Structured CBOR (a map, an array) is unambiguous
+        // and still wins.
+        && !(utf8.is_some() && is_scalar(&v))
         && let Ok(text) = serde_json::to_string(&v)
     {
         return text;
     }
-    match std::str::from_utf8(bytes) {
-        Ok(text) if !text.is_empty() => text.to_string(),
-        _ => format!("<{} bytes>", bytes.len()),
+    match utf8 {
+        Some(text) => text.to_string(),
+        None => format!("<{} bytes>", bytes.len()),
     }
+}
+
+/// Decode CBOR only if it accounts for **every** byte.
+///
+/// `ciborium::from_reader` decodes one value from the front and ignores the
+/// rest, which makes it a false-positive machine on plain text: `j` is `0x6A`,
+/// "text string of length 10", so `just a plain string` decodes as the CBOR
+/// text `"ust a plai"` with eight bytes left over — and an explorer that shows
+/// that has silently corrupted the payload it was asked to display. Any
+/// lowercase-initial ASCII text is a candidate. Requiring total consumption is
+/// what makes the sniff honest (RFC 08 §7 — sniffing is the last resort, so it
+/// must at least be self-consistent).
+fn cbor_whole(bytes: &[u8]) -> Option<ciborium::Value> {
+    let mut cursor = std::io::Cursor::new(bytes);
+    let value = ciborium::from_reader::<ciborium::Value, _>(&mut cursor).ok()?;
+    (cursor.position() as usize == bytes.len()).then_some(value)
+}
+
+/// A single scalar, as opposed to a map or array.
+fn is_scalar(v: &ciborium::Value) -> bool {
+    !matches!(v, ciborium::Value::Map(_) | ciborium::Value::Array(_))
 }
 
 /// The whole decode pipeline for one sample: refine the key against the
@@ -238,5 +265,60 @@ mod tests {
         ciborium::into_writer(&serde_json::json!({"x": 1}), &mut cbor).unwrap();
         assert!(structural(&cbor).contains("\"x\""));
         assert_eq!(structural(&[0xff, 0xfe, 0x00]), "<3 bytes>");
+    }
+
+    /// Regression: plain text must not be eaten by the CBOR sniff.
+    ///
+    /// `ciborium` decodes one value from the front and ignores trailing bytes,
+    /// so `just a plain string` used to render as `"ust a plai"` — `j` is
+    /// `0x6A`, "text string of length 10". Every lowercase-initial ASCII
+    /// payload was a candidate, which on an arbitrary bus is most of them.
+    #[test]
+    fn plain_text_is_not_mistaken_for_cbor() {
+        assert_eq!(structural(b"just a plain string"), "just a plain string");
+        assert_eq!(
+            structural(b"a v2 key: not this convention"),
+            "a v2 key: not this convention"
+        );
+        // The whole lowercase range is the danger zone (0x60..=0x7b).
+        for first in b'a'..=b'z' {
+            let mut payload = vec![first];
+            payload.extend_from_slice(b" some trailing words here");
+            let text = String::from_utf8(payload.clone()).unwrap();
+            assert_eq!(structural(&payload), text, "mangled {text:?}");
+        }
+    }
+
+    /// The ambiguous case: bytes that are *both* a complete CBOR text string
+    /// and valid UTF-8. Plain text is the likelier reading on a bus that
+    /// carries anything, and it is the lossless one.
+    #[test]
+    fn an_exact_cbor_text_string_still_reads_as_text() {
+        // 0x6A = text(10), followed by exactly 10 bytes: fully consumed CBOR.
+        let payload = b"just a plai";
+        assert!(cbor_whole(payload).is_some(), "setup: this is valid CBOR");
+        assert_eq!(structural(payload), "just a plai");
+    }
+
+    /// …but structured CBOR is unambiguous and must still win, even when the
+    /// bytes happen to be valid UTF-8.
+    #[test]
+    fn structured_cbor_still_wins_over_text() {
+        let mut cbor = Vec::new();
+        ciborium::into_writer(&serde_json::json!({"ok": true}), &mut cbor).unwrap();
+        let rendered = structural(&cbor);
+        assert!(rendered.contains("\"ok\""), "{rendered}");
+        assert!(rendered.starts_with('{'), "{rendered}");
+    }
+
+    /// Trailing bytes mean the buffer is not one CBOR value, whatever the
+    /// front of it looks like.
+    #[test]
+    fn cbor_must_account_for_every_byte() {
+        let mut cbor = Vec::new();
+        ciborium::into_writer(&serde_json::json!({"x": 1}), &mut cbor).unwrap();
+        assert!(cbor_whole(&cbor).is_some());
+        cbor.push(0x00);
+        assert!(cbor_whole(&cbor).is_none(), "trailing byte must reject");
     }
 }

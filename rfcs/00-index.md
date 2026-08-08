@@ -1,9 +1,48 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.8 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.9 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.9 (2026-08-08, the observer amendment)** — every amendment so far
+> specified what *publishers* and *consumers* owe the bus. This one specifies
+> what a **tool that only reads** owes its user. The convention said how to
+> read a conformant key and nothing about the other three cases an explorer
+> actually meets — a key under a different base, a key that is not this
+> convention at all, and a question the tool has not yet asked — so each was
+> left to be invented per tool, and the obvious inventions are the dishonest
+> ones. No grammar change, no wire change.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **O** | [09 §5.1](09-operations.md) *(new)* | **Observer obligations, six rules.** A non-conformant key is a fact, not an error, and MUST NOT be discarded (O1) — nothing here binds a foreign publisher, and [03 §1.2](03-grammar.md) governs where the *convention's* keyspace lives, not the bus. Classification degrades through three rungs, under-base → parses → registered, each failure weakening the claim rather than dropping the key (O2). An observer MUST NOT guess another deployment's base by scanning for a `v1` chunk — subject tails have no fixed arity and a base may contain a literal `v1`; naming bases stays the §5 sweep's job, which attributes fixed-arity from the right (O3). A question not yet asked MUST NOT render as a negative answer (O4) — [05 §3.1](05-control-rpc.md)'s rule applied to a badge instead of a reply set. A wildcard scope MUST NOT be presented as total coverage (O5). And a bounded observer MUST report what its bounds cost, counting "could not keep up" separately from "chose to forget" (O6). |
+> | **E1** | [03 §3](03-grammar.md) | **Erratum.** The reserved-token table still spelled the version chunk `@v<int>`, contradicting [§1.2](03-grammar.md), D1, and the guard tests ever since v1.1 made it plain. Corrected to `v<int>`. Documentation-only: no implementation ever followed the table. |
+>
+> **Why O5 is in the normative text and not a footnote.** `*` and `**` never
+> match a chunk beginning with `@` — that property is *what makes* D2 and D4
+> true, and it cuts both ways. A firehose subscriber cannot accidentally pull
+> `@media` frames or `@blob` bulk, which is a gift. But the same algebra means
+> a `**`-scoped observer sees no service-origin traffic **by construction**, so
+> an explorer that calls that scope "everything" renders a healthy `@catalog`
+> and a dead one identically. The gift is easy to notice and the trap is not.
+>
+> **What did *not* change.** No grammar, no wire, no registry format: position
+> counts, chunk lexical rules, the reserved tokens themselves and design
+> properties D1–D6 are untouched (the D1–D6 guard tests and the `@adv`-token
+> test pass unmodified). O1–O6 bind *tools*; no producer or consumer changes.
+> Nothing here makes non-conformant traffic legitimate or illegitimate — the
+> convention still declines to govern it, and §5.1 only says how to *report*
+> it.
+>
+> **Provenance.** Every rule is a mistake made and caught while building
+> `zengui` against this convention, not a hypothetical. O2/O4 replaced a
+> boolean "registered" flag that rendered "no registry loaded" as
+> "unregistered"; O3 replaced a base guess; O5 replaced a design that had
+> carefully defended against `@media` frames arriving through a `**` scope —
+> which cannot happen — while missing that the same scope silently hid
+> `@catalog`; O6 followed a `HashMap<String, KeyStats>` that grew without
+> bound for the lifetime of a session.
 
 > **v1.8 (2026-07-29, the `@blob` registry amendment)** — v1.7 re-specified
 > `@blob` and left it, by its own admission, the one plane with no registry
@@ -293,7 +332,7 @@ Chapters are numbered for reference, not reading. Suggested paths:
 | 06 | [06-identity.md](06-identity.md) | origin minting, observed devices, evidence, the `@catalog` contract |
 | 07 | [07-bulk-planes.md](07-bulk-planes.md) | `@media` (live frames) and `@blob` (bulk/content-addressed transfer) |
 | 08 | [08-registry.md](08-registry.md) | the subject registry: format, versioning policy, naming rules, ownership |
-| 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy |
+| 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy, **observer obligations (§5.1, normative for tools)** |
 | 10 | [10-prior-art.md](10-prior-art.md) | Keelson, uProtocol/automotive, rmw_zenoh, Sparkplug, OTel, NATS, Zenoh guidance, D-Bus, Homie, OPC UA — took/rejected per system |
 | 11 | [11-zensight-profile.md](11-zensight-profile.md) | the reference application: profile constants, worked keys per sensor, full shipped-family mapping |
 | 12 | [12-open-questions.md](12-open-questions.md) | the decision record: all six former open questions decided, each with its alternatives and revisit trigger |

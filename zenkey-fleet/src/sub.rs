@@ -55,23 +55,37 @@ pub enum FleetEvent {
 pub struct MonitorSpec {
     /// Full wire selectors to subscribe to.
     pub selectors: Vec<String>,
-    /// Also watch the fleet liveliness roster (with history: current tokens
+    /// Also watch these liveliness selectors (with history: current tokens
     /// arrive on join — no separate seed GET).
-    pub liveliness: Option<String>,
+    ///
+    /// A list, not a single selector, because one selector cannot express the
+    /// roster: `*` in the origin position never matches a verbatim service
+    /// origin (RFC 03 §4 **D4**), so the fleet sweep
+    /// `<base>/v1/*/state/*/alive` and `<base>/v1/@catalog/state/alive` are
+    /// necessarily two entries. A dashboard that watches only the first
+    /// renders "catalog dead" and "no entities" identically — the false
+    /// verdict RFC 05 §3.1 forbids.
+    pub liveliness: Vec<String>,
     /// Snapshot cadence.
     pub stats_tick: Duration,
     /// Broadcast capacity: bound it to what an echo pane can drain; lag is
     /// surfaced, never hidden.
     pub capacity: usize,
+    /// How many distinct keys to keep statistics for. Least-recently-seen keys
+    /// are dropped past this, and the drops are counted
+    /// ([`MonitorCore::keys_evicted`]) — a long-running observer is bounded,
+    /// and says so (RFC 09 §5.1).
+    pub max_keys: usize,
 }
 
 impl Default for MonitorSpec {
     fn default() -> Self {
         MonitorSpec {
             selectors: Vec::new(),
-            liveliness: None,
+            liveliness: Vec::new(),
             stats_tick: Duration::from_millis(250),
             capacity: 1024,
+            max_keys: crate::stats::DEFAULT_MAX_KEYS,
         }
     }
 }
@@ -88,10 +102,15 @@ pub struct MonitorCore {
 
 impl MonitorCore {
     pub fn new(capacity: usize) -> Arc<MonitorCore> {
+        MonitorCore::bounded(capacity, crate::stats::DEFAULT_MAX_KEYS)
+    }
+
+    /// A core whose statistics table is bounded at `max_keys` distinct keys.
+    pub fn bounded(capacity: usize, max_keys: usize) -> Arc<MonitorCore> {
         let (tx, _) = broadcast::channel(capacity.max(2));
         Arc::new(MonitorCore {
             tx,
-            stats: Mutex::new(StatsTable::new()),
+            stats: Mutex::new(StatsTable::with_capacity(max_keys)),
             tree: ArcSwap::from_pointee(KeyTreeSnapshot::default()),
             dropped: AtomicU64::new(0),
         })
@@ -139,6 +158,14 @@ impl MonitorCore {
     /// Total events dropped across all lagging receivers so far.
     pub fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// Distinct keys dropped from the statistics table to stay within its
+    /// bound. Non-zero means the key set on display is partial — report it
+    /// rather than letting a shrinking tree read as a quieting bus
+    /// (RFC 09 §5.1).
+    pub fn keys_evicted(&self) -> u64 {
+        self.with_stats(|s| s.evicted())
     }
 
     /// Subscribe to the event stream.
@@ -189,7 +216,7 @@ pub struct Monitor {
 impl Monitor {
     /// Declare the spec's subscribers on `session` and start watching.
     pub async fn start(session: &Session, spec: MonitorSpec) -> Result<Monitor> {
-        let core = MonitorCore::new(spec.capacity);
+        let core = MonitorCore::bounded(spec.capacity, spec.max_keys);
         let mut tasks = Vec::new();
 
         for selector in &spec.selectors {
@@ -215,7 +242,7 @@ impl Monitor {
             }));
         }
 
-        if let Some(liveliness_sel) = &spec.liveliness {
+        for liveliness_sel in &spec.liveliness {
             let subscriber = session
                 .liveliness()
                 .declare_subscriber(liveliness_sel)
@@ -259,8 +286,24 @@ impl Monitor {
         self.core.tree()
     }
 
-    /// Stop watching (aborts the tasks; subscribers undeclare on drop).
+    /// Stop watching. Equivalent to dropping the monitor — kept as an explicit
+    /// verb for call sites that want to say so.
     pub fn stop(self) {
+        drop(self);
+    }
+}
+
+/// Dropping a monitor stops it: the ingest tasks are aborted and the
+/// subscribers undeclare.
+///
+/// This is not a nicety. A `JoinHandle` merely *detaches* on drop, so without
+/// this impl every monitor that goes out of scope leaks a live subscriber and
+/// its ingest task for the lifetime of the session. `zenctl` never noticed —
+/// it calls [`Monitor::stop`] once and exits — but a GUI re-scopes its
+/// subscription whenever the user changes what they are watching, dropping and
+/// rebuilding the monitor each time.
+impl Drop for Monitor {
+    fn drop(&mut self) {
         for t in &self.tasks {
             t.abort();
         }

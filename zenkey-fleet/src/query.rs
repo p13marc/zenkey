@@ -10,6 +10,10 @@ use zenoh::Session;
 use zenoh::query::{ConsolidationMode, QueryTarget};
 
 /// How a producer answered a procedure call.
+///
+/// `Clone` is a refcount bump on the payload, not a copy — which is what lets
+/// a GUI hold an answer in widget state without paying for it.
+#[derive(Debug, Clone)]
 pub enum Answer {
     /// A value reply — RFC 05 §3: "a reply always indicates success".
     /// Carried as zenoh's refcounted buffer: cloning is a refcount bump,
@@ -24,6 +28,7 @@ pub enum Answer {
 }
 
 /// One host's answer, attributed to the origin that actually replied.
+#[derive(Debug, Clone)]
 pub struct FleetAnswer {
     pub origin: String,
     pub answer: Answer,

@@ -382,7 +382,7 @@ This convention narrows it:
 
 | Token | Position | Meaning |
 |---|---|---|
-| `@v<int>` | 2 | convention major version |
+| `v<int>` | 2 | convention major version (**plain, not verbatim** — §1.2, amended in v1.1) |
 | `h-<12hex>` | 3 | host origin id (reference derivation §1.3) |
 | `@catalog` | 3 | the identity/catalog service ([06-identity.md](06-identity.md)) |
 | `telemetry`, `state`, `events` | 4 | data classes |
