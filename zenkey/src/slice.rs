@@ -56,6 +56,13 @@ pub struct ProcedureDecl {
     pub request: Option<String>,
     /// The declared payload encoding (RFC 08 §2, v1.5).
     pub encoding: Option<String>,
+    /// `"forbidden"` forbids `*`-origin fan-out calls (RFC 05 §2.1); absent
+    /// means unconstrained. Surfaced in the slice since 0.5 so *dynamic*
+    /// callers (explorers) can refuse what generated builders make
+    /// unspellable — the registry layer of the three-layer refusal.
+    pub fanout: Option<String>,
+    /// Whether the procedure declares itself idempotent (RFC 08 §2).
+    pub idempotent: Option<bool>,
     pub since: Option<String>,
     pub description: Option<String>,
 }
@@ -228,6 +235,8 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             kind: s(e.get("kind")).unwrap_or_default(),
             reply: s(e.get("reply")),
             request: s(e.get("request")),
+            fanout: s(e.get("fanout")),
+            idempotent: e.get("idempotent").and_then(|v| v.as_bool()),
             encoding: s(e.get("encoding")),
             since: s(e.get("since")),
             description: s(e.get("description")),

@@ -228,6 +228,32 @@ enum TopicCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Publish to a key (issue #47) — a declared publisher, never an ad-hoc
+    /// put (P7).
+    Pub {
+        /// Full wire key to publish on.
+        key: String,
+        /// Payload: inline text, `@file`, or `-` for stdin.
+        body: String,
+        /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
+        #[arg(long, default_value = "sampled")]
+        qos: String,
+        /// Wire encoding to declare (e.g. application/json). Defaults to the
+        /// registry's declared encoding when the key refines, else none.
+        #[arg(long)]
+        encoding: Option<String>,
+        /// Publish this many times (0 = once).
+        #[arg(long, default_value_t = 0)]
+        repeat: usize,
+        /// Seconds between repeats.
+        #[arg(long, default_value_t = 1.0)]
+        interval: f64,
+        /// Skip registry/schema validation of the body.
+        #[arg(long)]
+        no_validate: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Measure publish rate over a window (ros2-style).
     Hz {
         /// Key expression (or use --origin/--class/--producer composition).
@@ -325,6 +351,10 @@ enum ServiceCmd {
         /// Request body: inline JSON, or `@path` to read a file.
         #[arg(long)]
         body: Option<String>,
+        /// Skip the registry lookup (and with it the registry-layer
+        /// forbidden-fanout refusal and any body validation).
+        #[arg(long)]
+        no_validate: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -545,6 +575,28 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Command::Topic(TopicCmd::Pub {
+            key,
+            body,
+            qos,
+            encoding,
+            repeat,
+            interval,
+            no_validate,
+            bus,
+        }) => {
+            cmd_pub(
+                &key,
+                &body,
+                &qos,
+                encoding.as_deref(),
+                repeat,
+                interval,
+                no_validate,
+                &bus,
+            )
+            .await
+        }
         Command::Topic(TopicCmd::Hz {
             selector,
             origin,
@@ -681,6 +733,7 @@ async fn main() -> Result<()> {
             procedure,
             params,
             body,
+            no_validate,
             bus,
         }) => {
             cmd_service_call(
@@ -689,6 +742,7 @@ async fn main() -> Result<()> {
                 &procedure,
                 &params,
                 body.as_deref(),
+                no_validate,
                 &bus,
             )
             .await
@@ -1191,6 +1245,116 @@ fn hex(bytes: &[u8]) -> String {
         .join(" ")
 }
 
+/// `topic pub` — publish through the write facade (issue #47).
+#[allow(clippy::too_many_arguments)]
+async fn cmd_pub(
+    key: &str,
+    body: &str,
+    qos: &str,
+    encoding: Option<&str>,
+    repeat: usize,
+    interval: f64,
+    no_validate: bool,
+    args: &BusArgs,
+) -> Result<()> {
+    let qos = zenkey::qos::QosProfile::from_name(qos).ok_or_else(|| {
+        anyhow!(
+            "unknown QoS profile {qos:?} — sampled|refreshed|transition|alert|frame (RFC 04 §3)"
+        )
+    })?;
+    let payload = match body {
+        "-" => {
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            std::io::stdin().read_to_end(&mut buf)?;
+            buf
+        }
+        b => match b.strip_prefix('@') {
+            Some(path) => std::fs::read(path)?,
+            None => b.as_bytes().to_vec(),
+        },
+    };
+
+    // Registry awareness: when the key refines to a registered subject the
+    // declared encoding fills in, and a served schema validates the body by
+    // ENCODING it — a body the schema cannot encode is refused before it
+    // touches the bus (--no-validate opts out; an unregistered key publishes
+    // as-is, honestly labelled).
+    let mut declared_encoding = encoding.map(str::to_string);
+    if !no_validate {
+        let slices = args.slice_set().await.unwrap_or_default();
+        let description = zenkey_fleet::describe_key(args.base(), key, Some(&slices));
+        if let zenkey_fleet::Registration::Registered(subject) = &description.facts.registration {
+            if declared_encoding.is_none() {
+                declared_encoding = subject.encoding.clone();
+            }
+            let session = args.session().await?;
+            let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+            let producer = subject_producer(&description);
+            if let Some(producer) = producer
+                && let Some(schema) = store
+                    .schema_for(&session, &producer, &subject.type_name)
+                    .await
+            {
+                let value: serde_json::Value =
+                    serde_json::from_slice(&payload).map_err(|e| {
+                        anyhow!(
+                            "body is not JSON but {} declares schema-validated type {} — {e}                              (--no-validate to publish anyway)",
+                            key,
+                            subject.type_name
+                        )
+                    })?;
+                let target = zenkey_fleet::decode::resolve_encoding(
+                    declared_encoding.as_deref(),
+                    subject.encoding.as_deref(),
+                    &payload,
+                );
+                zenkey::schema::decode::DecoderRegistry::new()
+                    .encode(&schema, &value, &target)
+                    .map_err(|e| {
+                        anyhow!(
+                            "body rejected by {}'s served schema: {e} (--no-validate to                              publish anyway)",
+                            subject.type_name
+                        )
+                    })?;
+            }
+        } else {
+            eprintln!(
+                "note: {key} is not a registered subject ({:?}) — publishing as-is",
+                description.facts.registration
+            );
+        }
+    }
+
+    let session = args.session().await?;
+    let publication =
+        zenkey_fleet::declare_publication(&session, key, qos, declared_encoding.as_deref()).await?;
+    let times = repeat.max(1);
+    for n in 0..times {
+        publication.send(payload.clone()).await?;
+        eprintln!(
+            "published {key} ({} bytes) [{}/{times}]",
+            payload.len(),
+            n + 1
+        );
+        if n + 1 < times {
+            tokio::time::sleep(Duration::from_secs_f64(interval.max(0.0))).await;
+        }
+    }
+    publication.undeclare().await?;
+    Ok(())
+}
+
+/// The producer a registered description refined through (host producer or
+/// the service slice's name is not carried on SubjectFacts — derive from the
+/// shape).
+fn subject_producer(d: &zenkey_fleet::KeyDescription) -> Option<String> {
+    match &d.facts.shape {
+        zenkey_fleet::KeyShape::V1(v) => v.producer.clone(),
+        _ => None,
+    }
+}
+
 /// `service call` — a GET on the `@rpc` plane (RFC 05).
 async fn cmd_service_call(
     origin: &str,
@@ -1198,19 +1362,14 @@ async fn cmd_service_call(
     procedure: &str,
     params: &[String],
     body: Option<&str>,
+    no_validate: bool,
     args: &BusArgs,
 ) -> Result<()> {
-    // A service origin (`@catalog`) carries no producer chunk (RFC 03 §1.5).
-    // Un-namespaced tool ⇒ full keys, composed off the configured base.
-    let mut key = if origin.starts_with('@') {
-        args.wire(format!("v1/{origin}/@rpc/{procedure}"))?
-    } else {
-        args.wire(format!("v1/{origin}/@rpc/{producer}/{procedure}"))?
-    };
-    if !params.is_empty() {
-        key.push('?');
-        key.push_str(&params.join(";"));
-    }
+    // The typed target refuses a hostname outright (RFC 06 §6) and makes a
+    // fleet call a deliberate variant; the engine's `call` composes the key
+    // through the typed builders and applies the fan-in discipline plus the
+    // registry-layer fanout guard (issue #36).
+    let target = zenkey_fleet::CallTarget::parse(origin)?;
 
     let payload = match body {
         Some(b) => Some(match b.strip_prefix('@') {
@@ -1220,57 +1379,36 @@ async fn cmd_service_call(
         None => None,
     };
 
-    let session = args.session().await?;
-    let answers = bus::fleet_get(&session, args.base(), &key, payload, args.timeout()).await?;
-
-    // Assemble the typed report (issue #12): value replies parse as JSON when
-    // they are JSON (read replies, by convention) and ride as text otherwise
-    // (introspect replies raw TOML). An error reply is a failure, never
-    // dressed up as success (RFC 05 §3).
-    let report = report::CallReport {
-        key: key.clone(),
-        answers: answers
-            .iter()
-            .map(|a| match &a.answer {
-                bus::Answer::Value(bytes) => {
-                    let bytes = bytes.to_bytes();
-                    match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                        Ok(v) => report::CallAnswer {
-                            origin: a.origin.clone(),
-                            ok: true,
-                            value: Some(v),
-                            text: None,
-                            error: None,
-                        },
-                        Err(_) => report::CallAnswer {
-                            origin: a.origin.clone(),
-                            ok: true,
-                            value: None,
-                            text: Some(String::from_utf8_lossy(&bytes).to_string()),
-                            error: None,
-                        },
-                    }
-                }
-                bus::Answer::Error { name, message } => report::CallAnswer {
-                    origin: a.origin.clone(),
-                    ok: false,
-                    value: None,
-                    text: None,
-                    error: Some(report::CallError {
-                        name: name.clone(),
-                        message: message.clone(),
-                    }),
-                },
-            })
-            .collect(),
+    // The fanout guard needs slices; loading them costs one introspect
+    // fan-in. --no-validate skips it (and with it the registry-layer refusal
+    // — the generated-builder and ACL layers remain).
+    let slices = if no_validate {
+        None
+    } else {
+        args.slice_set().await.ok()
     };
+
+    let session = args.session().await?;
+    let report = zenkey_fleet::call(
+        &session,
+        args.base(),
+        &target,
+        producer,
+        procedure,
+        params,
+        payload,
+        args.timeout(),
+        slices.as_ref(),
+    )
+    .await?;
+
     output::call(&report, args.format, |a| match (&a.value, &a.text) {
         (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
         (None, Some(t)) => t.clone(),
         _ => String::new(),
     });
-    // Exit-code discipline: 1 = an error reply, 2 = zero replies (silence
-    // stays a distinct non-verdict).
+    // Exit-code discipline preserved: 1 = an error reply, 2 = zero replies
+    // (silence stays a distinct non-verdict — RFC 05 §3.1).
     let code = report.exit_code();
     if code != 0 {
         std::process::exit(code);
@@ -1278,8 +1416,6 @@ async fn cmd_service_call(
     Ok(())
 }
 
-/// `doctor` — fan `introspect` across the fleet and diff each reply against
-/// the local registry files (RFC 08 §6).
 async fn cmd_doctor(deep: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let roster = bus::roster(&session, args.base(), args.timeout()).await?;

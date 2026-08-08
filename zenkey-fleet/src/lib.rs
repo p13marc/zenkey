@@ -24,6 +24,7 @@ pub mod skeleton;
 pub mod stats;
 pub mod sub;
 pub mod tree;
+pub mod write;
 
 #[cfg(feature = "decode")]
 pub mod decode;
@@ -48,3 +49,4 @@ pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem, WatchId,
 };
 pub use tree::KeyTreeSnapshot;
+pub use write::{CallTarget, Publication, call, declare_publication};
