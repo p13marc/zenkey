@@ -77,7 +77,8 @@ pub struct Zengui {
     selected: Option<String>,
     /// The last on-demand fetch: (key, outcome-or-error).
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
-    echo_filter: String,
+    /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
+    echo_view: view::echo::EchoView,
 
     /// The node dashboard's presence model (#61), fed by liveliness only.
     roster: crate::nodes::NodeRoster,
@@ -159,7 +160,7 @@ impl Zengui {
             expanded: BTreeSet::new(),
             selected: None,
             fetched: None,
-            echo_filter: String::new(),
+            echo_view: view::echo::EchoView::new(),
             roster: crate::nodes::NodeRoster::default(),
             node_selected: None,
             node_detail: view::nodes::DetailState::default(),
@@ -570,14 +571,7 @@ impl Zengui {
                 }
                 Task::none()
             }
-            Message::EchoFilterChanged(f) => {
-                self.echo_filter = f;
-                Task::none()
-            }
-            Message::ClearEcho => {
-                self.echo.clear();
-                Task::none()
-            }
+            Message::Echo(msg) => self.update_echo(msg),
             Message::PaneSelected(pane) => {
                 self.right_pane = pane;
                 Task::none()
@@ -867,6 +861,51 @@ impl Zengui {
                     Message::PublishReady,
                 );
                 Task::batch([stop, send])
+            }
+        }
+    }
+
+    /// The echo pane (#72). Every action here is a *view* action: nothing
+    /// changes what the session subscribes to, which is what keeps "I filtered
+    /// the pane" and "I narrowed the bus" two different, visible things.
+    fn update_echo(&mut self, msg: view::echo::EchoMsg) -> Task<Message> {
+        use view::echo::EchoMsg;
+        match msg {
+            EchoMsg::FilterChanged(f) => {
+                self.echo_view.filter = f;
+                Task::none()
+            }
+            EchoMsg::KeyFilterChanged(f) => {
+                self.echo_view.set_key_filter(f);
+                Task::none()
+            }
+            EchoMsg::FollowToggled => {
+                let seq = self.echo.next_seq();
+                if self.echo_view.following {
+                    self.echo_view.pause(seq);
+                } else {
+                    self.echo_view.resume(seq);
+                }
+                Task::none()
+            }
+            EchoMsg::Clear => {
+                self.echo.clear();
+                Task::none()
+            }
+            EchoMsg::LineClicked(key) => {
+                // Drill-through reuses the selection path rather than being a
+                // second way to open the inspector.
+                self.right_pane = RightPane::Detail;
+                self.update(Message::SelectKey(Some(key)))
+            }
+            EchoMsg::Export => {
+                let text = view::echo::export(
+                    &self.echo,
+                    &self.echo_view,
+                    self.selected.as_deref(),
+                    &self.settings.base,
+                );
+                iced::clipboard::write(text)
             }
         }
     }
@@ -1343,8 +1382,12 @@ impl Zengui {
             .width(Length::FillPortion(1))
             .height(Length::Fill),
             iced::widget::container(match self.right_pane {
-                RightPane::Echo =>
-                    view::echo::pane(&self.echo, &self.echo_filter, self.selected.as_deref(),),
+                RightPane::Echo => view::echo::pane(
+                    &self.echo,
+                    &self.echo_view,
+                    self.selected.as_deref(),
+                    self.echo.next_seq(),
+                ),
                 RightPane::Call =>
                     view::call::pane(&self.call_form, self.slices.as_deref(), &self.roster,),
                 RightPane::Publish =>

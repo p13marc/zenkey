@@ -86,8 +86,8 @@ pub enum Message {
     /// The tree scrolled: (absolute y offset, viewport height) — what the
     /// virtualized window renders against (issue #65).
     TreeScrolled(f32, f32),
-    EchoFilterChanged(String),
-    ClearEcho,
+    /// Echo pane interactions (issue #72, echo v2).
+    Echo(crate::view::echo::EchoMsg),
     /// Switch the right-hand pane (the toolbar's tab strip).
     PaneSelected(RightPane),
     Reconnect,
