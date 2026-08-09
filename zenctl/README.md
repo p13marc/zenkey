@@ -116,6 +116,27 @@ compiled in: the registry slices bind one payload type per subject (P5), and
 the value renders generically (JSON, CBOR→JSON diagnostic, text, or hex —
 tagged with the declared type name).
 
+`schema <producer>` dumps the served `describe` reply (RFC 08 §7) and
+`interface show <Type> --schema` asks every producer that carries the type, so
+two producers disagreeing about one name shows up as the drift it is. A
+producer serving no `describe` says so — undescribed is not shapeless.
+
+## `registry` — the registry as a document
+
+```bash
+zenctl registry export --as toml       # round-trips back through --registry
+zenctl registry export --as jsonschema # bundled from the served describe sets
+zenctl registry export --as asyncapi   # channels from subjects, ops from procedures
+zenctl registry diff                   # local --registry dirs vs what the fleet serves
+zenctl registry lint <dir>             # the consumer build's own RFC 08 §5 lints
+```
+
+`lint` runs `zenkey-build`'s lints, not a second copy of them — the diagnostic
+is byte-for-byte what the application's `build.rs` would print, which is the
+only version worth having. `diff` is the side-by-side that `doctor` turns into
+judgements: a producer present on one side only is a fact with two very
+different explanations, and the output says which.
+
 ## `doctor` — the one `ros2` has no answer for
 
 `introspect` is served by the *running binary*, from the same source as its key

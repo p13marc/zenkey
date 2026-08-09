@@ -75,6 +75,9 @@ enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// The registry as a document: export it, diff it, lint it.
+    #[command(subcommand)]
+    Registry(RegistryCmd),
     /// Zenoh admin space (`@/**`) — the middleware's own introspection.
     #[command(subcommand)]
     Admin(AdminCmd),
@@ -120,6 +123,41 @@ enum FailOn {
     Error,
     /// Fail on warnings or errors.
     Warning,
+}
+
+#[derive(Subcommand)]
+enum RegistryCmd {
+    /// Export the loaded slice set as a document.
+    ///
+    /// `--as toml` round-trips through `--registry <dir>`; `--as jsonschema`
+    /// bundles the producers' served `describe` schemas (RFC 08 §7);
+    /// `--as asyncapi` maps subjects to channels and procedures to operations.
+    Export {
+        /// Output document (note: `--format` stays the table/json switch).
+        #[arg(long = "as", value_enum, default_value = "toml")]
+        target: cmd::registry::ExportAs,
+        /// Only this producer.
+        #[arg(long)]
+        producer: Option<String>,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Diff local `--registry` files against what the fleet serves.
+    ///
+    /// RFC 08 §6: a disagreement is a finding, not an ambiguity. `doctor`
+    /// judges a deployment; this just shows the two registries side by side.
+    Diff {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Run the RFC 08 §5 registry lints on a directory, as a build would.
+    Lint {
+        /// The registry directory (the one a build script points at).
+        dir: PathBuf,
+        /// Deprecation ledger; defaults to `<dir>/deprecated.lock`.
+        #[arg(long, value_name = "FILE")]
+        ledger: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -863,6 +901,15 @@ async fn main() -> Result<()> {
             full,
             bus,
         } => cmd::schema::dump(&producer, type_name.as_deref(), full, &bus).await,
+        Command::Registry(RegistryCmd::Export {
+            target,
+            producer,
+            bus,
+        }) => cmd::registry::export(target, producer.as_deref(), &bus).await,
+        Command::Registry(RegistryCmd::Diff { bus }) => cmd::registry::diff(&bus).await,
+        Command::Registry(RegistryCmd::Lint { dir, ledger }) => {
+            cmd::registry::lint(&dir, ledger.as_ref())
+        }
         Command::Context(cmd) => match cmd {
             ContextCmd::Create {
                 name,

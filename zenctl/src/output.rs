@@ -261,6 +261,45 @@ pub fn interface_show(report: &InterfaceShow, format: Format) -> Result<()> {
     Ok(())
 }
 
+/// `zenctl registry diff` (issue #50).
+pub fn registry_diff(report: &RegistryDiff, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => report.producers.iter().for_each(json_line),
+        _ => {
+            if report.producers.is_empty() {
+                println!("no producers on either side.");
+                return Ok(());
+            }
+            for p in &report.producers {
+                let versions = match (&p.served_version, &p.local_version) {
+                    (Some(s), Some(l)) if s == l => format!("registry {s}"),
+                    (Some(s), Some(l)) => format!("served {s} · local {l}"),
+                    (Some(s), None) => format!("served {s} · local —"),
+                    (None, Some(l)) => format!("served — · local {l}"),
+                    (None, None) => String::new(),
+                };
+                if p.findings.is_empty() {
+                    println!("  {:<16} {versions}   agree", p.producer);
+                } else {
+                    println!("✗ {:<16} {versions}", p.producer);
+                    for f in &p.findings {
+                        println!("      {f}");
+                    }
+                }
+            }
+            // RFC 08 §6: a disagreement is a finding, not a verdict — the
+            // count is reported, the exit code is not touched.
+            println!(
+                "\n{} producer(s), {} disagreeing (RFC 08 §6: a disagreement is a finding).",
+                report.producers.len(),
+                report.disagreeing()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// `zenctl schema <producer>` (issue #51).
 pub fn schema_dump(report: &SchemaDump, format: Format) -> Result<()> {
     match format.resolved() {

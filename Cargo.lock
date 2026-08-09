@@ -6783,6 +6783,7 @@ dependencies = [
  "toml 0.8.23",
  "tracing-subscriber",
  "zenkey",
+ "zenkey-build",
  "zenkey-fleet",
  "zenoh",
 ]

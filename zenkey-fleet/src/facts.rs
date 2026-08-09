@@ -451,6 +451,7 @@ mod tests {
                 "SpecialPoint"
             }
             .to_string(),
+            common: None,
             since: None,
             description: None,
             qos: None,

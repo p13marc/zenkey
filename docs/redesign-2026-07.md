@@ -150,7 +150,7 @@ is a different category of tool.
 | **DDS XTypes** | Ship a type hash in discovery, fetch the full type on demand → our `SchemaSet` entries carry a sha256 hash for caching and drift detection. |
 | **NATS CLI** | Named contexts (`nats context`), clean verbs, built-in `bench`, schema subcommand → the zenctl v2 UX model. |
 | **kcat** | `-L` metadata mode, composable `-f` output format strings → `zenctl topic echo --fmt`. |
-| **CloudEvents / AsyncAPI 3.x** | Classification metadata belongs in the addressing layer (validates our grammar); AsyncAPI as a machine-readable bus description → `zenctl registry export --format asyncapi` gives browsable docs, diagrams and diffs from the registry for free. |
+| **CloudEvents / AsyncAPI 3.x** | Classification metadata belongs in the addressing layer (validates our grammar); AsyncAPI as a machine-readable bus description → `zenctl registry export --as asyncapi` gives browsable docs, diagrams and diffs from the registry for free. |
 | **prost-reflect / schemars / CDDL** | The Rust machinery for generic decode: `DynamicMessage::decode` against a served FileDescriptorSet; JSON Schema derived from serde types honoring `#[serde]` attrs; CDDL held in reserve as a future schema kind. |
 
 ---
@@ -510,8 +510,9 @@ zenctl service call <origin|*|@svc> <producer|-> <proc>
 zenctl interface list | show <Type> [--schema] [--full]              [T]
 zenctl schema <producer> [--type T] [--full]   # dump served SchemaSet  [T]
 
-zenctl registry export --format asyncapi|jsonschema|toml             [D]
-zenctl registry diff | lint <dir>                                    [D/L]
+zenctl registry export --as toml|jsonschema|asyncapi [--producer P]  [T]
+zenctl registry diff                # local --registry dirs vs the bus  [T]
+zenctl registry lint <dir>          # the consumer build's own lints    [T]
 
 zenctl admin get [SEL=@/**] | admin routers                          [T/D]
 zenctl storage list      # declared state subjects vs storage coverage  [D]

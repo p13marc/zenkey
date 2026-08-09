@@ -26,6 +26,16 @@ pub struct SubjectDecl {
     pub class: String,
     /// The payload type name, as the producer declares it.
     pub type_name: String,
+    /// `common = "health|errors|sensor|…"` — which of the RFC 08 §5 framework
+    /// state roles this subject declares itself as, when it declares one.
+    ///
+    /// Carried since #50: a producer serves its registry TOML verbatim, so
+    /// this field has always ridden the wire; the slice type simply dropped it
+    /// on the floor. That was invisible until `registry export --as toml` made
+    /// the parse→emit path a round trip somebody might feed back into a build,
+    /// where a lost `common` silently changes the generated
+    /// `AnySubject::common_state()`.
+    pub common: Option<String>,
     /// Registry version this subject first appeared in.
     pub since: Option<String>,
     pub description: Option<String>,
@@ -217,6 +227,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             path: s(e.get("path")).ok_or_else(|| err("[[subject]] missing path"))?,
             class: s(e.get("class")).ok_or_else(|| err("[[subject]] missing class"))?,
             type_name: s(e.get("type")).unwrap_or_default(),
+            common: s(e.get("common")),
             since: s(e.get("since")),
             description: s(e.get("description")),
             qos: s(e.get("qos")),
@@ -292,6 +303,125 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         blob,
         deprecated,
     })
+}
+
+/// Render a slice back to registry TOML — the inverse of [`parse_slice`]
+/// (issue #50: `zenctl registry export --as toml`).
+///
+/// Lossy in exactly one direction, and deliberately: [`parse_slice`] is
+/// tolerant of unknown keys, and a field this build has never heard of cannot
+/// be re-emitted because it was never carried. Exporting a *foreign* slice
+/// therefore round-trips what this build can read, which is the honest bound
+/// and is stated here rather than discovered later. Everything this build does
+/// carry round-trips exactly — pinned as a test.
+pub fn to_toml(slice: &RegistrySlice) -> String {
+    // TOML basic-string escaping: the values here are registry vocabulary
+    // (chunk-legal paths, type names) plus free-text descriptions, and a
+    // description with a quote in it must not produce a file that no longer
+    // parses.
+    fn s(value: &str) -> String {
+        let mut out = String::with_capacity(value.len() + 2);
+        out.push('"');
+        for c in value.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    }
+    fn opt(out: &mut String, key: &str, value: Option<&str>) {
+        if let Some(v) = value {
+            out.push_str(&format!("{key} = {}\n", s(v)));
+        }
+    }
+    fn opt_int(out: &mut String, key: &str, value: Option<i64>) {
+        if let Some(v) = value {
+            out.push_str(&format!("{key} = {v}\n"));
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str("[registry]\n");
+    out.push_str(&format!("version = {}\n", s(&slice.version)));
+    out.push_str(&format!("app = {}\n", s(&slice.app)));
+    out.push_str(&format!("convention = {}\n", slice.convention));
+
+    match &slice.service_origin {
+        Some(origin) => {
+            out.push_str("\n[service]\n");
+            out.push_str(&format!("name = {}\n", s(&slice.name)));
+            out.push_str(&format!("origin = {}\n", s(origin)));
+        }
+        None => {
+            out.push_str("\n[producer]\n");
+            out.push_str(&format!("name = {}\n", s(&slice.name)));
+        }
+    }
+    opt(&mut out, "description", slice.description.as_deref());
+
+    for d in &slice.subjects {
+        out.push_str("\n[[subject]]\n");
+        out.push_str(&format!("path = {}\n", s(&d.path)));
+        out.push_str(&format!("class = {}\n", s(&d.class)));
+        if !d.type_name.is_empty() {
+            out.push_str(&format!("type = {}\n", s(&d.type_name)));
+        }
+        opt(&mut out, "common", d.common.as_deref());
+        opt(&mut out, "qos", d.qos.as_deref());
+        opt_int(&mut out, "ttl_s", d.ttl_s);
+        opt(&mut out, "unit", d.unit.as_deref());
+        opt(&mut out, "rate", d.rate.as_deref());
+        opt_int(&mut out, "cardinality", d.cardinality);
+        opt(&mut out, "encoding", d.encoding.as_deref());
+        opt(&mut out, "since", d.since.as_deref());
+        opt(&mut out, "description", d.description.as_deref());
+    }
+
+    for d in &slice.procedures {
+        out.push_str("\n[[procedure]]\n");
+        out.push_str(&format!("path = {}\n", s(&d.path)));
+        if !d.kind.is_empty() {
+            out.push_str(&format!("kind = {}\n", s(&d.kind)));
+        }
+        opt(&mut out, "request", d.request.as_deref());
+        opt(&mut out, "reply", d.reply.as_deref());
+        opt(&mut out, "encoding", d.encoding.as_deref());
+        opt(&mut out, "fanout", d.fanout.as_deref());
+        if let Some(i) = d.idempotent {
+            out.push_str(&format!("idempotent = {i}\n"));
+        }
+        opt(&mut out, "since", d.since.as_deref());
+        opt(&mut out, "description", d.description.as_deref());
+    }
+
+    for d in &slice.blob {
+        out.push_str("\n[[blob]]\n");
+        out.push_str(&format!("tier = {}\n", s(&d.tier)));
+        if !d.endpoints.is_empty() {
+            let items: Vec<String> = d.endpoints.iter().map(|e| s(e)).collect();
+            out.push_str(&format!("endpoints = [{}]\n", items.join(", ")));
+        }
+        opt(&mut out, "algo", d.algo.as_deref());
+        opt(&mut out, "reference", d.reference.as_deref());
+        opt(&mut out, "encoding", d.encoding.as_deref());
+        opt(&mut out, "since", d.since.as_deref());
+        opt(&mut out, "description", d.description.as_deref());
+    }
+
+    for d in &slice.deprecated {
+        out.push_str("\n[[deprecated]]\n");
+        out.push_str(&format!("path = {}\n", s(&d.path)));
+        opt(&mut out, "since", d.since.as_deref());
+        opt(&mut out, "replaced_by", d.replaced_by.as_deref());
+    }
+
+    out
 }
 
 /// A disagreement between a served slice and the slice this build compiled in.
@@ -433,6 +563,111 @@ mod tests {
 
     // Corpus-level coverage ("every compiled slice parses") lives in
     // zenkey-build's fixture tests — this crate no longer bundles a registry.
+
+    /// `to_toml` is the inverse of `parse_slice` for everything this build
+    /// carries: parse → emit → parse yields the identical slice. Without this,
+    /// `zenctl registry export --as toml` would be a formatter nobody could
+    /// trust to feed back in (#50's own acceptance).
+    #[test]
+    fn toml_export_round_trips_every_carried_field() {
+        let source = r#"
+            [registry]
+            version = "2.1"
+            app = "acme"
+            convention = 1
+            [producer]
+            name = "netring"
+            description = "flow capture"
+            [[subject]]
+            path = "flows/{proto}/count"
+            class = "telemetry"
+            type = "TelemetryPoint"
+            qos = "sampled"
+            unit = "packets"
+            cardinality = 512
+            encoding = "application/cbor"
+            since = "1.0"
+            description = "per-protocol flow counter"
+            [[subject]]
+            path = "health"
+            class = "state"
+            type = "Health"
+            common = "health"
+            ttl_s = 60
+            rate = "burst"
+            [[procedure]]
+            path = "capture/trigger"
+            kind = "write"
+            request = "CaptureSpec"
+            reply = "Ack"
+            encoding = "application/json"
+            fanout = "forbidden"
+            idempotent = false
+            since = "1.1"
+            description = "start a capture"
+            [[blob]]
+            tier = "artifact"
+            endpoints = ["manifest", "slice", "have"]
+            reference = "ArtifactRef"
+            encoding = "application/octet-stream"
+            since = "1.2"
+            description = "captured pcaps"
+            [[blob]]
+            tier = "store"
+            algo = "blake3"
+            since = "1.2"
+            [[deprecated]]
+            path = "flows/legacy"
+            since = "2.0"
+            replaced_by = "flows/{proto}/count"
+            "#;
+        let parsed = parse_slice(source).unwrap();
+        let emitted = to_toml(&parsed);
+        let back = parse_slice(&emitted)
+            .unwrap_or_else(|e| panic!("exported TOML must re-parse: {e}\n---\n{emitted}"));
+        assert_eq!(back, parsed, "exported TOML:\n{emitted}");
+    }
+
+    /// A service slice keeps its `[service] origin` through the round trip —
+    /// the one field that decides which of the two header tables is emitted.
+    #[test]
+    fn toml_export_keeps_a_service_origin() {
+        let parsed = parse_slice(
+            r#"
+            [registry]
+            version = "1.0"
+            app = "acme"
+            convention = 1
+            [service]
+            name = "catalog"
+            origin = "@catalog"
+            "#,
+        )
+        .unwrap();
+        let emitted = to_toml(&parsed);
+        assert!(emitted.contains("[service]"), "{emitted}");
+        assert_eq!(parse_slice(&emitted).unwrap(), parsed);
+    }
+
+    /// Free text is escaped, not trusted: a description carrying a quote must
+    /// not produce a file that no longer parses.
+    #[test]
+    fn toml_export_escapes_free_text() {
+        let mut parsed = parse_slice(
+            r#"
+            [registry]
+            version = "1.0"
+            app = "acme"
+            convention = 1
+            [producer]
+            name = "p"
+            "#,
+        )
+        .unwrap();
+        parsed.description = Some("a \"quoted\" \\ back\nslash".into());
+        let emitted = to_toml(&parsed);
+        assert_eq!(parse_slice(&emitted).unwrap(), parsed, "{emitted}");
+    }
 
     #[test]
     fn a_service_slice_carries_its_origin() {

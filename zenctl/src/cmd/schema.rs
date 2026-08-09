@@ -73,6 +73,7 @@ mod tests {
                 path: "p".into(),
                 class: "telemetry".into(),
                 type_name: subject_type.into(),
+                common: None,
                 since: None,
                 description: None,
                 qos: None,

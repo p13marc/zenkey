@@ -253,6 +253,36 @@ pub struct SchemaRow {
     pub document: Option<serde_json::Value>,
 }
 
+/// One producer, as the bus serves it versus as the checkout declares it
+/// (issue #50). A `None` version means "not present on that side", which is a
+/// fact with two very different explanations — the findings say which.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProducerDiff {
+    pub producer: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub served_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_version: Option<String>,
+    /// RFC 08 §6 findings, rendered. Empty = the two agree.
+    pub findings: Vec<String>,
+}
+
+/// `zenctl registry diff` (issue #50).
+#[derive(Debug, Clone, Serialize)]
+pub struct RegistryDiff {
+    pub producers: Vec<ProducerDiff>,
+}
+
+impl RegistryDiff {
+    /// Producers whose two sides disagree.
+    pub fn disagreeing(&self) -> usize {
+        self.producers
+            .iter()
+            .filter(|p| !p.findings.is_empty())
+            .count()
+    }
+}
+
 /// One producer's served `describe` reply, rendered (issue #51).
 ///
 /// `served = false` is the honest degradation RFC 08 §7 leaves room for —
