@@ -3,10 +3,11 @@
 //! tool owes its user.
 //!
 //! [`SchemaStore`] caches each producer's served `describe` reply (RFC 08
-//! §7) and fetches on first miss through the disciplined fan-in
-//! ([`crate::query::fleet_get`]). [`decode_sample`] is the whole pipeline in
-//! one call; encoding resolution is **sample > registry > sniff** and the
-//! sniff never goes away.
+//! §7) and fetches on first miss through a declared
+//! [`crate::query::RepeatingQuery`] (the RFC 05 §2.1 discipline, kept warm
+//! across the negative-TTL re-asks — #37). [`decode_sample`] is the whole
+//! pipeline in one call; encoding resolution is **sample > registry > sniff**
+//! and the sniff never goes away.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -27,6 +28,11 @@ pub struct SchemaStore {
     /// instant — a `None` expires after [`NOT_SERVED_TTL`], so a producer
     /// that *starts* serving describe is noticed without a restart).
     sets: Mutex<HashMap<String, (Option<SchemaSet>, std::time::Instant)>>,
+    /// One declared querier per producer's describe key (#37), reused across
+    /// the negative-TTL re-asks. Bounded by fleet producer count; entries
+    /// live for the store's lifetime (no eviction — a fleet's producer set
+    /// is small and a stale querier is only idle routing state).
+    queriers: Mutex<HashMap<String, std::sync::Arc<crate::query::RepeatingQuery>>>,
     decoders: DecoderRegistry,
 }
 
@@ -39,6 +45,7 @@ impl SchemaStore {
             base: base.into(),
             timeout,
             sets: Mutex::new(HashMap::new()),
+            queriers: Mutex::new(HashMap::new()),
             decoders: DecoderRegistry::new(),
         }
     }
@@ -78,13 +85,33 @@ impl SchemaStore {
     }
 
     async fn fetch(&self, session: &Session, producer: &str) -> Option<SchemaSet> {
-        let key = zenkey::grammar::with_base(
-            &self.base,
-            zenkey::selector::fleet_rpc(producer, &["describe"]),
-        );
-        let answers = crate::query::fleet_get(session, &self.base, &key, None, self.timeout)
-            .await
-            .ok()?;
+        let cached = {
+            let queriers = self.queriers.lock().expect("querier lock");
+            queriers.get(producer).cloned()
+        };
+        let querier = match cached {
+            Some(q) => q,
+            None => {
+                let key = zenkey::grammar::with_base(
+                    &self.base,
+                    zenkey::selector::fleet_rpc(producer, &["describe"]),
+                );
+                let declared = std::sync::Arc::new(
+                    crate::query::declare_repeating(session, &self.base, &key, self.timeout)
+                        .await
+                        .ok()?,
+                );
+                // A concurrent miss may have declared first; keep whichever
+                // landed (the loser undeclares itself on drop — idle state,
+                // not a leak).
+                let mut queriers = self.queriers.lock().expect("querier lock");
+                queriers
+                    .entry(producer.to_string())
+                    .or_insert(declared)
+                    .clone()
+            }
+        };
+        let answers = querier.fetch().await.ok()?;
         // Any well-formed reply will do; hashes make same-name drift a
         // doctor finding, not a decode concern.
         for a in answers {

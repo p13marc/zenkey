@@ -41,8 +41,9 @@ pub use context_store::StoredContext;
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{
-    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, StateSample, ValueSource,
-    fetch_value, fleet_get, fleet_registry, state_snapshot,
+    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
+    StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,
+    fleet_registry, state_snapshot,
 };
 pub use registry::SliceSet;
 pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};

@@ -70,7 +70,16 @@ pub async fn fleet_get(
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))
         .with_context(|| format!("query failed: {key}"))?;
+    Ok(collect_answers(base, replies).await)
+}
 
+/// Drain a reply channel into attributed answers — the shared back half of
+/// [`fleet_get`] and [`RepeatingQuery`]: one implementation of reply-key
+/// attribution and the RFC 05 §3 error envelope, however the query was issued.
+async fn collect_answers(
+    base: &str,
+    replies: zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>,
+) -> Vec<FleetAnswer> {
     let mut out = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         match reply.result() {
@@ -112,7 +121,122 @@ pub async fn fleet_get(
             }
         }
     }
-    Ok(out)
+    out
+}
+
+/// A **declared** querier carrying the same RFC 05 §2.1 discipline as
+/// [`fleet_get`] (target `All`, consolidation `None`, attribution by reply
+/// key), for fetches that re-ask the **same key expression** — watch loops,
+/// the schema cache's re-asks, registry sweeps, doctor. Declaring once lets
+/// the network keep routing state warm instead of rebuilding it per GET
+/// (report §12's zenoh-1.9 adoption row).
+///
+/// When to use which:
+/// - recurring, same keyexpr → declare a `RepeatingQuery` and `fetch` many
+///   times (parameters and payload ride **per get**, never in the declared
+///   keyexpr — a `?params` suffix in `key` is a bug here);
+/// - genuinely one-shot, or an ad-hoc key → [`fleet_get`].
+///
+/// Liveliness sweeps ([`crate::roster`]) are a different API
+/// (`session.liveliness().get()`) with no querier equivalent and stay
+/// undeclared.
+pub struct RepeatingQuery {
+    querier: zenoh::query::Querier<'static>,
+    base: String,
+}
+
+/// Declare a repeating query on `key` (a full wire keyexpr, no `?params`).
+///
+/// The §2.1 discipline is fixed at declaration: target `All`, consolidation
+/// `None`, `timeout` for every subsequent fetch.
+pub async fn declare_repeating(
+    session: &Session,
+    base: &str,
+    key: &str,
+    timeout: Duration,
+) -> Result<RepeatingQuery> {
+    declare(session, base, key, timeout, false).await
+}
+
+/// As [`declare_repeating`], additionally accepting replies **outside** the
+/// declared keyexpr (`ReplyKeyExpr::Any`) — the querying-subscriber pattern
+/// the `@adv` cache rung needs. A separate constructor because this axis is
+/// part of the querier's identity: never reuse one querier across both modes.
+pub async fn declare_repeating_any(
+    session: &Session,
+    base: &str,
+    key: &str,
+    timeout: Duration,
+) -> Result<RepeatingQuery> {
+    declare(session, base, key, timeout, true).await
+}
+
+async fn declare(
+    session: &Session,
+    base: &str,
+    key: &str,
+    timeout: Duration,
+    accept_any: bool,
+) -> Result<RepeatingQuery> {
+    let mut builder = session
+        .declare_querier(key.to_string())
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout);
+    if accept_any {
+        builder = builder.accept_replies(zenoh::query::ReplyKeyExpr::Any);
+    }
+    let querier = builder
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .with_context(|| format!("declare querier failed: {key}"))?;
+    Ok(RepeatingQuery {
+        querier,
+        base: base.to_string(),
+    })
+}
+
+impl RepeatingQuery {
+    /// The declared key expression.
+    pub fn key(&self) -> &str {
+        self.querier.key_expr().as_str()
+    }
+
+    /// One fetch on the declared keyexpr, every reply attributed by its own
+    /// key — [`fleet_get`]'s contract, minus the per-call declaration.
+    pub async fn fetch(&self) -> Result<Vec<FleetAnswer>> {
+        self.fetch_with("", None).await
+    }
+
+    /// As [`fetch`](Self::fetch), with selector parameters and/or a request
+    /// payload riding this one get.
+    pub async fn fetch_with(
+        &self,
+        params: &str,
+        payload: Option<Vec<u8>>,
+    ) -> Result<Vec<FleetAnswer>> {
+        let mut builder = self.querier.get();
+        if !params.is_empty() {
+            builder = builder.parameters(params);
+        }
+        if let Some(body) = payload {
+            builder = builder.payload(body);
+        }
+        let replies = builder
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .with_context(|| format!("repeating query failed: {}", self.key()))?;
+        Ok(collect_answers(&self.base, replies).await)
+    }
+
+    /// Undeclare, telling the network to drop the routing state. The crate's
+    /// idiom: teardown is explicit and awaited, never left to `Drop`.
+    pub async fn undeclare(self) -> Result<()> {
+        self.querier
+            .undeclare()
+            .await
+            .map_err(|e| anyhow::anyhow!("undeclare querier: {e}"))
+    }
 }
 
 /// The origin chunk of a wire key, via the grammar (never by index — RFC 03
@@ -163,35 +287,66 @@ pub async fn fleet_registry_raw(
     base: &str,
     timeout: Duration,
 ) -> Result<Vec<(RegistrySlice, String)>> {
-    // This session is un-namespaced on purpose (RFC 09 §5), so it must
-    // spell the base itself — exactly as `service call` composes its full key.
-    // Two GETs: the wildcard-producer fan-out, plus `@catalog` by name (a `*`
-    // never matches a verbatim origin, D4 — the two cannot double-count).
-    let keys = [
-        with_base(base, zenkey::selector::fleet_rpc("*", &["introspect"])),
-        with_base(
+    let repeating = RepeatingRegistry::declare(session, base, timeout).await?;
+    let slices = repeating.fetch().await?;
+    repeating.undeclare().await?;
+    Ok(slices)
+}
+
+/// The registry sweep as a **declared** pair of queriers (#37) — for callers
+/// that re-run the sweep (`--watch topic list`, doctor's second pass, a GUI
+/// refresh). One-shot callers keep [`fleet_registry`].
+///
+/// Two queriers, not one: the wildcard-producer fan-out plus `@catalog` by
+/// name (a `*` never matches a verbatim origin, D4 — the two cannot
+/// double-count; same reasoning as [`fleet_registry`]).
+pub struct RepeatingRegistry {
+    wildcard: RepeatingQuery,
+    catalog: RepeatingQuery,
+}
+
+impl RepeatingRegistry {
+    pub async fn declare(session: &Session, base: &str, timeout: Duration) -> Result<Self> {
+        // This session is un-namespaced on purpose (RFC 09 §5), so it must
+        // spell the base itself — exactly as `service call` composes its key.
+        let wildcard = with_base(base, zenkey::selector::fleet_rpc("*", &["introspect"]));
+        let catalog = with_base(
             base,
             zenkey::selector::service_rpc(&zenkey::ServiceOrigin::catalog(), &["introspect"]),
-        ),
-    ];
-    let mut slices = Vec::new();
-    for key in keys {
-        let answers = fleet_get(session, base, &key, None, timeout).await?;
-        for answer in answers {
-            let Answer::Value(bytes) = answer.answer else {
-                continue;
-            };
-            let served_toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
-            match parse_slice(&served_toml) {
-                Ok(slice) => slices.push((slice, served_toml)),
-                Err(e) => tracing::warn!(
-                    origin = %answer.origin,
-                    "introspect reply did not parse, skipping: {e}"
-                ),
+        );
+        Ok(RepeatingRegistry {
+            wildcard: declare_repeating(session, base, &wildcard, timeout).await?,
+            catalog: declare_repeating(session, base, &catalog, timeout).await?,
+        })
+    }
+
+    /// One sweep: every parsed slice with its raw TOML. A reply that does not
+    /// parse is logged and skipped, never fatal — one malformed producer must
+    /// not blind the tool to every other producer's slice.
+    pub async fn fetch(&self) -> Result<Vec<(RegistrySlice, String)>> {
+        let mut slices = Vec::new();
+        for q in [&self.wildcard, &self.catalog] {
+            for answer in q.fetch().await? {
+                let Answer::Value(bytes) = answer.answer else {
+                    continue;
+                };
+                let served_toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
+                match parse_slice(&served_toml) {
+                    Ok(slice) => slices.push((slice, served_toml)),
+                    Err(e) => tracing::warn!(
+                        origin = %answer.origin,
+                        "introspect reply did not parse, skipping: {e}"
+                    ),
+                }
             }
         }
+        Ok(slices)
     }
-    Ok(slices)
+
+    pub async fn undeclare(self) -> Result<()> {
+        self.wildcard.undeclare().await?;
+        self.catalog.undeclare().await
+    }
 }
 
 /// One state sample from a snapshot GET.
