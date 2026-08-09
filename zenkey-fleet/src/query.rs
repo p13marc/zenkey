@@ -137,7 +137,7 @@ async fn collect_answers(
 ///   keyexpr — a `?params` suffix in `key` is a bug here);
 /// - genuinely one-shot, or an ad-hoc key → [`fleet_get`].
 ///
-/// Liveliness sweeps ([`crate::roster`]) are a different API
+/// Liveliness sweeps ([`crate::roster()`]) are a different API
 /// (`session.liveliness().get()`) with no querier equivalent and stay
 /// undeclared.
 pub struct RepeatingQuery {
