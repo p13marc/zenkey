@@ -21,7 +21,9 @@ path = "src/main.rs"
 
 [dependencies]
 zenkey = { workspace = true }
-zenkey-fleet = { workspace = true }
+# Same codec matrix as zenctl (#97) — the two explorers must not disagree
+# about which payloads they can read.
+zenkey-fleet = { workspace = true, features = ["decode-protobuf"] }
 
 zenoh = { workspace = true }
 iced = { workspace = true }
@@ -35,3 +37,7 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 iced_test = { workspace = true }
+# The `spray` example serves a protobuf descriptor set (#97) so the demo has a
+# subject only a served schema can decode.
+prost-reflect = { workspace = true }
+zenkey = { workspace = true, features = ["schema"] }

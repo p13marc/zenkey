@@ -289,9 +289,14 @@ enum TopicCmd {
         /// Seconds between repeats.
         #[arg(long, default_value_t = 1.0)]
         interval: f64,
-        /// Skip registry/schema validation of the body.
+        /// Do not refuse a body the served schema rejects — it ships as typed,
+        /// with a note. (It is still encoded when it *does* encode.)
         #[arg(long)]
         no_validate: bool,
+        /// Send the bytes verbatim: no schema lookup, no encoding, no refusal.
+        /// The escape hatch for a subject this tool cannot type.
+        #[arg(long)]
+        raw: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -412,6 +417,9 @@ enum ServiceCmd {
         /// forbidden-fanout refusal and any body validation).
         #[arg(long)]
         no_validate: bool,
+        /// Send the request body verbatim: no schema lookup, no encoding.
+        #[arg(long)]
+        raw: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -673,6 +681,7 @@ async fn main() -> Result<()> {
             repeat,
             interval,
             no_validate,
+            raw,
             bus,
         }) => {
             cmd::publish::run(
@@ -683,6 +692,7 @@ async fn main() -> Result<()> {
                 repeat,
                 interval,
                 no_validate,
+                raw,
                 &bus,
             )
             .await
@@ -784,6 +794,7 @@ async fn main() -> Result<()> {
             params,
             body,
             no_validate,
+            raw,
             bus,
         }) => {
             cmd::call::run(
@@ -793,6 +804,7 @@ async fn main() -> Result<()> {
                 &params,
                 body.as_deref(),
                 no_validate,
+                raw,
                 &bus,
             )
             .await

@@ -495,14 +495,16 @@ zenctl topic info <key>                                              [T]
 zenctl topic echo [SEL] [--origin|--class|--producer|--subject GLOB]
                   [--fmt FMT] [--hex|--raw|--no-decode] [--count] [--rate]  [T/D]
 zenctl topic hz|bw <SEL> [--window 10s] [--per-key]                  [T]
-zenctl topic pub <key> [BODY|@file|-] [--qos PROFILE] [--repeat] [--interval]  [D]
+zenctl topic pub <key> [BODY|@file|-] [--qos PROFILE] [--repeat] [--interval]
+                       [--encoding MIME] [--no-validate] [--raw]     [D]
+       # the body is ENCODED for the wire against the served schema (#97)
 
 zenctl node list [--verbose] [--watch]    # liveliness + introspect + admin join  [T]
 zenctl node info <origin>                                            [D]
 
 zenctl service list|info                                             [T]
 zenctl service call <origin|*|@svc> <producer|-> <proc>
-                    [--param k=v] [--body JSON|@file|-] [--no-validate]  [T]
+                    [--param k=v] [--body JSON|@file|-] [--no-validate] [--raw]  [T]
        # exit 1 = an error reply; exit 2 = zero replies (silence stays non-verdict)
 
 zenctl interface list | show <Type> [--schema]                       [T/D]

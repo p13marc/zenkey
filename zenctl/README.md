@@ -90,13 +90,22 @@ streams one `{snapshot, appeared, disappeared}` object per cycle. `node list
 --watch` is event-driven — a producer stopping shows within one liveliness
 event, not one poll interval.
 
-`topic pub` and `service call` validate a JSON body by **encoding it**
-against the producer's served schema (request types come from the slice's
-procedure declaration) and refuse what cannot encode; `--no-validate` opts
-out. A producer serving no schema validates nothing — silence is not a
-verdict about the type. `topic pub` also prints a matching note ("a
-subscriber currently matches …") — a routing fact about *this* publisher,
-never a fleet verdict.
+`topic pub` and `service call` **encode** a JSON body against the producer's
+served schema (request types come from the slice's procedure declaration),
+and those encoded bytes are what goes on the wire, labelled with the declared
+`Encoding`. Publishing to a subject that declares `application/protobuf`
+therefore puts protobuf on the bus, not the JSON you typed; `topic echo`
+decodes it back through the same descriptor set.
+
+A body the schema cannot encode is refused before it touches the bus.
+`--no-validate` drops the refusal (the body ships as typed, with a note);
+`--raw` skips the schema lookup entirely and sends the bytes verbatim. A
+producer serving no schema validates nothing — silence is not a verdict about
+the type, and the tool says which of the three cases happened rather than
+letting them look alike.
+
+`topic pub` also prints a matching note ("a subscriber currently matches …")
+— a routing fact about *this* publisher, never a fleet verdict.
 
 `node list` is a liveliness query on `<base>/v1/*/state/*/alive` — RFC 04 §5's
 "entire fleet-presence protocol, zero payload bytes". The token *key* is the

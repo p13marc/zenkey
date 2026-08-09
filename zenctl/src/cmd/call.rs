@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use crate::{BusArgs, output};
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     origin: &str,
     producer: &str,
@@ -11,6 +12,7 @@ pub async fn run(
     params: &[String],
     body: Option<&str>,
     no_validate: bool,
+    raw: bool,
     args: &BusArgs,
 ) -> Result<()> {
     // The typed target refuses a hostname outright (RFC 06 §6) and makes a
@@ -19,7 +21,7 @@ pub async fn run(
     // registry-layer fanout guard (issue #36).
     let target = zenkey_fleet::CallTarget::parse(origin)?;
 
-    let payload = match body {
+    let typed = match body {
         Some(b) => Some(match b.strip_prefix('@') {
             Some(path) => std::fs::read(path)?,
             None => b.as_bytes().to_vec(),
@@ -38,28 +40,34 @@ pub async fn run(
 
     let session = args.session().await?;
 
-    // Body validation by encoding (#57), same ladder as `topic pub`: when
-    // the slice declares a request type and the producer serves its schema,
-    // an unencodable body is refused before the GET leaves. No declared
-    // request type / no served schema → proceed (silence is not a verdict).
-    if let (Some(slices), Some(payload)) = (&slices, &payload)
+    // The request body rides the same encode ladder as `topic pub` (#97, over
+    // #57's validation): when the slice declares a request type and the
+    // producer serves its schema, the **encoded** payload is what goes on the
+    // GET, and an unencodable body is refused before the GET leaves. No
+    // declared request type / no served schema → the body rides as typed, and
+    // the note says so (silence is not a verdict).
+    let mut payload = typed.clone();
+    if let (Some(slices), Some(typed)) = (&slices, &typed)
         && let Some(slice) = slices.get(producer)
         && let Some(decl) = slice.procedures.iter().find(|p| p.path == procedure)
         && let Some(request_type) = &decl.request
     {
-        super::validate::encode_check(
+        let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+        let prepared = zenkey_fleet::prepare_request(
             &session,
-            args,
-            super::validate::EncodeCheck {
-                producer,
-                type_name: request_type,
-                declared_encoding: None,
-                registry_encoding: decl.encoding.as_deref(),
-                action: "call anyway",
-            },
-            payload,
+            &store,
+            producer,
+            request_type,
+            None,
+            decl.encoding.as_deref(),
+            typed,
+            super::publish::mode(raw, no_validate),
         )
         .await?;
+        if let Some(note) = &prepared.note {
+            eprintln!("note: {note}");
+        }
+        payload = Some(prepared.bytes);
     }
 
     let report = zenkey_fleet::call(

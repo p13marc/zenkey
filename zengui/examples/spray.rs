@@ -11,7 +11,13 @@
 //! - a large payload, to exercise the echo ring's byte budget and the
 //!   "too large to preview" path;
 //! - a `@media`-shaped key, which a `**` subscriber must *not* see (RFC 03 §4
-//!   D2) — if it shows up in the tree, the scope design is broken.
+//!   D2) — if it shows up in the tree, the scope design is broken;
+//! - a **protobuf** subject with a producer that serves both RFC 08 halves
+//!   (`introspect` and `describe`, issue #97): the leaf decodes to named
+//!   fields with no registry directory involved, and it is the target the
+//!   publish pane can actually be pointed at. It is served from the bus rather
+//!   than added to `fixture-tests/registry` on purpose — that directory is the
+//!   codegen regression corpus, not a demo prop.
 //!
 //! ```text
 //! cargo run -p zengui --example spray -- -l tcp/127.0.0.1:7449   # listen, no router
@@ -46,6 +52,86 @@ struct Args {
     /// every tick so freshness dots keep moving.
     #[arg(long, default_value_t = 0)]
     keys: usize,
+}
+
+/// The `probe` producer's introspect slice: one subject, declared protobuf.
+const PROBE_SLICE: &str = r#"
+[registry]
+version = "1.0"
+app = "spray"
+convention = 1
+
+[producer]
+name = "probe"
+description = "demo producer serving a protobuf-encoded subject (#97)"
+
+[[subject]]
+path = "reading"
+class = "telemetry"
+type = "Reading"
+encoding = "application/protobuf"
+since = "1.0"
+description = "a protobuf payload — decodable only via the served descriptor set"
+"#;
+
+/// `package demo; message Reading { double value = 1; string label = 2; }`,
+/// built through prost-types so the fixture reads as the schema it is.
+fn probe_descriptor_set() -> Vec<u8> {
+    use prost_reflect::prost::Message as _;
+    use prost_reflect::prost_types::{
+        DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
+        field_descriptor_proto,
+    };
+    let field = |name: &str, number: i32, ty: field_descriptor_proto::Type| FieldDescriptorProto {
+        name: Some(name.to_string()),
+        number: Some(number),
+        label: Some(field_descriptor_proto::Label::Optional as i32),
+        r#type: Some(ty as i32),
+        json_name: Some(name.to_string()),
+        ..Default::default()
+    };
+    FileDescriptorSet {
+        file: vec![FileDescriptorProto {
+            name: Some("demo.proto".into()),
+            package: Some("demo".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Reading".into()),
+                field: vec![
+                    field("value", 1, field_descriptor_proto::Type::Double),
+                    field("label", 2, field_descriptor_proto::Type::String),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    }
+    .encode_to_vec()
+}
+
+/// The `describe` reply (RFC 08 §7).
+fn probe_schema_set() -> String {
+    zenkey::schema::SchemaSet::builder("spray")
+        .entry(
+            "Reading",
+            zenkey::schema::TypeSchema::protobuf("demo.Reading", &probe_descriptor_set()),
+        )
+        .build()
+        .to_json()
+}
+
+/// One `Reading`, on the wire. Deliberately *not* JSON: every sniff a generic
+/// tool has renders this as bytes, which is the point of serving a schema.
+fn probe_sample() -> Vec<u8> {
+    use prost_reflect::prost::Message as _;
+    let pool = prost_reflect::DescriptorPool::decode(probe_descriptor_set().as_slice())
+        .expect("fixture descriptor set");
+    let desc = pool
+        .get_message_by_name("demo.Reading")
+        .expect("fixture message");
+    let mut msg = prost_reflect::DynamicMessage::new(desc);
+    msg.set_field_by_name("value", prost_reflect::Value::F64(12.5));
+    msg.set_field_by_name("label", prost_reflect::Value::String("probe".into()));
+    msg.encode_to_vec()
 }
 
 #[tokio::main]
@@ -122,13 +208,47 @@ async fn main() -> anyhow::Result<()> {
             with_base(&format!("v1/{host}/@media/parallax/cam0/video/h264/hi")),
             vec![0u8; 4096],
         ),
+        // A protobuf payload (#97). Opaque to every sniff — it decodes only
+        // because `probe` serves its descriptor set on `describe` below.
+        (
+            with_base(&format!("v1/{host}/telemetry/probe/reading")),
+            probe_sample(),
+        ),
     ];
+
+    // The `probe` producer's RFC 08 §6/§7 halves. Served from the bus, so the
+    // protobuf leaf decodes with `--registry` pointing anywhere (or nowhere):
+    // the union takes served-wins, and this producer is only served.
+    let mut described = Vec::new();
+    for (procedure, payload) in [
+        ("introspect", PROBE_SLICE.to_string()),
+        ("describe", probe_schema_set()),
+    ] {
+        let key = with_base(&format!("v1/{host}/@rpc/probe/{procedure}"));
+        println!("serving: {key}");
+        let reply_key = key.clone();
+        described.push(
+            session
+                .declare_queryable(&key)
+                .callback(move |query| {
+                    let q = query.clone();
+                    let reply_key = reply_key.clone();
+                    let payload = payload.clone();
+                    tokio::spawn(async move {
+                        let _ = q.reply(reply_key, payload).await;
+                    });
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("queryable {key}: {e}"))?,
+        );
+    }
 
     // Liveliness tokens (RFC 04 §5): the roster the node views feed on.
     // Killing this process retracts them — that is the suspect-on-retraction
     // demo for `zenctl node list --watch` and the zengui node dashboard.
     let tokens = [
         with_base(&format!("v1/{host}/state/sysinfo/alive")),
+        with_base(&format!("v1/{host}/state/probe/alive")),
         with_base("v1/@catalog/state/alive"),
     ];
     let mut held = Vec::new();

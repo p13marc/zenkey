@@ -32,3 +32,11 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+# Fixture descriptor sets for the codec round-trip test (#97) — built through
+# prost-types rather than hand-encoded bytes, so the fixture stays readable.
+prost-reflect = { workspace = true }
+# The codec registration lives in zenkey, so enabling it here turns the
+# protobuf decoder on for *this crate's tests* without touching what the
+# library ships. `cargo test -p zenkey-fleet` then covers `tests/codec.rs`
+# on its own, instead of only when a frontend happens to unify the feature in.
+zenkey = { workspace = true, features = ["decode-protobuf"] }

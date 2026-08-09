@@ -21,7 +21,11 @@ path = "src/main.rs"
 
 [dependencies]
 zenkey = { workspace = true }
-zenkey-fleet = { workspace = true }
+# The codec matrix is enabled in the *binary*, not the library (issue #97):
+# the dynamic protobuf decoder existed since v1.5 and was compiled out of
+# every shipped explorer, so a protobuf subject rendered as a hex sniff and
+# could not be published to at all.
+zenkey-fleet = { workspace = true, features = ["decode-protobuf"] }
 
 zenoh = { workspace = true }
 tokio = { workspace = true }
