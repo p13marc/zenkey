@@ -132,7 +132,7 @@ pub fn matches(line: &EchoLine, filter: &str) -> bool {
     line.key.to_lowercase().contains(&needle) || line.preview.to_lowercase().contains(&needle)
 }
 
-/// The lines a given view shows, newest first, bounded by [`VISIBLE`].
+/// The lines a given view shows, newest first, bounded by the draw cap.
 ///
 /// Returns `(lines, matched)` — `matched` counts everything that passed the
 /// filters, so the strip can say "showing N of M" rather than implying the
