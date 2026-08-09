@@ -77,7 +77,12 @@ pub struct Zengui {
     selected: Option<String>,
     /// The last on-demand fetch: (key, outcome-or-error).
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
-    echo_filter: String,
+    /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
+    echo_view: view::echo::EchoView,
+    /// The connection pane's state (issue #67): contexts and endpoints.
+    context_form: view::contexts::ContextForm,
+    /// The command palette / overlay state (issue #75).
+    palette: view::palette::PaletteState,
 
     /// The node dashboard's presence model (#61), fed by liveliness only.
     roster: crate::nodes::NodeRoster,
@@ -104,6 +109,13 @@ pub struct Zengui {
     slices: Option<Arc<SliceSet>>,
     slice_source: SliceSource,
 
+    /// Persisted UI preferences (issue #73) — theme, zoom, geometry, and the
+    /// scope/context the window was last on.
+    prefs: crate::prefs::Prefs,
+    /// Why the defaults are in force, when a prefs file could not be read.
+    /// Rendered once in the status strip; never a reason to refuse to open.
+    prefs_note: Option<String>,
+
     bases: Vec<DiscoveredBase>,
     keys: usize,
     keys_evicted: u64,
@@ -113,6 +125,17 @@ pub struct Zengui {
 
 impl Zengui {
     pub fn new(settings: Settings) -> (Zengui, Task<Message>) {
+        let (prefs, prefs_note) = crate::prefs::Prefs::load();
+        Self::with_prefs(settings, prefs, prefs_note)
+    }
+
+    /// The pure constructor: preferences are injected rather than read, so a
+    /// test never touches the user's real file.
+    pub fn with_prefs(
+        settings: Settings,
+        prefs: crate::prefs::Prefs,
+        prefs_note: Option<String>,
+    ) -> (Zengui, Task<Message>) {
         let echo = EchoRing::new(settings.echo_lines);
         let connect = settings.connect.clone();
         let listen = settings.listen.clone();
@@ -141,7 +164,9 @@ impl Zengui {
             expanded: BTreeSet::new(),
             selected: None,
             fetched: None,
-            echo_filter: String::new(),
+            echo_view: view::echo::EchoView::new(),
+            context_form: view::contexts::ContextForm::default(),
+            palette: view::palette::PaletteState::default(),
             roster: crate::nodes::NodeRoster::default(),
             node_selected: None,
             node_detail: view::nodes::DetailState::default(),
@@ -155,6 +180,8 @@ impl Zengui {
             facts: HashMap::new(),
             slices: None,
             slice_source: SliceSource::None,
+            prefs,
+            prefs_note,
             bases: Vec::new(),
             keys: 0,
             keys_evicted: 0,
@@ -177,13 +204,22 @@ impl Zengui {
     }
 
     pub fn theme(&self) -> iced::Theme {
-        iced::Theme::Dark
+        self.prefs.theme.theme()
+    }
+
+    /// The UI scale factor iced applies to the whole window (issue #73).
+    pub fn scale_factor(&self) -> f32 {
+        self.prefs.zoom
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::SessionOpened(Ok(session)) => {
                 self.session = Some(session.clone());
+                // The context list is read from the shared file, not cached at
+                // launch: `zenctl context create` on the other side of the
+                // screen should show up here without a restart (#67).
+                self.refresh_contexts();
                 self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
                     &self.settings.base,
                     self.settings.timeout(),
@@ -370,21 +406,9 @@ impl Zengui {
                 self.settings.base = base;
                 // The base is an input to every projection and to the
                 // skeleton, and watch selectors are base-relative: a fresh
-                // monitor is the obviously-correct restart.
-                self.facts.clear();
-                // A roster against another base is not evidence here (O4).
-                self.roster.clear();
-                self.node_selected = None;
-                self.node_detail = view::nodes::DetailState::NotAsked;
-                // Nor is a doctor report.
-                self.doctor.clear();
-                self.my_watches.clear();
-                self.my_watch_paths.clear();
-                self.scope_watches.clear();
-                self.seeding.clear();
-                self.seeding_paths.clear();
-                self.seed_totals = (0, 0, 0);
-                self.seeded_watches = 0;
+                // monitor is the obviously-correct restart. Everything the old
+                // base taught us is evidence about a different deployment (O4).
+                self.forget_deployment();
                 self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
                     &self.settings.base,
                     self.settings.timeout(),
@@ -398,6 +422,8 @@ impl Zengui {
                     return Task::none();
                 }
                 self.settings.scope = scope;
+                // Remembered for the next launch (issue #73).
+                self.remember();
                 // If the scope is being observed, re-point the observation.
                 if !self.scope_watches.is_empty() {
                     let release = self.unwatch_scope();
@@ -543,30 +569,48 @@ impl Zengui {
                 }
                 Task::none()
             }
-            Message::EchoFilterChanged(f) => {
-                self.echo_filter = f;
-                Task::none()
+            Message::Echo(msg) => self.update_echo(msg),
+            Message::Context(msg) => self.update_context(msg),
+            Message::ContextSwitched(Ok(session)) => {
+                // A new session is a new everything: the base may differ, so
+                // every projection, roster and verdict from the old one is
+                // evidence about a different deployment (O4).
+                self.forget_deployment();
+                self.update(Message::SessionOpened(Ok(session)))
             }
-            Message::ClearEcho => {
-                self.echo.clear();
+            Message::ContextSwitched(Err(e)) => {
+                self.link = LinkState::Failed(e.clone());
+                self.context_form.status = Some(Err(format!("could not connect: {e}")));
                 Task::none()
             }
             Message::PaneSelected(pane) => {
                 self.right_pane = pane;
                 Task::none()
             }
+            Message::WindowResized(w, h) => {
+                // Geometry is remembered, but not on every pixel of a drag:
+                // the prefs file would be rewritten hundreds of times per
+                // resize. Recorded here, written on the next real change.
+                self.prefs.window = Some((w, h));
+                Task::none()
+            }
+            Message::Key(key, modifiers) => self.update_key(&key, modifiers),
+            Message::Palette(msg) => self.update_palette(msg),
+            Message::Prefs(msg) => {
+                use crate::message::PrefsMsg;
+                match msg {
+                    PrefsMsg::ThemeToggled => self.prefs.theme = self.prefs.theme.toggled(),
+                    PrefsMsg::ZoomIn => self.prefs.zoom_in(),
+                    PrefsMsg::ZoomOut => self.prefs.zoom_out(),
+                    PrefsMsg::ZoomReset => self.prefs.zoom_reset(),
+                }
+                // Saved on every change rather than at exit: a GUI is killed,
+                // not quit, more often than anyone admits.
+                self.remember();
+                Task::none()
+            }
             Message::Reconnect => {
-                self.my_watches.clear();
-                self.my_watch_paths.clear();
-                self.scope_watches.clear();
-                self.seeding.clear();
-                self.seeding_paths.clear();
-                self.seed_totals = (0, 0, 0);
-                self.seeded_watches = 0;
-                self.roster.clear();
-                self.node_selected = None;
-                self.node_detail = view::nodes::DetailState::NotAsked;
-                self.doctor.clear();
+                self.forget_deployment();
                 self.start_monitor()
             }
         }
@@ -820,6 +864,387 @@ impl Zengui {
                     Message::PublishReady,
                 );
                 Task::batch([stop, send])
+            }
+        }
+    }
+
+    /// Everything a session learned about one deployment, forgotten.
+    ///
+    /// Factored out because three paths need exactly this — a base change, a
+    /// reconnect, and a context switch — and each one that forgot a different
+    /// subset would leave a stale verdict on screen about a fleet it is no
+    /// longer looking at (O4).
+    fn forget_deployment(&mut self) {
+        self.facts.clear();
+        self.roster.clear();
+        self.node_selected = None;
+        self.node_detail = view::nodes::DetailState::NotAsked;
+        self.doctor.clear();
+        self.my_watches.clear();
+        self.my_watch_paths.clear();
+        self.scope_watches.clear();
+        self.seeding.clear();
+        self.seeding_paths.clear();
+        self.seed_totals = (0, 0, 0);
+        self.seeded_watches = 0;
+        self.skeleton = None;
+        self.slices = None;
+        self.slice_source = view::status::SliceSource::None;
+        self.bases.clear();
+    }
+
+    /// One key press, in context.
+    ///
+    /// **Esc layering** (#75): palette first, then a tree selection, then
+    /// nothing — one layer per press, so Esc never does two things at once.
+    /// The arrows drive the overlay only while one is open, which is what
+    /// keeps them available to the panes the rest of the time.
+    fn update_key(
+        &mut self,
+        key: &iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+    ) -> Task<Message> {
+        use iced::keyboard::{Key, key::Named};
+        use view::palette::PaletteMsg;
+
+        if crate::shortcuts::is_escape(key) {
+            if self.palette.is_open() {
+                self.palette.close();
+            } else if self.selected.is_some() {
+                return self.update(Message::SelectKey(None));
+            }
+            return Task::none();
+        }
+        if self.palette.is_open() {
+            match key {
+                Key::Named(Named::ArrowDown) => {
+                    return self.update_palette(PaletteMsg::CursorDown);
+                }
+                Key::Named(Named::ArrowUp) => {
+                    return self.update_palette(PaletteMsg::CursorUp);
+                }
+                Key::Named(Named::Enter) => return self.update_palette(PaletteMsg::Activate),
+                _ => {}
+            }
+        }
+        match crate::shortcuts::resolve(key, modifiers) {
+            Some(message) => self.update(message),
+            None => Task::none(),
+        }
+    }
+
+    /// The command palette (#75).
+    ///
+    /// Every activation dispatches through `self.update(...)` with the
+    /// action's own message, which is what keeps the palette from being a
+    /// second implementation of anything: it is a faster way to send a message
+    /// the UI already sends, and nothing more.
+    fn update_palette(&mut self, msg: view::palette::PaletteMsg) -> Task<Message> {
+        use view::palette::PaletteMsg;
+        match msg {
+            PaletteMsg::Open(overlay) => {
+                self.palette.open(overlay);
+                Task::none()
+            }
+            PaletteMsg::Close => {
+                self.palette.close();
+                Task::none()
+            }
+            PaletteMsg::QueryChanged(q) => {
+                self.palette.query = q;
+                // A new query re-ranks the list, so the old cursor points at a
+                // different row — start from the best match again.
+                self.palette.cursor = 0;
+                Task::none()
+            }
+            PaletteMsg::CursorUp => {
+                self.palette.cursor = self.palette.cursor.saturating_sub(1);
+                Task::none()
+            }
+            PaletteMsg::CursorDown => {
+                self.palette.cursor = self
+                    .palette
+                    .cursor
+                    .saturating_add(1)
+                    .min(self.palette_rows().len().saturating_sub(1));
+                Task::none()
+            }
+            PaletteMsg::Activate => self.run_palette_row(self.palette.cursor),
+            PaletteMsg::Pick(i) => self.run_palette_row(i),
+        }
+    }
+
+    /// The rows the open overlay currently shows, in display order.
+    fn palette_rows(&self) -> Vec<Message> {
+        use view::palette::{Overlay, actions, rank};
+        match self.palette.overlay {
+            Overlay::Commands => {
+                let items = actions(&self.context_form.known);
+                rank(&items, &self.palette.query, |a| a.label.as_str())
+                    .into_iter()
+                    .map(|i| items[i].message.clone())
+                    .collect()
+            }
+            Overlay::Keys => {
+                let keys = self.observed_keys();
+                rank(&keys, &self.palette.query, |k| k.as_str())
+                    .into_iter()
+                    .map(|i| Message::SelectKey(Some(keys[i].clone())))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Keys the session has actually observed — never a guess (O4): the
+    /// jump-to overlay offers what is on the bus, not what a registry says
+    /// could be.
+    fn observed_keys(&self) -> Vec<String> {
+        self.facts.keys().cloned().collect()
+    }
+
+    fn run_palette_row(&mut self, index: usize) -> Task<Message> {
+        let rows = self.palette_rows();
+        let Some(message) = rows.get(index).cloned() else {
+            return Task::none();
+        };
+        // Jumping to a key also shows it: selecting without switching panes
+        // would look like nothing happened.
+        if matches!(self.palette.overlay, view::palette::Overlay::Keys) {
+            self.right_pane = RightPane::Detail;
+        }
+        self.palette.close();
+        self.update(message)
+    }
+
+    /// The connection pane (#67). Contexts are read and written through the
+    /// **shared** store, so a context created here is one `zenctl` selects and
+    /// vice versa — that reciprocity is the feature, not a side effect.
+    fn update_context(&mut self, msg: view::contexts::ContextMsg) -> Task<Message> {
+        use view::contexts::ContextMsg;
+        match msg {
+            ContextMsg::NameChanged(v) => {
+                self.context_form.name = v;
+                Task::none()
+            }
+            ContextMsg::ConnectChanged(v) => {
+                self.context_form.connect = v;
+                Task::none()
+            }
+            ContextMsg::ListenChanged(v) => {
+                self.context_form.listen = v;
+                Task::none()
+            }
+            ContextMsg::BaseChanged(v) => {
+                self.context_form.base = v;
+                Task::none()
+            }
+            ContextMsg::ScoutingToggled(b) => {
+                self.context_form.scouting = b;
+                Task::none()
+            }
+            ContextMsg::Isolate => {
+                // RFC 09 §0.1's isolated-verification recipe, one click:
+                // multicast off, explicit endpoints only.
+                self.context_form.scouting = false;
+                self.context_form.status = Some(Ok(
+                    "multicast scouting off — an empty result now means \"nothing on these \
+                     endpoints\", never \"nothing on the network\" (RFC 09 §0.1)"
+                        .into(),
+                ));
+                Task::none()
+            }
+            ContextMsg::Load => {
+                let Some(name) = self.context_form.active.clone() else {
+                    self.context_form.status = Some(Err("pick a context first".into()));
+                    return Task::none();
+                };
+                match zenkey_fleet::context_store::load() {
+                    Ok(config) => match config.contexts.get(&name) {
+                        Some(stored) => {
+                            self.context_form.load_from(&name, stored);
+                            self.context_form.status = Some(Ok(format!("loaded {name}")));
+                        }
+                        None => {
+                            self.context_form.status =
+                                Some(Err(format!("{name} is no longer in the config")));
+                        }
+                    },
+                    Err(e) => self.context_form.status = Some(Err(e.to_string())),
+                }
+                Task::none()
+            }
+            ContextMsg::Save => {
+                self.save_context(false);
+                Task::none()
+            }
+            ContextMsg::SaveAndSelect => {
+                if !self.save_context(true) {
+                    return Task::none();
+                }
+                self.switch_to_form_context()
+            }
+            ContextMsg::Selected(name) => {
+                self.context_form.active = Some(name.clone());
+                match zenkey_fleet::context_store::load() {
+                    Ok(config) => match config.contexts.get(&name) {
+                        Some(stored) => {
+                            self.context_form.load_from(&name, stored);
+                            self.apply_context(stored.clone());
+                            self.prefs.context = Some(name.clone());
+                            self.prefs.save();
+                            self.context_form.status = Some(Ok(format!("switched to {name}")));
+                            return self.reopen_session();
+                        }
+                        None => {
+                            self.context_form.status =
+                                Some(Err(format!("{name} is no longer in the config")));
+                        }
+                    },
+                    Err(e) => self.context_form.status = Some(Err(e.to_string())),
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// Write the editor to the shared config. Returns whether it landed.
+    fn save_context(&mut self, select: bool) -> bool {
+        let stored = match self.context_form.to_stored() {
+            Ok(s) => s,
+            Err(e) => {
+                self.context_form.status = Some(Err(e));
+                return false;
+            }
+        };
+        let name = self.context_form.name.trim().to_string();
+        let mut config = match zenkey_fleet::context_store::load() {
+            Ok(c) => c,
+            Err(e) => {
+                self.context_form.status = Some(Err(e.to_string()));
+                return false;
+            }
+        };
+        config.contexts.insert(name.clone(), stored);
+        if select {
+            config.current = Some(name.clone());
+        }
+        if let Err(e) = zenkey_fleet::context_store::save(&config) {
+            self.context_form.status = Some(Err(e.to_string()));
+            return false;
+        }
+        self.refresh_contexts();
+        self.context_form.active = Some(name.clone());
+        self.context_form.status = Some(Ok(format!(
+            "saved {name} to {}",
+            zenkey_fleet::context_store::config_path().display()
+        )));
+        true
+    }
+
+    /// Re-read the context names from the shared config.
+    fn refresh_contexts(&mut self) {
+        if let Ok(config) = zenkey_fleet::context_store::load() {
+            self.context_form.known = config.contexts.keys().cloned().collect();
+            if self.context_form.active.is_none() {
+                self.context_form.active = config.current.clone();
+            }
+        }
+    }
+
+    /// Layer a stored context over the live settings — the same precedence
+    /// `Cli::settings_with` applies, minus the flags, because a context picked
+    /// in-app *is* the explicit choice.
+    fn apply_context(&mut self, stored: zenkey_fleet::StoredContext) {
+        self.settings.base = stored.base.unwrap_or_default();
+        self.settings.connect = stored.connect;
+        self.settings.listen = stored.listen;
+        self.settings.scouting = stored.scouting.unwrap_or(false);
+        if !stored.registry.is_empty() {
+            self.settings.registry = stored.registry;
+        }
+        if let Some(t) = stored.timeout {
+            self.settings.timeout_secs = t;
+        }
+    }
+
+    fn switch_to_form_context(&mut self) -> Task<Message> {
+        let stored = match self.context_form.to_stored() {
+            Ok(s) => s,
+            Err(e) => {
+                self.context_form.status = Some(Err(e));
+                return Task::none();
+            }
+        };
+        self.apply_context(stored);
+        self.prefs.context = Some(self.context_form.name.trim().to_string());
+        self.prefs.save();
+        self.reopen_session()
+    }
+
+    /// Tear the link down and build a new one on the current settings.
+    ///
+    /// The epoch bump the subscription machinery already does on
+    /// `MonitorStarted` is what retires the old pump; nothing here has to
+    /// coordinate with it.
+    fn reopen_session(&mut self) -> Task<Message> {
+        self.link = LinkState::Connecting;
+        self.monitor = None;
+        self.session = None;
+        let connect = self.settings.connect.clone();
+        let listen = self.settings.listen.clone();
+        let scouting = self.settings.scouting;
+        Task::perform(
+            async move {
+                zenkey_fleet::session::open(&connect, &listen, scouting)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            Message::ContextSwitched,
+        )
+    }
+
+    /// The echo pane (#72). Every action here is a *view* action: nothing
+    /// changes what the session subscribes to, which is what keeps "I filtered
+    /// the pane" and "I narrowed the bus" two different, visible things.
+    fn update_echo(&mut self, msg: view::echo::EchoMsg) -> Task<Message> {
+        use view::echo::EchoMsg;
+        match msg {
+            EchoMsg::FilterChanged(f) => {
+                self.echo_view.filter = f;
+                Task::none()
+            }
+            EchoMsg::KeyFilterChanged(f) => {
+                self.echo_view.set_key_filter(f);
+                Task::none()
+            }
+            EchoMsg::FollowToggled => {
+                let seq = self.echo.next_seq();
+                if self.echo_view.following {
+                    self.echo_view.pause(seq);
+                } else {
+                    self.echo_view.resume(seq);
+                }
+                Task::none()
+            }
+            EchoMsg::Clear => {
+                self.echo.clear();
+                Task::none()
+            }
+            EchoMsg::LineClicked(key) => {
+                // Drill-through reuses the selection path rather than being a
+                // second way to open the inspector.
+                self.right_pane = RightPane::Detail;
+                self.update(Message::SelectKey(Some(key)))
+            }
+            EchoMsg::Export => {
+                let text = view::echo::export(
+                    &self.echo,
+                    &self.echo_view,
+                    self.selected.as_deref(),
+                    &self.settings.base,
+                );
+                iced::clipboard::write(text)
             }
         }
     }
@@ -1103,6 +1528,14 @@ impl Zengui {
         )
     }
 
+    /// Persist what the window looks like now. Best-effort by construction
+    /// (see `Prefs::save`) — a preference that cannot be written must not fail
+    /// whatever the user was actually doing.
+    fn remember(&mut self) {
+        self.prefs.scope = self.settings.scope;
+        self.prefs.save();
+    }
+
     fn apply_tick(&mut self, tick: &BusTick) {
         self.observed = Arc::clone(&tick.tree);
         self.keys = tick.keys;
@@ -1255,6 +1688,24 @@ impl Zengui {
             let period = std::time::Duration::from_secs_f64(self.publish_form.interval_secs());
             subs.push(iced::time::every(period).map(|_| Message::PublishTick));
         }
+        // Window geometry, for the next launch (issue #73).
+        subs.push(
+            iced::window::resize_events()
+                .map(|(_, size)| Message::WindowResized(size.width, size.height)),
+        );
+        // Keyboard shortcuts (issues #73, #75). `listen` only sees events no
+        // widget consumed, so a shortcut can never steal a keystroke from the
+        // text box the user is typing in.
+        // Key presses arrive raw: `listen` only sees what no widget consumed,
+        // and iced's subscription closures cannot capture, so the *meaning* of
+        // a press is decided in `update` where the state is (#75's Esc
+        // layering needs to know what is open).
+        subs.push(iced::keyboard::listen().filter_map(|event| match event {
+            iced::keyboard::Event::KeyPressed { key, modifiers, .. } => {
+                Some(Message::Key(key, modifiers))
+            }
+            _ => None,
+        }));
         Subscription::batch(subs)
     }
 
@@ -1274,8 +1725,12 @@ impl Zengui {
             .width(Length::FillPortion(1))
             .height(Length::Fill),
             iced::widget::container(match self.right_pane {
-                RightPane::Echo =>
-                    view::echo::pane(&self.echo, &self.echo_filter, self.selected.as_deref(),),
+                RightPane::Echo => view::echo::pane(
+                    &self.echo,
+                    &self.echo_view,
+                    self.selected.as_deref(),
+                    self.echo.next_seq(),
+                ),
                 RightPane::Call =>
                     view::call::pane(&self.call_form, self.slices.as_deref(), &self.roster,),
                 RightPane::Publish =>
@@ -1294,13 +1749,15 @@ impl Zengui {
                     detail: &self.node_detail,
                 }),
                 RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
+                RightPane::Connect =>
+                    view::contexts::pane(&self.context_form, self.settings.is_unreachable(),),
             })
             .width(Length::FillPortion(1))
             .height(Length::Fill),
         ]
         .spacing(space::MD);
 
-        column![
+        let layout = column![
             self.toolbar(),
             panes,
             view::status::strip(Status {
@@ -1319,11 +1776,32 @@ impl Zengui {
                 seeded_watches: self.seeded_watches,
                 seed_totals: self.seed_totals,
                 unreachable: self.settings.is_unreachable(),
+                prefs_note: self.prefs_note.as_deref(),
             }),
         ]
         .spacing(space::MD)
-        .padding(space::MD)
-        .into()
+        .padding(space::MD);
+
+        // The overlay floats above everything (#75). `stack` rather than a
+        // modal widget because the layering rule is ours — palette above
+        // panes, Esc peeling one layer at a time — and a widget with its own
+        // dismissal policy would fight it.
+        match view::palette::overlay(
+            &self.palette,
+            &self.context_form.known,
+            &self.observed_keys(),
+        ) {
+            None => layout.into(),
+            Some(overlay) => iced::widget::stack![
+                layout,
+                iced::widget::container(overlay)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .padding(space::XL),
+            ]
+            .into(),
+        }
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
@@ -1374,6 +1852,26 @@ impl Zengui {
             .spacing(space::XS),
             crate::view::kit::muted(self.settings.scope.label()),
             iced::widget::space::horizontal(),
+            // Window preferences (issue #73): the theme name is the button,
+            // so the label says what you get rather than what you have.
+            iced::widget::button(
+                text(format!("theme: {}", self.prefs.theme.label()))
+                    .size(crate::view::tokens::font::CAPTION)
+            )
+            .on_press(Message::Prefs(crate::message::PrefsMsg::ThemeToggled))
+            .padding(4),
+            iced::widget::button(text("-").size(crate::view::tokens::font::CAPTION))
+                .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomOut))
+                .padding(4),
+            iced::widget::button(
+                text(format!("{}%", (self.prefs.zoom * 100.0).round() as i32))
+                    .size(crate::view::tokens::font::CAPTION)
+            )
+            .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomReset))
+            .padding(4),
+            iced::widget::button(text("+").size(crate::view::tokens::font::CAPTION))
+                .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomIn))
+                .padding(4),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))
                 .on_press(Message::Reconnect)
                 .padding(4),

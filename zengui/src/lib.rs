@@ -24,5 +24,7 @@ pub mod keyfacts;
 pub mod link;
 pub mod message;
 pub mod nodes;
+pub mod prefs;
 pub mod scope;
+pub mod shortcuts;
 pub mod view;

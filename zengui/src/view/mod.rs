@@ -5,11 +5,13 @@
 //! pane be rendered standalone in a test (zensight's `tests/ui_tests.rs` shape).
 
 pub mod call;
+pub mod contexts;
 pub mod detail;
 pub mod doctor;
 pub mod echo;
 pub mod kit;
 pub mod nodes;
+pub mod palette;
 pub mod publish;
 pub mod status;
 pub mod theme;

@@ -86,11 +86,38 @@ pub enum Message {
     /// The tree scrolled: (absolute y offset, viewport height) — what the
     /// virtualized window renders against (issue #65).
     TreeScrolled(f32, f32),
-    EchoFilterChanged(String),
-    ClearEcho,
+    /// Echo pane interactions (issue #72, echo v2).
+    Echo(crate::view::echo::EchoMsg),
+    /// Connection pane interactions (issue #67).
+    Context(crate::view::contexts::ContextMsg),
+    /// A context switch finished re-opening the session.
+    ContextSwitched(Result<zenoh::Session, String>),
     /// Switch the right-hand pane (the toolbar's tab strip).
     PaneSelected(RightPane),
     Reconnect,
+
+    /// A key press no widget consumed (issues #73, #75).
+    ///
+    /// Delivered raw rather than pre-resolved because Esc and the arrows mean
+    /// different things depending on what is open, and iced's subscription
+    /// closures must not capture — so the decision belongs in `update`, where
+    /// the state is.
+    Key(iced::keyboard::Key, iced::keyboard::Modifiers),
+    /// Command-palette / overlay interactions (issue #75).
+    Palette(crate::view::palette::PaletteMsg),
+    /// A persisted-preference change (issue #73). Each one saves.
+    Prefs(PrefsMsg),
+    /// The window was resized — remembered for the next launch (issue #73).
+    WindowResized(f32, f32),
+}
+
+/// What a user can change about the window itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefsMsg {
+    ThemeToggled,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
 }
 
 /// What one prepare→declare→send round produced. The publication travels in
@@ -116,18 +143,21 @@ pub enum RightPane {
     Detail,
     Nodes,
     Doctor,
+    /// Contexts and endpoints (issue #67).
+    Connect,
 }
 
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 6] = [
+    pub const ALL: [RightPane; 7] = [
         RightPane::Echo,
         RightPane::Call,
         RightPane::Publish,
         RightPane::Detail,
         RightPane::Nodes,
         RightPane::Doctor,
+        RightPane::Connect,
     ];
 
     pub fn label(self) -> &'static str {
@@ -138,6 +168,7 @@ impl RightPane {
             RightPane::Detail => "detail",
             RightPane::Nodes => "nodes",
             RightPane::Doctor => "doctor",
+            RightPane::Connect => "connect",
         }
     }
 }

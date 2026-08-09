@@ -34,7 +34,13 @@ use zenkey::selector::{self, Scope};
 pub const ANY_BASE: &str = "**";
 
 /// What to watch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]
+///
+/// `Serialize`/`Deserialize` because the preset is remembered across launches
+/// (issue #73) — it is a user's choice about their window, not runtime state.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum ScopePreset {
     /// Every plain-chunk key on the bus. The key-agnostic default.
     Everything,

@@ -53,8 +53,17 @@ send log that reports what it dropped), the node dashboard (#61 — liveliness
 roster, suspect-on-retraction, lazy `node_info` detail), and the
 schema-decoded payload inspector with the selection detail pane. A doctor
 panel (#71) renders the same typed findings as `zenctl doctor --format json`,
-run on demand with run-over-run deltas. Still open: contexts UX (#67), echo v2
-(#72), settings persistence (#73), and the command palette (#75).
+run on demand with run-over-run deltas.
+
+Phase 2 of the epic is complete: a **connect pane** (#67) selects and edits the
+named contexts `zenctl` shares, and spends three lines on what RFC 09 §0.1
+actually says about scouting; **echo v2** (#72) pauses without lying about the
+gap, filters by key expression *and* substring, drills through to the inspector
+and exports the CLI's ndjson rows; **preferences** (#73) persist theme, zoom,
+geometry and scope, degrading loudly rather than silently when the file will not
+parse; and a **command palette** (#75) — Ctrl+P for actions, Ctrl+K for observed
+keys, `?` for the shortcut map, which is rendered from the same table that
+dispatches it.
 
 No codec logic lives here. The publish form hands its body to
 `zenkey_fleet::prepare_publish` and renders what comes back — encoded, sent as

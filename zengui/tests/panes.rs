@@ -753,3 +753,157 @@ fn the_doctor_pane_never_invents_a_verdict() {
         "fixed findings stay visible, dimmed"
     );
 }
+
+/// Persisted preferences (#73) reach the window: the theme button says what
+/// you *get*, the zoom reads back as a percentage, and a preferences file that
+/// could not be read explains itself in the strip rather than looking like a
+/// reset.
+#[test]
+fn preferences_are_visible_and_a_broken_file_says_so() {
+    use zengui::prefs::{Prefs, ThemeChoice};
+    use zengui::view::status::{self, Status};
+
+    // The theme choice drives the actual iced theme, not just a label.
+    assert_eq!(ThemeChoice::Light.theme(), iced::Theme::Light);
+    assert_eq!(ThemeChoice::Dark.theme(), iced::Theme::Dark);
+
+    let mut prefs = Prefs::default();
+    prefs.zoom_in();
+    assert!(prefs.zoom > 1.0);
+
+    let link = zengui::message::LinkState::Pumping;
+    let watched: Vec<String> = vec![];
+    let source = status::SliceSource::None;
+    let mut ui = simulator::<Message, _, _>(status::strip(Status {
+        link: &link,
+        base_label: "acme",
+        watched: &watched,
+        skeleton: None,
+        keys_unwatched: 0,
+        fetched: None,
+        scope_label: "all",
+        keys: 0,
+        keys_evicted: 0,
+        totals: (0, 0, 0.0),
+        slices: &source,
+        seeding: 0,
+        seeded_watches: 0,
+        seed_totals: (0, 0, 0),
+        unreachable: false,
+        prefs_note: Some("zengui.toml does not parse (bad) — using defaults"),
+    }));
+    assert!(
+        ui.find("preferences: zengui.toml does not parse (bad) — using defaults")
+            .is_ok(),
+        "an unreadable prefs file must not look like a reset"
+    );
+}
+
+/// The connection pane (#67) explains scouting rather than labelling it, and
+/// carries RFC 09 §0.1's actual semantics: two independent switches, and the
+/// reading of an empty result under an isolated session.
+#[test]
+fn the_connect_pane_states_what_scouting_means() {
+    use zengui::view::contexts::{ContextForm, pane};
+
+    let form = ContextForm {
+        known: vec!["lab".into(), "prod".into()],
+        active: Some("lab".into()),
+        ..ContextForm::default()
+    };
+    let mut ui = simulator::<Message, _, _>(pane(&form, false));
+    assert!(
+        ui.find(
+            "RFC 09 §0.1: multicast scouting and gossip are independent. This toggle is \
+             the multicast half only — with it off, a peer still learns about others \
+             through gossip over an established link."
+        )
+        .is_ok(),
+        "the two-switch distinction must be on screen, not just in the RFC"
+    );
+    assert!(
+        ui.find(
+            "Contexts are shared with zenctl — one file, two explorers \
+             (~/.config/zenkey-explorer/config.toml)."
+        )
+        .is_ok(),
+        "the shared store is the feature; say so"
+    );
+
+    // A session that reaches nothing is called out where the fix is.
+    let mut ui = simulator::<Message, _, _>(pane(&form, true));
+    assert!(
+        ui.find("this session has no endpoints and multicast scouting is off — it reaches nothing")
+            .is_ok()
+    );
+}
+
+/// The command palette (#75): every action is on screen and every one of
+/// them emits a message the UI path also emits — the property that keeps a
+/// palette from becoming a second implementation of the app.
+#[test]
+fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
+    use zengui::view::palette::{Overlay, PaletteState, overlay};
+
+    let contexts = vec!["lab".to_string()];
+    let keys = vec![
+        "v1/h-3fa9c2d41b7e/state/sysinfo/health".to_string(),
+        "demo/example/foo".to_string(),
+    ];
+
+    let mut state = PaletteState::default();
+    state.open(Overlay::Commands);
+    {
+        let element = overlay(&state, &contexts, &keys).expect("commands overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        assert!(ui.find("go to doctor pane").is_ok());
+        assert!(ui.find("context: lab").is_ok(), "contexts are offered");
+    }
+
+    // The list is bounded, so reaching an action past the first screenful is
+    // what typing is for — which is also the fuzzy match's real workload.
+    state.query = "ndjson".into();
+    {
+        let element = overlay(&state, &contexts, &keys).expect("commands overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        assert!(ui.find("export echo as ndjson").is_ok());
+        assert!(
+            ui.find("go to doctor pane").is_err(),
+            "a query narrows; it does not merely reorder"
+        );
+    }
+    state.query.clear();
+
+    // Jump-to-key offers only observed keys, and says so — it must not read
+    // as an inventory of the keyspace (O4).
+    state.open(Overlay::Keys);
+    {
+        let element = overlay(&state, &contexts, &keys).expect("keys overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        assert!(ui.find("v1/h-3fa9c2d41b7e/state/sysinfo/health").is_ok());
+        assert!(
+            ui.find("fuzzy over keys observed so far — nothing here is a guess (O4)")
+                .is_ok()
+        );
+    }
+
+    // The `?` overlay renders the shortcut map itself, so it cannot drift
+    // from what `resolve` dispatches.
+    state.open(Overlay::Help);
+    {
+        let element = overlay(&state, &contexts, &keys).expect("help overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        for binding in zengui::shortcuts::map() {
+            assert!(
+                ui.find(binding.keys).is_ok(),
+                "the help overlay omits {:?} ({})",
+                binding.keys,
+                binding.what
+            );
+        }
+    }
+
+    // Closed means nothing renders.
+    state.close();
+    assert!(overlay(&state, &contexts, &keys).is_none());
+}

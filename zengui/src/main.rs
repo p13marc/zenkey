@@ -4,6 +4,7 @@
 use clap::Parser;
 use zengui::app::Zengui;
 use zengui::config::Cli;
+use zengui::prefs::Prefs;
 
 fn main() -> iced::Result {
     tracing_subscriber::fmt()
@@ -22,13 +23,30 @@ fn main() -> iced::Result {
         }
     };
 
+    // Preferences are read once, here, so the app can be constructed from an
+    // injected set in tests (issue #73). A note about an unreadable file rides
+    // into the window rather than to a terminal nobody is watching.
+    let (prefs, prefs_note) = Prefs::load();
+    if let Some(note) = &prefs_note {
+        tracing::warn!("{note}");
+    }
+    let window = iced::window::Settings {
+        size: prefs
+            .window
+            .map(|(w, h)| iced::Size::new(w, h))
+            .unwrap_or(iced::Size::new(1280.0, 800.0)),
+        ..Default::default()
+    };
+
     iced::application(
-        move || Zengui::new(settings.clone()),
+        move || Zengui::with_prefs(settings.clone(), prefs.clone(), prefs_note.clone()),
         Zengui::update,
         Zengui::view,
     )
     .title(Zengui::title)
     .theme(Zengui::theme)
+    .scale_factor(Zengui::scale_factor)
     .subscription(Zengui::subscription)
+    .window(window)
     .run()
 }

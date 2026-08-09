@@ -164,6 +164,13 @@ impl EchoRing {
         self.lines.len()
     }
 
+    /// The sequence the next pushed line will carry — the freeze point a
+    /// paused view records (issue #72). Monotonic across `clear`, so a gap
+    /// count stays meaningful after one.
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
+    }
+
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty()
     }
