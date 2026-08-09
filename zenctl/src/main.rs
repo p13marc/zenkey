@@ -175,6 +175,8 @@ enum ContextCmd {
     Select { name: String },
     /// Remove a context.
     Rm { name: String },
+    /// Open the whole config file in $VISUAL/$EDITOR, validating afterwards.
+    Edit,
 }
 
 #[derive(Subcommand)]
@@ -191,6 +193,13 @@ enum TopicCmd {
         /// Only this class: telemetry, state, or events.
         #[arg(long)]
         class: Option<String>,
+        /// Only subjects carrying this payload type.
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<String>,
+        /// Also list retired subjects from each slice's [[deprecated]]
+        /// ledger (RFC 08 §6: which hosts still serve a deprecated subject).
+        #[arg(long)]
+        deprecated: bool,
         /// Re-render on change every SECS seconds (default 2). Appeared and
         /// disappeared subjects are marked for one cycle; ndjson streams one
         /// snapshot object per cycle.
@@ -603,15 +612,22 @@ async fn main() -> Result<()> {
         Command::Topic(TopicCmd::List {
             producer,
             class,
+            r#type,
+            deprecated,
             watch,
             bus,
         }) => {
+            let filter = cmd::watch::TopicFilter {
+                producer,
+                class,
+                type_name: r#type,
+                deprecated,
+            };
             if let Some(secs) = watch {
-                return cmd::watch::topic_list(secs, producer.as_deref(), class.as_deref(), &bus)
-                    .await;
+                return cmd::watch::topic_list(secs, &filter, &bus).await;
             }
             let slices = bus.slices().await?;
-            let report = offline::topic_list(&slices, producer.as_deref(), class.as_deref())?;
+            let report = filter.apply(&slices)?;
             output::topic_list(&report, bus.format)
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
@@ -814,6 +830,7 @@ async fn main() -> Result<()> {
                 select,
             ),
             ContextCmd::List => context::list(),
+            ContextCmd::Edit => context::edit(),
             ContextCmd::Show { name } => context::show(name.as_deref()),
             ContextCmd::Select { name } => context::select(&name),
             ContextCmd::Rm { name } => context::remove(&name),

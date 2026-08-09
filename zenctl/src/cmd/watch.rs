@@ -170,12 +170,27 @@ fn topic_rows(report: &crate::report::TopicList) -> Vec<(String, String)> {
         .collect()
 }
 
-pub async fn topic_list(
-    secs: f64,
-    producer: Option<&str>,
-    class: Option<&str>,
-    args: &crate::BusArgs,
-) -> Result<()> {
+/// The `topic list` filter flags, shared by the one-shot and watch paths.
+pub struct TopicFilter {
+    pub producer: Option<String>,
+    pub class: Option<String>,
+    pub type_name: Option<String>,
+    pub deprecated: bool,
+}
+
+impl TopicFilter {
+    pub fn apply(&self, slices: &[zenkey::RegistrySlice]) -> Result<crate::report::TopicList> {
+        crate::offline::topic_list(
+            slices,
+            self.producer.as_deref(),
+            self.class.as_deref(),
+            self.type_name.as_deref(),
+            self.deprecated,
+        )
+    }
+}
+
+pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::BusArgs) -> Result<()> {
     validate_format(args.format)?;
     let interval = interval_of(secs)?;
     let dirs = args.registry_dirs();
@@ -192,7 +207,7 @@ pub async fn topic_list(
                 .into_iter()
                 .map(|(s, _)| s)
                 .collect();
-            crate::offline::topic_list(&slices, producer, class)
+            filter.apply(&slices)
         };
         poll_loop(interval, args.format, fetch, topic_rows).await?;
         repeating.undeclare().await
@@ -201,7 +216,7 @@ pub async fn topic_list(
         // sourcing as the one-shot command.
         let fetch = async || {
             let slices = args.slices().await?;
-            crate::offline::topic_list(&slices, producer, class)
+            filter.apply(&slices)
         };
         poll_loop(interval, args.format, fetch, topic_rows).await
     }

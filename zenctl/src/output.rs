@@ -63,12 +63,28 @@ pub fn topic_list(report: &TopicList, format: Format) -> Result<()> {
                 if s.open_ended {
                     open_ended += 1;
                 }
+                let deprecation = if s.deprecated {
+                    format!(
+                        "  DEPRECATED{}{}",
+                        s.deprecated_since
+                            .as_deref()
+                            .map(|v| format!(" since {v}"))
+                            .unwrap_or_default(),
+                        s.replaced_by
+                            .as_deref()
+                            .map(|r| format!(" → {r}"))
+                            .unwrap_or_default()
+                    )
+                } else {
+                    String::new()
+                };
                 println!(
-                    "  {:<10} {:<44} {}{}",
+                    "  {:<10} {:<44} {}{}{}",
                     s.class,
                     s.path,
                     s.type_name,
-                    if s.open_ended { "  [open-ended]" } else { "" }
+                    if s.open_ended { "  [open-ended]" } else { "" },
+                    deprecation
                 );
             }
             println!("\n{} registered subject(s).", report.subjects.len());

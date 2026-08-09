@@ -10,6 +10,46 @@ use anyhow::{Context as _, Result, anyhow, bail};
 
 pub use zenkey_fleet::context_store::{StoredContext, active, load, save};
 
+/// `context edit` — open the whole config file in `$VISUAL`/`$EDITOR`, then
+/// validate: a file that no longer parses is reported (with its path) and
+/// kept — the user's edit is never discarded, but a broken config must not
+/// fail silently at the next command.
+pub fn edit() -> Result<()> {
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .map_err(|_| anyhow!("neither $VISUAL nor $EDITOR is set"))?;
+    // Ensure the file exists so a first-run edit opens something real.
+    let config = load()?;
+    save(&config)?;
+    let path = zenkey_fleet::context_store::config_path();
+    let status = std::process::Command::new(&editor)
+        .arg(&path)
+        .status()
+        .with_context(|| format!("running {editor:?}"))?;
+    if !status.success() {
+        bail!("{editor} exited with {status} — config left as it is");
+    }
+    match load() {
+        Ok(config) => {
+            println!(
+                "ok: {} context(s){}",
+                config.contexts.len(),
+                config
+                    .current
+                    .as_deref()
+                    .map(|c| format!(", {c:?} selected"))
+                    .unwrap_or_default()
+            );
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("{} no longer parses: {e}", path.display());
+            eprintln!("the file is kept as you wrote it — fix it and re-run");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// `zenctl context <verb>` handlers.
 pub fn create(name: &str, stored: StoredContext, select: bool) -> Result<()> {
     let mut config = load()?;

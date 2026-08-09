@@ -60,35 +60,20 @@ pub async fn run(
                 declared_encoding = subject.encoding.clone();
             }
             let session = args.session().await?;
-            let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
-            let producer = subject_producer(&description);
-            if let Some(producer) = producer
-                && let Some(schema) = store
-                    .schema_for(&session, &producer, &subject.type_name)
-                    .await
-            {
-                let value: serde_json::Value = serde_json::from_slice(&payload).map_err(|e| {
-                    anyhow!(
-                        "body is not JSON but {} declares schema-validated type {} — {e} \
-                         (--no-validate to publish anyway)",
-                        key,
-                        subject.type_name
-                    )
-                })?;
-                let target = zenkey_fleet::decode::resolve_encoding(
-                    declared_encoding.as_deref(),
-                    subject.encoding.as_deref(),
+            if let Some(producer) = subject_producer(&description) {
+                super::validate::encode_check(
+                    &session,
+                    args,
+                    super::validate::EncodeCheck {
+                        producer: &producer,
+                        type_name: &subject.type_name,
+                        declared_encoding: declared_encoding.as_deref(),
+                        registry_encoding: subject.encoding.as_deref(),
+                        action: "publish anyway",
+                    },
                     &payload,
-                );
-                zenkey::schema::decode::DecoderRegistry::new()
-                    .encode(&schema, &value, &target)
-                    .map_err(|e| {
-                        anyhow!(
-                            "body rejected by {}'s served schema: {e} (--no-validate to \
-                             publish anyway)",
-                            subject.type_name
-                        )
-                    })?;
+                )
+                .await?;
             }
         } else {
             eprintln!(
@@ -101,6 +86,16 @@ pub async fn run(
     let session = args.session().await?;
     let publication =
         zenkey_fleet::declare_publication(&session, key, qos, declared_encoding.as_deref()).await?;
+    // Matching note (#38): a routing fact about THIS publisher — informative,
+    // never gating, and never a fleet verdict (RFC 05 §3.1).
+    match publication.matching_status().await {
+        Ok(true) => eprintln!("matching: a subscriber currently matches {key}"),
+        Ok(false) => eprintln!(
+            "matching: no subscriber currently matches {key} — a routing fact about \
+             this publisher, not a fleet verdict (RFC 05 §3.1)"
+        ),
+        Err(_) => {}
+    }
     let times = repeat.max(1);
     for n in 0..times {
         publication.send(payload.clone()).await?;
