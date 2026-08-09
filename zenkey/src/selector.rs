@@ -116,21 +116,33 @@ pub fn producer_state(scope: Scope, producer: &str, prefix: &[&str]) -> Selector
     Selector::from_canonical(out)
 }
 
-/// A fleet fan-in procedure selector: `v1/*/@rpc/<producer>/<procedure…>`.
-/// Callers MUST use query target `All` (RFC 05 §2.1). `producer` may be `*`
-/// to reach every producer (the discovery sweep).
-pub fn fleet_rpc(producer: &str, procedure: &[&str]) -> Selector {
+/// A procedure selector in an arbitrary scope:
+/// `v1/<scope>/@rpc/<producer>/<procedure…>`. `producer` may be `*` to reach
+/// every producer (the discovery sweep); the scope may be one origin, which is
+/// how a caller asks *one* node a fan-in question without sweeping the fleet
+/// (issue #96). Callers of the fleet scope MUST use query target `All`
+/// (RFC 05 §2.1).
+///
+/// A service origin has no producer chunk — [`service_rpc`] is its builder,
+/// and a `*` scope could not reach it anyway (D4).
+pub fn rpc(scope: Scope, producer: &str, procedure: &[&str]) -> Selector {
     let p = if producer == "*" {
         "*"
     } else {
         legal_chunk(producer, "producer")
     };
-    let mut out = format!("{VERSION_CHUNK}/*/{PLANE_RPC}/{p}");
+    let mut out = format!("{VERSION_CHUNK}/{}/{PLANE_RPC}/{p}", scope.chunk());
     for chunk in procedure {
         out.push('/');
         out.push_str(legal_chunk(chunk, "procedure chunk"));
     }
     Selector::from_canonical(out)
+}
+
+/// A fleet fan-in procedure selector: `v1/*/@rpc/<producer>/<procedure…>` —
+/// [`rpc`] at fleet scope.
+pub fn fleet_rpc(producer: &str, procedure: &[&str]) -> Selector {
+    rpc(Scope::fleet(), producer, procedure)
 }
 
 /// One host's procedure key: `v1/<origin>/@rpc/<producer>/<procedure…>`.
@@ -193,6 +205,17 @@ mod tests {
         assert_eq!(fleet_rpc("*", &["introspect"]), "v1/*/@rpc/*/introspect");
         assert_eq!(fleet_rpc("netring", &["flows"]), "v1/*/@rpc/netring/flows");
         let o = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
+        // One node's producers, not the fleet's (#96).
+        assert_eq!(
+            rpc(Scope::origin(&o), "*", &["introspect"]),
+            "v1/h-3fa9c2d41b7e/@rpc/*/introspect"
+        );
+        // …and it is strictly narrower than the fleet sweep it replaces.
+        assert!(fleet_rpc("*", &["introspect"]).includes(&rpc(
+            Scope::origin(&o),
+            "*",
+            &["introspect"]
+        )));
         assert_eq!(
             rpc_at(&o, "netring", &["capture_disk", "set"]),
             "v1/h-3fa9c2d41b7e/@rpc/netring/capture_disk/set"
