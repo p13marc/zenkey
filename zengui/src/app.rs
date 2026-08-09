@@ -81,6 +81,8 @@ pub struct Zengui {
     echo_view: view::echo::EchoView,
     /// The connection pane's state (issue #67): contexts and endpoints.
     context_form: view::contexts::ContextForm,
+    /// The command palette / overlay state (issue #75).
+    palette: view::palette::PaletteState,
 
     /// The node dashboard's presence model (#61), fed by liveliness only.
     roster: crate::nodes::NodeRoster,
@@ -164,6 +166,7 @@ impl Zengui {
             fetched: None,
             echo_view: view::echo::EchoView::new(),
             context_form: view::contexts::ContextForm::default(),
+            palette: view::palette::PaletteState::default(),
             roster: crate::nodes::NodeRoster::default(),
             node_selected: None,
             node_detail: view::nodes::DetailState::default(),
@@ -591,6 +594,8 @@ impl Zengui {
                 self.prefs.window = Some((w, h));
                 Task::none()
             }
+            Message::Key(key, modifiers) => self.update_key(&key, modifiers),
+            Message::Palette(msg) => self.update_palette(msg),
             Message::Prefs(msg) => {
                 use crate::message::PrefsMsg;
                 match msg {
@@ -886,6 +891,130 @@ impl Zengui {
         self.slices = None;
         self.slice_source = view::status::SliceSource::None;
         self.bases.clear();
+    }
+
+    /// One key press, in context.
+    ///
+    /// **Esc layering** (#75): palette first, then a tree selection, then
+    /// nothing — one layer per press, so Esc never does two things at once.
+    /// The arrows drive the overlay only while one is open, which is what
+    /// keeps them available to the panes the rest of the time.
+    fn update_key(
+        &mut self,
+        key: &iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+    ) -> Task<Message> {
+        use iced::keyboard::{Key, key::Named};
+        use view::palette::PaletteMsg;
+
+        if crate::shortcuts::is_escape(key) {
+            if self.palette.is_open() {
+                self.palette.close();
+            } else if self.selected.is_some() {
+                return self.update(Message::SelectKey(None));
+            }
+            return Task::none();
+        }
+        if self.palette.is_open() {
+            match key {
+                Key::Named(Named::ArrowDown) => {
+                    return self.update_palette(PaletteMsg::CursorDown);
+                }
+                Key::Named(Named::ArrowUp) => {
+                    return self.update_palette(PaletteMsg::CursorUp);
+                }
+                Key::Named(Named::Enter) => return self.update_palette(PaletteMsg::Activate),
+                _ => {}
+            }
+        }
+        match crate::shortcuts::resolve(key, modifiers) {
+            Some(message) => self.update(message),
+            None => Task::none(),
+        }
+    }
+
+    /// The command palette (#75).
+    ///
+    /// Every activation dispatches through `self.update(...)` with the
+    /// action's own message, which is what keeps the palette from being a
+    /// second implementation of anything: it is a faster way to send a message
+    /// the UI already sends, and nothing more.
+    fn update_palette(&mut self, msg: view::palette::PaletteMsg) -> Task<Message> {
+        use view::palette::PaletteMsg;
+        match msg {
+            PaletteMsg::Open(overlay) => {
+                self.palette.open(overlay);
+                Task::none()
+            }
+            PaletteMsg::Close => {
+                self.palette.close();
+                Task::none()
+            }
+            PaletteMsg::QueryChanged(q) => {
+                self.palette.query = q;
+                // A new query re-ranks the list, so the old cursor points at a
+                // different row — start from the best match again.
+                self.palette.cursor = 0;
+                Task::none()
+            }
+            PaletteMsg::CursorUp => {
+                self.palette.cursor = self.palette.cursor.saturating_sub(1);
+                Task::none()
+            }
+            PaletteMsg::CursorDown => {
+                self.palette.cursor = self
+                    .palette
+                    .cursor
+                    .saturating_add(1)
+                    .min(self.palette_rows().len().saturating_sub(1));
+                Task::none()
+            }
+            PaletteMsg::Activate => self.run_palette_row(self.palette.cursor),
+            PaletteMsg::Pick(i) => self.run_palette_row(i),
+        }
+    }
+
+    /// The rows the open overlay currently shows, in display order.
+    fn palette_rows(&self) -> Vec<Message> {
+        use view::palette::{Overlay, actions, rank};
+        match self.palette.overlay {
+            Overlay::Commands => {
+                let items = actions(&self.context_form.known);
+                rank(&items, &self.palette.query, |a| a.label.as_str())
+                    .into_iter()
+                    .map(|i| items[i].message.clone())
+                    .collect()
+            }
+            Overlay::Keys => {
+                let keys = self.observed_keys();
+                rank(&keys, &self.palette.query, |k| k.as_str())
+                    .into_iter()
+                    .map(|i| Message::SelectKey(Some(keys[i].clone())))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Keys the session has actually observed — never a guess (O4): the
+    /// jump-to overlay offers what is on the bus, not what a registry says
+    /// could be.
+    fn observed_keys(&self) -> Vec<String> {
+        self.facts.keys().cloned().collect()
+    }
+
+    fn run_palette_row(&mut self, index: usize) -> Task<Message> {
+        let rows = self.palette_rows();
+        let Some(message) = rows.get(index).cloned() else {
+            return Task::none();
+        };
+        // Jumping to a key also shows it: selecting without switching panes
+        // would look like nothing happened.
+        if matches!(self.palette.overlay, view::palette::Overlay::Keys) {
+            self.right_pane = RightPane::Detail;
+        }
+        self.palette.close();
+        self.update(message)
     }
 
     /// The connection pane (#67). Contexts are read and written through the
@@ -1567,9 +1696,13 @@ impl Zengui {
         // Keyboard shortcuts (issues #73, #75). `listen` only sees events no
         // widget consumed, so a shortcut can never steal a keystroke from the
         // text box the user is typing in.
+        // Key presses arrive raw: `listen` only sees what no widget consumed,
+        // and iced's subscription closures cannot capture, so the *meaning* of
+        // a press is decided in `update` where the state is (#75's Esc
+        // layering needs to know what is open).
         subs.push(iced::keyboard::listen().filter_map(|event| match event {
             iced::keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                crate::shortcuts::resolve(&key, modifiers)
+                Some(Message::Key(key, modifiers))
             }
             _ => None,
         }));
@@ -1624,7 +1757,7 @@ impl Zengui {
         ]
         .spacing(space::MD);
 
-        column![
+        let layout = column![
             self.toolbar(),
             panes,
             view::status::strip(Status {
@@ -1647,8 +1780,28 @@ impl Zengui {
             }),
         ]
         .spacing(space::MD)
-        .padding(space::MD)
-        .into()
+        .padding(space::MD);
+
+        // The overlay floats above everything (#75). `stack` rather than a
+        // modal widget because the layering rule is ours — palette above
+        // panes, Esc peeling one layer at a time — and a widget with its own
+        // dismissal policy would fight it.
+        match view::palette::overlay(
+            &self.palette,
+            &self.context_form.known,
+            &self.observed_keys(),
+        ) {
+            None => layout.into(),
+            Some(overlay) => iced::widget::stack![
+                layout,
+                iced::widget::container(overlay)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .padding(space::XL),
+            ]
+            .into(),
+        }
     }
 
     fn toolbar(&self) -> Element<'_, Message> {

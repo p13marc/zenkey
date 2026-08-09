@@ -11,6 +11,7 @@ pub mod doctor;
 pub mod echo;
 pub mod kit;
 pub mod nodes;
+pub mod palette;
 pub mod publish;
 pub mod status;
 pub mod theme;

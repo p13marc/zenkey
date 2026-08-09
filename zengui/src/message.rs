@@ -96,6 +96,15 @@ pub enum Message {
     PaneSelected(RightPane),
     Reconnect,
 
+    /// A key press no widget consumed (issues #73, #75).
+    ///
+    /// Delivered raw rather than pre-resolved because Esc and the arrows mean
+    /// different things depending on what is open, and iced's subscription
+    /// closures must not capture — so the decision belongs in `update`, where
+    /// the state is.
+    Key(iced::keyboard::Key, iced::keyboard::Modifiers),
+    /// Command-palette / overlay interactions (issue #75).
+    Palette(crate::view::palette::PaletteMsg),
     /// A persisted-preference change (issue #73). Each one saves.
     Prefs(PrefsMsg),
     /// The window was resized — remembered for the next launch (issue #73).

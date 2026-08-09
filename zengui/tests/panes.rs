@@ -837,3 +837,73 @@ fn the_connect_pane_states_what_scouting_means() {
             .is_ok()
     );
 }
+
+/// The command palette (#75): every action is on screen and every one of
+/// them emits a message the UI path also emits — the property that keeps a
+/// palette from becoming a second implementation of the app.
+#[test]
+fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
+    use zengui::view::palette::{Overlay, PaletteState, overlay};
+
+    let contexts = vec!["lab".to_string()];
+    let keys = vec![
+        "v1/h-3fa9c2d41b7e/state/sysinfo/health".to_string(),
+        "demo/example/foo".to_string(),
+    ];
+
+    let mut state = PaletteState::default();
+    state.open(Overlay::Commands);
+    {
+        let element = overlay(&state, &contexts, &keys).expect("commands overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        assert!(ui.find("go to doctor pane").is_ok());
+        assert!(ui.find("context: lab").is_ok(), "contexts are offered");
+    }
+
+    // The list is bounded, so reaching an action past the first screenful is
+    // what typing is for — which is also the fuzzy match's real workload.
+    state.query = "ndjson".into();
+    {
+        let element = overlay(&state, &contexts, &keys).expect("commands overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        assert!(ui.find("export echo as ndjson").is_ok());
+        assert!(
+            ui.find("go to doctor pane").is_err(),
+            "a query narrows; it does not merely reorder"
+        );
+    }
+    state.query.clear();
+
+    // Jump-to-key offers only observed keys, and says so — it must not read
+    // as an inventory of the keyspace (O4).
+    state.open(Overlay::Keys);
+    {
+        let element = overlay(&state, &contexts, &keys).expect("keys overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        assert!(ui.find("v1/h-3fa9c2d41b7e/state/sysinfo/health").is_ok());
+        assert!(
+            ui.find("fuzzy over keys observed so far — nothing here is a guess (O4)")
+                .is_ok()
+        );
+    }
+
+    // The `?` overlay renders the shortcut map itself, so it cannot drift
+    // from what `resolve` dispatches.
+    state.open(Overlay::Help);
+    {
+        let element = overlay(&state, &contexts, &keys).expect("help overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        for binding in zengui::shortcuts::map() {
+            assert!(
+                ui.find(binding.keys).is_ok(),
+                "the help overlay omits {:?} ({})",
+                binding.keys,
+                binding.what
+            );
+        }
+    }
+
+    // Closed means nothing renders.
+    state.close();
+    assert!(overlay(&state, &contexts, &keys).is_none());
+}

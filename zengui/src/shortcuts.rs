@@ -13,6 +13,7 @@
 use iced::keyboard::{Key, Modifiers, key::Named};
 
 use crate::message::{Message, PrefsMsg, RightPane};
+use crate::view::palette::{Overlay, PaletteMsg};
 
 /// One binding: how it is typed, what it does, and the message it sends.
 pub struct Binding {
@@ -51,6 +52,16 @@ pub fn map() -> Vec<Binding> {
             keys: "Ctrl R",
             what: "reconnect",
             message: || Message::Reconnect,
+        },
+        Binding {
+            keys: "Ctrl P",
+            what: "command palette",
+            message: || Message::Palette(PaletteMsg::Open(Overlay::Commands)),
+        },
+        Binding {
+            keys: "Ctrl K",
+            what: "jump to an observed key",
+            message: || Message::Palette(PaletteMsg::Open(Overlay::Keys)),
         },
     ];
     // The pane strip, in tab order — so the numbers on screen and the numbers
@@ -109,8 +120,18 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
             "0" => Some(Message::Prefs(PrefsMsg::ZoomReset)),
             "t" | "T" => Some(Message::Prefs(PrefsMsg::ThemeToggled)),
             "r" | "R" => Some(Message::Reconnect),
+            "p" | "P" => Some(Message::Palette(PaletteMsg::Open(Overlay::Commands))),
+            "k" | "K" => Some(Message::Palette(PaletteMsg::Open(Overlay::Keys))),
             _ => None,
         };
+    }
+    // `?` opens the shortcut map. Unmodified on purpose — it is the one key
+    // every TUI/GUI in this family answers, and it reaches here only when no
+    // text input consumed it.
+    if let Key::Character(c) = key
+        && c.as_str() == "?"
+    {
+        return Some(Message::Palette(PaletteMsg::Open(Overlay::Help)));
     }
     if mods.alt()
         && let Key::Character(c) = key
@@ -203,12 +224,24 @@ mod tests {
     }
 
     /// A bare keystroke is not a shortcut: typing `t` into the tree's search
-    /// box must not toggle the theme.
+    /// box must not toggle the theme. (`?` is the deliberate exception — see
+    /// `the_help_key_is_the_one_unmodified_binding`.)
     #[test]
     fn unmodified_keys_are_never_shortcuts() {
         for c in ["t", "r", "0", "-", "1"] {
             assert!(press(c, Modifiers::empty()).is_none(), "{c}");
         }
+    }
+
+    /// `?` is the one binding without a modifier, because it is the key every
+    /// tool in this family answers with its help. It still only fires when no
+    /// text input consumed the keystroke.
+    #[test]
+    fn the_help_key_is_the_one_unmodified_binding() {
+        assert!(matches!(
+            press("?", Modifiers::empty()),
+            Some(Message::Palette(PaletteMsg::Open(Overlay::Help)))
+        ));
     }
 
     #[test]
