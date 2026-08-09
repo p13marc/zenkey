@@ -82,46 +82,50 @@ async fn collect_answers(
 ) -> Vec<FleetAnswer> {
     let mut out = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
-        match reply.result() {
-            Ok(sample) => {
-                let origin = origin_of(base, sample.key_expr().as_str());
-                out.push(FleetAnswer {
-                    origin,
-                    answer: Answer::Value(sample.payload().clone()),
-                });
-            }
-            Err(err) => {
-                // The error envelope is `{ "error": "<name>", "message": "…" }`
-                // (RFC 05 §3), with reserved names like `error/not-found`. If it
-                // does not parse we still surface the bytes — an unreadable
-                // refusal is still a refusal.
-                let bytes = err.payload().to_bytes();
-                let (name, message) = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                    Ok(v) => (
-                        v.get("error")
-                            .and_then(|e| e.as_str())
-                            .unwrap_or("error/unparsed")
-                            .to_string(),
-                        v.get("message")
-                            .and_then(|m| m.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                    ),
-                    Err(_) => (
-                        "error/unparsed".to_string(),
-                        String::from_utf8_lossy(&bytes).to_string(),
-                    ),
-                };
-                // An error reply has no sample, so no concrete key to attribute
-                // by; zenoh does not surface the responder here.
-                out.push(FleetAnswer {
-                    origin: "?".to_string(),
-                    answer: Answer::Error { name, message },
-                });
+        out.push(answer_of(base, reply));
+    }
+    out
+}
+
+/// One reply, attributed — the per-reply half of [`collect_answers`], shared
+/// with the timed drain in [`RepeatingQuery::fetch_timed`] so attribution and
+/// the RFC 05 §3 error envelope have exactly one implementation.
+fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
+    match reply.result() {
+        Ok(sample) => FleetAnswer {
+            origin: origin_of(base, sample.key_expr().as_str()),
+            answer: Answer::Value(sample.payload().clone()),
+        },
+        Err(err) => {
+            // The error envelope is `{ "error": "<name>", "message": "…" }`
+            // (RFC 05 §3), with reserved names like `error/not-found`. If it
+            // does not parse we still surface the bytes — an unreadable
+            // refusal is still a refusal.
+            let bytes = err.payload().to_bytes();
+            let (name, message) = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(v) => (
+                    v.get("error")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("error/unparsed")
+                        .to_string(),
+                    v.get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
+                Err(_) => (
+                    "error/unparsed".to_string(),
+                    String::from_utf8_lossy(&bytes).to_string(),
+                ),
+            };
+            // An error reply has no sample, so no concrete key to attribute
+            // by; zenoh does not surface the responder here.
+            FleetAnswer {
+                origin: "?".to_string(),
+                answer: Answer::Error { name, message },
             }
         }
     }
-    out
 }
 
 /// A **declared** querier carrying the same RFC 05 §2.1 discipline as
@@ -227,6 +231,31 @@ impl RepeatingQuery {
             .map_err(|e| anyhow::anyhow!("{e}"))
             .with_context(|| format!("repeating query failed: {}", self.key()))?;
         Ok(collect_answers(&self.base, replies).await)
+    }
+
+    /// As [`fetch`](Self::fetch), stamping each reply with how long after the
+    /// GET it arrived (issue #52).
+    ///
+    /// This exists because a fan-out call's *call* duration is the time until
+    /// the slowest answer, so attributing it to every origin would report a
+    /// fast responder's latency as the fleet's worst. Timing each reply where
+    /// it is drained is the only place the distinction is available — and it
+    /// keeps the RFC 05 §2.1 chokepoint intact rather than forking a second
+    /// GET path to measure with.
+    pub async fn fetch_timed(&self) -> Result<Vec<(FleetAnswer, Duration)>> {
+        let started = std::time::Instant::now();
+        let replies = self
+            .querier
+            .get()
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .with_context(|| format!("repeating query failed: {}", self.key()))?;
+        let mut out = Vec::new();
+        while let Ok(reply) = replies.recv_async().await {
+            let at = started.elapsed();
+            out.push((answer_of(&self.base, reply), at));
+        }
+        Ok(out)
     }
 
     /// Undeclare, telling the network to drop the routing state. The crate's

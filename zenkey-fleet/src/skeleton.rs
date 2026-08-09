@@ -473,6 +473,7 @@ mod tests {
             path: path.into(),
             class: class.into(),
             type_name: "T".into(),
+            common: None,
             since: None,
             description: None,
             qos: None,

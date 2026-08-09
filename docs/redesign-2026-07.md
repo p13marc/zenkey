@@ -150,7 +150,7 @@ is a different category of tool.
 | **DDS XTypes** | Ship a type hash in discovery, fetch the full type on demand → our `SchemaSet` entries carry a sha256 hash for caching and drift detection. |
 | **NATS CLI** | Named contexts (`nats context`), clean verbs, built-in `bench`, schema subcommand → the zenctl v2 UX model. |
 | **kcat** | `-L` metadata mode, composable `-f` output format strings → `zenctl topic echo --fmt`. |
-| **CloudEvents / AsyncAPI 3.x** | Classification metadata belongs in the addressing layer (validates our grammar); AsyncAPI as a machine-readable bus description → `zenctl registry export --format asyncapi` gives browsable docs, diagrams and diffs from the registry for free. |
+| **CloudEvents / AsyncAPI 3.x** | Classification metadata belongs in the addressing layer (validates our grammar); AsyncAPI as a machine-readable bus description → `zenctl registry export --as asyncapi` gives browsable docs, diagrams and diffs from the registry for free. |
 | **prost-reflect / schemars / CDDL** | The Rust machinery for generic decode: `DynamicMessage::decode` against a served FileDescriptorSet; JSON Schema derived from serde types honoring `#[serde]` attrs; CDDL held in reserve as a future schema kind. |
 
 ---
@@ -479,7 +479,7 @@ is in scope.
 |---|---|
 | Profiles | Named **contexts** in `~/.config/zenctl/config.toml` (nats-style); `--base` becomes optional: flag > env > context |
 | Scripting | Global `--format auto\|table\|json\|ndjson` over **typed report structs** (serde) — one refactor unlocking scripting, tests, GUI parity |
-| Daemon | **No** (Zenoh discovery is fast; ros2's daemon solves a DDS problem we don't have). On-disk slice cache `~/.cache/zenctl/<context>/slices/` gives instant dynamic completions |
+| Daemon | **No** (Zenoh discovery is fast; ros2's daemon solves a DDS problem we don't have). On-disk slice cache `~/.cache/zenkey-explorer/<context>/slices/` gives instant dynamic completions (shipped in #54) |
 | Completions | `clap_complete` static + dynamic (subject/producer/type names from the cache) |
 | Watch | `--watch` flags on list commands; the TUI is the GUI's job |
 | Registry sources | `--registry` and bus stop being exclusive: union, served wins per producer; disagreement is reported by `doctor`/`registry diff` |
@@ -488,7 +488,8 @@ is in scope.
 
 ```
 zenctl context create|list|show|select|rm|edit          [T]
-zenctl completions <shell>                               [T]
+zenctl completions <shell> [--static]  # dynamic from the cache      [T]
+zenctl cache show|refresh|clear     # the completion cache, visible  [T]
 
 zenctl topic list [--producer] [--class] [--type] [--watch]          [T]
 zenctl topic info <key>                                              [T]
@@ -507,18 +508,20 @@ zenctl service call <origin|*|@svc> <producer|-> <proc>
                     [--param k=v] [--body JSON|@file|-] [--no-validate] [--raw]  [T]
        # exit 1 = an error reply; exit 2 = zero replies (silence stays non-verdict)
 
-zenctl interface list | show <Type> [--schema]                       [T/D]
-zenctl schema <producer>            # dump fetched SchemaSet         [D]
+zenctl interface list | show <Type> [--schema] [--full]              [T]
+zenctl schema <producer> [--type T] [--full]   # dump served SchemaSet  [T]
 
-zenctl registry export --format asyncapi|jsonschema|toml             [D]
-zenctl registry diff | lint <dir>                                    [D/L]
+zenctl registry export --as toml|jsonschema|asyncapi [--producer P]  [T]
+zenctl registry diff                # local --registry dirs vs the bus  [T]
+zenctl registry lint <dir>          # the consumer build's own lints    [T]
 
 zenctl admin get [SEL=@/**] | admin routers                          [T/D]
 zenctl storage list      # declared state subjects vs storage coverage  [D]
 
 zenctl doctor [--sample N] [--deep]   # + freshness-vs-ttl, storage coverage,
                                       #   admin reachability, schema conformance  [T→D]
-zenctl bench rpc <origin|*> <producer> [--count]                     [D]
+zenctl bench rpc <origin|*> <producer> [proc=introspect] [--count]
+                 [--concurrency N] [--i-know]  # per-reply latency   [T]
 zenctl bench pub|sub …                                               [L]
 zenctl record <SEL> -o f.zrec | replay f.zrec [--speed] [--dry-run]  [L]
 ```

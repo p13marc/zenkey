@@ -223,6 +223,9 @@ pub fn interface_show(slices: &[RegistrySlice], type_name: &str) -> Result<Inter
     Ok(InterfaceShow {
         type_name: type_name.to_string(),
         carriers,
+        // Offline by construction: schemas come from the bus, and the caller
+        // fills them in only when `--schema` asked for them.
+        schemas: Vec::new(),
     })
 }
 

@@ -5,12 +5,16 @@
 //! (`report.rs`, shared with the engine) rendered by `output.rs`.
 
 pub mod admin;
+pub mod bench;
+pub mod cache;
 pub mod call;
 pub mod doctor;
 pub mod echo;
 pub mod node;
 pub mod publish;
 pub mod rate;
+pub mod registry;
+pub mod schema;
 pub mod watch;
 
 use anyhow::{Result, anyhow};

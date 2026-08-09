@@ -263,6 +263,24 @@ impl Config {
     /// As [`generate`](Self::generate), returning the generated source
     /// instead of writing it.
     pub fn generate_string(&self) -> Result<String, Error> {
+        self.checked()?;
+        let files = load_registry(&self.registry_dir)?;
+        Ok(emit::emit(&files, &self.zenkey_path))
+    }
+
+    /// Every check `generate` runs, and **nothing else** (issue #50):
+    /// `zenctl registry lint <dir>` gives an application the same diagnostic
+    /// its `build.rs` would produce, without needing the application's build.
+    ///
+    /// Deliberately one `Err`, not a collected list: the point is fidelity to
+    /// what a build says, and a build stops at the first lint. A lint that
+    /// reported *more* than the build would be a different tool wearing the
+    /// same name.
+    pub fn lint(&self) -> Result<(), Error> {
+        self.checked().map(|_| ())
+    }
+
+    fn checked(&self) -> Result<Vec<RegistryFile>, Error> {
         if self.emit_rerun_if_changed {
             println!("cargo::rerun-if-changed={}", self.registry_dir.display());
             if let Some(l) = &self.ledger {
@@ -276,7 +294,7 @@ impl Config {
             .unwrap_or_else(|| self.registry_dir.join("deprecated.lock"));
         check_deprecation_ledger(&ledger, &files)?;
         check_type_table(&self.registry_dir, &files)?;
-        Ok(emit::emit(&files, &self.zenkey_path))
+        Ok(files)
     }
 }
 

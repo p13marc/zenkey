@@ -108,6 +108,38 @@ pub fn load() -> Result<ConfigFile> {
     Ok(ConfigFile::default())
 }
 
+/// Where a context's cached slices live (issue #54).
+///
+/// Keyed by context name so two deployments cannot complete each other's
+/// producers, and `"default"` for an invocation with no named context —
+/// which is a real configuration (flags only), not an absence.
+///
+/// The cache is a *convenience*, never a source of truth: it feeds shell
+/// completion and nothing else reads it without saying so. That is why it
+/// sits under the cache dir, where an OS is free to delete it.
+pub fn cache_dir(context: Option<&str>) -> PathBuf {
+    let root = override_dir()
+        .map(|d| d.join("cache"))
+        .or_else(|| dirs::cache_dir().map(|d| d.join("zenkey-explorer")))
+        .unwrap_or_else(|| PathBuf::from(".zenkey-explorer-cache"));
+    root.join(context.unwrap_or("default")).join("slices")
+}
+
+/// The name of the context this invocation resolves to — the cache key. The
+/// same precedence [`active`] uses, minus the lookup, so a completion can find
+/// the cache without loading (or failing on) the config file.
+pub fn active_name(explicit: Option<&str>) -> Option<String> {
+    if let Some(name) = explicit {
+        return Some(name.to_string());
+    }
+    if let Ok(name) =
+        std::env::var("ZENKEY_EXPLORER_CONTEXT").or_else(|_| std::env::var("ZENCTL_CONTEXT"))
+    {
+        return Some(name);
+    }
+    load().ok().and_then(|c| c.current)
+}
+
 /// Save to the neutral path (creating the directory), never to the legacy one.
 pub fn save(config: &ConfigFile) -> Result<()> {
     let path = config_path();

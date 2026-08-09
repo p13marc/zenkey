@@ -233,6 +233,105 @@ pub struct CarrierRow {
 pub struct InterfaceShow {
     pub type_name: String,
     pub carriers: Vec<CarrierRow>,
+    /// What each producer serving this type name says its schema is
+    /// (issue #51). Empty = nothing asked or nothing served; two rows with
+    /// different hashes *is* the RFC 08 §7 drift finding, visible right here
+    /// rather than only in `doctor`.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub schemas: Vec<SchemaRow>,
+}
+
+/// One type's schema entry as one producer serves it (issue #51).
+#[derive(Debug, Clone, Serialize)]
+pub struct SchemaRow {
+    pub producer: String,
+    pub type_name: String,
+    pub kind: String,
+    pub hash: String,
+    /// The schema document, when the caller asked for the full form.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<serde_json::Value>,
+}
+
+/// One origin's reply-latency distribution in a benchmark (issue #52).
+/// Timed **per reply**, so a fast origin in a fan-out is not charged the
+/// slowest origin's round trip.
+#[derive(Debug, Clone, Serialize)]
+pub struct OriginLatency {
+    pub origin: String,
+    pub replies: usize,
+    pub min_ms: f64,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    pub p99_ms: f64,
+    pub max_ms: f64,
+}
+
+/// `zenctl bench rpc` (issue #52).
+#[derive(Debug, Clone, Serialize)]
+pub struct BenchReport {
+    pub key: String,
+    pub requested: usize,
+    pub completed: usize,
+    pub concurrency: usize,
+    /// Error replies (RFC 05 §3) plus calls the GET itself failed.
+    pub errors: usize,
+    /// Calls that drew **zero** replies — counted apart from errors, because
+    /// silence is not a failure and averaging it away would hide it
+    /// (RFC 05 §3.1).
+    pub silent: usize,
+    pub elapsed_s: f64,
+    pub calls_per_s: f64,
+    pub origins: Vec<OriginLatency>,
+}
+
+/// One producer, as the bus serves it versus as the checkout declares it
+/// (issue #50). A `None` version means "not present on that side", which is a
+/// fact with two very different explanations — the findings say which.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProducerDiff {
+    pub producer: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub served_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_version: Option<String>,
+    /// RFC 08 §6 findings, rendered. Empty = the two agree.
+    pub findings: Vec<String>,
+}
+
+/// `zenctl registry diff` (issue #50).
+#[derive(Debug, Clone, Serialize)]
+pub struct RegistryDiff {
+    pub producers: Vec<ProducerDiff>,
+}
+
+impl RegistryDiff {
+    /// Producers whose two sides disagree.
+    pub fn disagreeing(&self) -> usize {
+        self.producers
+            .iter()
+            .filter(|p| !p.findings.is_empty())
+            .count()
+    }
+}
+
+/// One producer's served `describe` reply, rendered (issue #51).
+///
+/// `served = false` is the honest degradation RFC 08 §7 leaves room for —
+/// `describe` is a SHOULD, so a producer that serves none has said nothing
+/// about its types, which is not the same as having no types.
+#[derive(Debug, Clone, Serialize)]
+pub struct SchemaDump {
+    pub producer: String,
+    pub served: bool,
+    /// The declaring app, as the served set names it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    pub types: Vec<SchemaRow>,
+    /// Registry-declared type names this producer's set does **not** cover —
+    /// RFC 08 §7's totality clause, checked where the user is already looking.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub missing: Vec<String>,
 }
 
 /// One producer on one origin — row-shaped so a `--watch` loop can diff it

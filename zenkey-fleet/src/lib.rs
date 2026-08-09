@@ -12,6 +12,7 @@
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 
 pub mod admin;
+pub mod bench;
 pub mod context_store;
 pub mod discover;
 pub mod facts;
@@ -38,7 +39,9 @@ pub use body::{
     BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
 };
 #[cfg(feature = "decode")]
-pub use decode::{SchemaDrift, TotalityGap, schema_drift, totality_gaps};
+pub use decode::{
+    SchemaDrift, TotalityGap, schema_drift, schema_dump, schemas_for_type, totality_gaps,
+};
 #[cfg(feature = "decode")]
 pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
 
@@ -47,7 +50,8 @@ pub use admin::{
     storages,
 };
 pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
-pub use context_store::StoredContext;
+pub use bench::{BenchSpec, bench_rpc};
+pub use context_store::{StoredContext, active_name, cache_dir};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{

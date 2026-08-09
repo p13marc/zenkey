@@ -54,7 +54,7 @@ subject   disk/{mount}/usage_percent
 variables
   mount = root
 payload   TelemetryPoint
-  (schema lives with the owning application — RFC 08 §5)
+  (`zenctl schema sysinfo --type TelemetryPoint` for the served shape)
 qos       sampled
 cardinality  ~512 keys expected
 ```
@@ -116,6 +116,60 @@ compiled in: the registry slices bind one payload type per subject (P5), and
 the value renders generically (JSON, CBOR→JSON diagnostic, text, or hex —
 tagged with the declared type name).
 
+`schema <producer>` dumps the served `describe` reply (RFC 08 §7) and
+`interface show <Type> --schema` asks every producer that carries the type, so
+two producers disagreeing about one name shows up as the drift it is. A
+producer serving no `describe` says so — undescribed is not shapeless.
+
+## `registry` — the registry as a document
+
+```bash
+zenctl registry export --as toml       # round-trips back through --registry
+zenctl registry export --as jsonschema # bundled from the served describe sets
+zenctl registry export --as asyncapi   # channels from subjects, ops from procedures
+zenctl registry diff                   # local --registry dirs vs what the fleet serves
+zenctl registry lint <dir>             # the consumer build's own RFC 08 §5 lints
+```
+
+`lint` runs `zenkey-build`'s lints, not a second copy of them — the diagnostic
+is byte-for-byte what the application's `build.rs` would print, which is the
+only version worth having. `diff` is the side-by-side that `doctor` turns into
+judgements: a producer present on one side only is a fact with two very
+different explanations, and the output says which.
+
+## Completions
+
+```bash
+source <(zenctl completions bash)      # zsh, fish, elvish, powershell too
+```
+
+The script is **dynamic**: it calls back into `zenctl`, so producer, type,
+procedure and key candidates come from the cached registry of the active
+context. Completion never opens a session — a `<TAB>` cannot hang on a fleet
+that is down — and with no cache it degrades to the static command tree.
+
+Any command that loads slices fills the cache; `zenctl cache show|refresh|clear`
+makes it visible, current, or gone. The names are from the last sighting, not
+a live inventory. `--static` emits the old self-contained script.
+
+## `bench rpc` — how fast, and *which origin* is slow
+
+```bash
+zenctl bench rpc '*' sysinfo --count 200 --concurrency 8
+```
+
+Latency is measured **per reply**, not per call: a fan-out GET finishes when
+the slowest origin answers, so charging that duration to every responder would
+report the fastest node's latency as the worst one's. Error replies and calls
+that drew *no* reply are counted separately from the distribution — averaging a
+non-answer into a latency figure is how a benchmark lies.
+
+Only procedures the registry declares `idempotent = true` bench by default; a
+benchmark repeats, and repeating a write into a live fleet is a different act
+from measuring it. `--i-know` overrides. The convention's own reads
+(`introspect`, `describe`) need no registry permission — RFC 08 §6/§7 define
+them, so their idempotence is not an application's to declare.
+
 ## `doctor` — the one `ros2` has no answer for
 
 `introspect` is served by the *running binary*, from the same source as its key
@@ -152,9 +206,13 @@ round trip, without SSH.
 - **Scouting is off by default.** A scouting explorer joins whatever mesh it can
   find, which is how a throwaway session ends up talking to a production fleet.
   `--scouting` is opt-in, and you should mean it.
-- **Field-level payload schemas.** RFC 01 §5 keeps payload definitions with the
-  owning applications; `interface show` maps the type vocabulary rather than
-  pretending to reproduce the shapes.
+- **Payload schemas are shown, not invented.** RFC 01 §5 keeps payload
+  *definitions* with the owning applications, and this tool has no opinion
+  about their contents. But since RFC 08 §7, a producer **serves** its shapes
+  on `@rpc/<producer>/describe`, so `zenctl schema <producer>` and
+  `interface show --schema` print served data rather than sending you to
+  `curl`. (This bullet used to say the opposite; it predated §7.) A producer
+  serving no `describe` degrades honestly — "undescribed" is not "no shape".
 
 ## Fan-in discipline
 

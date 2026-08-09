@@ -74,4 +74,4 @@ pub use key::{Chunk, Key, Selector};
 pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};
 pub use profile::AppProfile;
 pub use qos::QosProfile;
-pub use slice::{RegistrySlice, SliceFinding, parse_slice};
+pub use slice::{RegistrySlice, SliceFinding, parse_slice, to_toml as slice_to_toml};
