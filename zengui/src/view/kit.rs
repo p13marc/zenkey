@@ -29,6 +29,32 @@ pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
         .into()
 }
 
+/// One tab of the right-pane strip: the active tab reads `primary` on the
+/// pane surface, inactive tabs read muted with no background.
+pub fn tab<'a, M: Clone + 'a>(label: &'a str, active: bool, on_press: M) -> Element<'a, M> {
+    iced::widget::button(text(label).size(font::CAPTION))
+        .padding([2, 8])
+        .style(move |theme: &iced::Theme, _status| {
+            let c = colors(theme);
+            iced::widget::button::Style {
+                background: active.then(|| c.surface().into()),
+                text_color: if active { c.primary() } else { c.text_muted() },
+                border: Border {
+                    color: if active {
+                        c.border()
+                    } else {
+                        Color::TRANSPARENT
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .on_press(on_press)
+        .into()
+}
+
 /// A section title with optional trailing controls.
 pub fn section_header<'a, M: 'a>(
     title: impl Into<String>,

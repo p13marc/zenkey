@@ -68,9 +68,32 @@ pub enum Message {
     TreeScrolled(f32, f32),
     EchoFilterChanged(String),
     ClearEcho,
-    /// Switch the right-hand pane (echo ↔ call).
-    PaneToggled,
+    /// Switch the right-hand pane (the toolbar's tab strip).
+    PaneSelected(RightPane),
     Reconnect,
+}
+
+/// The right-hand pane switch — a tab strip, not a cycle, because the pane
+/// set grows with the epic (#61 nodes, #71 doctor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RightPane {
+    Echo,
+    Call,
+    Detail,
+}
+
+impl RightPane {
+    /// Every pane, in tab order — the strip iterates this, so a new variant
+    /// cannot be forgotten in the toolbar.
+    pub const ALL: [RightPane; 3] = [RightPane::Echo, RightPane::Call, RightPane::Detail];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RightPane::Echo => "echo",
+            RightPane::Call => "call",
+            RightPane::Detail => "detail",
+        }
+    }
 }
 
 /// What the link is doing, so the UI never has to infer it from emptiness.

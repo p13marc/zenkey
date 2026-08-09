@@ -33,13 +33,7 @@ use crate::view::tokens::space;
 /// only the scrolled-into window.
 const MAX_ROWS: usize = 50_000;
 
-/// The right-hand pane switch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RightPane {
-    Echo,
-    Call,
-    Detail,
-}
+use crate::message::RightPane;
 
 pub struct Zengui {
     settings: Settings,
@@ -443,12 +437,8 @@ impl Zengui {
                 self.echo.clear();
                 Task::none()
             }
-            Message::PaneToggled => {
-                self.right_pane = match self.right_pane {
-                    RightPane::Echo => RightPane::Call,
-                    RightPane::Call => RightPane::Detail,
-                    RightPane::Detail => RightPane::Echo,
-                };
+            Message::PaneSelected(pane) => {
+                self.right_pane = pane;
                 Task::none()
             }
             Message::Reconnect => {
@@ -698,7 +688,10 @@ impl Zengui {
                 self.seeded_watches += 1;
             }
         }
-        self.echo.record_lag(tick.lagged + tick.coalesced);
+        // Two different facts about the same window (O6): the broadcast
+        // outran us vs. our own batch cap chose to coalesce.
+        self.echo.record_lag(tick.lagged);
+        self.echo.record_coalesced(tick.coalesced);
         for sample in &tick.samples {
             self.ensure_facts(&sample.key);
             self.echo.push(sample);
@@ -919,16 +912,10 @@ impl Zengui {
             text("scope").size(crate::view::tokens::font::CAPTION),
             scope_picker,
             observe,
-            iced::widget::button(
-                text(match self.right_pane {
-                    RightPane::Echo => "call pane",
-                    RightPane::Call => "detail pane",
-                    RightPane::Detail => "echo pane",
-                })
-                .size(crate::view::tokens::font::CAPTION)
-            )
-            .on_press(Message::PaneToggled)
-            .padding(4),
+            iced::widget::Row::from_iter(RightPane::ALL.into_iter().map(|p| {
+                crate::view::kit::tab(p.label(), self.right_pane == p, Message::PaneSelected(p))
+            }))
+            .spacing(space::XS),
             crate::view::kit::muted(self.settings.scope.label()),
             iced::widget::space::horizontal(),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))
