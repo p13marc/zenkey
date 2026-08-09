@@ -54,4 +54,4 @@ pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem, WatchId,
 };
 pub use tree::KeyTreeSnapshot;
-pub use write::{CallTarget, Publication, call, declare_publication};
+pub use write::{CallTarget, MatchingEvents, Publication, call, declare_publication};

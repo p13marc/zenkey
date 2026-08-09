@@ -237,6 +237,24 @@ impl RepeatingQuery {
             .await
             .map_err(|e| anyhow::anyhow!("undeclare querier: {e}"))
     }
+
+    /// Whether any queryable currently matches **this querier** — "someone
+    /// serves what *we* ask", a routing fact about the querier this process
+    /// declared (RFC 12 §9's allowed half). `false` is not a fleet verdict:
+    /// it never means "nobody serves this key" (RFC 05 §3.1).
+    pub async fn matching_status(&self) -> Result<bool> {
+        self.querier
+            .matching_status()
+            .await
+            .map(|s| s.matching())
+            .map_err(|e| anyhow::anyhow!("matching status: {e}"))
+    }
+
+    /// Event-driven matching changes for this querier — same honesty bounds
+    /// as [`matching_status`](Self::matching_status).
+    pub async fn matching_events(&self) -> Result<crate::write::MatchingEvents> {
+        crate::write::MatchingEvents::for_querier(&self.querier).await
+    }
 }
 
 /// The origin chunk of a wire key, via the grammar (never by index — RFC 03

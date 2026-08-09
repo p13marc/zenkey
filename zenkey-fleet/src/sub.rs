@@ -39,6 +39,13 @@ pub struct SampleView {
 }
 
 /// What the monitor emits.
+///
+/// Deliberately **no matching variant** (#38/#80 adoption note): zenoh 1.9
+/// has matching listeners on publishers and queriers only — a subscriber
+/// cannot ask "does anyone publish what I watch", so the monitor's watches
+/// have nothing honest to report here. Matching lives on the write facade's
+/// [`crate::Publication`] and on [`crate::RepeatingQuery`], the two entities
+/// this process declares that zenoh can answer for.
 #[derive(Debug, Clone)]
 pub enum FleetEvent {
     Sample(Arc<SampleView>),
