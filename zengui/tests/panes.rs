@@ -420,3 +420,79 @@ fn the_node_detail_reports_freshness_honestly() {
         "an unanswered ttl'd subject reads stale with its evidence"
     );
 }
+
+/// The doctor panel (#71): never-run is not "0 findings", findings render
+/// with their check ids and RFC citations, and re-runs show deltas — all
+/// over the exact struct `zenctl doctor --format json` serializes.
+#[test]
+fn the_doctor_pane_never_invents_a_verdict() {
+    use std::sync::Arc;
+    use zengui::doctor::DoctorState;
+    use zengui::view::doctor::pane;
+    use zenkey_fleet::report::{DoctorFinding, DoctorReport, DoctorSeverity};
+
+    let state = DoctorState::default();
+    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    assert!(
+        ui.find("no doctor run yet").is_ok(),
+        "never-run must not read as a clean fleet (O4)"
+    );
+
+    let report = DoctorReport {
+        findings: vec![DoctorFinding {
+            severity: DoctorSeverity::Error,
+            check: "slice-sync".into(),
+            subject: "h-3fa9c2d41b7e/sysinfo".into(),
+            evidence: "registry version differs: served 1.0, local 2.0".into(),
+            citation: Some("RFC 08 §6".into()),
+        }],
+        synced: vec![],
+        introspect_answered: 1,
+        live_producers: 1,
+        describe_served: 0,
+        describe_missing: 1,
+        routers: 0,
+        router_version: None,
+        deep: false,
+    };
+    let mut state = DoctorState::default();
+    state.finish(Ok(Arc::new(report.clone())));
+    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    assert!(ui.find("slice-sync").is_ok(), "the stable check id renders");
+    assert!(ui.find("RFC 08 §6").is_ok(), "the citation renders");
+    assert!(
+        ui.find("registry version differs: served 1.0, local 2.0")
+            .is_ok(),
+        "the evidence renders"
+    );
+    assert!(
+        ui.find("go to subject").is_ok(),
+        "an origin/producer subject offers navigation"
+    );
+
+    drop(ui);
+
+    // Second run: the finding is fixed, a new one appears — the delta strip
+    // says exactly that.
+    let second = DoctorReport {
+        findings: vec![DoctorFinding {
+            severity: DoctorSeverity::Info,
+            check: "describe-missing".into(),
+            subject: "fleet".into(),
+            evidence: "1 producer(s) serve no describe".into(),
+            citation: Some("RFC 08 §7".into()),
+        }],
+        ..report
+    };
+    state.finish(Ok(Arc::new(second)));
+    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    assert!(
+        ui.find("vs previous run: 1 new · 1 fixed · 0 unchanged")
+            .is_ok(),
+        "the delta strip renders"
+    );
+    assert!(
+        ui.find("fixed since last run").is_ok(),
+        "fixed findings stay visible, dimmed"
+    );
+}

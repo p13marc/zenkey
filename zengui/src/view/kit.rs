@@ -132,6 +132,29 @@ pub fn badge_presence<'a, M: 'a>(
     .into()
 }
 
+/// A doctor-severity badge (#71) — theme-resolved like [`tone_badge`],
+/// mirroring the CLI's severity marks.
+pub fn badge_severity<'a, M: 'a>(
+    tone: super::theme::SeverityTone,
+    label: impl Into<String>,
+) -> Element<'a, M> {
+    let style = move |theme: &iced::Theme| text::Style {
+        color: Some(colors(theme).severity(tone)),
+    };
+    let mark = match tone {
+        super::theme::SeverityTone::Error => "✗",
+        super::theme::SeverityTone::Warning => "⚠",
+        super::theme::SeverityTone::Info => "·",
+    };
+    row![
+        text(mark).size(font::CAPTION).style(style),
+        text(label.into()).size(font::CAPTION).style(style),
+    ]
+    .spacing(space::XS)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
 /// Dimmed caption text.
 pub fn muted<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
     text(s.into())

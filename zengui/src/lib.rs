@@ -18,6 +18,7 @@
 
 pub mod app;
 pub mod config;
+pub mod doctor;
 pub mod echo;
 pub mod keyfacts;
 pub mod link;

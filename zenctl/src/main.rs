@@ -196,7 +196,7 @@ enum TopicCmd {
         /// Only subjects carrying this payload type.
         #[arg(long, value_name = "TYPE")]
         r#type: Option<String>,
-        /// Also list retired subjects from each slice's [[deprecated]]
+        /// Also list retired subjects from each slice's `[[deprecated]]`
         /// ledger (RFC 08 §6: which hosts still serve a deprecated subject).
         #[arg(long)]
         deprecated: bool,

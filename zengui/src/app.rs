@@ -85,6 +85,8 @@ pub struct Zengui {
     node_selected: Option<String>,
     /// Its one-shot `node_info` detail — the pane's only data-plane cost.
     node_detail: view::nodes::DetailState,
+    /// The doctor panel's run state (#71) — run-on-demand only.
+    doctor: crate::doctor::DoctorState,
 
     call_form: view::call::CallForm,
     /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
@@ -138,6 +140,7 @@ impl Zengui {
             roster: crate::nodes::NodeRoster::default(),
             node_selected: None,
             node_detail: view::nodes::DetailState::default(),
+            doctor: crate::doctor::DoctorState::default(),
             call_form: view::call::CallForm::default(),
             schema_store: None,
             decoded: None,
@@ -303,7 +306,12 @@ impl Zengui {
             }
             Message::ValueFetched(key, outcome) => {
                 self.decoded = None;
-                self.right_pane = RightPane::Detail;
+                // A fetch normally lands the detail pane in view — except
+                // from the doctor's click-through, where losing the finding
+                // list would cost more than it shows (#71).
+                if self.right_pane != RightPane::Doctor {
+                    self.right_pane = RightPane::Detail;
+                }
                 let decode_task = match (&outcome, &self.session, &self.schema_store, &self.slices)
                 {
                     (Ok(out), Some(session), Some(store), Some(slices)) => {
@@ -361,6 +369,8 @@ impl Zengui {
                 self.roster.clear();
                 self.node_selected = None;
                 self.node_detail = view::nodes::DetailState::NotAsked;
+                // Nor is a doctor report.
+                self.doctor.clear();
                 self.my_watches.clear();
                 self.my_watch_paths.clear();
                 self.scope_watches.clear();
@@ -441,6 +451,7 @@ impl Zengui {
             }
             Message::Call(msg) => self.update_call(msg),
             Message::Nodes(msg) => self.update_nodes(msg),
+            Message::Doctor(msg) => self.update_doctor(msg),
             Message::CallDone(outcome) => {
                 self.call_form.in_flight = false;
                 self.call_form.outcome =
@@ -470,6 +481,7 @@ impl Zengui {
                 self.roster.clear();
                 self.node_selected = None;
                 self.node_detail = view::nodes::DetailState::NotAsked;
+                self.doctor.clear();
                 self.start_monitor()
             }
         }
@@ -602,6 +614,92 @@ impl Zengui {
                 self.selected = Some(path);
                 self.reflatten();
                 Task::none()
+            }
+        }
+    }
+
+    fn update_doctor(&mut self, msg: view::doctor::DoctorMsg) -> Task<Message> {
+        use view::doctor::DoctorMsg;
+        match msg {
+            DoctorMsg::DeepToggled(deep) => {
+                self.doctor.deep = deep;
+                Task::none()
+            }
+            DoctorMsg::Run => {
+                if self.doctor.in_flight {
+                    return Task::none();
+                }
+                let Some(session) = self.session.clone() else {
+                    self.doctor.error = Some("no session — connect first".into());
+                    return Task::none();
+                };
+                self.doctor.in_flight = true;
+                self.doctor.error = None;
+                let base = self.settings.base.clone();
+                let timeout = self.settings.timeout();
+                let deep = self.doctor.deep;
+                // Locals come from the registry DIRS only — never the union
+                // set, which would diff the bus against itself.
+                let dirs = self.settings.registry.clone();
+                Task::perform(
+                    async move {
+                        let locals = match SliceSet::from_dirs(&dirs) {
+                            Ok(set) => set.slices().to_vec(),
+                            Err(e) => return Err(format!("registry dirs: {e}")),
+                        };
+                        zenkey_fleet::run_doctor(
+                            &session,
+                            &base,
+                            &locals,
+                            &zenkey_fleet::DoctorSpec {
+                                deep,
+                                sample: None,
+                                timeout,
+                            },
+                        )
+                        .await
+                        .map(Arc::new)
+                        .map_err(|e| e.to_string())
+                    },
+                    |out| Message::Doctor(DoctorMsg::Done(out)),
+                )
+            }
+            DoctorMsg::Done(outcome) => {
+                self.doctor.finish(outcome);
+                Task::none()
+            }
+            DoctorMsg::FindingClicked(index) => {
+                let Some(finding) = self
+                    .doctor
+                    .current
+                    .as_deref()
+                    .and_then(|r| r.findings.get(index))
+                else {
+                    return Task::none();
+                };
+                match crate::doctor::finding_target(finding, &self.settings.base) {
+                    // A concrete key: select in the tree (with the usual
+                    // on-demand fetch); the right pane stays on Doctor so
+                    // the finding list is not lost.
+                    Some(crate::doctor::Target::Key(key)) => {
+                        let mut prefix = String::new();
+                        for chunk in key.split('/') {
+                            if !prefix.is_empty() {
+                                prefix.push('/');
+                            }
+                            prefix.push_str(chunk);
+                            self.expanded.insert(prefix.clone());
+                        }
+                        self.reflatten();
+                        self.update(Message::SelectKey(Some(key)))
+                    }
+                    // An origin/producer subject: land on the nodes pane.
+                    Some(crate::doctor::Target::Node(origin)) => {
+                        self.right_pane = RightPane::Nodes;
+                        self.update_nodes(view::nodes::NodesMsg::Selected(origin))
+                    }
+                    None => Task::none(),
+                }
             }
         }
     }
@@ -923,6 +1021,7 @@ impl Zengui {
                     selected: self.node_selected.as_deref(),
                     detail: &self.node_detail,
                 }),
+                RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
             })
             .width(Length::FillPortion(1))
             .height(Length::Fill),

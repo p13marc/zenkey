@@ -61,6 +61,8 @@ pub enum Message {
     CallDone(Result<Arc<zenkey_fleet::report::CallReport>, String>),
     /// Node dashboard interactions (issue #61).
     Nodes(crate::view::nodes::NodesMsg),
+    /// Doctor panel interactions (issue #71).
+    Doctor(crate::view::doctor::DoctorMsg),
 
     BaseSelected(String),
     ScopeSelected(ScopePreset),
@@ -88,16 +90,18 @@ pub enum RightPane {
     Call,
     Detail,
     Nodes,
+    Doctor,
 }
 
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 4] = [
+    pub const ALL: [RightPane; 5] = [
         RightPane::Echo,
         RightPane::Call,
         RightPane::Detail,
         RightPane::Nodes,
+        RightPane::Doctor,
     ];
 
     pub fn label(self) -> &'static str {
@@ -106,6 +110,7 @@ impl RightPane {
             RightPane::Call => "call",
             RightPane::Detail => "detail",
             RightPane::Nodes => "nodes",
+            RightPane::Doctor => "doctor",
         }
     }
 }
