@@ -132,6 +132,9 @@ enum StorageCmd {
     /// List configured storages and judge declared state families against
     /// them (covered / partial / uncovered — RFC 04 §4, issue #14).
     List {
+        /// Re-render on change every SECS seconds (default 2).
+        #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
+        watch: Option<f64>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -188,6 +191,11 @@ enum TopicCmd {
         /// Only this class: telemetry, state, or events.
         #[arg(long)]
         class: Option<String>,
+        /// Re-render on change every SECS seconds (default 2). Appeared and
+        /// disappeared subjects are marked for one cycle; ndjson streams one
+        /// snapshot object per cycle.
+        #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
+        watch: Option<f64>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -339,6 +347,10 @@ enum NodeCmd {
         /// registry version).
         #[arg(long)]
         verbose: bool,
+        /// Re-render on liveliness events (no polling — the bus pushes the
+        /// roster). Reflects a producer stopping within one event.
+        #[arg(long)]
+        watch: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -354,6 +366,9 @@ enum BaseCmd {
     /// base (keys start at `v1/` on the wire) is reported as `(empty)` and
     /// selected with `--base ""`.
     List {
+        /// Re-render on change every SECS seconds (default 2).
+        #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
+        watch: Option<f64>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -588,8 +603,13 @@ async fn main() -> Result<()> {
         Command::Topic(TopicCmd::List {
             producer,
             class,
+            watch,
             bus,
         }) => {
+            if let Some(secs) = watch {
+                return cmd::watch::topic_list(secs, producer.as_deref(), class.as_deref(), &bus)
+                    .await;
+            }
             let slices = bus.slices().await?;
             let report = offline::topic_list(&slices, producer.as_deref(), class.as_deref())?;
             output::topic_list(&report, bus.format)
@@ -697,15 +717,30 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Node(NodeCmd::Info { origin, bus }) => cmd::node::info(&origin, &bus).await,
-        Command::Node(NodeCmd::List { verbose, bus }) => cmd::node::list(verbose, &bus).await,
-        Command::Base(BaseCmd::List { bus }) => {
+        Command::Node(NodeCmd::List {
+            verbose,
+            watch,
+            bus,
+        }) => {
+            if watch {
+                return cmd::node::watch(verbose, &bus).await;
+            }
+            cmd::node::list(verbose, &bus).await
+        }
+        Command::Base(BaseCmd::List { watch, bus }) => {
+            if let Some(secs) = watch {
+                return cmd::watch::base_list(secs, &bus).await;
+            }
             // Deliberately never calls bus.base() — this is the command that
             // answers "what would I even pass as --base?".
             let session = bus.session().await?;
             let bases = bus::discover_bases(&session, bus.timeout()).await?;
             output::base_list(&report::BaseList { bases }, bus.format)
         }
-        Command::Storage(StorageCmd::List { bus }) => {
+        Command::Storage(StorageCmd::List { watch, bus }) => {
+            if let Some(secs) = watch {
+                return cmd::watch::storage_list(secs, &bus).await;
+            }
             let session = bus.session().await?;
             let storages = zenkey_fleet::storages(&session, bus.timeout()).await?;
             // The coverage join needs slices; degrade to storages-only when

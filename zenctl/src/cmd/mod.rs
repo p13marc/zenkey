@@ -11,6 +11,7 @@ pub mod echo;
 pub mod node;
 pub mod publish;
 pub mod rate;
+pub mod watch;
 
 use anyhow::{Result, anyhow};
 
