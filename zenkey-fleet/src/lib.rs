@@ -30,7 +30,11 @@ pub mod write;
 #[cfg(feature = "decode")]
 pub mod decode;
 #[cfg(feature = "decode")]
+pub mod doctor;
+#[cfg(feature = "decode")]
 pub use decode::{SchemaDrift, TotalityGap, schema_drift, totality_gaps};
+#[cfg(feature = "decode")]
+pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
 
 pub use admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,

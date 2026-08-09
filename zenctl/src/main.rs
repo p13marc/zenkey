@@ -84,9 +84,26 @@ enum Command {
         /// fleet query load.
         #[arg(long)]
         deep: bool,
+        /// With --deep: drain at most N state samples per family — bounds
+        /// the sweep's cost, not just its output.
+        #[arg(long, value_name = "N", requires = "deep")]
+        sample: Option<usize>,
+        /// Exit 1 when a finding at (or above) this severity exists.
+        /// Default: always exit 0 — findings are output, not verdicts.
+        #[arg(long, value_enum, value_name = "SEVERITY")]
+        fail_on: Option<FailOn>,
         #[command(flatten)]
         bus: BusArgs,
     },
+}
+
+/// The `--fail-on` severity ceiling (scripting hook; opt-in).
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum FailOn {
+    /// Fail on error-severity findings only.
+    Error,
+    /// Fail on warnings or errors.
+    Warning,
 }
 
 #[derive(Subcommand)]
@@ -522,7 +539,7 @@ impl BusArgs {
                 zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
             for d in &out.disagreements {
                 eprintln!(
-                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{}                      (served wins; `zenctl registry diff` details it)",
+                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{}                      (served wins; `zenctl doctor --registry <dir>` details the drift)",
                     d.producer,
                     d.bus_version,
                     d.dirs_version,
@@ -771,6 +788,11 @@ async fn main() -> Result<()> {
             clap_complete::generate(shell, &mut Cli::command(), "zenctl", &mut std::io::stdout());
             Ok(())
         }
-        Command::Doctor { deep, bus } => cmd::doctor::run(deep, &bus).await,
+        Command::Doctor {
+            deep,
+            sample,
+            fail_on,
+            bus,
+        } => cmd::doctor::run(deep, sample, fail_on, &bus).await,
     }
 }

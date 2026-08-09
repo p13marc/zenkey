@@ -168,7 +168,7 @@ pub enum SliceSource {
 ///
 /// A disagreement is **data**, not an error: served wins in the union (the
 /// bus is the runtime truth, RFC 08 §6.1), and the difference is retained for
-/// `doctor` / `registry diff` to report instead of being silently overwritten.
+/// `doctor` to report instead of being silently overwritten.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SliceDisagreement {
     pub producer: String,

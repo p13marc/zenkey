@@ -459,4 +459,50 @@ mod tests {
         // …but no registry facts were invented.
         assert!(info.payload_type.is_none());
     }
+
+    /// The serialized DoctorReport is a wire contract: `zenctl doctor
+    /// --format json` scripts and the GUI panel both consume this exact
+    /// shape. Field renames/removals break users — this golden pin makes
+    /// that a deliberate act.
+    #[test]
+    fn doctor_report_json_shape_is_pinned() {
+        let report = DoctorReport {
+            findings: vec![DoctorFinding {
+                severity: DoctorSeverity::Error,
+                check: "slice-sync".into(),
+                subject: "h-3fa9c2d41b7e/sysinfo".into(),
+                evidence: "registry version differs: served 1.0, local 2.0".into(),
+                citation: Some("RFC 08 §6".into()),
+            }],
+            synced: vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()],
+            introspect_answered: 2,
+            live_producers: 3,
+            describe_served: 1,
+            describe_missing: 1,
+            routers: 1,
+            router_version: Some("1.9.0".into()),
+            deep: false,
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "findings": [{
+                    "severity": "error",
+                    "check": "slice-sync",
+                    "subject": "h-3fa9c2d41b7e/sysinfo",
+                    "evidence": "registry version differs: served 1.0, local 2.0",
+                    "citation": "RFC 08 §6",
+                }],
+                "synced": ["h-3fa9c2d41b7e/other (registry 1.0)"],
+                "introspect_answered": 2,
+                "live_producers": 3,
+                "describe_served": 1,
+                "describe_missing": 1,
+                "routers": 1,
+                "router_version": "1.9.0",
+                "deep": false,
+            })
+        );
+    }
 }

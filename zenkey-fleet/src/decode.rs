@@ -189,7 +189,15 @@ pub fn totality_gaps(described: &[(String, SchemaSet)], slices: &SliceSet) -> Ve
             continue;
         };
         let mut names: Vec<&str> = Vec::new();
-        names.extend(slice.subjects.iter().map(|s| s.type_name.as_str()));
+        // An untyped subject (empty `type`) references nothing — without this
+        // filter it would demand a schema for "" and report a phantom gap.
+        names.extend(
+            slice
+                .subjects
+                .iter()
+                .map(|s| s.type_name.as_str())
+                .filter(|t| !t.is_empty()),
+        );
         for p in &slice.procedures {
             names.extend(p.request.as_deref());
             names.extend(p.reply.as_deref());
@@ -535,5 +543,43 @@ mod tests {
 
         // No describe served at all: not judged by totality.
         assert!(totality_gaps(&[], &slices).is_empty());
+    }
+
+    /// An untyped subject (empty `type`) references nothing — it must not
+    /// demand a schema for `""` (regression: phantom gap found while
+    /// consolidating doctor's totality check onto this function, #55).
+    #[test]
+    fn an_untyped_subject_is_not_a_totality_gap() {
+        use zenkey::slice::{RegistrySlice, SubjectDecl};
+        let slice = RegistrySlice {
+            version: "1".into(),
+            app: "a".into(),
+            convention: 1,
+            name: "sysinfo".into(),
+            service_origin: None,
+            description: None,
+            subjects: vec![SubjectDecl {
+                path: "raw".into(),
+                class: "telemetry".into(),
+                type_name: String::new(),
+                since: None,
+                description: None,
+                qos: None,
+                ttl_s: None,
+                unit: None,
+                rate: None,
+                cardinality: None,
+                encoding: None,
+            }],
+            procedures: vec![],
+            blob: vec![],
+            deprecated: vec![],
+        };
+        let slices = crate::registry::SliceSet::from_slices(vec![slice]);
+        let served = SchemaSet::builder("a").build();
+        assert!(
+            totality_gaps(&[("sysinfo".to_string(), served)], &slices).is_empty(),
+            "empty type names must be filtered, not reported as gaps"
+        );
     }
 }

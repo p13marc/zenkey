@@ -383,10 +383,15 @@ pub struct StateSample {
 /// (target All, consolidation None) — the doctor's freshness check
 /// (RFC 04 §1.2) consumes the timestamps. Same chokepoint posture as
 /// [`fleet_get`]: no subcommand issues a raw `session.get`.
+///
+/// `max` bounds the samples **drained** (`doctor --sample N`): the loop
+/// stops reading at the cap, so a bounded sweep is cheaper, not merely
+/// quieter. `None` drains every reply.
 pub async fn state_snapshot(
     session: &Session,
     selector: &str,
     timeout: Duration,
+    max: Option<usize>,
 ) -> Result<Vec<StateSample>> {
     let replies = session
         .get(selector)
@@ -398,6 +403,9 @@ pub async fn state_snapshot(
         .with_context(|| format!("state snapshot failed: {selector}"))?;
     let mut out = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
+        if max.is_some_and(|m| out.len() >= m) {
+            break;
+        }
         let Ok(sample) = reply.result() else { continue };
         out.push(StateSample {
             key: sample.key_expr().as_str().to_string(),
