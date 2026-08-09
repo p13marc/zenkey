@@ -1,6 +1,6 @@
 # zenkey redesign 2026-07 — analysis, generalization, and roadmap
 
-Status: **largely implemented** (historical design record). Written against RFC v1.4; the RFC set is at v1.9. P0–P5 shipped through the 0.3/0.4 releases and the zengui bootstrap (PR #32); remaining rows are tracked by epic #33 ("Explorer Suite 1.0"). Kept for the rationale; where it and shipped code disagree, the code and the RFCs win.
+Status: **largely implemented** (historical design record). Written against RFC v1.4; the RFC set is at v1.10. P0–P5 shipped through the 0.3/0.4 releases and the zengui bootstrap (PR #32); remaining rows are tracked by epic #33 ("Explorer Suite 1.0"). Kept for the rationale; where it and shipped code disagree, the code and the RFCs win.
 Scope: `zenkey`, `zenkey-build`, `zenctl`, the RFC set, and the groundwork for a future
 Iced GUI bus explorer. Backward compatibility is explicitly on the table — we are the
 only consumers today (zensight, tcgui).
@@ -495,14 +495,16 @@ zenctl topic info <key>                                              [T]
 zenctl topic echo [SEL] [--origin|--class|--producer|--subject GLOB]
                   [--fmt FMT] [--hex|--raw|--no-decode] [--count] [--rate]  [T/D]
 zenctl topic hz|bw <SEL> [--window 10s] [--per-key]                  [T]
-zenctl topic pub <key> [BODY|@file|-] [--qos PROFILE] [--repeat] [--interval]  [D]
+zenctl topic pub <key> [BODY|@file|-] [--qos PROFILE] [--repeat] [--interval]
+                       [--encoding MIME] [--no-validate] [--raw]     [D]
+       # the body is ENCODED for the wire against the served schema (#97)
 
 zenctl node list [--verbose] [--watch]    # liveliness + introspect + admin join  [T]
 zenctl node info <origin>                                            [D]
 
 zenctl service list|info                                             [T]
 zenctl service call <origin|*|@svc> <producer|-> <proc>
-                    [--param k=v] [--body JSON|@file|-] [--no-validate]  [T]
+                    [--param k=v] [--body JSON|@file|-] [--no-validate] [--raw]  [T]
        # exit 1 = an error reply; exit 2 = zero replies (silence stays non-verdict)
 
 zenctl interface list | show <Type> [--schema]                       [T/D]

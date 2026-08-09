@@ -136,6 +136,18 @@ impl SchemaStore {
     ) -> Result<DecodedPayload, DecodeError> {
         self.decoders.decode(schema, encoding, bytes)
     }
+
+    /// The other direction (issue #97): a JSON value framed for the wire.
+    /// The store owns the decoder table, so the write path resolves its codec
+    /// exactly where the read path does — one registration, both directions.
+    pub fn encode(
+        &self,
+        schema: &TypeSchema,
+        value: &serde_json::Value,
+        target: &WireEncoding,
+    ) -> Result<Vec<u8>, DecodeError> {
+        self.decoders.encode(schema, value, target)
+    }
 }
 
 /// Two producers serving one type name with different hashes — "a `doctor`

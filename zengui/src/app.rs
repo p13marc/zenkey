@@ -89,6 +89,11 @@ pub struct Zengui {
     doctor: crate::doctor::DoctorState,
 
     call_form: view::call::CallForm,
+    publish_form: view::publish::PublishForm,
+    /// The armed publication and the bytes it repeats (#60). Held here rather
+    /// than in the form because a `Publication` is a live bus declaration, not
+    /// view state — dropping it undeclares.
+    publication: Option<(Arc<zenkey_fleet::Publication>, Arc<Vec<u8>>)>,
     /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
     schema_store: Option<Arc<zenkey_fleet::decode::SchemaStore>>,
     /// The decode of the last fetched value.
@@ -142,6 +147,8 @@ impl Zengui {
             node_detail: view::nodes::DetailState::default(),
             doctor: crate::doctor::DoctorState::default(),
             call_form: view::call::CallForm::default(),
+            publish_form: view::publish::PublishForm::default(),
+            publication: None,
             schema_store: None,
             decoded: None,
             right_pane: RightPane::Echo,
@@ -452,10 +459,88 @@ impl Zengui {
             Message::Call(msg) => self.update_call(msg),
             Message::Nodes(msg) => self.update_nodes(msg),
             Message::Doctor(msg) => self.update_doctor(msg),
+            Message::Publish(msg) => self.update_publish(msg),
             Message::CallDone(outcome) => {
                 self.call_form.in_flight = false;
                 self.call_form.outcome =
                     Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
+                Task::none()
+            }
+            Message::PublishReady(Ok(outcome)) => {
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                form.error = None;
+                form.source = Some(outcome.prepared.source.clone());
+                form.note = outcome.prepared.note.clone();
+                form.encoding_used = outcome.prepared.encoding.clone();
+                form.matching = outcome.matching;
+                form.log(
+                    true,
+                    format!("sent {} bytes → {}", outcome.prepared.bytes.len(), form.key),
+                );
+                match &outcome.publication {
+                    Some(publication) => {
+                        form.armed = true;
+                        self.publication = Some((
+                            publication.clone(),
+                            Arc::new(outcome.prepared.bytes.clone()),
+                        ));
+                    }
+                    // One-shot: the task already undeclared.
+                    None => {
+                        form.armed = false;
+                        self.publication = None;
+                    }
+                }
+                Task::none()
+            }
+            Message::PublishReady(Err(e)) => {
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                form.armed = false;
+                form.error = Some(e.clone());
+                form.log(false, format!("refused: {e}"));
+                self.publication = None;
+                Task::none()
+            }
+            Message::PublishTick => {
+                let Some((publication, bytes)) = self.publication.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move {
+                        publication
+                            .send(bytes.as_ref().clone())
+                            .await
+                            .map(|()| bytes.len())
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::PublishSent,
+                )
+            }
+            Message::PublishSent(Ok(n)) => {
+                let key = self.publish_form.key.clone();
+                self.publish_form
+                    .log(true, format!("sent {n} bytes → {key}"));
+                Task::none()
+            }
+            Message::PublishSent(Err(e)) => {
+                // A failed repeat disarms: a stream that silently stopped
+                // working would keep claiming it was publishing.
+                self.publish_form.log(false, format!("send failed: {e}"));
+                self.publish_form.armed = false;
+                self.publication = None;
+                Task::none()
+            }
+            Message::PublishStopped(result) => {
+                match result {
+                    Ok(()) => self
+                        .publish_form
+                        .log(true, "stopped — publication undeclared"),
+                    Err(e) => self
+                        .publish_form
+                        .log(false, format!("undeclare failed: {e}")),
+                }
                 Task::none()
             }
             Message::EchoFilterChanged(f) => {
@@ -496,7 +581,48 @@ impl Zengui {
                 Task::none()
             }
             CallMsg::ProcedurePicked(p) => {
-                self.call_form.procedure = Some(p);
+                self.call_form.procedure = Some(p.clone());
+                // Scaffold from the served request schema (§6.4 item 3). Not
+                // asked yet is `None`, and stays `None` until an answer — the
+                // pane renders that as "not asked", never as "no fields".
+                self.call_form.request_fields = None;
+                let (Some(session), Some(store), Some(producer)) = (
+                    self.session.clone(),
+                    self.schema_store.clone(),
+                    self.call_form.producer.clone(),
+                ) else {
+                    return Task::none();
+                };
+                let Some(request) = self
+                    .slices
+                    .as_ref()
+                    .and_then(|s| s.get(&producer))
+                    .and_then(|s| s.procedures.iter().find(|d| d.path == p))
+                    .and_then(|d| d.request.clone())
+                else {
+                    // No declared request type: there is nothing to scaffold,
+                    // and that is an answer.
+                    self.call_form.request_fields = Some(Vec::new());
+                    return Task::none();
+                };
+                Task::perform(
+                    async move {
+                        store
+                            .schema_for(&session, &producer, &request)
+                            .await
+                            .map(|schema| view::call::schema_fields(&schema))
+                    },
+                    |fields| Message::Call(CallMsg::RequestSchema(fields)),
+                )
+            }
+            CallMsg::RequestSchema(fields) => {
+                self.call_form.request_fields = fields;
+                Task::none()
+            }
+            CallMsg::ScaffoldBody => {
+                if let Some(body) = self.call_form.scaffold() {
+                    self.call_form.body = body;
+                }
                 Task::none()
             }
             CallMsg::TargetChanged(t) => {
@@ -558,6 +684,142 @@ impl Zengui {
                     },
                     Message::CallDone,
                 )
+            }
+        }
+    }
+
+    /// The publish pane (#60). Everything that touches the bus goes through
+    /// the engine: `prepare_publish` for the body (#97's encode ladder) and
+    /// `declare_publication` for the write (P7 — a declared publisher, never
+    /// an ad-hoc put). No codec logic may live on this side of the seam.
+    fn update_publish(&mut self, msg: view::publish::PublishMsg) -> Task<Message> {
+        use view::publish::PublishMsg;
+        match msg {
+            PublishMsg::KeyChanged(k) => {
+                // Classify as you type, through the same ladder the tree uses.
+                self.publish_form.facts = (!k.trim().is_empty()).then(|| {
+                    zenkey_fleet::describe_key(&self.settings.base, &k, self.slices.as_deref())
+                        .facts
+                });
+                self.publish_form.key = k;
+                Task::none()
+            }
+            PublishMsg::BodyChanged(b) => {
+                self.publish_form.body = b;
+                Task::none()
+            }
+            PublishMsg::QosPicked(q) => {
+                self.publish_form.qos = q;
+                Task::none()
+            }
+            PublishMsg::EncodingChanged(e) => {
+                self.publish_form.encoding = e;
+                Task::none()
+            }
+            PublishMsg::RawToggled(b) => {
+                self.publish_form.raw = b;
+                Task::none()
+            }
+            PublishMsg::RepeatToggled(b) => {
+                self.publish_form.repeat = b;
+                // Turning repeat off mid-stream stops it, rather than leaving
+                // an armed publication with the checkbox saying otherwise.
+                if !b && self.publication.is_some() {
+                    return self.update_publish(PublishMsg::Stop);
+                }
+                Task::none()
+            }
+            PublishMsg::IntervalChanged(i) => {
+                self.publish_form.interval = i;
+                Task::none()
+            }
+            PublishMsg::Stop => {
+                self.publish_form.armed = false;
+                let Some((publication, _)) = self.publication.take() else {
+                    return Task::none();
+                };
+                // Acknowledged undeclare when we hold the last reference; a
+                // drop would undeclare too, but silently.
+                match Arc::try_unwrap(publication) {
+                    Ok(p) => Task::perform(
+                        async move { p.undeclare().await.map_err(|e| e.to_string()) },
+                        Message::PublishStopped,
+                    ),
+                    Err(_) => Task::none(),
+                }
+            }
+            PublishMsg::Send => {
+                let (Some(session), Some(store)) =
+                    (self.session.clone(), self.schema_store.clone())
+                else {
+                    return Task::none();
+                };
+                // A new send replaces any armed publication: two publishers on
+                // one key from one pane would double every sample.
+                let stop = self.update_publish(PublishMsg::Stop);
+                let form = &self.publish_form;
+                let key = form.key.trim().to_string();
+                let body = form.body.clone().into_bytes();
+                let qos = form.qos.0;
+                let encoding = form.encoding.trim().to_string();
+                let mode = if form.raw {
+                    zenkey_fleet::PrepareMode::Raw
+                } else {
+                    zenkey_fleet::PrepareMode::Encode
+                };
+                let base = self.settings.base.clone();
+                let slices = self.slices.clone();
+                let repeat = form.repeat;
+                self.publish_form.in_flight = true;
+                self.publish_form.error = None;
+                let send = Task::perform(
+                    async move {
+                        let prepared = zenkey_fleet::prepare_publish(
+                            &session,
+                            &store,
+                            slices.as_deref(),
+                            &base,
+                            &key,
+                            (!encoding.is_empty()).then_some(encoding.as_str()),
+                            &body,
+                            mode,
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                        let publication = zenkey_fleet::declare_publication(
+                            &session,
+                            &key,
+                            qos,
+                            prepared.encoding.as_deref(),
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                        publication
+                            .send(prepared.bytes.clone())
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        // The badge is a routing fact about this publisher and
+                        // nothing else; an error asking is "not asked" (O4),
+                        // never "nobody listens".
+                        let matching = publication.matching_status().await.ok();
+                        // A one-shot undeclares here, acknowledged, exactly as
+                        // `zenctl topic pub` does; only a repeating publish
+                        // hands the declaration back to be held.
+                        let publication = if repeat {
+                            Some(Arc::new(publication))
+                        } else {
+                            publication.undeclare().await.map_err(|e| e.to_string())?;
+                            None
+                        };
+                        Ok(Arc::new(crate::message::PublishOutcome {
+                            prepared,
+                            publication,
+                            matching,
+                        }))
+                    },
+                    Message::PublishReady,
+                );
+                Task::batch([stop, send])
             }
         }
     }
@@ -980,13 +1242,20 @@ impl Zengui {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let Some(monitor) = self.monitor.clone() else {
-            return Subscription::none();
-        };
-        link::subscribe(LinkKey {
-            monitor,
-            epoch: self.epoch,
-        })
+        let mut subs = Vec::new();
+        if let Some(monitor) = self.monitor.clone() {
+            subs.push(link::subscribe(LinkKey {
+                monitor,
+                epoch: self.epoch,
+            }));
+        }
+        // The repeat clock for a sustained publish (#60). It exists only while
+        // a publication is armed, so an idle pane costs nothing.
+        if self.publish_form.armed {
+            let period = std::time::Duration::from_secs_f64(self.publish_form.interval_secs());
+            subs.push(iced::time::every(period).map(|_| Message::PublishTick));
+        }
+        Subscription::batch(subs)
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -1007,7 +1276,10 @@ impl Zengui {
             iced::widget::container(match self.right_pane {
                 RightPane::Echo =>
                     view::echo::pane(&self.echo, &self.echo_filter, self.selected.as_deref(),),
-                RightPane::Call => view::call::pane(&self.call_form, self.slices.as_deref()),
+                RightPane::Call =>
+                    view::call::pane(&self.call_form, self.slices.as_deref(), &self.roster,),
+                RightPane::Publish =>
+                    view::publish::pane(&self.publish_form, self.slices.is_some()),
                 RightPane::Detail => view::detail::pane(view::detail::DetailData {
                     key: self.selected.as_deref().unwrap_or("(nothing selected)"),
                     facts: self.selected.as_deref().and_then(|k| self.facts.get(k)),

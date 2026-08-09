@@ -168,8 +168,10 @@ impl PayloadDecoder for ProtobufDecoder {
         bytes: &[u8],
     ) -> Result<DecodedPayload, DecodeError> {
         match encoding {
+            // `Other` is an unlabelled bus, not a contradiction: the schema
+            // says protobuf and the sample said nothing.
             WireEncoding::Protobuf | WireEncoding::Other(_) => {}
-            WireEncoding::Json | WireEncoding::Cbor => {
+            WireEncoding::Json | WireEncoding::Cbor | WireEncoding::Cdr => {
                 return Err(DecodeError::WrongEncoding(format!("{encoding:?}")));
             }
         }
@@ -218,12 +220,14 @@ impl Default for DecoderRegistry {
 
 impl DecoderRegistry {
     /// A registry with the built-in codecs (`json-schema`; `protobuf` when
-    /// the `decode-protobuf` feature is on).
+    /// the `decode-protobuf` feature is on; `cdr` when `decode-cdr` is).
     pub fn new() -> Self {
         #[allow(unused_mut)]
         let mut decoders: Vec<Box<dyn PayloadDecoder>> = vec![Box::new(JsonSchemaDecoder)];
         #[cfg(feature = "decode-protobuf")]
         decoders.push(Box::new(ProtobufDecoder));
+        #[cfg(feature = "decode-cdr")]
+        decoders.push(Box::new(super::cdr::CdrDecoder));
         DecoderRegistry { decoders }
     }
 

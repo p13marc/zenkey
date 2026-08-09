@@ -14,7 +14,15 @@ tooling — the shared core of the `zenctl` and `zengui` explorers:
   `SchemaStore` lazily fetches each producer's served `describe` schema set,
   `decode_sample` turns wire bytes into named-field JSON with honest
   structural fallback; encoding resolution is sample > registry > sniff.
-  `decode-protobuf` adds dynamic protobuf via the served FileDescriptorSet.
+  `decode-protobuf` adds dynamic protobuf via the served FileDescriptorSet,
+  `decode-cdr` adds XCDR1 (DDS / ROS 2) against a served `cdr` field list.
+- **`body`** *(feature `decode`)* — the other direction: `prepare_publish` /
+  `prepare_request` turn a typed body into the bytes that actually ship,
+  encoded against the served schema and labelled with the declared
+  `Encoding`. Encode resolution is declared > registry > the schema kind's
+  native encoding (never a sniff of the operator's text). A body that could
+  not be encoded is reported as such — `BodySource` distinguishes encoded,
+  as-typed, and raw, so no caller can ship an unencoded payload silently.
 - **`sub`** — `Monitor`: subscription multiplexing + liveliness watching
   (with `history(true)` — the roster arrives on join) into a bounded
   broadcast of events. Overflow surfaces as an explicit `Dropped(n)`;

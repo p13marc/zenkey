@@ -28,9 +28,15 @@ pub mod tree;
 pub mod write;
 
 #[cfg(feature = "decode")]
+pub mod body;
+#[cfg(feature = "decode")]
 pub mod decode;
 #[cfg(feature = "decode")]
 pub mod doctor;
+#[cfg(feature = "decode")]
+pub use body::{
+    BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
+};
 #[cfg(feature = "decode")]
 pub use decode::{SchemaDrift, TotalityGap, schema_drift, totality_gaps};
 #[cfg(feature = "decode")]

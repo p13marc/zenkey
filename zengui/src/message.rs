@@ -59,6 +59,17 @@ pub enum Message {
     Call(crate::view::call::CallMsg),
     /// A call finished.
     CallDone(Result<Arc<zenkey_fleet::report::CallReport>, String>),
+    /// Publish pane interactions (issue #60's other half).
+    Publish(crate::view::publish::PublishMsg),
+    /// A prepare→declare→send round finished: the prepared body's provenance,
+    /// the declared publication (kept when repeating), and its matching status.
+    PublishReady(Result<Arc<PublishOutcome>, String>),
+    /// One repeat tick fired.
+    PublishTick,
+    /// A repeat send landed (or did not).
+    PublishSent(Result<usize, String>),
+    /// The armed publication was undeclared.
+    PublishStopped(Result<(), String>),
     /// Node dashboard interactions (issue #61).
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).
@@ -82,12 +93,26 @@ pub enum Message {
     Reconnect,
 }
 
+/// What one prepare→declare→send round produced. The publication travels in
+/// the message because a *repeating* publish keeps it: `Publication` is not
+/// `Clone`, so the `Arc` is what lets the app hold the declared publisher
+/// between ticks. A one-shot send undeclares in the task and carries `None` —
+/// an explorer does not leave declarations lying around on the bus.
+#[derive(Debug)]
+pub struct PublishOutcome {
+    pub prepared: zenkey_fleet::PreparedBody,
+    pub publication: Option<Arc<zenkey_fleet::Publication>>,
+    /// `None` = the status could not be asked, which is not `false` (O4).
+    pub matching: Option<bool>,
+}
+
 /// The right-hand pane switch — a tab strip, not a cycle, because the pane
-/// set grows with the epic (#61 nodes, #71 doctor).
+/// set grows with the epic (#61 nodes, #71 doctor, #60 publish).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPane {
     Echo,
     Call,
+    Publish,
     Detail,
     Nodes,
     Doctor,
@@ -96,9 +121,10 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 5] = [
+    pub const ALL: [RightPane; 6] = [
         RightPane::Echo,
         RightPane::Call,
+        RightPane::Publish,
         RightPane::Detail,
         RightPane::Nodes,
         RightPane::Doctor,
@@ -108,6 +134,7 @@ impl RightPane {
         match self {
             RightPane::Echo => "echo",
             RightPane::Call => "call",
+            RightPane::Publish => "publish",
             RightPane::Detail => "detail",
             RightPane::Nodes => "nodes",
             RightPane::Doctor => "doctor",

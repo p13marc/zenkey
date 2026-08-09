@@ -101,13 +101,74 @@ pub struct NodeInfo {
     pub freshness: Vec<Freshness>,
 }
 
+/// How one origin string spells its two framework keys. A host and a service
+/// differ in both (`v1/<h>/state/*/alive` + a producer chunk in `@rpc`, versus
+/// `v1/@svc/state/alive` + no producer chunk), and a `*` can reach neither
+/// other's shape — so the split is made once, up front, rather than guessed
+/// per key (D4).
+enum Node {
+    Host(zenkey::origin::RemoteOrigin),
+    Service(zenkey::ServiceOrigin),
+}
+
+impl Node {
+    fn parse(origin: &str) -> Result<Node> {
+        if origin.starts_with('@') {
+            zenkey::ServiceOrigin::new(origin)
+                .map(Node::Service)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        } else {
+            zenkey::origin::RemoteOrigin::parse(origin)
+                .map(Node::Host)
+                .map_err(|e| anyhow::anyhow!("{e} — a hostname is not an origin (RFC 06 §6)"))
+        }
+    }
+
+    /// This node's liveliness tokens, and nothing else's.
+    fn alive_selector(&self) -> String {
+        match self {
+            Node::Host(o) => {
+                zenkey::selector::all_liveliness(zenkey::selector::Scope::origin(o)).to_string()
+            }
+            Node::Service(o) => zenkey::selector::service_alive(o).to_string(),
+        }
+    }
+
+    /// This node's producers' `introspect`, and nothing else's.
+    fn introspect_selector(&self) -> String {
+        match self {
+            Node::Host(o) => {
+                zenkey::selector::rpc(zenkey::selector::Scope::origin(o), "*", &["introspect"])
+                    .to_string()
+            }
+            Node::Service(o) => zenkey::selector::service_rpc(o, &["introspect"]).to_string(),
+        }
+    }
+
+    /// This node's state subtree. `**` cannot cross an `@` chunk (D2), so this
+    /// cannot pull a plane however deep the subject tail runs.
+    fn state_selector(&self) -> String {
+        let scope = match self {
+            Node::Host(o) => zenkey::selector::Scope::origin(o),
+            Node::Service(o) => zenkey::selector::Scope::origin(o),
+        };
+        zenkey::selector::all_state(scope).to_string()
+    }
+}
+
 /// Assemble one node's full story (issue #40; feeds `zenctl node info` and
 /// the zengui dashboard).
 ///
-/// Three bounded sweeps: the roster (zero payload), this origin's introspect
-/// replies (attributed by reply key — per-origin truth, not the fleet-deduped
+/// Three bounded sweeps, **all three scoped to the asked origin** (issue #96 —
+/// before it, this re-ran the whole fleet roster and a fleet-wide introspect
+/// fan-in per call and then filtered, which the zengui node dashboard pays for
+/// on every card click): this origin's liveliness tokens, this origin's
+/// producers' introspect replies (per-origin truth, not the fleet-deduped
 /// `SliceSet`), and — when `with_freshness` — one state GET on this origin
 /// only (D2 guarantees it cannot pull planes).
+///
+/// Narrower is also *more* honest: the answers can no longer be diluted by a
+/// deduplication across origins that never applied to this one.
 pub async fn node_info(
     session: &Session,
     base: &str,
@@ -115,19 +176,55 @@ pub async fn node_info(
     timeout: Duration,
     with_freshness: bool,
 ) -> Result<NodeInfo> {
-    let roster = roster(session, base, timeout).await?;
-    let alive: Vec<String> = roster.get(origin).cloned().unwrap_or_default();
+    let node = Node::parse(origin)?;
 
-    // Per-origin capabilities: fleet_registry attributes each introspect
-    // reply to the origin that served it.
-    let served = crate::query::fleet_registry(session, base, timeout)
+    // Liveliness, this origin only. A producer chunk is position 5 for a host;
+    // `@catalog`'s token has none — the service *is* the producer.
+    let mut alive: Vec<String> = Vec::new();
+    let alive_expr = with_base(base, node.alive_selector());
+    if let Ok(replies) = session.liveliness().get(&alive_expr).timeout(timeout).await {
+        while let Ok(reply) = replies.recv_async().await {
+            let Ok(sample) = reply.result() else { continue };
+            let Some(parsed) = zenkey::grammar::parse_full(base, sample.key_expr().as_str()) else {
+                continue;
+            };
+            alive.push(
+                parsed
+                    .producer
+                    .as_ref()
+                    .map(|p| p.chunk())
+                    .unwrap_or_else(|| parsed.origin.chunk().trim_start_matches('@').to_string()),
+            );
+        }
+    }
+    alive.sort();
+    alive.dedup();
+
+    // Per-origin capabilities: one origin-scoped introspect GET. Replies are
+    // still attributed by reply key, so a router that answered for somebody
+    // else could not smuggle a slice in.
+    let introspect = with_base(base, node.introspect_selector());
+    let answers = crate::query::fleet_get(session, base, &introspect, None, timeout)
         .await
         .unwrap_or_default();
-    let mine: Vec<&zenkey::slice::RegistrySlice> = served
-        .iter()
-        .filter(|(o, _)| o == origin)
-        .map(|(_, s)| s)
+    let served: Vec<zenkey::slice::RegistrySlice> = answers
+        .into_iter()
+        .filter(|a| a.origin == origin)
+        .filter_map(|a| {
+            let crate::query::Answer::Value(bytes) = a.answer else {
+                return None;
+            };
+            let toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
+            match zenkey::parse_slice(&toml) {
+                Ok(slice) => Some(slice),
+                Err(e) => {
+                    tracing::warn!(origin, "introspect reply did not parse, skipping: {e}");
+                    None
+                }
+            }
+        })
         .collect();
+    let mine: Vec<&zenkey::slice::RegistrySlice> = served.iter().collect();
 
     let mut names: Vec<String> = alive.clone();
     names.extend(mine.iter().map(|s| s.name.clone()));
@@ -156,7 +253,7 @@ pub async fn node_info(
     let mut freshness = Vec::new();
     if with_freshness && !mine.is_empty() {
         // One origin-scoped state sweep; join against declared ttl_s.
-        let selector = zenkey::grammar::with_base(base, format!("v1/{origin}/state/**"));
+        let selector = with_base(base, node.state_selector());
         let samples = crate::query::state_snapshot(session, &selector, timeout, None)
             .await
             .unwrap_or_default();

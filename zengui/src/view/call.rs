@@ -18,6 +18,69 @@ use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
 
+/// One field of a served request schema, as the form scaffolds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaField {
+    pub name: String,
+    /// The declared type, when the schema names one.
+    pub type_name: Option<String>,
+    pub required: bool,
+}
+
+impl SchemaField {
+    /// `name: type*` — the star marks required, so a scaffolded body's
+    /// mandatory half is legible before the send refuses it.
+    pub fn label(&self) -> String {
+        format!(
+            "{}: {}{}",
+            self.name,
+            self.type_name.as_deref().unwrap_or("?"),
+            if self.required { "*" } else { "" }
+        )
+    }
+
+    /// A placeholder value of the right shape, for the scaffolded body.
+    fn placeholder(&self) -> serde_json::Value {
+        match self.type_name.as_deref() {
+            Some("integer") => serde_json::json!(0),
+            Some("number") => serde_json::json!(0.0),
+            Some("boolean") => serde_json::json!(false),
+            Some("array") => serde_json::json!([]),
+            Some("object") => serde_json::json!({}),
+            _ => serde_json::json!(""),
+        }
+    }
+}
+
+/// Extract the top-level field list from a served schema. Only the
+/// `json-schema` kind describes fields in a form this can read; every other
+/// kind returns an empty list, which the pane renders as "nothing to
+/// scaffold" rather than as "no fields".
+pub fn schema_fields(schema: &zenkey::schema::TypeSchema) -> Vec<SchemaField> {
+    let Some(doc) = schema.json_document() else {
+        return Vec::new();
+    };
+    let Some(props) = doc.get("properties").and_then(|p| p.as_object()) else {
+        return Vec::new();
+    };
+    let required: Vec<&str> = doc
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    props
+        .iter()
+        .map(|(name, spec)| SchemaField {
+            name: name.clone(),
+            type_name: spec
+                .get("type")
+                .and_then(|t| t.as_str())
+                .map(str::to_string),
+            required: required.contains(&name.as_str()),
+        })
+        .collect()
+}
+
 /// The pane's editable state (owned by the app).
 #[derive(Debug, Clone, Default)]
 pub struct CallForm {
@@ -26,9 +89,28 @@ pub struct CallForm {
     pub target: String,
     pub params: String,
     pub body: String,
+    /// The selected procedure's request-schema fields. `None` = **not asked**
+    /// (no schema fetched yet), which is not "the request has no fields".
+    pub request_fields: Option<Vec<SchemaField>>,
     /// The last outcome: a report, or the refusal/error text.
     pub outcome: Option<Result<CallReport, String>>,
     pub in_flight: bool,
+}
+
+impl CallForm {
+    /// A skeleton body from the scaffolded fields — every field present, each
+    /// with a placeholder of its declared shape.
+    pub fn scaffold(&self) -> Option<String> {
+        let fields = self.request_fields.as_ref()?;
+        if fields.is_empty() {
+            return None;
+        }
+        let mut obj = serde_json::Map::new();
+        for f in fields {
+            obj.insert(f.name.clone(), f.placeholder());
+        }
+        serde_json::to_string_pretty(&serde_json::Value::Object(obj)).ok()
+    }
 }
 
 /// Messages the pane emits (wrapped into the app's `Message::Call`).
@@ -39,12 +121,23 @@ pub enum CallMsg {
     TargetChanged(String),
     ParamsChanged(String),
     BodyChanged(String),
+    /// Fill the body editor from the served request schema.
+    ScaffoldBody,
     Submit,
+    /// The selected procedure's request schema arrived (or did not).
+    RequestSchema(Option<Vec<SchemaField>>),
 }
 
 /// Render the pane. `slices` scaffolds the pickers; without a registry the
-/// pane says so instead of presenting empty dropdowns as knowledge (O4).
-pub fn pane<'a>(form: &'a CallForm, slices: Option<&'a SliceSet>) -> Element<'a, Message> {
+/// pane says so instead of presenting empty dropdowns as knowledge (O4). The
+/// `roster` is what turns silence into a sentence: RFC 05 §3.1 says "no
+/// reply" is not one condition, and the only way to say *which* origins did
+/// not answer is to join the answers against who is up.
+pub fn pane<'a>(
+    form: &'a CallForm,
+    slices: Option<&'a SliceSet>,
+    roster: &'a crate::nodes::NodeRoster,
+) -> Element<'a, Message> {
     let Some(slices) = slices else {
         return kit::empty_state(
             "No registry loaded",
@@ -106,6 +199,38 @@ pub fn pane<'a>(form: &'a CallForm, slices: Option<&'a SliceSet>) -> Element<'a,
             d.request.as_deref().unwrap_or("—"),
             d.reply.as_deref().unwrap_or("—"),
         )));
+        // Request-form scaffolding (§6.4 item 3): the served schema's fields,
+        // and a button that drops a skeleton body in the editor. A declared
+        // request type whose schema has not been fetched says "not asked" —
+        // it must not read as "this procedure takes nothing" (O4).
+        if let Some(request) = &d.request {
+            meta = match &form.request_fields {
+                Some(fields) if !fields.is_empty() => meta.push(
+                    row![
+                        kit::muted(format!(
+                            "{request} fields: {}",
+                            fields
+                                .iter()
+                                .map(SchemaField::label)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )),
+                        button(text("scaffold body").size(font::CAPTION))
+                            .padding(2)
+                            .on_press(Message::Call(CallMsg::ScaffoldBody)),
+                    ]
+                    .spacing(space::SM)
+                    .align_y(iced::Alignment::Center),
+                ),
+                Some(_) => meta.push(kit::muted(format!(
+                    "{request}'s served schema declares no fields to scaffold"
+                ))),
+                None => meta.push(kit::muted(format!(
+                    "{request}: schema not asked yet — pick the procedure again once \
+                     connected to scaffold from it"
+                ))),
+            };
+        }
         if fanout_forbidden {
             meta = meta.push(
                 text("fanout = \"forbidden\" — a fleet (*) target is refused (RFC 05 §2.1)")
@@ -152,13 +277,41 @@ pub fn pane<'a>(form: &'a CallForm, slices: Option<&'a SliceSet>) -> Element<'a,
     .spacing(space::SM);
 
     if let Some(outcome) = &form.outcome {
-        col = col.push(outcome_view(outcome));
+        col = col.push(outcome_view(outcome, form, roster));
     }
 
     iced::widget::scrollable(col).height(Length::Fill).into()
 }
 
-fn outcome_view(outcome: &Result<CallReport, String>) -> Element<'_, Message> {
+/// Origins the roster says are up and running the asked producer, that did
+/// not answer. This is the join RFC 05 §3.1 asks for: "no reply" is not one
+/// condition, and naming the silent origins is the difference between a
+/// non-verdict a user can act on and one they cannot.
+fn non_repliers(
+    report: &CallReport,
+    form: &CallForm,
+    roster: &crate::nodes::NodeRoster,
+) -> Vec<String> {
+    let Some(producer) = form.producer.as_deref() else {
+        return Vec::new();
+    };
+    roster
+        .iter()
+        .filter(|(_, producers)| {
+            producers
+                .get(producer)
+                .is_some_and(|presence| presence.alive)
+        })
+        .map(|(origin, _)| origin.clone())
+        .filter(|origin| !report.answers.iter().any(|a| &a.origin == origin))
+        .collect()
+}
+
+fn outcome_view<'a>(
+    outcome: &'a Result<CallReport, String>,
+    form: &'a CallForm,
+    roster: &'a crate::nodes::NodeRoster,
+) -> Element<'a, Message> {
     match outcome {
         Err(e) => text(format!("refused / failed: {e}"))
             .size(font::CAPTION)
@@ -186,6 +339,13 @@ fn outcome_view(outcome: &Result<CallReport, String>) -> Element<'_, Message> {
                     _ => format!("{}  ✓", a.origin),
                 };
                 col = col.push(kit::mono(line));
+            }
+            let silent = non_repliers(report, form, roster);
+            if !silent.is_empty() {
+                col = col.push(kit::muted(format!(
+                    "did not answer, though alive: {}",
+                    silent.join(", ")
+                )));
             }
             col.into()
         }

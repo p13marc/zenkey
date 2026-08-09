@@ -21,6 +21,18 @@ pub enum QosProfile {
 }
 
 impl QosProfile {
+    /// Every profile, in RFC 04 §3's order. The vocabulary is closed, so a
+    /// picker built from this cannot drift from the enum — adding a variant
+    /// without adding it here is a compile error, not a silently missing
+    /// option in somebody's UI.
+    pub const ALL: [QosProfile; 5] = [
+        Self::Sampled,
+        Self::Refreshed,
+        Self::Transition,
+        Self::Alert,
+        Self::Frame,
+    ];
+
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "sampled" => Some(Self::Sampled),
@@ -90,16 +102,23 @@ mod tests {
 
     #[test]
     fn names_round_trip() {
-        for p in [
-            QosProfile::Sampled,
-            QosProfile::Refreshed,
-            QosProfile::Transition,
-            QosProfile::Alert,
-            QosProfile::Frame,
-        ] {
+        for p in QosProfile::ALL {
             assert_eq!(QosProfile::from_name(p.name()), Some(p));
         }
         assert_eq!(QosProfile::from_name("telemetry"), None); // old vocabulary
+    }
+
+    /// `ALL` is the vocabulary, not a copy of it: every variant appears once.
+    #[test]
+    fn all_is_complete_and_unique() {
+        let mut names: Vec<&str> = QosProfile::ALL.iter().map(|p| p.name()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), QosProfile::ALL.len());
+        assert_eq!(
+            names,
+            ["alert", "frame", "refreshed", "sampled", "transition"]
+        );
     }
 
     /// Pins the RFC 04 §3 table.
