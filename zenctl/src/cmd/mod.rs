@@ -5,6 +5,7 @@
 //! (`report.rs`, shared with the engine) rendered by `output.rs`.
 
 pub mod admin;
+pub mod bench;
 pub mod call;
 pub mod doctor;
 pub mod echo;

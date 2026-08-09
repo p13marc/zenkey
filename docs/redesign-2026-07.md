@@ -519,7 +519,8 @@ zenctl storage list      # declared state subjects vs storage coverage  [D]
 
 zenctl doctor [--sample N] [--deep]   # + freshness-vs-ttl, storage coverage,
                                       #   admin reachability, schema conformance  [T→D]
-zenctl bench rpc <origin|*> <producer> [--count]                     [D]
+zenctl bench rpc <origin|*> <producer> [proc=introspect] [--count]
+                 [--concurrency N] [--i-know]  # per-reply latency   [T]
 zenctl bench pub|sub …                                               [L]
 zenctl record <SEL> -o f.zrec | replay f.zrec [--speed] [--dry-run]  [L]
 ```

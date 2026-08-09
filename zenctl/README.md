@@ -137,6 +137,24 @@ only version worth having. `diff` is the side-by-side that `doctor` turns into
 judgements: a producer present on one side only is a fact with two very
 different explanations, and the output says which.
 
+## `bench rpc` — how fast, and *which origin* is slow
+
+```bash
+zenctl bench rpc '*' sysinfo --count 200 --concurrency 8
+```
+
+Latency is measured **per reply**, not per call: a fan-out GET finishes when
+the slowest origin answers, so charging that duration to every responder would
+report the fastest node's latency as the worst one's. Error replies and calls
+that drew *no* reply are counted separately from the distribution — averaging a
+non-answer into a latency figure is how a benchmark lies.
+
+Only procedures the registry declares `idempotent = true` bench by default; a
+benchmark repeats, and repeating a write into a live fleet is a different act
+from measuring it. `--i-know` overrides. The convention's own reads
+(`introspect`, `describe`) need no registry permission — RFC 08 §6/§7 define
+them, so their idempotence is not an application's to declare.
+
 ## `doctor` — the one `ros2` has no answer for
 
 `introspect` is served by the *running binary*, from the same source as its key

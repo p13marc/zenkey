@@ -261,6 +261,56 @@ pub fn interface_show(report: &InterfaceShow, format: Format) -> Result<()> {
     Ok(())
 }
 
+/// `zenctl bench rpc` (issue #52).
+pub fn bench(report: &BenchReport, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => report.origins.iter().for_each(json_line),
+        _ => {
+            println!("→ {}", report.key);
+            println!(
+                "{} call(s), concurrency {}, {:.2}s — {:.1} calls/s",
+                report.completed, report.concurrency, report.elapsed_s, report.calls_per_s
+            );
+            if report.completed < report.requested {
+                println!(
+                    "  {} of {} calls did not complete",
+                    report.requested - report.completed,
+                    report.requested
+                );
+            }
+            if report.origins.is_empty() {
+                // The same non-verdict `service call` reports, with the same
+                // wording: nothing answered, and that is not proof of absence.
+                println!(
+                    "\nno origin answered — a non-verdict, not proof of absence \
+                     (RFC 05 §3.1); `zenctl node list` says who is up."
+                );
+                return Ok(());
+            }
+            println!(
+                "\n{:<16} {:>8} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                "origin", "replies", "min ms", "p50 ms", "p95 ms", "p99 ms", "max ms"
+            );
+            for o in &report.origins {
+                println!(
+                    "{:<16} {:>8} {:>9.2} {:>9.2} {:>9.2} {:>9.2} {:>9.2}",
+                    o.origin, o.replies, o.min_ms, o.p50_ms, o.p95_ms, o.p99_ms, o.max_ms
+                );
+            }
+            // Errors and silence are counted apart on purpose: averaging a
+            // non-answer into a latency figure is how a benchmark lies.
+            if report.errors > 0 || report.silent > 0 {
+                println!(
+                    "\n{} error repl(ies), {} call(s) drew no reply at all.",
+                    report.errors, report.silent
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `zenctl registry diff` (issue #50).
 pub fn registry_diff(report: &RegistryDiff, format: Format) -> Result<()> {
     match format.resolved() {

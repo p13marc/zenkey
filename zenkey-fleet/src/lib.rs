@@ -12,6 +12,7 @@
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 
 pub mod admin;
+pub mod bench;
 pub mod context_store;
 pub mod discover;
 pub mod facts;
@@ -49,6 +50,7 @@ pub use admin::{
     storages,
 };
 pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
+pub use bench::{BenchSpec, bench_rpc};
 pub use context_store::StoredContext;
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};

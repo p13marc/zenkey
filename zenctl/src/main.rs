@@ -78,6 +78,9 @@ enum Command {
     /// The registry as a document: export it, diff it, lint it.
     #[command(subcommand)]
     Registry(RegistryCmd),
+    /// Measure the fleet.
+    #[command(subcommand)]
+    Bench(BenchCmd),
     /// Zenoh admin space (`@/**`) — the middleware's own introspection.
     #[command(subcommand)]
     Admin(AdminCmd),
@@ -123,6 +126,38 @@ enum FailOn {
     Error,
     /// Fail on warnings or errors.
     Warning,
+}
+
+#[derive(Subcommand)]
+enum BenchCmd {
+    /// Time an `@rpc` procedure, per origin.
+    ///
+    /// Latency is measured **per reply**, so a fast origin in a fan-out is not
+    /// charged the slowest one's round trip. Only procedures the registry
+    /// declares `idempotent = true` bench by default: a benchmark repeats, and
+    /// repeating a write into a live fleet is a different act from measuring
+    /// it.
+    Rpc {
+        /// Origin to target: a host id, `*` for the fleet, or `@catalog`.
+        origin: String,
+        /// Producer name.
+        producer: String,
+        /// Procedure path. `introspect` is the safe default: RFC 08 §6 makes
+        /// it a read every producer serves.
+        #[arg(default_value = "introspect")]
+        procedure: String,
+        /// Calls to issue (default 100).
+        #[arg(long)]
+        count: Option<usize>,
+        /// Calls in flight at once (1 = strictly sequential).
+        #[arg(long, default_value_t = 1)]
+        concurrency: usize,
+        /// Bench a procedure the registry does not declare idempotent.
+        #[arg(long = "i-know")]
+        i_know: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -909,6 +944,27 @@ async fn main() -> Result<()> {
         Command::Registry(RegistryCmd::Diff { bus }) => cmd::registry::diff(&bus).await,
         Command::Registry(RegistryCmd::Lint { dir, ledger }) => {
             cmd::registry::lint(&dir, ledger.as_ref())
+        }
+        Command::Bench(BenchCmd::Rpc {
+            origin,
+            producer,
+            procedure,
+            count,
+            concurrency,
+            i_know,
+            bus,
+        }) => {
+            eprintln!("{}", cmd::bench::note(bus.timeout()));
+            cmd::bench::rpc(
+                &origin,
+                &producer,
+                &procedure,
+                count,
+                concurrency,
+                i_know,
+                &bus,
+            )
+            .await
         }
         Command::Context(cmd) => match cmd {
             ContextCmd::Create {
