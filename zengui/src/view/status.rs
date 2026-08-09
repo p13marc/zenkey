@@ -90,6 +90,9 @@ pub struct Status<'a> {
     /// replies, superseded).
     pub seed_totals: (usize, usize, u64),
     pub unreachable: bool,
+    /// Why the persisted preferences are not in force, when a file could not
+    /// be read (issue #73). `None` on the ordinary path, including first run.
+    pub prefs_note: Option<&'a str>,
 }
 
 /// The key count, and — if the table has evicted — what that count omits.
@@ -217,6 +220,19 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             Err(e) => format!("fetch {key} failed: {e}"),
         };
         r = r.push(kit::muted(label));
+    }
+
+    // A preferences file that could not be read is worth one line: the window
+    // looks reset, and "your settings did not load" is a much better
+    // explanation than the user re-deriving it (issue #73).
+    if let Some(note) = s.prefs_note {
+        r = r.push(
+            text(format!("preferences: {note}"))
+                .size(font::CAPTION)
+                .style(|theme: &iced::Theme| text::Style {
+                    color: Some(colors(theme).warning()),
+                }),
+        );
     }
 
     // The single most misleading state a bus explorer can be in: a healthy

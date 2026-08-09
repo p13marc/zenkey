@@ -753,3 +753,48 @@ fn the_doctor_pane_never_invents_a_verdict() {
         "fixed findings stay visible, dimmed"
     );
 }
+
+/// Persisted preferences (#73) reach the window: the theme button says what
+/// you *get*, the zoom reads back as a percentage, and a preferences file that
+/// could not be read explains itself in the strip rather than looking like a
+/// reset.
+#[test]
+fn preferences_are_visible_and_a_broken_file_says_so() {
+    use zengui::prefs::{Prefs, ThemeChoice};
+    use zengui::view::status::{self, Status};
+
+    // The theme choice drives the actual iced theme, not just a label.
+    assert_eq!(ThemeChoice::Light.theme(), iced::Theme::Light);
+    assert_eq!(ThemeChoice::Dark.theme(), iced::Theme::Dark);
+
+    let mut prefs = Prefs::default();
+    prefs.zoom_in();
+    assert!(prefs.zoom > 1.0);
+
+    let link = zengui::message::LinkState::Pumping;
+    let watched: Vec<String> = vec![];
+    let source = status::SliceSource::None;
+    let mut ui = simulator::<Message, _, _>(status::strip(Status {
+        link: &link,
+        base_label: "acme",
+        watched: &watched,
+        skeleton: None,
+        keys_unwatched: 0,
+        fetched: None,
+        scope_label: "all",
+        keys: 0,
+        keys_evicted: 0,
+        totals: (0, 0, 0.0),
+        slices: &source,
+        seeding: 0,
+        seeded_watches: 0,
+        seed_totals: (0, 0, 0),
+        unreachable: false,
+        prefs_note: Some("zengui.toml does not parse (bad) — using defaults"),
+    }));
+    assert!(
+        ui.find("preferences: zengui.toml does not parse (bad) — using defaults")
+            .is_ok(),
+        "an unreadable prefs file must not look like a reset"
+    );
+}

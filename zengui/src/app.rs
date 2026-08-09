@@ -104,6 +104,13 @@ pub struct Zengui {
     slices: Option<Arc<SliceSet>>,
     slice_source: SliceSource,
 
+    /// Persisted UI preferences (issue #73) — theme, zoom, geometry, and the
+    /// scope/context the window was last on.
+    prefs: crate::prefs::Prefs,
+    /// Why the defaults are in force, when a prefs file could not be read.
+    /// Rendered once in the status strip; never a reason to refuse to open.
+    prefs_note: Option<String>,
+
     bases: Vec<DiscoveredBase>,
     keys: usize,
     keys_evicted: u64,
@@ -113,6 +120,17 @@ pub struct Zengui {
 
 impl Zengui {
     pub fn new(settings: Settings) -> (Zengui, Task<Message>) {
+        let (prefs, prefs_note) = crate::prefs::Prefs::load();
+        Self::with_prefs(settings, prefs, prefs_note)
+    }
+
+    /// The pure constructor: preferences are injected rather than read, so a
+    /// test never touches the user's real file.
+    pub fn with_prefs(
+        settings: Settings,
+        prefs: crate::prefs::Prefs,
+        prefs_note: Option<String>,
+    ) -> (Zengui, Task<Message>) {
         let echo = EchoRing::new(settings.echo_lines);
         let connect = settings.connect.clone();
         let listen = settings.listen.clone();
@@ -155,6 +173,8 @@ impl Zengui {
             facts: HashMap::new(),
             slices: None,
             slice_source: SliceSource::None,
+            prefs,
+            prefs_note,
             bases: Vec::new(),
             keys: 0,
             keys_evicted: 0,
@@ -177,7 +197,12 @@ impl Zengui {
     }
 
     pub fn theme(&self) -> iced::Theme {
-        iced::Theme::Dark
+        self.prefs.theme.theme()
+    }
+
+    /// The UI scale factor iced applies to the whole window (issue #73).
+    pub fn scale_factor(&self) -> f32 {
+        self.prefs.zoom
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -398,6 +423,8 @@ impl Zengui {
                     return Task::none();
                 }
                 self.settings.scope = scope;
+                // Remembered for the next launch (issue #73).
+                self.remember();
                 // If the scope is being observed, re-point the observation.
                 if !self.scope_watches.is_empty() {
                     let release = self.unwatch_scope();
@@ -553,6 +580,26 @@ impl Zengui {
             }
             Message::PaneSelected(pane) => {
                 self.right_pane = pane;
+                Task::none()
+            }
+            Message::WindowResized(w, h) => {
+                // Geometry is remembered, but not on every pixel of a drag:
+                // the prefs file would be rewritten hundreds of times per
+                // resize. Recorded here, written on the next real change.
+                self.prefs.window = Some((w, h));
+                Task::none()
+            }
+            Message::Prefs(msg) => {
+                use crate::message::PrefsMsg;
+                match msg {
+                    PrefsMsg::ThemeToggled => self.prefs.theme = self.prefs.theme.toggled(),
+                    PrefsMsg::ZoomIn => self.prefs.zoom_in(),
+                    PrefsMsg::ZoomOut => self.prefs.zoom_out(),
+                    PrefsMsg::ZoomReset => self.prefs.zoom_reset(),
+                }
+                // Saved on every change rather than at exit: a GUI is killed,
+                // not quit, more often than anyone admits.
+                self.remember();
                 Task::none()
             }
             Message::Reconnect => {
@@ -1103,6 +1150,14 @@ impl Zengui {
         )
     }
 
+    /// Persist what the window looks like now. Best-effort by construction
+    /// (see `Prefs::save`) — a preference that cannot be written must not fail
+    /// whatever the user was actually doing.
+    fn remember(&mut self) {
+        self.prefs.scope = self.settings.scope;
+        self.prefs.save();
+    }
+
     fn apply_tick(&mut self, tick: &BusTick) {
         self.observed = Arc::clone(&tick.tree);
         self.keys = tick.keys;
@@ -1255,6 +1310,20 @@ impl Zengui {
             let period = std::time::Duration::from_secs_f64(self.publish_form.interval_secs());
             subs.push(iced::time::every(period).map(|_| Message::PublishTick));
         }
+        // Window geometry, for the next launch (issue #73).
+        subs.push(
+            iced::window::resize_events()
+                .map(|(_, size)| Message::WindowResized(size.width, size.height)),
+        );
+        // Keyboard shortcuts (issues #73, #75). `listen` only sees events no
+        // widget consumed, so a shortcut can never steal a keystroke from the
+        // text box the user is typing in.
+        subs.push(iced::keyboard::listen().filter_map(|event| match event {
+            iced::keyboard::Event::KeyPressed { key, modifiers, .. } => {
+                crate::shortcuts::resolve(&key, modifiers)
+            }
+            _ => None,
+        }));
         Subscription::batch(subs)
     }
 
@@ -1319,6 +1388,7 @@ impl Zengui {
                 seeded_watches: self.seeded_watches,
                 seed_totals: self.seed_totals,
                 unreachable: self.settings.is_unreachable(),
+                prefs_note: self.prefs_note.as_deref(),
             }),
         ]
         .spacing(space::MD)
@@ -1374,6 +1444,26 @@ impl Zengui {
             .spacing(space::XS),
             crate::view::kit::muted(self.settings.scope.label()),
             iced::widget::space::horizontal(),
+            // Window preferences (issue #73): the theme name is the button,
+            // so the label says what you get rather than what you have.
+            iced::widget::button(
+                text(format!("theme: {}", self.prefs.theme.label()))
+                    .size(crate::view::tokens::font::CAPTION)
+            )
+            .on_press(Message::Prefs(crate::message::PrefsMsg::ThemeToggled))
+            .padding(4),
+            iced::widget::button(text("-").size(crate::view::tokens::font::CAPTION))
+                .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomOut))
+                .padding(4),
+            iced::widget::button(
+                text(format!("{}%", (self.prefs.zoom * 100.0).round() as i32))
+                    .size(crate::view::tokens::font::CAPTION)
+            )
+            .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomReset))
+            .padding(4),
+            iced::widget::button(text("+").size(crate::view::tokens::font::CAPTION))
+                .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomIn))
+                .padding(4),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))
                 .on_press(Message::Reconnect)
                 .padding(4),

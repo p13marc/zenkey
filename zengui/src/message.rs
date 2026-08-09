@@ -91,6 +91,20 @@ pub enum Message {
     /// Switch the right-hand pane (the toolbar's tab strip).
     PaneSelected(RightPane),
     Reconnect,
+
+    /// A persisted-preference change (issue #73). Each one saves.
+    Prefs(PrefsMsg),
+    /// The window was resized — remembered for the next launch (issue #73).
+    WindowResized(f32, f32),
+}
+
+/// What a user can change about the window itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefsMsg {
+    ThemeToggled,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
 }
 
 /// What one prepare→declare→send round produced. The publication travels in
