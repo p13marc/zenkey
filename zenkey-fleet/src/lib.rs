@@ -51,7 +51,7 @@ pub use admin::{
 };
 pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
 pub use bench::{BenchSpec, bench_rpc};
-pub use context_store::StoredContext;
+pub use context_store::{StoredContext, active_name, cache_dir};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{

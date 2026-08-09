@@ -18,6 +18,7 @@
 //! command that reports it.
 
 mod cmd;
+mod completion;
 mod context;
 mod offline;
 mod output;
@@ -28,6 +29,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
+use clap_complete::ArgValueCandidates;
 use zenkey::RegistrySlice;
 use zenkey_fleet as bus;
 
@@ -65,9 +67,10 @@ enum Command {
     /// `describe` degrades honestly — it is not an error.
     Schema {
         /// Producer name, e.g. `sysinfo`.
+        #[arg(add = ArgValueCandidates::new(completion::producers))]
         producer: String,
         /// Show only this type (implies the full document).
-        #[arg(long = "type", value_name = "TYPE")]
+        #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
         type_name: Option<String>,
         /// Print every schema document in full, not just kind + hash.
         #[arg(long)]
@@ -90,10 +93,25 @@ enum Command {
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
     Context(ContextCmd),
+    /// Inspect or clear the slice cache that feeds shell completion.
+    #[command(subcommand)]
+    Cache(CacheCmd),
     /// Generate shell completions (bash, zsh, fish, elvish, powershell).
     ///
     /// e.g. `zenctl completions bash > ~/.local/share/bash-completion/completions/zenctl`
-    Completions { shell: clap_complete::Shell },
+    ///
+    /// The default script is **dynamic** (issue #54): it calls back into
+    /// `zenctl` so producer, subject, type and procedure names come from the
+    /// cached registry of the active context. The cache is written by any
+    /// command that loads slices; completion never touches the bus, so a
+    /// `<TAB>` cannot hang on a fleet that is down. `--static` emits the old
+    /// self-contained script instead.
+    Completions {
+        shell: clap_complete::Shell,
+        /// Emit the self-contained script: no callbacks, no cached names.
+        #[arg(long = "static")]
+        static_only: bool,
+    },
     /// Diff what the fleet *serves* against local registry files.
     ///
     /// RFC 08 §6: "A disagreement between introspection and the checked-in TOML
@@ -129,6 +147,29 @@ enum FailOn {
 }
 
 #[derive(Subcommand)]
+enum CacheCmd {
+    /// Print the cache directory for the active context, and what is in it.
+    Show {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Re-read the slice source and rewrite the cache.
+    ///
+    /// Every command already answers from its source live — this exists so a
+    /// *completion* can be brought up to date without running one, and so
+    /// "why is it suggesting a producer we deleted" has an answer.
+    Refresh {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Delete the cache for the active context.
+    Clear {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
 enum BenchCmd {
     /// Time an `@rpc` procedure, per origin.
     ///
@@ -141,10 +182,11 @@ enum BenchCmd {
         /// Origin to target: a host id, `*` for the fleet, or `@catalog`.
         origin: String,
         /// Producer name.
+        #[arg(add = ArgValueCandidates::new(completion::producers))]
         producer: String,
         /// Procedure path. `introspect` is the safe default: RFC 08 §6 makes
         /// it a read every producer serves.
-        #[arg(default_value = "introspect")]
+        #[arg(default_value = "introspect", add = ArgValueCandidates::new(completion::procedures))]
         procedure: String,
         /// Calls to issue (default 100).
         #[arg(long)]
@@ -172,7 +214,7 @@ enum RegistryCmd {
         #[arg(long = "as", value_enum, default_value = "toml")]
         target: cmd::registry::ExportAs,
         /// Only this producer.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
         producer: Option<String>,
         #[command(flatten)]
         bus: BusArgs,
@@ -277,13 +319,13 @@ enum TopicCmd {
     /// With `--registry <dir>` it answers offline from local registry TOMLs.
     List {
         /// Only this producer.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
         producer: Option<String>,
         /// Only this class: telemetry, state, or events.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(completion::classes))]
         class: Option<String>,
         /// Only subjects carrying this payload type.
-        #[arg(long, value_name = "TYPE")]
+        #[arg(long, value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
         r#type: Option<String>,
         /// Also list retired subjects from each slice's `[[deprecated]]`
         /// ledger (RFC 08 §6: which hosts still serve a deprecated subject).
@@ -304,6 +346,7 @@ enum TopicCmd {
     /// local with `--registry`).
     Info {
         /// A concrete wire key, as it appears on the bus.
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
         key: String,
         #[command(flatten)]
         bus: BusArgs,
@@ -366,7 +409,7 @@ enum TopicCmd {
         /// Payload: inline text, `@file`, or `-` for stdin.
         body: String,
         /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
-        #[arg(long, default_value = "sampled")]
+        #[arg(long, default_value = "sampled", add = ArgValueCandidates::new(completion::qos_profiles))]
         qos: String,
         /// Wire encoding to declare (e.g. application/json). Defaults to the
         /// registry's declared encoding when the key refines, else none.
@@ -493,8 +536,10 @@ enum ServiceCmd {
         /// fleet, or `@catalog` for a service origin.
         origin: String,
         /// Producer name. Omit for a service origin, which has no producer chunk.
+        #[arg(add = ArgValueCandidates::new(completion::producers))]
         producer: String,
         /// Procedure path, e.g. `introspect` or `artifact/status`.
+        #[arg(add = ArgValueCandidates::new(completion::procedures))]
         procedure: String,
         /// Selector parameters, repeatable: `--param state=established`.
         #[arg(long = "param", value_name = "K=V")]
@@ -524,6 +569,7 @@ enum InterfaceCmd {
     /// Show one payload type and every subject that carries it.
     Show {
         /// Type name, e.g. `TelemetryPoint`.
+        #[arg(add = ArgValueCandidates::new(completion::types))]
         type_name: String,
         /// Also fetch the served schema from every producer that carries it
         /// (RFC 08 §7). Disagreeing hashes are reported as drift.
@@ -555,7 +601,7 @@ struct BusArgs {
     base: Option<String>,
     /// Use a named context from the config file for this invocation
     /// (default: the file's `current` pointer; env `ZENCTL_CONTEXT`).
-    #[arg(long, value_name = "NAME")]
+    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
     context: Option<String>,
     /// Local registry directory (`registry/*.toml`), repeatable. When given,
     /// registry-sourced commands answer offline from these files instead of
@@ -625,6 +671,10 @@ impl BusArgs {
         let scouting = self.scouting || stored.and_then(|c| c.scouting).unwrap_or(false);
         bus::open(&connect, &listen, scouting).await
     }
+    /// The `--context` name this invocation was given, if any.
+    fn context_name(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
     fn timeout(&self) -> Duration {
         Duration::from_secs(
             self.timeout
@@ -678,6 +728,7 @@ impl BusArgs {
                     }
                 );
             }
+            self.cache(&out.set);
             return Ok(out.set);
         }
         let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
@@ -688,7 +739,28 @@ impl BusArgs {
                  (offline alternative: --registry <dir> with the app's registry TOMLs)"
             );
         }
+        self.cache(&set);
         Ok(set)
+    }
+
+    /// Persist the slice set for shell completion (issue #54).
+    ///
+    /// Best-effort by design: a cache that cannot be written must not fail the
+    /// command the user actually ran, and an unwritable cache dir is a
+    /// completion that stays static — not an outage. An *empty* set is never
+    /// written, because overwriting a good cache with a sweep that found
+    /// nothing would turn one bad moment on the bus into a permanently blank
+    /// completion.
+    fn cache(&self, set: &zenkey_fleet::SliceSet) {
+        if set.slices().is_empty() {
+            return;
+        }
+        let dir =
+            zenkey_fleet::cache_dir(zenkey_fleet::active_name(self.context.as_deref()).as_deref());
+        // Nothing is logged on failure: this runs on every command, and a
+        // warning about a cache the user did not ask for would be noise on
+        // the output they did.
+        let _ = set.write_cache(&dir);
     }
 }
 
@@ -703,6 +775,11 @@ async fn main() -> Result<()> {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
+
+    // Before anything else, and before parsing: a completion request arrives
+    // as a *partial* command line the parser would reject (issue #54). This
+    // exits the process when it is one, and is a no-op otherwise.
+    completion::maybe_serve();
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -966,6 +1043,9 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Command::Cache(CacheCmd::Show { bus }) => cmd::cache::show(&bus),
+        Command::Cache(CacheCmd::Refresh { bus }) => cmd::cache::refresh(&bus).await,
+        Command::Cache(CacheCmd::Clear { bus }) => cmd::cache::clear(&bus),
         Command::Context(cmd) => match cmd {
             ContextCmd::Create {
                 name,
@@ -994,10 +1074,18 @@ async fn main() -> Result<()> {
             ContextCmd::Select { name } => context::select(&name),
             ContextCmd::Rm { name } => context::remove(&name),
         },
-        Command::Completions { shell } => {
+        Command::Completions { shell, static_only } => {
             use clap::CommandFactory as _;
-            clap_complete::generate(shell, &mut Cli::command(), "zenctl", &mut std::io::stdout());
-            Ok(())
+            if static_only {
+                clap_complete::aot::generate(
+                    shell,
+                    &mut Cli::command(),
+                    "zenctl",
+                    &mut std::io::stdout(),
+                );
+                return Ok(());
+            }
+            completion::registration(shell)
         }
         Command::Doctor {
             deep,

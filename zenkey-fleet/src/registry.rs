@@ -75,6 +75,13 @@ impl SliceSet {
         }
     }
 
+    /// Each slice with the raw TOML it was parsed from — the pair
+    /// `write_cache` persists. The text is empty for a set built by
+    /// [`from_slices`](Self::from_slices), which has none to give.
+    pub fn entries(&self) -> impl Iterator<Item = (&RegistrySlice, &str)> {
+        self.slices.iter().zip(self.raw.iter().map(String::as_str))
+    }
+
     pub fn slices(&self) -> &[RegistrySlice] {
         &self.slices
     }
@@ -212,12 +219,16 @@ impl SliceSet {
             SliceSet::from_dirs(dirs)?
         };
 
-        let mut merged: Vec<RegistrySlice> = Vec::new();
+        // Carry each slice's raw TOML through the merge (issue #54): a union
+        // that dropped it produced a set `write_cache` silently skipped, so
+        // the `--registry` path — the offline one, where a warm completion
+        // cache matters most — cached nothing at all.
+        let mut merged = SliceSet::default();
         let mut from_bus = Vec::new();
         let mut dirs_only = Vec::new();
         let mut disagreements = Vec::new();
 
-        for served in bus.slices() {
+        for (served, raw) in bus.entries() {
             from_bus.push(served.name.clone());
             if let Some(local) = disk.get(&served.name)
                 && (local.version != served.version || local != served)
@@ -236,17 +247,17 @@ impl SliceSet {
                     },
                 });
             }
-            merged.push(served.clone());
+            merged.push(served.clone(), raw.to_string());
         }
-        for local in disk.slices() {
+        for (local, raw) in disk.entries() {
             if bus.get(&local.name).is_none() {
                 dirs_only.push(local.name.clone());
-                merged.push(local.clone());
+                merged.push(local.clone(), raw.to_string());
             }
         }
 
         Ok(UnionOutcome {
-            set: SliceSet::from_slices(merged),
+            set: merged,
             from_bus,
             dirs_only,
             disagreements,

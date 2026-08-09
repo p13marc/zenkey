@@ -31,7 +31,9 @@ thiserror = "2"
 toml = "0.8"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
-clap_complete = "4"
+# `unstable-dynamic` is what makes cache-backed completion possible (#54);
+# pinned to 4.6 so an unstable API cannot shift under a minor bump.
+clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
 arc-swap = "1"
 dirs = "5"
 tracing = "0.1"

@@ -479,7 +479,7 @@ is in scope.
 |---|---|
 | Profiles | Named **contexts** in `~/.config/zenctl/config.toml` (nats-style); `--base` becomes optional: flag > env > context |
 | Scripting | Global `--format auto\|table\|json\|ndjson` over **typed report structs** (serde) — one refactor unlocking scripting, tests, GUI parity |
-| Daemon | **No** (Zenoh discovery is fast; ros2's daemon solves a DDS problem we don't have). On-disk slice cache `~/.cache/zenctl/<context>/slices/` gives instant dynamic completions |
+| Daemon | **No** (Zenoh discovery is fast; ros2's daemon solves a DDS problem we don't have). On-disk slice cache `~/.cache/zenkey-explorer/<context>/slices/` gives instant dynamic completions (shipped in #54) |
 | Completions | `clap_complete` static + dynamic (subject/producer/type names from the cache) |
 | Watch | `--watch` flags on list commands; the TUI is the GUI's job |
 | Registry sources | `--registry` and bus stop being exclusive: union, served wins per producer; disagreement is reported by `doctor`/`registry diff` |
@@ -488,7 +488,8 @@ is in scope.
 
 ```
 zenctl context create|list|show|select|rm|edit          [T]
-zenctl completions <shell>                               [T]
+zenctl completions <shell> [--static]  # dynamic from the cache      [T]
+zenctl cache show|refresh|clear     # the completion cache, visible  [T]
 
 zenctl topic list [--producer] [--class] [--type] [--watch]          [T]
 zenctl topic info <key>                                              [T]

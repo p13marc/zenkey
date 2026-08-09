@@ -137,6 +137,21 @@ only version worth having. `diff` is the side-by-side that `doctor` turns into
 judgements: a producer present on one side only is a fact with two very
 different explanations, and the output says which.
 
+## Completions
+
+```bash
+source <(zenctl completions bash)      # zsh, fish, elvish, powershell too
+```
+
+The script is **dynamic**: it calls back into `zenctl`, so producer, type,
+procedure and key candidates come from the cached registry of the active
+context. Completion never opens a session — a `<TAB>` cannot hang on a fleet
+that is down — and with no cache it degrades to the static command tree.
+
+Any command that loads slices fills the cache; `zenctl cache show|refresh|clear`
+makes it visible, current, or gone. The names are from the last sighting, not
+a live inventory. `--static` emits the old self-contained script.
+
 ## `bench rpc` — how fast, and *which origin* is slow
 
 ```bash

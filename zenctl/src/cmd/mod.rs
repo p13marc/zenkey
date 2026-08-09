@@ -6,6 +6,7 @@
 
 pub mod admin;
 pub mod bench;
+pub mod cache;
 pub mod call;
 pub mod doctor;
 pub mod echo;
