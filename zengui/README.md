@@ -44,14 +44,22 @@ because otherwise "catalog dead" and "no entities" would look identical.
 ## Status
 
 The §6.4 checklist is delivered: key tree (with pivots, find-in-tree and
-virtualized rendering), live echo, the call pane (#60's call half — typed
-targets, per-origin outcomes), the node dashboard (#61 — liveliness roster,
-suspect-on-retraction, lazy `node_info` detail), and the schema-decoded
-payload inspector with the selection detail pane. A doctor panel (#71)
-renders the same typed findings as `zenctl doctor --format json`, run on
-demand with run-over-run deltas. Still open: the publish form (#60's other
-half), contexts UX (#67), echo v2 (#72), settings persistence (#73), and the
-command palette (#75).
+virtualized rendering), live echo, the call and publish panes (#60 — typed
+targets, per-origin outcomes with the alive-but-silent origins named, request
+forms scaffolded from the served schema; and a publish form that encodes for
+the wire through the engine's ladder, with a QoS picker that *is* the closed
+enum, a repeat/interval stream carrying the #38 matching badge, and a bounded
+send log that reports what it dropped), the node dashboard (#61 — liveliness
+roster, suspect-on-retraction, lazy `node_info` detail), and the
+schema-decoded payload inspector with the selection detail pane. A doctor
+panel (#71) renders the same typed findings as `zenctl doctor --format json`,
+run on demand with run-over-run deltas. Still open: contexts UX (#67), echo v2
+(#72), settings persistence (#73), and the command palette (#75).
+
+No codec logic lives here. The publish form hands its body to
+`zenkey_fleet::prepare_publish` and renders what comes back — encoded, sent as
+typed, or sent raw — because a payload that shipped unencoded must never look
+like one that did not.
 
 ## Try it
 

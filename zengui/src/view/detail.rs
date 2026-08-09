@@ -100,7 +100,7 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
     iced::widget::scrollable(col).height(Length::Fill).into()
 }
 
-fn facts_section(f: &KeyFacts) -> Element<'_, Message> {
+pub(crate) fn facts_section(f: &KeyFacts) -> Element<'_, Message> {
     let mut col = Column::new().spacing(2);
     match &f.shape {
         KeyShape::V1(v) => {

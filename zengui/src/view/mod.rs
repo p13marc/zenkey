@@ -10,6 +10,7 @@ pub mod doctor;
 pub mod echo;
 pub mod kit;
 pub mod nodes;
+pub mod publish;
 pub mod status;
 pub mod theme;
 pub mod tokens;

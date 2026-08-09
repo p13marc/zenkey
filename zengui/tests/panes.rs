@@ -240,7 +240,8 @@ fn the_call_pane_labels_forbidden_fanout() {
         target: "*".into(),
         ..CallForm::default()
     };
-    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices)));
+    let roster = zengui::nodes::NodeRoster::default();
+    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
     assert!(
         ui.find("fanout = \"forbidden\" — a fleet (*) target is refused (RFC 05 §2.1)")
             .is_ok(),
@@ -249,8 +250,264 @@ fn the_call_pane_labels_forbidden_fanout() {
 
     // Without a registry the pane says "not asked", not empty dropdowns.
     let empty = CallForm::default();
-    let mut ui = simulator::<Message, _, _>(pane(&empty, None));
+    let mut ui = simulator::<Message, _, _>(pane(&empty, None, &roster));
     assert!(ui.find("No registry loaded").is_ok());
+}
+
+/// Silence gets a name (#60's first acceptance): an origin the roster says is
+/// alive and running the producer, that did not reply, is listed. RFC 05 §3.1
+/// says "no reply" is not one condition — this is the join that says which.
+#[test]
+fn the_call_pane_names_the_origins_that_did_not_answer() {
+    use zengui::view::call::{CallForm, pane};
+    use zenkey_fleet::report::{CallAnswer, CallReport};
+
+    let mut roster = zengui::nodes::NodeRoster::default();
+    roster.seed(&BTreeMap::from([
+        ("h-aaaaaaaaaaaa".to_string(), vec!["netring".to_string()]),
+        ("h-bbbbbbbbbbbb".to_string(), vec!["netring".to_string()]),
+        // A third node that does not run the producer must NOT be blamed.
+        ("h-cccccccccccc".to_string(), vec!["sysinfo".to_string()]),
+    ]));
+
+    let form = CallForm {
+        producer: Some("netring".into()),
+        procedure: Some("introspect".into()),
+        target: "*".into(),
+        outcome: Some(Ok(CallReport {
+            key: "v1/*/@rpc/netring/introspect".into(),
+            answers: vec![CallAnswer {
+                origin: "h-aaaaaaaaaaaa".into(),
+                ok: true,
+                value: None,
+                text: Some("slice".into()),
+                error: None,
+            }],
+        })),
+        ..CallForm::default()
+    };
+    let slices = SliceSet::from_slices(vec![zenkey::slice::RegistrySlice {
+        version: "1.0".into(),
+        app: "t".into(),
+        convention: 1,
+        name: "netring".into(),
+        service_origin: None,
+        description: None,
+        subjects: vec![],
+        procedures: vec![zenkey::slice::ProcedureDecl {
+            path: "introspect".into(),
+            kind: "read".into(),
+            reply: Some("RegistrySlice".into()),
+            request: None,
+            encoding: None,
+            fanout: None,
+            idempotent: Some(true),
+            since: None,
+            description: None,
+        }],
+        blob: vec![],
+        deprecated: vec![],
+    }]);
+    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+    assert!(
+        ui.find("did not answer, though alive: h-bbbbbbbbbbbb")
+            .is_ok(),
+        "the alive non-replier must be named, not folded into silence"
+    );
+}
+
+/// Request-form scaffolding (§6.4 item 3): a declared request type whose
+/// schema has not been fetched reads as "not asked", never as "takes
+/// nothing" (O4) — and once fetched, the fields are on screen.
+#[test]
+fn the_call_pane_distinguishes_an_unasked_schema_from_an_empty_one() {
+    use zengui::view::call::{CallForm, SchemaField, pane};
+    use zenkey::slice::{ProcedureDecl, RegistrySlice};
+
+    let slice = RegistrySlice {
+        version: "1.0".into(),
+        app: "t".into(),
+        convention: 1,
+        name: "netring".into(),
+        service_origin: None,
+        description: None,
+        subjects: vec![],
+        procedures: vec![ProcedureDecl {
+            path: "capture/start".into(),
+            kind: "write".into(),
+            reply: Some("Ack".into()),
+            request: Some("CaptureSpec".into()),
+            encoding: None,
+            fanout: None,
+            idempotent: Some(false),
+            since: None,
+            description: None,
+        }],
+        blob: vec![],
+        deprecated: vec![],
+    };
+    let slices = SliceSet::from_slices(vec![slice]);
+    let roster = zengui::nodes::NodeRoster::default();
+
+    let unasked = CallForm {
+        producer: Some("netring".into()),
+        procedure: Some("capture/start".into()),
+        ..CallForm::default()
+    };
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&unasked, Some(&slices), &roster));
+        assert!(
+            ui.find("CaptureSpec: schema not asked yet — pick the procedure again once connected to scaffold from it")
+                .is_ok(),
+            "an unfetched schema must not read as a request with no fields"
+        );
+    }
+
+    let asked = CallForm {
+        request_fields: Some(vec![
+            SchemaField {
+                name: "iface".into(),
+                type_name: Some("string".into()),
+                required: true,
+            },
+            SchemaField {
+                name: "seconds".into(),
+                type_name: Some("integer".into()),
+                required: false,
+            },
+        ]),
+        ..unasked
+    };
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&asked, Some(&slices), &roster));
+        assert!(
+            ui.find("CaptureSpec fields: iface: string*, seconds: integer")
+                .is_ok(),
+            "the served schema's fields scaffold the form"
+        );
+    }
+    // …and the scaffold is a real body, with the declared shapes.
+    let body: serde_json::Value =
+        serde_json::from_str(&asked.scaffold().expect("scaffold")).expect("valid JSON");
+    assert_eq!(body["iface"], serde_json::json!(""));
+    assert_eq!(body["seconds"], serde_json::json!(0));
+}
+
+/// The publish pane's three provenances must never look alike (#60/#97):
+/// encoded, sent as typed, and sent raw are different facts about what is on
+/// the wire, and a user who cannot tell them apart cannot trust any of them.
+#[test]
+fn the_publish_pane_says_how_the_body_reached_the_wire() {
+    use zengui::view::publish::{PublishForm, pane};
+    use zenkey_fleet::BodySource;
+
+    let base = PublishForm {
+        key: "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used".into(),
+        body: "{\"value\": 1}".into(),
+        encoding_used: Some("application/protobuf".into()),
+        source: Some(BodySource::Encoded {
+            type_name: "TelemetryPoint".into(),
+        }),
+        ..PublishForm::default()
+    };
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&base, true));
+        assert!(
+            ui.find("encoded as TelemetryPoint → application/protobuf")
+                .is_ok()
+        );
+    }
+
+    let as_typed = PublishForm {
+        source: Some(BodySource::AsTyped),
+        encoding_used: None,
+        note: Some("sysinfo serves no schema for TelemetryPoint".into()),
+        ..base.clone()
+    };
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&as_typed, true));
+        assert!(ui.find("sent as typed → (no encoding set)").is_ok());
+        assert!(
+            ui.find("sysinfo serves no schema for TelemetryPoint")
+                .is_ok(),
+            "the engine's note is rendered, not swallowed"
+        );
+    }
+
+    let raw = PublishForm {
+        source: Some(BodySource::Raw),
+        raw: true,
+        ..base.clone()
+    };
+    let mut ui = simulator::<Message, _, _>(pane(&raw, true));
+    assert!(ui.find("sent raw — bytes verbatim, not encoded").is_ok());
+}
+
+/// The publish pane's honesty surfaces: the closed QoS vocabulary, the O4
+/// matching badge, and the O6 bounded log.
+#[test]
+fn the_publish_pane_bounds_its_log_and_never_invents_a_matcher() {
+    use zengui::view::publish::{LOG_LINES, PublishForm, pane};
+
+    let mut form = PublishForm {
+        key: "demo/foreign/key".into(),
+        armed: true,
+        // Armed, but the status could not be asked: "not asked" (O4).
+        matching: None,
+        ..PublishForm::default()
+    };
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&form, true));
+        assert!(ui.find("matching: not asked").is_ok());
+    }
+    // The five profiles, and only those (RFC 04 §3's closed vocabulary).
+    assert_eq!(zenkey::qos::QosProfile::ALL.len(), 5);
+    for name in ["sampled", "refreshed", "transition", "alert", "frame"] {
+        assert!(
+            zenkey::qos::QosProfile::ALL
+                .iter()
+                .any(|p| p.name() == name),
+            "{name} must stay in the vocabulary the picker renders"
+        );
+    }
+
+    form.matching = Some(false);
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&form, true));
+        assert!(
+            ui.find(
+                "matching: no subscriber currently matches this publication — a routing \
+                 fact about this publisher, not a fleet verdict (RFC 05 §3.1)"
+            )
+            .is_ok(),
+            "a false matching badge must disclaim, exactly as the CLI does"
+        );
+    }
+
+    // O6: the log is bounded, and it reports what the bound cost.
+    for i in 0..(LOG_LINES + 3) {
+        form.log(true, format!("sent {i} bytes"));
+    }
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&form, true));
+        assert!(
+            ui.find(format!(
+                "send log — {LOG_LINES} shown, 3 dropped (bounded at {LOG_LINES})"
+            ))
+            .is_ok(),
+            "a trimmed log must say how much it trimmed"
+        );
+    }
+
+    // With no registry the pane says "not asked", never "unregistered".
+    let mut ui = simulator::<Message, _, _>(pane(&form, false));
+    assert!(
+        ui.find(
+            "no registry loaded — the body cannot be schema-checked, and that is \
+             \"not asked\", not \"unregistered\" (O4)"
+        )
+        .is_ok()
+    );
 }
 
 /// The detail pane (§6.4 item 5 + #66): the decoded side is tagged with HOW
