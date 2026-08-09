@@ -3,10 +3,11 @@
 //! tool owes its user.
 //!
 //! [`SchemaStore`] caches each producer's served `describe` reply (RFC 08
-//! §7) and fetches on first miss through the disciplined fan-in
-//! ([`crate::query::fleet_get`]). [`decode_sample`] is the whole pipeline in
-//! one call; encoding resolution is **sample > registry > sniff** and the
-//! sniff never goes away.
+//! §7) and fetches on first miss through a declared
+//! [`crate::query::RepeatingQuery`] (the RFC 05 §2.1 discipline, kept warm
+//! across the negative-TTL re-asks — #37). [`decode_sample`] is the whole
+//! pipeline in one call; encoding resolution is **sample > registry > sniff**
+//! and the sniff never goes away.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -27,6 +28,11 @@ pub struct SchemaStore {
     /// instant — a `None` expires after [`NOT_SERVED_TTL`], so a producer
     /// that *starts* serving describe is noticed without a restart).
     sets: Mutex<HashMap<String, (Option<SchemaSet>, std::time::Instant)>>,
+    /// One declared querier per producer's describe key (#37), reused across
+    /// the negative-TTL re-asks. Bounded by fleet producer count; entries
+    /// live for the store's lifetime (no eviction — a fleet's producer set
+    /// is small and a stale querier is only idle routing state).
+    queriers: Mutex<HashMap<String, std::sync::Arc<crate::query::RepeatingQuery>>>,
     decoders: DecoderRegistry,
 }
 
@@ -39,6 +45,7 @@ impl SchemaStore {
             base: base.into(),
             timeout,
             sets: Mutex::new(HashMap::new()),
+            queriers: Mutex::new(HashMap::new()),
             decoders: DecoderRegistry::new(),
         }
     }
@@ -78,13 +85,33 @@ impl SchemaStore {
     }
 
     async fn fetch(&self, session: &Session, producer: &str) -> Option<SchemaSet> {
-        let key = zenkey::grammar::with_base(
-            &self.base,
-            zenkey::selector::fleet_rpc(producer, &["describe"]),
-        );
-        let answers = crate::query::fleet_get(session, &self.base, &key, None, self.timeout)
-            .await
-            .ok()?;
+        let cached = {
+            let queriers = self.queriers.lock().expect("querier lock");
+            queriers.get(producer).cloned()
+        };
+        let querier = match cached {
+            Some(q) => q,
+            None => {
+                let key = zenkey::grammar::with_base(
+                    &self.base,
+                    zenkey::selector::fleet_rpc(producer, &["describe"]),
+                );
+                let declared = std::sync::Arc::new(
+                    crate::query::declare_repeating(session, &self.base, &key, self.timeout)
+                        .await
+                        .ok()?,
+                );
+                // A concurrent miss may have declared first; keep whichever
+                // landed (the loser undeclares itself on drop — idle state,
+                // not a leak).
+                let mut queriers = self.queriers.lock().expect("querier lock");
+                queriers
+                    .entry(producer.to_string())
+                    .or_insert(declared)
+                    .clone()
+            }
+        };
+        let answers = querier.fetch().await.ok()?;
         // Any well-formed reply will do; hashes make same-name drift a
         // doctor finding, not a decode concern.
         for a in answers {
@@ -162,7 +189,15 @@ pub fn totality_gaps(described: &[(String, SchemaSet)], slices: &SliceSet) -> Ve
             continue;
         };
         let mut names: Vec<&str> = Vec::new();
-        names.extend(slice.subjects.iter().map(|s| s.type_name.as_str()));
+        // An untyped subject (empty `type`) references nothing — without this
+        // filter it would demand a schema for "" and report a phantom gap.
+        names.extend(
+            slice
+                .subjects
+                .iter()
+                .map(|s| s.type_name.as_str())
+                .filter(|t| !t.is_empty()),
+        );
         for p in &slice.procedures {
             names.extend(p.request.as_deref());
             names.extend(p.reply.as_deref());
@@ -508,5 +543,43 @@ mod tests {
 
         // No describe served at all: not judged by totality.
         assert!(totality_gaps(&[], &slices).is_empty());
+    }
+
+    /// An untyped subject (empty `type`) references nothing — it must not
+    /// demand a schema for `""` (regression: phantom gap found while
+    /// consolidating doctor's totality check onto this function, #55).
+    #[test]
+    fn an_untyped_subject_is_not_a_totality_gap() {
+        use zenkey::slice::{RegistrySlice, SubjectDecl};
+        let slice = RegistrySlice {
+            version: "1".into(),
+            app: "a".into(),
+            convention: 1,
+            name: "sysinfo".into(),
+            service_origin: None,
+            description: None,
+            subjects: vec![SubjectDecl {
+                path: "raw".into(),
+                class: "telemetry".into(),
+                type_name: String::new(),
+                since: None,
+                description: None,
+                qos: None,
+                ttl_s: None,
+                unit: None,
+                rate: None,
+                cardinality: None,
+                encoding: None,
+            }],
+            procedures: vec![],
+            blob: vec![],
+            deprecated: vec![],
+        };
+        let slices = crate::registry::SliceSet::from_slices(vec![slice]);
+        let served = SchemaSet::builder("a").build();
+        assert!(
+            totality_gaps(&[("sysinfo".to_string(), served)], &slices).is_empty(),
+            "empty type names must be filtered, not reported as gaps"
+        );
     }
 }

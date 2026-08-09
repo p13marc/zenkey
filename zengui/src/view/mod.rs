@@ -6,8 +6,10 @@
 
 pub mod call;
 pub mod detail;
+pub mod doctor;
 pub mod echo;
 pub mod kit;
+pub mod nodes;
 pub mod status;
 pub mod theme;
 pub mod tokens;

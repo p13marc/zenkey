@@ -91,6 +91,32 @@ impl ThemeColors<'_> {
             RegistrationTone::Unknown | RegistrationTone::NotApplicable => self.text_dim(),
         }
     }
+
+    /// The presence badge scale (#61).
+    pub fn presence(&self, kind: PresenceTone) -> Color {
+        match kind {
+            PresenceTone::Alive => self.success(),
+            PresenceTone::Suspect => self.danger(),
+            PresenceTone::Unknown => self.text_dim(),
+        }
+    }
+
+    /// The doctor severity scale (#71), mirroring the CLI's ✗/⚠/· marks.
+    pub fn severity(&self, kind: SeverityTone) -> Color {
+        match kind {
+            SeverityTone::Error => self.danger(),
+            SeverityTone::Warning => self.warning(),
+            SeverityTone::Info => self.text_muted(),
+        }
+    }
+}
+
+/// How a doctor finding's severity should read (#71).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeverityTone {
+    Error,
+    Warning,
+    Info,
 }
 
 /// How a registration state should read at a glance.
@@ -101,6 +127,15 @@ pub enum RegistrationTone {
     NoSlice,
     Unknown,
     NotApplicable,
+}
+
+/// How a liveliness presence should read (#61) — same discipline as
+/// [`RegistrationTone`]: "unknown" must not look like a verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresenceTone {
+    Alive,
+    Suspect,
+    Unknown,
 }
 
 /// Linear blend, `t` from `a` (0.0) to `b` (1.0).

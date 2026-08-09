@@ -22,6 +22,19 @@ pub struct TopicRow {
     /// Trailing `{var...}` family: the registry fixes the shape, not the
     /// members.
     pub open_ended: bool,
+    /// Registry version the subject first appeared in, when declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// A retired subject (from the slice's `[[deprecated]]` ledger, RFC 08
+    /// §6) — rendered only under `topic list --deprecated`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub deprecated: bool,
+    /// When it was retired, if the ledger says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated_since: Option<String>,
+    /// The declared replacement subject, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -222,10 +235,29 @@ pub struct InterfaceShow {
     pub carriers: Vec<CarrierRow>,
 }
 
+/// One producer on one origin — row-shaped so a `--watch` loop can diff it
+/// and a GUI can select it (`origin/producer` is the stable row identity).
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeRow {
+    pub origin: String,
+    /// Live producer name (from the liveliness token; zero payload).
+    pub producer: String,
+    /// The producing app, when a registry slice joined (`--verbose`).
+    /// `None` = not asked / no slice — never a default (O4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// Registry version from the joined slice, same provenance rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_version: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct NodeList {
-    /// origin → live producer names (from liveliness tokens; zero payload).
-    pub origins: BTreeMap<String, Vec<String>>,
+    pub nodes: Vec<NodeRow>,
+    /// Whether a slice join was even attempted (`--verbose`) — keeps "asked,
+    /// no slice served" distinguishable from "not asked" in rows whose
+    /// `app`/`registry_version` are `None` (O4).
+    pub slices_joined: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -458,5 +490,51 @@ mod tests {
         assert_eq!(info.origin.as_deref(), Some("h-3fa9c2d41b7e"));
         // …but no registry facts were invented.
         assert!(info.payload_type.is_none());
+    }
+
+    /// The serialized DoctorReport is a wire contract: `zenctl doctor
+    /// --format json` scripts and the GUI panel both consume this exact
+    /// shape. Field renames/removals break users — this golden pin makes
+    /// that a deliberate act.
+    #[test]
+    fn doctor_report_json_shape_is_pinned() {
+        let report = DoctorReport {
+            findings: vec![DoctorFinding {
+                severity: DoctorSeverity::Error,
+                check: "slice-sync".into(),
+                subject: "h-3fa9c2d41b7e/sysinfo".into(),
+                evidence: "registry version differs: served 1.0, local 2.0".into(),
+                citation: Some("RFC 08 §6".into()),
+            }],
+            synced: vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()],
+            introspect_answered: 2,
+            live_producers: 3,
+            describe_served: 1,
+            describe_missing: 1,
+            routers: 1,
+            router_version: Some("1.9.0".into()),
+            deep: false,
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "findings": [{
+                    "severity": "error",
+                    "check": "slice-sync",
+                    "subject": "h-3fa9c2d41b7e/sysinfo",
+                    "evidence": "registry version differs: served 1.0, local 2.0",
+                    "citation": "RFC 08 §6",
+                }],
+                "synced": ["h-3fa9c2d41b7e/other (registry 1.0)"],
+                "introspect_answered": 2,
+                "live_producers": 3,
+                "describe_served": 1,
+                "describe_missing": 1,
+                "routers": 1,
+                "router_version": "1.9.0",
+                "deep": false,
+            })
+        );
     }
 }

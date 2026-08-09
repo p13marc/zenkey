@@ -63,12 +63,28 @@ pub fn topic_list(report: &TopicList, format: Format) -> Result<()> {
                 if s.open_ended {
                     open_ended += 1;
                 }
+                let deprecation = if s.deprecated {
+                    format!(
+                        "  DEPRECATED{}{}",
+                        s.deprecated_since
+                            .as_deref()
+                            .map(|v| format!(" since {v}"))
+                            .unwrap_or_default(),
+                        s.replaced_by
+                            .as_deref()
+                            .map(|r| format!(" → {r}"))
+                            .unwrap_or_default()
+                    )
+                } else {
+                    String::new()
+                };
                 println!(
-                    "  {:<10} {:<44} {}{}",
+                    "  {:<10} {:<44} {}{}{}",
                     s.class,
                     s.path,
                     s.type_name,
-                    if s.open_ended { "  [open-ended]" } else { "" }
+                    if s.open_ended { "  [open-ended]" } else { "" },
+                    deprecation
                 );
             }
             println!("\n{} registered subject(s).", report.subjects.len());
@@ -223,22 +239,36 @@ pub fn interface_show(report: &InterfaceShow, format: Format) -> Result<()> {
 
 pub fn node_list(report: &NodeList, format: Format) -> Result<()> {
     match format.resolved() {
-        Format::Json | Format::Ndjson => json_doc(report),
+        Format::Json => json_doc(report),
+        Format::Ndjson => report.nodes.iter().for_each(json_line),
         _ => {
-            if report.origins.is_empty() {
+            if report.nodes.is_empty() {
                 println!("no live producers.");
                 return Ok(());
             }
-            for (origin, producers) in &report.origins {
-                println!("{origin}");
-                for p in producers {
-                    println!("  {p}");
+            let mut last_origin = "";
+            for row in &report.nodes {
+                if row.origin != last_origin {
+                    println!("{}", row.origin);
+                    last_origin = &row.origin;
+                }
+                match (&row.app, &row.registry_version) {
+                    (Some(app), Some(v)) => {
+                        println!("  {}  (app {app}, registry {v})", row.producer)
+                    }
+                    // Asked and unanswered is a fact; not asked is not (O4).
+                    _ if report.slices_joined => {
+                        println!("  {}  (no served slice)", row.producer)
+                    }
+                    _ => println!("  {}", row.producer),
                 }
             }
-            let total: usize = report.origins.values().map(Vec::len).sum();
+            let origins: std::collections::BTreeSet<&str> =
+                report.nodes.iter().map(|r| r.origin.as_str()).collect();
             println!(
-                "\n{total} producer(s) on {} origin(s).",
-                report.origins.len()
+                "\n{} producer(s) on {} origin(s).",
+                report.nodes.len(),
+                origins.len()
             );
         }
     }

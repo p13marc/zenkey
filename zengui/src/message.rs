@@ -9,6 +9,9 @@ use zenkey_fleet::{
 
 use crate::scope::ScopePreset;
 
+/// The engine roster's shape: origin → live producer names.
+pub type LiveRoster = std::collections::BTreeMap<String, Vec<String>>;
+
 /// Everything that can move the app.
 ///
 /// `Clone` is required by iced's widget callbacks. Every payload here is
@@ -23,8 +26,10 @@ pub enum Message {
     SessionOpened(Result<zenoh::Session, String>),
     /// The monitor started (lazily — no data-plane watches yet unless eager).
     MonitorStarted(Result<Arc<Monitor>, String>),
-    /// The declared-keyspace skeleton was (re)built.
-    SkeletonBuilt(Result<Arc<Skeleton>, String>),
+    /// The declared-keyspace skeleton was (re)built, with the liveliness
+    /// roster the build task gathered anyway (#61 seeds the node roster
+    /// from it instead of throwing it away).
+    SkeletonBuilt(Result<(Arc<Skeleton>, Arc<LiveRoster>), String>),
     /// The base sweep finished. An empty list is *not* a verdict (RFC 05 §3.1).
     BasesDiscovered(Result<Vec<DiscoveredBase>, String>),
     /// Registry slices arrived, from the bus or from `--registry` dirs.
@@ -54,6 +59,10 @@ pub enum Message {
     Call(crate::view::call::CallMsg),
     /// A call finished.
     CallDone(Result<Arc<zenkey_fleet::report::CallReport>, String>),
+    /// Node dashboard interactions (issue #61).
+    Nodes(crate::view::nodes::NodesMsg),
+    /// Doctor panel interactions (issue #71).
+    Doctor(crate::view::doctor::DoctorMsg),
 
     BaseSelected(String),
     ScopeSelected(ScopePreset),
@@ -68,9 +77,42 @@ pub enum Message {
     TreeScrolled(f32, f32),
     EchoFilterChanged(String),
     ClearEcho,
-    /// Switch the right-hand pane (echo ↔ call).
-    PaneToggled,
+    /// Switch the right-hand pane (the toolbar's tab strip).
+    PaneSelected(RightPane),
     Reconnect,
+}
+
+/// The right-hand pane switch — a tab strip, not a cycle, because the pane
+/// set grows with the epic (#61 nodes, #71 doctor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RightPane {
+    Echo,
+    Call,
+    Detail,
+    Nodes,
+    Doctor,
+}
+
+impl RightPane {
+    /// Every pane, in tab order — the strip iterates this, so a new variant
+    /// cannot be forgotten in the toolbar.
+    pub const ALL: [RightPane; 5] = [
+        RightPane::Echo,
+        RightPane::Call,
+        RightPane::Detail,
+        RightPane::Nodes,
+        RightPane::Doctor,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RightPane::Echo => "echo",
+            RightPane::Call => "call",
+            RightPane::Detail => "detail",
+            RightPane::Nodes => "nodes",
+            RightPane::Doctor => "doctor",
+        }
+    }
 }
 
 /// What the link is doing, so the UI never has to infer it from emptiness.

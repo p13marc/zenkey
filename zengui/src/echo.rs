@@ -97,6 +97,10 @@ pub struct EchoRing {
     /// A different failure from `evicted` and reported separately: this one
     /// means we could not keep up, not that we chose to forget.
     lagged: u64,
+    /// Samples the link's per-tick batch cap coalesced away — our own cap,
+    /// a third distinct failure (O6: "could not keep up" and "chose to
+    /// forget" and "chose to batch" must not be one number).
+    coalesced: u64,
     next_seq: u64,
 }
 
@@ -111,6 +115,7 @@ impl EchoRing {
             bytes: 0,
             evicted: 0,
             lagged: 0,
+            coalesced: 0,
             next_seq: 0,
         }
     }
@@ -140,6 +145,11 @@ impl EchoRing {
         self.lagged += n;
     }
 
+    /// Record samples the link's per-tick batch cap coalesced away.
+    pub fn record_coalesced(&mut self, n: u64) {
+        self.coalesced += n;
+    }
+
     pub fn clear(&mut self) {
         self.lines.clear();
         self.bytes = 0;
@@ -166,6 +176,11 @@ impl EchoRing {
     /// Samples lost to broadcast lag — we fell behind, we did not choose.
     pub fn lagged(&self) -> u64 {
         self.lagged
+    }
+
+    /// Samples the per-tick batch cap coalesced away — our own cap.
+    pub fn coalesced(&self) -> u64 {
+        self.coalesced
     }
 }
 
@@ -231,8 +246,10 @@ mod tests {
         }
         ring.record_lag(17);
         ring.record_lag(3);
+        ring.record_coalesced(9);
         assert_eq!(ring.evicted(), 3);
         assert_eq!(ring.lagged(), 20);
+        assert_eq!(ring.coalesced(), 9, "batch-cap coalescing is its own fact");
     }
 
     /// Clearing the view must not erase the record of what was lost — that

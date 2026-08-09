@@ -55,4 +55,4 @@ async-stream = "0.3"
 # Internal
 zenkey = { version = "0.4.0", path = "zenkey" }
 zenkey-build = { version = "0.4.0", path = "zenkey-build" }
-zenkey-fleet = { version = "0.5.0", path = "zenkey-fleet" }
+zenkey-fleet = { version = "0.6.0", path = "zenkey-fleet" }

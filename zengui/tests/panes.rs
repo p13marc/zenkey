@@ -312,3 +312,187 @@ fn the_detail_pane_tags_decode_provenance() {
         "silence stays attributed"
     );
 }
+
+/// The nodes pane (#61): a retracted token reads suspect, the catalog is
+/// named, and freshness never invents a verdict.
+#[test]
+fn the_nodes_pane_marks_retraction_suspect_and_names_the_catalog() {
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::{DetailState, NodesData, pane};
+
+    let mut roster = NodeRoster::default();
+    roster.apply_transitions(
+        "",
+        &[
+            ("v1/h-3fa9c2d41b7e/state/sysinfo/alive".to_string(), true),
+            ("v1/h-aaaaaaaaaaaa/state/other/alive".to_string(), true),
+            ("v1/h-aaaaaaaaaaaa/state/other/alive".to_string(), false),
+        ],
+        Instant::now(),
+    );
+
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        roster: &roster,
+        selected: None,
+        detail: &DetailState::NotAsked,
+    }));
+    assert!(
+        ui.find("sysinfo: alive").is_ok(),
+        "the live row reads alive"
+    );
+    assert!(
+        ui.find("other: suspect since 0s (token retracted)").is_ok(),
+        "retraction reads suspect immediately, never aged out"
+    );
+    assert!(
+        ui.find("catalog: no token observed — not proof none exists (RFC 05 §3.1)")
+            .is_ok(),
+        "the catalog is asked for by name, never folded into 'no nodes'"
+    );
+    assert!(
+        ui.find("not watched — freshness unknown").is_ok(),
+        "an unwatched producer's freshness is unknown, not fresh (O4)"
+    );
+}
+
+/// The nodes pane's O4 ladder before any presence source reports.
+#[test]
+fn the_nodes_pane_distinguishes_not_asked_from_empty() {
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::{DetailState, NodesData, pane};
+
+    let roster = NodeRoster::default();
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        roster: &roster,
+        selected: None,
+        detail: &DetailState::NotAsked,
+    }));
+    assert!(
+        ui.find("no presence asked yet").is_ok(),
+        "'not asked' must not render as an empty fleet"
+    );
+}
+
+/// The node detail's freshness honesty: an unanswered sample is stale, and
+/// zero ttl declarations is unknown, never fresh.
+#[test]
+fn the_node_detail_reports_freshness_honestly() {
+    use std::sync::Arc;
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::{DetailState, NodesData, pane};
+    use zenkey_fleet::{Freshness, NodeInfo, ProducerInfo};
+
+    let mut roster = NodeRoster::default();
+    roster.apply_transitions(
+        "",
+        &[("v1/h-3fa9c2d41b7e/state/sysinfo/alive".to_string(), true)],
+        Instant::now(),
+    );
+    let info = NodeInfo {
+        origin: "h-3fa9c2d41b7e".to_string(),
+        producers: vec![ProducerInfo {
+            name: "sysinfo".to_string(),
+            alive: true,
+            app: Some("demo".to_string()),
+            registry_version: Some("1.0".to_string()),
+            subjects: 2,
+            procedures: 1,
+            blob_tiers: vec![],
+            deprecated_served: 0,
+        }],
+        freshness: vec![Freshness {
+            producer: "sysinfo".to_string(),
+            path: "health".to_string(),
+            ttl_s: 30,
+            age_s: None,
+            stale: true,
+        }],
+    };
+    let detail = DetailState::Loaded("h-3fa9c2d41b7e".to_string(), Ok(Arc::new(info)));
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        roster: &roster,
+        selected: Some("h-3fa9c2d41b7e"),
+        detail: &detail,
+    }));
+    assert!(
+        ui.find("sysinfo/health  no sample answered — stale  (ttl 30s)  STALE")
+            .is_ok(),
+        "an unanswered ttl'd subject reads stale with its evidence"
+    );
+}
+
+/// The doctor panel (#71): never-run is not "0 findings", findings render
+/// with their check ids and RFC citations, and re-runs show deltas — all
+/// over the exact struct `zenctl doctor --format json` serializes.
+#[test]
+fn the_doctor_pane_never_invents_a_verdict() {
+    use std::sync::Arc;
+    use zengui::doctor::DoctorState;
+    use zengui::view::doctor::pane;
+    use zenkey_fleet::report::{DoctorFinding, DoctorReport, DoctorSeverity};
+
+    let state = DoctorState::default();
+    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    assert!(
+        ui.find("no doctor run yet").is_ok(),
+        "never-run must not read as a clean fleet (O4)"
+    );
+
+    let report = DoctorReport {
+        findings: vec![DoctorFinding {
+            severity: DoctorSeverity::Error,
+            check: "slice-sync".into(),
+            subject: "h-3fa9c2d41b7e/sysinfo".into(),
+            evidence: "registry version differs: served 1.0, local 2.0".into(),
+            citation: Some("RFC 08 §6".into()),
+        }],
+        synced: vec![],
+        introspect_answered: 1,
+        live_producers: 1,
+        describe_served: 0,
+        describe_missing: 1,
+        routers: 0,
+        router_version: None,
+        deep: false,
+    };
+    let mut state = DoctorState::default();
+    state.finish(Ok(Arc::new(report.clone())));
+    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    assert!(ui.find("slice-sync").is_ok(), "the stable check id renders");
+    assert!(ui.find("RFC 08 §6").is_ok(), "the citation renders");
+    assert!(
+        ui.find("registry version differs: served 1.0, local 2.0")
+            .is_ok(),
+        "the evidence renders"
+    );
+    assert!(
+        ui.find("go to subject").is_ok(),
+        "an origin/producer subject offers navigation"
+    );
+
+    drop(ui);
+
+    // Second run: the finding is fixed, a new one appears — the delta strip
+    // says exactly that.
+    let second = DoctorReport {
+        findings: vec![DoctorFinding {
+            severity: DoctorSeverity::Info,
+            check: "describe-missing".into(),
+            subject: "fleet".into(),
+            evidence: "1 producer(s) serve no describe".into(),
+            citation: Some("RFC 08 §7".into()),
+        }],
+        ..report
+    };
+    state.finish(Ok(Arc::new(second)));
+    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    assert!(
+        ui.find("vs previous run: 1 new · 1 fixed · 0 unchanged")
+            .is_ok(),
+        "the delta strip renders"
+    );
+    assert!(
+        ui.find("fixed since last run").is_ok(),
+        "fixed findings stay visible, dimmed"
+    );
+}

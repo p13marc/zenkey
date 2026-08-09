@@ -84,9 +84,26 @@ enum Command {
         /// fleet query load.
         #[arg(long)]
         deep: bool,
+        /// With --deep: drain at most N state samples per family — bounds
+        /// the sweep's cost, not just its output.
+        #[arg(long, value_name = "N", requires = "deep")]
+        sample: Option<usize>,
+        /// Exit 1 when a finding at (or above) this severity exists.
+        /// Default: always exit 0 — findings are output, not verdicts.
+        #[arg(long, value_enum, value_name = "SEVERITY")]
+        fail_on: Option<FailOn>,
         #[command(flatten)]
         bus: BusArgs,
     },
+}
+
+/// The `--fail-on` severity ceiling (scripting hook; opt-in).
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum FailOn {
+    /// Fail on error-severity findings only.
+    Error,
+    /// Fail on warnings or errors.
+    Warning,
 }
 
 #[derive(Subcommand)]
@@ -115,6 +132,9 @@ enum StorageCmd {
     /// List configured storages and judge declared state families against
     /// them (covered / partial / uncovered — RFC 04 §4, issue #14).
     List {
+        /// Re-render on change every SECS seconds (default 2).
+        #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
+        watch: Option<f64>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -155,6 +175,8 @@ enum ContextCmd {
     Select { name: String },
     /// Remove a context.
     Rm { name: String },
+    /// Open the whole config file in $VISUAL/$EDITOR, validating afterwards.
+    Edit,
 }
 
 #[derive(Subcommand)]
@@ -171,6 +193,18 @@ enum TopicCmd {
         /// Only this class: telemetry, state, or events.
         #[arg(long)]
         class: Option<String>,
+        /// Only subjects carrying this payload type.
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<String>,
+        /// Also list retired subjects from each slice's `[[deprecated]]`
+        /// ledger (RFC 08 §6: which hosts still serve a deprecated subject).
+        #[arg(long)]
+        deprecated: bool,
+        /// Re-render on change every SECS seconds (default 2). Appeared and
+        /// disappeared subjects are marked for one cycle; ndjson streams one
+        /// snapshot object per cycle.
+        #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
+        watch: Option<f64>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -322,6 +356,10 @@ enum NodeCmd {
         /// registry version).
         #[arg(long)]
         verbose: bool,
+        /// Re-render on liveliness events (no polling — the bus pushes the
+        /// roster). Reflects a producer stopping within one event.
+        #[arg(long)]
+        watch: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -337,6 +375,9 @@ enum BaseCmd {
     /// base (keys start at `v1/` on the wire) is reported as `(empty)` and
     /// selected with `--base ""`.
     List {
+        /// Re-render on change every SECS seconds (default 2).
+        #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
+        watch: Option<f64>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -522,7 +563,7 @@ impl BusArgs {
                 zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
             for d in &out.disagreements {
                 eprintln!(
-                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{}                      (served wins; `zenctl registry diff` details it)",
+                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{}                      (served wins; `zenctl doctor --registry <dir>` details the drift)",
                     d.producer,
                     d.bus_version,
                     d.dirs_version,
@@ -571,10 +612,22 @@ async fn main() -> Result<()> {
         Command::Topic(TopicCmd::List {
             producer,
             class,
+            r#type,
+            deprecated,
+            watch,
             bus,
         }) => {
+            let filter = cmd::watch::TopicFilter {
+                producer,
+                class,
+                type_name: r#type,
+                deprecated,
+            };
+            if let Some(secs) = watch {
+                return cmd::watch::topic_list(secs, &filter, &bus).await;
+            }
             let slices = bus.slices().await?;
-            let report = offline::topic_list(&slices, producer.as_deref(), class.as_deref())?;
+            let report = filter.apply(&slices)?;
             output::topic_list(&report, bus.format)
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
@@ -680,15 +733,30 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Node(NodeCmd::Info { origin, bus }) => cmd::node::info(&origin, &bus).await,
-        Command::Node(NodeCmd::List { verbose, bus }) => cmd::node::list(verbose, &bus).await,
-        Command::Base(BaseCmd::List { bus }) => {
+        Command::Node(NodeCmd::List {
+            verbose,
+            watch,
+            bus,
+        }) => {
+            if watch {
+                return cmd::node::watch(verbose, &bus).await;
+            }
+            cmd::node::list(verbose, &bus).await
+        }
+        Command::Base(BaseCmd::List { watch, bus }) => {
+            if let Some(secs) = watch {
+                return cmd::watch::base_list(secs, &bus).await;
+            }
             // Deliberately never calls bus.base() — this is the command that
             // answers "what would I even pass as --base?".
             let session = bus.session().await?;
             let bases = bus::discover_bases(&session, bus.timeout()).await?;
             output::base_list(&report::BaseList { bases }, bus.format)
         }
-        Command::Storage(StorageCmd::List { bus }) => {
+        Command::Storage(StorageCmd::List { watch, bus }) => {
+            if let Some(secs) = watch {
+                return cmd::watch::storage_list(secs, &bus).await;
+            }
             let session = bus.session().await?;
             let storages = zenkey_fleet::storages(&session, bus.timeout()).await?;
             // The coverage join needs slices; degrade to storages-only when
@@ -762,6 +830,7 @@ async fn main() -> Result<()> {
                 select,
             ),
             ContextCmd::List => context::list(),
+            ContextCmd::Edit => context::edit(),
             ContextCmd::Show { name } => context::show(name.as_deref()),
             ContextCmd::Select { name } => context::select(&name),
             ContextCmd::Rm { name } => context::remove(&name),
@@ -771,6 +840,11 @@ async fn main() -> Result<()> {
             clap_complete::generate(shell, &mut Cli::command(), "zenctl", &mut std::io::stdout());
             Ok(())
         }
-        Command::Doctor { deep, bus } => cmd::doctor::run(deep, &bus).await,
+        Command::Doctor {
+            deep,
+            sample,
+            fail_on,
+            bus,
+        } => cmd::doctor::run(deep, sample, fail_on, &bus).await,
     }
 }

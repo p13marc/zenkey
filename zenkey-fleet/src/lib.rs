@@ -30,7 +30,11 @@ pub mod write;
 #[cfg(feature = "decode")]
 pub mod decode;
 #[cfg(feature = "decode")]
+pub mod doctor;
+#[cfg(feature = "decode")]
 pub use decode::{SchemaDrift, TotalityGap, schema_drift, totality_gaps};
+#[cfg(feature = "decode")]
+pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
 
 pub use admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,
@@ -41,8 +45,9 @@ pub use context_store::StoredContext;
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{
-    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, StateSample, ValueSource,
-    fetch_value, fleet_get, fleet_registry, state_snapshot,
+    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
+    StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,
+    fleet_registry, state_snapshot,
 };
 pub use registry::SliceSet;
 pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
@@ -53,4 +58,4 @@ pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem, WatchId,
 };
 pub use tree::KeyTreeSnapshot;
-pub use write::{CallTarget, Publication, call, declare_publication};
+pub use write::{CallTarget, MatchingEvents, Publication, call, declare_publication};

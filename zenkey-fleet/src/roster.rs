@@ -157,7 +157,7 @@ pub async fn node_info(
     if with_freshness && !mine.is_empty() {
         // One origin-scoped state sweep; join against declared ttl_s.
         let selector = zenkey::grammar::with_base(base, format!("v1/{origin}/state/**"));
-        let samples = crate::query::state_snapshot(session, &selector, timeout)
+        let samples = crate::query::state_snapshot(session, &selector, timeout, None)
             .await
             .unwrap_or_default();
         let now = std::time::SystemTime::now();

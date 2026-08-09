@@ -32,7 +32,8 @@ The gap between those two is where drift lives, and `doctor` is the command
 that reports it.
 
 ```bash
-zenctl topic list --base acme [--producer sysinfo] [--class telemetry]
+zenctl topic list --base acme [--producer sysinfo] [--class telemetry] [--type TelemetryPoint]
+zenctl topic list --base acme --deprecated   # + each slice's [[deprecated]] ledger rows
 zenctl topic info --base acme acme/v1/h-3fa9c2d41b7e/state/sysinfo/health
 zenctl service list --base acme [--producer sysinfo]
 zenctl interface list --base acme
@@ -69,15 +70,33 @@ enumerates them.
 ```bash
 zenctl base list -c tcp/127.0.0.1:7447  # discover deployment bases (needs no --base)
 zenctl node list --base acme            # the liveliness roster (--verbose joins introspect)
+zenctl node list --base acme --watch    # …re-rendered per liveliness event (no polling)
 zenctl topic echo --base acme           # subscribe + decode (defaults to <base>/v1/**)
+zenctl topic list --base acme --watch 5 # topic/storage/base list poll+diff; +/- marks
 zenctl topic hz --base acme             # per-key sample rates; topic bw for bytes
 zenctl service call --base acme '*' sysinfo processes --param sort=cpu
 zenctl service call --base acme h-3fa9 netring capture/trigger --body @trigger.json
 zenctl admin get                        # raw admin-space browse; admin routers
 zenctl storage list --base acme         # declared state subjects vs storage coverage
 zenctl doctor --base acme --registry path/to/registry
+zenctl doctor --deep --sample 10 --fail-on error   # bounded deep sweep; exit 1 on errors
 zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>
+zenctl context edit                     # the whole config file, in $EDITOR, validated
 ```
+
+`--watch` re-renders on change (appeared rows mark `+` for one cycle,
+disappeared rows linger one cycle marked `-`); `--watch --format ndjson`
+streams one `{snapshot, appeared, disappeared}` object per cycle. `node list
+--watch` is event-driven — a producer stopping shows within one liveliness
+event, not one poll interval.
+
+`topic pub` and `service call` validate a JSON body by **encoding it**
+against the producer's served schema (request types come from the slice's
+procedure declaration) and refuse what cannot encode; `--no-validate` opts
+out. A producer serving no schema validates nothing — silence is not a
+verdict about the type. `topic pub` also prints a matching note ("a
+subscriber currently matches …") — a routing fact about *this* publisher,
+never a fleet verdict.
 
 `node list` is a liveliness query on `<base>/v1/*/state/*/alive` — RFC 04 §5's
 "entire fleet-presence protocol, zero payload bytes". The token *key* is the

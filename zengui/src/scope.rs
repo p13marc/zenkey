@@ -140,6 +140,15 @@ pub fn liveliness_any_base() -> Vec<String> {
     liveliness_selectors(ANY_BASE)
 }
 
+/// The tree display path of one origin's subtree (#61 click-through):
+/// assembled from the grammar's version chunk + a parsed origin chunk,
+/// lifted with the base — the same discipline as every other selector here
+/// (never `format!` of arbitrary user text; `origin` comes from a parsed
+/// liveliness token).
+pub fn origin_display_path(base: &str, origin: &str) -> String {
+    with_base(base, format!("v1/{origin}"))
+}
+
 /// The watch selector for one tree subtree: symbolic skeleton chunks widen
 /// (`{var}` → `*`, `{rest...}` → `**`), and the subtree is covered with a
 /// trailing `/**`.

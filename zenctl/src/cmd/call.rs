@@ -37,6 +37,31 @@ pub async fn run(
     };
 
     let session = args.session().await?;
+
+    // Body validation by encoding (#57), same ladder as `topic pub`: when
+    // the slice declares a request type and the producer serves its schema,
+    // an unencodable body is refused before the GET leaves. No declared
+    // request type / no served schema → proceed (silence is not a verdict).
+    if let (Some(slices), Some(payload)) = (&slices, &payload)
+        && let Some(slice) = slices.get(producer)
+        && let Some(decl) = slice.procedures.iter().find(|p| p.path == procedure)
+        && let Some(request_type) = &decl.request
+    {
+        super::validate::encode_check(
+            &session,
+            args,
+            super::validate::EncodeCheck {
+                producer,
+                type_name: request_type,
+                declared_encoding: None,
+                registry_encoding: decl.encoding.as_deref(),
+                action: "call anyway",
+            },
+            payload,
+        )
+        .await?;
+    }
+
     let report = zenkey_fleet::call(
         &session,
         args.base(),

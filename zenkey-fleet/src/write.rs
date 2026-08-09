@@ -86,6 +86,58 @@ impl Publication {
             .await
             .map_err(|e| anyhow!("undeclare publisher: {e}"))
     }
+
+    /// Whether any subscriber currently matches **this publication** — a
+    /// routing fact about the publisher *this process declared* (RFC 12 §9's
+    /// allowed half). It says nothing about other publishers on the key, and
+    /// `false` is not a fleet verdict ("no subscriber matched *our*
+    /// publication", never "nobody listens here" — RFC 05 §3.1 applied to a
+    /// badge).
+    pub async fn matching_status(&self) -> Result<bool> {
+        self.publisher
+            .matching_status()
+            .await
+            .map(|s| s.matching())
+            .map_err(|e| anyhow!("matching status: {e}"))
+    }
+
+    /// Event-driven matching changes for this publication — the badge feed.
+    /// Same honesty bounds as [`matching_status`](Self::matching_status).
+    pub async fn matching_events(&self) -> Result<MatchingEvents> {
+        let listener = self
+            .publisher
+            .matching_listener()
+            .await
+            .map_err(|e| anyhow!("matching listener: {e}"))?;
+        Ok(MatchingEvents { listener })
+    }
+}
+
+/// A stream of matching changes for one **self-declared** entity (a
+/// [`Publication`] or a [`crate::RepeatingQuery`]). These are the only two
+/// places a matching claim can be made from — a foreign publisher's consumers
+/// are not observable without publishing on their key, and that half stays
+/// deferred (RFC 12 §9; #38/#80 adoption note).
+pub struct MatchingEvents {
+    listener: zenoh::matching::MatchingListener<
+        zenoh::handlers::FifoChannelHandler<zenoh::matching::MatchingStatus>,
+    >,
+}
+
+impl MatchingEvents {
+    pub(crate) async fn for_querier(querier: &zenoh::query::Querier<'_>) -> Result<Self> {
+        let listener = querier
+            .matching_listener()
+            .await
+            .map_err(|e| anyhow!("matching listener: {e}"))?;
+        Ok(MatchingEvents { listener })
+    }
+
+    /// The next change: `Some(true)` = at least one matcher appeared,
+    /// `Some(false)` = the last one left, `None` = the entity was undeclared.
+    pub async fn recv(&self) -> Option<bool> {
+        self.listener.recv_async().await.ok().map(|s| s.matching())
+    }
 }
 
 /// Who a call is addressed to. Typed — a fleet call is a deliberate variant,

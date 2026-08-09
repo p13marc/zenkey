@@ -33,13 +33,7 @@ use crate::view::tokens::space;
 /// only the scrolled-into window.
 const MAX_ROWS: usize = 50_000;
 
-/// The right-hand pane switch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RightPane {
-    Echo,
-    Call,
-    Detail,
-}
+use crate::message::RightPane;
 
 pub struct Zengui {
     settings: Settings,
@@ -84,6 +78,15 @@ pub struct Zengui {
     /// The last on-demand fetch: (key, outcome-or-error).
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     echo_filter: String,
+
+    /// The node dashboard's presence model (#61), fed by liveliness only.
+    roster: crate::nodes::NodeRoster,
+    /// The selected origin in the nodes pane.
+    node_selected: Option<String>,
+    /// Its one-shot `node_info` detail — the pane's only data-plane cost.
+    node_detail: view::nodes::DetailState,
+    /// The doctor panel's run state (#71) — run-on-demand only.
+    doctor: crate::doctor::DoctorState,
 
     call_form: view::call::CallForm,
     /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
@@ -134,6 +137,10 @@ impl Zengui {
             selected: None,
             fetched: None,
             echo_filter: String::new(),
+            roster: crate::nodes::NodeRoster::default(),
+            node_selected: None,
+            node_detail: view::nodes::DetailState::default(),
+            doctor: crate::doctor::DoctorState::default(),
             call_form: view::call::CallForm::default(),
             schema_store: None,
             decoded: None,
@@ -204,8 +211,11 @@ impl Zengui {
                 self.link = LinkState::Failed(e);
                 Task::none()
             }
-            Message::SkeletonBuilt(Ok(skeleton)) => {
+            Message::SkeletonBuilt(Ok((skeleton, roster))) => {
                 self.skeleton = Some(skeleton);
+                // The build task gathered the roster anyway — seed the node
+                // dashboard from it instead of throwing it away (#61).
+                self.roster.seed(&roster);
                 self.reflatten();
                 Task::none()
             }
@@ -296,7 +306,12 @@ impl Zengui {
             }
             Message::ValueFetched(key, outcome) => {
                 self.decoded = None;
-                self.right_pane = RightPane::Detail;
+                // A fetch normally lands the detail pane in view — except
+                // from the doctor's click-through, where losing the finding
+                // list would cost more than it shows (#71).
+                if self.right_pane != RightPane::Doctor {
+                    self.right_pane = RightPane::Detail;
+                }
                 let decode_task = match (&outcome, &self.session, &self.schema_store, &self.slices)
                 {
                     (Ok(out), Some(session), Some(store), Some(slices)) => {
@@ -350,6 +365,12 @@ impl Zengui {
                 // skeleton, and watch selectors are base-relative: a fresh
                 // monitor is the obviously-correct restart.
                 self.facts.clear();
+                // A roster against another base is not evidence here (O4).
+                self.roster.clear();
+                self.node_selected = None;
+                self.node_detail = view::nodes::DetailState::NotAsked;
+                // Nor is a doctor report.
+                self.doctor.clear();
                 self.my_watches.clear();
                 self.my_watch_paths.clear();
                 self.scope_watches.clear();
@@ -429,6 +450,8 @@ impl Zengui {
                 )
             }
             Message::Call(msg) => self.update_call(msg),
+            Message::Nodes(msg) => self.update_nodes(msg),
+            Message::Doctor(msg) => self.update_doctor(msg),
             Message::CallDone(outcome) => {
                 self.call_form.in_flight = false;
                 self.call_form.outcome =
@@ -443,12 +466,8 @@ impl Zengui {
                 self.echo.clear();
                 Task::none()
             }
-            Message::PaneToggled => {
-                self.right_pane = match self.right_pane {
-                    RightPane::Echo => RightPane::Call,
-                    RightPane::Call => RightPane::Detail,
-                    RightPane::Detail => RightPane::Echo,
-                };
+            Message::PaneSelected(pane) => {
+                self.right_pane = pane;
                 Task::none()
             }
             Message::Reconnect => {
@@ -459,6 +478,10 @@ impl Zengui {
                 self.seeding_paths.clear();
                 self.seed_totals = (0, 0, 0);
                 self.seeded_watches = 0;
+                self.roster.clear();
+                self.node_selected = None;
+                self.node_detail = view::nodes::DetailState::NotAsked;
+                self.doctor.clear();
                 self.start_monitor()
             }
         }
@@ -539,6 +562,148 @@ impl Zengui {
         }
     }
 
+    fn update_nodes(&mut self, msg: view::nodes::NodesMsg) -> Task<Message> {
+        use view::nodes::{DetailState, NodesMsg};
+        match msg {
+            NodesMsg::Selected(origin) => {
+                if self.node_selected.as_deref() == Some(origin.as_str()) {
+                    // Re-click deselects (and drops the detail state).
+                    self.node_selected = None;
+                    self.node_detail = DetailState::NotAsked;
+                    return Task::none();
+                }
+                self.node_selected = Some(origin.clone());
+                self.node_detail = DetailState::Loading(origin.clone());
+                let Some(session) = self.session.clone() else {
+                    return Task::none();
+                };
+                let base = self.settings.base.clone();
+                let timeout = self.settings.timeout();
+                // The pane's one data-plane cost: a one-shot node_info on
+                // selection (laziness ground rule, #84/#85).
+                Task::perform(
+                    async move {
+                        let out = zenkey_fleet::node_info(&session, &base, &origin, timeout, true)
+                            .await
+                            .map(Arc::new)
+                            .map_err(|e| e.to_string());
+                        (origin, out)
+                    },
+                    |(origin, out)| Message::Nodes(NodesMsg::InfoLoaded(origin, out)),
+                )
+            }
+            NodesMsg::InfoLoaded(origin, outcome) => {
+                // Stale guard: only the currently selected origin's info lands.
+                if self.node_selected.as_deref() == Some(origin.as_str()) {
+                    self.node_detail = DetailState::Loaded(origin, outcome);
+                }
+                Task::none()
+            }
+            NodesMsg::ShowInTree(origin) => {
+                let path = scope::origin_display_path(&self.settings.base, &origin);
+                // Expand every prefix so the subtree is visible; select
+                // WITHOUT fetching (a subtree prefix is not a concrete key).
+                let mut prefix = String::new();
+                for chunk in path.split('/') {
+                    if !prefix.is_empty() {
+                        prefix.push('/');
+                    }
+                    prefix.push_str(chunk);
+                    self.expanded.insert(prefix.clone());
+                }
+                self.selected = Some(path);
+                self.reflatten();
+                Task::none()
+            }
+        }
+    }
+
+    fn update_doctor(&mut self, msg: view::doctor::DoctorMsg) -> Task<Message> {
+        use view::doctor::DoctorMsg;
+        match msg {
+            DoctorMsg::DeepToggled(deep) => {
+                self.doctor.deep = deep;
+                Task::none()
+            }
+            DoctorMsg::Run => {
+                if self.doctor.in_flight {
+                    return Task::none();
+                }
+                let Some(session) = self.session.clone() else {
+                    self.doctor.error = Some("no session — connect first".into());
+                    return Task::none();
+                };
+                self.doctor.in_flight = true;
+                self.doctor.error = None;
+                let base = self.settings.base.clone();
+                let timeout = self.settings.timeout();
+                let deep = self.doctor.deep;
+                // Locals come from the registry DIRS only — never the union
+                // set, which would diff the bus against itself.
+                let dirs = self.settings.registry.clone();
+                Task::perform(
+                    async move {
+                        let locals = match SliceSet::from_dirs(&dirs) {
+                            Ok(set) => set.slices().to_vec(),
+                            Err(e) => return Err(format!("registry dirs: {e}")),
+                        };
+                        zenkey_fleet::run_doctor(
+                            &session,
+                            &base,
+                            &locals,
+                            &zenkey_fleet::DoctorSpec {
+                                deep,
+                                sample: None,
+                                timeout,
+                            },
+                        )
+                        .await
+                        .map(Arc::new)
+                        .map_err(|e| e.to_string())
+                    },
+                    |out| Message::Doctor(DoctorMsg::Done(out)),
+                )
+            }
+            DoctorMsg::Done(outcome) => {
+                self.doctor.finish(outcome);
+                Task::none()
+            }
+            DoctorMsg::FindingClicked(index) => {
+                let Some(finding) = self
+                    .doctor
+                    .current
+                    .as_deref()
+                    .and_then(|r| r.findings.get(index))
+                else {
+                    return Task::none();
+                };
+                match crate::doctor::finding_target(finding, &self.settings.base) {
+                    // A concrete key: select in the tree (with the usual
+                    // on-demand fetch); the right pane stays on Doctor so
+                    // the finding list is not lost.
+                    Some(crate::doctor::Target::Key(key)) => {
+                        let mut prefix = String::new();
+                        for chunk in key.split('/') {
+                            if !prefix.is_empty() {
+                                prefix.push('/');
+                            }
+                            prefix.push_str(chunk);
+                            self.expanded.insert(prefix.clone());
+                        }
+                        self.reflatten();
+                        self.update(Message::SelectKey(Some(key)))
+                    }
+                    // An origin/producer subject: land on the nodes pane.
+                    Some(crate::doctor::Target::Node(origin)) => {
+                        self.right_pane = RightPane::Nodes;
+                        self.update_nodes(view::nodes::NodesMsg::Selected(origin))
+                    }
+                    None => Task::none(),
+                }
+            }
+        }
+    }
+
     fn start_monitor(&mut self) -> Task<Message> {
         let Some(session) = self.session.clone() else {
             return Task::none();
@@ -586,12 +751,8 @@ impl Zengui {
                 let admin = zenkey_fleet::declared_entities(&session, timeout)
                     .await
                     .unwrap_or(None);
-                Ok(Arc::new(Skeleton::build(
-                    &base,
-                    &slices,
-                    &roster,
-                    admin.as_ref(),
-                )))
+                let skeleton = Arc::new(Skeleton::build(&base, &slices, &roster, admin.as_ref()));
+                Ok((skeleton, Arc::new(roster)))
             },
             Message::SkeletonBuilt,
         )
@@ -698,7 +859,10 @@ impl Zengui {
                 self.seeded_watches += 1;
             }
         }
-        self.echo.record_lag(tick.lagged + tick.coalesced);
+        // Two different facts about the same window (O6): the broadcast
+        // outran us vs. our own batch cap chose to coalesce.
+        self.echo.record_lag(tick.lagged);
+        self.echo.record_coalesced(tick.coalesced);
         for sample in &tick.samples {
             self.ensure_facts(&sample.key);
             self.echo.push(sample);
@@ -706,6 +870,13 @@ impl Zengui {
         for (key, _up) in &tick.nodes {
             self.ensure_facts(key);
         }
+        // The node dashboard (#61): transitions in arrival order (flap-
+        // correct), then the zero-cost watched-freshness join.
+        let now = std::time::Instant::now();
+        self.roster
+            .apply_transitions(&self.settings.base, &tick.nodes, now);
+        self.roster
+            .refresh(&tick.tree, &self.settings.base, &tick.watched, now);
         self.reflatten();
     }
 
@@ -845,6 +1016,12 @@ impl Zengui {
                     }),
                     decoded: self.decoded.as_ref(),
                 }),
+                RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
+                    roster: &self.roster,
+                    selected: self.node_selected.as_deref(),
+                    detail: &self.node_detail,
+                }),
+                RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
             })
             .width(Length::FillPortion(1))
             .height(Length::Fill),
@@ -919,16 +1096,10 @@ impl Zengui {
             text("scope").size(crate::view::tokens::font::CAPTION),
             scope_picker,
             observe,
-            iced::widget::button(
-                text(match self.right_pane {
-                    RightPane::Echo => "call pane",
-                    RightPane::Call => "detail pane",
-                    RightPane::Detail => "echo pane",
-                })
-                .size(crate::view::tokens::font::CAPTION)
-            )
-            .on_press(Message::PaneToggled)
-            .padding(4),
+            iced::widget::Row::from_iter(RightPane::ALL.into_iter().map(|p| {
+                crate::view::kit::tab(p.label(), self.right_pane == p, Message::PaneSelected(p))
+            }))
+            .spacing(space::XS),
             crate::view::kit::muted(self.settings.scope.label()),
             iced::widget::space::horizontal(),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))

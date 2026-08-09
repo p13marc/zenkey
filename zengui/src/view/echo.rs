@@ -95,13 +95,15 @@ pub fn pane<'a>(
 /// than the batch cap, `evicted` means the ring chose to forget old lines.
 /// Collapsing them would hide which one happened.
 fn loss_strip<'a>(ring: &EchoRing) -> Element<'a, Message> {
-    if ring.lagged() == 0 && ring.evicted() == 0 {
+    if ring.lagged() == 0 && ring.evicted() == 0 && ring.coalesced() == 0 {
         return kit::muted(format!("{} lines retained", ring.len()));
     }
     let msg = format!(
-        "{} lines retained · {} dropped by the bus (we fell behind) · {} evicted (ring full)",
+        "{} lines retained · {} dropped by the bus (we fell behind) · {} coalesced \
+         (tick batch cap) · {} evicted (ring full)",
         ring.len(),
         ring.lagged(),
+        ring.coalesced(),
         ring.evicted(),
     );
     text(msg)

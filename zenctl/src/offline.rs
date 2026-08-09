@@ -38,6 +38,8 @@ pub fn topic_list(
     slices: &[RegistrySlice],
     producer: Option<&str>,
     class: Option<&str>,
+    type_name: Option<&str>,
+    deprecated: bool,
 ) -> Result<TopicList> {
     if let Some(c) = class
         && !["telemetry", "state", "events"].contains(&c)
@@ -55,6 +57,7 @@ pub fn topic_list(
             .subjects
             .iter()
             .filter(|s| class.is_none_or(|c| c == s.class))
+            .filter(|s| type_name.is_none_or(|t| t == s.type_name))
         {
             subjects.push(TopicRow {
                 producer: slice.name.clone(),
@@ -63,7 +66,31 @@ pub fn topic_list(
                 path: s.path.clone(),
                 type_name: s.type_name.clone(),
                 open_ended: s.path.contains("..."),
+                since: s.since.clone(),
+                deprecated: false,
+                deprecated_since: None,
+                replaced_by: None,
             });
+        }
+        // --deprecated: the ledger-backed retirements this build still
+        // serves — RFC 08 §6 names "which hosts still serve a deprecated
+        // subject" as a headline buy of introspection. A ledger entry has no
+        // class or type, so the narrowing filters exclude these rows.
+        if deprecated && type_name.is_none() && class.is_none() {
+            for d in &slice.deprecated {
+                subjects.push(TopicRow {
+                    producer: slice.name.clone(),
+                    registry_version: slice.version.clone(),
+                    class: "-".into(),
+                    path: d.path.clone(),
+                    type_name: String::new(),
+                    open_ended: false,
+                    since: None,
+                    deprecated: true,
+                    deprecated_since: d.since.clone(),
+                    replaced_by: d.replaced_by.clone(),
+                });
+            }
         }
     }
     Ok(TopicList { subjects })
@@ -242,10 +269,42 @@ mod tests {
         fanout = "one"
         since = "0.2"
         description = "apply a netem config"
+
+        [[deprecated]]
+        path = "iface/{iface}/status"
+        since = "0.2"
+        replaced_by = "iface/{iface}/state"
     "#;
 
     fn tcgui_slices() -> Vec<RegistrySlice> {
         vec![parse_slice(TCGUI_SLICE).unwrap()]
+    }
+
+    /// `--type` narrows to carrying subjects; `--deprecated` appends the
+    /// ledger rows with their since/replacement (#57), and stays quiet
+    /// without the flag.
+    #[test]
+    fn type_and_deprecated_filters() {
+        let slices = tcgui_slices();
+
+        let by_type = topic_list(&slices, None, None, Some("NetworkInterface"), false).unwrap();
+        assert_eq!(by_type.subjects.len(), 1);
+        assert_eq!(by_type.subjects[0].path, "iface/{iface}/state");
+
+        let without = topic_list(&slices, None, None, None, false).unwrap();
+        assert!(without.subjects.iter().all(|s| !s.deprecated));
+
+        let with = topic_list(&slices, None, None, None, true).unwrap();
+        let retired: Vec<_> = with.subjects.iter().filter(|s| s.deprecated).collect();
+        assert_eq!(retired.len(), 1);
+        assert_eq!(retired[0].path, "iface/{iface}/status");
+        assert_eq!(retired[0].deprecated_since.as_deref(), Some("0.2"));
+        assert_eq!(
+            retired[0].replaced_by.as_deref(),
+            Some("iface/{iface}/state")
+        );
+        // Subjects still carry their since column.
+        assert_eq!(with.subjects[0].since.as_deref(), Some("0.1"));
     }
 
     #[test]
@@ -266,8 +325,8 @@ mod tests {
 
         // The shared renderers accept a bus-sourced slice with nothing
         // compiled in — same code path as any `--base` drives.
-        topic_list(&slices, None, None).unwrap();
-        topic_list(&slices, Some("tc"), Some("state")).unwrap();
+        topic_list(&slices, None, None, None, false).unwrap();
+        topic_list(&slices, Some("tc"), Some("state"), None, false).unwrap();
         service_list(&slices, Some("tc")).unwrap();
         interface_list(&slices).unwrap();
         interface_show(&slices, "NetworkInterface").unwrap();
@@ -330,7 +389,7 @@ mod tests {
     #[test]
     fn reports_serialize_to_stable_json() {
         let slices = tcgui_slices();
-        let list = topic_list(&slices, Some("tc"), Some("state")).unwrap();
+        let list = topic_list(&slices, Some("tc"), Some("state"), None, false).unwrap();
         let json = serde_json::to_value(&list).unwrap();
         assert_eq!(json["subjects"][0]["producer"], "tc");
         assert_eq!(json["subjects"][0]["path"], "iface/{iface}/state");
@@ -385,7 +444,7 @@ mod tests {
 
     #[test]
     fn unknown_class_is_rejected() {
-        let err = topic_list(&tcgui_slices(), None, Some("alerts")).unwrap_err();
+        let err = topic_list(&tcgui_slices(), None, Some("alerts"), None, false).unwrap_err();
         assert!(err.to_string().contains("unknown class"), "got: {err}");
     }
 

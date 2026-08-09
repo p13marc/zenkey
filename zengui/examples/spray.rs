@@ -124,6 +124,24 @@ async fn main() -> anyhow::Result<()> {
         ),
     ];
 
+    // Liveliness tokens (RFC 04 §5): the roster the node views feed on.
+    // Killing this process retracts them — that is the suspect-on-retraction
+    // demo for `zenctl node list --watch` and the zengui node dashboard.
+    let tokens = [
+        with_base(&format!("v1/{host}/state/sysinfo/alive")),
+        with_base("v1/@catalog/state/alive"),
+    ];
+    let mut held = Vec::new();
+    for key in tokens {
+        println!("liveliness token: {key}");
+        let t = session
+            .liveliness()
+            .declare_token(key.clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("token {key}: {e}"))?;
+        held.push(t);
+    }
+
     println!("publishing {} keys at {} Hz each:", plan.len(), args.hz);
     let mut publishers = Vec::new();
     for (key, payload) in plan {

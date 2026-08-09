@@ -29,6 +29,32 @@ pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
         .into()
 }
 
+/// One tab of the right-pane strip: the active tab reads `primary` on the
+/// pane surface, inactive tabs read muted with no background.
+pub fn tab<'a, M: Clone + 'a>(label: &'a str, active: bool, on_press: M) -> Element<'a, M> {
+    iced::widget::button(text(label).size(font::CAPTION))
+        .padding([2, 8])
+        .style(move |theme: &iced::Theme, _status| {
+            let c = colors(theme);
+            iced::widget::button::Style {
+                background: active.then(|| c.surface().into()),
+                text_color: if active { c.primary() } else { c.text_muted() },
+                border: Border {
+                    color: if active {
+                        c.border()
+                    } else {
+                        Color::TRANSPARENT
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .on_press(on_press)
+        .into()
+}
+
 /// A section title with optional trailing controls.
 pub fn section_header<'a, M: 'a>(
     title: impl Into<String>,
@@ -82,6 +108,46 @@ pub fn tone_badge<'a, M: 'a>(
     };
     row![
         text("●").size(font::CAPTION).style(style),
+        text(label.into()).size(font::CAPTION).style(style),
+    ]
+    .spacing(space::XS)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// A presence badge (#61) — theme-resolved like [`tone_badge`].
+pub fn badge_presence<'a, M: 'a>(
+    tone: super::theme::PresenceTone,
+    label: impl Into<String>,
+) -> Element<'a, M> {
+    let style = move |theme: &iced::Theme| text::Style {
+        color: Some(colors(theme).presence(tone)),
+    };
+    row![
+        text("●").size(font::CAPTION).style(style),
+        text(label.into()).size(font::CAPTION).style(style),
+    ]
+    .spacing(space::XS)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// A doctor-severity badge (#71) — theme-resolved like [`tone_badge`],
+/// mirroring the CLI's severity marks.
+pub fn badge_severity<'a, M: 'a>(
+    tone: super::theme::SeverityTone,
+    label: impl Into<String>,
+) -> Element<'a, M> {
+    let style = move |theme: &iced::Theme| text::Style {
+        color: Some(colors(theme).severity(tone)),
+    };
+    let mark = match tone {
+        super::theme::SeverityTone::Error => "✗",
+        super::theme::SeverityTone::Warning => "⚠",
+        super::theme::SeverityTone::Info => "·",
+    };
+    row![
+        text(mark).size(font::CAPTION).style(style),
         text(label.into()).size(font::CAPTION).style(style),
     ]
     .spacing(space::XS)

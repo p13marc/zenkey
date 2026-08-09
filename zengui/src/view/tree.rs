@@ -1117,9 +1117,9 @@ fn row_view<'a>(
     let body = button(line)
         .width(Length::Fill)
         .padding(2)
-        .style(|_theme: &iced::Theme, _status| button::Style {
+        .style(|theme: &iced::Theme, _status| button::Style {
             background: None,
-            text_color: iced::Color::WHITE,
+            text_color: colors(theme).text(),
             ..Default::default()
         })
         .on_press(row_press(r));
