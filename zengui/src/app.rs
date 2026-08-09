@@ -79,6 +79,8 @@ pub struct Zengui {
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
     echo_view: view::echo::EchoView,
+    /// The connection pane's state (issue #67): contexts and endpoints.
+    context_form: view::contexts::ContextForm,
 
     /// The node dashboard's presence model (#61), fed by liveliness only.
     roster: crate::nodes::NodeRoster,
@@ -161,6 +163,7 @@ impl Zengui {
             selected: None,
             fetched: None,
             echo_view: view::echo::EchoView::new(),
+            context_form: view::contexts::ContextForm::default(),
             roster: crate::nodes::NodeRoster::default(),
             node_selected: None,
             node_detail: view::nodes::DetailState::default(),
@@ -210,6 +213,10 @@ impl Zengui {
         match message {
             Message::SessionOpened(Ok(session)) => {
                 self.session = Some(session.clone());
+                // The context list is read from the shared file, not cached at
+                // launch: `zenctl context create` on the other side of the
+                // screen should show up here without a restart (#67).
+                self.refresh_contexts();
                 self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
                     &self.settings.base,
                     self.settings.timeout(),
@@ -396,21 +403,9 @@ impl Zengui {
                 self.settings.base = base;
                 // The base is an input to every projection and to the
                 // skeleton, and watch selectors are base-relative: a fresh
-                // monitor is the obviously-correct restart.
-                self.facts.clear();
-                // A roster against another base is not evidence here (O4).
-                self.roster.clear();
-                self.node_selected = None;
-                self.node_detail = view::nodes::DetailState::NotAsked;
-                // Nor is a doctor report.
-                self.doctor.clear();
-                self.my_watches.clear();
-                self.my_watch_paths.clear();
-                self.scope_watches.clear();
-                self.seeding.clear();
-                self.seeding_paths.clear();
-                self.seed_totals = (0, 0, 0);
-                self.seeded_watches = 0;
+                // monitor is the obviously-correct restart. Everything the old
+                // base taught us is evidence about a different deployment (O4).
+                self.forget_deployment();
                 self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
                     &self.settings.base,
                     self.settings.timeout(),
@@ -572,6 +567,19 @@ impl Zengui {
                 Task::none()
             }
             Message::Echo(msg) => self.update_echo(msg),
+            Message::Context(msg) => self.update_context(msg),
+            Message::ContextSwitched(Ok(session)) => {
+                // A new session is a new everything: the base may differ, so
+                // every projection, roster and verdict from the old one is
+                // evidence about a different deployment (O4).
+                self.forget_deployment();
+                self.update(Message::SessionOpened(Ok(session)))
+            }
+            Message::ContextSwitched(Err(e)) => {
+                self.link = LinkState::Failed(e.clone());
+                self.context_form.status = Some(Err(format!("could not connect: {e}")));
+                Task::none()
+            }
             Message::PaneSelected(pane) => {
                 self.right_pane = pane;
                 Task::none()
@@ -597,17 +605,7 @@ impl Zengui {
                 Task::none()
             }
             Message::Reconnect => {
-                self.my_watches.clear();
-                self.my_watch_paths.clear();
-                self.scope_watches.clear();
-                self.seeding.clear();
-                self.seeding_paths.clear();
-                self.seed_totals = (0, 0, 0);
-                self.seeded_watches = 0;
-                self.roster.clear();
-                self.node_selected = None;
-                self.node_detail = view::nodes::DetailState::NotAsked;
-                self.doctor.clear();
+                self.forget_deployment();
                 self.start_monitor()
             }
         }
@@ -863,6 +861,218 @@ impl Zengui {
                 Task::batch([stop, send])
             }
         }
+    }
+
+    /// Everything a session learned about one deployment, forgotten.
+    ///
+    /// Factored out because three paths need exactly this — a base change, a
+    /// reconnect, and a context switch — and each one that forgot a different
+    /// subset would leave a stale verdict on screen about a fleet it is no
+    /// longer looking at (O4).
+    fn forget_deployment(&mut self) {
+        self.facts.clear();
+        self.roster.clear();
+        self.node_selected = None;
+        self.node_detail = view::nodes::DetailState::NotAsked;
+        self.doctor.clear();
+        self.my_watches.clear();
+        self.my_watch_paths.clear();
+        self.scope_watches.clear();
+        self.seeding.clear();
+        self.seeding_paths.clear();
+        self.seed_totals = (0, 0, 0);
+        self.seeded_watches = 0;
+        self.skeleton = None;
+        self.slices = None;
+        self.slice_source = view::status::SliceSource::None;
+        self.bases.clear();
+    }
+
+    /// The connection pane (#67). Contexts are read and written through the
+    /// **shared** store, so a context created here is one `zenctl` selects and
+    /// vice versa — that reciprocity is the feature, not a side effect.
+    fn update_context(&mut self, msg: view::contexts::ContextMsg) -> Task<Message> {
+        use view::contexts::ContextMsg;
+        match msg {
+            ContextMsg::NameChanged(v) => {
+                self.context_form.name = v;
+                Task::none()
+            }
+            ContextMsg::ConnectChanged(v) => {
+                self.context_form.connect = v;
+                Task::none()
+            }
+            ContextMsg::ListenChanged(v) => {
+                self.context_form.listen = v;
+                Task::none()
+            }
+            ContextMsg::BaseChanged(v) => {
+                self.context_form.base = v;
+                Task::none()
+            }
+            ContextMsg::ScoutingToggled(b) => {
+                self.context_form.scouting = b;
+                Task::none()
+            }
+            ContextMsg::Isolate => {
+                // RFC 09 §0.1's isolated-verification recipe, one click:
+                // multicast off, explicit endpoints only.
+                self.context_form.scouting = false;
+                self.context_form.status = Some(Ok(
+                    "multicast scouting off — an empty result now means \"nothing on these \
+                     endpoints\", never \"nothing on the network\" (RFC 09 §0.1)"
+                        .into(),
+                ));
+                Task::none()
+            }
+            ContextMsg::Load => {
+                let Some(name) = self.context_form.active.clone() else {
+                    self.context_form.status = Some(Err("pick a context first".into()));
+                    return Task::none();
+                };
+                match zenkey_fleet::context_store::load() {
+                    Ok(config) => match config.contexts.get(&name) {
+                        Some(stored) => {
+                            self.context_form.load_from(&name, stored);
+                            self.context_form.status = Some(Ok(format!("loaded {name}")));
+                        }
+                        None => {
+                            self.context_form.status =
+                                Some(Err(format!("{name} is no longer in the config")));
+                        }
+                    },
+                    Err(e) => self.context_form.status = Some(Err(e.to_string())),
+                }
+                Task::none()
+            }
+            ContextMsg::Save => {
+                self.save_context(false);
+                Task::none()
+            }
+            ContextMsg::SaveAndSelect => {
+                if !self.save_context(true) {
+                    return Task::none();
+                }
+                self.switch_to_form_context()
+            }
+            ContextMsg::Selected(name) => {
+                self.context_form.active = Some(name.clone());
+                match zenkey_fleet::context_store::load() {
+                    Ok(config) => match config.contexts.get(&name) {
+                        Some(stored) => {
+                            self.context_form.load_from(&name, stored);
+                            self.apply_context(stored.clone());
+                            self.prefs.context = Some(name.clone());
+                            self.prefs.save();
+                            self.context_form.status = Some(Ok(format!("switched to {name}")));
+                            return self.reopen_session();
+                        }
+                        None => {
+                            self.context_form.status =
+                                Some(Err(format!("{name} is no longer in the config")));
+                        }
+                    },
+                    Err(e) => self.context_form.status = Some(Err(e.to_string())),
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// Write the editor to the shared config. Returns whether it landed.
+    fn save_context(&mut self, select: bool) -> bool {
+        let stored = match self.context_form.to_stored() {
+            Ok(s) => s,
+            Err(e) => {
+                self.context_form.status = Some(Err(e));
+                return false;
+            }
+        };
+        let name = self.context_form.name.trim().to_string();
+        let mut config = match zenkey_fleet::context_store::load() {
+            Ok(c) => c,
+            Err(e) => {
+                self.context_form.status = Some(Err(e.to_string()));
+                return false;
+            }
+        };
+        config.contexts.insert(name.clone(), stored);
+        if select {
+            config.current = Some(name.clone());
+        }
+        if let Err(e) = zenkey_fleet::context_store::save(&config) {
+            self.context_form.status = Some(Err(e.to_string()));
+            return false;
+        }
+        self.refresh_contexts();
+        self.context_form.active = Some(name.clone());
+        self.context_form.status = Some(Ok(format!(
+            "saved {name} to {}",
+            zenkey_fleet::context_store::config_path().display()
+        )));
+        true
+    }
+
+    /// Re-read the context names from the shared config.
+    fn refresh_contexts(&mut self) {
+        if let Ok(config) = zenkey_fleet::context_store::load() {
+            self.context_form.known = config.contexts.keys().cloned().collect();
+            if self.context_form.active.is_none() {
+                self.context_form.active = config.current.clone();
+            }
+        }
+    }
+
+    /// Layer a stored context over the live settings — the same precedence
+    /// `Cli::settings_with` applies, minus the flags, because a context picked
+    /// in-app *is* the explicit choice.
+    fn apply_context(&mut self, stored: zenkey_fleet::StoredContext) {
+        self.settings.base = stored.base.unwrap_or_default();
+        self.settings.connect = stored.connect;
+        self.settings.listen = stored.listen;
+        self.settings.scouting = stored.scouting.unwrap_or(false);
+        if !stored.registry.is_empty() {
+            self.settings.registry = stored.registry;
+        }
+        if let Some(t) = stored.timeout {
+            self.settings.timeout_secs = t;
+        }
+    }
+
+    fn switch_to_form_context(&mut self) -> Task<Message> {
+        let stored = match self.context_form.to_stored() {
+            Ok(s) => s,
+            Err(e) => {
+                self.context_form.status = Some(Err(e));
+                return Task::none();
+            }
+        };
+        self.apply_context(stored);
+        self.prefs.context = Some(self.context_form.name.trim().to_string());
+        self.prefs.save();
+        self.reopen_session()
+    }
+
+    /// Tear the link down and build a new one on the current settings.
+    ///
+    /// The epoch bump the subscription machinery already does on
+    /// `MonitorStarted` is what retires the old pump; nothing here has to
+    /// coordinate with it.
+    fn reopen_session(&mut self) -> Task<Message> {
+        self.link = LinkState::Connecting;
+        self.monitor = None;
+        self.session = None;
+        let connect = self.settings.connect.clone();
+        let listen = self.settings.listen.clone();
+        let scouting = self.settings.scouting;
+        Task::perform(
+            async move {
+                zenkey_fleet::session::open(&connect, &listen, scouting)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            Message::ContextSwitched,
+        )
     }
 
     /// The echo pane (#72). Every action here is a *view* action: nothing
@@ -1406,6 +1616,8 @@ impl Zengui {
                     detail: &self.node_detail,
                 }),
                 RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
+                RightPane::Connect =>
+                    view::contexts::pane(&self.context_form, self.settings.is_unreachable(),),
             })
             .width(Length::FillPortion(1))
             .height(Length::Fill),

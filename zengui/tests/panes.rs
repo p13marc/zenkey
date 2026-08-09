@@ -798,3 +798,42 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         "an unreadable prefs file must not look like a reset"
     );
 }
+
+/// The connection pane (#67) explains scouting rather than labelling it, and
+/// carries RFC 09 §0.1's actual semantics: two independent switches, and the
+/// reading of an empty result under an isolated session.
+#[test]
+fn the_connect_pane_states_what_scouting_means() {
+    use zengui::view::contexts::{ContextForm, pane};
+
+    let form = ContextForm {
+        known: vec!["lab".into(), "prod".into()],
+        active: Some("lab".into()),
+        ..ContextForm::default()
+    };
+    let mut ui = simulator::<Message, _, _>(pane(&form, false));
+    assert!(
+        ui.find(
+            "RFC 09 §0.1: multicast scouting and gossip are independent. This toggle is \
+             the multicast half only — with it off, a peer still learns about others \
+             through gossip over an established link."
+        )
+        .is_ok(),
+        "the two-switch distinction must be on screen, not just in the RFC"
+    );
+    assert!(
+        ui.find(
+            "Contexts are shared with zenctl — one file, two explorers \
+             (~/.config/zenkey-explorer/config.toml)."
+        )
+        .is_ok(),
+        "the shared store is the feature; say so"
+    );
+
+    // A session that reaches nothing is called out where the fix is.
+    let mut ui = simulator::<Message, _, _>(pane(&form, true));
+    assert!(
+        ui.find("this session has no endpoints and multicast scouting is off — it reaches nothing")
+            .is_ok()
+    );
+}

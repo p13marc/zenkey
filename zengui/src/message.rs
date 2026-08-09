@@ -88,6 +88,10 @@ pub enum Message {
     TreeScrolled(f32, f32),
     /// Echo pane interactions (issue #72, echo v2).
     Echo(crate::view::echo::EchoMsg),
+    /// Connection pane interactions (issue #67).
+    Context(crate::view::contexts::ContextMsg),
+    /// A context switch finished re-opening the session.
+    ContextSwitched(Result<zenoh::Session, String>),
     /// Switch the right-hand pane (the toolbar's tab strip).
     PaneSelected(RightPane),
     Reconnect,
@@ -130,18 +134,21 @@ pub enum RightPane {
     Detail,
     Nodes,
     Doctor,
+    /// Contexts and endpoints (issue #67).
+    Connect,
 }
 
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 6] = [
+    pub const ALL: [RightPane; 7] = [
         RightPane::Echo,
         RightPane::Call,
         RightPane::Publish,
         RightPane::Detail,
         RightPane::Nodes,
         RightPane::Doctor,
+        RightPane::Connect,
     ];
 
     pub fn label(self) -> &'static str {
@@ -152,6 +159,7 @@ impl RightPane {
             RightPane::Detail => "detail",
             RightPane::Nodes => "nodes",
             RightPane::Doctor => "doctor",
+            RightPane::Connect => "connect",
         }
     }
 }
