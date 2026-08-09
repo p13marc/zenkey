@@ -63,6 +63,10 @@ pub fn topic_list(
                 path: s.path.clone(),
                 type_name: s.type_name.clone(),
                 open_ended: s.path.contains("..."),
+                since: s.since.clone(),
+                deprecated: false,
+                deprecated_since: None,
+                replaced_by: None,
             });
         }
     }

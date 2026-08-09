@@ -22,6 +22,19 @@ pub struct TopicRow {
     /// Trailing `{var...}` family: the registry fixes the shape, not the
     /// members.
     pub open_ended: bool,
+    /// Registry version the subject first appeared in, when declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// A retired subject (from the slice's `[[deprecated]]` ledger, RFC 08
+    /// §6) — rendered only under `topic list --deprecated`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub deprecated: bool,
+    /// When it was retired, if the ledger says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated_since: Option<String>,
+    /// The declared replacement subject, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -222,10 +235,29 @@ pub struct InterfaceShow {
     pub carriers: Vec<CarrierRow>,
 }
 
+/// One producer on one origin — row-shaped so a `--watch` loop can diff it
+/// and a GUI can select it (`origin/producer` is the stable row identity).
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeRow {
+    pub origin: String,
+    /// Live producer name (from the liveliness token; zero payload).
+    pub producer: String,
+    /// The producing app, when a registry slice joined (`--verbose`).
+    /// `None` = not asked / no slice — never a default (O4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// Registry version from the joined slice, same provenance rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_version: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct NodeList {
-    /// origin → live producer names (from liveliness tokens; zero payload).
-    pub origins: BTreeMap<String, Vec<String>>,
+    pub nodes: Vec<NodeRow>,
+    /// Whether a slice join was even attempted (`--verbose`) — keeps "asked,
+    /// no slice served" distinguishable from "not asked" in rows whose
+    /// `app`/`registry_version` are `None` (O4).
+    pub slices_joined: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -81,7 +81,7 @@ pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
 
 pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
-    let mut roster = bus::roster(&session, args.base(), args.timeout()).await?;
+    let roster = bus::roster(&session, args.base(), args.timeout()).await?;
 
     if roster.is_empty() {
         eprintln!(
@@ -90,21 +90,40 @@ pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
             zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet())
         );
     }
-    if verbose {
-        let slices = args.slice_set().await?;
-        for producers in roster.values_mut() {
-            for p in producers.iter_mut() {
+    let slices = if verbose {
+        Some(args.slice_set().await?)
+    } else {
+        None
+    };
+    output::node_list(&node_rows(&roster, slices.as_ref()), args.format)
+}
+
+/// Roster → typed rows, joining the slice facts when given (`--verbose`).
+/// Absent slice = `None` fields, never a default (O4).
+pub fn node_rows(
+    roster: &std::collections::BTreeMap<String, Vec<String>>,
+    slices: Option<&zenkey_fleet::SliceSet>,
+) -> report::NodeList {
+    let mut nodes = Vec::new();
+    for (origin, producers) in roster {
+        for producer in producers {
+            let joined = slices.and_then(|s| {
                 // Instance suffixes share the base slice (RFC 03 §1.5).
-                let base_name = zenkey::grammar::Producer::parse_chunk(p)
+                let base_name = zenkey::grammar::Producer::parse_chunk(producer)
                     .map(|pr| pr.name().to_string())
-                    .unwrap_or_else(|_| p.clone());
-                if let Some(slice) = slices.get(&base_name) {
-                    *p = format!("{p}  (app {}, registry {})", slice.app, slice.version);
-                } else {
-                    *p = format!("{p}  (no served slice)");
-                }
-            }
+                    .unwrap_or_else(|_| producer.clone());
+                s.get(&base_name)
+            });
+            nodes.push(report::NodeRow {
+                origin: origin.clone(),
+                producer: producer.clone(),
+                app: joined.map(|s| s.app.clone()),
+                registry_version: joined.map(|s| s.version.clone()),
+            });
         }
     }
-    output::node_list(&report::NodeList { origins: roster }, args.format)
+    report::NodeList {
+        nodes,
+        slices_joined: slices.is_some(),
+    }
 }
