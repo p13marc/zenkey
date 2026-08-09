@@ -21,9 +21,9 @@ path = "src/main.rs"
 
 [dependencies]
 zenkey = { workspace = true }
-# Same codec matrix as zenctl (#97) — the two explorers must not disagree
-# about which payloads they can read.
-zenkey-fleet = { workspace = true, features = ["decode-protobuf"] }
+# Same codec matrix as zenctl (#97, #98) — the two explorers must not
+# disagree about which payloads they can read.
+zenkey-fleet = { workspace = true, features = ["decode-protobuf", "decode-cdr"] }
 
 zenoh = { workspace = true }
 iced = { workspace = true }

@@ -30,6 +30,9 @@ schemars = ["schema", "dep:schemars"]
 decode = ["schema", "dep:ciborium"]
 # Protobuf decode via a served FileDescriptorSet (prost-reflect DynamicMessage).
 decode-protobuf = ["decode", "dep:prost-reflect", "dep:prost"]
+# XCDR1 (DDS / ROS 2) decode+encode against a served `cdr` field list. Pure
+# Rust, no extra dependency — the schema document is JSON like every other.
+decode-cdr = ["decode"]
 
 [dependencies]
 zenoh = { workspace = true, optional = true }

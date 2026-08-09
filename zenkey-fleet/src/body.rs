@@ -100,6 +100,7 @@ pub fn encode_encoding(
     schema.and_then(|s| match s.kind().as_str() {
         SchemaKind::JSON_SCHEMA => Some("application/json".to_string()),
         SchemaKind::PROTOBUF => Some("application/protobuf".to_string()),
+        SchemaKind::CDR => Some("application/cdr".to_string()),
         // An unknown kind's native framing is exactly what this tool does not
         // know. Saying nothing beats naming the wrong one.
         _ => None,

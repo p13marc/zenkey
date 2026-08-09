@@ -1,5 +1,5 @@
-//! The publish→decode round trip through a non-self-describing codec
-//! (issue #97), against real zenoh.
+//! The publish→decode round trip through the non-self-describing codecs
+//! (issues #97, #98), against real zenoh.
 //!
 //! This is the test the old design could not have passed: `topic pub` encoded
 //! the body against the served schema purely to *validate* it and then put the
@@ -26,6 +26,7 @@ use zenkey_fleet::{BodySource, PrepareMode, SliceSet, decode::SchemaStore};
 const ORIGIN: &str = "h-aaaaaaaaaaaa";
 const PRODUCER: &str = "sysinfo";
 const SUBJECT_KEY: &str = "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/blob";
+const TWIST_KEY: &str = "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/twist";
 
 async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
     let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
@@ -84,11 +85,38 @@ type = "Blob"
 encoding = "application/protobuf"
 since = "1.0"
 description = "a protobuf-carrying subject"
+
+[[subject]]
+path = "twist"
+class = "telemetry"
+type = "Twist"
+encoding = "application/cdr"
+since = "1.0"
+description = "a CDR-carrying subject (DDS / ROS 2 shaped)"
 "#;
+
+/// `geometry_msgs/Twist`, in the served `cdr` document form (#98).
+fn twist_schema() -> TypeSchema {
+    TypeSchema::cdr(serde_json::json!({
+        "fields": [
+            {"name": "linear",  "type": "Vector3"},
+            {"name": "angular", "type": "Vector3"}
+        ],
+        "types": {
+            "Vector3": { "fields": [
+                {"name": "x", "type": "float64"},
+                {"name": "y", "type": "float64"},
+                {"name": "z", "type": "float64"}
+            ]}
+        },
+        "source": {"language": "ros2msg", "text": "Vector3 linear\nVector3 angular\n"}
+    }))
+}
 
 fn schema_set_json() -> String {
     SchemaSet::builder("t")
         .entry("Blob", TypeSchema::protobuf("t.Blob", &descriptor_set()))
+        .entry("Twist", twist_schema())
         .build()
         .to_json()
 }
@@ -344,5 +372,65 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
     assert!(
         !note.contains("not a registered subject"),
         "\"not asked\" must not render as \"unregistered\": {note}"
+    );
+}
+
+/// #98's acceptance, over #97's path: a `cdr`-declaring subject ships CDR
+/// bytes and round-trips. The codec seam is the same one protobuf uses —
+/// registering a kind is all it took, which is the claim the amendment makes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
+    let (a, b) = peer_pair(7506).await;
+    let _producer = declare_producer(&a).await;
+    let store = connected_store(&b).await;
+    let slices = slices();
+    let typed = br#"{"linear": {"x": 1.0, "y": 0.0, "z": 0.0},
+                     "angular": {"x": 0.0, "y": 0.0, "z": 0.5}}"#;
+
+    let prepared = zenkey_fleet::prepare_publish(
+        &b,
+        &store,
+        Some(&slices),
+        "",
+        TWIST_KEY,
+        None,
+        typed,
+        PrepareMode::Encode,
+    )
+    .await
+    .expect("prepare");
+
+    assert_eq!(
+        prepared.source,
+        BodySource::Encoded {
+            type_name: "Twist".into()
+        }
+    );
+    assert_eq!(prepared.encoding.as_deref(), Some("application/cdr"));
+    // 4-byte little-endian encapsulation header, then six naturally-aligned
+    // f64s. Nothing about the operator's JSON survives.
+    assert_eq!(prepared.bytes.len(), 4 + 6 * 8);
+    assert_eq!(&prepared.bytes[..4], &[0x00, 0x01, 0x00, 0x00]);
+
+    let (type_name, rendering) = zenkey_fleet::decode::decode_sample(
+        &store,
+        &b,
+        &slices,
+        "",
+        TWIST_KEY,
+        Some("application/cdr"),
+        &prepared.bytes,
+    )
+    .await;
+    assert_eq!(type_name.as_deref(), Some("Twist"));
+    let zenkey_fleet::decode::Rendering::Typed(decoded) = rendering else {
+        panic!("a served cdr schema must decode, not fall back to structure");
+    };
+    assert_eq!(
+        decoded.value,
+        serde_json::json!({
+            "linear":  {"x": 1.0, "y": 0.0, "z": 0.0},
+            "angular": {"x": 0.0, "y": 0.0, "z": 0.5}
+        })
     );
 }

@@ -15,6 +15,7 @@ authors.workspace = true
 default = ["decode"]
 decode = ["zenkey/decode"]
 decode-protobuf = ["zenkey/decode-protobuf"]
+decode-cdr = ["zenkey/decode-cdr"]
 
 [dependencies]
 zenkey = { workspace = true, features = ["schema"] }
@@ -39,4 +40,4 @@ prost-reflect = { workspace = true }
 # protobuf decoder on for *this crate's tests* without touching what the
 # library ships. `cargo test -p zenkey-fleet` then covers `tests/codec.rs`
 # on its own, instead of only when a frontend happens to unify the feature in.
-zenkey = { workspace = true, features = ["decode-protobuf"] }
+zenkey = { workspace = true, features = ["decode-protobuf", "decode-cdr"] }

@@ -1,9 +1,47 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.9 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.10 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.10 (2026-08-09, the codec amendment)** — [08 §7](08-registry.md) has
+> called its schema-kind vocabulary "open" since v1.5 and then registered
+> exactly the two kinds this project already needed. An open vocabulary nobody
+> has ever extended is indistinguishable from a closed one with good manners,
+> so this amendment extends it — with **`cdr`**, the DDS / ROS 2 framing, which
+> is the honest test case: non-self-describing, no descriptor format of its
+> own, and from a neighbouring ecosystem rather than this one. It fits without
+> a grammar change, a wire change, or a new required field, which is the claim
+> §7 was making.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **K1** | [08 §7.1](08-registry.md) *(new)* | **The `cdr` kind.** A served entry carries a **compact JSON field list** in wire order (`fields`), an optional local type table (`types`), and the `.msg`/IDL source text **informatively** (`source`, excluded from the hash — two producers generating one message from `.msg` and from IDL agree, and drift detection must not call that a disagreement). Framing is XCDR1 `PLAIN_CDR`: the 4-byte encapsulation header, primitives at natural alignment relative to the body, `string` counting its NUL terminator, `sequence` counting its elements. Decoders accept both endiannesses; encoders emit little-endian, which makes decode∘encode byte-identical and therefore *testable* rather than merely plausible. |
+> | **K2** | [08 §7](08-registry.md) | **Writing is the read ladder backwards.** A tool publishing a registered subject MUST encode through the served schema before the wire and set the `Encoding` it encoded for, resolving **declared > registry > the kind's own encoding** — pointedly *not* sample-then-sniff, which is the decode rule and makes no sense outbound: an outgoing body has no wire bytes to sniff, and the operator types JSON whatever the subject carries. A tool that could not encode MUST say so rather than publish the unencoded body silently ([09 §5.1](09-operations.md) O4, applied to a write for the first time). |
+>
+> **Why the field list and not IDL or `.msg` text.** Both alternatives were
+> real candidates — IDL is canonical for DDS, `.msg` is what a ROS 2 author
+> actually wrote — and both were rejected for the same reason: they would have
+> required a *second* canonicalization story for the hash, next to the JCS one
+> `json-schema` already uses, and a text parser in the decode path. The field
+> list hashes like every other JSON document here, and a producer-side
+> generator can emit it from either source language. The source text is kept
+> so nothing is lost, and kept out of the hash so nothing is falsely gained.
+>
+> **What did *not* change.** No grammar, no key shapes, no registry TOML
+> format, no new required field anywhere; §7's totality clause and the
+> hash/drift machinery are untouched. The forward-compat clause did the work:
+> a consumer built before this amendment skips `cdr` and keeps the rest of the
+> set, which is pinned as a test rather than asserted. XCDR2, appendable type
+> evolution, further codec kinds, and any ROS 2 *topic-name* mapping are
+> explicitly out of scope, each with its revisit trigger recorded in §7.1.
+>
+> **Provenance.** The owner directive of 2026-08-09 — the explorers publish
+> data, not only supervision traffic, and encode/decode is automatic across
+> codecs — which also produced K2: the write half was specified nowhere,
+> and the shipped tools had quietly been validating bodies by encoding them
+> and then publishing the *unencoded* text.
 
 > **v1.9 (2026-08-08, the observer amendment)** — every amendment so far
 > specified what *publishers* and *consumers* owe the bus. This one specifies

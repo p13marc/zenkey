@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2 — see [00-index.md](00-index.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.5, v1.8 and v1.10 — see [00-index.md](00-index.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -227,7 +227,7 @@ Normative field table (`[[subject]]`; `[[procedure]]`/`[[media]]` analogous):
 | `detect_s` | integer | no (live `state` only; default = `ttl_s`) | max latency to detect a missed transition; values ≪ `ttl_s` require the advanced tier ([04-planes.md §3.3](04-planes.md)) |
 | `replay` | `none` \| `window(t)` | `events` only | how far back events must stay queryable (met by the events storage) |
 | `delivery` | `full` (default) \| `invalidate` | no | oversized-state pattern ([04-planes.md §1.2](04-planes.md)) |
-| `encoding` | MIME-ish string (`application/cbor`, `application/json`, `application/protobuf`) | no (RECOMMENDED, v1.5) | the payload encoding a consumer should expect; resolution order is sample `Encoding` > this field > sniff ([04-planes.md §3](04-planes.md), §7) |
+| `encoding` | MIME-ish string (`application/cbor`, `application/json`, `application/protobuf`, `application/cdr`) | no (RECOMMENDED, v1.5) | the payload encoding a consumer should expect; resolution order is sample `Encoding` > this field > sniff on read, and declared > this field > the schema kind's own on write ([04-planes.md §3](04-planes.md), §7) |
 | `since` / `gone` / `replaced_by` | registry versions / path | `since` yes | lifecycle (§3) |
 | `description` | string | yes | one line, human |
 
@@ -634,14 +634,17 @@ Normative points:
   is a lie.
 - **Kinds are an open vocabulary.** This RFC registers `json-schema`
   (JSON Schema draft 2020-12; describes the *data model*, so it covers
-  both JSON and CBOR framings of the same serde model) and `protobuf`
+  both JSON and CBOR framings of the same serde model), `protobuf`
   (a base64 `FileDescriptorSet` plus the fully-qualified `message` name —
-  exactly what a dynamic-message decoder needs). A consumer MUST skip an
+  exactly what a dynamic-message decoder needs), and — since v1.10 —
+  `cdr` (§7.1). A consumer MUST skip an
   unknown `kind` without discarding the rest of the set, and MUST ignore
   unknown fields (the same forward-compat posture as the slice parser,
-  §6).
+  §6). Registering a kind is therefore always **additive**: this clause is
+  what makes it so, and v1.10 is the first amendment to exercise it.
 - **Hash.** `hash` is `sha256:` over the schema's canonical bytes (JCS
-  for JSON documents; the raw descriptor bytes for protobuf). It exists
+  for JSON documents; the raw descriptor bytes for protobuf; for `cdr`,
+  JCS over the `fields`/`types` object alone — §7.1). It exists
   for client caching and for drift detection (two producers serving the
   same type name with different hashes is a `doctor` finding).
 - **No per-sample schema ids.** Evolution stays additive-only under one
@@ -656,10 +659,19 @@ Normative points:
   design).
 - **Encoding is a separate axis.** Producers SHOULD set the middleware
   `Encoding` on every sample (`application/cbor`, `application/json`,
-  `application/protobuf` — the predefined constants); the registry MAY
+  `application/protobuf`, `application/cdr`); the registry MAY
   declare a per-entry `encoding` (§2). Consumers resolve
   **sample > registry > sniff**, and the first-byte sniff remains the
   honest last resort — mixed fleets keep working.
+- **Writing is the same ladder read backwards (v1.10).** A tool that
+  *publishes* a registered subject MUST encode the body through the same
+  served schema before it reaches the wire, and set the `Encoding` it
+  encoded for. Its resolution order is **declared > registry > the schema
+  kind's own encoding** — deliberately *not* sample-then-sniff, because an
+  outgoing body has no wire bytes to sniff and the operator's text says
+  nothing about the subject. A tool that could not encode MUST say so
+  rather than publish the unencoded body silently ([09 §5.1](09-operations.md)
+  O4 applied to a write).
 
 The decode contract for a generic tool is then mechanical: wire key →
 structural parse → slice refine → type name (+ encoding) → SchemaSet
@@ -667,3 +679,69 @@ lookup (fetch `describe` on first miss, cache by hash) → decode into
 named fields. A tool that cannot resolve a schema falls back to what it
 could always do — structural rendering tagged with the declared type
 name, or an honest `<undecoded TypeName: N bytes>`.
+
+### 7.1 The `cdr` kind (v1.10)
+
+*The gap this closes: §7 declared kinds an open vocabulary and then
+registered exactly the two this project already needed. DDS and ROS 2
+speak CDR, a non-self-describing framing with no descriptor format of its
+own — so it is the case that tests whether "open vocabulary" was a design
+or a slogan. Registering it required no grammar change, no new required
+field, and no consumer change: an older reader already skips it by the
+clause above.*
+
+A `cdr` entry carries a **compact JSON field list**, and the `.msg`/IDL
+source text informatively alongside:
+
+```json
+"Twist": {
+  "kind": "cdr",
+  "hash": "sha256:1f4c…",
+  "fields": [ {"name": "linear",  "type": "Vector3"},
+              {"name": "angular", "type": "Vector3"} ],
+  "types":  { "Vector3": { "fields": [ {"name": "x", "type": "float64"},
+                                       {"name": "y", "type": "float64"},
+                                       {"name": "z", "type": "float64"} ] } },
+  "source": { "language": "ros2msg", "text": "Vector3 linear\nVector3 angular\n" }
+}
+```
+
+- **`fields`** (REQUIRED) is the message's members **in wire order** —
+  CDR is positional, so the order is the schema.
+- A field's `type` is a primitive name (`bool`, `int8`…`uint64`,
+  `float32`, `float64`, `string`), a key into **`types`** (OPTIONAL, the
+  local type table), or one of the two composite forms
+  `{"array": {"of": <type>, "len": N}}` and
+  `{"sequence": {"of": <type>, "bound": N?}}`. IDL spellings (`octet`,
+  `unsigned long`, `double`, …) are accepted as aliases.
+- **`source`** (OPTIONAL) is `{language, text}` and is **informative**:
+  it does not participate in the hash. Two producers generating the same
+  message from `.msg` and from IDL describe the same wire format, and
+  drift detection MUST NOT call that a disagreement.
+- **`hash`** is `sha256:` over the JCS serialization of
+  `{"fields": …, "types": …}` — the same canonicalization
+  `json-schema` uses, which is the reason this form was chosen over
+  serving IDL or `.msg` text (there is no second canonicalization story
+  to specify, and none to get wrong).
+- The framing is **XCDR1** (`PLAIN_CDR`): the 4-byte RTPS encapsulation
+  header, primitives at natural alignment relative to the start of the
+  body, `string` as a `uint32` length **including** its NUL terminator,
+  `sequence` as a `uint32` count then its elements, fixed `array` as
+  elements alone. A decoder MUST accept both endiannesses; an encoder
+  SHOULD emit the little-endian encapsulation, so that decode∘encode is
+  byte-identical and a round trip is testable rather than merely
+  plausible.
+- The middleware `Encoding` is `application/cdr`.
+
+**Out of scope, recorded.** XCDR2 and appendable/mutable type evolution
+(they change the framing, and the revisit trigger is a real peer that
+speaks them); `flatbuffers`/`messagepack` kinds (the same seam — file one
+when something serves it); and a ROS 2 **topic-name** bridge, which is a
+keyspace mapping question and not a payload-codec one.
+
+**Not registered by guesswork.** Only `application/cdr` (with
+`application/x-cdr` accepted) maps to this kind. Additional bridge
+spellings are added when one is *observed*, not when it is imagined:
+mapping a guessed media type to a codec is how a tool ends up confidently
+decoding the wrong bytes, and an unrecognised encoding already renders
+honestly.

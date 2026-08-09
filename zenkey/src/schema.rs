@@ -9,11 +9,14 @@
 //!
 //! Kinds are an **open vocabulary**: this crate registers `json-schema`
 //! (describes the serde data model, so it covers both JSON and CBOR
-//! framings) and `protobuf` (a base64 `FileDescriptorSet` + message name).
+//! framings), `protobuf` (a base64 `FileDescriptorSet` + message name), and
+//! `cdr` (a compact field list for the DDS / ROS 2 framing, v1.10).
 //! Parsing is tolerant exactly like the slice parser: unknown kinds are
 //! retained-but-opaque, unknown fields ignored — one exotic type must not
 //! blind a tool to the rest of the set.
 
+#[cfg(feature = "decode-cdr")]
+pub mod cdr;
 #[cfg(feature = "decode")]
 pub mod decode;
 
@@ -34,6 +37,9 @@ impl SchemaKind {
     pub const JSON_SCHEMA: &str = "json-schema";
     /// A base64 `FileDescriptorSet` plus a fully-qualified `message` name.
     pub const PROTOBUF: &str = "protobuf";
+    /// A compact JSON field list describing an XCDR1 message (DDS / ROS 2),
+    /// with the `.msg`/IDL source text carried informatively (v1.10).
+    pub const CDR: &str = "cdr";
 
     pub fn new(kind: impl Into<String>) -> Self {
         SchemaKind(kind.into())
@@ -70,17 +76,25 @@ pub enum WireEncoding {
     Json,
     Cbor,
     Protobuf,
+    /// OMG CDR, the DDS / ROS 2 framing (v1.10).
+    Cdr,
     /// Anything else — carried verbatim, decoded only by sniff.
     Other(String),
 }
 
 impl WireEncoding {
     /// Map a middleware/registry encoding string (`application/cbor`, …).
+    ///
+    /// The alias sets are deliberately short. A spelling is listed once it has
+    /// been *seen*, not once it has been imagined: mapping a guessed media
+    /// type to a codec is how a tool ends up confidently decoding the wrong
+    /// bytes, and `Other` already renders honestly.
     pub fn from_encoding_str(s: &str) -> WireEncoding {
         match s {
             "application/json" | "text/json" => WireEncoding::Json,
             "application/cbor" => WireEncoding::Cbor,
             "application/protobuf" | "application/x-protobuf" => WireEncoding::Protobuf,
+            "application/cdr" | "application/x-cdr" => WireEncoding::Cdr,
             other => WireEncoding::Other(other.to_string()),
         }
     }
@@ -163,6 +177,34 @@ impl TypeSchema {
         }
     }
 
+    /// A `cdr` entry (v1.10) from its document: `fields` (required), `types`
+    /// (optional local type table), and `source` (optional, informative).
+    ///
+    /// The hash covers **`fields` and `types` only**. The source text is the
+    /// human's copy of the schema, not the schema: two producers generating
+    /// the same message from `.msg` and from IDL describe the same wire
+    /// format, and drift detection must not call that a disagreement.
+    pub fn cdr(document: Value) -> TypeSchema {
+        let mut hashed = serde_json::Map::new();
+        for key in ["fields", "types"] {
+            if let Some(v) = document.get(key) {
+                hashed.insert(key.to_string(), v.clone());
+            }
+        }
+        let hash = hash_value(&Value::Object(hashed));
+        let mut body = BTreeMap::new();
+        if let Some(obj) = document.as_object() {
+            for (k, v) in obj {
+                body.insert(k.clone(), v.clone());
+            }
+        }
+        TypeSchema {
+            kind: SchemaKind::new(SchemaKind::CDR),
+            hash,
+            body,
+        }
+    }
+
     pub fn kind(&self) -> &SchemaKind {
         &self.kind
     }
@@ -183,6 +225,21 @@ impl TypeSchema {
     pub fn protobuf_message(&self) -> Option<&str> {
         (self.kind == SchemaKind::PROTOBUF)
             .then(|| self.body.get("message").and_then(Value::as_str))
+            .flatten()
+    }
+
+    /// The ordered field list, when this is a `cdr` entry.
+    pub fn cdr_fields(&self) -> Option<&Value> {
+        (self.kind == SchemaKind::CDR)
+            .then(|| self.body.get("fields"))
+            .flatten()
+    }
+
+    /// The local type table of a `cdr` entry (absent when the message uses
+    /// primitives only).
+    pub fn cdr_types(&self) -> Option<&serde_json::Map<String, Value>> {
+        (self.kind == SchemaKind::CDR)
+            .then(|| self.body.get("types").and_then(Value::as_object))
             .flatten()
     }
 
@@ -434,6 +491,30 @@ mod tests {
         assert_ne!(a.hash(), c.hash());
     }
 
+    /// RFC 08 §7's own forward-compat rule, applied to the kind this
+    /// amendment adds: a consumer built before `cdr` existed (or with the
+    /// feature off) must skip it and keep the rest of the set. The `cdr`
+    /// entry is *retained*, not dropped — a tool can still name the type it
+    /// cannot decode, which is what makes the gap reportable.
+    #[test]
+    fn an_older_consumer_skips_cdr_without_losing_the_set() {
+        let json = r#"{
+            "schema_version": 1,
+            "app": "ros",
+            "types": {
+                "Twist": { "kind": "cdr", "hash": "sha256:aa",
+                           "fields": [{"name": "x", "type": "float64"}] },
+                "Health": { "kind": "json-schema", "hash": "sha256:bb", "schema": {} }
+            }
+        }"#;
+        let set = SchemaSet::parse(json).unwrap();
+        assert_eq!(set.len(), 2, "the unknown kind must not blind us to Health");
+        assert!(set.get("Health").unwrap().json_document().is_some());
+        assert_eq!(set.get("Twist").unwrap().kind(), &SchemaKind::CDR);
+        // Round-tripping preserves the entry verbatim, feature or no feature.
+        assert_eq!(SchemaSet::parse(&set.to_json()).unwrap(), set);
+    }
+
     #[test]
     fn unknown_kinds_are_retained_not_fatal() {
         let json = r#"{
@@ -495,6 +576,10 @@ mod tests {
         assert_eq!(
             WireEncoding::from_encoding_str("application/json"),
             WireEncoding::Json
+        );
+        assert_eq!(
+            WireEncoding::from_encoding_str("application/cdr"),
+            WireEncoding::Cdr
         );
         assert_eq!(
             WireEncoding::from_encoding_str("video/h264"),
