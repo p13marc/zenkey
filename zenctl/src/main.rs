@@ -59,6 +59,22 @@ enum Command {
     /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
+    /// Dump a producer's served payload schemas (`@rpc/<producer>/describe`).
+    ///
+    /// RFC 08 §7: the shapes are served data. A producer that serves no
+    /// `describe` degrades honestly — it is not an error.
+    Schema {
+        /// Producer name, e.g. `sysinfo`.
+        producer: String,
+        /// Show only this type (implies the full document).
+        #[arg(long = "type", value_name = "TYPE")]
+        type_name: Option<String>,
+        /// Print every schema document in full, not just kind + hash.
+        #[arg(long)]
+        full: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Zenoh admin space (`@/**`) — the middleware's own introspection.
     #[command(subcommand)]
     Admin(AdminCmd),
@@ -436,6 +452,13 @@ enum InterfaceCmd {
     Show {
         /// Type name, e.g. `TelemetryPoint`.
         type_name: String,
+        /// Also fetch the served schema from every producer that carries it
+        /// (RFC 08 §7). Disagreeing hashes are reported as drift.
+        #[arg(long)]
+        schema: bool,
+        /// With --schema, print each schema document in full.
+        #[arg(long)]
+        full: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -814,11 +837,32 @@ async fn main() -> Result<()> {
             let report = offline::interface_list(&slices)?;
             output::interface_list(&report, bus.format)
         }
-        Command::Interface(InterfaceCmd::Show { type_name, bus }) => {
+        Command::Interface(InterfaceCmd::Show {
+            type_name,
+            schema,
+            full,
+            bus,
+        }) => {
             let slices = bus.slices().await?;
-            let report = offline::interface_show(&slices, &type_name)?;
+            let mut report = offline::interface_show(&slices, &type_name)?;
+            if schema {
+                // Only the producers that carry the type are asked — the
+                // registry already says who, so this is never a fleet fan-out.
+                let producers = cmd::schema::carriers_of(&slices, &type_name);
+                let session = bus.session().await?;
+                let store = zenkey_fleet::decode::SchemaStore::new(bus.base(), bus.timeout());
+                report.schemas =
+                    zenkey_fleet::schemas_for_type(&store, &session, &producers, &type_name, full)
+                        .await;
+            }
             output::interface_show(&report, bus.format)
         }
+        Command::Schema {
+            producer,
+            type_name,
+            full,
+            bus,
+        } => cmd::schema::dump(&producer, type_name.as_deref(), full, &bus).await,
         Command::Context(cmd) => match cmd {
             ContextCmd::Create {
                 name,

@@ -54,7 +54,7 @@ subject   disk/{mount}/usage_percent
 variables
   mount = root
 payload   TelemetryPoint
-  (schema lives with the owning application — RFC 08 §5)
+  (`zenctl schema sysinfo --type TelemetryPoint` for the served shape)
 qos       sampled
 cardinality  ~512 keys expected
 ```
@@ -152,9 +152,13 @@ round trip, without SSH.
 - **Scouting is off by default.** A scouting explorer joins whatever mesh it can
   find, which is how a throwaway session ends up talking to a production fleet.
   `--scouting` is opt-in, and you should mean it.
-- **Field-level payload schemas.** RFC 01 §5 keeps payload definitions with the
-  owning applications; `interface show` maps the type vocabulary rather than
-  pretending to reproduce the shapes.
+- **Payload schemas are shown, not invented.** RFC 01 §5 keeps payload
+  *definitions* with the owning applications, and this tool has no opinion
+  about their contents. But since RFC 08 §7, a producer **serves** its shapes
+  on `@rpc/<producer>/describe`, so `zenctl schema <producer>` and
+  `interface show --schema` print served data rather than sending you to
+  `curl`. (This bullet used to say the opposite; it predated §7.) A producer
+  serving no `describe` degrades honestly — "undescribed" is not "no shape".
 
 ## Fan-in discipline
 

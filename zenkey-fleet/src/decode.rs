@@ -66,22 +66,32 @@ impl SchemaStore {
         producer: &str,
         type_name: &str,
     ) -> Option<TypeSchema> {
+        self.set_for(session, producer)
+            .await
+            .and_then(|set| set.get(type_name).cloned())
+    }
+
+    /// The producer's **whole** served set, on the same fetch-and-cache path
+    /// as [`schema_for`](Self::schema_for) (issue #51: `zenctl schema
+    /// <producer>` dumps the inventory, and asking type-by-type would be a
+    /// different question than the one `describe` answers).
+    ///
+    /// `None` = the producer does not serve `describe` — an honest
+    /// degradation, never an error.
+    pub async fn set_for(&self, session: &Session, producer: &str) -> Option<SchemaSet> {
         {
             let sets = self.sets.lock().expect("store lock");
             if let Some((cached, asked)) = sets.get(producer) {
                 let expired = cached.is_none() && asked.elapsed() > NOT_SERVED_TTL;
                 if !expired {
-                    return cached.as_ref().and_then(|s| s.get(type_name).cloned());
+                    return cached.clone();
                 }
             }
         }
         let fetched = self.fetch(session, producer).await;
         let mut sets = self.sets.lock().expect("store lock");
-        let entry = sets.insert(producer.to_string(), (fetched, std::time::Instant::now()));
-        let _ = entry;
-        sets.get(producer)
-            .and_then(|(s, _)| s.as_ref())
-            .and_then(|s| s.get(type_name).cloned())
+        sets.insert(producer.to_string(), (fetched, std::time::Instant::now()));
+        sets.get(producer).and_then(|(s, _)| s.clone())
     }
 
     async fn fetch(&self, session: &Session, producer: &str) -> Option<SchemaSet> {
@@ -148,6 +158,141 @@ impl SchemaStore {
     ) -> Result<Vec<u8>, DecodeError> {
         self.decoders.encode(schema, value, target)
     }
+}
+
+/// The registry type names one producer's slice references — RFC 08 §7's
+/// totality set for that producer.
+fn referenced_types(slice: &zenkey::slice::RegistrySlice) -> Vec<String> {
+    let mut names: Vec<&str> = slice
+        .subjects
+        .iter()
+        .map(|s| s.type_name.as_str())
+        .filter(|t| !t.is_empty())
+        .collect();
+    for p in &slice.procedures {
+        names.extend(p.request.as_deref());
+        names.extend(p.reply.as_deref());
+    }
+    for b in &slice.blob {
+        names.extend(b.reference.as_deref());
+    }
+    names.sort_unstable();
+    names.dedup();
+    names.into_iter().map(str::to_string).collect()
+}
+
+/// One type's schema, as a report row.
+fn row(
+    producer: &str,
+    type_name: &str,
+    schema: &TypeSchema,
+    full: bool,
+) -> crate::report::SchemaRow {
+    crate::report::SchemaRow {
+        producer: producer.to_string(),
+        type_name: type_name.to_string(),
+        kind: schema.kind().as_str().to_string(),
+        hash: schema.hash().to_string(),
+        document: full.then(|| schema_document(schema)),
+    }
+}
+
+/// A schema's document in a renderable form. `json-schema` has one natively;
+/// every other kind is summarised structurally rather than faked — a codec
+/// this build cannot read still gets to say what it is.
+fn schema_document(schema: &TypeSchema) -> serde_json::Value {
+    if let Some(doc) = schema.json_document() {
+        return doc.clone();
+    }
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "kind".into(),
+        serde_json::Value::String(schema.kind().as_str().to_string()),
+    );
+    if let Some(m) = schema.protobuf_message() {
+        obj.insert("message".into(), serde_json::Value::String(m.to_string()));
+    }
+    if let Some(bytes) = schema.protobuf_descriptor_set() {
+        obj.insert(
+            "descriptor_set_bytes".into(),
+            serde_json::Value::from(bytes.len()),
+        );
+    }
+    if let Some(fields) = schema.cdr_fields() {
+        obj.insert("fields".into(), fields.clone());
+    }
+    if let Some(types) = schema.cdr_types() {
+        obj.insert("types".into(), serde_json::Value::Object(types.clone()));
+    }
+    serde_json::Value::Object(obj)
+}
+
+/// Dump one producer's served `describe` reply (issue #51), joined against
+/// its registry slice so the RFC 08 §7 totality gap is visible where the user
+/// is already looking.
+///
+/// A producer serving no `describe` yields `served: false` — the honest
+/// degradation, never an error: §7 is a SHOULD, and silence about a type is
+/// not a claim about it.
+pub async fn schema_dump(
+    store: &SchemaStore,
+    session: &Session,
+    slices: &SliceSet,
+    producer: &str,
+    type_filter: Option<&str>,
+    full: bool,
+) -> crate::report::SchemaDump {
+    let set = store.set_for(session, producer).await;
+    let Some(set) = set else {
+        return crate::report::SchemaDump {
+            producer: producer.to_string(),
+            served: false,
+            app: None,
+            types: Vec::new(),
+            missing: Vec::new(),
+        };
+    };
+    let types: Vec<crate::report::SchemaRow> = set
+        .iter()
+        .filter(|(name, _)| type_filter.is_none_or(|f| f == *name))
+        .map(|(name, schema)| row(producer, name, schema, full || type_filter.is_some()))
+        .collect();
+    let missing = slices
+        .get(producer)
+        .map(|slice| {
+            referenced_types(slice)
+                .into_iter()
+                .filter(|n| set.get(n).is_none())
+                .collect()
+        })
+        .unwrap_or_default();
+    crate::report::SchemaDump {
+        producer: producer.to_string(),
+        served: true,
+        app: Some(set.app().to_string()),
+        types,
+        missing,
+    }
+}
+
+/// Every producer's schema for one type name (issue #51's `interface show
+/// --schema`). Asking all of them is the point: same name, different hash is
+/// RFC 08 §7's drift finding, and the type's own page is where it is worth
+/// seeing.
+pub async fn schemas_for_type(
+    store: &SchemaStore,
+    session: &Session,
+    producers: &[String],
+    type_name: &str,
+    full: bool,
+) -> Vec<crate::report::SchemaRow> {
+    let mut out = Vec::new();
+    for producer in producers {
+        if let Some(schema) = store.schema_for(session, producer, type_name).await {
+            out.push(row(producer, type_name, &schema, full));
+        }
+    }
+    out
 }
 
 /// Two producers serving one type name with different hashes — "a `doctor`

@@ -132,7 +132,9 @@ pub fn topic_info(report: &TopicInfo, format: Format) -> Result<()> {
             }
             if let Some(payload) = &report.payload_type {
                 println!("payload   {payload}");
-                println!("  (schema lives with the owning application — RFC 08 §5)");
+                // Since RFC 08 §7 the shape is served, so point at it rather
+                // than at the old "lives with the application" dead end.
+                println!("  (`zenctl interface show {payload} --schema` for the served shape)");
             }
             if let Some(unit) = &report.unit {
                 println!("unit      {unit}");
@@ -221,7 +223,6 @@ pub fn interface_show(report: &InterfaceShow, format: Format) -> Result<()> {
         Format::Json | Format::Ndjson => json_doc(report),
         _ => {
             println!("type      {}", report.type_name);
-            println!("          (schema lives with the owning application — RFC 08 §5)");
             println!(
                 "\ncarried by {} subject(s)/procedure(s):",
                 report.carriers.len()
@@ -231,6 +232,84 @@ pub fn interface_show(report: &InterfaceShow, format: Format) -> Result<()> {
             }
             if report.carriers.len() > 20 {
                 println!("  … and {} more", report.carriers.len() - 20);
+            }
+            if !report.schemas.is_empty() {
+                println!("\nserved schema (RFC 08 §7):");
+                for s in &report.schemas {
+                    println!("  {:<10} {:<12} {}", s.producer, s.kind, s.hash);
+                }
+                // Same name, different hash across producers: §7 says this is
+                // a finding, and the type's own page is where it is worth
+                // seeing.
+                let first = &report.schemas[0].hash;
+                if report.schemas.iter().any(|s| &s.hash != first) {
+                    println!(
+                        "\n  ⚠ producers disagree about {}'s shape — a schema-drift finding \
+                         (RFC 08 §7); `zenctl doctor` carries it as one",
+                        report.type_name
+                    );
+                }
+                for s in &report.schemas {
+                    if let Some(doc) = &s.document {
+                        println!("\n  {} says:", s.producer);
+                        println!("{}", serde_json::to_string_pretty(doc).unwrap_or_default());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `zenctl schema <producer>` (issue #51).
+pub fn schema_dump(report: &SchemaDump, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => report.types.iter().for_each(json_line),
+        _ => {
+            if !report.served {
+                // §7 is a SHOULD. "Serves no describe" is a fact about the
+                // producer, not a verdict about its payloads (RFC 05 §3.1's
+                // rule applied to a schema fetch).
+                println!(
+                    "{} serves no `describe` — its payload shapes are undescribed, which is \
+                     not the same as having none (RFC 08 §7 is a SHOULD).",
+                    report.producer
+                );
+                return Ok(());
+            }
+            println!(
+                "producer  {}{}",
+                report.producer,
+                report
+                    .app
+                    .as_deref()
+                    .map(|a| format!("   (app {a})"))
+                    .unwrap_or_default()
+            );
+            if report.types.is_empty() {
+                println!("\nthe served set declares no matching types.");
+            } else {
+                println!("\n{} type(s):\n", report.types.len());
+                for t in &report.types {
+                    println!("  {:<24} {:<12} {}", t.type_name, t.kind, t.hash);
+                }
+            }
+            for t in &report.types {
+                if let Some(doc) = &t.document {
+                    println!("\n{}:", t.type_name);
+                    println!("{}", serde_json::to_string_pretty(doc).unwrap_or_default());
+                }
+            }
+            if !report.missing.is_empty() {
+                // RFC 08 §7's totality clause, checked where the user is
+                // already looking rather than only in `doctor`.
+                println!(
+                    "\n⚠ the registry references {} type(s) this set does not cover: {}\n  \
+                     (RFC 08 §7 totality — the set MUST cover every referenced name)",
+                    report.missing.len(),
+                    report.missing.join(", ")
+                );
             }
         }
     }

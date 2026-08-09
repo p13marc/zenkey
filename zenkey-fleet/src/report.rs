@@ -233,6 +233,43 @@ pub struct CarrierRow {
 pub struct InterfaceShow {
     pub type_name: String,
     pub carriers: Vec<CarrierRow>,
+    /// What each producer serving this type name says its schema is
+    /// (issue #51). Empty = nothing asked or nothing served; two rows with
+    /// different hashes *is* the RFC 08 §7 drift finding, visible right here
+    /// rather than only in `doctor`.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub schemas: Vec<SchemaRow>,
+}
+
+/// One type's schema entry as one producer serves it (issue #51).
+#[derive(Debug, Clone, Serialize)]
+pub struct SchemaRow {
+    pub producer: String,
+    pub type_name: String,
+    pub kind: String,
+    pub hash: String,
+    /// The schema document, when the caller asked for the full form.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<serde_json::Value>,
+}
+
+/// One producer's served `describe` reply, rendered (issue #51).
+///
+/// `served = false` is the honest degradation RFC 08 §7 leaves room for —
+/// `describe` is a SHOULD, so a producer that serves none has said nothing
+/// about its types, which is not the same as having no types.
+#[derive(Debug, Clone, Serialize)]
+pub struct SchemaDump {
+    pub producer: String,
+    pub served: bool,
+    /// The declaring app, as the served set names it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    pub types: Vec<SchemaRow>,
+    /// Registry-declared type names this producer's set does **not** cover —
+    /// RFC 08 §7's totality clause, checked where the user is already looking.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub missing: Vec<String>,
 }
 
 /// One producer on one origin — row-shaped so a `--watch` loop can diff it

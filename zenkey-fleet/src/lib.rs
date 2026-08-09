@@ -38,7 +38,9 @@ pub use body::{
     BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
 };
 #[cfg(feature = "decode")]
-pub use decode::{SchemaDrift, TotalityGap, schema_drift, totality_gaps};
+pub use decode::{
+    SchemaDrift, TotalityGap, schema_drift, schema_dump, schemas_for_type, totality_gaps,
+};
 #[cfg(feature = "decode")]
 pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
 

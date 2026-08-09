@@ -507,8 +507,8 @@ zenctl service call <origin|*|@svc> <producer|-> <proc>
                     [--param k=v] [--body JSON|@file|-] [--no-validate] [--raw]  [T]
        # exit 1 = an error reply; exit 2 = zero replies (silence stays non-verdict)
 
-zenctl interface list | show <Type> [--schema]                       [T/D]
-zenctl schema <producer>            # dump fetched SchemaSet         [D]
+zenctl interface list | show <Type> [--schema] [--full]              [T]
+zenctl schema <producer> [--type T] [--full]   # dump served SchemaSet  [T]
 
 zenctl registry export --format asyncapi|jsonschema|toml             [D]
 zenctl registry diff | lint <dir>                                    [D/L]
