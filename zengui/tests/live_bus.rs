@@ -233,3 +233,93 @@ async fn the_tree_carries_foreign_traffic() {
         leaf.count, leaf.bytes, leaf.rate_hz
     );
 }
+
+/// Suspect-on-retraction (#61), self-contained (NOT ignored): a second
+/// in-process peer declares a conforming liveliness token; undeclaring it
+/// must flip the roster to suspect on the very next NodeDown event — no ttl
+/// aging, no polling — and redeclaring recovers it. Port 7476.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
+    use std::time::Instant;
+    use zenkey_fleet::{FleetEvent, StreamItem};
+
+    let producer_side =
+        zenkey_fleet::session::open(&[], &["tcp/127.0.0.1:7476".to_string()], false)
+            .await
+            .expect("producer session");
+    let observer_side =
+        zenkey_fleet::session::open(&["tcp/127.0.0.1:7476".to_string()], &[], false)
+            .await
+            .expect("observer session");
+
+    let monitor = Monitor::start(
+        &observer_side,
+        MonitorSpec {
+            selectors: vec![], // lazy: liveliness only
+            liveliness: scope::liveliness_selectors(""),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("start monitor");
+    let mut events = monitor.events();
+
+    let mut roster = zengui::nodes::NodeRoster::default();
+    const TOKEN: &str = "v1/h-3fa9c2d41b7e/state/sysinfo/alive";
+
+    // Bounded wait for the matching liveliness event, applied in order.
+    async fn apply_next(
+        roster: &mut zengui::nodes::NodeRoster,
+        events: &mut zenkey_fleet::EventStream,
+        want_up: bool,
+    ) {
+        loop {
+            let item = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("liveliness event within 5s")
+                .expect("monitor alive");
+            if let StreamItem::Event(ev) = item {
+                match ev {
+                    FleetEvent::NodeUp(key) if want_up => {
+                        roster.apply_transitions("", &[(key, true)], Instant::now());
+                        break;
+                    }
+                    FleetEvent::NodeDown(key) if !want_up => {
+                        roster.apply_transitions("", &[(key, false)], Instant::now());
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let token = producer_side
+        .liveliness()
+        .declare_token(TOKEN)
+        .await
+        .expect("token");
+    apply_next(&mut roster, &mut events, true).await;
+    let p = &roster.get("h-3fa9c2d41b7e").expect("origin seen")["sysinfo"];
+    assert!(p.alive && p.suspect_since.is_none());
+
+    token.undeclare().await.expect("undeclare");
+    apply_next(&mut roster, &mut events, false).await;
+    let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
+    assert!(
+        !p.alive && p.suspect_since.is_some(),
+        "retraction must mark suspect on the event itself, never aged out"
+    );
+
+    let _token = producer_side
+        .liveliness()
+        .declare_token(TOKEN)
+        .await
+        .expect("redeclare");
+    apply_next(&mut roster, &mut events, true).await;
+    let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
+    assert!(
+        p.alive && p.suspect_since.is_none(),
+        "reappearance recovers the row"
+    );
+}

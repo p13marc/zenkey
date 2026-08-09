@@ -79,6 +79,13 @@ pub struct Zengui {
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     echo_filter: String,
 
+    /// The node dashboard's presence model (#61), fed by liveliness only.
+    roster: crate::nodes::NodeRoster,
+    /// The selected origin in the nodes pane.
+    node_selected: Option<String>,
+    /// Its one-shot `node_info` detail — the pane's only data-plane cost.
+    node_detail: view::nodes::DetailState,
+
     call_form: view::call::CallForm,
     /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
     schema_store: Option<Arc<zenkey_fleet::decode::SchemaStore>>,
@@ -128,6 +135,9 @@ impl Zengui {
             selected: None,
             fetched: None,
             echo_filter: String::new(),
+            roster: crate::nodes::NodeRoster::default(),
+            node_selected: None,
+            node_detail: view::nodes::DetailState::default(),
             call_form: view::call::CallForm::default(),
             schema_store: None,
             decoded: None,
@@ -198,8 +208,11 @@ impl Zengui {
                 self.link = LinkState::Failed(e);
                 Task::none()
             }
-            Message::SkeletonBuilt(Ok(skeleton)) => {
+            Message::SkeletonBuilt(Ok((skeleton, roster))) => {
                 self.skeleton = Some(skeleton);
+                // The build task gathered the roster anyway — seed the node
+                // dashboard from it instead of throwing it away (#61).
+                self.roster.seed(&roster);
                 self.reflatten();
                 Task::none()
             }
@@ -344,6 +357,10 @@ impl Zengui {
                 // skeleton, and watch selectors are base-relative: a fresh
                 // monitor is the obviously-correct restart.
                 self.facts.clear();
+                // A roster against another base is not evidence here (O4).
+                self.roster.clear();
+                self.node_selected = None;
+                self.node_detail = view::nodes::DetailState::NotAsked;
                 self.my_watches.clear();
                 self.my_watch_paths.clear();
                 self.scope_watches.clear();
@@ -423,6 +440,7 @@ impl Zengui {
                 )
             }
             Message::Call(msg) => self.update_call(msg),
+            Message::Nodes(msg) => self.update_nodes(msg),
             Message::CallDone(outcome) => {
                 self.call_form.in_flight = false;
                 self.call_form.outcome =
@@ -449,6 +467,9 @@ impl Zengui {
                 self.seeding_paths.clear();
                 self.seed_totals = (0, 0, 0);
                 self.seeded_watches = 0;
+                self.roster.clear();
+                self.node_selected = None;
+                self.node_detail = view::nodes::DetailState::NotAsked;
                 self.start_monitor()
             }
         }
@@ -529,6 +550,62 @@ impl Zengui {
         }
     }
 
+    fn update_nodes(&mut self, msg: view::nodes::NodesMsg) -> Task<Message> {
+        use view::nodes::{DetailState, NodesMsg};
+        match msg {
+            NodesMsg::Selected(origin) => {
+                if self.node_selected.as_deref() == Some(origin.as_str()) {
+                    // Re-click deselects (and drops the detail state).
+                    self.node_selected = None;
+                    self.node_detail = DetailState::NotAsked;
+                    return Task::none();
+                }
+                self.node_selected = Some(origin.clone());
+                self.node_detail = DetailState::Loading(origin.clone());
+                let Some(session) = self.session.clone() else {
+                    return Task::none();
+                };
+                let base = self.settings.base.clone();
+                let timeout = self.settings.timeout();
+                // The pane's one data-plane cost: a one-shot node_info on
+                // selection (laziness ground rule, #84/#85).
+                Task::perform(
+                    async move {
+                        let out = zenkey_fleet::node_info(&session, &base, &origin, timeout, true)
+                            .await
+                            .map(Arc::new)
+                            .map_err(|e| e.to_string());
+                        (origin, out)
+                    },
+                    |(origin, out)| Message::Nodes(NodesMsg::InfoLoaded(origin, out)),
+                )
+            }
+            NodesMsg::InfoLoaded(origin, outcome) => {
+                // Stale guard: only the currently selected origin's info lands.
+                if self.node_selected.as_deref() == Some(origin.as_str()) {
+                    self.node_detail = DetailState::Loaded(origin, outcome);
+                }
+                Task::none()
+            }
+            NodesMsg::ShowInTree(origin) => {
+                let path = scope::origin_display_path(&self.settings.base, &origin);
+                // Expand every prefix so the subtree is visible; select
+                // WITHOUT fetching (a subtree prefix is not a concrete key).
+                let mut prefix = String::new();
+                for chunk in path.split('/') {
+                    if !prefix.is_empty() {
+                        prefix.push('/');
+                    }
+                    prefix.push_str(chunk);
+                    self.expanded.insert(prefix.clone());
+                }
+                self.selected = Some(path);
+                self.reflatten();
+                Task::none()
+            }
+        }
+    }
+
     fn start_monitor(&mut self) -> Task<Message> {
         let Some(session) = self.session.clone() else {
             return Task::none();
@@ -576,12 +653,8 @@ impl Zengui {
                 let admin = zenkey_fleet::declared_entities(&session, timeout)
                     .await
                     .unwrap_or(None);
-                Ok(Arc::new(Skeleton::build(
-                    &base,
-                    &slices,
-                    &roster,
-                    admin.as_ref(),
-                )))
+                let skeleton = Arc::new(Skeleton::build(&base, &slices, &roster, admin.as_ref()));
+                Ok((skeleton, Arc::new(roster)))
             },
             Message::SkeletonBuilt,
         )
@@ -699,6 +772,13 @@ impl Zengui {
         for (key, _up) in &tick.nodes {
             self.ensure_facts(key);
         }
+        // The node dashboard (#61): transitions in arrival order (flap-
+        // correct), then the zero-cost watched-freshness join.
+        let now = std::time::Instant::now();
+        self.roster
+            .apply_transitions(&self.settings.base, &tick.nodes, now);
+        self.roster
+            .refresh(&tick.tree, &self.settings.base, &tick.watched, now);
         self.reflatten();
     }
 
@@ -837,6 +917,11 @@ impl Zengui {
                         (Some(k.as_str()) == self.selected.as_deref()).then_some(o)
                     }),
                     decoded: self.decoded.as_ref(),
+                }),
+                RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
+                    roster: &self.roster,
+                    selected: self.node_selected.as_deref(),
+                    detail: &self.node_detail,
                 }),
             })
             .width(Length::FillPortion(1))

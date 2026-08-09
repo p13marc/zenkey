@@ -115,6 +115,23 @@ pub fn tone_badge<'a, M: 'a>(
     .into()
 }
 
+/// A presence badge (#61) — theme-resolved like [`tone_badge`].
+pub fn badge_presence<'a, M: 'a>(
+    tone: super::theme::PresenceTone,
+    label: impl Into<String>,
+) -> Element<'a, M> {
+    let style = move |theme: &iced::Theme| text::Style {
+        color: Some(colors(theme).presence(tone)),
+    };
+    row![
+        text("●").size(font::CAPTION).style(style),
+        text(label.into()).size(font::CAPTION).style(style),
+    ]
+    .spacing(space::XS)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
 /// Dimmed caption text.
 pub fn muted<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
     text(s.into())

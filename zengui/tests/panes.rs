@@ -312,3 +312,111 @@ fn the_detail_pane_tags_decode_provenance() {
         "silence stays attributed"
     );
 }
+
+/// The nodes pane (#61): a retracted token reads suspect, the catalog is
+/// named, and freshness never invents a verdict.
+#[test]
+fn the_nodes_pane_marks_retraction_suspect_and_names_the_catalog() {
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::{DetailState, NodesData, pane};
+
+    let mut roster = NodeRoster::default();
+    roster.apply_transitions(
+        "",
+        &[
+            ("v1/h-3fa9c2d41b7e/state/sysinfo/alive".to_string(), true),
+            ("v1/h-aaaaaaaaaaaa/state/other/alive".to_string(), true),
+            ("v1/h-aaaaaaaaaaaa/state/other/alive".to_string(), false),
+        ],
+        Instant::now(),
+    );
+
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        roster: &roster,
+        selected: None,
+        detail: &DetailState::NotAsked,
+    }));
+    assert!(
+        ui.find("sysinfo: alive").is_ok(),
+        "the live row reads alive"
+    );
+    assert!(
+        ui.find("other: suspect since 0s (token retracted)").is_ok(),
+        "retraction reads suspect immediately, never aged out"
+    );
+    assert!(
+        ui.find("catalog: no token observed — not proof none exists (RFC 05 §3.1)")
+            .is_ok(),
+        "the catalog is asked for by name, never folded into 'no nodes'"
+    );
+    assert!(
+        ui.find("not watched — freshness unknown").is_ok(),
+        "an unwatched producer's freshness is unknown, not fresh (O4)"
+    );
+}
+
+/// The nodes pane's O4 ladder before any presence source reports.
+#[test]
+fn the_nodes_pane_distinguishes_not_asked_from_empty() {
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::{DetailState, NodesData, pane};
+
+    let roster = NodeRoster::default();
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        roster: &roster,
+        selected: None,
+        detail: &DetailState::NotAsked,
+    }));
+    assert!(
+        ui.find("no presence asked yet").is_ok(),
+        "'not asked' must not render as an empty fleet"
+    );
+}
+
+/// The node detail's freshness honesty: an unanswered sample is stale, and
+/// zero ttl declarations is unknown, never fresh.
+#[test]
+fn the_node_detail_reports_freshness_honestly() {
+    use std::sync::Arc;
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::{DetailState, NodesData, pane};
+    use zenkey_fleet::{Freshness, NodeInfo, ProducerInfo};
+
+    let mut roster = NodeRoster::default();
+    roster.apply_transitions(
+        "",
+        &[("v1/h-3fa9c2d41b7e/state/sysinfo/alive".to_string(), true)],
+        Instant::now(),
+    );
+    let info = NodeInfo {
+        origin: "h-3fa9c2d41b7e".to_string(),
+        producers: vec![ProducerInfo {
+            name: "sysinfo".to_string(),
+            alive: true,
+            app: Some("demo".to_string()),
+            registry_version: Some("1.0".to_string()),
+            subjects: 2,
+            procedures: 1,
+            blob_tiers: vec![],
+            deprecated_served: 0,
+        }],
+        freshness: vec![Freshness {
+            producer: "sysinfo".to_string(),
+            path: "health".to_string(),
+            ttl_s: 30,
+            age_s: None,
+            stale: true,
+        }],
+    };
+    let detail = DetailState::Loaded("h-3fa9c2d41b7e".to_string(), Ok(Arc::new(info)));
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        roster: &roster,
+        selected: Some("h-3fa9c2d41b7e"),
+        detail: &detail,
+    }));
+    assert!(
+        ui.find("sysinfo/health  no sample answered — stale  (ttl 30s)  STALE")
+            .is_ok(),
+        "an unanswered ttl'd subject reads stale with its evidence"
+    );
+}
