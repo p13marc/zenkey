@@ -214,6 +214,178 @@ impl KeyFacts {
     }
 }
 
+/// Fraction of the cache dropped when the bound is hit — the amortisation
+/// argument is [`crate::stats`]'s, verbatim: evicting one entry per insert
+/// would make every projection past the bound a full scan.
+const EVICT_FRACTION: usize = 16;
+
+struct Entry {
+    facts: KeyFacts,
+    /// Monotone observation counter, not an `Instant`: recency here means
+    /// last-*observed*, the ordering is all that is read, and a counter is
+    /// deterministic in tests and one word per entry.
+    seen: u64,
+}
+
+impl std::fmt::Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry").field("seen", &self.seen).finish()
+    }
+}
+
+/// A bounded cache of key projections, sized off the same `max_keys` as the
+/// [`StatsTable`](crate::stats::StatsTable) it shadows, counting what the bound
+/// costs (RFC 09 §5.1 O6).
+///
+/// **Why this exists** (issue #107). Projecting a key is not free — a
+/// [`KeyFacts`] owns a `String` per subject chunk plus the resolved
+/// [`SubjectFacts`] — so every observer caches it, and zengui's cache was a
+/// plain `HashMap` that grew one entry per distinct key *ever seen*. The engine's
+/// key table is bounded and counts its evictions; the projection cache shadowing
+/// it was, in `stats.rs`'s own words, "merely a leak with better manners".
+///
+/// **Why an LRU and not "prune to the stats table"**, which is the obvious fix:
+///
+/// - the table is fed from samples, and an observer also projects **liveliness
+///   token keys**, which never enter it. Pruning to the table would delete and
+///   re-project those on every tick, and drop them from any "keys seen" list;
+/// - a frontend holds a key-*tree* snapshot, not a key list, so membership means
+///   walking the tree per tick — O(n) allocation on the render thread at up to
+///   50k keys, where this is O(1) amortised on the insert path;
+/// - "evicted because the table evicted it" and "evicted because it was never in
+///   the table" are different facts, and one counter over both is exactly what
+///   O6 forbids.
+///
+/// Recency is last-**observed**, not last-rendered, which is what keeps
+/// [`get`](Self::get) a pure read: a `&self` render path can look keys up
+/// without touching the ordering, so no interior mutability and no signature
+/// churn in the views.
+#[derive(Debug)]
+pub struct FactsCache {
+    entries: std::collections::HashMap<String, Entry>,
+    max_keys: usize,
+    inserted: u64,
+    evicted: u64,
+    seq: u64,
+}
+
+impl Default for FactsCache {
+    fn default() -> Self {
+        FactsCache::with_capacity(crate::stats::DEFAULT_MAX_KEYS)
+    }
+}
+
+impl FactsCache {
+    /// A cache bounded at `max_keys` projections. Pass the same bound the
+    /// stats table was built with: the cache cannot usefully outgrow the table
+    /// it shadows, and one number makes that one sentence.
+    pub fn with_capacity(max_keys: usize) -> FactsCache {
+        FactsCache {
+            entries: std::collections::HashMap::new(),
+            max_keys: max_keys.max(1),
+            inserted: 0,
+            evicted: 0,
+            seq: 0,
+        }
+    }
+
+    /// Project `key` if it is not cached yet; bump its recency either way.
+    ///
+    /// The single insert point — the whole bound rests on that being true.
+    pub fn ensure(&mut self, base: &str, key: &str, slices: Option<&SliceSet>) {
+        self.seq += 1;
+        let seq = self.seq;
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.seen = seq;
+            return;
+        }
+        if self.entries.len() >= self.max_keys {
+            self.evict();
+        }
+        let mut facts = KeyFacts::project(base, key);
+        if let Some(slices) = slices {
+            facts.resolve(slices);
+        }
+        self.entries
+            .insert(key.to_string(), Entry { facts, seen: seq });
+        self.inserted += 1;
+    }
+
+    /// A cached projection, if it is still held. Pure: recency is not touched,
+    /// so this is safe to call from a `&self` render path.
+    pub fn get(&self, key: &str) -> Option<&KeyFacts> {
+        self.entries.get(key).map(|e| &e.facts)
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(String::as_str)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn max_keys(&self) -> usize {
+        self.max_keys
+    }
+
+    /// Projections retired to stay within the bound.
+    ///
+    /// Displayed, never hidden: a cache that stopped growing and a bus that
+    /// went quiet look identical from the outside (RFC 09 §5.1 O6).
+    pub fn evicted(&self) -> u64 {
+        self.evicted
+    }
+
+    /// Projections *made* since the last [`clear`](Self::clear).
+    ///
+    /// The other half of the O6 ledger, and the reason it is a public number
+    /// rather than an internal one: `inserted == len() + evicted()` is the
+    /// conservation law, and without this counter it cannot be checked from
+    /// outside. Note it counts insertions, not distinct keys — a key evicted
+    /// and later re-observed is projected again, which is precisely the cost
+    /// the bound is trading against.
+    pub fn inserted(&self) -> u64 {
+        self.inserted
+    }
+
+    /// Re-resolve every held projection against a newly-loaded slice set —
+    /// what a registry arriving after the first samples calls for.
+    pub fn resolve_all(&mut self, slices: &SliceSet) {
+        for entry in self.entries.values_mut() {
+            entry.facts.resolve(slices);
+        }
+    }
+
+    /// Base change / reconnect / context switch. Keeps the bound and resets
+    /// the counter: retirements under another deployment are not this one's.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.inserted = 0;
+        self.evicted = 0;
+        self.seq = 0;
+    }
+
+    /// Drop the least-recently-observed entries until there is room.
+    fn evict(&mut self) {
+        let target = self.max_keys - (self.max_keys / EVICT_FRACTION).max(1);
+        let mut seen: Vec<(u64, String)> = self
+            .entries
+            .iter()
+            .map(|(k, e)| (e.seen, k.clone()))
+            .collect();
+        seen.sort_unstable_by_key(|(seen, _)| *seen);
+        for (_, key) in seen.into_iter().take(self.entries.len() - target) {
+            self.entries.remove(&key);
+            self.evicted += 1;
+        }
+    }
+}
+
 impl V1Facts {
     fn from_parsed(parsed: &StructuralKey<'_>) -> V1Facts {
         let (origin, origin_kind) = match &parsed.origin {
@@ -509,5 +681,123 @@ mod tests {
         }
         let d = describe_key("zensight", "other/v1/h-3fa9c2d41b7e/state/x/y", None);
         assert_eq!(d.facts.shape, KeyShape::NotUnderBase);
+    }
+}
+
+// ── FactsCache (#107) ───────────────────────────────────────────────────
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn key(i: usize) -> String {
+        format!("v1/h-3fa9c2d41b7e/telemetry/sysinfo/k{i}")
+    }
+
+    #[test]
+    fn the_bound_holds_and_every_drop_is_counted() {
+        let mut cache = FactsCache::with_capacity(100);
+        for i in 0..1_000 {
+            cache.ensure("", &key(i), None);
+        }
+        assert!(cache.len() <= 100, "held {}", cache.len());
+        assert!(cache.evicted() > 0, "the fixture must trip the bound");
+        // The ledger #107 asks for: nothing vanishes unaccounted.
+        assert_eq!(cache.inserted(), 1_000, "every key here was distinct");
+        assert_eq!(cache.len() as u64 + cache.evicted(), cache.inserted());
+    }
+
+    /// A key evicted and later re-observed is projected *again* — the cost the
+    /// bound trades against, and the reason the ledger counts insertions rather
+    /// than distinct keys.
+    #[test]
+    fn a_re_observed_eviction_is_projected_again() {
+        let mut cache = FactsCache::with_capacity(2);
+        for i in 0..10 {
+            cache.ensure("", &key(i), None);
+        }
+        let after_first_pass = cache.inserted();
+        for i in 0..10 {
+            cache.ensure("", &key(i), None);
+        }
+        assert!(
+            cache.inserted() > after_first_pass,
+            "a second pass over evicted keys re-projects them"
+        );
+        assert_eq!(cache.len() as u64 + cache.evicted(), cache.inserted());
+    }
+
+    #[test]
+    fn the_least_recently_observed_is_the_one_that_goes() {
+        let mut cache = FactsCache::with_capacity(4);
+        for i in 0..4 {
+            cache.ensure("", &key(i), None);
+        }
+        // Re-observing k0 makes k1 the oldest, so the next eviction takes k1
+        // and spares k0 — recency is last-*observed*, and this is what says so.
+        cache.ensure("", &key(0), None);
+        cache.ensure("", &key(99), None);
+        assert!(cache.get(&key(0)).is_some(), "the re-observed key survives");
+        assert!(cache.get(&key(1)).is_none(), "the oldest went instead");
+    }
+
+    #[test]
+    fn ensure_is_idempotent_and_does_not_reproject() {
+        let slices = SliceSet::default();
+        let mut cache = FactsCache::with_capacity(10);
+        cache.ensure("", &key(0), None);
+        let before = cache.get(&key(0)).cloned();
+        cache.ensure("", &key(0), Some(&slices));
+        assert_eq!(
+            cache.get(&key(0)).cloned(),
+            before,
+            "a second ensure must not re-resolve behind the caller's back"
+        );
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn resolve_all_reaches_entries_projected_before_the_registry_arrived() {
+        // The ordinary startup order: samples first, slices second.
+        let mut cache = FactsCache::with_capacity(10);
+        cache.ensure("", &key(0), None);
+        assert_eq!(
+            cache.get(&key(0)).map(|f| f.registration.clone()),
+            Some(Registration::Unknown)
+        );
+        cache.resolve_all(&SliceSet::default());
+        assert_ne!(
+            cache.get(&key(0)).map(|f| f.registration.clone()),
+            Some(Registration::Unknown),
+            "a registry that arrives late still reaches what was already cached"
+        );
+    }
+
+    #[test]
+    fn clearing_keeps_the_bound_and_forgets_the_count() {
+        let mut cache = FactsCache::with_capacity(4);
+        for i in 0..40 {
+            cache.ensure("", &key(i), None);
+        }
+        assert!(cache.evicted() > 0);
+        cache.clear();
+        assert!(cache.is_empty());
+        assert_eq!(cache.max_keys(), 4, "the bound is a setting, not a state");
+        assert_eq!(
+            cache.evicted(),
+            0,
+            "retirements under another deployment are not this one's"
+        );
+        assert_eq!(cache.inserted(), 0);
+    }
+
+    #[test]
+    fn a_degenerate_bound_is_still_a_bound() {
+        let mut cache = FactsCache::with_capacity(0);
+        for i in 0..10 {
+            cache.ensure("", &key(i), None);
+        }
+        assert_eq!(cache.max_keys(), 1);
+        assert!(cache.len() <= 1);
     }
 }
