@@ -1,6 +1,6 @@
 # zenkey redesign 2026-07 — analysis, generalization, and roadmap
 
-Status: **largely implemented** (historical design record). Written against RFC v1.4; the RFC set is at v1.10. P0–P5 shipped through the 0.3/0.4 releases and the zengui bootstrap (PR #32); remaining rows are tracked by epic #33 ("Explorer Suite 1.0"). Kept for the rationale; where it and shipped code disagree, the code and the RFCs win.
+Status: **largely implemented** (historical design record). Written against RFC v1.4; the RFC set is at v1.11. P0–P5 shipped through the 0.3/0.4 releases and the zengui bootstrap (PR #32); remaining rows are tracked by epic #33 ("Explorer Suite 1.0"). Kept for the rationale; where it and shipped code disagree, the code and the RFCs win.
 Scope: `zenkey`, `zenkey-build`, `zenctl`, the RFC set, and the groundwork for a future
 Iced GUI bus explorer. Backward compatibility is explicitly on the table — we are the
 only consumers today (zensight, tcgui).
