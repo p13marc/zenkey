@@ -17,6 +17,7 @@
 //! see traffic a namespaced application is blind to.
 
 pub mod app;
+pub mod blob;
 pub mod config;
 pub mod doctor;
 pub mod echo;

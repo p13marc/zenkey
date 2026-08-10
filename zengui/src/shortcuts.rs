@@ -77,13 +77,13 @@ pub fn map() -> Vec<Binding> {
     out
 }
 
-/// Alt+1..Alt+8, one per pane. Parallel arrays rather than a formatted string
+/// Alt+1..Alt+9, one per pane. Parallel arrays rather than a formatted string
 /// because `Binding` holds `&'static str` — and the length assertion below is
 /// what keeps them in step with `RightPane::ALL`.
-const PANE_KEYS: [&str; 8] = [
-    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7", "Alt 8",
+const PANE_KEYS: [&str; 9] = [
+    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7", "Alt 8", "Alt 9",
 ];
-const PANE_WHAT: [&str; 8] = [
+const PANE_WHAT: [&str; 9] = [
     "echo pane",
     "call pane",
     "publish pane",
@@ -91,9 +91,10 @@ const PANE_WHAT: [&str; 8] = [
     "nodes pane",
     "doctor pane",
     "history pane",
+    "blobs pane",
     "connect pane",
 ];
-const PANE_MESSAGES: [fn() -> Message; 8] = [
+const PANE_MESSAGES: [fn() -> Message; 9] = [
     || Message::PaneSelected(RightPane::Echo),
     || Message::PaneSelected(RightPane::Call),
     || Message::PaneSelected(RightPane::Publish),
@@ -101,6 +102,7 @@ const PANE_MESSAGES: [fn() -> Message; 8] = [
     || Message::PaneSelected(RightPane::Nodes),
     || Message::PaneSelected(RightPane::Doctor),
     || Message::PaneSelected(RightPane::History),
+    || Message::PaneSelected(RightPane::Blob),
     || Message::PaneSelected(RightPane::Connect),
 ];
 
@@ -246,9 +248,14 @@ mod tests {
         ));
     }
 
+    /// Alt+N reaches every pane and stops there: the range is `RightPane::ALL`,
+    /// so adding a pane moves the boundary rather than leaving a dead key.
     #[test]
-    fn alt_digits_beyond_the_pane_count_do_nothing() {
-        assert!(press("9", Modifiers::ALT).is_none());
+    fn alt_digits_cover_the_panes_and_stop() {
+        assert!(matches!(
+            press("9", Modifiers::ALT),
+            Some(Message::PaneSelected(RightPane::Connect))
+        ));
         assert!(press("0", Modifiers::ALT).is_none());
     }
 }

@@ -4,6 +4,7 @@
 //! plain state struct rather than a method on the app, which is what lets a
 //! pane be rendered standalone in a test (zensight's `tests/ui_tests.rs` shape).
 
+pub mod blob;
 pub mod call;
 pub mod contexts;
 pub mod detail;

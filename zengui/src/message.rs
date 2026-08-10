@@ -78,6 +78,8 @@ pub enum Message {
     History(crate::view::history::HistoryMsg),
     /// Detail pane interactions (issue #64): which numeric leaf is plotted.
     Detail(crate::view::detail::DetailMsg),
+    /// Blob browser interactions (issue #68).
+    Blob(crate::view::blob::BlobMsg),
 
     BaseSelected(String),
     ScopeSelected(ScopePreset),
@@ -149,6 +151,8 @@ pub enum RightPane {
     Doctor,
     /// Per-key history and payload diff (issue #63).
     History,
+    /// The `@blob` plane: who serves bulk content, and fetching it (issue #68).
+    Blob,
     /// Contexts and endpoints (issue #67).
     Connect,
 }
@@ -156,7 +160,7 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 8] = [
+    pub const ALL: [RightPane; 9] = [
         RightPane::Echo,
         RightPane::Call,
         RightPane::Publish,
@@ -164,6 +168,7 @@ impl RightPane {
         RightPane::Nodes,
         RightPane::Doctor,
         RightPane::History,
+        RightPane::Blob,
         RightPane::Connect,
     ];
 
@@ -176,6 +181,7 @@ impl RightPane {
             RightPane::Nodes => "nodes",
             RightPane::Doctor => "doctor",
             RightPane::History => "history",
+            RightPane::Blob => "blobs",
             RightPane::Connect => "connect",
         }
     }
