@@ -60,3 +60,88 @@ builders (3.4× faster — they skip grammar re-validation entirely because
 their inputs are typed `Chunk`s) and `V1Context`. An `unsafe` unchecked
 constructor could reclaim it and was declined (no-unsafe policy); revisit
 only if a profile shows a real workload bound on raw grammar builds.
+
+## Fleet engine baseline (issue #44)
+
+Criterion benches: `zenkey-fleet/benches/fleet.rs`. Run with
+`cargo bench -p zenkey-fleet`. `docs/zero-copy.md` names which id pins which
+rule.
+
+- Commit: `183d496` (branch `chunk-n-perf-program`)
+- Date: 2026-08-10
+- Machine: Linux 7.1.3-200.fc44.x86_64 (dev workstation, default governor)
+
+| Bench | Time (point) | |
+|---|---|---|
+| stats/record_hit | 41.6 ns | the per-sample floor |
+| stats/record_new_key | 267 ns | the insert branch |
+| stats/record_past_the_bound | 1.68 µs | steady state at the bound, evict amortised |
+| stats/totals_10k | 58.5 µs ~ | the O(keys) fold the pump no longer takes a lock for |
+| stats/retire_unwatched_1k | 899 µs ~ | |
+| decode/structural_json | 499 ns | per sample on every render path |
+| decode/structural_value_json | 749 ns ~ | |
+| decode/structural_cbor | 1.40 µs | |
+| decode/structural_text | 176 ns | |
+| decode/structural_opaque | 234 ns | |
+| tree/build_1k | 535 µs | |
+| tree/build_10k | 7.35 ms | per tick |
+| tree/build_50k | 58.8 ms | per tick at `DEFAULT_MAX_KEYS` |
+| skeleton/build_fixture | 23.2 ms ~ | |
+| skeleton/merge_10k | 74.8 ms ~ | per tick, render path |
+| facts/project_v1 | 1.50 µs ~ | |
+| facts/project_unparsed | 1.37 µs ~ | |
+| facts/project_not_under_base | 38.6 ns ~ | |
+| facts/resolve_registered | 59.8 µs ~ | |
+| facts/resolve_unregistered | 45.1 µs ~ | |
+| facts/describe_key | 28.1 µs | |
+| registry/refine_hit | 27.0 µs | per sample on zenctl's decode path |
+| registry/refine_miss | 38.8 µs ~ | |
+| monitor/ingest | 383 ns ~ | the whole per-sample cost |
+| monitor/tick_10k | 13.9 ms ~ | |
+| fanin/origin_attribution_256 | 64.1 µs | 256 reply keys |
+
+**Rows marked `~` are not trustworthy as a comparison point.** They varied by
+more than 2× across repeated runs of *identical code* on this workstation
+(`skeleton/merge_10k` read 19.5 ms and 74.8 ms; `stats/totals_10k` 16 µs and
+58 µs). Re-take them on a quiet machine before using them as a regression
+gate. The unmarked rows agreed within noise across every run.
+
+At `monitor/ingest`, 100k msg/s costs a few percent of one core — which is the
+claim `zenkey-fleet/src/tree.rs` makes and `tests/ledger.rs` now soaks.
+
+### What the #44 fixes moved
+
+Fresh back-to-back, the methodology this file already insists on: the
+pre-fix commit benched from a worktree immediately before the post-fix run,
+same filter, same flags (`--sample-size 10`, so the intervals are wide).
+Controls first — these are code the fixes did not touch, and they agree:
+
+| Bench | before | after | |
+|---|---|---|---|
+| stats/record_hit | 41.2 ns | 41.0 ns | control |
+| decode/structural_text | 158 ns | 145 ns | control |
+| stats/totals_10k | 16.4 µs | 17.7 µs | control |
+| tree/build_10k | 14.1 ms | 7.49 ms | **−47%** (no `String` per chunk per hit) |
+| tree/build_50k | 137 ms | 57.4 ms | **−58%** (same) |
+| skeleton/merge_10k | 66.8 ms | 19.5 ms | **−71%** (borrowed keyexpr, path buffer) |
+| registry/refine_hit | 115 µs | 38.9 µs | **−66%** (patterns parsed once, not per call) |
+| facts/resolve_registered | 137 µs | 38.9 µs | **−72%** (dominated by refine) |
+
+These are **lower bounds**: the after-run went second, and the second run of a
+back-to-back pair is penalised on this machine (see below). `tree/build_50k`
+at 58 ms against a 250 ms tick is the one that matters — it was 137 ms, more
+than half the budget, and the tick holds the ingest mutex for all of it.
+
+`stats/retire_unwatched_1k` is deliberately absent: the pair above was taken
+with the flawed version of that bench (it built its fixture inside `b.iter`,
+so it mostly measured `StatsTable::record`), and the corrected bench could not
+separate the change from noise on this machine.
+
+**Methodology, extended.** The note above records that a same-day re-run
+drifted 50% on unchanged paths. Sharper finding from this round: in a
+back-to-back pair, **the second run is penalised**, and by enough to invert a
+verdict. Running the pair one way said the change was 2.2× slower; running it
+the other way said 1.5× faster — same two binaries, same filter, minutes
+apart. So: record which order was used, put the *new* code first when you want
+a conservative number, and check the controls before believing any delta. A
+delta whose controls disagree is a measurement, not a result.
