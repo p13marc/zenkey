@@ -168,6 +168,11 @@ impl BlobTarget {
     }
 
     /// The tier-1 id, for the reference client's per-id endpoint helpers.
+    ///
+    /// Feature-gated with its only callers: without the transport there is no
+    /// per-id endpoint to build, and an always-compiled private helper nobody
+    /// calls is a dead-code warning in every build that turns `blob` off.
+    #[cfg(feature = "blob")]
     pub(crate) fn artifact_id(&self) -> Option<&str> {
         match self {
             BlobTarget::Artifact { id } => Some(id),
