@@ -59,7 +59,7 @@ pub use blob::{BlobTarget, blob_list, declared_by};
 pub use context_store::{StoredContext, active_name, cache_dir};
 pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
-pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
+pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
     StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,

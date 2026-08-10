@@ -56,7 +56,10 @@ panel (#71) renders the same typed findings as `zenctl doctor --format json`,
 run on demand with run-over-run deltas. A **blob browser** (#68) walks RFC 07
 §2.5's sequence — probe wide, choose one holder, fetch from it — and has no
 origin input at all, because the only origin a fetch can name is one a probe
-reported.
+reported. An **admin & storage panel** (#70) sweeps the Zenoh admin space on
+demand and renders the coverage table RFC 09 §2's late-joiner concern calls
+for: declared state families against the storages that would seed them, with
+"not judged" kept firmly distinct from "uncovered".
 
 Phase 2 of the epic is complete: a **connect pane** (#67) selects and edits the
 named contexts `zenctl` shares, and spends three lines on what RFC 09 §0.1
@@ -93,8 +96,15 @@ What to look at:
   explorer runs un-namespaced (RFC 09 §5).
 - Switch scope to `deployment` and watch `@catalog` appear — see the note above
   on why `**` cannot see it.
-- `just gui-demo-bounded` trips the key bound immediately, so the status strip
-  reads `N keys (+M retired — bound reached)`.
+- `just gui-demo-bounded` trips both bounds immediately, so the status strip
+  reads `N keys (+M retired — bound reached)` **and**
+  `facts: N cached (+M projections retired — cache bound reached)`. Two
+  bounds over two different populations, so two sentences (#107).
+- Alt 0, the **admin** pane. Against the demo's peer-only bus every section
+  should say *why* it is empty — "a peer-only mesh, or the admin space is
+  disabled" — and the coverage table should read "coverage not judged"
+  without a registry, never "uncovered". Point it at a router with storages
+  and the rows must match `zenctl storage list`.
 - `just gui-demo-no-registry` withholds the registry, so every badge reads `—`
   ("not asked") rather than "unregistered".
 - Alt 9, the **blobs** pane. `spray` serves a 1 MiB artifact *and* a second

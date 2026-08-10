@@ -35,8 +35,14 @@
 #     disagreement rather than picking (RFC 07 §2.1). Fetch from the second
 #     with the first's root pinned and it aborts naming that origin, leaving
 #     no file — verification happens before disk, not after transfer.
-#   * `just gui-demo-bounded` trips the key bound immediately: the status strip
-#     should read "N keys (+M retired — bound reached)" (RFC 09 §5.1 O6).
+#   * Alt 0 opens the admin pane. Sweep it: against this demo's peer-only bus
+#     every section should say why it is empty, and the coverage table should
+#     read "coverage not judged" rather than "uncovered" — a registry that was
+#     never loaded has not told you a family is uncovered (RFC 09 §5.1 O4).
+#   * `just gui-demo-bounded` trips *both* bounds immediately: the status strip
+#     should read "N keys (+M retired — bound reached)" and, beside it,
+#     "facts: N cached (+M projections retired — cache bound reached)" — two
+#     bounds over two populations, two sentences (RFC 09 §5.1 O6).
 #   * `just gui-demo-no-registry` withholds the registry: every badge should
 #     read "—" ("not asked"), never "unregistered" (RFC 09 §5.1 O4).
 #

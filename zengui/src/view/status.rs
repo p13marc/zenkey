@@ -80,6 +80,11 @@ pub struct Status<'a> {
     pub keys: usize,
     /// Keys retired to stay within the table's bound.
     pub keys_evicted: u64,
+    /// Key projections held by the facts cache (issue #107).
+    pub facts_cached: usize,
+    /// Projections retired to stay within the *cache's* bound — a separate
+    /// number from `keys_evicted` on purpose, see [`facts_text`].
+    pub facts_evicted: u64,
     pub totals: (u64, u64, f64),
     pub slices: &'a SliceSource,
     /// Watches whose seed phase has not resolved yet (issue #92).
@@ -123,6 +128,17 @@ pub fn keys_text(keys: usize, evicted: u64) -> String {
             kit::plural(keys, "key")
         )
     }
+}
+
+/// The projection cache's population, and what its bound cost (issue #107).
+///
+/// A **second** number beside [`keys_text`], never folded into it. The engine's
+/// key table and the projection cache have different bounds and different
+/// populations — the cache also holds liveliness-token keys, which never enter
+/// the table — so one figure over both would answer neither question. O6 asks
+/// what each bound cost, not what the bounds cost between them.
+pub fn facts_text(cached: usize, evicted: u64) -> String {
+    format!("facts: {cached} cached (+{evicted} projections retired — cache bound reached)")
 }
 
 pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
@@ -201,6 +217,18 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             "{} keys retired by unwatch",
             s.keys_unwatched
         )));
+    }
+    // Only once the bound has actually bitten: the key count already states
+    // the population, so a quiet cache has nothing to disclose. Warning tone,
+    // like every other bound that is costing something.
+    if s.facts_evicted > 0 {
+        r = r.push(
+            text(facts_text(s.facts_cached, s.facts_evicted))
+                .size(font::CAPTION)
+                .style(|theme: &iced::Theme| text::Style {
+                    color: Some(colors(theme).warning()),
+                }),
+        );
     }
     if let Some((key, outcome)) = s.fetched {
         let label = match outcome {
