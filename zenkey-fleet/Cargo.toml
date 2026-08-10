@@ -16,9 +16,15 @@ default = ["decode"]
 decode = ["zenkey/decode"]
 decode-protobuf = ["zenkey/decode-protobuf"]
 decode-cdr = ["zenkey/decode-cdr"]
+# The `@blob` transport (RFC 07 §2.5's probe and fetch), which pulls in the
+# reference client and its hashing stack. Off by default: the registry
+# projection and the report shapes are unconditional, so a library consumer
+# that only renders a blob report pays nothing, while both explorers turn it on.
+blob = ["dep:zblob"]
 
 [dependencies]
 zenkey = { workspace = true, features = ["schema"] }
+zblob = { workspace = true, optional = true }
 zenoh = { workspace = true }
 zenoh-ext = { workspace = true }
 tokio = { workspace = true }
