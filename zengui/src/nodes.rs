@@ -150,6 +150,33 @@ impl NodeRoster {
         self.nodes.get(origin)
     }
 
+    /// Origin → live producers, in the shape `zenkey_fleet::roster` returns —
+    /// for joins that need "who is actually up".
+    ///
+    /// `None` while unseeded, and that is the whole point of the method: a
+    /// caller must be able to tell "no presence source has reported" from "the
+    /// fleet is empty" (RFC 09 §5.1 O4), and a `BTreeMap` alone cannot say it.
+    pub fn live_map(&self) -> Option<BTreeMap<String, Vec<String>>> {
+        if !self.seeded {
+            return None;
+        }
+        Some(
+            self.nodes
+                .iter()
+                .map(|(origin, producers)| {
+                    (
+                        origin.clone(),
+                        producers
+                            .iter()
+                            .filter(|(_, p)| p.alive)
+                            .map(|(name, _)| name.clone())
+                            .collect(),
+                    )
+                })
+                .collect(),
+        )
+    }
+
     /// The catalog's own presence, by name — never folded into "no nodes".
     pub fn catalog(&self) -> CatalogPresence {
         match self

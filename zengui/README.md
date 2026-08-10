@@ -53,7 +53,10 @@ send log that reports what it dropped), the node dashboard (#61 — liveliness
 roster, suspect-on-retraction, lazy `node_info` detail), and the
 schema-decoded payload inspector with the selection detail pane. A doctor
 panel (#71) renders the same typed findings as `zenctl doctor --format json`,
-run on demand with run-over-run deltas.
+run on demand with run-over-run deltas. A **blob browser** (#68) walks RFC 07
+§2.5's sequence — probe wide, choose one holder, fetch from it — and has no
+origin input at all, because the only origin a fetch can name is one a probe
+reported.
 
 Phase 2 of the epic is complete: a **connect pane** (#67) selects and edits the
 named contexts `zenctl` shares, and spends three lines on what RFC 09 §0.1
@@ -94,6 +97,13 @@ What to look at:
   reads `N keys (+M retired — bound reached)`.
 - `just gui-demo-no-registry` withholds the registry, so every badge reads `—`
   ("not asked") rather than "unregistered".
+- Alt 9, the **blobs** pane. `spray` serves a 1 MiB artifact *and* a second
+  origin claiming the same id at a different content root, so probing
+  `01jqz3demo0001` lists two holders and flags the disagreement. Fetching from
+  the second one with the first one's root pinned aborts naming that origin,
+  with nothing written: RFC 07 §2.1 verifies before disk, not after transfer.
+  The tier table above it is filled before any of that — a registry
+  declaration is a capability, and the pane says so.
 
 `examples/spray.rs` exists because neither zenkey nor zensight can emit
 non-conforming traffic — that is the point of them — so it is the only way to

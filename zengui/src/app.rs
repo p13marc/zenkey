@@ -102,6 +102,8 @@ pub struct Zengui {
     node_detail: view::nodes::DetailState,
     /// The doctor panel's run state (#71) — run-on-demand only.
     doctor: crate::doctor::DoctorState,
+    /// The blob browser's state (#68) — probe and fetch, both on demand.
+    blob: crate::blob::BlobState,
 
     call_form: view::call::CallForm,
     publish_form: view::publish::PublishForm,
@@ -184,6 +186,7 @@ impl Zengui {
             node_selected: None,
             node_detail: view::nodes::DetailState::default(),
             doctor: crate::doctor::DoctorState::default(),
+            blob: crate::blob::BlobState::default(),
             call_form: view::call::CallForm::default(),
             publish_form: view::publish::PublishForm::default(),
             publication: None,
@@ -299,6 +302,7 @@ impl Zengui {
                 };
                 self.slices = Some(slices);
                 self.reresolve_registrations();
+                self.refresh_blob_list();
                 // The skeleton is built FROM the slices — (re)build it now.
                 self.build_skeleton()
             }
@@ -310,6 +314,7 @@ impl Zengui {
                 };
                 self.slices = Some(slices);
                 self.reresolve_registrations();
+                self.refresh_blob_list();
                 self.build_skeleton()
             }
             Message::SlicesUnionLoaded(Err(e)) => {
@@ -509,6 +514,7 @@ impl Zengui {
             Message::Call(msg) => self.update_call(msg),
             Message::Nodes(msg) => self.update_nodes(msg),
             Message::Doctor(msg) => self.update_doctor(msg),
+            Message::Blob(msg) => self.update_blob(msg),
             Message::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
                 self.series_leaf = Some(path);
                 Task::none()
@@ -920,6 +926,7 @@ impl Zengui {
         self.node_selected = None;
         self.node_detail = view::nodes::DetailState::NotAsked;
         self.doctor.clear();
+        self.blob.clear();
         self.my_watches.clear();
         self.my_watch_paths.clear();
         self.scope_watches.clear();
@@ -1442,6 +1449,230 @@ impl Zengui {
         }
     }
 
+    /// Reproject the registry's `[[blob]]` declarations after a slice load.
+    ///
+    /// Costs nothing on the bus: it reads slices already in hand and joins them
+    /// against the roster already observed. The laziness rule (#84/#85) governs
+    /// *fetching*, not rendering what has arrived — and the roster's
+    /// `live_map()` returns `None` while unseeded, so an unasked join renders
+    /// as "not asked" rather than as "nobody serves it" (O4).
+    fn refresh_blob_list(&mut self) {
+        let Some(slices) = self.slices.as_deref() else {
+            self.blob.list = None;
+            return;
+        };
+        let source = match self.slice_source {
+            view::status::SliceSource::Union { .. } => zenkey_fleet::report::BlobListSource::Union,
+            view::status::SliceSource::Dirs { .. } => {
+                zenkey_fleet::report::BlobListSource::RegistryDirs
+            }
+            _ => zenkey_fleet::report::BlobListSource::Bus,
+        };
+        self.blob.list = Some(zenkey_fleet::blob_list(
+            slices.slices(),
+            self.roster.live_map().as_ref(),
+            source,
+        ));
+    }
+
+    fn update_blob(&mut self, msg: view::blob::BlobMsg) -> Task<Message> {
+        use view::blob::BlobMsg;
+        match msg {
+            BlobMsg::TargetChanged(t) => {
+                self.blob.set_target(t);
+                Task::none()
+            }
+            BlobMsg::RootChanged(t) => {
+                self.blob.root_input = t;
+                Task::none()
+            }
+            BlobMsg::DestChanged(t) => {
+                self.blob.dest_input = t;
+                Task::none()
+            }
+            BlobMsg::AllowUnpinnedToggled(b) => {
+                self.blob.allow_unpinned = b;
+                Task::none()
+            }
+            BlobMsg::HolderPicked(i) => {
+                self.blob.holder = Some(i);
+                Task::none()
+            }
+            BlobMsg::UseSuggestedName => {
+                // Fills the *field*. The advisory filename never becomes a
+                // path on its own — a remote party does not choose where our
+                // bytes land.
+                if let Some(name) = self
+                    .blob
+                    .selected()
+                    .and_then(|h| h.manifest.as_ref())
+                    .and_then(|m| m.filename.clone())
+                {
+                    self.blob.dest_input = name;
+                }
+                Task::none()
+            }
+            BlobMsg::Probe => {
+                let Some(Ok(target)) = self.blob.target.clone() else {
+                    return Task::none();
+                };
+                let Some(session) = self.session.clone() else {
+                    self.blob.probe =
+                        crate::blob::Probe::Failed("no session — connect first".into());
+                    return Task::none();
+                };
+                self.blob.probe = crate::blob::Probe::InFlight;
+                self.blob.holder = None;
+                let base = self.settings.base.clone();
+                let timeout = self.settings.timeout();
+                let slices = self
+                    .slices
+                    .as_deref()
+                    .map(|s| s.slices().to_vec())
+                    .unwrap_or_default();
+                Task::perform(
+                    async move {
+                        zenkey_fleet::blob_probe(&session, &base, &target, &slices, timeout)
+                            .await
+                            .map(Arc::new)
+                            .map_err(|e| e.to_string())
+                    },
+                    |out| Message::Blob(BlobMsg::ProbeDone(out)),
+                )
+            }
+            BlobMsg::ProbeDone(outcome) => {
+                self.blob.probe = match outcome {
+                    Ok(report) => crate::blob::Probe::Done(report),
+                    Err(e) => crate::blob::Probe::Failed(e),
+                };
+                Task::none()
+            }
+            BlobMsg::Fetch => {
+                if self.blob.fetch_ready().is_err() {
+                    return Task::none();
+                }
+                let Some(Ok(target)) = self.blob.target.clone() else {
+                    return Task::none();
+                };
+                let Some(session) = self.session.clone() else {
+                    self.blob.fetch =
+                        crate::blob::Fetch::Failed("no session — connect first".into());
+                    return Task::none();
+                };
+                // The origin comes off the chosen holder, which came off a
+                // reply key. There is no other way for one to enter here.
+                let Some(origin) = self.blob.selected().map(|h| h.origin.clone()) else {
+                    return Task::none();
+                };
+                let root = match self.blob.root_input.trim() {
+                    "" => None,
+                    hex => match zenkey::ContentHash::parse(hex) {
+                        Ok(h) => Some(h),
+                        Err(e) => {
+                            self.blob.fetch = crate::blob::Fetch::Failed(format!("root: {e}"));
+                            return Task::none();
+                        }
+                    },
+                };
+
+                let cancel = zenkey_fleet::zblob::CancelToken::new();
+                self.blob.cancel = Some(cancel.clone());
+                self.blob.fetch = crate::blob::Fetch::InFlight {
+                    received: 0,
+                    total: 0,
+                    bytes: 0,
+                };
+
+                let dest = std::path::PathBuf::from(self.blob.dest_input.trim());
+                let base = self.settings.base.clone();
+                let timeout = self.settings.timeout();
+                // Progress arrives on a channel rather than through the return
+                // value: a transfer that only reported at the end would leave
+                // the pane unable to say anything true while it ran.
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                let progress = Task::run(
+                    async_stream::stream! {
+                        let mut rx = rx;
+                        while let Some(p) = rx.recv().await {
+                            yield p;
+                        }
+                    },
+                    |p| Message::Blob(BlobMsg::Progress(p)),
+                );
+                let run = Task::perform(
+                    async move {
+                        let spec = zenkey_fleet::BlobFetchSpec {
+                            timeout,
+                            overwrite: true,
+                            root,
+                            cancel,
+                        };
+                        let sink = move |p| {
+                            let _ = tx.send(p);
+                        };
+                        zenkey_fleet::blob_fetch(
+                            &session, &base, &origin, &target, &dest, &spec, &sink,
+                        )
+                        .await
+                        .map(Arc::new)
+                        .map_err(|e| e.to_string())
+                    },
+                    |out| Message::Blob(BlobMsg::FetchDone(out)),
+                );
+                Task::batch([progress, run])
+            }
+            BlobMsg::Progress(p) => {
+                use zenkey_fleet::report::BlobProgress;
+                if let crate::blob::Fetch::InFlight {
+                    received,
+                    total,
+                    bytes,
+                } = &mut self.blob.fetch
+                {
+                    match p {
+                        BlobProgress::Started { chunk_count, .. } => *total = chunk_count,
+                        BlobProgress::Resumed {
+                            received: r,
+                            total: t,
+                        } => {
+                            *received = r;
+                            *total = t;
+                        }
+                        BlobProgress::Chunk {
+                            received: r,
+                            total: t,
+                            bytes_received,
+                            ..
+                        } => {
+                            *received = r;
+                            *total = t;
+                            *bytes = bytes_received;
+                        }
+                        // Completion, cancellation and failure are the
+                        // report's to state, so the pane says one thing about
+                        // the outcome rather than two.
+                        _ => {}
+                    }
+                }
+                Task::none()
+            }
+            BlobMsg::FetchDone(outcome) => {
+                self.blob.cancel = None;
+                self.blob.fetch = match outcome {
+                    Ok(report) => crate::blob::Fetch::Done(report),
+                    Err(e) => crate::blob::Fetch::Failed(e),
+                };
+                Task::none()
+            }
+            BlobMsg::Cancel => {
+                if let Some(c) = self.blob.cancel.take() {
+                    c.cancel();
+                }
+                Task::none()
+            }
+        }
+    }
+
     fn start_monitor(&mut self) -> Task<Message> {
         let Some(session) = self.session.clone() else {
             return Task::none();
@@ -1816,6 +2047,7 @@ impl Zengui {
                     detail: &self.node_detail,
                 }),
                 RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
+                RightPane::Blob => view::blob::pane(&self.blob, self.slices.is_some()),
                 RightPane::History => view::history::pane(view::history::HistoryData {
                     key: self.selected.as_deref(),
                     recorder: self.history.as_ref(),

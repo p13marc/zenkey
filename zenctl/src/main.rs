@@ -90,6 +90,9 @@ enum Command {
     /// Storages: what the mesh persists, joined against declared state.
     #[command(subcommand)]
     Storage(StorageCmd),
+    /// The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2).
+    #[command(subcommand)]
+    Blob(BlobCmd),
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
     Context(ContextCmd),
@@ -266,6 +269,64 @@ enum StorageCmd {
         /// Re-render on change every SECS seconds (default 2).
         #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
         watch: Option<f64>,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum BlobCmd {
+    /// Which producers declare which `@blob` tiers (registry only, no bus
+    /// traffic). A declaration is a capability, never possession.
+    List {
+        /// Only this producer's declarations.
+        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+        producer: Option<String>,
+        /// Only this tier: artifact, tree or store.
+        #[arg(long, add = ArgValueCandidates::new(completion::blob_tiers))]
+        tier: Option<String>,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Ask every origin who holds an artifact, with a *tiny* reply
+    /// (RFC 07 §2.5): `have` and `manifest`, at data-low, never the bytes.
+    ///
+    /// There is no `--origin`: fanning out is what a probe *is*. The
+    /// content-addressed tiers have no probe endpoint — their key carries the
+    /// object — and say so rather than reporting zero holders.
+    Probe {
+        /// `<id>`, `artifact/<id>`, `tree/<hex>` or `store/<algo>/<hex>`.
+        target: String,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Fetch from **one** origin's concrete key, at data-low, verifying every
+    /// reply against the content root before it reaches disk (RFC 07 §2.1).
+    Fetch {
+        /// `<id>`, `artifact/<id>`, `tree/<hex>` or `store/<algo>/<hex>`.
+        target: String,
+        /// The one origin to fetch from (`h-<12hex>` or `@service`) — as
+        /// reported by `zenctl blob probe`. A wildcard is not an origin.
+        #[arg(long = "from", value_name = "ORIGIN")]
+        from: String,
+        /// Where to write. Defaults to the target's last chunk; the origin's
+        /// advisory filename is never used to choose a path.
+        #[arg(long, short = 'o', value_name = "PATH")]
+        out: Option<PathBuf>,
+        /// The content root the reference carried (RFC 07 §2.1). Every reply
+        /// is verified against it before disk.
+        #[arg(long, value_name = "HEX")]
+        root: Option<String>,
+        /// Accept whatever this origin serves, without a root to check it
+        /// against — trust-on-first-use, stated out loud.
+        #[arg(long, conflicts_with = "root")]
+        allow_unpinned: bool,
+        /// Replace an existing destination file.
+        #[arg(long)]
+        overwrite: bool,
+        /// Suppress progress on stderr.
+        #[arg(long, short = 'q')]
+        quiet: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -952,6 +1013,35 @@ async fn main() -> Result<()> {
                 }
             };
             output::storage_list(&report::StorageList { storages, coverage }, bus.format)
+        }
+        Command::Blob(BlobCmd::List {
+            producer,
+            tier,
+            bus,
+        }) => cmd::blob::list(producer.as_deref(), tier.as_deref(), &bus).await,
+        Command::Blob(BlobCmd::Probe { target, bus }) => cmd::blob::probe(&target, &bus).await,
+        Command::Blob(BlobCmd::Fetch {
+            target,
+            from,
+            out,
+            root,
+            allow_unpinned,
+            overwrite,
+            quiet,
+            bus,
+        }) => {
+            let dest = out.unwrap_or_else(|| cmd::blob::default_dest(&target));
+            cmd::blob::fetch(
+                &target,
+                &from,
+                &dest,
+                root.as_deref(),
+                allow_unpinned,
+                overwrite,
+                quiet,
+                &bus,
+            )
+            .await
         }
         Command::Admin(AdminCmd::Get { selector, bus }) => cmd::admin::get(&selector, &bus).await,
         Command::Admin(AdminCmd::Routers { bus }) => cmd::admin::routers(&bus).await,

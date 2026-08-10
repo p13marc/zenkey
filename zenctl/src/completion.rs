@@ -137,6 +137,20 @@ pub fn qos_profiles() -> Vec<CompletionCandidate> {
     )
 }
 
+/// The `@blob` tier tokens — a closed vocabulary (RFC 07 §2), so this needs no
+/// cache and cannot go stale.
+pub fn blob_tiers() -> Vec<CompletionCandidate> {
+    candidates(
+        [
+            zenkey::BlobTier::Artifact,
+            zenkey::BlobTier::Tree,
+            zenkey::BlobTier::Store,
+        ]
+        .into_iter()
+        .map(|t| t.chunk().to_string()),
+    )
+}
+
 /// Named contexts from the config file.
 pub fn contexts() -> Vec<CompletionCandidate> {
     let Ok(config) = zenkey_fleet::context_store::load() else {
@@ -194,6 +208,12 @@ mod tests {
             .map(|c| c.get_value().to_string_lossy().to_string())
             .collect();
         assert_eq!(classes, ["events", "state", "telemetry"]);
+
+        let tiers: Vec<String> = blob_tiers()
+            .iter()
+            .map(|c| c.get_value().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(tiers, ["artifact", "store", "tree"]);
     }
 
     /// No cache, no candidates — and above all, no panic and no bus. This is

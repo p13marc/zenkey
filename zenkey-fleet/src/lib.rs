@@ -13,6 +13,7 @@
 
 pub mod admin;
 pub mod bench;
+pub mod blob;
 pub mod context_store;
 pub mod diff;
 pub mod discover;
@@ -52,6 +53,9 @@ pub use admin::{
 };
 pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
 pub use bench::{BenchSpec, bench_rpc};
+#[cfg(feature = "blob")]
+pub use blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe};
+pub use blob::{BlobTarget, blob_list, declared_by};
 pub use context_store::{StoredContext, active_name, cache_dir};
 pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
@@ -59,7 +63,7 @@ pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
     StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,
-    fleet_registry, state_snapshot,
+    fleet_get_at, fleet_registry, state_snapshot,
 };
 pub use registry::SliceSet;
 pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
@@ -71,3 +75,7 @@ pub use sub::{
 };
 pub use tree::KeyTreeSnapshot;
 pub use write::{CallTarget, MatchingEvents, Publication, call, declare_publication};
+/// The RFC 07 reference client, re-exported so a frontend, an example or a
+/// test cannot end up on a different version of it than the engine.
+#[cfg(feature = "blob")]
+pub use zblob;

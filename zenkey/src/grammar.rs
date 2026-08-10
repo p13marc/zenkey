@@ -706,6 +706,28 @@ pub fn blob_key(origin: &Origin, tier: BlobTier, rest: &[&str]) -> Result<Key, K
     Ok(Key::from_canonical(key))
 }
 
+/// The `@blob` tier prefix under one origin: `v1/<origin>/@blob/<tier>`
+/// (RFC 07 §2).
+///
+/// Not a key that addresses anything — it is the *concrete* prefix the
+/// per-endpoint tails of RFC 07 §2.2 hang off, and the thing a probe resolves
+/// to once one origin has been chosen (§2.5). Contrast
+/// [`crate::BlobProbePrefix`], the `*`-origin form, which is a distinct type
+/// precisely so the two cannot be swapped.
+///
+/// Takes an [`Origin`] rather than riding on [`crate::V1Context`] because
+/// `@blob` keys carry no producer chunk: an explorer that has read an origin
+/// off the wire has everything this needs, and should not have to invent a
+/// producer to reach it.
+pub fn blob_tier_prefix(origin: &Origin, tier: BlobTier) -> Key {
+    let mut key = String::new();
+    push_key(&mut key, VERSION_CHUNK);
+    push_key(&mut key, origin.chunk());
+    push_key(&mut key, PLANE_BLOB);
+    push_key(&mut key, tier.chunk());
+    Key::from_canonical(key)
+}
+
 /// Build a Tier-2 **tree** key: `v1/<origin>/@blob/tree/<root>` (RFC 07 §2.3).
 ///
 /// A snapshot is named by its own root, so the key is immutable and the

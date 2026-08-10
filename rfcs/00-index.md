@@ -1,9 +1,40 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.10 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.11 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.11 (2026-08-10, the blob-id spelling erratum)** — [07 §2.2](07-bulk-planes.md)
+> says a Tier-1 `<id>` "is the ULID minted by the RPC that created it" and
+> stops there. A canonical ULID is uppercase Crockford base32; a non-verbatim
+> chunk has no uppercase spelling. The rule that resolves this has been
+> normative since v1.4 and lives in [03 §2](03-grammar.md) — "**ULIDs are
+> key-encoded in lowercase**" — but chapter 07 never pointed at it, so the one
+> chapter that mints ULID-bearing keys was also the one place a reader could
+> not see the constraint. No new rule; a cross-reference where the keys are
+> defined.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **L1** | [07 §2.2](07-bulk-planes.md) | **`<id>` is one plain chunk, and a ULID enters it lowercased**, restating [03 §2](03-grammar.md) at the point of use. The failure it prevents is specific and silent: an id pasted from an RPC reply verbatim yields a key that is not a v1 key at all, so an observer attributing a reply *by its key* ([05 §2.1](05-control-rpc.md)) cannot name the origin that answered — a probe across origins degrades to a list of anonymous holders exactly when naming them is the point ([09 §5.1](09-operations.md) O1). Lossless: Crockford base32 decodes case-insensitively, and the payload MAY carry the canonical uppercase form. |
+>
+> **What did *not* change.** No grammar change, no wire change, no registry
+> format change, no new field: [03 §2](03-grammar.md)'s lexical rules are
+> quoted, not amended, and every implementation already followed them (zenkey's
+> `is_valid_plain_chunk` has rejected uppercase since v1.0 — this erratum
+> documents a constraint the code was already enforcing). §2.1's anchor, the
+> §2.2 endpoint table, §2.5's probe form and §2.6's QoS obligation are
+> untouched. One editorial touch: 07's status line listed its amendments as
+> "v1.2 and v1.7" and had missed v1.8's §2.7; it now reads v1.2, v1.7, v1.8
+> and v1.11.
+>
+> **Provenance.** Found while building `zenctl blob` and the zengui blob
+> browser (zenkey #58, #68) — the first consumers of the plane v1.7 and v1.8
+> specified. The tools refuse a non-conforming id
+> with this citation rather than lowercasing it silently, because an id the
+> caller cannot spell is a caller-side bug and quietly rewriting it would hide
+> which origin holds what.
 
 > **v1.10 (2026-08-09, the codec amendment)** — [08 §7](08-registry.md) has
 > called its schema-kind vocabulary "open" since v1.5 and then registered

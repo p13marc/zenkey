@@ -30,6 +30,11 @@
 #     rather than a change (RFC 04 §1.2).
 #   * `…/telemetry/probe/reading` moves too, but offers no chart: a protobuf
 #     leaf needs a schema decode, which must not sit on a render path.
+#   * Alt 9 opens the blob pane. Probe `01jqz3demo0001`: spray serves it from
+#     two origins at two different content roots, so the pane flags the
+#     disagreement rather than picking (RFC 07 §2.1). Fetch from the second
+#     with the first's root pinned and it aborts naming that origin, leaving
+#     no file — verification happens before disk, not after transfer.
 #   * `just gui-demo-bounded` trips the key bound immediately: the status strip
 #     should read "N keys (+M retired — bound reached)" (RFC 09 §5.1 O6).
 #   * `just gui-demo-no-registry` withholds the registry: every badge should

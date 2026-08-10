@@ -182,13 +182,7 @@ impl V1Context {
     /// deployment namespace. An un-namespaced reader must
     /// [`grammar::with_base`] it.
     pub fn blob_prefix(&self, tier: grammar::BlobTier) -> Key {
-        Key::from_canonical(format!(
-            "{}/{}/{}/{}",
-            grammar::VERSION_CHUNK,
-            self.origin.chunk(),
-            grammar::PLANE_BLOB,
-            tier.chunk()
-        ))
+        grammar::blob_tier_prefix(&self.origin, tier)
     }
 
     /// A Tier-2 **tree** key under this origin (RFC 07 §2.3):

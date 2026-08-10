@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.7 (proposed)** · normative chapter · *amended in v1.2 and v1.7 — see [00-index.md](00-index.md)*
+**Status: v1.7 (proposed)** · normative chapter · *amended in v1.2, v1.7, v1.8 and v1.11 — see [00-index.md](00-index.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -131,6 +131,16 @@ Whole-file delivery of a one-off artifact (debug bundle, pcap). The `<id>`
 is the ULID minted by the RPC that created it; the id is per-artifact, which
 is acceptable *here* because blob keys are short-lived queryable endpoints,
 not published state.
+
+> **`<id>` is one plain chunk, and a ULID enters it lowercased**
+> ([03 §2](03-grammar.md)). A canonical ULID is uppercase Crockford base32
+> and uppercase has no spelling in a non-verbatim chunk, so an id copied
+> from an RPC reply verbatim produces a key this convention cannot parse:
+> `…/@blob/artifact/01HQXK8F9C2N4P/manifest` is not a v1 key, and an
+> explorer that attributes a reply *by its key* ([05 §2.1](05-control-rpc.md))
+> then cannot name which origin answered. Crockford base32 decodes
+> case-insensitively, so the lowercasing is lossless and the payload MAY
+> carry the canonical uppercase form.
 
 The endpoints under `artifact/<id>/` are reserved and normative:
 

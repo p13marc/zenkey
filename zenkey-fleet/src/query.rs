@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use zenkey::grammar::with_base;
 use zenkey::{RegistrySlice, parse_slice};
 use zenoh::Session;
+use zenoh::qos::Priority;
 use zenoh::query::{ConsolidationMode, QueryTarget};
 
 /// How a producer answered a procedure call.
@@ -31,6 +32,22 @@ pub enum Answer {
 #[derive(Debug, Clone)]
 pub struct FleetAnswer {
     pub origin: String,
+    /// The reply's **own** key expression — what `origin` was derived from, and
+    /// the concrete key a follow-up must be addressed to.
+    ///
+    /// Empty for an error reply, which zenoh gives no sample and therefore no
+    /// key. Carried because `origin` is lossy by design: the attribution helper goes
+    /// through the grammar and yields `"?"` for any key that does not parse
+    /// under `base`, and a caller that must still *name* the responder (RFC 09
+    /// §5.1 O1 — a non-conforming key is a fact) has nowhere else to look.
+    pub key: String,
+    /// The reply's declared encoding, when it carried one.
+    ///
+    /// A caller that speaks a specific wire (`@blob`'s postcard replies, say)
+    /// needs to tell "answered in a dialect we do not speak" from "did not
+    /// answer": the first is an observation, the second is silence, and RFC 09
+    /// §5.1 O4 forbids rendering them alike.
+    pub encoding: Option<String>,
     pub answer: Answer,
 }
 
@@ -58,10 +75,38 @@ pub async fn fleet_get(
     payload: Option<Vec<u8>>,
     timeout: Duration,
 ) -> Result<Vec<FleetAnswer>> {
+    fleet_get_at(session, base, key, payload, timeout, Priority::DEFAULT).await
+}
+
+/// [`fleet_get`] with the query's **priority** stated (RFC 04 §3, RFC 07 §2.6).
+///
+/// Replies inherit the *query's* QoS — a server-side setter is a no-op — so a
+/// bulk plane's priority can only be decided here. RFC 07 §2.6 makes that a
+/// caller obligation rather than a suggestion: `@blob` GETs MUST ride at
+/// [`Priority::DataLow`], or one operator fetching a debug bundle starves the
+/// telemetry and alerts sharing the link.
+///
+/// A sibling rather than a sixth parameter on [`fleet_get`]: every existing
+/// call site would pass the same value and read worse for it, and naming the
+/// bulk case makes "who issues bulk GETs?" a grep — the same argument that
+/// keeps `BlobProbePrefix` a distinct type instead of a `Key`.
+///
+/// [`fleet_get`] delegates here with [`Priority::DEFAULT`], which is
+/// `Priority::Data` — byte-identical to setting nothing, which is what it did
+/// before this function existed.
+pub async fn fleet_get_at(
+    session: &Session,
+    base: &str,
+    key: &str,
+    payload: Option<Vec<u8>>,
+    timeout: Duration,
+    priority: Priority,
+) -> Result<Vec<FleetAnswer>> {
     let mut builder = session
         .get(key)
         .target(QueryTarget::All)
         .consolidation(ConsolidationMode::None)
+        .priority(priority)
         .timeout(timeout);
     if let Some(body) = payload {
         builder = builder.payload(body);
@@ -94,6 +139,8 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
     match reply.result() {
         Ok(sample) => FleetAnswer {
             origin: origin_of(base, sample.key_expr().as_str()),
+            key: sample.key_expr().as_str().to_string(),
+            encoding: Some(sample.encoding().to_string()),
             answer: Answer::Value(sample.payload().clone()),
         },
         Err(err) => {
@@ -122,6 +169,8 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
             // by; zenoh does not surface the responder here.
             FleetAnswer {
                 origin: "?".to_string(),
+                key: String::new(),
+                encoding: None,
                 answer: Answer::Error { name, message },
             }
         }
