@@ -57,14 +57,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 
 ## Commands
 
-```bash
-cargo build --workspace --all-targets
-cargo test --workspace                  # includes fixture-tests (codegen round-trip)
-cargo test -p zenkey --test guard       # single integration-test file
-cargo test -p zenkey slug::             # tests matching a module path
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings   # zero-warnings gate (CI)
+Zero warnings is a CI gate. `cargo test --workspace` includes fixture-tests
+(the codegen round-trip).
 
+```bash
 cargo run -p zenctl -- node list --base zensight -c tcp/127.0.0.1:7447
 cargo run -p zenctl -- topic list --base zensight --registry ../zensight/zensight-common/registry
 ```
@@ -72,22 +68,10 @@ cargo run -p zenctl -- topic list --base zensight --registry ../zensight/zensigh
 Plain cargo is still the build system; the `justfile` only covers what needs
 more than one command — chiefly running the GUI against traffic to look at.
 The demo is self-contained (no `zenohd`): `spray` listens and zengui connects
-straight to it.
+straight to it (`just --list` for the recipes).
 
-```bash
-just gui-demo               # zengui + generated conforming/foreign traffic
-just gui-demo-bounded       # the same, with the key bound tripping immediately
-just gui-demo-no-registry   # the same, with badges reading "not asked"
-just spray                  # traffic only; then `just test-live` elsewhere
-just ci                     # everything CI runs, in the same order
-```
-
-CI (`.forgejo/workflows/ci.yml`, Forgejo Actions) runs: fmt check, clippy
-`-D warnings` (all features), build + test (workspace, plus `-p zenkey
---all-features`), an MSRV job (rustc pinned), and rustdoc with `-D warnings`.
-`release.yml` (tag push `vX.Y.Z`) builds the zenctl binary + source tarball as
-a Forgejo release; `publish-crates.yml` (manual dispatch) publishes the lib
-crates to crates.io.
+CI gates live in `.forgejo/workflows/ci.yml`; the release and publish lanes in
+`release.yml` (tag push `vX.Y.Z`) and `publish-crates.yml` (manual dispatch).
 
 ## Architecture
 
@@ -118,51 +102,14 @@ un-namespaced debug tools (`zenctl`) ever see full keys
    `zenkey/src/common_state.rs`); app-specific groupings are wrappers the
    consumer writes over its own `AnySubject`.
 
-### zenkey crate layers (each module maps to an RFC section)
+### Where the detail lives
 
-- `grammar` — chunk charset, reserved tokens, structural assembly/parse
-  (RFC 03), plus the wire-observer helpers (`parse_full`, `fleet_rpc_key`,
-  `service_rpc_key`, `all_liveliness_wildcard`, `service_alive_key`).
-- `origin` — `h-<12hex>` minting from machine-id + app salt (RFC 06 §1);
-  `profile` supplies the salt and fallback persistence.
-- `slug` — canonical, injective slugging of foreign values, `_xNN_` escape (RFC 03 §2).
-- `qos` — the five named QoS profiles as a closed enum (RFC 04 §3); the zenoh
-  mappings sit behind the default `zenoh` feature (zenkey-build depends on
-  zenkey with `default-features = false`).
-- `context` — `V1Context` bundles origin + producer; producers build all keys
-  through it.
-- `slice` — `RegistrySlice`, the `introspect` reply type + diff (RFC 08 §6),
-  including per-producer `[[blob]]` tier declarations (v1.8). Optional
-  metadata fields (qos/ttl/unit/rate/cardinality) must stay **optional** —
-  forward-compat is pinned by zenctl's foreign-slice test.
-- `tests/guard.rs` — RFC 03 §4 design properties D1–D6 pinned as executable
-  tests. If a grammar change breaks these, the change is wrong (or needs an RFC
-  amendment).
-
-### Registry codegen (zenkey-build — the load-bearing piece)
-
-`Config::generate()` reads every `registry/*.toml` in the consumer's dir,
-**lints it against RFC 08 §5** (returned as `Error`, surfaced by the consumer's
-build.rs `unwrap()`), checks the append-only `deprecated.lock` ledger, and
-emits the module. Codegen is normative in **both** directions (RFC 08 §1):
-an unregistered subject does not construct; a metric name refines into a typed
-subject with named variables (never `parts[1]`). Consumers that cannot parse a
-subject **drop it** — no string-parsing fallback.
-
-Registry conventions to preserve when editing registry TOMLs (fixtures here,
-live files in the application repos):
-
-- Telemetry is registered as **real subject families**, not a `{metric...}`
-  catch-all. Exception: device-defined trees (snmp/modbus/gnmi/netflow style)
-  keep a trailing rest-var by design.
-- A leaf naming a distinct measurement is a **literal**; a leaf that is a value
-  of a dimension is a **`{var}`**.
-- `deprecated.lock` is an **append-only ledger**: one `<producer>\t<path>` line
-  per retired subject, never removed; codegen fails if ledger and
-  `[[deprecated]]` entries disagree.
-- `common = "health|errors|sensor|alert|evidence_self|evidence_device|evidence_names|entity|alias|pdns"`
-  marks a state subject as one of the RFC framework set; the lint checks the
-  pattern's variable names against the CommonState variant fields.
+- `zenkey` crate module-by-module layering (each module ↔ its RFC section):
+  `zenkey/CLAUDE.md`, loaded when working in the crate.
+- Registry codegen and the registry-TOML conventions (RFC 08 §5 lints, the
+  append-only `deprecated.lock` ledger, literal-vs-`{var}` leaves, the
+  `common = "…"` framework set): the `registry-conventions` skill — read it
+  before editing any `registry/*.toml` or touching zenkey-build's codegen.
 
 ### zenctl: source-parameterized, app-neutral
 
@@ -182,7 +129,6 @@ never a verdict. Scouting is opt-in.
 - RFC text is normative: when code and RFC disagree, either fix the code or amend
   the RFC explicitly (with a changelog entry in `00-index.md`) — never silently
   drift. Doc comments cite RFC sections (`RFC 03 §2`) and issues; keep that habit.
-- Rust edition 2024, Zenoh 1.9 (`unstable` feature), tokio.
 - Publishing (crates.io, LIB CRATES ONLY): `zenkey` → `zenkey-build` →
   `zenkey-fleet` (in that order; zenkey-build version-locks to zenkey 0.x).
   Binaries (zenctl, zengui) ship via the `release.yml` binary lane.

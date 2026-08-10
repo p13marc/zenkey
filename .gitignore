@@ -1,2 +1,5 @@
 /target
 /.run
+
+# Per-developer Claude Code settings; the shared skills alongside it are tracked.
+/.claude/settings.local.json
