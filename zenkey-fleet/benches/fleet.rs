@@ -104,13 +104,17 @@ fn bench_stats(c: &mut Criterion) {
         b.iter(|| black_box(&ten_k).totals())
     });
 
-    // The unwatch path: one keyexpr per table key, before the #44 fix.
+    // The unwatch path: one keyexpr per table key. `iter_batched` because
+    // `retire_unwatched` consumes the table it is given — building a fresh
+    // one inside `iter` would put table construction in the number, and a
+    // bench whose id says `retire_unwatched` must measure that.
     c.bench_function("stats/retire_unwatched_1k", |b| {
         let kept = vec!["v1/*/state/**".to_string()];
-        b.iter(|| {
-            let mut stats = table_of(1_000);
-            stats.retire_unwatched(black_box("v1/*/telemetry/**"), black_box(&kept))
-        })
+        b.iter_batched(
+            || table_of(1_000),
+            |mut stats| stats.retire_unwatched(black_box("v1/*/telemetry/**"), black_box(&kept)),
+            criterion::BatchSize::SmallInput,
+        )
     });
 }
 
