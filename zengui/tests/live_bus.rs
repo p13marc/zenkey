@@ -323,3 +323,98 @@ async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
         "reappearance recovers the row"
     );
 }
+
+/// The history/plotting path end to end (#63, #64), against real traffic.
+///
+/// What only a live bus can prove: that samples reach a recorder through the
+/// monitor with a usable arrival stamp, that a real tombstone survives the
+/// engine as a `Delete` rather than an empty put, and that consecutive
+/// payloads actually differ enough to diff and to plot. `spray` retires
+/// `state/…/health` every twentieth sample, so this waits for one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs a live bus; see the module docs"]
+async fn history_records_a_real_tombstone_and_a_plottable_series() {
+    use zengui::history::HistoryRecorder;
+    use zengui::series::value_series;
+    use zenkey_fleet::{FleetEvent, StreamItem};
+
+    let session = zenkey_fleet::session::open(&[endpoint()], &[], false)
+        .await
+        .expect("open session");
+    let monitor = Monitor::start(
+        &session,
+        MonitorSpec {
+            selectors: vec![
+                "v1/*/state/sysinfo/health".to_string(),
+                "v1/*/telemetry/sysinfo/disk/**".to_string(),
+            ],
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("start monitor");
+
+    let mut events = monitor.events();
+    let mut health = HistoryRecorder::new("", 512);
+    let mut disk = HistoryRecorder::new("", 512);
+    // The keys carry spray's host id; learn them from the first sample rather
+    // than hard-coding what the fixture happens to use today.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while tokio::time::Instant::now() < deadline {
+        let Ok(Some(item)) = tokio::time::timeout_at(deadline, events.recv()).await else {
+            break;
+        };
+        if let StreamItem::Event(FleetEvent::Sample(view)) = item {
+            let target = if view.key.contains("/state/") {
+                &mut health
+            } else {
+                &mut disk
+            };
+            if target.key.is_empty() {
+                target.key = view.key.clone();
+            }
+            target.observe(&view);
+        }
+        if health.ring.iter().any(|e| e.is_delete) && disk.ring.len() > 3 {
+            break;
+        }
+    }
+
+    // A real delete, through the engine, marked as retirement.
+    let tombstones = health.ring.iter().filter(|e| e.is_delete).count();
+    assert!(
+        tombstones > 0,
+        "no tombstone in {} health samples — is this `spray` new enough to retire the key?",
+        health.ring.len()
+    );
+    // And it is not merely an empty put: the puts around it carry documents.
+    assert!(
+        health
+            .ring
+            .iter()
+            .any(|e| !e.is_delete && e.value.is_some()),
+        "the health key should also carry ordinary values"
+    );
+
+    // Arrival stamps are monotonic and distinct enough to space a series.
+    let stamps: Vec<_> = disk.ring.iter().map(|e| e.received).collect();
+    assert!(
+        stamps.windows(2).all(|w| w[0] >= w[1]),
+        "history is newest-first, so arrival must be non-increasing across it"
+    );
+
+    // The plotted series moves — a fixture that republished one payload would
+    // give a flat line and prove nothing.
+    let series = value_series(&disk.ring, "value");
+    assert!(series.has_data(), "no numeric `value` on the disk subject");
+    let (lo, hi) = series.bounds().expect("bounds over a non-empty series");
+    assert!(
+        hi > lo,
+        "the demo value must actually move ({lo}..{hi}) or the sparkline demo shows nothing"
+    );
+    println!(
+        "health: {} samples, {tombstones} tombstones · disk: {} points, {lo}..{hi}",
+        health.ring.len(),
+        series.len(),
+    );
+}
