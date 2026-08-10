@@ -35,7 +35,20 @@ pub struct SampleView {
     pub encoding: String,
     pub kind: SampleKind,
     /// HLC timestamp when the publisher's session stamps one.
+    ///
+    /// Absent is common — a publisher whose session is not timestamping stamps
+    /// nothing — and absence must never be defaulted to an arrival time. This
+    /// is the *publisher's* clock; [`SampleView::received`] is ours, and the
+    /// two are never mixed (a consumer plotting a time axis states which one
+    /// it plotted).
     pub timestamp: Option<zenoh::time::Timestamp>,
+    /// Arrival, on **this observer's** monotonic clock — always available,
+    /// never wall-clock, and never a claim about when the sample was produced.
+    ///
+    /// Stamped per sample rather than per batch so a consumer that coalesces
+    /// (zengui ticks at 250 ms) can still space a 5 Hz key's samples truthfully
+    /// instead of collapsing a tick's worth onto one instant.
+    pub received: Instant,
 }
 
 /// What the monitor emits.
@@ -343,6 +356,7 @@ impl Monitor {
                         encoding: sample.encoding().to_string(),
                         kind: sample.kind(),
                         timestamp: sample.timestamp().copied(),
+                        received: Instant::now(),
                     },
                     sn,
                 );
@@ -563,6 +577,7 @@ mod tests {
             encoding: "zenoh/bytes".to_string(),
             kind: SampleKind::Put,
             timestamp: None,
+            received: Instant::now(),
         }
     }
 

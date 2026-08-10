@@ -14,6 +14,7 @@
 pub mod admin;
 pub mod bench;
 pub mod context_store;
+pub mod diff;
 pub mod discover;
 pub mod facts;
 pub mod query;
@@ -52,6 +53,7 @@ pub use admin::{
 pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
 pub use bench::{BenchSpec, bench_rpc};
 pub use context_store::{StoredContext, active_name, cache_dir};
+pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use query::{

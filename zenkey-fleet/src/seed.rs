@@ -162,6 +162,10 @@ pub(crate) fn view_of(sample: &zenoh::sample::Sample) -> SampleView {
         encoding: sample.encoding().to_string(),
         kind: sample.kind(),
         timestamp: sample.timestamp().copied(),
+        // Arrival, not production: a seed reply is *received* now, however old
+        // the value it carries is. The HLC above is the only thing that speaks
+        // for when it was produced, and it is often absent.
+        received: std::time::Instant::now(),
     }
 }
 
