@@ -1528,3 +1528,206 @@ fn an_untripped_cache_bound_says_nothing() {
     }));
     assert!(ui.find(status::facts_text(12, 0).as_str()).is_err());
 }
+
+/// The admin & storage panel's honesty surfaces (#70). The pane exists to draw
+/// three distinctions that all look like "nothing here" unless something makes
+/// them look different: not swept, swept-and-unreachable, and swept-and-empty.
+mod admin {
+    use super::*;
+    use std::sync::Arc;
+    use zengui::admin::{AdminState, AdminSweep};
+    use zengui::view::admin::pane;
+    use zenkey_fleet::report::StorageList;
+    use zenkey_fleet::{Coverage, CoverageRow, DeclaredEntities, RouterInfo, StorageInfo};
+
+    fn sweep(
+        routers: Vec<RouterInfo>,
+        storages: Vec<StorageInfo>,
+        coverage: Vec<CoverageRow>,
+        declared: Option<DeclaredEntities>,
+        note: Option<&str>,
+    ) -> AdminState {
+        let mut state = AdminState::default();
+        state.finish(
+            Ok(Arc::new(AdminSweep {
+                routers,
+                storage: StorageList { storages, coverage },
+                declared,
+                coverage_note: note.map(str::to_string),
+                base: String::new(),
+            })),
+            "",
+        );
+        state
+    }
+
+    fn storage(name: &str) -> StorageInfo {
+        StorageInfo {
+            zid: "z1".into(),
+            name: name.into(),
+            key_expr: Some("acme/v1/*/state/**".into()),
+            strip_prefix: Some("acme/v1".into()),
+            volume: Some("rocksdb".into()),
+            raw: serde_json::json!({"volume": "rocksdb"}),
+        }
+    }
+
+    fn row(producer: &str, path: &str, coverage: Coverage) -> CoverageRow {
+        CoverageRow {
+            producer: producer.into(),
+            path: path.into(),
+            ttl_s: Some(60),
+            coverage,
+        }
+    }
+
+    /// O4: never swept must not read as "no routers".
+    #[test]
+    fn the_admin_pane_never_reports_a_sweep_it_did_not_run() {
+        let state = AdminState::default();
+        let mut ui = simulator::<Message, _, _>(pane(&state));
+        assert!(ui.find("admin space not swept yet").is_ok());
+        assert!(
+            ui.find(
+                "nothing has been asked — this is \"not asked\", not \"no routers\" \
+                 (RFC 09 §5.1 O4)"
+            )
+            .is_ok()
+        );
+        assert!(
+            ui.find(
+                "no routers answered @/*/router — a peer-only mesh, or the admin space \
+                     is disabled."
+            )
+            .is_err(),
+            "an unrun sweep must not render the swept-and-empty sentence"
+        );
+    }
+
+    /// #70's second acceptance criterion: a router-less bus shows the honest
+    /// empty states, not an error — and above all not a coverage verdict.
+    #[test]
+    fn a_router_less_bus_says_so_four_ways() {
+        let state = sweep(
+            vec![],
+            vec![],
+            vec![],
+            None,
+            Some(
+                "no registry slices resolved, so the declared state families are unknown — \
+                 this is \"not asked\", not \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, \
+                 or wait for the bus registry (RFC 08 §6).",
+            ),
+        );
+        let mut ui = simulator::<Message, _, _>(pane(&state));
+        // Verbatim from the CLI, so the two tools cannot disagree.
+        assert!(
+            ui.find(
+                "no routers answered @/*/router — a peer-only mesh, or the admin space is \
+                 disabled."
+            )
+            .is_ok()
+        );
+        assert!(
+            ui.find(
+                "no storages found in the admin space — a peer-only mesh, a router without \
+                 the storage manager, or the admin space is disabled."
+            )
+            .is_ok()
+        );
+        assert!(ui.find("coverage not judged").is_ok());
+        assert!(
+            ui.find(
+                "declared entities: n/a — nothing answered the admin sweep. zenoh's \
+                 adminspace.enabled defaults to false and a peer mesh has none, so this is \
+                 \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4)."
+            )
+            .is_ok()
+        );
+        // The negative that matters: an unjudged table must never render as an
+        // uncovered one.
+        assert!(
+            ui.find("uncovered").is_err(),
+            "coverage that was never judged must not read as uncovered"
+        );
+    }
+
+    /// A populated sweep: the three coverage verdicts read differently, both
+    /// RFC notes are present, and the new storage fields are on screen.
+    #[test]
+    fn a_populated_sweep_renders_every_verdict_distinctly() {
+        let state = sweep(
+            vec![RouterInfo {
+                zid: "z1".into(),
+                version: Some("1.9.0".into()),
+                locators: vec!["tcp/127.0.0.1:7447".into()],
+                raw: serde_json::Value::Null,
+            }],
+            vec![storage("latest")],
+            vec![
+                row("tc", "health", Coverage::Covered("latest@z1".into())),
+                row("tc", "config/{iface}", Coverage::Partial("one@z1".into())),
+                row("netring", "capture", Coverage::Uncovered),
+            ],
+            Some(DeclaredEntities::default()),
+            None,
+        );
+        let mut ui = simulator::<Message, _, _>(pane(&state));
+        assert!(ui.find("covered by latest@z1").is_ok());
+        assert!(ui.find("PARTIAL via one@z1").is_ok());
+        assert!(ui.find("uncovered").is_ok());
+        // The consequence RFC 09 §2 names, which is the visual #70 asked for.
+        assert!(
+            ui.find(
+                "no storage captures an uncovered family — while its producer is down, a \
+                 late joiner GETs nothing: the `latest` storage is the fleet-wide \
+                 late-joiner seed (RFC 09 §2)"
+            )
+            .is_ok()
+        );
+        // And the counterweight, verbatim from the CLI.
+        assert!(
+            ui.find(
+                "note: an uncovered ttl'd family is not automatically a defect — \
+                 volatile-state seeding may ride the advanced-pub/sub cache (RFC 04 §3.5); \
+                 storage is authoritative for durable data."
+            )
+            .is_ok()
+        );
+        assert!(
+            ui.find("strip acme/v1  ·  volume rocksdb").is_ok(),
+            "the fields #70 asked for reach the screen"
+        );
+        assert!(
+            ui.find("ttl 60s").is_ok(),
+            "the note is unusable without it"
+        );
+    }
+
+    /// The O4 pair, pinned: "answered and declared none" must not render as
+    /// "nothing answered".
+    #[test]
+    fn an_empty_admin_space_reads_differently_from_an_absent_one() {
+        let state = sweep(
+            vec![],
+            vec![],
+            vec![],
+            Some(DeclaredEntities::default()),
+            None,
+        );
+        let mut ui = simulator::<Message, _, _>(pane(&state));
+        assert!(
+            ui.find("declared entities: 0 — the admin space answered and declared none")
+                .is_ok()
+        );
+        assert!(
+            ui.find(
+                "declared entities: n/a — nothing answered the admin sweep. zenoh's \
+                 adminspace.enabled defaults to false and a peer mesh has none, so this is \
+                 \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4)."
+            )
+            .is_err(),
+            "an answered sweep must not carry the unreachable sentence"
+        );
+    }
+}
