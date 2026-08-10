@@ -50,7 +50,13 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 # `iced::Subscription`. Deliberately *not* `sipper`/`advanced`: the link is an
 # `async_stream` yielding `Message` directly (zensight's shape), not tcgui's
 # sipper-plus-remap.
-iced = { version = "0.14", features = ["tokio"] }
+#
+# `canvas` is the one addition to that lean set (#64): a sparkline that draws a
+# gap as a *break* in the line has no widget equivalent, and drawing gaps rather
+# than bridging them is the honesty requirement, not a flourish. It buys no
+# animation — nothing here declares a `frames()` subscription; the charts redraw
+# on the same 250 ms bus tick as everything else.
+iced = { version = "0.14", features = ["tokio", "canvas"] }
 iced_test = "0.14"
 async-stream = "0.3"
 

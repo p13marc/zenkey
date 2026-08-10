@@ -79,6 +79,12 @@ pub struct Zengui {
     /// dropped on the next one — which is what makes deselecting stop the
     /// cost, since there is then nothing left to feed.
     history: Option<crate::history::HistoryRecorder>,
+    /// The selected key's rate series (issue #64), sampled once per stats
+    /// tick. Reset with the selection, like the history it sits beside.
+    rate_series: crate::series::RateSampler,
+    /// Which numeric leaf the value sparkline plots; `None` follows the first
+    /// leaf the payload offers.
+    series_leaf: Option<String>,
     /// The last on-demand fetch: (key, outcome-or-error).
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
@@ -168,6 +174,8 @@ impl Zengui {
             expanded: BTreeSet::new(),
             selected: None,
             history: None,
+            rate_series: crate::series::RateSampler::new(),
+            series_leaf: None,
             fetched: None,
             echo_view: view::echo::EchoView::new(),
             context_form: view::contexts::ContextForm::default(),
@@ -470,6 +478,10 @@ impl Zengui {
                 self.history = key.as_deref().filter(|k| !k.contains('{')).map(|k| {
                     crate::history::HistoryRecorder::new(k, self.settings.history_entries)
                 });
+                // The plotted series belong to the same selection (issue #64):
+                // they start empty, and stop being fed when it goes away.
+                self.rate_series = crate::series::RateSampler::new();
+                self.series_leaf = None;
                 let (Some(session), Some(key)) = (self.session.clone(), key) else {
                     return Task::none();
                 };
@@ -497,6 +509,10 @@ impl Zengui {
             Message::Call(msg) => self.update_call(msg),
             Message::Nodes(msg) => self.update_nodes(msg),
             Message::Doctor(msg) => self.update_doctor(msg),
+            Message::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
+                self.series_leaf = Some(path);
+                Task::none()
+            }
             Message::History(msg) => {
                 if let Some(rec) = self.history.as_mut() {
                     match msg {
@@ -1582,6 +1598,15 @@ impl Zengui {
         // outran us vs. our own batch cap chose to coalesce.
         self.echo.record_lag(tick.lagged);
         self.echo.record_coalesced(tick.coalesced);
+        // One point per tick for the selected key's rate (issue #64). The
+        // count is what says whether the EWMA moved: it never decays on its
+        // own, so an unchanged count is silence, and the sampler records a gap
+        // rather than a confident flat line.
+        if let Some(rec) = self.history.as_ref() {
+            let chunks: Vec<&str> = rec.key.split('/').collect();
+            let observed = tick.tree.node(&chunks).map(|n| (n.count, n.rate_hz));
+            self.rate_series.tick(observed);
+        }
         for sample in &tick.samples {
             self.ensure_facts(&sample.key);
             self.echo.push(sample);
@@ -1771,6 +1796,8 @@ impl Zengui {
                         (Some(k.as_str()) == self.selected.as_deref()).then_some(o)
                     }),
                     decoded: self.decoded.as_ref(),
+                    series: self.series_data(),
+                    history_entries: self.history.as_ref().map(|r| r.ring.len()),
                 }),
                 RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
                     roster: &self.roster,
@@ -1916,6 +1943,48 @@ impl Zengui {
         .spacing(space::SM)
         .align_y(iced::Alignment::Center)
         .into()
+    }
+}
+
+impl Zengui {
+    /// Derive the detail pane's sparkline data from the recorded history
+    /// (issue #64).
+    ///
+    /// Computed per frame rather than kept: the ring is the single source, and
+    /// a cached series would be one more thing to invalidate on every eviction.
+    /// The leaves come from the newest payload, so a producer that starts
+    /// emitting a new field offers it without a restart.
+    fn series_data(&self) -> Option<view::detail::SeriesData> {
+        let rec = self.history.as_ref()?;
+        let leaves = rec
+            .ring
+            .newest()
+            .and_then(|e| e.value.as_ref())
+            .map(crate::series::numeric_leaves)
+            .unwrap_or_default();
+        // The chosen leaf, if the newest payload still carries it — a field
+        // that disappeared should not silently keep plotting its own gaps.
+        let leaf = self
+            .series_leaf
+            .as_ref()
+            .filter(|p| leaves.leaves.iter().any(|(k, _)| k == *p))
+            .cloned()
+            .or_else(|| leaves.leaves.first().map(|(k, _)| k.clone()));
+        let value = match &leaf {
+            Some(p) => crate::series::value_series(&rec.ring, p),
+            None => crate::series::Series::new(),
+        };
+        let unit = match self.facts.get(&rec.key).map(|f| &f.registration) {
+            Some(zenkey_fleet::Registration::Registered(s)) => s.unit.clone(),
+            _ => None,
+        };
+        Some(view::detail::SeriesData {
+            leaves,
+            leaf,
+            value,
+            rate: self.rate_series.series().clone(),
+            unit,
+        })
     }
 }
 

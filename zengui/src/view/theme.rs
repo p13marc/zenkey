@@ -101,6 +101,25 @@ impl ThemeColors<'_> {
         }
     }
 
+    /// A plotted series (#64): the value line.
+    ///
+    /// The chart's own accent rather than a borrowed semantic colour — a line
+    /// drawn in `success()` or `danger()` would read as a verdict about the
+    /// numbers, which a plot of arbitrary telemetry has no business implying.
+    pub fn series(&self, kind: SeriesTone) -> Color {
+        match kind {
+            SeriesTone::Value => self.primary(),
+            // The rate is the observer's own measurement, not the publisher's
+            // data, and is dimmed to say so.
+            SeriesTone::Rate => mix(self.primary(), self.background(), 0.4),
+        }
+    }
+
+    /// The baseline and gridline of a chart — structure, never data.
+    pub fn axis(&self) -> Color {
+        self.border()
+    }
+
     /// The doctor severity scale (#71), mirroring the CLI's ✗/⚠/· marks.
     pub fn severity(&self, kind: SeverityTone) -> Color {
         match kind {
@@ -109,6 +128,15 @@ impl ThemeColors<'_> {
             SeverityTone::Info => self.text_muted(),
         }
     }
+}
+
+/// Which series a chart is drawing (#64).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeriesTone {
+    /// A numeric field of the payload, over time.
+    Value,
+    /// The observed sample rate, over time.
+    Rate,
 }
 
 /// How a doctor finding's severity should read (#71).

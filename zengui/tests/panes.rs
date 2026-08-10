@@ -545,6 +545,8 @@ fn the_detail_pane_tags_decode_provenance() {
         facts: Some(&facts),
         fetched: Some(&fetched),
         decoded: Some(&decoded),
+        series: None,
+        history_entries: None,
     }));
     assert!(ui.find("registered").is_ok(), "the facts section renders");
     assert!(
@@ -563,6 +565,8 @@ fn the_detail_pane_tags_decode_provenance() {
         facts: Some(&facts),
         fetched: Some(&none),
         decoded: None,
+        series: None,
+        history_entries: None,
     }));
     assert!(
         ui.find("no value — asked get, @adv cache, subscribe window — a non-verdict, not proof of absence (RFC 05 §3.1)")
@@ -1106,5 +1110,94 @@ fn the_history_pane_counts_what_it_evicted() {
         ui.find("recording since selection · 3 retained · 7 evicted (ring full)")
             .is_ok(),
         "what the bound cost is a fact on screen"
+    );
+}
+
+// ── Numeric plotting (#64) ───────────────────────────────────────────────
+
+/// A payload with no numbers in it offers no chart at all — not an empty one,
+/// and not an error. Nothing about a string payload is a problem.
+#[test]
+fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
+    use zengui::series::{NumericLeaves, RateSampler, Series};
+    use zengui::view::detail::{DetailData, SeriesData, pane};
+
+    let series = SeriesData {
+        leaves: NumericLeaves::default(),
+        leaf: None,
+        value: Series::new(),
+        rate: RateSampler::new().series().clone(),
+        unit: None,
+    };
+    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+        key: FOREIGN,
+        facts: None,
+        fetched: None,
+        decoded: None,
+        series: Some(series),
+        history_entries: Some(3),
+    }));
+    assert!(
+        ui.find("Series").is_err(),
+        "a payload with nothing numeric in it must not grow a chart section"
+    );
+    // …but the link into the timeline is still there: history is not numeric.
+    assert!(
+        ui.find("history: 3 samples recorded — open (Alt 8)")
+            .is_ok()
+    );
+}
+
+/// The chart's numbers live in its caption, which is what makes the plot
+/// readable without colour — and gaps are named rather than smoothed away.
+#[test]
+fn the_detail_pane_labels_the_series_it_plots() {
+    use zengui::series::{Series, numeric_leaves};
+    use zengui::view::detail::{DetailData, SeriesData, pane};
+
+    let mut value = Series::new();
+    value.push(41.0);
+    value.push_gap();
+    value.push(42.0);
+    let mut rate = Series::new();
+    rate.push(5.0);
+
+    let series = SeriesData {
+        leaves: numeric_leaves(&serde_json::json!({"value": 42.0})),
+        leaf: Some("value".to_string()),
+        value,
+        rate,
+        unit: Some("percent".to_string()),
+    };
+    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+        key: REGISTERED,
+        facts: None,
+        fetched: None,
+        decoded: None,
+        series: Some(series),
+        history_entries: Some(3),
+    }));
+    assert!(ui.find("Series").is_ok());
+    assert!(
+        ui.find(
+            "value: 42percent now · 41percent min · 42percent max · 3 points · \
+             1 drawn as gaps, not interpolated"
+        )
+        .is_ok(),
+        "the caption carries the numbers, the unit and the gap count"
+    );
+    assert!(
+        ui.find("rate: 5.0/s now · 5.0/s min · 5.0/s max · 1 point")
+            .is_ok(),
+        "the rate series uses the shared rate wording"
+    );
+    assert!(
+        ui.find(
+            "plotted from the recorded history's structural values — a schema decode \
+             per sample would hit the bus on a render path, so a protobuf or CDR leaf \
+             offers no chart"
+        )
+        .is_ok(),
+        "the boundary of what can be plotted is stated, not left to be discovered"
     );
 }

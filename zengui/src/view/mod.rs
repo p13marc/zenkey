@@ -14,6 +14,7 @@ pub mod kit;
 pub mod nodes;
 pub mod palette;
 pub mod publish;
+pub mod spark;
 pub mod status;
 pub mod theme;
 pub mod tokens;

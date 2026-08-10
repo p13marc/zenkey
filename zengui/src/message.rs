@@ -76,6 +76,8 @@ pub enum Message {
     Doctor(crate::view::doctor::DoctorMsg),
     /// History pane interactions (issue #63).
     History(crate::view::history::HistoryMsg),
+    /// Detail pane interactions (issue #64): which numeric leaf is plotted.
+    Detail(crate::view::detail::DetailMsg),
 
     BaseSelected(String),
     ScopeSelected(ScopePreset),
