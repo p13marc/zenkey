@@ -53,6 +53,9 @@ prost-reflect = { workspace = true }
 # library ships. `cargo test -p zenkey-fleet` then covers `tests/codec.rs`
 # on its own, instead of only when a frontend happens to unify the feature in.
 zenkey = { workspace = true, features = ["decode-protobuf", "decode-cdr"] }
+# `tests/blob.rs` fetches to a real path, because "verified before disk" is
+# only checkable against a disk.
+tempfile = { workspace = true }
 
 [[bench]]
 name = "fleet"

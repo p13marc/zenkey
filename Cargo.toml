@@ -44,6 +44,7 @@ base64 = "0.22"
 prost = "0.13"
 prost-reflect = { version = "0.15", features = ["serde"] }
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+tempfile = "3"
 
 # GUI (zengui only). The `tokio` feature makes iced drive its subscriptions on a
 # tokio runtime, which is what lets the Zenoh link stream live inside an
