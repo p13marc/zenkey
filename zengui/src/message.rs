@@ -74,6 +74,8 @@ pub enum Message {
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).
     Doctor(crate::view::doctor::DoctorMsg),
+    /// History pane interactions (issue #63).
+    History(crate::view::history::HistoryMsg),
 
     BaseSelected(String),
     ScopeSelected(ScopePreset),
@@ -143,6 +145,8 @@ pub enum RightPane {
     Detail,
     Nodes,
     Doctor,
+    /// Per-key history and payload diff (issue #63).
+    History,
     /// Contexts and endpoints (issue #67).
     Connect,
 }
@@ -150,13 +154,14 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 7] = [
+    pub const ALL: [RightPane; 8] = [
         RightPane::Echo,
         RightPane::Call,
         RightPane::Publish,
         RightPane::Detail,
         RightPane::Nodes,
         RightPane::Doctor,
+        RightPane::History,
         RightPane::Connect,
     ];
 
@@ -168,6 +173,7 @@ impl RightPane {
             RightPane::Detail => "detail",
             RightPane::Nodes => "nodes",
             RightPane::Doctor => "doctor",
+            RightPane::History => "history",
             RightPane::Connect => "connect",
         }
     }

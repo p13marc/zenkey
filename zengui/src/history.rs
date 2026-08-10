@@ -275,13 +275,17 @@ mod tests {
     /// one huge document must not pin megabytes just because the count is low.
     #[test]
     fn the_ring_is_also_bounded_by_bytes() {
-        let mut ring = HistoryRing::new(1000);
+        let mut ring = HistoryRing::new(100);
         let big = vec![b'x'; 200_000];
         for _ in 0..20 {
             ring.push(&put("k", &big));
         }
-        assert!(ring.len() < 20, "byte budget must evict, got {}", ring.len());
-        assert!(ring.evicted() > 0);
+        assert!(
+            ring.len() < 20,
+            "the byte budget must evict well before the entry cap, got {}",
+            ring.len()
+        );
+        assert_eq!(ring.evicted(), 20 - ring.len() as u64);
     }
 
     #[test]
@@ -345,7 +349,10 @@ mod tests {
         assert_eq!(prev.map(|e| e.seq), Some(1));
         let (prev, entry) = ring.pair(0).expect("seq 0 retained");
         assert_eq!(entry.seq, 0);
-        assert!(prev.is_none(), "the oldest retained entry has no predecessor");
+        assert!(
+            prev.is_none(),
+            "the oldest retained entry has no predecessor"
+        );
         assert!(ring.pair(99).is_none());
     }
 

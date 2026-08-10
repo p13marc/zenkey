@@ -9,6 +9,7 @@ pub mod contexts;
 pub mod detail;
 pub mod doctor;
 pub mod echo;
+pub mod history;
 pub mod kit;
 pub mod nodes;
 pub mod palette;

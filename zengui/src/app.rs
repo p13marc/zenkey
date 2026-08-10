@@ -75,6 +75,10 @@ pub struct Zengui {
     echo: EchoRing,
     expanded: BTreeSet<String>,
     selected: Option<String>,
+    /// The selected key's history recording (issue #63). Created on selection,
+    /// dropped on the next one — which is what makes deselecting stop the
+    /// cost, since there is then nothing left to feed.
+    history: Option<crate::history::HistoryRecorder>,
     /// The last on-demand fetch: (key, outcome-or-error).
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
@@ -163,6 +167,7 @@ impl Zengui {
             echo,
             expanded: BTreeSet::new(),
             selected: None,
+            history: None,
             fetched: None,
             echo_view: view::echo::EchoView::new(),
             context_form: view::contexts::ContextForm::default(),
@@ -458,6 +463,13 @@ impl Zengui {
             }
             Message::SelectKey(key) => {
                 self.selected = key.clone();
+                // History follows the selection and nothing else (issue #63):
+                // the previous recording is dropped here, which is what makes
+                // deselecting free. A symbolic skeleton path names no concrete
+                // key, so nothing can be recorded for it.
+                self.history = key.as_deref().filter(|k| !k.contains('{')).map(|k| {
+                    crate::history::HistoryRecorder::new(k, self.settings.history_entries)
+                });
                 let (Some(session), Some(key)) = (self.session.clone(), key) else {
                     return Task::none();
                 };
@@ -485,6 +497,18 @@ impl Zengui {
             Message::Call(msg) => self.update_call(msg),
             Message::Nodes(msg) => self.update_nodes(msg),
             Message::Doctor(msg) => self.update_doctor(msg),
+            Message::History(msg) => {
+                if let Some(rec) = self.history.as_mut() {
+                    match msg {
+                        view::history::HistoryMsg::Select(seq) => rec.selected = Some(seq),
+                        view::history::HistoryMsg::Clear => {
+                            rec.ring.clear();
+                            rec.selected = None;
+                        }
+                    }
+                }
+                Task::none()
+            }
             Message::Publish(msg) => self.update_publish(msg),
             Message::CallDone(outcome) => {
                 self.call_form.in_flight = false;
@@ -1561,6 +1585,11 @@ impl Zengui {
         for sample in &tick.samples {
             self.ensure_facts(&sample.key);
             self.echo.push(sample);
+            // History is per-key and costs no subscription of its own: these
+            // samples are already flowing for an existing watch (issue #63).
+            if let Some(rec) = self.history.as_mut() {
+                rec.observe(sample);
+            }
         }
         for (key, _up) in &tick.nodes {
             self.ensure_facts(key);
@@ -1749,6 +1778,14 @@ impl Zengui {
                     detail: &self.node_detail,
                 }),
                 RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
+                RightPane::History => view::history::pane(view::history::HistoryData {
+                    key: self.selected.as_deref(),
+                    recorder: self.history.as_ref(),
+                    watched: self
+                        .selected
+                        .as_deref()
+                        .is_some_and(|k| key_is_watched(&self.watched, k)),
+                }),
                 RightPane::Connect =>
                     view::contexts::pane(&self.context_form, self.settings.is_unreachable(),),
             })
@@ -1879,5 +1916,45 @@ impl Zengui {
         .spacing(space::SM)
         .align_y(iced::Alignment::Center)
         .into()
+    }
+}
+
+/// Whether any active watch selector covers this exact key.
+///
+/// The distinction the history pane rests on: with no watch, no sample can
+/// reach the recorder, and "nothing recorded yet" would be a verdict the tool
+/// never obtained (RFC 09 §5.1 O4). A selector that does not parse cannot be
+/// claimed as coverage, so it is not counted — the same rule
+/// `StatsTable::retire_unwatched` applies from the other side.
+fn key_is_watched(watched: &[String], key: &str) -> bool {
+    let Ok(ke) = zenoh::key_expr::KeyExpr::new(key.to_string()) else {
+        return false;
+    };
+    watched
+        .iter()
+        .filter_map(|sel| zenoh::key_expr::KeyExpr::new(sel.clone()).ok())
+        .any(|sel| sel.intersects(&ke))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn watch_coverage_is_decided_by_intersection_not_by_prefix() {
+        let watched = vec![
+            "v1/h-a/telemetry/**".to_string(),
+            "demo/example/foo".to_string(),
+        ];
+        assert!(key_is_watched(&watched, "v1/h-a/telemetry/sysinfo/cpu"));
+        assert!(key_is_watched(&watched, "demo/example/foo"));
+        assert!(!key_is_watched(&watched, "v1/h-b/telemetry/sysinfo/cpu"));
+        assert!(!key_is_watched(&[], "v1/h-a/telemetry/sysinfo/cpu"));
+    }
+
+    /// A selector we cannot parse is not coverage we can claim.
+    #[test]
+    fn an_unparseable_selector_is_not_counted_as_coverage() {
+        assert!(!key_is_watched(&["not a key/**/".to_string()], "a/b"));
     }
 }

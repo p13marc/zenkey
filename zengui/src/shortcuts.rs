@@ -77,28 +77,30 @@ pub fn map() -> Vec<Binding> {
     out
 }
 
-/// Alt+1..Alt+6, one per pane. Parallel arrays rather than a formatted string
+/// Alt+1..Alt+8, one per pane. Parallel arrays rather than a formatted string
 /// because `Binding` holds `&'static str` — and the length assertion below is
 /// what keeps them in step with `RightPane::ALL`.
-const PANE_KEYS: [&str; 7] = [
-    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7",
+const PANE_KEYS: [&str; 8] = [
+    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7", "Alt 8",
 ];
-const PANE_WHAT: [&str; 7] = [
+const PANE_WHAT: [&str; 8] = [
     "echo pane",
     "call pane",
     "publish pane",
     "detail pane",
     "nodes pane",
     "doctor pane",
+    "history pane",
     "connect pane",
 ];
-const PANE_MESSAGES: [fn() -> Message; 7] = [
+const PANE_MESSAGES: [fn() -> Message; 8] = [
     || Message::PaneSelected(RightPane::Echo),
     || Message::PaneSelected(RightPane::Call),
     || Message::PaneSelected(RightPane::Publish),
     || Message::PaneSelected(RightPane::Detail),
     || Message::PaneSelected(RightPane::Nodes),
     || Message::PaneSelected(RightPane::Doctor),
+    || Message::PaneSelected(RightPane::History),
     || Message::PaneSelected(RightPane::Connect),
 ];
 

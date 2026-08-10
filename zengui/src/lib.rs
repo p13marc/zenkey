@@ -20,6 +20,7 @@ pub mod app;
 pub mod config;
 pub mod doctor;
 pub mod echo;
+pub mod history;
 pub mod keyfacts;
 pub mod link;
 pub mod message;
