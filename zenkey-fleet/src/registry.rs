@@ -13,6 +13,21 @@ use anyhow::{Result, anyhow};
 use zenkey::{RegistrySlice, parse_slice};
 use zenoh::Session;
 
+/// One slice's subject patterns, parsed once and grouped by class.
+///
+/// `refine` runs **per sample** on zenctl's decode path and per first-sight
+/// key in zengui, and it used to parse every subject pattern of the class on
+/// every call — then clone them all again to hand `best_match` a contiguous
+/// slice. Parsing at construction turns that into a map lookup
+/// (`docs/zero-copy.md`).
+#[derive(Debug, Clone, Default)]
+struct ParsedSubjects {
+    /// Index into the slice's own `subjects`, parallel to `pats`.
+    idx: Vec<usize>,
+    /// Contiguous, so `best_match` takes it borrowed.
+    pats: Vec<zenkey::pattern::SubjectPattern>,
+}
+
 /// A set of registry slices, indexed by producer/service base name.
 #[derive(Debug, Clone, Default)]
 pub struct SliceSet {
@@ -20,6 +35,25 @@ pub struct SliceSet {
     /// The raw TOML per slice, kept for the disk cache (slices do not
     /// re-serialize; the served text is the artifact).
     raw: Vec<String>,
+    /// Parsed subject patterns per slice, keyed by class. Rebuilt wholesale
+    /// with its slice — the two vectors are index-parallel, and `push` is the
+    /// only place either grows.
+    parsed: Vec<std::collections::BTreeMap<String, ParsedSubjects>>,
+}
+
+/// Group one slice's subjects by class, parsing each pattern once. A subject
+/// whose pattern does not parse is dropped here exactly as it was dropped
+/// per-call before — a malformed declaration refines nothing.
+fn parse_subjects(slice: &RegistrySlice) -> std::collections::BTreeMap<String, ParsedSubjects> {
+    let mut out: std::collections::BTreeMap<String, ParsedSubjects> = Default::default();
+    for (i, s) in slice.subjects.iter().enumerate() {
+        if let Ok(p) = zenkey::pattern::SubjectPattern::parse(&s.path) {
+            let entry = out.entry(s.class.clone()).or_default();
+            entry.idx.push(i);
+            entry.pats.push(p);
+        }
+    }
+    out
 }
 
 impl SliceSet {
@@ -66,12 +100,15 @@ impl SliceSet {
         // One slice per base name; last one wins (a fleet mid-rollout serves
         // several versions — the newest reply is as good a pick as any, and
         // `doctor` is where disagreement is *reported*).
+        let parsed = parse_subjects(&slice);
         if let Some(i) = self.slices.iter().position(|s| s.name == slice.name) {
             self.slices[i] = slice;
             self.raw[i] = raw;
+            self.parsed[i] = parsed;
         } else {
             self.slices.push(slice);
             self.raw.push(raw);
+            self.parsed.push(parsed);
         }
     }
 
@@ -106,25 +143,14 @@ impl SliceSet {
         class: &str,
         tail: &[&str],
     ) -> Option<(&'s zenkey::slice::SubjectDecl, Vec<(String, String)>)> {
-        let slice = self.get(producer)?;
-        // Precedence-ordered via the shared matcher (issue #7): collect the
-        // class's patterns and let best_match pick — same order the codegen
-        // compiles.
-        let candidates: Vec<(usize, zenkey::pattern::SubjectPattern)> = slice
-            .subjects
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.class == class)
-            .filter_map(|(i, s)| {
-                zenkey::pattern::SubjectPattern::parse(&s.path)
-                    .ok()
-                    .map(|p| (i, p))
-            })
-            .collect();
-        let patterns: Vec<zenkey::pattern::SubjectPattern> =
-            candidates.iter().map(|(_, p)| p.clone()).collect();
-        let (winner, binds) = zenkey::pattern::best_match(&patterns, tail)?;
-        let (subject_idx, _) = candidates[winner];
+        let i = self.slices.iter().position(|s| s.name == producer)?;
+        let slice = &self.slices[i];
+        // Precedence-ordered via the shared matcher (issue #7): the class's
+        // patterns were parsed at construction, so this is a map lookup and a
+        // borrowed slice — no parse, no clone, per sample.
+        let candidates = self.parsed[i].get(class)?;
+        let (winner, binds) = zenkey::pattern::best_match(&candidates.pats, tail)?;
+        let subject_idx = candidates.idx[winner];
         Some((
             &slice.subjects[subject_idx],
             binds.into_iter().map(|(n, v)| (n.to_string(), v)).collect(),
@@ -135,7 +161,12 @@ impl SliceSet {
     /// is skipped by `write_cache`).
     pub fn from_slices(slices: Vec<RegistrySlice>) -> SliceSet {
         let raw = vec![String::new(); slices.len()];
-        SliceSet { slices, raw }
+        let parsed = slices.iter().map(parse_subjects).collect();
+        SliceSet {
+            slices,
+            raw,
+            parsed,
+        }
     }
 
     /// Write the raw slice TOMLs to a cache dir (one file per producer).

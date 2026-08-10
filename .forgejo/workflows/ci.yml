@@ -48,6 +48,11 @@ jobs:
       - run: cargo build --workspace --all-targets --locked
       - run: cargo test --workspace --locked
       - run: cargo test -p zenkey --all-features --locked
+      # Benches are a gate, not decoration: the baseline in
+      # docs/bench-baseline.md is only worth reading if the code behind it
+      # still compiles. Building them is cheap here (warm target dir) and
+      # exercises the criterion harness link, which --all-targets does not.
+      - run: cargo bench --workspace --no-run --locked
 
   msrv:
     runs-on: ubuntu-24.04

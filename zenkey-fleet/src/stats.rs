@@ -108,19 +108,24 @@ impl StatsTable {
     /// how many were retired. Selectors that fail to parse as key
     /// expressions cover nothing (`gone`) / keep nothing (`kept`).
     pub fn retire_unwatched(&mut self, gone: &str, kept: &[String]) -> usize {
-        use zenoh::key_expr::KeyExpr;
-        let Ok(gone) = KeyExpr::new(gone.to_string()) else {
+        use zenoh::key_expr::keyexpr;
+        // Borrowed throughout: `keyexpr::new(&str)` validates without
+        // allocating, where `KeyExpr::new(String)` builds an `OwnedKeyExpr`.
+        // The old form cloned the key *and* built an owned expr for every key
+        // in the table on every unwatch — 100k allocations at the default
+        // bound (`docs/zero-copy.md`).
+        let Ok(gone) = keyexpr::new(gone) else {
             return 0;
         };
-        let kept: Vec<KeyExpr<'static>> = kept
+        let kept: Vec<&keyexpr> = kept
             .iter()
-            .filter_map(|k| KeyExpr::new(k.clone()).ok())
+            .filter_map(|k| keyexpr::new(k.as_str()).ok())
             .collect();
         let doomed: Vec<String> = self
             .keys
             .keys()
-            .filter(|key| match KeyExpr::new((*key).clone()) {
-                Ok(ke) => gone.intersects(&ke) && !kept.iter().any(|k| k.intersects(&ke)),
+            .filter(|key| match keyexpr::new(key.as_str()) {
+                Ok(ke) => gone.intersects(ke) && !kept.iter().any(|k| k.intersects(ke)),
                 Err(_) => false,
             })
             .cloned()

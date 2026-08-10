@@ -233,9 +233,12 @@ pub async fn run(
             zenkey_fleet::StreamItem::Event(_) => continue,
         };
         seen += 1;
-        let key = sample.key.clone();
+        // Borrowed, not cloned: `sample` is an `Arc<SampleView>` that
+        // outlives every use below (`docs/zero-copy.md`). `to_bytes()` is a
+        // `Cow` and is already the right form — it is not a copy.
+        let key = sample.key.as_str();
         let bytes = sample.payload.to_bytes();
-        let encoding = sample.encoding.clone();
+        let encoding = sample.encoding.as_str();
         let timestamp = sample.timestamp.map(|t| t.to_string());
         let rate_suffix = if rate {
             let (_, _, hz) = monitor.core().with_stats(|s| s.totals());
@@ -254,8 +257,8 @@ pub async fn run(
                 &session,
                 &slices,
                 &base,
-                &key,
-                Some(&encoding),
+                key,
+                Some(encoding),
                 &bytes,
             )
             .await;
@@ -277,8 +280,8 @@ pub async fn run(
                     &session,
                     &slices,
                     &base,
-                    &key,
-                    Some(&encoding),
+                    key,
+                    Some(encoding),
                     &bytes,
                 )
                 .await
@@ -294,7 +297,7 @@ pub async fn run(
                 }
             };
             if ndjson {
-                let parsed = zenkey::grammar::parse_full(&base, &key);
+                let parsed = zenkey::grammar::parse_full(&base, key);
                 let obj = serde_json::json!({
                     "key": key,
                     "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
@@ -313,10 +316,10 @@ pub async fn run(
                     format_sample(
                         fmt,
                         seen,
-                        &key,
+                        key,
                         &base,
                         type_name.as_deref(),
-                        &encoding,
+                        encoding,
                         bytes.len(),
                         timestamp.as_deref(),
                         &value,

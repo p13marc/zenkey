@@ -33,6 +33,12 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+# The engine's hot paths are benched here rather than in a consumer, because
+# they are the paths BOTH explorers run per sample and per tick (#44).
+criterion = { workspace = true }
+# Fixture payloads for the decode benches; the crate itself does not need it.
+serde_json = { workspace = true }
+ciborium = { workspace = true }
 # Fixture descriptor sets for the codec round-trip test (#97) — built through
 # prost-types rather than hand-encoded bytes, so the fixture stays readable.
 prost-reflect = { workspace = true }
@@ -41,3 +47,11 @@ prost-reflect = { workspace = true }
 # library ships. `cargo test -p zenkey-fleet` then covers `tests/codec.rs`
 # on its own, instead of only when a frontend happens to unify the feature in.
 zenkey = { workspace = true, features = ["decode-protobuf", "decode-cdr"] }
+
+[[bench]]
+name = "fleet"
+harness = false
+# The `decode/*` benches need the decode seam; `decode` is on by default, and
+# naming it here means `--no-default-features` skips the target rather than
+# failing to compile it.
+required-features = ["decode"]

@@ -99,7 +99,18 @@ ci:
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo build --workspace --all-targets --locked
     cargo test --workspace --locked
+    cargo bench --workspace --no-run --locked
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+
+# The criterion baselines behind docs/bench-baseline.md. Slow: tree/build_50k
+# and skeleton/merge_10k are tens of milliseconds an iteration.
+bench:
+    cargo bench --workspace
+
+# The #45 soak: a hot bus against the O6 ledger, with the numbers printed.
+# The ledger itself is an ordinary test and runs in `just ci`.
+soak:
+    cargo test --release -p zenkey-fleet --test ledger -- --ignored --nocapture
 
 fmt:
     cargo fmt --all

@@ -7002,6 +7002,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "ciborium",
+ "criterion",
  "dirs 5.0.1",
  "prost-reflect",
  "serde",
