@@ -54,6 +54,7 @@
 
 use serde_json::{Map, Value};
 
+use super::compiled::CompiledCache;
 use super::decode::{DecodeError, DecodedPayload, PayloadDecoder};
 use super::{SchemaKind, TypeSchema, WireEncoding};
 
@@ -482,7 +483,32 @@ fn undeclared(fields: &[(String, CdrType)], value: &Value) -> Vec<String> {
 }
 
 /// The `cdr` codec.
-pub struct CdrDecoder;
+///
+/// Holds a [`CompiledCache`] of resolved type models (issue #100): the served
+/// document is a JSON field list, and walking it into a `CdrType` allocates
+/// a string and a node per field — which was happening on every sample, in
+/// both directions.
+#[derive(Default)]
+pub struct CdrDecoder {
+    models: CompiledCache<CdrType>,
+}
+
+impl CdrDecoder {
+    pub fn new() -> CdrDecoder {
+        CdrDecoder::default()
+    }
+
+    /// How many type models this decoder has resolved — one per distinct
+    /// schema hash (issue #100's acceptance is a counter, not an inspection).
+    pub fn compilations(&self) -> u64 {
+        self.models.compilations()
+    }
+
+    /// The resolved model for this schema, built at most once per hash.
+    fn model(&self, schema: &TypeSchema) -> Result<std::sync::Arc<CdrType>, DecodeError> {
+        self.models.get_or_compile(schema, resolve_schema)
+    }
+}
 
 impl PayloadDecoder for CdrDecoder {
     fn kind(&self) -> &str {
@@ -501,7 +527,7 @@ impl PayloadDecoder for CdrDecoder {
             WireEncoding::Cdr | WireEncoding::Other(_) => {}
             other => return Err(DecodeError::WrongEncoding(format!("{other:?}"))),
         }
-        let ty = resolve_schema(schema)?;
+        let ty = self.model(schema)?;
         let mut reader = Reader::new(bytes)?;
         let value = read(&ty, &mut reader)?;
         // Trailing bytes mean the schema and the payload disagree about the
@@ -523,7 +549,7 @@ impl PayloadDecoder for CdrDecoder {
         value: &Value,
         _target: &WireEncoding,
     ) -> Result<Vec<u8>, DecodeError> {
-        let ty = resolve_schema(schema)?;
+        let ty = self.model(schema)?;
         let mut w = Writer { body: Vec::new() };
         write(&ty, value, &mut w)?;
         let mut out = Vec::with_capacity(4 + w.body.len());
@@ -550,7 +576,7 @@ mod tests {
 
     /// `geometry_msgs/Twist`, the canonical ROS 2 shape: a struct of structs
     /// of doubles.
-    fn twist() -> TypeSchema {
+    pub(super) fn twist() -> TypeSchema {
         TypeSchema::cdr(json!({
             "fields": [
                 {"name": "linear",  "type": "Vector3"},
@@ -576,7 +602,7 @@ mod tests {
 
     #[test]
     fn a_twist_round_trips_byte_identically() {
-        let codec = CdrDecoder;
+        let codec = CdrDecoder::new();
         let schema = twist();
         let value = twist_value();
         let bytes = codec
@@ -611,7 +637,7 @@ mod tests {
             ]
         }));
         let value = json!({"flag": 1, "count": 2, "wide": 3});
-        let bytes = CdrDecoder
+        let bytes = CdrDecoder::new()
             .encode(&schema, &value, &WireEncoding::Cdr)
             .expect("encode");
         assert_eq!(
@@ -624,7 +650,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            CdrDecoder
+            CdrDecoder::new()
                 .decode(&schema, &WireEncoding::Cdr, &bytes)
                 .unwrap()
                 .value,
@@ -644,7 +670,7 @@ mod tests {
             ]
         }));
         let value = json!({"name": "hi", "values": [1, -2], "fixed": [7, 8, 9]});
-        let bytes = CdrDecoder
+        let bytes = CdrDecoder::new()
             .encode(&schema, &value, &WireEncoding::Cdr)
             .unwrap();
         assert_eq!(
@@ -652,7 +678,7 @@ mod tests {
             // uint32 length 3 ("hi" + NUL), then the bytes.
             &[0x03, 0x00, 0x00, 0x00, b'h', b'i', 0x00, 0x00]
         );
-        let back = CdrDecoder
+        let back = CdrDecoder::new()
             .decode(&schema, &WireEncoding::Cdr, &bytes)
             .unwrap();
         assert_eq!(back.value, value);
@@ -665,12 +691,12 @@ mod tests {
             "fields": [{"name": "n", "type": "uint32"}]
         }));
         let be = vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00];
-        let decoded = CdrDecoder
+        let decoded = CdrDecoder::new()
             .decode(&schema, &WireEncoding::Cdr, &be)
             .expect("big-endian decode");
         assert_eq!(decoded.value, json!({"n": 256}));
         // …and re-encoding normalises to the canonical little-endian form.
-        let le = CdrDecoder
+        let le = CdrDecoder::new()
             .encode(&schema, &decoded.value, &WireEncoding::Cdr)
             .unwrap();
         assert_eq!(le, vec![0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00]);
@@ -681,7 +707,7 @@ mod tests {
     fn xcdr2_and_parameter_lists_are_refused_by_name() {
         let schema = TypeSchema::cdr(json!({"fields": []}));
         for (a, b) in [(0x00u8, 0x02u8), (0x00, 0x03), (0x00, 0x09)] {
-            let err = CdrDecoder
+            let err = CdrDecoder::new()
                 .decode(&schema, &WireEncoding::Cdr, &[a, b, 0, 0])
                 .unwrap_err()
                 .to_string();
@@ -696,7 +722,7 @@ mod tests {
         let schema = TypeSchema::cdr(json!({
             "fields": [{"name": "wide", "type": "uint64"}]
         }));
-        let err = CdrDecoder
+        let err = CdrDecoder::new()
             .decode(&schema, &WireEncoding::Cdr, &[0x00, 0x01, 0x00, 0x00, 0x01])
             .unwrap_err()
             .to_string();
@@ -710,11 +736,11 @@ mod tests {
         let schema = TypeSchema::cdr(json!({
             "fields": [{"name": "n", "type": "uint32"}]
         }));
-        let mut bytes = CdrDecoder
+        let mut bytes = CdrDecoder::new()
             .encode(&schema, &json!({"n": 1}), &WireEncoding::Cdr)
             .unwrap();
         bytes.push(0xff);
-        let out = CdrDecoder
+        let out = CdrDecoder::new()
             .decode(&schema, &WireEncoding::Cdr, &bytes)
             .unwrap();
         assert_eq!(out.value, json!({"n": 1}));
@@ -729,13 +755,13 @@ mod tests {
         let schema = TypeSchema::cdr(json!({
             "fields": [{"name": "v", "type": {"sequence": {"of": "uint8", "bound": 2}}}]
         }));
-        let err = CdrDecoder
+        let err = CdrDecoder::new()
             .encode(&schema, &json!({"v": [1, 2, 3]}), &WireEncoding::Cdr)
             .unwrap_err()
             .to_string();
         assert!(err.contains("bounded at 2"), "{err}");
 
-        let err = CdrDecoder
+        let err = CdrDecoder::new()
             .encode(&schema, &json!({}), &WireEncoding::Cdr)
             .unwrap_err()
             .to_string();
@@ -761,7 +787,7 @@ mod tests {
             "fields": [{"name": "node", "type": "Node"}],
             "types": {"Node": {"fields": [{"name": "next", "type": "Node"}]}}
         }));
-        let err = CdrDecoder
+        let err = CdrDecoder::new()
             .decode(&schema, &WireEncoding::Cdr, &[0x00, 0x01, 0x00, 0x00])
             .unwrap_err()
             .to_string();
@@ -791,5 +817,63 @@ mod tests {
         // …but a real shape change moves it.
         let c = TypeSchema::cdr(json!({"fields": [{"name": "linear", "type": "float64"}]}));
         assert_ne!(a.hash(), c.hash());
+    }
+}
+
+#[cfg(test)]
+mod compiled_tests {
+    use super::*;
+
+    /// Issue #100: the type model is resolved once per schema, not once per
+    /// sample. Asserted by the decoder's own counter — "built once" is a
+    /// measurement, not something you establish by reading the code.
+    #[test]
+    fn the_type_model_is_resolved_once_across_many_samples() {
+        let codec = CdrDecoder::new();
+        let schema = super::tests::twist();
+        let value = serde_json::json!({
+            "linear":  {"x": 1.0, "y": 2.0, "z": 3.0},
+            "angular": {"x": 4.0, "y": 5.0, "z": 6.0},
+        });
+        let bytes = codec
+            .encode(&schema, &value, &WireEncoding::Cdr)
+            .expect("encodes");
+
+        for _ in 0..50 {
+            let out = codec
+                .decode(&schema, &WireEncoding::Cdr, &bytes)
+                .expect("decodes");
+            assert_eq!(out.value, value);
+        }
+        // The encode above is the first compile; the 50 decodes add none.
+        assert_eq!(
+            codec.compilations(),
+            1,
+            "the served field list must be walked once, not per sample"
+        );
+    }
+
+    /// Drift stays observable: a producer that changes the type serves a new
+    /// hash, and the decoder must build the new model rather than reuse the
+    /// old one.
+    #[test]
+    fn a_changed_schema_hash_rebuilds_the_model() {
+        let codec = CdrDecoder::new();
+        let a = TypeSchema::cdr(serde_json::json!({
+            "fields": [{"name": "x", "type": "float64"}]
+        }));
+        let b = TypeSchema::cdr(serde_json::json!({
+            "fields": [{"name": "x", "type": "float64"}, {"name": "y", "type": "float64"}]
+        }));
+        assert_ne!(a.hash(), b.hash(), "the fixture must actually differ");
+
+        let av = serde_json::json!({"x": 1.0});
+        let bv = serde_json::json!({"x": 1.0, "y": 2.0});
+        let ab = codec.encode(&a, &av, &WireEncoding::Cdr).unwrap();
+        let bb = codec.encode(&b, &bv, &WireEncoding::Cdr).unwrap();
+        assert_eq!(codec.compilations(), 2);
+        assert_eq!(codec.decode(&a, &WireEncoding::Cdr, &ab).unwrap().value, av);
+        assert_eq!(codec.decode(&b, &WireEncoding::Cdr, &bb).unwrap().value, bv);
+        assert_eq!(codec.compilations(), 2, "both models were already built");
     }
 }

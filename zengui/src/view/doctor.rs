@@ -25,6 +25,11 @@ pub enum DoctorMsg {
     Done(Result<std::sync::Arc<DoctorReport>, String>),
     /// A finding row was clicked — navigate to its subject.
     FindingClicked(usize),
+    /// Drop every cached `describe` so the next decode asks the bus again
+    /// (issue #101). A positive entry never expires on its own, so a producer
+    /// that changed its served set mid-session is otherwise read forever with
+    /// the schemas it had at first contact.
+    ReaskSchemas,
 }
 
 fn tone(severity: DoctorSeverity) -> SeverityTone {
@@ -51,11 +56,31 @@ pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
         .text_size(font::CAPTION)
         .on_toggle(|b| Message::Doctor(DoctorMsg::DeepToggled(b)));
 
+    // The schema cache's escape hatch lives here because it is the same kind
+    // of thing as the run button: an explicit, costed re-ask, never ambient.
+    let reask = iced::widget::button(text("re-ask schemas").size(font::CAPTION))
+        .padding(4)
+        .on_press(Message::Doctor(DoctorMsg::ReaskSchemas));
+
     let mut col = column![
         kit::section_header("doctor", None),
         row![run, deep]
             .spacing(space::MD)
             .align_y(iced::Alignment::Center),
+        row![
+            reask,
+            kit::muted(match state.schemas_forgotten {
+                0 => "schema cache: kept for the session; a producer that changes \
+                      its served set is read with the schemas it had at first contact"
+                    .to_string(),
+                n => format!(
+                    "schema cache cleared {} — the next decode asks the bus again",
+                    kit::plural(n, "time")
+                ),
+            }),
+        ]
+        .spacing(space::MD)
+        .align_y(iced::Alignment::Center),
     ]
     .spacing(space::SM);
 

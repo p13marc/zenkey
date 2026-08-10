@@ -1201,3 +1201,42 @@ fn the_detail_pane_labels_the_series_it_plots() {
         "the boundary of what can be plotted is stated, not left to be discovered"
     );
 }
+
+/// The schema cache's escape hatch (#101) is visible, and says which state it
+/// is in — a button whose effect you cannot observe is one you cannot trust.
+#[test]
+fn the_doctor_pane_offers_the_schema_re_ask_and_reports_it() {
+    use zengui::doctor::DoctorState;
+    use zengui::view::doctor::pane;
+
+    let mut state = DoctorState::default();
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+        assert!(ui.find("re-ask schemas").is_ok());
+        assert!(
+            ui.find(
+                "schema cache: kept for the session; a producer that changes its \
+                 served set is read with the schemas it had at first contact"
+            )
+            .is_ok(),
+            "the standing behaviour is stated, not left to be discovered"
+        );
+    }
+
+    state.schemas_forgotten = 1;
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+        assert!(
+            ui.find("schema cache cleared 1 time — the next decode asks the bus again")
+                .is_ok()
+        );
+    }
+    state.schemas_forgotten = 3;
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+        assert!(
+            ui.find("schema cache cleared 3 times — the next decode asks the bus again")
+                .is_ok()
+        );
+    }
+}

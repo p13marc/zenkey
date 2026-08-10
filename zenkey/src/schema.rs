@@ -18,6 +18,8 @@
 #[cfg(feature = "decode-cdr")]
 pub mod cdr;
 #[cfg(feature = "decode")]
+pub mod compiled;
+#[cfg(feature = "decode")]
 pub mod decode;
 
 use std::collections::BTreeMap;
