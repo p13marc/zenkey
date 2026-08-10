@@ -65,6 +65,26 @@ fn prefix_at(origin: &str) -> String {
         .to_string()
 }
 
+/// Wait until `key` answers, or give up after ~5s.
+///
+/// A peer pair takes a moment to connect, and a probe issued before it has
+/// answers nothing — which is indistinguishable from "nobody holds it" and
+/// would make every assertion below pass or fail on the scheduler's mood. So
+/// the fixture proves itself routable, with a plain `fleet_get`, before any
+/// claim is made about it.
+async fn wait_routable(session: &zenoh::Session, key: &str) {
+    for _ in 0..50 {
+        let answers = zenkey_fleet::fleet_get(session, BASE, key, None, TIMEOUT)
+            .await
+            .expect("settle get");
+        if !answers.is_empty() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("fixture never became routable: {key}");
+}
+
 /// Serve `data` as artifact [`ID`] under `origin`, and return the handle plus
 /// the manifest (whose root is what a downloader should pin).
 async fn serve(
@@ -92,6 +112,9 @@ async fn a_probe_names_every_holder_and_a_fetch_names_one() {
     let data = payload(200_000, 7);
     let (a, manifest) = serve(&serving, "h-aaaaaaaaaaaa", data.clone()).await;
     let (b, _) = serve(&serving, "h-bbbbbbbbbbbb", data.clone()).await;
+    for origin in ["h-aaaaaaaaaaaa", "h-bbbbbbbbbbbb"] {
+        wait_routable(&asking, &zblob::manifest_key(&prefix_at(origin), ID)).await;
+    }
 
     let report = blob_probe(&asking, BASE, &target(), &[], TIMEOUT)
         .await
@@ -177,6 +200,9 @@ async fn a_disagreeing_root_is_named_not_averaged() {
     let rogue = payload(120_000, 12);
     let (a, manifest) = serve(&serving, "h-aaaaaaaaaaaa", honest.clone()).await;
     let (c, rogue_manifest) = serve(&serving, "h-cccccccccccc", rogue).await;
+    for origin in ["h-aaaaaaaaaaaa", "h-cccccccccccc"] {
+        wait_routable(&asking, &zblob::manifest_key(&prefix_at(origin), ID)).await;
+    }
     assert_ne!(
         manifest.root, rogue_manifest.root,
         "the fixture must disagree"
@@ -285,18 +311,9 @@ async fn every_blob_get_rides_at_data_low() {
             .expect("recording queryable")
     };
 
-    // Prove the fixture routable before asserting anything about it: a peer
-    // pair that has not finished connecting answers nothing, and "nothing
-    // answered" would pass an all-data-low assertion vacuously.
-    for _ in 0..50 {
-        let answers = zenkey_fleet::fleet_get(&asking, BASE, &manifest_key, None, TIMEOUT)
-            .await
-            .expect("settle get");
-        if !answers.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    // Here the settle matters twice over: "nothing answered" would pass an
+    // all-data-low assertion vacuously.
+    wait_routable(&asking, &manifest_key).await;
     // Those settle GETs rode at the default priority, on purpose — they are
     // not @blob traffic under test. Forget them before the real assertions.
     seen.lock().unwrap().clear();
