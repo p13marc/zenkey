@@ -519,6 +519,234 @@ pub fn call(report: &CallReport, format: Format, render_text: impl Fn(&CallAnswe
     }
 }
 
+/// `blob list` — the registry's `[[blob]]` declarations (RFC 07 §2.7 / 08 §2).
+///
+/// The footer is not decoration: a declaration is a *capability*, and the one
+/// mistake this table invites is reading it as possession. So the prose says
+/// what would actually answer that question.
+pub fn blob_list(report: &BlobList, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => report.tiers.iter().for_each(json_line),
+        _ => {
+            if report.tiers.is_empty() {
+                println!(
+                    "no producer declares an @blob tier ({} slice(s) read). \
+                     An empty table here is what the registry says, not what the bus holds.",
+                    report.slices_considered
+                );
+                return Ok(());
+            }
+            println!("declared @blob tiers:\n");
+            for row in &report.tiers {
+                let flag = if row.known_tier {
+                    ""
+                } else {
+                    "  (unreserved tier token)"
+                };
+                println!(
+                    "  {:<12} {:<9} v{}{}",
+                    row.producer, row.tier, row.registry_version, flag
+                );
+                if !row.endpoints.is_empty() {
+                    println!("      endpoints  {}", row.endpoints.join(", "));
+                }
+                if let Some(algo) = &row.algo {
+                    println!("      algo       {algo}");
+                }
+                if let Some(t) = &row.reference {
+                    println!("      reference  {t}  (carries the content root — RFC 07 §2.1)");
+                }
+                if let Some(e) = &row.encoding {
+                    println!("      encoding   {e}");
+                }
+                // Three different facts, three different sentences. An empty
+                // roster is not a fleet verdict (RFC 05 §3.1) and an unasked
+                // one is not an empty one (RFC 09 §5.1 O4).
+                match &row.origins {
+                    Some(origins) if origins.is_empty() => println!(
+                        "      origins    — (no liveliness token answered; silence is not a \
+                         verdict — RFC 05 §3.1)"
+                    ),
+                    Some(origins) => println!("      origins    {}", origins.join(" ")),
+                    None => println!("      origins    — (roster not asked)"),
+                }
+                if let Some(d) = &row.description {
+                    println!("      {d}");
+                }
+            }
+            println!(
+                "\n{} of {} slice(s) declare a tier. A declaration is a capability, never \
+                 possession — `zenctl blob probe <id>` asks who actually holds one.",
+                report.slices_considered - report.slices_without_blob,
+                report.slices_considered
+            );
+        }
+    }
+    Ok(())
+}
+
+/// `blob probe` — who answered, and at which root (RFC 07 §2.5).
+pub fn blob_probe(report: &BlobProbeReport, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => {
+            // An envelope line first, *always*, then one line per holder.
+            //
+            // Row-per-line alone would mean a probe that found nobody — or one
+            // that was never issued at all, as the content-addressed tiers are
+            // — emits an empty stream, which reads as "asked, nobody holds it".
+            // The coverage statement (O5) and the reason nothing was asked (O4)
+            // have to survive the pipe, so they get their own object.
+            json_line(&serde_json::json!({
+                "probe": report.target,
+                "tier": report.tier,
+                "asked": report.asked,
+                "not_probed": report.not_probed,
+                "answered": report.answered,
+                "roots": report.roots,
+                "declared_by": report.declared_by,
+            }));
+            report.holders.iter().for_each(json_line);
+        }
+        _ => {
+            println!("target  {}  (tier {})", report.target, report.tier);
+
+            // O5: name the coverage before the result, so "no holders" is read
+            // against what was actually asked.
+            if let Some(why) = &report.not_probed {
+                println!("\nnot probed: {why}");
+                if !report.declared_by.is_empty() {
+                    println!(
+                        "\ndeclared by: {} — a capability claim from the registry, not a \
+                         statement that any of them holds this object.",
+                        report.declared_by.join(", ")
+                    );
+                }
+                return Ok(());
+            }
+            println!("asked:");
+            for selector in &report.asked {
+                println!("  {selector}");
+            }
+
+            if report.holders.is_empty() {
+                println!(
+                    "\nno replies. Silence is not a verdict (RFC 05 §3.1): no origin holds \
+                     this id, none is up, or the timeout was too short."
+                );
+                if !report.declared_by.is_empty() {
+                    println!(
+                        "declared by: {} — so the tier exists in the registry; \
+                         `zenctl node list` says whether they are up.",
+                        report.declared_by.join(", ")
+                    );
+                }
+                return Ok(());
+            }
+
+            println!("\nholders:\n");
+            for h in &report.holders {
+                print!("  {:<16}", h.origin);
+                match (&h.availability, &h.manifest) {
+                    (Some(a), Some(m)) => print!(
+                        "  {}/{} chunks · {} bytes · root {}",
+                        a.have,
+                        a.chunk_count,
+                        m.total_len,
+                        short(&m.root)
+                    ),
+                    (Some(a), None) => {
+                        print!("  {}/{} chunks · no manifest reply", a.have, a.chunk_count)
+                    }
+                    (None, Some(m)) => print!(
+                        "  {} bytes · root {} · no have reply",
+                        m.total_len,
+                        short(&m.root)
+                    ),
+                    (None, None) => print!("  answered, said nothing readable"),
+                }
+                println!();
+                if let Some(u) = &h.unreadable {
+                    println!("      unreadable: {u}");
+                }
+                if let Some(e) = &h.error {
+                    println!("      ✗ {} — {}", e.name, e.message);
+                }
+                println!("      {}", h.key);
+            }
+
+            if report.roots.len() > 1 {
+                println!(
+                    "\nROOT DIFFERS — {} distinct content roots under one id:",
+                    report.roots.len()
+                );
+                for r in &report.roots {
+                    println!("  {r}");
+                }
+                println!(
+                    "The id is a name; the root is the anchor (RFC 07 §2.1). This is a \
+                     finding, not a tie-break: pass --root <hex> to say which content you \
+                     mean, and the fetch will refuse anything else."
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `blob fetch` — what one transfer cost and proved.
+pub fn blob_fetch(report: &BlobFetchReport, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json | Format::Ndjson => json_doc(report),
+        _ => {
+            println!("{}", report.dest);
+            println!("  from      {} ({})", report.origin, report.key);
+            println!(
+                "  bytes     {} in {} chunk(s){}",
+                report.bytes,
+                report.chunks,
+                if report.chunks_resumed > 0 {
+                    format!(", {} resumed", report.chunks_resumed)
+                } else {
+                    String::new()
+                }
+            );
+            println!("  priority  {} (RFC 07 §2.6)", report.priority);
+            if report.root_pinned {
+                println!("  root      {} (pinned)", report.root);
+            } else {
+                println!(
+                    "  root      trust-on-first-use — this origin chose the content \
+                     (RFC 07 §2.1)"
+                );
+            }
+            // Nonzero rejections mean a replier served bytes that did not
+            // verify. The transfer succeeded anyway, which is the point of
+            // verifying before disk — but it is a fact about the fleet.
+            if report.rejected > 0 {
+                println!(
+                    "  rejected  {} repl{} failed verification before disk",
+                    report.rejected,
+                    if report.rejected == 1 { "y" } else { "ies" }
+                );
+            }
+            if report.retries > 0 {
+                println!("  retries   {}", report.retries);
+            }
+            eprintln!("{} ms", report.elapsed_ms);
+        }
+    }
+    Ok(())
+}
+
+fn short(hash: &str) -> String {
+    if hash.len() <= 16 {
+        return hash.to_string();
+    }
+    format!("{}…", &hash[..16])
+}
+
 pub fn storage_list(report: &StorageList, format: Format) -> Result<()> {
     match format.resolved() {
         Format::Json => json_doc(report),

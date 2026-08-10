@@ -381,9 +381,33 @@ mod tests {
             show.carriers
         );
 
+        // And the loop this test's own comment opened, now closed: the
+        // projection a `zenctl blob list` renders (issue #58).
+        let list = zenkey_fleet::blob_list(
+            &slices,
+            None,
+            zenkey_fleet::report::BlobListSource::RegistryDirs,
+        );
+        assert_eq!(list.tiers.len(), 2);
+        assert_eq!(list.slices_considered, 1);
+        assert_eq!(list.slices_without_blob, 0);
+        assert!(list.tiers.iter().all(|t| t.known_tier));
+        // Nobody asked the roster, so nothing may claim who serves it (O4).
+        assert!(list.tiers.iter().all(|t| t.origins.is_none()));
+
         // Backward direction: the same slice minus the blob entries parses
-        // with an empty list rather than failing.
-        assert!(parse_slice(TCGUI_SLICE).unwrap().blob.is_empty());
+        // with an empty list rather than failing — and counts as a slice that
+        // was *read* and declared nothing, which is not the same as unread.
+        let bare = parse_slice(TCGUI_SLICE).unwrap();
+        assert!(bare.blob.is_empty());
+        let none = zenkey_fleet::blob_list(
+            &[bare],
+            None,
+            zenkey_fleet::report::BlobListSource::RegistryDirs,
+        );
+        assert!(none.tiers.is_empty());
+        assert_eq!(none.slices_considered, 1);
+        assert_eq!(none.slices_without_blob, 1);
     }
 
     /// The golden JSON contract (issue #12): `--format json` output is
