@@ -20,7 +20,6 @@ use zenkey_fleet::{
 
 use crate::config::Settings;
 use crate::echo::EchoRing;
-use crate::keyfacts::KeyFacts;
 use crate::link::{self, LinkKey};
 use crate::message::{BusTick, LinkState, Message};
 use crate::scope::{self, ScopePreset};
@@ -117,7 +116,8 @@ pub struct Zengui {
     decoded: Option<(Option<String>, zenkey_fleet::decode::Rendering)>,
     /// Which right-hand pane is showing.
     right_pane: RightPane,
-    facts: HashMap<String, KeyFacts>,
+    /// Bounded, and it says what the bound costs (#107).
+    facts: zenkey_fleet::FactsCache,
     slices: Option<Arc<SliceSet>>,
     slice_source: SliceSource,
 
@@ -149,6 +149,11 @@ impl Zengui {
         prefs_note: Option<String>,
     ) -> (Zengui, Task<Message>) {
         let echo = EchoRing::new(settings.echo_lines);
+        // Read before `settings` is moved into the struct. The projection
+        // cache takes the *same* bound as the engine's key table: it cannot
+        // usefully outgrow the table it shadows, and one number keeps that
+        // one sentence (#107).
+        let max_keys = settings.max_keys;
         let connect = settings.connect.clone();
         let listen = settings.listen.clone();
         let scouting = settings.scouting;
@@ -193,7 +198,7 @@ impl Zengui {
             schema_store: None,
             decoded: None,
             right_pane: RightPane::Echo,
-            facts: HashMap::new(),
+            facts: zenkey_fleet::FactsCache::with_capacity(max_keys),
             slices: None,
             slice_source: SliceSource::None,
             prefs,
@@ -1047,7 +1052,7 @@ impl Zengui {
     /// jump-to overlay offers what is on the bus, not what a registry says
     /// could be.
     fn observed_keys(&self) -> Vec<String> {
-        self.facts.keys().cloned().collect()
+        self.facts.keys().map(str::to_string).collect()
     }
 
     fn run_palette_row(&mut self, index: usize) -> Task<Message> {
@@ -1913,23 +1918,17 @@ impl Zengui {
     }
 
     fn ensure_facts(&mut self, key: &str) {
-        if self.facts.contains_key(key) {
-            return;
-        }
-        let mut facts = KeyFacts::project(&self.settings.base, key);
-        if let Some(slices) = &self.slices {
-            facts.resolve(slices);
-        }
-        self.facts.insert(key.to_string(), facts);
+        // One line, and the bound lives in the engine with the counter that
+        // reports it (#107). This is still the single insert point.
+        let base = self.settings.base.clone();
+        self.facts.ensure(&base, key, self.slices.as_deref());
     }
 
     fn reresolve_registrations(&mut self) {
         let Some(slices) = self.slices.clone() else {
             return;
         };
-        for facts in self.facts.values_mut() {
-            facts.resolve(&slices);
-        }
+        self.facts.resolve_all(&slices);
     }
 
     fn load_slices(&self) -> Task<Message> {
@@ -2074,6 +2073,8 @@ impl Zengui {
                 keys: self.keys,
                 keys_evicted: self.keys_evicted,
                 keys_unwatched: self.keys_unwatched,
+                facts_cached: self.facts.len(),
+                facts_evicted: self.facts.evicted(),
                 watched: &self.watched,
                 skeleton: self.skeleton.as_deref().map(|s| s.coverage),
                 fetched: self.fetched.as_ref(),

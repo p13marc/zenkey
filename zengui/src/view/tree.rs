@@ -31,7 +31,7 @@ use iced::widget::{Column, button, column, row, text};
 use iced::{Element, Length};
 use zenkey_fleet::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
-use crate::keyfacts::{KeyFacts, Registration};
+use crate::keyfacts::Registration;
 use crate::message::Message;
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::{RegistrationTone, colors};
@@ -881,9 +881,13 @@ pub fn registration_label(reg: &Registration) -> &'static str {
     }
 }
 
-/// Registration lookup by wire key. A plain map rather than a closure so the
-/// pane borrows app state directly instead of a temporary.
-pub type FactsIndex = std::collections::HashMap<String, KeyFacts>;
+/// Registration lookup by wire key. The engine's bounded projection cache
+/// rather than a plain map (issue #107): a `HashMap` here grew one entry per
+/// distinct key *ever* observed, shadowing a key table that has been bounded
+/// and counting its evictions since the bootstrap. Aliased so every pane and
+/// row signature below reads the same, and so `facts.get(key)` stays a pure
+/// `&self` read from the render path.
+pub type FactsIndex = zenkey_fleet::FactsCache;
 
 /// What clicking the row body does (issue #93): concrete entries select
 /// (detail fetch acts on `target`); groups toggle. Pure, so it is testable

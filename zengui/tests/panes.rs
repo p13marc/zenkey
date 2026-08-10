@@ -61,15 +61,11 @@ fn expand_all(keys: &[&str]) -> BTreeSet<String> {
 
 fn index(keys: &[&str], with_slices: bool) -> FactsIndex {
     let slices = slices();
-    keys.iter()
-        .map(|k| {
-            let mut f = KeyFacts::project("", k);
-            if with_slices {
-                f.resolve(&slices);
-            }
-            (k.to_string(), f)
-        })
-        .collect()
+    let mut cache = FactsIndex::default();
+    for k in keys {
+        cache.ensure("", k, with_slices.then_some(&slices));
+    }
+    cache
 }
 
 fn render(keys: &[&str], with_slices: bool) -> (tree::Flattened, FactsIndex) {
@@ -178,7 +174,7 @@ fn foreign_keys_render_without_convention_labels() {
 #[test]
 fn the_empty_tree_explains_itself() {
     let flat = tree::Flattened::empty();
-    let facts = FactsIndex::new();
+    let facts = FactsIndex::default();
     let watches = BTreeSet::new();
     let mut ui = simulator::<Message, _, _>(tree::pane(
         &flat,
@@ -789,6 +785,8 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         scope_label: "all",
         keys: 0,
         keys_evicted: 0,
+        facts_cached: 0,
+        facts_evicted: 0,
         totals: (0, 0, 0.0),
         slices: &source,
         seeding: 0,
@@ -1450,4 +1448,83 @@ mod blob {
             .is_ok()
         );
     }
+}
+
+/// #107's "the bound is not a silent one": the projection cache's retirement
+/// count reaches the strip, and reads as its own number rather than being
+/// folded into the key count. Two bounds, two populations, two sentences (O6).
+#[test]
+fn the_projection_cache_discloses_its_bound() {
+    use zengui::prefs::Prefs;
+    use zengui::view::status::{self, Status};
+
+    let _ = Prefs::default();
+    let link = zengui::message::LinkState::Pumping;
+    let watched: Vec<String> = vec![];
+    let source = status::SliceSource::None;
+    let mut ui = simulator::<Message, _, _>(status::strip(Status {
+        link: &link,
+        base_label: "acme",
+        watched: &watched,
+        skeleton: None,
+        keys_unwatched: 0,
+        fetched: None,
+        scope_label: "all",
+        keys: 120,
+        keys_evicted: 7,
+        facts_cached: 118,
+        facts_evicted: 312,
+        totals: (0, 0, 0.0),
+        slices: &source,
+        seeding: 0,
+        seeded_watches: 0,
+        seed_totals: (0, 0, 0),
+        unreachable: false,
+        prefs_note: None,
+    }));
+    assert!(
+        ui.find(status::facts_text(118, 312).as_str()).is_ok(),
+        "the cache's bound must be visible, not merely enforced"
+    );
+    assert!(
+        ui.find(status::keys_text(120, 7).as_str()).is_ok(),
+        "and the key table's own count is still its own"
+    );
+    assert_ne!(
+        status::facts_text(118, 312),
+        status::keys_text(118, 312),
+        "the two bounds must not read as one number"
+    );
+}
+
+/// A quiet cache has nothing to disclose: the key count already states the
+/// population, so an untripped bound must not add a line.
+#[test]
+fn an_untripped_cache_bound_says_nothing() {
+    use zengui::view::status::{self, Status};
+
+    let link = zengui::message::LinkState::Pumping;
+    let watched: Vec<String> = vec![];
+    let source = status::SliceSource::None;
+    let mut ui = simulator::<Message, _, _>(status::strip(Status {
+        link: &link,
+        base_label: "acme",
+        watched: &watched,
+        skeleton: None,
+        keys_unwatched: 0,
+        fetched: None,
+        scope_label: "all",
+        keys: 12,
+        keys_evicted: 0,
+        facts_cached: 12,
+        facts_evicted: 0,
+        totals: (0, 0, 0.0),
+        slices: &source,
+        seeding: 0,
+        seeded_watches: 0,
+        seed_totals: (0, 0, 0),
+        unreachable: false,
+        prefs_note: None,
+    }));
+    assert!(ui.find(status::facts_text(12, 0).as_str()).is_err());
 }
