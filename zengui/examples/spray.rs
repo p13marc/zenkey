@@ -22,6 +22,11 @@
 //!   publish pane can actually be pointed at. It is served from the bus rather
 //!   than added to `fixture-tests/registry` on purpose — that directory is the
 //!   codegen regression corpus, not a demo prop.
+//! - a **`@blob` artifact** served by the reference client (issue #68), and
+//!   beside it a second origin claiming the same id at a *different* content
+//!   root. Two holders that disagree is the case RFC 07 §2.1 exists for — the
+//!   id is a name and the root is the anchor — and it is the one thing a
+//!   single honest server can never demonstrate.
 //!
 //! ```text
 //! cargo run -p zengui --example spray -- -l tcp/127.0.0.1:7449   # listen, no router
@@ -76,7 +81,40 @@ type = "Reading"
 encoding = "application/protobuf"
 since = "1.0"
 description = "a protobuf payload — decodable only via the served descriptor set"
+
+# What this producer serves on the @blob plane (RFC 08 §2, v1.8). `push` and
+# `fanout` are omitted because spray serves neither: a slice states capability,
+# and claiming one it does not have would be the lie the plane is modelled to
+# prevent.
+[[blob]]
+tier = "artifact"
+endpoints = ["manifest", "slice", "have"]
+reference = "BlobReference"
+encoding = "application/octet-stream"
+since = "1.8"
+description = "a demo artifact, so the blob pane has something to probe"
 "#;
+
+/// The demo artifact's id. **Lowercase**, and the example is where that is
+/// documented: RFC 07 §2.2 calls the id a ULID, canonical ULIDs are uppercase
+/// Crockford base32, and RFC 03 §2 chunks have no uppercase spelling. An
+/// uppercase id here would produce a key nothing in this convention can parse.
+const BLOB_ID: &str = "01jqz3demo0001";
+
+/// The origin the *disagreeing* holder answers under — a second claimant for
+/// `BLOB_ID`, serving different bytes.
+const ROGUE_ORIGIN: &str = "h-bbbbbbbbbbbb";
+
+/// Deterministic artifact bytes, so two runs of the demo agree about the root.
+fn artifact_bytes(len: usize, seed: u64) -> Vec<u8> {
+    let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+    (0..len)
+        .map(|_| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as u8
+        })
+        .collect()
+}
 
 /// `package demo; message Reading { double value = 1; string label = 2; }`,
 /// built through prost-types so the fixture reads as the schema it is.
@@ -313,6 +351,112 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("queryable {key}: {e}"))?,
         );
     }
+
+    // ── the @blob plane (#68) ────────────────────────────────────────────
+    //
+    // A real artifact, served by the RFC 07 reference client under this host's
+    // tier-1 prefix; and beside it a second origin claiming the same id at a
+    // different root. Both are needed: one server proves a probe→fetch round
+    // trip works, and only two disagreeing ones prove the explorer *reports*
+    // the disagreement instead of trusting whoever answered first (§2.1).
+    let blob_prefix = with_base(
+        zenkey::grammar::blob_tier_prefix(
+            &zenkey::grammar::Origin::Host(zenkey::HostId::parse(host)?),
+            zenkey::grammar::BlobTier::Artifact,
+        )
+        .as_str(),
+    );
+    let blob_data = artifact_bytes(1 << 20, 42);
+    let blob_server = zenkey_fleet::zblob::BlobServer::new(
+        std::sync::Arc::new(session.clone()),
+        blob_prefix.clone(),
+    );
+    let manifest = blob_server
+        .register_source(
+            zenkey_fleet::zblob::BlobSpec::new(BLOB_ID).filename("demo-bundle.bin"),
+            std::sync::Arc::new(zenkey_fleet::zblob::MemoryBlobSource::new(blob_data)),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("register blob: {e}"))?;
+    // The serve loop owns its queryable and lives in its own task, so the
+    // handle is only a stop switch — and this fixture stops with the process.
+    let _blob_handle = blob_server
+        .spawn()
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn blob server: {e}"))?;
+    println!(
+        "serving: {blob_prefix}/{BLOB_ID}/**  root {}",
+        manifest.root
+    );
+
+    // The rogue: same id, a manifest with a different root, and an
+    // availability bitfield claiming the lot. It serves no slices — it does
+    // not need to, because a fetch from it with the honest root pinned must
+    // fail before a byte reaches disk, naming this origin.
+    let rogue_prefix = with_base(
+        zenkey::grammar::blob_tier_prefix(
+            &zenkey::grammar::Origin::Host(zenkey::HostId::parse(ROGUE_ORIGIN)?),
+            zenkey::grammar::BlobTier::Artifact,
+        )
+        .as_str(),
+    );
+    let rogue_manifest = zenkey_fleet::zblob::Manifest {
+        version: 2,
+        id: BLOB_ID.to_string(),
+        filename: Some("demo-bundle.bin".into()),
+        total_len: manifest.total_len,
+        chunk_size: manifest.chunk_size,
+        root: zenkey_fleet::zblob::Hash::of(b"a different artifact entirely"),
+        created_ms: 0,
+    };
+    println!(
+        "serving: {rogue_prefix}/{BLOB_ID}/**  root {}  (the disagreeing holder)",
+        rogue_manifest.root
+    );
+    let chunk_count = manifest.total_len.div_ceil(manifest.chunk_size as u64) as u32;
+    let rogue_replies: std::collections::HashMap<String, (Vec<u8>, &'static str)> =
+        std::collections::HashMap::from([
+            (
+                zenkey_fleet::zblob::manifest_key(&rogue_prefix, BLOB_ID),
+                (
+                    zenkey_fleet::zblob::wire::encode(&rogue_manifest)
+                        .map_err(|e| anyhow::anyhow!("encode rogue manifest: {e}"))?,
+                    zenkey_fleet::zblob::wire::ENC_MANIFEST,
+                ),
+            ),
+            (
+                zenkey_fleet::zblob::availability_key(&rogue_prefix, BLOB_ID),
+                (
+                    zenkey_fleet::zblob::wire::encode(
+                        &zenkey_fleet::zblob::wire::Availability::full(chunk_count),
+                    )
+                    .map_err(|e| anyhow::anyhow!("encode rogue availability: {e}"))?,
+                    zenkey_fleet::zblob::wire::ENC_AVAIL,
+                ),
+            ),
+        ]);
+    let _rogue = session
+        .declare_queryable(format!("{rogue_prefix}/**"))
+        .callback(move |query| {
+            // Replies go on the responder's own concrete key, as a real server
+            // does — which is what lets a `*`-origin probe attribute them.
+            for (key, (payload, encoding)) in &rogue_replies {
+                if !query.key_expr().intersects(
+                    &zenoh::key_expr::KeyExpr::try_from(key.as_str()).expect("valid key"),
+                ) {
+                    continue;
+                }
+                let q = query.clone();
+                let key = key.clone();
+                let payload = payload.clone();
+                let encoding = *encoding;
+                tokio::spawn(async move {
+                    let _ = q.reply(key, payload).encoding(encoding).await;
+                });
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("rogue queryable: {e}"))?;
 
     // Liveliness tokens (RFC 04 §5): the roster the node views feed on.
     // Killing this process retracts them — that is the suspect-on-retraction
