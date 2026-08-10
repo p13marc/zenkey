@@ -75,6 +75,16 @@ pub struct Zengui {
     echo: EchoRing,
     expanded: BTreeSet<String>,
     selected: Option<String>,
+    /// The selected key's history recording (issue #63). Created on selection,
+    /// dropped on the next one — which is what makes deselecting stop the
+    /// cost, since there is then nothing left to feed.
+    history: Option<crate::history::HistoryRecorder>,
+    /// The selected key's rate series (issue #64), sampled once per stats
+    /// tick. Reset with the selection, like the history it sits beside.
+    rate_series: crate::series::RateSampler,
+    /// Which numeric leaf the value sparkline plots; `None` follows the first
+    /// leaf the payload offers.
+    series_leaf: Option<String>,
     /// The last on-demand fetch: (key, outcome-or-error).
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
@@ -163,6 +173,9 @@ impl Zengui {
             echo,
             expanded: BTreeSet::new(),
             selected: None,
+            history: None,
+            rate_series: crate::series::RateSampler::new(),
+            series_leaf: None,
             fetched: None,
             echo_view: view::echo::EchoView::new(),
             context_form: view::contexts::ContextForm::default(),
@@ -458,6 +471,17 @@ impl Zengui {
             }
             Message::SelectKey(key) => {
                 self.selected = key.clone();
+                // History follows the selection and nothing else (issue #63):
+                // the previous recording is dropped here, which is what makes
+                // deselecting free. A symbolic skeleton path names no concrete
+                // key, so nothing can be recorded for it.
+                self.history = key.as_deref().filter(|k| !k.contains('{')).map(|k| {
+                    crate::history::HistoryRecorder::new(k, self.settings.history_entries)
+                });
+                // The plotted series belong to the same selection (issue #64):
+                // they start empty, and stop being fed when it goes away.
+                self.rate_series = crate::series::RateSampler::new();
+                self.series_leaf = None;
                 let (Some(session), Some(key)) = (self.session.clone(), key) else {
                     return Task::none();
                 };
@@ -485,6 +509,22 @@ impl Zengui {
             Message::Call(msg) => self.update_call(msg),
             Message::Nodes(msg) => self.update_nodes(msg),
             Message::Doctor(msg) => self.update_doctor(msg),
+            Message::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
+                self.series_leaf = Some(path);
+                Task::none()
+            }
+            Message::History(msg) => {
+                if let Some(rec) = self.history.as_mut() {
+                    match msg {
+                        view::history::HistoryMsg::Select(seq) => rec.selected = Some(seq),
+                        view::history::HistoryMsg::Clear => {
+                            rec.ring.clear();
+                            rec.selected = None;
+                        }
+                    }
+                }
+                Task::none()
+            }
             Message::Publish(msg) => self.update_publish(msg),
             Message::CallDone(outcome) => {
                 self.call_form.in_flight = false;
@@ -1558,9 +1598,23 @@ impl Zengui {
         // outran us vs. our own batch cap chose to coalesce.
         self.echo.record_lag(tick.lagged);
         self.echo.record_coalesced(tick.coalesced);
+        // One point per tick for the selected key's rate (issue #64). The
+        // count is what says whether the EWMA moved: it never decays on its
+        // own, so an unchanged count is silence, and the sampler records a gap
+        // rather than a confident flat line.
+        if let Some(rec) = self.history.as_ref() {
+            let chunks: Vec<&str> = rec.key.split('/').collect();
+            let observed = tick.tree.node(&chunks).map(|n| (n.count, n.rate_hz));
+            self.rate_series.tick(observed);
+        }
         for sample in &tick.samples {
             self.ensure_facts(&sample.key);
             self.echo.push(sample);
+            // History is per-key and costs no subscription of its own: these
+            // samples are already flowing for an existing watch (issue #63).
+            if let Some(rec) = self.history.as_mut() {
+                rec.observe(sample);
+            }
         }
         for (key, _up) in &tick.nodes {
             self.ensure_facts(key);
@@ -1742,6 +1796,8 @@ impl Zengui {
                         (Some(k.as_str()) == self.selected.as_deref()).then_some(o)
                     }),
                     decoded: self.decoded.as_ref(),
+                    series: self.series_data(),
+                    history_entries: self.history.as_ref().map(|r| r.ring.len()),
                 }),
                 RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
                     roster: &self.roster,
@@ -1749,6 +1805,14 @@ impl Zengui {
                     detail: &self.node_detail,
                 }),
                 RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
+                RightPane::History => view::history::pane(view::history::HistoryData {
+                    key: self.selected.as_deref(),
+                    recorder: self.history.as_ref(),
+                    watched: self
+                        .selected
+                        .as_deref()
+                        .is_some_and(|k| key_is_watched(&self.watched, k)),
+                }),
                 RightPane::Connect =>
                     view::contexts::pane(&self.context_form, self.settings.is_unreachable(),),
             })
@@ -1879,5 +1943,91 @@ impl Zengui {
         .spacing(space::SM)
         .align_y(iced::Alignment::Center)
         .into()
+    }
+}
+
+impl Zengui {
+    /// Derive the detail pane's sparkline data from the recorded history
+    /// (issue #64).
+    ///
+    /// Computed per frame rather than kept: the ring is the single source, and
+    /// a cached series would be one more thing to invalidate on every eviction.
+    /// The leaves come from the newest payload, so a producer that starts
+    /// emitting a new field offers it without a restart.
+    fn series_data(&self) -> Option<view::detail::SeriesData> {
+        let rec = self.history.as_ref()?;
+        // The most recent entry that *is* a document, not simply the most
+        // recent one: a tombstone carries no fields, and letting it empty the
+        // picker would make the chart vanish on every retirement and come
+        // back on the next put.
+        let leaves = rec
+            .ring
+            .iter()
+            .find_map(|e| e.value.as_ref())
+            .map(crate::series::numeric_leaves)
+            .unwrap_or_default();
+        // The chosen leaf, if the newest payload still carries it — a field
+        // that disappeared should not silently keep plotting its own gaps.
+        let leaf = self
+            .series_leaf
+            .as_ref()
+            .filter(|p| leaves.leaves.iter().any(|(k, _)| k == *p))
+            .cloned()
+            .or_else(|| leaves.leaves.first().map(|(k, _)| k.clone()));
+        let value = match &leaf {
+            Some(p) => crate::series::value_series(&rec.ring, p),
+            None => crate::series::Series::new(),
+        };
+        let unit = match self.facts.get(&rec.key).map(|f| &f.registration) {
+            Some(zenkey_fleet::Registration::Registered(s)) => s.unit.clone(),
+            _ => None,
+        };
+        Some(view::detail::SeriesData {
+            leaves,
+            leaf,
+            value,
+            rate: self.rate_series.series().clone(),
+            unit,
+        })
+    }
+}
+
+/// Whether any active watch selector covers this exact key.
+///
+/// The distinction the history pane rests on: with no watch, no sample can
+/// reach the recorder, and "nothing recorded yet" would be a verdict the tool
+/// never obtained (RFC 09 §5.1 O4). A selector that does not parse cannot be
+/// claimed as coverage, so it is not counted — the same rule
+/// `StatsTable::retire_unwatched` applies from the other side.
+fn key_is_watched(watched: &[String], key: &str) -> bool {
+    let Ok(ke) = zenoh::key_expr::KeyExpr::new(key.to_string()) else {
+        return false;
+    };
+    watched
+        .iter()
+        .filter_map(|sel| zenoh::key_expr::KeyExpr::new(sel.clone()).ok())
+        .any(|sel| sel.intersects(&ke))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn watch_coverage_is_decided_by_intersection_not_by_prefix() {
+        let watched = vec![
+            "v1/h-a/telemetry/**".to_string(),
+            "demo/example/foo".to_string(),
+        ];
+        assert!(key_is_watched(&watched, "v1/h-a/telemetry/sysinfo/cpu"));
+        assert!(key_is_watched(&watched, "demo/example/foo"));
+        assert!(!key_is_watched(&watched, "v1/h-b/telemetry/sysinfo/cpu"));
+        assert!(!key_is_watched(&[], "v1/h-a/telemetry/sysinfo/cpu"));
+    }
+
+    /// A selector we cannot parse is not coverage we can claim.
+    #[test]
+    fn an_unparseable_selector_is_not_counted_as_coverage() {
+        assert!(!key_is_watched(&["not a key/**/".to_string()], "a/b"));
     }
 }

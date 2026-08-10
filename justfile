@@ -20,6 +20,16 @@
 #   * Switch scope to `deployment` and watch `@catalog` appear. It is invisible
 #     under `everything` because `**` never crosses an `@` chunk (RFC 03 §4 D2)
 #     — which is also why `**` cannot pull the `@media` frames spray publishes.
+#   * Select `…/telemetry/sysinfo/disk/var-log/used` and watch its subtree. The
+#     detail pane's `Series` section traces the wandering `value`; the `history`
+#     tab (Alt 8) fills, and clicking a row names the field that moved. Before
+#     the watch, both say *why* they are empty — an unwatched key records
+#     nothing, and that is not the same as a quiet one.
+#   * Select `…/state/sysinfo/health` and wait: every 20th sample is a
+#     tombstone. It renders as retirement, and the put after it as a new value
+#     rather than a change (RFC 04 §1.2).
+#   * `…/telemetry/probe/reading` moves too, but offers no chart: a protobuf
+#     leaf needs a schema decode, which must not sit on a render path.
 #   * `just gui-demo-bounded` trips the key bound immediately: the status strip
 #     should read "N keys (+M retired — bound reached)" (RFC 09 §5.1 O6).
 #   * `just gui-demo-no-registry` withholds the registry: every badge should

@@ -10,6 +10,10 @@
 //!   two-chunk key — one for each `KeyShape` / `UnparsedReason` arm;
 //! - a large payload, to exercise the echo ring's byte budget and the
 //!   "too large to preview" path;
+//! - **payloads that move** (issues #63/#64): a wandering numeric telemetry
+//!   subject to plot and to diff, and a state key that is retired by tombstone
+//!   and revived on a cycle. Everything else stays byte-stable, because the
+//!   tree and badge demos are about keys and a moving payload would be noise;
 //! - a `@media`-shaped key, which a `**` subscriber must *not* see (RFC 03 §4
 //!   D2) — if it shows up in the tree, the scope design is broken;
 //! - a **protobuf** subject with a producer that serves both RFC 08 halves
@@ -121,7 +125,7 @@ fn probe_schema_set() -> String {
 
 /// One `Reading`, on the wire. Deliberately *not* JSON: every sniff a generic
 /// tool has renders this as bytes, which is the point of serving a schema.
-fn probe_sample() -> Vec<u8> {
+fn probe_sample(value: f64) -> Vec<u8> {
     use prost_reflect::prost::Message as _;
     let pool = prost_reflect::DescriptorPool::decode(probe_descriptor_set().as_slice())
         .expect("fixture descriptor set");
@@ -129,9 +133,68 @@ fn probe_sample() -> Vec<u8> {
         .get_message_by_name("demo.Reading")
         .expect("fixture message");
     let mut msg = prost_reflect::DynamicMessage::new(desc);
-    msg.set_field_by_name("value", prost_reflect::Value::F64(12.5));
+    msg.set_field_by_name("value", prost_reflect::Value::F64(value));
     msg.set_field_by_name("label", prost_reflect::Value::String("probe".into()));
     msg.encode_to_vec()
+}
+
+/// How a plan entry's payload is produced on each tick.
+///
+/// Most of the fixture is byte-stable, because the tree, badge and scope demos
+/// are about *keys* and a moving payload would only be noise. The three that
+/// move exist for #63/#64: a diff of two identical payloads shows nothing, and
+/// a sparkline of a constant is a flat line — neither demonstrates anything.
+enum Payload {
+    /// Identical every tick.
+    Fixed(Vec<u8>),
+    /// A JSON document whose `value` wanders — the plotting subject.
+    Wander,
+    /// The protobuf `Reading`, wandering too: proof that the codec path is
+    /// live, and the thing that shows a schema-decoded leaf offers no chart.
+    Reading,
+    /// A state key that is periodically **retired and revived**: puts, then a
+    /// tombstone, then puts again. The only way to see RFC 04 §1.2's
+    /// distinction by hand.
+    Cycle,
+}
+
+/// How many ticks one retire/revive cycle takes; the last tick of each is the
+/// tombstone.
+const CYCLE: u64 = 20;
+
+/// A deterministic wander in `[lo, hi]` — a fixture should look the same on
+/// every run, so this is a sine of the tick, not a random number.
+fn wander(tick: u64, lo: f64, hi: f64) -> f64 {
+    let t = (tick as f64) * 0.37;
+    let unit = (t.sin() + 1.0) / 2.0;
+    // One decimal: enough movement to see, few enough digits to read in a diff.
+    ((lo + unit * (hi - lo)) * 10.0).round() / 10.0
+}
+
+impl Payload {
+    /// The bytes for this tick, or `None` to publish a tombstone instead.
+    fn bytes(&self, tick: u64) -> Option<Vec<u8>> {
+        match self {
+            Payload::Fixed(b) => Some(b.clone()),
+            Payload::Wander => Some(
+                format!(
+                    r#"{{"value":{},"unit":"percent","inodes":{}}}"#,
+                    wander(tick, 20.0, 90.0),
+                    1000 + tick % 7,
+                )
+                .into_bytes(),
+            ),
+            Payload::Reading => Some(probe_sample(wander(tick, 5.0, 25.0))),
+            Payload::Cycle => (tick % CYCLE != CYCLE - 1).then(|| {
+                format!(
+                    r#"{{"status":"ok","checks":{},"epoch":{}}}"#,
+                    tick % CYCLE,
+                    tick / CYCLE,
+                )
+                .into_bytes()
+            }),
+        }
+    }
 }
 
 #[tokio::main]
@@ -163,56 +226,64 @@ async fn main() -> anyhow::Result<()> {
     let with_base = |k: &str| zenkey::grammar::with_base(&args.base, k);
     let host = "h-3fa9c2d41b7e";
 
-    // (key, payload) pairs, one publisher each.
-    let plan: Vec<(String, Vec<u8>)> = vec![
-        // Conforming, and registered in fixture-tests/registry.
+    // (key, payload source) pairs, one publisher each.
+    let plan: Vec<(String, Payload)> = vec![
+        // Conforming, and registered in fixture-tests/registry. This one
+        // moves: it is the sparkline and payload-diff subject (#63/#64).
         (
             with_base(&format!("v1/{host}/telemetry/sysinfo/disk/var-log/used")),
-            br#"{"value":42.0,"unit":"percent"}"#.to_vec(),
+            Payload::Wander,
         ),
+        // State, retired and revived on a cycle — the tombstone demo.
         (
             with_base(&format!("v1/{host}/state/sysinfo/health")),
-            br#"{"status":"ok"}"#.to_vec(),
+            Payload::Cycle,
         ),
         // Conforming, but NOT registered — must read "unregistered", not
         // "no slice", and certainly not "registered".
         (
             with_base(&format!("v1/{host}/telemetry/sysinfo/not/a/real/subject")),
-            br#"{"value":1}"#.to_vec(),
+            Payload::Fixed(br#"{"value":1}"#.to_vec()),
         ),
         // A service origin: `**` cannot reach this (D4), so it is the check
         // that the Deployment scope's explicit @catalog selector works.
         (
             with_base("v1/@catalog/state/entity/h-3fa9c2d41b7e"),
-            br#"{"entity":"host-a"}"#.to_vec(),
+            Payload::Fixed(br#"{"entity":"host-a"}"#.to_vec()),
         ),
         // Foreign traffic — the key-agnostic path.
         (
             "demo/example/foo".to_string(),
-            b"just a plain string".to_vec(),
+            Payload::Fixed(b"just a plain string".to_vec()),
         ),
-        ("demo/cbor".to_string(), vec![0xA1, 0x61, 0x61, 0x01]),
-        ("two/chunks".to_string(), b"{}".to_vec()),
+        (
+            "demo/cbor".to_string(),
+            Payload::Fixed(vec![0xA1, 0x61, 0x61, 0x01]),
+        ),
+        ("two/chunks".to_string(), Payload::Fixed(b"{}".to_vec())),
         (
             format!("v2/{host}/telemetry/sysinfo/cpu"),
-            b"a v2 key: not this convention".to_vec(),
+            Payload::Fixed(b"a v2 key: not this convention".to_vec()),
         ),
         (
             format!("someotherbase/v1/{host}/state/sysinfo/health"),
-            br#"{"status":"another deployment"}"#.to_vec(),
+            Payload::Fixed(br#"{"status":"another deployment"}"#.to_vec()),
         ),
         // Exercises the ring's byte budget and the no-preview path.
-        ("demo/huge".to_string(), vec![b'x'; 512 * 1024]),
+        (
+            "demo/huge".to_string(),
+            Payload::Fixed(vec![b'x'; 512 * 1024]),
+        ),
         // Must NOT appear under a `**` subscription (RFC 03 §4 D2).
         (
             with_base(&format!("v1/{host}/@media/parallax/cam0/video/h264/hi")),
-            vec![0u8; 4096],
+            Payload::Fixed(vec![0u8; 4096]),
         ),
         // A protobuf payload (#97). Opaque to every sniff — it decodes only
         // because `probe` serves its descriptor set on `describe` below.
         (
             with_base(&format!("v1/{host}/telemetry/probe/reading")),
-            probe_sample(),
+            Payload::Reading,
         ),
     ];
 
@@ -291,11 +362,22 @@ async fn main() -> anyhow::Result<()> {
     let mut ticker = tokio::time::interval(period);
     let refresh_per_tick = (args.keys / 1000).max(1);
     let mut cursor = 0usize;
+    let mut tick: u64 = 0;
     loop {
         ticker.tick().await;
         for (p, payload) in &publishers {
-            let _ = p.put(payload.clone()).await;
+            match payload.bytes(tick) {
+                Some(bytes) => {
+                    let _ = p.put(bytes).await;
+                }
+                // A tombstone, not an empty put — the whole point of the
+                // cycle (RFC 04 §1.2).
+                None => {
+                    let _ = p.delete().await;
+                }
+            }
         }
+        tick = tick.wrapping_add(1);
         if !synth.is_empty() {
             for _ in 0..refresh_per_tick {
                 let key = &synth[cursor % synth.len()];

@@ -85,6 +85,14 @@ pub struct Cli {
     #[arg(long, default_value_t = 2000)]
     pub echo_lines: usize,
 
+    /// How many samples of the selected key's history to retain (issue #63).
+    ///
+    /// Smaller than the echo ring on purpose: history keeps whole payloads so
+    /// it can diff them, where echo keeps a one-line preview. Entries dropped
+    /// to respect this bound are counted and displayed (RFC 09 §5.1 O6).
+    #[arg(long, default_value_t = 200)]
+    pub history_entries: usize,
+
     /// How many distinct keys to keep statistics for.
     ///
     /// Least-recently-seen keys are retired past this, and the retirements are
@@ -108,6 +116,7 @@ pub struct Settings {
     pub selectors: Vec<String>,
     pub eager: bool,
     pub echo_lines: usize,
+    pub history_entries: usize,
     pub max_keys: usize,
 }
 
@@ -140,6 +149,9 @@ impl Cli {
         if self.echo_lines == 0 {
             anyhow::bail!("--echo-lines must be at least 1");
         }
+        if self.history_entries == 0 {
+            anyhow::bail!("--history-entries must be at least 1");
+        }
         if self.max_keys == 0 {
             anyhow::bail!("--max-keys must be at least 1");
         }
@@ -168,6 +180,7 @@ impl Cli {
             selectors: self.selector,
             eager: self.eager,
             echo_lines: self.echo_lines,
+            history_entries: self.history_entries,
             max_keys: self.max_keys,
         })
     }
@@ -239,7 +252,20 @@ mod tests {
         assert_eq!(s.scope, ScopePreset::Everything);
         assert!(!s.eager, "lazy is the default (issue #85)");
         assert_eq!(s.echo_lines, 2000);
+        assert_eq!(s.history_entries, 200);
         assert_eq!(s.max_keys, zenkey_fleet::stats::DEFAULT_MAX_KEYS);
+    }
+
+    /// History retains whole payloads, so its bound is the one most worth
+    /// turning down — and, like every other bound here, zero is rejected at
+    /// the boundary rather than clamped downstream.
+    #[test]
+    fn the_history_bound_is_configurable_and_must_be_positive() {
+        assert_eq!(
+            parse(&["--history-entries", "5"]).unwrap().history_entries,
+            5
+        );
+        assert!(parse(&["--history-entries", "0"]).is_err());
     }
 
     /// The key table is bounded (RFC 09 §5.1 O6); a zero bound is rejected at

@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use iced_test::simulator;
+use zengui::history::HistoryRecorder;
 use zengui::keyfacts::KeyFacts;
 use zengui::message::Message;
 use zengui::view::tree::{self, FactsIndex};
@@ -544,6 +545,8 @@ fn the_detail_pane_tags_decode_provenance() {
         facts: Some(&facts),
         fetched: Some(&fetched),
         decoded: Some(&decoded),
+        series: None,
+        history_entries: None,
     }));
     assert!(ui.find("registered").is_ok(), "the facts section renders");
     assert!(
@@ -562,6 +565,8 @@ fn the_detail_pane_tags_decode_provenance() {
         facts: Some(&facts),
         fetched: Some(&none),
         decoded: None,
+        series: None,
+        history_entries: None,
     }));
     assert!(
         ui.find("no value — asked get, @adv cache, subscribe window — a non-verdict, not proof of absence (RFC 05 §3.1)")
@@ -906,4 +911,293 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // Closed means nothing renders.
     state.close();
     assert!(overlay(&state, &contexts, &keys).is_none());
+}
+
+// ── History pane (#63) ───────────────────────────────────────────────────
+
+/// Build a recorder over a scripted sample stream.
+fn recording(key: &str, max_entries: usize, samples: &[(&[u8], bool)]) -> HistoryRecorder {
+    let mut rec = HistoryRecorder::new(key, max_entries);
+    for (payload, is_delete) in samples {
+        rec.observe(&zenkey_fleet::SampleView {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
+            encoding: "application/json".to_string(),
+            kind: if *is_delete {
+                zenoh::sample::SampleKind::Delete
+            } else {
+                zenoh::sample::SampleKind::Put
+            },
+            timestamp: None,
+            received: Instant::now(),
+        });
+    }
+    rec
+}
+
+/// The pane's first job is saying whether anything is being recorded at all.
+/// "Nothing yet" for a key nobody watches is a verdict never obtained (O4).
+#[test]
+fn the_history_pane_says_why_it_is_empty() {
+    use zengui::view::history::{HistoryData, pane};
+
+    // Nothing selected.
+    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+        key: None,
+        recorder: None,
+        watched: false,
+    }));
+    assert!(ui.find("Nothing selected").is_ok());
+
+    // Selected, but no watch covers it — the two must not read alike.
+    let rec = recording(REGISTERED, 8, &[]);
+    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+        key: Some(REGISTERED),
+        recorder: Some(&rec),
+        watched: false,
+    }));
+    assert!(
+        ui.find("Not watched — nothing is being recorded").is_ok(),
+        "an unwatched key must not render as a quiet one"
+    );
+    assert!(
+        ui.find("watch this key").is_ok(),
+        "and the pane offers the watch rather than only complaining"
+    );
+
+    // Watched and genuinely quiet: a different sentence, and not a verdict.
+    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+        key: Some(REGISTERED),
+        recorder: Some(&rec),
+        watched: true,
+    }));
+    assert!(ui.find("No samples yet").is_ok());
+    assert!(
+        ui.find(
+            "The watch is active and nothing has arrived on this key since it \
+             was selected. That is not a statement about the bus (RFC 05 §3.1)."
+        )
+        .is_ok(),
+        "silence stays a non-verdict"
+    );
+}
+
+/// The diff names the field that moved, and says which clock stamped the row.
+#[test]
+fn the_history_pane_diffs_consecutive_payloads() {
+    use zengui::view::history::{HistoryData, pane};
+
+    let rec = recording(
+        REGISTERED,
+        8,
+        &[
+            (br#"{"value":41.0,"unit":"percent"}"#, false),
+            (br#"{"value":42.0,"unit":"percent","inodes":1188}"#, false),
+        ],
+    );
+    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+        key: Some(REGISTERED),
+        recorder: Some(&rec),
+        watched: true,
+    }));
+    assert!(
+        ui.find("~ value  41.0 → 42.0").is_ok(),
+        "the changed field is named with both sides"
+    );
+    assert!(
+        ui.find("+ inodes  1188").is_ok(),
+        "an added field is not a change"
+    );
+    assert!(
+        ui.find(
+            "times are the publisher's HLC where one was stamped and this observer's \
+             arrival otherwise — every row says which"
+        )
+        .is_ok(),
+        "the clock is labelled, never implied"
+    );
+}
+
+/// A tombstone is authoritative retirement (RFC 04 §1.2), and the put that
+/// follows one starts a new value rather than "changing" the deleted one.
+#[test]
+fn the_history_pane_marks_a_tombstone_as_retirement() {
+    use zengui::view::history::{HistoryData, pane};
+
+    let script: &[(&[u8], bool)] = &[
+        (br#"{"status":"ok"}"#, false),
+        (b"", true),
+        (br#"{"status":"ok"}"#, false),
+    ];
+
+    // Focused on the delete itself.
+    let mut rec = recording(REGISTERED, 8, script);
+    rec.selected = Some(1);
+    {
+        let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+            key: Some(REGISTERED),
+            recorder: Some(&rec),
+            watched: true,
+        }));
+        assert!(ui.find("▸ t-1").is_ok(), "the focused row is marked");
+        assert!(
+            ui.find("DELETE (tombstone)").is_ok(),
+            "a delete must be visibly distinct from an empty put"
+        );
+        assert!(
+            ui.find("retired — an authoritative delete (RFC 04 §1.2), not an empty value")
+                .is_ok()
+        );
+    }
+
+    // Focused on the put after it: a new value, not a change.
+    rec.selected = Some(2);
+    {
+        let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+            key: Some(REGISTERED),
+            recorder: Some(&rec),
+            watched: true,
+        }));
+        assert!(
+            ui.find("new value after retirement — not a change to the previous value")
+                .is_ok()
+        );
+    }
+}
+
+/// A payload with no structural form degrades to a byte comparison that says
+/// so, instead of inventing field names for bytes it cannot read.
+#[test]
+fn the_history_pane_falls_back_to_bytes_and_admits_it() {
+    use zengui::view::history::{HistoryData, pane};
+
+    let rec = recording(
+        FOREIGN,
+        8,
+        &[
+            (b"just a plain string", false),
+            (b"just a plain STRING", false),
+        ],
+    );
+    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+        key: Some(FOREIGN),
+        recorder: Some(&rec),
+        watched: true,
+    }));
+    assert!(
+        ui.find("neither sample has a structural form — compared as bytes, not as fields")
+            .is_ok()
+    );
+}
+
+/// The bound is on screen, not implied by a short list (RFC 09 §5.1 O6).
+#[test]
+fn the_history_pane_counts_what_it_evicted() {
+    use zengui::view::history::{HistoryData, pane};
+
+    let script: Vec<(Vec<u8>, bool)> = (0..10)
+        .map(|i| (format!(r#"{{"value":{i}}}"#).into_bytes(), false))
+        .collect();
+    let borrowed: Vec<(&[u8], bool)> = script.iter().map(|(p, d)| (p.as_slice(), *d)).collect();
+    let rec = recording(REGISTERED, 3, &borrowed);
+
+    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+        key: Some(REGISTERED),
+        recorder: Some(&rec),
+        watched: true,
+    }));
+    assert!(
+        ui.find("recording since selection · 3 retained · 7 evicted (ring full)")
+            .is_ok(),
+        "what the bound cost is a fact on screen"
+    );
+}
+
+// ── Numeric plotting (#64) ───────────────────────────────────────────────
+
+/// A payload with no numbers in it offers no chart at all — not an empty one,
+/// and not an error. Nothing about a string payload is a problem.
+#[test]
+fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
+    use zengui::series::{NumericLeaves, RateSampler, Series};
+    use zengui::view::detail::{DetailData, SeriesData, pane};
+
+    let series = SeriesData {
+        leaves: NumericLeaves::default(),
+        leaf: None,
+        value: Series::new(),
+        rate: RateSampler::new().series().clone(),
+        unit: None,
+    };
+    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+        key: FOREIGN,
+        facts: None,
+        fetched: None,
+        decoded: None,
+        series: Some(series),
+        history_entries: Some(3),
+    }));
+    assert!(
+        ui.find("Series").is_err(),
+        "a payload with nothing numeric in it must not grow a chart section"
+    );
+    // …but the link into the timeline is still there: history is not numeric.
+    assert!(
+        ui.find("history: 3 samples recorded — open (Alt 8)")
+            .is_ok()
+    );
+}
+
+/// The chart's numbers live in its caption, which is what makes the plot
+/// readable without colour — and gaps are named rather than smoothed away.
+#[test]
+fn the_detail_pane_labels_the_series_it_plots() {
+    use zengui::series::{Series, numeric_leaves};
+    use zengui::view::detail::{DetailData, SeriesData, pane};
+
+    let mut value = Series::new();
+    value.push(41.0);
+    value.push_gap();
+    value.push(42.0);
+    let mut rate = Series::new();
+    rate.push(5.0);
+
+    let series = SeriesData {
+        leaves: numeric_leaves(&serde_json::json!({"value": 42.0})),
+        leaf: Some("value".to_string()),
+        value,
+        rate,
+        unit: Some("percent".to_string()),
+    };
+    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+        key: REGISTERED,
+        facts: None,
+        fetched: None,
+        decoded: None,
+        series: Some(series),
+        history_entries: Some(3),
+    }));
+    assert!(ui.find("Series").is_ok());
+    assert!(
+        ui.find(
+            "value: 42percent now · 41percent min · 42percent max · 3 points · \
+             1 drawn as gaps, not interpolated"
+        )
+        .is_ok(),
+        "the caption carries the numbers, the unit and the gap count"
+    );
+    assert!(
+        ui.find("rate: 5.0/s now · 5.0/s min · 5.0/s max · 1 point")
+            .is_ok(),
+        "the rate series uses the shared rate wording"
+    );
+    assert!(
+        ui.find(
+            "plotted from the recorded history's structural values — a schema decode \
+             per sample would hit the bus on a render path, so a protobuf or CDR leaf \
+             offers no chart"
+        )
+        .is_ok(),
+        "the boundary of what can be plotted is stated, not left to be discovered"
+    );
 }

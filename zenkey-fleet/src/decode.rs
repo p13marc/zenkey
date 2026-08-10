@@ -416,9 +416,19 @@ pub fn resolve_encoding(
     }
 }
 
-/// Structural fallback rendering — what the wire honestly says when no
-/// schema resolves.
-pub fn structural(bytes: &[u8]) -> String {
+/// The structural sniff as a **value** rather than as text — the same ladder
+/// [`structural`] renders, stopped one step earlier.
+///
+/// `Some` means the bytes carry a self-describing document (JSON, or CBOR that
+/// accounts for every byte and is not the text-vs-scalar ambiguity below).
+/// `None` means they do not: plain text, or opaque bytes. That distinction is
+/// what lets a caller diff two payloads field-by-field when it can, and say so
+/// honestly — a byte comparison — when it cannot.
+///
+/// Deliberately sync and schema-free: this runs on render paths, where the
+/// async [`decode_sample`] (which may GET a `describe` on a miss) must never
+/// sit.
+pub fn structural_value(bytes: &[u8]) -> Option<serde_json::Value> {
     let looks_json = bytes.first().is_some_and(|b| {
         matches!(
             b,
@@ -426,20 +436,32 @@ pub fn structural(bytes: &[u8]) -> String {
         )
     });
     if looks_json && let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
-        return serde_json::to_string(&v).unwrap_or_default();
+        return Some(v);
     }
-    let utf8 = std::str::from_utf8(bytes).ok().filter(|t| !t.is_empty());
+    let is_text = std::str::from_utf8(bytes).is_ok_and(|t| !t.is_empty());
     if let Some(v) = cbor_whole(bytes)
         // A bare CBOR scalar over bytes that are *also* valid text is the
         // ambiguous case, and plain text is the likelier reading on a bus that
         // carries anything. Structured CBOR (a map, an array) is unambiguous
         // and still wins.
-        && !(utf8.is_some() && is_scalar(&v))
-        && let Ok(text) = serde_json::to_string(&v)
+        && !(is_text && is_scalar(&v))
+        // A CBOR map keyed by anything but strings has no JSON form; that is a
+        // failure of the *rendering*, not of the payload, so it degrades to
+        // text like any other unreadable shape rather than being invented.
+        && let Ok(value) = serde_json::to_value(&v)
     {
-        return text;
+        return Some(value);
     }
-    match utf8 {
+    None
+}
+
+/// Structural fallback rendering — what the wire honestly says when no
+/// schema resolves.
+pub fn structural(bytes: &[u8]) -> String {
+    if let Some(v) = structural_value(bytes) {
+        return serde_json::to_string(&v).unwrap_or_default();
+    }
+    match std::str::from_utf8(bytes).ok().filter(|t| !t.is_empty()) {
         Some(text) => text.to_string(),
         None => format!("<{} bytes>", bytes.len()),
     }
@@ -544,6 +566,40 @@ mod tests {
         ciborium::into_writer(&serde_json::json!({"x": 1}), &mut cbor).unwrap();
         assert!(structural(&cbor).contains("\"x\""));
         assert_eq!(structural(&[0xff, 0xfe, 0x00]), "<3 bytes>");
+    }
+
+    /// The value form answers the question a diff actually asks: is there a
+    /// document here to compare field by field, or only bytes?
+    #[test]
+    fn structural_value_yields_documents_and_nothing_else() {
+        assert_eq!(
+            structural_value(br#"{"value":42.0}"#),
+            Some(serde_json::json!({"value": 42.0}))
+        );
+        let mut cbor = Vec::new();
+        ciborium::into_writer(&serde_json::json!({"x": 1}), &mut cbor).unwrap();
+        assert_eq!(structural_value(&cbor), Some(serde_json::json!({"x": 1})));
+        // Plain text and opaque bytes are not documents — the caller falls
+        // back to a byte comparison rather than being handed a fake one.
+        assert_eq!(structural_value(b"just a plain string"), None);
+        assert_eq!(structural_value(&[0xff, 0xfe, 0x00]), None);
+        assert_eq!(structural_value(b""), None);
+    }
+
+    /// The two must not drift: `structural` is the rendering of
+    /// `structural_value` wherever one exists.
+    #[test]
+    fn the_rendering_agrees_with_the_value() {
+        for payload in [
+            &br#"{"a":1}"#[..],
+            &b"[1,2,3]"[..],
+            &b"just a plain string"[..],
+            &[0xff, 0xfe, 0x00][..],
+        ] {
+            if let Some(v) = structural_value(payload) {
+                assert_eq!(structural(payload), serde_json::to_string(&v).unwrap());
+            }
+        }
     }
 
     /// Regression: plain text must not be eaten by the CBOR sniff.
