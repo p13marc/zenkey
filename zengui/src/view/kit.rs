@@ -159,6 +159,30 @@ pub fn badge_severity<'a, M: 'a>(
     .into()
 }
 
+/// A storage-coverage badge (#70) — theme-resolved like [`tone_badge`], and
+/// carrying the CLI's own mark so the two explorers read alike. Mark **and**
+/// text, never colour alone.
+pub fn badge_coverage<'a, M: 'a>(
+    tone: super::theme::CoverageTone,
+    label: impl Into<String>,
+) -> Element<'a, M> {
+    let style = move |theme: &iced::Theme| text::Style {
+        color: Some(colors(theme).coverage(tone)),
+    };
+    let mark = match tone {
+        super::theme::CoverageTone::Covered => "✓",
+        super::theme::CoverageTone::Partial => "~",
+        super::theme::CoverageTone::Uncovered => "·",
+    };
+    row![
+        text(mark).size(font::CAPTION).style(style),
+        text(label.into()).size(font::CAPTION).style(style),
+    ]
+    .spacing(space::XS)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
 /// Dimmed caption text.
 pub fn muted<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
     text(s.into())

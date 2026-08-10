@@ -128,6 +128,28 @@ impl ThemeColors<'_> {
             SeverityTone::Info => self.text_muted(),
         }
     }
+
+    /// The storage-coverage scale (#70), mirroring the CLI's ✓/~/· marks.
+    pub fn coverage(&self, kind: CoverageTone) -> Color {
+        match kind {
+            CoverageTone::Covered => self.success(),
+            CoverageTone::Partial => self.warning(),
+            CoverageTone::Uncovered => self.text_dim(),
+        }
+    }
+}
+
+/// How storage coverage should read (#70).
+///
+/// `Uncovered` is **dimmed, never `danger()`**: RFC 04 §3.5 makes an uncovered
+/// ttl'd family perfectly legitimate — volatile state may be seeded by the
+/// advanced pub/sub cache — so a red badge would report a verdict the tool
+/// never obtained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoverageTone {
+    Covered,
+    Partial,
+    Uncovered,
 }
 
 /// Which series a chart is drawing (#64).

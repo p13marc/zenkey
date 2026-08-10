@@ -103,6 +103,8 @@ pub struct Zengui {
     doctor: crate::doctor::DoctorState,
     /// The blob browser's state (#68) — probe and fetch, both on demand.
     blob: crate::blob::BlobState,
+    /// The admin & storage panel's state (#70) — swept on demand.
+    admin: crate::admin::AdminState,
 
     call_form: view::call::CallForm,
     publish_form: view::publish::PublishForm,
@@ -192,6 +194,7 @@ impl Zengui {
             node_detail: view::nodes::DetailState::default(),
             doctor: crate::doctor::DoctorState::default(),
             blob: crate::blob::BlobState::default(),
+            admin: crate::admin::AdminState::default(),
             call_form: view::call::CallForm::default(),
             publish_form: view::publish::PublishForm::default(),
             publication: None,
@@ -520,6 +523,7 @@ impl Zengui {
             Message::Nodes(msg) => self.update_nodes(msg),
             Message::Doctor(msg) => self.update_doctor(msg),
             Message::Blob(msg) => self.update_blob(msg),
+            Message::Admin(msg) => self.update_admin(msg),
             Message::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
                 self.series_leaf = Some(path);
                 Task::none()
@@ -932,6 +936,7 @@ impl Zengui {
         self.node_detail = view::nodes::DetailState::NotAsked;
         self.doctor.clear();
         self.blob.clear();
+        self.admin.clear();
         self.my_watches.clear();
         self.my_watch_paths.clear();
         self.scope_watches.clear();
@@ -1678,6 +1683,83 @@ impl Zengui {
         }
     }
 
+    fn update_admin(&mut self, msg: view::admin::AdminMsg) -> Task<Message> {
+        use view::admin::AdminMsg;
+        match msg {
+            AdminMsg::RawToggled(id) => {
+                self.admin.toggle_raw(id);
+                Task::none()
+            }
+            AdminMsg::FilterProducer(producer) => {
+                // The tree already owns "show me this": reusing its search is
+                // one behaviour, not two that can drift.
+                self.right_pane = RightPane::Echo;
+                Task::done(Message::TreeSearchChanged(producer))
+            }
+            AdminMsg::Run => {
+                if self.admin.in_flight {
+                    return Task::none();
+                }
+                let Some(session) = self.session.clone() else {
+                    self.admin.error = Some("no session — connect first".into());
+                    return Task::none();
+                };
+                self.admin.in_flight = true;
+                self.admin.error = None;
+                let base = self.settings.base.clone();
+                let timeout = self.settings.timeout();
+                // The app's *resolved* slice set — bus, dirs or the union.
+                //
+                // Deliberately NOT the doctor's `SliceSet::from_dirs`: that one
+                // is dirs-only because it diffs local against served, whereas
+                // the coverage join asks "what does the registry say exists",
+                // which is `bus.slice_set()` in zenctl. Copying the doctor here
+                // would empty the coverage table on every bus-registry-only
+                // deployment — an invisible, plausible-looking wrong answer.
+                let slices = self.slices.clone();
+                Task::perform(
+                    async move {
+                        let routers = zenkey_fleet::routers(&session, timeout)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let storages = zenkey_fleet::storages(&session, timeout)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let declared = zenkey_fleet::declared_entities(&session, timeout)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let (coverage, coverage_note) = match slices.as_deref() {
+                            Some(set) => (
+                                zenkey_fleet::state_coverage(set, &base, &storages),
+                                None,
+                            ),
+                            None => (
+                                Vec::new(),
+                                Some(
+                                    "no registry slices resolved, so the declared state                                      families are unknown — this is \"not asked\", not                                      \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, or                                      wait for the bus registry (RFC 08 §6)."
+                                        .to_string(),
+                                ),
+                            ),
+                        };
+                        Ok(Arc::new(crate::admin::AdminSweep {
+                            routers,
+                            storage: zenkey_fleet::report::StorageList { storages, coverage },
+                            declared,
+                            coverage_note,
+                            base,
+                        }))
+                    },
+                    |out| Message::Admin(AdminMsg::Done(out)),
+                )
+            }
+            AdminMsg::Done(outcome) => {
+                let base = self.settings.base.clone();
+                self.admin.finish(outcome, &base);
+                Task::none()
+            }
+        }
+    }
+
     fn start_monitor(&mut self) -> Task<Message> {
         let Some(session) = self.session.clone() else {
             return Task::none();
@@ -2047,6 +2129,7 @@ impl Zengui {
                 }),
                 RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
                 RightPane::Blob => view::blob::pane(&self.blob, self.slices.is_some()),
+                RightPane::Admin => view::admin::pane(&self.admin),
                 RightPane::History => view::history::pane(view::history::HistoryData {
                     key: self.selected.as_deref(),
                     recorder: self.history.as_ref(),

@@ -77,13 +77,13 @@ pub fn map() -> Vec<Binding> {
     out
 }
 
-/// Alt+1..Alt+9, one per pane. Parallel arrays rather than a formatted string
-/// because `Binding` holds `&'static str` — and the length assertion below is
-/// what keeps them in step with `RightPane::ALL`.
-const PANE_KEYS: [&str; 9] = [
-    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7", "Alt 8", "Alt 9",
+/// Alt+1..Alt+9 then Alt+0 for the tenth, one per pane. Parallel arrays rather
+/// than a formatted string because `Binding` holds `&'static str` — and the
+/// length assertion below is what keeps them in step with `RightPane::ALL`.
+const PANE_KEYS: [&str; 10] = [
+    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7", "Alt 8", "Alt 9", "Alt 0",
 ];
-const PANE_WHAT: [&str; 9] = [
+const PANE_WHAT: [&str; 10] = [
     "echo pane",
     "call pane",
     "publish pane",
@@ -92,9 +92,10 @@ const PANE_WHAT: [&str; 9] = [
     "doctor pane",
     "history pane",
     "blobs pane",
+    "admin pane",
     "connect pane",
 ];
-const PANE_MESSAGES: [fn() -> Message; 9] = [
+const PANE_MESSAGES: [fn() -> Message; 10] = [
     || Message::PaneSelected(RightPane::Echo),
     || Message::PaneSelected(RightPane::Call),
     || Message::PaneSelected(RightPane::Publish),
@@ -103,6 +104,7 @@ const PANE_MESSAGES: [fn() -> Message; 9] = [
     || Message::PaneSelected(RightPane::Doctor),
     || Message::PaneSelected(RightPane::History),
     || Message::PaneSelected(RightPane::Blob),
+    || Message::PaneSelected(RightPane::Admin),
     || Message::PaneSelected(RightPane::Connect),
 ];
 
@@ -139,10 +141,16 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
     }
     if mods.alt()
         && let Key::Character(c) = key
-        && let Ok(n) = c.parse::<usize>()
-        && (1..=RightPane::ALL.len()).contains(&n)
+        && let Ok(digit) = c.parse::<usize>()
     {
-        return Some(Message::PaneSelected(RightPane::ALL[n - 1]));
+        // Alt+1..9 are panes 1..9; Alt+0 is the tenth, following the tab-bar
+        // convention every browser uses. Beyond ten panes the strip needs a
+        // different idea, and this stops rather than wrapping to something
+        // arbitrary.
+        let n = if digit == 0 { 10 } else { digit };
+        if (1..=RightPane::ALL.len()).contains(&n) {
+            return Some(Message::PaneSelected(RightPane::ALL[n - 1]));
+        }
     }
     None
 }
@@ -249,13 +257,27 @@ mod tests {
     }
 
     /// Alt+N reaches every pane and stops there: the range is `RightPane::ALL`,
-    /// so adding a pane moves the boundary rather than leaving a dead key.
+    /// so adding a pane moves the boundary rather than leaving a dead key. With
+    /// ten panes, Alt+0 is the tenth — the tab-bar convention.
     #[test]
     fn alt_digits_cover_the_panes_and_stop() {
         assert!(matches!(
             press("9", Modifiers::ALT),
+            Some(Message::PaneSelected(RightPane::Admin))
+        ));
+        assert!(matches!(
+            press("0", Modifiers::ALT),
             Some(Message::PaneSelected(RightPane::Connect))
         ));
-        assert!(press("0", Modifiers::ALT).is_none());
+        // Every pane is reachable by *some* digit — the property that matters,
+        // stated rather than spot-checked.
+        for pane in RightPane::ALL {
+            assert!(
+                PANE_MESSAGES
+                    .iter()
+                    .any(|m| format!("{:?}", m()) == format!("{:?}", Message::PaneSelected(pane))),
+                "{pane:?} has no binding"
+            );
+        }
     }
 }

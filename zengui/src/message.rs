@@ -80,6 +80,8 @@ pub enum Message {
     Detail(crate::view::detail::DetailMsg),
     /// Blob browser interactions (issue #68).
     Blob(crate::view::blob::BlobMsg),
+    /// Admin & storage panel interactions (issue #70).
+    Admin(crate::view::admin::AdminMsg),
 
     BaseSelected(String),
     ScopeSelected(ScopePreset),
@@ -153,6 +155,8 @@ pub enum RightPane {
     History,
     /// The `@blob` plane: who serves bulk content, and fetching it (issue #68).
     Blob,
+    /// Routers, storages and the state-coverage table (issue #70).
+    Admin,
     /// Contexts and endpoints (issue #67).
     Connect,
 }
@@ -160,7 +164,7 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 9] = [
+    pub const ALL: [RightPane; 10] = [
         RightPane::Echo,
         RightPane::Call,
         RightPane::Publish,
@@ -169,6 +173,7 @@ impl RightPane {
         RightPane::Doctor,
         RightPane::History,
         RightPane::Blob,
+        RightPane::Admin,
         RightPane::Connect,
     ];
 
@@ -182,6 +187,7 @@ impl RightPane {
             RightPane::Doctor => "doctor",
             RightPane::History => "history",
             RightPane::Blob => "blobs",
+            RightPane::Admin => "admin",
             RightPane::Connect => "connect",
         }
     }
