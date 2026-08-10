@@ -124,10 +124,13 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
                         &v.encoding
                     },
                 )));
-                let bytes: Vec<u8> = v.payload.to_bytes().to_vec();
+                // Borrow through the Cow: `to_bytes()` is already free for a
+                // contiguous payload, and `.to_vec()` on top of it was the
+                // double copy the redesign flagged (`docs/zero-copy.md`).
+                let bytes = v.payload.to_bytes();
                 let len = bytes.len();
                 col = col.push(
-                    row![hex_pane(bytes), decoded_pane(data.decoded, len)].spacing(space::MD),
+                    row![hex_pane(&bytes), decoded_pane(data.decoded, len)].spacing(space::MD),
                 );
             }
         },
@@ -283,7 +286,7 @@ pub(crate) fn facts_section(f: &KeyFacts) -> Element<'_, Message> {
 }
 
 /// The hex side: offset + bytes, bounded, truncation stated.
-fn hex_pane<'a>(bytes: Vec<u8>) -> Element<'a, Message> {
+fn hex_pane<'a>(bytes: &[u8]) -> Element<'a, Message> {
     let shown = &bytes[..bytes.len().min(HEX_VIEW_BYTES)];
     let mut out = String::with_capacity(shown.len() * 4);
     for (i, chunk) in shown.chunks(16).enumerate() {

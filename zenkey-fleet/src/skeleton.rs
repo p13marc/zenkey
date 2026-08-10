@@ -20,7 +20,7 @@
 
 use std::collections::BTreeMap;
 
-use zenoh::key_expr::KeyExpr;
+use zenoh::key_expr::keyexpr;
 
 use crate::registry::SliceSet;
 use crate::tree::{KeyTreeSnapshot, TreeNode};
@@ -380,22 +380,33 @@ pub struct MergedNode {
 /// Fold the skeleton, the observed snapshot, and the active watch set into
 /// one tree. Runs at tick cadence — the same order of work as a flatten.
 pub fn merge(skeleton: &Skeleton, observed: &KeyTreeSnapshot, watched: &[String]) -> MergedNode {
-    let watched: Vec<KeyExpr<'static>> = watched
+    // Borrowed, not owned: `keyexpr::new(&str)` validates without allocating,
+    // where `KeyExpr::new(String)` builds an `OwnedKeyExpr` (an `Arc<str>`
+    // copy) per selector per tick (`docs/zero-copy.md`).
+    let watched: Vec<&keyexpr> = watched
         .iter()
-        .filter_map(|w| KeyExpr::new(w.clone()).ok())
+        .filter_map(|w| keyexpr::new(w.as_str()).ok())
         .collect();
-    merge_nodes(Some(&skeleton.root), Some(&observed.root), &watched, "")
+    // One reusable buffer for the descent's prefixes, instead of a fresh
+    // `String` per node per tick.
+    let mut path = String::new();
+    merge_nodes(
+        Some(&skeleton.root),
+        Some(&observed.root),
+        &watched,
+        &mut path,
+    )
 }
 
 fn merge_nodes(
     skel: Option<&SkeletonNode>,
     obs: Option<&TreeNode>,
-    watched: &[KeyExpr<'static>],
-    prefix: &str,
+    watched: &[&keyexpr],
+    path: &mut String,
 ) -> MergedNode {
     let evidence = skel.map(|s| s.evidence).unwrap_or_default();
     let stats = obs.map(NodeStats::from_tree);
-    let covered = is_covered(prefix, watched);
+    let covered = is_covered(path, watched);
     let status = match (stats.is_some(), covered) {
         (true, true) => NodeStatus::Observed(evidence),
         (true, false) => NodeStatus::Unwatched(evidence),
@@ -418,19 +429,19 @@ fn merge_nodes(
         let skel_child = skel.and_then(|s| s.children.get(name));
         let obs_child = obs.and_then(|o| o.children.get(name));
         // Coverage tests run on *selector* form: symbolic chunks widen.
+        // `selector_chunk()` already returns `&str`, so nothing is owned here.
         let sel_chunk = skel_child
             .and_then(|c| c.chunk.as_ref())
-            .map(|c| c.selector_chunk().to_string())
-            .unwrap_or_else(|| name.clone());
-        let child_prefix = if prefix.is_empty() {
-            sel_chunk
-        } else {
-            format!("{prefix}/{sel_chunk}")
-        };
-        children.insert(
-            name.clone(),
-            merge_nodes(skel_child, obs_child, watched, &child_prefix),
-        );
+            .map(|c| c.selector_chunk())
+            .unwrap_or(name.as_str());
+        let mark = path.len();
+        if !path.is_empty() {
+            path.push('/');
+        }
+        path.push_str(sel_chunk);
+        let child = merge_nodes(skel_child, obs_child, watched, path);
+        path.truncate(mark);
+        children.insert(name.clone(), child);
     }
 
     MergedNode {
@@ -447,18 +458,29 @@ fn merge_nodes(
 /// its subtree (`prefix/**`), so an ancestor of a watched subtree reads
 /// "watched" rather than "declared only" — the honest reading of "some watch
 /// reaches below here". The root is covered iff anything is watched.
-fn is_covered(prefix: &str, watched: &[KeyExpr<'static>]) -> bool {
+fn is_covered(prefix: &str, watched: &[&keyexpr]) -> bool {
     if watched.is_empty() {
         return false;
     }
     if prefix.is_empty() {
         return true;
     }
-    let subtree = format!("{prefix}/**");
-    let Ok(node) = KeyExpr::new(subtree) else {
-        return false;
-    };
-    watched.iter().any(|w| w.intersects(&node))
+    // A thread-local scratch buffer: this runs once per node per tick, and a
+    // fresh `String` plus an `OwnedKeyExpr` each time was the heaviest thing
+    // on the render path (`docs/zero-copy.md`).
+    thread_local! {
+        static SUBTREE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    }
+    SUBTREE.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.clear();
+        buf.push_str(prefix);
+        buf.push_str("/**");
+        let Ok(node) = keyexpr::new(buf.as_str()) else {
+            return false;
+        };
+        watched.iter().any(|w| w.intersects(node))
+    })
 }
 
 #[cfg(test)]

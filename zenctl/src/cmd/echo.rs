@@ -233,9 +233,12 @@ pub async fn run(
             zenkey_fleet::StreamItem::Event(_) => continue,
         };
         seen += 1;
-        let key = sample.key.clone();
+        // Borrowed, not cloned: `sample` is an `Arc<SampleView>` that
+        // outlives every use below (`docs/zero-copy.md`). `to_bytes()` is a
+        // `Cow` and is already the right form — it is not a copy.
+        let key = sample.key.as_str();
         let bytes = sample.payload.to_bytes();
-        let encoding = sample.encoding.clone();
+        let encoding = sample.encoding.as_str();
         let timestamp = sample.timestamp.map(|t| t.to_string());
         let rate_suffix = if rate {
             let (_, _, hz) = monitor.core().with_stats(|s| s.totals());

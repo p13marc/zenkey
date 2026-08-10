@@ -56,7 +56,7 @@ impl EchoLine {
         } else if len > DECODE_LIMIT {
             format!("<{len} bytes — too large to preview>")
         } else {
-            truncate(&zenkey_fleet::decode::structural(&view.payload.to_bytes()))
+            truncate(zenkey_fleet::decode::structural(&view.payload.to_bytes()))
         };
         EchoLine {
             seq,
@@ -75,9 +75,12 @@ impl EchoLine {
     }
 }
 
-fn truncate(s: &str) -> String {
+fn truncate(s: String) -> String {
+    // Takes ownership: the caller already has an owned `String` from
+    // `structural`, and the common (short) case would otherwise copy it a
+    // second time, per sample (`docs/zero-copy.md`).
     if s.chars().count() <= PREVIEW_CHARS {
-        return s.to_string();
+        return s;
     }
     let mut out: String = s.chars().take(PREVIEW_CHARS).collect();
     out.push('…');
@@ -277,18 +280,18 @@ mod tests {
     #[test]
     fn previews_are_truncated_with_a_marker() {
         let long = "a".repeat(PREVIEW_CHARS * 2);
-        let out = truncate(&long);
+        let out = truncate(long);
         assert_eq!(out.chars().count(), PREVIEW_CHARS + 1);
         assert!(out.ends_with('…'));
         // Short strings pass through untouched.
-        assert_eq!(truncate("hi"), "hi");
+        assert_eq!(truncate("hi".to_string()), "hi");
     }
 
     /// Multi-byte characters must not be split — truncation is by character.
     #[test]
     fn truncation_is_character_safe() {
         let s = "é".repeat(PREVIEW_CHARS * 2);
-        let out = truncate(&s);
+        let out = truncate(s);
         assert!(out.ends_with('…'));
         assert_eq!(out.chars().count(), PREVIEW_CHARS + 1);
     }

@@ -77,7 +77,7 @@ impl HistoryEntry {
         } else if len > DECODE_LIMIT {
             format!("<{len} bytes — too large to preview>")
         } else {
-            truncate(&zenkey_fleet::decode::structural(&bytes))
+            truncate(zenkey_fleet::decode::structural(&bytes))
         };
         HistoryEntry {
             seq,
@@ -103,9 +103,12 @@ impl HistoryEntry {
     }
 }
 
-fn truncate(s: &str) -> String {
+fn truncate(s: String) -> String {
+    // Takes ownership: the caller already has an owned `String` from
+    // `structural`, and the common (short) case would otherwise copy it a
+    // second time, per sample (`docs/zero-copy.md`).
     if s.chars().count() <= PREVIEW_CHARS {
-        return s.to_string();
+        return s;
     }
     let mut out: String = s.chars().take(PREVIEW_CHARS).collect();
     out.push('…');

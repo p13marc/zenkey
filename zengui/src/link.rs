@@ -89,13 +89,23 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                     seeded.push((id, coverage));
                 }
                 StreamItem::Event(FleetEvent::StatsTick) => {
-                    let (keys, totals, keys_evicted, keys_unwatched) =
-                        monitor.core().with_stats(|s| {
-                            (s.len(), s.totals(), s.evicted(), s.unwatched())
-                        });
+                    // One lock-free load, and *no stats lock at all*: the
+                    // snapshot already carries the totals and the O6 counters
+                    // (`KeyTreeSnapshot`), because `build` folded them while
+                    // it held the lock. Locking here to re-fold 50k entries
+                    // would contend with the ingest path four times a second
+                    // for numbers we were already handed.
+                    let tree = monitor.tree();
+                    let keys = tree.keys;
+                    let keys_evicted = tree.evicted;
+                    let keys_unwatched = tree.unwatched;
+                    let totals = (
+                        tree.root.subtree_count,
+                        tree.root.subtree_bytes,
+                        tree.root.subtree_rate_hz,
+                    );
                     yield Message::Tick(Arc::new(BusTick {
-                        // One lock-free load. The tree is never rebuilt here.
-                        tree: monitor.tree(),
+                        tree,
                         samples: std::mem::take(&mut samples),
                         lagged: std::mem::take(&mut lagged),
                         coalesced: std::mem::take(&mut coalesced),

@@ -46,10 +46,21 @@ pub struct TreeNode {
 }
 
 /// An immutable point-in-time view of the observed keyspace.
+///
+/// Carries the table's O6 counters too, so a render loop can report what the
+/// bound cost **without taking the ingest lock**: `root.subtree_count/bytes/
+/// rate_hz` are already the fold `StatsTable::totals` performs, and `keys` is
+/// its `len`. A consumer that pulled this `Arc` and then locked the table
+/// anyway was walking 50k entries a second time, four times a second, on the
+/// same mutex 100k samples/s need (`docs/zero-copy.md`).
 #[derive(Debug, Clone, Default)]
 pub struct KeyTreeSnapshot {
     pub root: TreeNode,
     pub keys: usize,
+    /// Keys retired to stay within the table's bound, as of this snapshot.
+    pub evicted: u64,
+    /// Keys retired because their watch was released.
+    pub unwatched: u64,
 }
 
 impl KeyTreeSnapshot {
@@ -61,7 +72,20 @@ impl KeyTreeSnapshot {
             let mut node = &mut root;
             accumulate(node, s);
             for chunk in key.split('/') {
-                node = node.children.entry(chunk.to_string()).or_default();
+                // `entry` would need an owned key, so `chunk.to_string()`
+                // would run — and be dropped — on every *hit*, which is
+                // almost every chunk of almost every key. At 50k keys of 6
+                // chunks that is 300 000 wasted allocations per tick, four
+                // times a second. `BTreeMap<String, _>` looks up by `&str`
+                // through `Borrow`, so the owned key is built only when the
+                // node is genuinely new (`docs/zero-copy.md`).
+                if !node.children.contains_key(chunk) {
+                    node.children.insert(chunk.to_string(), TreeNode::default());
+                }
+                node = node
+                    .children
+                    .get_mut(chunk)
+                    .expect("just inserted if it was missing");
                 accumulate(node, s);
             }
             node.count = s.count;
@@ -72,6 +96,8 @@ impl KeyTreeSnapshot {
         KeyTreeSnapshot {
             root,
             keys: stats.len(),
+            evicted: stats.evicted(),
+            unwatched: stats.unwatched(),
         }
     }
 
