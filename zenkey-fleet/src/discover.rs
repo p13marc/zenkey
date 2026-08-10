@@ -282,6 +282,8 @@ mod tests {
             zid: "z1".into(),
             name: "latest".into(),
             key_expr: key_expr.map(str::to_string),
+            strip_prefix: strip_prefix.map(str::to_string),
+            volume: None,
             raw: match strip_prefix {
                 Some(p) => serde_json::json!({ "strip_prefix": p }),
                 None => serde_json::Value::Null,

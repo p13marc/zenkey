@@ -112,6 +112,17 @@ pub struct StorageInfo {
     /// The key expression the storage captures, when the layout exposes it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_expr: Option<String>,
+    /// The literal prefix stripped before the volume sees a key (RFC 09 §2 —
+    /// zenoh requires a wildcard-free prefix here). Absent when the layout
+    /// does not say, which is not the same as "none configured".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strip_prefix: Option<String>,
+    /// The backing volume's id — `memory` is volatile and loses late-joiner
+    /// seeds on a router restart, `fs`/`rocksdb` are the durable LWW stores
+    /// (RFC 09 §2). Spelled either as a bare string or as `{ id: "fs", … }`
+    /// depending on version; both are absorbed here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<String>,
     /// The full admin document, untrimmed — layouts vary by version.
     pub raw: serde_json::Value,
 }
@@ -129,16 +140,59 @@ pub fn storage_from_admin_entry(key: &str, value: &serde_json::Value) -> Option<
     }
     let name = chunks.get(storages_pos + 1)?;
     let zid = chunks.get(1).unwrap_or(&"?");
-    let key_expr = value
-        .get("key_expr")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
+    let text = |field: &str| {
+        value
+            .get(field)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    };
+    // The volume is a bare string in some layouts and an object with an `id`
+    // in others. Absorbing both here is what this pure parser is for.
+    let volume = text("volume").or_else(|| {
+        value
+            .get("volume")
+            .and_then(|v| v.get("id"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
     Some(StorageInfo {
         zid: (*zid).to_string(),
         name: (*name).to_string(),
-        key_expr,
+        key_expr: text("key_expr"),
+        strip_prefix: text("strip_prefix"),
+        volume,
         raw: value.clone(),
     })
+}
+
+/// One row per `(zid, name)`, merging field by field.
+///
+/// The config and status subtrees both answer a storage sweep, and neither is
+/// reliably the richer one — so a row that names a `key_expr` and a row that
+/// names a `volume` must combine rather than one winning outright. Pure, and
+/// separated from [`storages`] because with three optional fields a hand-rolled
+/// `dedup_by` is where a quietly-dropped field would hide.
+pub fn merge_storage_rows(mut rows: Vec<StorageInfo>) -> Vec<StorageInfo> {
+    rows.sort_by(|a, b| (&a.zid, &a.name).cmp(&(&b.zid, &b.name)));
+    let mut out: Vec<StorageInfo> = Vec::with_capacity(rows.len());
+    for row in rows {
+        match out.last_mut() {
+            Some(prev) if prev.zid == row.zid && prev.name == row.name => {
+                prev.key_expr = prev.key_expr.take().or(row.key_expr);
+                prev.strip_prefix = prev.strip_prefix.take().or(row.strip_prefix);
+                prev.volume = prev.volume.take().or(row.volume);
+                // Keep the document that said more, so the raw disclosure is
+                // the useful one.
+                if prev.raw.as_object().map(|o| o.len()).unwrap_or(0)
+                    < row.raw.as_object().map(|o| o.len()).unwrap_or(0)
+                {
+                    prev.raw = row.raw;
+                }
+            }
+            _ => out.push(row),
+        }
+    }
+    out
 }
 
 /// Enumerate configured storages across the mesh (issue #14). Zero routers
@@ -150,24 +204,11 @@ pub async fn storages(session: &Session, timeout: Duration) -> Result<Vec<Storag
         timeout,
     )
     .await?;
-    let mut out: Vec<StorageInfo> = entries
+    let rows: Vec<StorageInfo> = entries
         .iter()
         .filter_map(|e| storage_from_admin_entry(&e.key, &e.value))
         .collect();
-    // One row per (zid, name): config and status subtrees can both answer.
-    out.sort_by(|a, b| (&a.zid, &a.name).cmp(&(&b.zid, &b.name)));
-    out.dedup_by(|a, b| {
-        if a.zid == b.zid && a.name == b.name {
-            // Keep the richer entry (the one that names a key_expr).
-            if b.key_expr.is_none() {
-                b.key_expr = a.key_expr.take();
-            }
-            true
-        } else {
-            false
-        }
-    });
-    Ok(out)
+    Ok(merge_storage_rows(rows))
 }
 
 /// How a declared state family relates to the configured storages.
@@ -388,6 +429,20 @@ mod tests {
         assert_eq!(s.zid, "abc123");
         assert_eq!(s.name, "latest");
         assert_eq!(s.key_expr.as_deref(), Some("zs/v1/*/state/**"));
+        assert_eq!(s.volume.as_deref(), Some("fs"), "a bare-string volume");
+        // The other spelling of the same field.
+        let v = serde_json::json!({
+            "key_expr": "zs/v1/*/state/**",
+            "strip_prefix": "zs/v1",
+            "volume": {"id": "rocksdb", "dir": "latest"},
+        });
+        let s = storage_from_admin_entry(
+            "@/abc123/router/config/plugins/storage_manager/storages/durable",
+            &v,
+        )
+        .unwrap();
+        assert_eq!(s.volume.as_deref(), Some("rocksdb"), "an object volume");
+        assert_eq!(s.strip_prefix.as_deref(), Some("zs/v1"));
         // Status-subtree shape without key_expr still names the storage.
         let s = storage_from_admin_entry(
             "@/abc123/router/status/plugins/storage_manager/storages/latest/info",
@@ -404,6 +459,49 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    /// Config and status subtrees both answer, neither is reliably richer, and
+    /// a field named by only one of them must survive either arrival order.
+    #[test]
+    fn merging_a_storage_keeps_every_field_either_side_named() {
+        let config = StorageInfo {
+            zid: "z1".into(),
+            name: "latest".into(),
+            key_expr: Some("zs/**".into()),
+            strip_prefix: Some("zs".into()),
+            volume: None,
+            raw: serde_json::json!({"key_expr": "zs/**", "strip_prefix": "zs"}),
+        };
+        let status = StorageInfo {
+            zid: "z1".into(),
+            name: "latest".into(),
+            key_expr: None,
+            strip_prefix: None,
+            volume: Some("fs".into()),
+            raw: serde_json::json!({"volume": "fs"}),
+        };
+        for rows in [
+            vec![config.clone(), status.clone()],
+            vec![status, config.clone()],
+        ] {
+            let merged = merge_storage_rows(rows);
+            assert_eq!(merged.len(), 1, "one row per (zid, name)");
+            assert_eq!(merged[0].key_expr.as_deref(), Some("zs/**"));
+            assert_eq!(merged[0].strip_prefix.as_deref(), Some("zs"));
+            assert_eq!(merged[0].volume.as_deref(), Some("fs"));
+        }
+
+        // Two names under one zid stay two rows.
+        let other = StorageInfo {
+            zid: "z1".into(),
+            name: "history".into(),
+            key_expr: None,
+            strip_prefix: None,
+            volume: None,
+            raw: serde_json::Value::Null,
+        };
+        assert_eq!(merge_storage_rows(vec![config, other]).len(), 2);
     }
 
     fn slices_with_state() -> crate::registry::SliceSet {
@@ -437,6 +535,8 @@ mod tests {
             zid: "z1".into(),
             name: name.into(),
             key_expr: Some(key_expr.into()),
+            strip_prefix: None,
+            volume: None,
             raw: serde_json::Value::Null,
         }
     }

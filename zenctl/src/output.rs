@@ -769,6 +769,15 @@ pub fn storage_list(report: &StorageList, format: Format) -> Result<()> {
                         s.zid,
                         s.key_expr.as_deref().unwrap_or("-")
                     );
+                    // `-` where the layout did not say. Absent is not empty:
+                    // a storage with no strip_prefix and one whose admin
+                    // document omits the field are different facts.
+                    println!(
+                        "  {:<16} strip {}  ·  volume {}",
+                        "",
+                        s.strip_prefix.as_deref().unwrap_or("-"),
+                        s.volume.as_deref().unwrap_or("-")
+                    );
                 }
             }
             if !report.coverage.is_empty() {
