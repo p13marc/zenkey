@@ -24,15 +24,14 @@ use crate::registry::SliceSet;
 pub struct SchemaStore {
     base: String,
     timeout: Duration,
-    /// producer → (served set or None = asked-and-not-served, with the ask
-    /// instant — a `None` expires after [`NOT_SERVED_TTL`], so a producer
-    /// that *starts* serving describe is noticed without a restart).
+    /// producer → what we know about its `describe` (see [`Cached`]).
     ///
-    /// The set is behind an `Arc` because it is read **per sample**: handing
-    /// out a deep clone of every type's document to answer "what is the
-    /// schema for this one type" was the other half of issue #100's cost, and
-    /// the quieter half — a descriptor pool rebuild at least looks expensive.
-    sets: Mutex<HashMap<String, CachedSet>>,
+    /// A served set is behind an `Arc` because it is read **per sample**:
+    /// handing out a deep clone of every type's document to answer "what is
+    /// the schema for this one type" was the other half of issue #100's cost,
+    /// and the quieter half — a descriptor pool rebuild at least looks
+    /// expensive.
+    sets: Mutex<HashMap<String, Cached>>,
     /// One declared querier per producer's describe key (#37), reused across
     /// the negative-TTL re-asks. Bounded by fleet producer count; entries
     /// live for the store's lifetime (no eviction — a fleet's producer set
@@ -41,13 +40,69 @@ pub struct SchemaStore {
     decoders: DecoderRegistry,
 }
 
-/// How long "asked, not served" stays authoritative before re-asking.
+/// How long "asked, and answered with nothing usable" stays authoritative
+/// before re-asking. A producer that genuinely serves no `describe` must not
+/// be re-asked per sample, and 60s is the bound for that.
 const NOT_SERVED_TTL: Duration = Duration::from_secs(60);
 
-/// What the store knows about one producer: the served set (shared, because
-/// it is read per sample), or `None` for asked-and-not-served, with the ask
-/// instant.
-type CachedSet = (Option<std::sync::Arc<SchemaSet>>, std::time::Instant);
+/// The first backoff after a GET that drew **zero replies** (issue #101).
+///
+/// Zero replies is the RFC 05 §3.1 non-verdict this codebase refuses to treat
+/// as an answer anywhere else, and it is what an explorer started before its
+/// fleet sees. Doubling from here, capped at [`NOT_SERVED_TTL`], means a
+/// routing race resolves in well under a second while a producer that is
+/// simply absent still converges on the same 60s bound.
+const NO_REPLY_BACKOFF: Duration = Duration::from_millis(250);
+
+/// Why a producer has no cached set, which decides how soon we re-ask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MissReason {
+    /// The GET returned no replies at all. Nobody said anything — including
+    /// "no". Could be a producer that does not exist, or a connector whose
+    /// GET went out before the producer's queryable was routable.
+    NoReplies,
+    /// Somebody replied, and nothing in the replies parsed as a `SchemaSet`.
+    /// That *is* an answer about this producer, and it earns the full TTL.
+    AnsweredUnusable,
+}
+
+/// A producer we asked and got nothing usable from.
+#[derive(Debug, Clone, Copy)]
+struct Missing {
+    reason: MissReason,
+    asked: std::time::Instant,
+    /// Consecutive zero-reply asks, driving the backoff.
+    attempts: u32,
+}
+
+impl Missing {
+    /// How long this miss stays authoritative before the next ask.
+    fn backoff(&self) -> Duration {
+        match self.reason {
+            MissReason::AnsweredUnusable => NOT_SERVED_TTL,
+            MissReason::NoReplies => NO_REPLY_BACKOFF
+                .saturating_mul(1u32 << self.attempts.saturating_sub(1).min(16))
+                .min(NOT_SERVED_TTL),
+        }
+    }
+
+    fn may_reask(&self) -> bool {
+        self.asked.elapsed() >= self.backoff()
+    }
+}
+
+/// What the store knows about one producer's `describe`.
+enum Cached {
+    Served(std::sync::Arc<SchemaSet>),
+    Missing(Missing),
+}
+
+/// What one `describe` GET produced — the distinction issue #101 exists for.
+enum Fetched {
+    Served(SchemaSet),
+    NoReplies,
+    AnsweredUnusable,
+}
 
 impl SchemaStore {
     pub fn new(base: impl Into<String>, timeout: Duration) -> Self {
@@ -93,22 +148,72 @@ impl SchemaStore {
         session: &Session,
         producer: &str,
     ) -> Option<std::sync::Arc<SchemaSet>> {
-        {
+        // How many consecutive zero-reply asks precede this one — carried
+        // across so the backoff actually grows.
+        let attempts = {
             let sets = self.sets.lock().expect("store lock");
-            if let Some((cached, asked)) = sets.get(producer) {
-                let expired = cached.is_none() && asked.elapsed() > NOT_SERVED_TTL;
-                if !expired {
-                    return cached.clone();
-                }
+            match sets.get(producer) {
+                Some(Cached::Served(set)) => return Some(std::sync::Arc::clone(set)),
+                Some(Cached::Missing(m)) if !m.may_reask() => return None,
+                Some(Cached::Missing(m)) => m.attempts,
+                None => 0,
             }
-        }
-        let fetched = self.fetch(session, producer).await.map(std::sync::Arc::new);
+        };
+        let entry = match self.fetch(session, producer).await {
+            Fetched::Served(set) => Cached::Served(std::sync::Arc::new(set)),
+            Fetched::NoReplies => Cached::Missing(Missing {
+                reason: MissReason::NoReplies,
+                asked: std::time::Instant::now(),
+                attempts: attempts.saturating_add(1),
+            }),
+            // An answer resets the streak: this is a verdict about the
+            // producer, not a routing race.
+            Fetched::AnsweredUnusable => Cached::Missing(Missing {
+                reason: MissReason::AnsweredUnusable,
+                asked: std::time::Instant::now(),
+                attempts: 0,
+            }),
+        };
         let mut sets = self.sets.lock().expect("store lock");
-        sets.insert(producer.to_string(), (fetched, std::time::Instant::now()));
-        sets.get(producer).and_then(|(s, _)| s.clone())
+        let served = match &entry {
+            Cached::Served(set) => Some(std::sync::Arc::clone(set)),
+            Cached::Missing(_) => None,
+        };
+        sets.insert(producer.to_string(), entry);
+        served
     }
 
-    async fn fetch(&self, session: &Session, producer: &str) -> Option<SchemaSet> {
+    /// Forget what we learned about one producer, so the next question goes
+    /// to the bus (issue #101).
+    ///
+    /// The queriers are kept: they are idle routing state, and re-declaring
+    /// them is exactly the cost #37 removed.
+    pub fn forget(&self, producer: &str) {
+        self.sets.lock().expect("store lock").remove(producer);
+    }
+
+    /// Forget every producer — the "re-ask schemas" action a frontend offers.
+    ///
+    /// Covers the case the backoff cannot: a *positive* entry never expires,
+    /// so a producer that changes its served set mid-session is otherwise
+    /// read with the schemas it had at first contact.
+    pub fn forget_all(&self) {
+        self.sets.lock().expect("store lock").clear();
+    }
+
+    /// Producers currently answered-for, and whether each served a set —
+    /// what a frontend shows next to its re-ask button.
+    pub fn known(&self) -> Vec<(String, bool)> {
+        let sets = self.sets.lock().expect("store lock");
+        let mut out: Vec<(String, bool)> = sets
+            .iter()
+            .map(|(p, c)| (p.clone(), matches!(c, Cached::Served(_))))
+            .collect();
+        out.sort();
+        out
+    }
+
+    async fn fetch(&self, session: &Session, producer: &str) -> Fetched {
         let cached = {
             let queriers = self.queriers.lock().expect("querier lock");
             queriers.get(producer).cloned()
@@ -120,11 +225,16 @@ impl SchemaStore {
                     &self.base,
                     zenkey::selector::fleet_rpc(producer, &["describe"]),
                 );
-                let declared = std::sync::Arc::new(
-                    crate::query::declare_repeating(session, &self.base, &key, self.timeout)
+                let declared =
+                    match crate::query::declare_repeating(session, &self.base, &key, self.timeout)
                         .await
-                        .ok()?,
-                );
+                    {
+                        Ok(q) => std::sync::Arc::new(q),
+                        // We could not even ask. Nobody said anything about
+                        // this producer, so this is the non-verdict case, not
+                        // a 60s verdict.
+                        Err(_) => return Fetched::NoReplies,
+                    };
                 // A concurrent miss may have declared first; keep whichever
                 // landed (the loser undeclares itself on drop — idle state,
                 // not a leak).
@@ -135,7 +245,12 @@ impl SchemaStore {
                     .clone()
             }
         };
-        let answers = querier.fetch().await.ok()?;
+        let Ok(answers) = querier.fetch().await else {
+            return Fetched::NoReplies;
+        };
+        if answers.is_empty() {
+            return Fetched::NoReplies;
+        }
         // Any well-formed reply will do; hashes make same-name drift a
         // doctor finding, not a decode concern.
         for a in answers {
@@ -144,11 +259,13 @@ impl SchemaStore {
                 if let Ok(text) = std::str::from_utf8(&cow)
                     && let Ok(set) = SchemaSet::parse(text)
                 {
-                    return Some(set);
+                    return Fetched::Served(set);
                 }
             }
         }
-        None
+        // Somebody answered — with an error, or with something that is not a
+        // SchemaSet. That is a statement about this producer.
+        Fetched::AnsweredUnusable
     }
 
     /// Decode `bytes` under a schema, if one resolves.
@@ -810,5 +927,49 @@ mod tests {
             totality_gaps(&[("sysinfo".to_string(), served)], &slices).is_empty(),
             "empty type names must be filtered, not reported as gaps"
         );
+    }
+
+    /// Issue #101: the two ways of learning nothing are different facts and
+    /// must not share a bound. Zero replies is the RFC 05 §3.1 non-verdict —
+    /// it backs off in milliseconds and grows; an answer that served nothing
+    /// usable keeps the full 60s.
+    #[test]
+    fn a_zero_reply_ask_backs_off_fast_and_an_answered_one_does_not() {
+        let now = std::time::Instant::now();
+        let no_reply = |attempts| Missing {
+            reason: MissReason::NoReplies,
+            asked: now,
+            attempts,
+        };
+        assert_eq!(no_reply(1).backoff(), NO_REPLY_BACKOFF);
+        assert_eq!(no_reply(2).backoff(), NO_REPLY_BACKOFF * 2);
+        assert_eq!(no_reply(3).backoff(), NO_REPLY_BACKOFF * 4);
+        // …and it converges on the same bound a genuinely absent producer
+        // deserves, rather than re-asking forever.
+        assert_eq!(no_reply(30).backoff(), NOT_SERVED_TTL);
+
+        let answered = Missing {
+            reason: MissReason::AnsweredUnusable,
+            asked: now,
+            attempts: 0,
+        };
+        assert_eq!(
+            answered.backoff(),
+            NOT_SERVED_TTL,
+            "a producer that answered and served nothing is asked once per TTL"
+        );
+    }
+
+    /// The first zero-reply backoff must be short enough that an explorer
+    /// started before its fleet is not blind for a human-noticeable time.
+    #[test]
+    fn the_first_reask_is_sub_second() {
+        let m = Missing {
+            reason: MissReason::NoReplies,
+            asked: std::time::Instant::now(),
+            attempts: 1,
+        };
+        assert!(m.backoff() < Duration::from_secs(1));
+        assert!(!m.may_reask(), "and not before it elapses");
     }
 }

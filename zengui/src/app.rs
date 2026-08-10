@@ -1352,6 +1352,17 @@ impl Zengui {
                 self.doctor.deep = deep;
                 Task::none()
             }
+            DoctorMsg::ReaskSchemas => {
+                // Local and immediate: the store simply forgets, and the next
+                // decode that needs a schema asks the bus. Nothing is fetched
+                // here — an explorer retrieves nothing it was not asked for
+                // (#85), and "re-ask" is a permission, not a sweep.
+                if let Some(store) = self.schema_store.as_ref() {
+                    store.forget_all();
+                    self.doctor.schemas_forgotten += 1;
+                }
+                Task::none()
+            }
             DoctorMsg::Run => {
                 if self.doctor.in_flight {
                     return Task::none();

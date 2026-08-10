@@ -55,6 +55,10 @@ pub struct DoctorState {
     pub previous: Option<Arc<DoctorReport>>,
     pub delta: Option<Delta>,
     pub error: Option<String>,
+    /// How many times the schema cache has been cleared this session
+    /// (issue #101) — shown so the button is visibly a thing that happened,
+    /// not a no-op the user has to guess at.
+    pub schemas_forgotten: usize,
 }
 
 impl DoctorState {

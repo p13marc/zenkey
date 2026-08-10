@@ -157,11 +157,16 @@ fn slices() -> SliceSet {
 
 /// A store built *after* the fixture is reachable.
 ///
-/// `SchemaStore` caches "asked, not served" for a minute on purpose (a
-/// producer that never serves `describe` must not be re-asked per sample), so
-/// a store that asks before routing has settled is blind for the rest of a
-/// short test. Waiting on a raw GET first is the honest fix — retrying the
-/// store would only be re-reading its own cache.
+/// This used to be load-bearing: `SchemaStore` cached every kind of miss for
+/// a minute, so a store that asked before routing settled was blind for the
+/// rest of a short test. Issue #101 split that — a **zero-reply** ask is the
+/// RFC 05 §3.1 non-verdict and now backs off in milliseconds, so the store
+/// would recover on its own (`tests/schema_reask.rs` is where that is
+/// pinned).
+///
+/// The wait stays because these tests are about the *codecs*: making the
+/// fixture provably routable first keeps their timing out of the picture
+/// entirely, rather than making every assertion here depend on a backoff.
 async fn connected_store(session: &zenoh::Session) -> SchemaStore {
     let key = zenkey::selector::fleet_rpc(PRODUCER, &["describe"]).to_string();
     tokio::time::timeout(Duration::from_secs(10), async {
