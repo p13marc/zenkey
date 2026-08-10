@@ -10,7 +10,21 @@
 //! ```text
 //! received_events + Σ Dropped(n) == sent_events
 //! inserted_keys               == stats.len() + evicted + unwatched
+//! facts.inserted()            == facts.len() + facts.evicted()
 //! ```
+//!
+//! Note the third law is over **insertions**, not over samples and not over
+//! distinct keys. `ensure` on a key already held is a cache hit; a key evicted
+//! and later re-observed is projected *again*. Both wrong formulations were
+//! tried first and both were caught by the soak, which is the argument for
+//! keeping a soak at all.
+//!
+//! The third law is the one issue #107 was about: an explorer's *projection*
+//! cache shadows the key table, and until that issue it was unbounded while the
+//! table it shadowed was not — "merely a leak with better manners", in
+//! `stats.rs`'s own words. It lives here rather than in a frontend for the same
+//! reason the other two do: `MonitorCore` and `FactsCache` are both pure, so the
+//! identity is checkable without a bus, a port or a window.
 //!
 //! The interleaving decides *how many* are dropped; it cannot decide whether
 //! the books balance. That is what makes these ordinary fast tests rather than
@@ -40,7 +54,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::{EventStream, FleetEvent, MonitorCore, SampleView, StreamItem};
+use zenkey_fleet::{EventStream, FactsCache, FleetEvent, MonitorCore, SampleView, StreamItem};
 
 /// The last event of every phase. A `NodeDown` because it is trivially
 /// distinguishable from anything else the harness sends.
@@ -297,6 +311,40 @@ async fn the_key_ledger_balances_under_eviction_and_retirement() {
 /// `cargo test --release -p zenkey-fleet --test ledger -- --ignored --nocapture`
 /// (or `just soak`). Bounded by message count, not by duration, so `sent` is
 /// reproducible and a failure is diagnosable; the achieved rate is reported
+/// The third law, on its own: far more distinct keys than the bound, and the
+/// books still balance (issue #107).
+///
+/// Fast, session-free and *not* `#[ignore]`d — it is the regression guard, and
+/// a guard that only runs under `just soak` is one nobody runs. The soak below
+/// exercises the same identity against a hot bus.
+#[test]
+fn the_projection_cache_balances_its_own_ledger() {
+    const KEYS: usize = 200_000;
+    const BOUND: usize = 1_000;
+
+    let mut cache = FactsCache::with_capacity(BOUND);
+    for i in 0..KEYS {
+        cache.ensure("", &synth_key(i), None);
+    }
+
+    assert!(
+        cache.len() <= BOUND,
+        "the cache is bounded: held {} against a bound of {BOUND}",
+        cache.len()
+    );
+    assert!(
+        cache.evicted() > 0,
+        "the fixture must actually trip the bound, or this asserts nothing"
+    );
+    assert_eq!(cache.inserted(), KEYS as u64, "every key here was distinct");
+    assert_eq!(
+        cache.len() as u64 + cache.evicted(),
+        cache.inserted(),
+        "every projection is either held or counted as retired — nothing \
+         disappears unaccounted (RFC 09 §5.1 O6)"
+    );
+}
+
 /// rather than demanded, because a shared CI runner cannot promise one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "soak — run explicitly, read the printed numbers"]
@@ -351,6 +399,13 @@ async fn hot_bus_soak() {
     let mut seen = Tally::default();
     let mut tick_gaps: Vec<Duration> = Vec::new();
     let mut last_tick = Instant::now();
+    // The projection cache a frontend keeps beside the table, fed exactly as
+    // `apply_tick` feeds it — one `ensure` per sample (#107).
+    let mut facts = FactsCache::with_capacity(1_000);
+    // Distinct keys the consumer saw — printed beside the insertion count, so
+    // the re-projection cost of a small bound over a large key space is a
+    // number the soak actually reports rather than an argument in a comment.
+    let mut distinct: std::collections::HashSet<String> = std::collections::HashSet::new();
     let finisher = {
         let core = Arc::clone(&core);
         tokio::spawn(async move {
@@ -366,7 +421,11 @@ async fn hot_bus_soak() {
         let item = events.recv().await.expect("the stream cannot close");
         match item {
             StreamItem::Dropped(n) => seen.dropped += n,
-            StreamItem::Event(FleetEvent::Sample(_)) => seen.samples += 1,
+            StreamItem::Event(FleetEvent::Sample(ref view)) => {
+                seen.samples += 1;
+                facts.ensure("", &view.key, None);
+                distinct.insert(view.key.clone());
+            }
             StreamItem::Event(FleetEvent::StatsTick) => {
                 seen.ticks += 1;
                 tick_gaps.push(last_tick.elapsed());
@@ -418,6 +477,13 @@ async fn hot_bus_soak() {
         core.keys_evicted(),
         core.keys_unwatched()
     );
+    println!(
+        "  facts cached {} · retired {} · projected {} over {} distinct keys",
+        facts.len(),
+        facts.evicted(),
+        facts.inserted(),
+        distinct.len()
+    );
 
     // The same identity the fast test asserts — that is the point of sharing
     // the function.
@@ -425,6 +491,22 @@ async fn hot_bus_soak() {
     assert!(
         core.with_stats(|s| s.len()) <= 50_000,
         "the key table must stay within its bound under sustained load"
+    );
+    // The third law, under load: the projection cache is bounded too, and says
+    // what the bound cost (#107).
+    assert!(
+        facts.len() <= 1_000,
+        "the projection cache must stay within its bound: held {}",
+        facts.len()
+    );
+    assert_eq!(
+        facts.len() as u64 + facts.evicted(),
+        facts.inserted(),
+        "every projection is held or counted as retired"
+    );
+    assert!(
+        facts.inserted() >= distinct.len() as u64,
+        "a bound smaller than the key space re-projects; it cannot under-project"
     );
     // Generous on purpose: the claim is "bounded", not "fast on this machine".
     assert!(
