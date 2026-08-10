@@ -1956,10 +1956,14 @@ impl Zengui {
     /// emitting a new field offers it without a restart.
     fn series_data(&self) -> Option<view::detail::SeriesData> {
         let rec = self.history.as_ref()?;
+        // The most recent entry that *is* a document, not simply the most
+        // recent one: a tombstone carries no fields, and letting it empty the
+        // picker would make the chart vanish on every retirement and come
+        // back on the next put.
         let leaves = rec
             .ring
-            .newest()
-            .and_then(|e| e.value.as_ref())
+            .iter()
+            .find_map(|e| e.value.as_ref())
             .map(crate::series::numeric_leaves)
             .unwrap_or_default();
         // The chosen leaf, if the newest payload still carries it — a field
