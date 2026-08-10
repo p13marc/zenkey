@@ -15,11 +15,14 @@
 //! holders cost N× the bytes with no way to stop them — and this crate makes it
 //! unspellable rather than unfashionable: the wide form is a
 //! [`BlobProbePrefix`], which is not a [`Key`] and does not convert into one,
-//! and [`blob_fetch`] takes a concrete origin that goes through
-//! [`RemoteOrigin::parse`].
+//! and `blob_fetch` takes a concrete origin that goes through
+//! [`zenkey::RemoteOrigin::parse`]. (The two functions are named without
+//! links because they exist only under the `blob` feature, and a link that
+//! resolves in one build configuration and not the other is a docs-lane
+//! failure waiting for whoever turns the feature off.)
 //!
 //! **What this module does not implement.** Verified streaming. RFC 07 §2
-//! names [`zblob`] the reference client and §2.1 makes per-reply verification
+//! names `zblob` the reference client and §2.1 makes per-reply verification
 //! *before disk* normative; a second implementation of an integrity anchor is a
 //! second thing that can be wrong about the same bytes. So the fetch path is
 //! zblob's, and this module's job is to spell the keys through zenkey's typed
@@ -188,7 +191,7 @@ fn content_hash(text: &str, tier: &str) -> Result<ContentHash> {
 /// claims it serves that tier's endpoints, never that it holds any particular
 /// blob. Possession is a probe's answer, and only a probe's.
 ///
-/// `roster` is the liveliness map as [`crate::roster`] returns it (origin →
+/// `roster` is the liveliness map as [`crate::roster()`] returns it (origin →
 /// producers), inverted here to fill `origins`. Pass `None` when it was not
 /// asked — an offline `--registry` read has learned nothing about who is up,
 /// and `origins: None` is how that stays distinguishable from "declared, but

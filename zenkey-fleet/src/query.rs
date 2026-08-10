@@ -36,7 +36,7 @@ pub struct FleetAnswer {
     /// the concrete key a follow-up must be addressed to.
     ///
     /// Empty for an error reply, which zenoh gives no sample and therefore no
-    /// key. Carried because `origin` is lossy by design: [`origin_of`] goes
+    /// key. Carried because `origin` is lossy by design: the attribution helper goes
     /// through the grammar and yields `"?"` for any key that does not parse
     /// under `base`, and a caller that must still *name* the responder (RFC 09
     /// §5.1 O1 — a non-conforming key is a fact) has nowhere else to look.
