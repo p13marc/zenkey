@@ -27,7 +27,12 @@ pub struct SchemaStore {
     /// producer → (served set or None = asked-and-not-served, with the ask
     /// instant — a `None` expires after [`NOT_SERVED_TTL`], so a producer
     /// that *starts* serving describe is noticed without a restart).
-    sets: Mutex<HashMap<String, (Option<SchemaSet>, std::time::Instant)>>,
+    ///
+    /// The set is behind an `Arc` because it is read **per sample**: handing
+    /// out a deep clone of every type's document to answer "what is the
+    /// schema for this one type" was the other half of issue #100's cost, and
+    /// the quieter half — a descriptor pool rebuild at least looks expensive.
+    sets: Mutex<HashMap<String, CachedSet>>,
     /// One declared querier per producer's describe key (#37), reused across
     /// the negative-TTL re-asks. Bounded by fleet producer count; entries
     /// live for the store's lifetime (no eviction — a fleet's producer set
@@ -38,6 +43,11 @@ pub struct SchemaStore {
 
 /// How long "asked, not served" stays authoritative before re-asking.
 const NOT_SERVED_TTL: Duration = Duration::from_secs(60);
+
+/// What the store knows about one producer: the served set (shared, because
+/// it is read per sample), or `None` for asked-and-not-served, with the ask
+/// instant.
+type CachedSet = (Option<std::sync::Arc<SchemaSet>>, std::time::Instant);
 
 impl SchemaStore {
     pub fn new(base: impl Into<String>, timeout: Duration) -> Self {
@@ -78,7 +88,11 @@ impl SchemaStore {
     ///
     /// `None` = the producer does not serve `describe` — an honest
     /// degradation, never an error.
-    pub async fn set_for(&self, session: &Session, producer: &str) -> Option<SchemaSet> {
+    pub async fn set_for(
+        &self,
+        session: &Session,
+        producer: &str,
+    ) -> Option<std::sync::Arc<SchemaSet>> {
         {
             let sets = self.sets.lock().expect("store lock");
             if let Some((cached, asked)) = sets.get(producer) {
@@ -88,7 +102,7 @@ impl SchemaStore {
                 }
             }
         }
-        let fetched = self.fetch(session, producer).await;
+        let fetched = self.fetch(session, producer).await.map(std::sync::Arc::new);
         let mut sets = self.sets.lock().expect("store lock");
         sets.insert(producer.to_string(), (fetched, std::time::Instant::now()));
         sets.get(producer).and_then(|(s, _)| s.clone())

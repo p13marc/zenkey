@@ -14,6 +14,8 @@
 
 use serde_json::Value;
 
+#[cfg(feature = "decode-protobuf")]
+use super::compiled::CompiledCache;
 use super::{SchemaKind, TypeSchema, WireEncoding};
 
 /// A decoded payload: named-field JSON plus honesty notes (fields the
@@ -136,22 +138,45 @@ impl PayloadDecoder for JsonSchemaDecoder {
 
 /// The `protobuf` codec (feature `decode-protobuf`): dynamic decode against
 /// the served `FileDescriptorSet` — no compiled-in message types.
+///
+/// Holds a [`CompiledCache`] of resolved message descriptors (issue #100):
+/// building a `DescriptorPool` means base64-decoding the whole descriptor set
+/// and parsing it, which was happening on every single sample in both
+/// directions.
 #[cfg(feature = "decode-protobuf")]
-pub struct ProtobufDecoder;
+#[derive(Default)]
+pub struct ProtobufDecoder {
+    descriptors: CompiledCache<prost_reflect::MessageDescriptor>,
+}
 
 #[cfg(feature = "decode-protobuf")]
 impl ProtobufDecoder {
-    fn descriptor(schema: &TypeSchema) -> Result<prost_reflect::MessageDescriptor, DecodeError> {
-        let fds = schema
-            .protobuf_descriptor_set()
-            .ok_or_else(|| DecodeError::BadSchema("missing descriptor_b64".into()))?;
-        let message = schema
-            .protobuf_message()
-            .ok_or_else(|| DecodeError::BadSchema("missing message name".into()))?;
-        let pool = prost_reflect::DescriptorPool::decode(fds.as_slice())
-            .map_err(|e| DecodeError::BadSchema(format!("descriptor set: {e}")))?;
-        pool.get_message_by_name(message)
-            .ok_or_else(|| DecodeError::BadSchema(format!("message {message:?} not in set")))
+    pub fn new() -> ProtobufDecoder {
+        ProtobufDecoder::default()
+    }
+
+    /// How many descriptor pools this decoder has built — one per distinct
+    /// schema hash (issue #100's acceptance is a counter, not an inspection).
+    pub fn compilations(&self) -> u64 {
+        self.descriptors.compilations()
+    }
+
+    fn descriptor(
+        &self,
+        schema: &TypeSchema,
+    ) -> Result<std::sync::Arc<prost_reflect::MessageDescriptor>, DecodeError> {
+        self.descriptors.get_or_compile(schema, |schema| {
+            let fds = schema
+                .protobuf_descriptor_set()
+                .ok_or_else(|| DecodeError::BadSchema("missing descriptor_b64".into()))?;
+            let message = schema
+                .protobuf_message()
+                .ok_or_else(|| DecodeError::BadSchema("missing message name".into()))?;
+            let pool = prost_reflect::DescriptorPool::decode(fds.as_slice())
+                .map_err(|e| DecodeError::BadSchema(format!("descriptor set: {e}")))?;
+            pool.get_message_by_name(message)
+                .ok_or_else(|| DecodeError::BadSchema(format!("message {message:?} not in set")))
+        })
     }
 }
 
@@ -175,8 +200,8 @@ impl PayloadDecoder for ProtobufDecoder {
                 return Err(DecodeError::WrongEncoding(format!("{encoding:?}")));
             }
         }
-        let desc = Self::descriptor(schema)?;
-        let msg = prost_reflect::DynamicMessage::decode(desc, bytes)
+        let desc = self.descriptor(schema)?;
+        let msg = prost_reflect::DynamicMessage::decode((*desc).clone(), bytes)
             .map_err(|e| DecodeError::Malformed("protobuf", e.to_string()))?;
         let value = serde_json::to_value(&msg)
             .map_err(|e| DecodeError::Malformed("protobuf->json", e.to_string()))?;
@@ -193,11 +218,11 @@ impl PayloadDecoder for ProtobufDecoder {
         _target: &WireEncoding,
     ) -> Result<Vec<u8>, DecodeError> {
         use prost::Message as _;
-        let desc = Self::descriptor(schema)?;
+        let desc = self.descriptor(schema)?;
         let rendered =
             serde_json::to_string(value).map_err(|e| DecodeError::Encode(e.to_string()))?;
         let mut deserializer = serde_json::Deserializer::from_str(&rendered);
-        let msg = prost_reflect::DynamicMessage::deserialize(desc, &mut deserializer)
+        let msg = prost_reflect::DynamicMessage::deserialize((*desc).clone(), &mut deserializer)
             .map_err(|e| DecodeError::Encode(e.to_string()))?;
         deserializer
             .end()
@@ -225,9 +250,9 @@ impl DecoderRegistry {
         #[allow(unused_mut)]
         let mut decoders: Vec<Box<dyn PayloadDecoder>> = vec![Box::new(JsonSchemaDecoder)];
         #[cfg(feature = "decode-protobuf")]
-        decoders.push(Box::new(ProtobufDecoder));
+        decoders.push(Box::new(ProtobufDecoder::new()));
         #[cfg(feature = "decode-cdr")]
-        decoders.push(Box::new(super::cdr::CdrDecoder));
+        decoders.push(Box::new(super::cdr::CdrDecoder::new()));
         DecoderRegistry { decoders }
     }
 
@@ -403,5 +428,106 @@ mod tests {
             .unwrap();
         assert_eq!(out.value.get("x"), Some(&json!(42)));
         assert_eq!(out.value.get("name"), Some(&json!("hi")));
+    }
+}
+
+#[cfg(all(test, feature = "decode-protobuf"))]
+mod protobuf_compiled_tests {
+    use super::*;
+
+    /// `package t; message M { double v = 1; }`, optionally with a second
+    /// field so two fixtures differ in hash.
+    fn descriptor_set(extra_field: bool) -> Vec<u8> {
+        use prost::Message as _;
+        use prost_reflect::prost_types::{
+            DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
+            field_descriptor_proto,
+        };
+        let field = |name: &str, number: i32| FieldDescriptorProto {
+            name: Some(name.to_string()),
+            number: Some(number),
+            label: Some(field_descriptor_proto::Label::Optional as i32),
+            r#type: Some(field_descriptor_proto::Type::Double as i32),
+            json_name: Some(name.to_string()),
+            ..Default::default()
+        };
+        let mut fields = vec![field("v", 1)];
+        if extra_field {
+            fields.push(field("w", 2));
+        }
+        FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("t.proto".into()),
+                package: Some("t".into()),
+                message_type: vec![DescriptorProto {
+                    name: Some("M".into()),
+                    field: fields,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec()
+    }
+
+    fn schema(extra_field: bool) -> TypeSchema {
+        TypeSchema::protobuf("t.M", &descriptor_set(extra_field))
+    }
+
+    /// Issue #100: the descriptor pool is built once per schema, not once per
+    /// sample. Before this, `topic echo` on a protobuf subject paid a
+    /// base64-decode plus a full pool parse for every message on the wire.
+    #[test]
+    fn the_descriptor_pool_is_built_once_across_many_samples() {
+        let codec = ProtobufDecoder::new();
+        let s = schema(false);
+        let value = serde_json::json!({"v": 12.5});
+        let bytes = codec
+            .encode(&s, &value, &WireEncoding::Protobuf)
+            .expect("encodes");
+
+        for _ in 0..50 {
+            let out = codec
+                .decode(&s, &WireEncoding::Protobuf, &bytes)
+                .expect("decodes");
+            assert_eq!(out.value, value);
+        }
+        assert_eq!(
+            codec.compilations(),
+            1,
+            "the descriptor set must be parsed once, not per sample"
+        );
+    }
+
+    /// A producer that changes its type serves a new hash; the decoder must
+    /// build the new pool rather than keep interpreting with the old one.
+    #[test]
+    fn a_changed_schema_hash_rebuilds_the_pool() {
+        let codec = ProtobufDecoder::new();
+        let (a, b) = (schema(false), schema(true));
+        assert_ne!(a.hash(), b.hash(), "the fixture must actually differ");
+
+        let av = serde_json::json!({"v": 1.0});
+        let bv = serde_json::json!({"v": 1.0, "w": 2.0});
+        let ab = codec.encode(&a, &av, &WireEncoding::Protobuf).unwrap();
+        let bb = codec.encode(&b, &bv, &WireEncoding::Protobuf).unwrap();
+        assert_eq!(codec.compilations(), 2);
+
+        assert_eq!(
+            codec
+                .decode(&b, &WireEncoding::Protobuf, &bb)
+                .unwrap()
+                .value,
+            bv,
+            "the new schema decodes its own new field"
+        );
+        assert_eq!(
+            codec
+                .decode(&a, &WireEncoding::Protobuf, &ab)
+                .unwrap()
+                .value,
+            av
+        );
+        assert_eq!(codec.compilations(), 2, "both pools were already built");
     }
 }
