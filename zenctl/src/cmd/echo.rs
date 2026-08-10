@@ -257,8 +257,8 @@ pub async fn run(
                 &session,
                 &slices,
                 &base,
-                &key,
-                Some(&encoding),
+                key,
+                Some(encoding),
                 &bytes,
             )
             .await;
@@ -280,8 +280,8 @@ pub async fn run(
                     &session,
                     &slices,
                     &base,
-                    &key,
-                    Some(&encoding),
+                    key,
+                    Some(encoding),
                     &bytes,
                 )
                 .await
@@ -297,7 +297,7 @@ pub async fn run(
                 }
             };
             if ndjson {
-                let parsed = zenkey::grammar::parse_full(&base, &key);
+                let parsed = zenkey::grammar::parse_full(&base, key);
                 let obj = serde_json::json!({
                     "key": key,
                     "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
@@ -316,10 +316,10 @@ pub async fn run(
                     format_sample(
                         fmt,
                         seen,
-                        &key,
+                        key,
                         &base,
                         type_name.as_deref(),
-                        &encoding,
+                        encoding,
                         bytes.len(),
                         timestamp.as_deref(),
                         &value,
