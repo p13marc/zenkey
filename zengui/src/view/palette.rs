@@ -212,13 +212,21 @@ pub fn rank<T>(items: &[T], query: &str, label: impl Fn(&T) -> &str) -> Vec<usiz
 }
 
 /// Render the open overlay, if any.
-/// Only `state` is borrowed into the returned element: the rows are cloned
-/// into owned strings, so a caller may pass a freshly-computed key list
-/// without keeping it alive.
+///
+/// `keys` is consumed only by the jump-to overlay, and only the rows
+/// actually drawn (≤ `MAX_ROWS`, a private bound) are cloned into the
+/// element — opening
+/// the overlay costs what it draws, not the cache's population, and any
+/// other overlay state never touches the iterator (#110). One deliberate
+/// non-change: `rank` breaks score ties by index, and the indices now come
+/// from the cache's iteration order — but so did the old per-frame snapshot,
+/// so tie jitter across cache mutations is pre-existing, and a full sort of
+/// 50k borrowed keys per frame would reintroduce O(n log n) to cure a
+/// cosmetic.
 pub fn overlay<'a>(
     state: &'a PaletteState,
     contexts: &[String],
-    keys: &[String],
+    keys: impl Iterator<Item = &'a str>,
 ) -> Option<Element<'a, Message>> {
     match state.overlay {
         Overlay::None => None,
@@ -237,12 +245,17 @@ pub fn overlay<'a>(
             ))
         }
         Overlay::Keys => {
-            let order = rank(keys, &state.query, |k| k.as_str());
+            // Fat pointers only — no key bytes are copied to rank (#110).
+            let keys: Vec<&str> = keys.collect();
+            let order = rank(&keys, &state.query, |k| *k);
             Some(list(
                 state,
                 "Jump to key",
                 "fuzzy over keys observed so far — nothing here is a guess (O4)",
-                order.iter().map(|i| keys[*i].clone()).collect::<Vec<_>>(),
+                order
+                    .iter()
+                    .map(|i| keys[*i].to_string())
+                    .collect::<Vec<_>>(),
             ))
         }
     }
@@ -347,6 +360,23 @@ fn help<'a>() -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #110: only the jump-to overlay may read the key iterator — a closed
+    /// palette, the command list and the help sheet must cost the cache
+    /// nothing. The iterator panics on first pull to prove it.
+    #[test]
+    fn only_the_keys_overlay_reads_the_keys() {
+        for open in [None, Some(Overlay::Commands), Some(Overlay::Help)] {
+            let mut state = PaletteState::default();
+            if let Some(o) = open {
+                state.open(o);
+            }
+            let poisoned = std::iter::from_fn(|| -> Option<&str> {
+                panic!("this overlay must not read the keys")
+            });
+            let _ = overlay(&state, &[], poisoned);
+        }
+    }
 
     /// The property the whole design rests on: a palette entry is the *same*
     /// message the UI path sends, so the two cannot drift apart.

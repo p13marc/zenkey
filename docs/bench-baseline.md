@@ -145,3 +145,16 @@ the other way said 1.5× faster — same two binaries, same filter, minutes
 apart. So: record which order was used, put the *new* code first when you want
 a conservative number, and check the controls before believing any delta. A
 delta whose controls disagree is a measurement, not a result.
+
+
+## zengui palette key list (#110), 2026-08
+
+Before: `view()` cloned every cached key into a fresh `Vec<String>` *every
+frame regardless of overlay state* (the argument was evaluated before
+`overlay()` could decline it), and twice more per palette keypress — at the
+#107 bound of 50k keys, megabytes of string churn per redraw. After: a closed
+overlay allocates nothing; an open jump-to overlay collects one `Vec<&str>`
+(fat pointers only) and clones exactly the ≤ 20 drawn rows; activation clones
+exactly one key. A note rather than a bench, deliberately: zengui has no
+criterion harness, and the change is structural (O(cache) → O(drawn)) — a
+number here would measure the allocator, not the design.

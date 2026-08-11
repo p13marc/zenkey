@@ -21,7 +21,7 @@ pub enum NodesMsg {
     /// An origin card was selected — loads its `node_info` one-shot.
     Selected(String),
     /// The one-shot `node_info` landed.
-    InfoLoaded(String, Result<Arc<NodeInfo>, String>),
+    InfoLoaded(String, String, Result<Arc<NodeInfo>, String>),
     /// Click-through: land on the origin's subtree in the key tree.
     ShowInTree(String),
 }

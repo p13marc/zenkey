@@ -382,6 +382,12 @@ impl Zengui {
                 }
             }
             Message::ValueFetched(key, outcome) => {
+                // No base guard needed (#109 audit): the evidence is keyed by
+                // the full wire key, which names its own base (an explorer
+                // runs un-namespaced, RFC 09 §5), and the view passes
+                // `fetched` through only while that exact key is selected.
+                // Residual: a stale landing can still flip the right pane to
+                // Detail — a focus nit, not a misattributed verdict.
                 self.decoded = None;
                 // A fetch normally lands the detail pane in view — except
                 // from the doctor's click-through, where losing the finding
@@ -550,12 +556,21 @@ impl Zengui {
             }
             Message::Publish(msg) => self.update_publish(msg),
             Message::CallDone(outcome) => {
+                // No base guard needed (#109 audit): a call reply is the
+                // answer to the exact question the user pressed the button
+                // for, addressed by a full wire key naming its base — user
+                // output, not projected deployment state.
                 self.call_form.in_flight = false;
                 self.call_form.outcome =
                     Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
                 Task::none()
             }
             Message::PublishReady(Ok(outcome)) => {
+                // No base guard needed (#109 audit): publishing is
+                // user-initiated *output* on a full wire key, not observed
+                // evidence. (A publication straddling a context switch rides
+                // the old session's Arc until stopped — a session-lifetime
+                // question, out of #109's scope.)
                 let form = &mut self.publish_form;
                 form.in_flight = false;
                 form.error = None;
@@ -1039,6 +1054,13 @@ impl Zengui {
     /// reconnect, and a context switch — and each one that forgot a different
     /// subset would leave a stale verdict on screen about a fleet it is no
     /// longer looking at (O4).
+    ///
+    /// What survives, deliberately (#109 audit): the tree selection, the
+    /// fetched value, the history recorder, and the call/publish forms —
+    /// each keyed by a full wire key that names its own base, or user input
+    /// rather than projected evidence. What cannot be cleared here — a task
+    /// already in flight — is judged at its landing instead: doctor, blob
+    /// probe/fetch and node_info each carry the base they ran against.
     fn forget_deployment(&mut self) {
         self.facts.clear();
         self.roster.clear();
@@ -1133,7 +1155,7 @@ impl Zengui {
                     .palette
                     .cursor
                     .saturating_add(1)
-                    .min(self.palette_rows().len().saturating_sub(1));
+                    .min(self.palette_row_count().saturating_sub(1));
                 Task::none()
             }
             PaletteMsg::Activate => self.run_palette_row(self.palette.cursor),
@@ -1141,38 +1163,50 @@ impl Zengui {
         }
     }
 
-    /// The rows the open overlay currently shows, in display order.
-    fn palette_rows(&self) -> Vec<Message> {
+    /// How many rows the open overlay currently shows. Ranks over borrowed
+    /// keys (fat pointers, no string bytes) — runs per keypress, not per
+    /// frame (#110).
+    fn palette_row_count(&self) -> usize {
         use view::palette::{Overlay, actions, rank};
         match self.palette.overlay {
             Overlay::Commands => {
                 let items = actions(&self.context_form.known);
-                rank(&items, &self.palette.query, |a| a.label.as_str())
-                    .into_iter()
-                    .map(|i| items[i].message.clone())
-                    .collect()
+                rank(&items, &self.palette.query, |a| a.label.as_str()).len()
             }
             Overlay::Keys => {
-                let keys = self.observed_keys();
-                rank(&keys, &self.palette.query, |k| k.as_str())
-                    .into_iter()
-                    .map(|i| Message::SelectKey(Some(keys[i].clone())))
-                    .collect()
+                // Observed keys only — never a guess (O4): the jump-to
+                // overlay offers what is on the bus, not what a registry
+                // says could be.
+                let keys: Vec<&str> = self.facts.keys().collect();
+                rank(&keys, &self.palette.query, |k| *k).len()
             }
-            _ => Vec::new(),
+            _ => 0,
         }
     }
 
-    /// Keys the session has actually observed — never a guess (O4): the
-    /// jump-to overlay offers what is on the bus, not what a registry says
-    /// could be.
-    fn observed_keys(&self) -> Vec<String> {
-        self.facts.keys().map(str::to_string).collect()
+    /// The message behind row `index` — on the Keys overlay, the one place
+    /// the palette ever clones a key `String` (#110): the activated row.
+    fn palette_row(&self, index: usize) -> Option<Message> {
+        use view::palette::{Overlay, actions, rank};
+        match self.palette.overlay {
+            Overlay::Commands => {
+                let items = actions(&self.context_form.known);
+                let order = rank(&items, &self.palette.query, |a| a.label.as_str());
+                order.get(index).map(|i| items[*i].message.clone())
+            }
+            Overlay::Keys => {
+                let keys: Vec<&str> = self.facts.keys().collect();
+                let order = rank(&keys, &self.palette.query, |k| *k);
+                order
+                    .get(index)
+                    .map(|i| Message::SelectKey(Some(keys[*i].to_string())))
+            }
+            _ => None,
+        }
     }
 
     fn run_palette_row(&mut self, index: usize) -> Task<Message> {
-        let rows = self.palette_rows();
-        let Some(message) = rows.get(index).cloned() else {
+        let Some(message) = self.palette_row(index) else {
             return Task::none();
         };
         // Jumping to a key also shows it: selecting without switching panes
@@ -1441,14 +1475,20 @@ impl Zengui {
                             .await
                             .map(Arc::new)
                             .map_err(|e| e.to_string());
-                        (origin, out)
+                        (origin, base, out)
                     },
-                    |(origin, out)| Message::Nodes(NodesMsg::InfoLoaded(origin, out)),
+                    |(origin, ran, out)| Message::Nodes(NodesMsg::InfoLoaded(origin, ran, out)),
                 )
             }
-            NodesMsg::InfoLoaded(origin, outcome) => {
-                // Stale guard: only the currently selected origin's info lands.
-                if self.node_selected.as_deref() == Some(origin.as_str()) {
+            NodesMsg::InfoLoaded(origin, ran_against, outcome) => {
+                // Stale guard: only the currently selected origin's info lands
+                // — and only when it ran against the base this window shows.
+                // Origin ids are base-independent (#109): re-selecting the
+                // same host after a base switch would otherwise admit the old
+                // deployment's reply through the selection-only check.
+                if self.node_selected.as_deref() == Some(origin.as_str())
+                    && ran_against == self.settings.base
+                {
                     self.node_detail = DetailState::Loaded(origin, outcome);
                 }
                 Task::none()
@@ -1523,14 +1563,20 @@ impl Zengui {
                             },
                         )
                         .await
-                        .map(Arc::new)
+                        // The run carries the base it was judged against —
+                        // the staleness guard's other half (#109).
+                        .map(|r| crate::doctor::DoctorRun {
+                            report: Arc::new(r),
+                            base,
+                        })
                         .map_err(|e| e.to_string())
                     },
                     |out| Message::Doctor(DoctorMsg::Done(out)),
                 )
             }
             DoctorMsg::Done(outcome) => {
-                self.doctor.finish(outcome);
+                let base = self.settings.base.clone();
+                self.doctor.finish(outcome, &base);
                 Task::none()
             }
             DoctorMsg::FindingClicked(index) => {
@@ -1652,19 +1698,19 @@ impl Zengui {
                     .unwrap_or_default();
                 Task::perform(
                     async move {
-                        zenkey_fleet::blob_probe(&session, &base, &target, &slices, timeout)
-                            .await
-                            .map(Arc::new)
-                            .map_err(|e| e.to_string())
+                        let out =
+                            zenkey_fleet::blob_probe(&session, &base, &target, &slices, timeout)
+                                .await
+                                .map(Arc::new)
+                                .map_err(|e| e.to_string());
+                        (base, out)
                     },
-                    |out| Message::Blob(BlobMsg::ProbeDone(out)),
+                    |(ran, out)| Message::Blob(BlobMsg::ProbeDone(ran, out)),
                 )
             }
-            BlobMsg::ProbeDone(outcome) => {
-                self.blob.probe = match outcome {
-                    Ok(report) => crate::blob::Probe::Done(report),
-                    Err(e) => crate::blob::Probe::Failed(e),
-                };
+            BlobMsg::ProbeDone(ran_against, outcome) => {
+                self.blob
+                    .probe_finished(outcome, &ran_against, &self.settings.base);
                 Task::none()
             }
             BlobMsg::Fetch => {
@@ -1730,19 +1776,23 @@ impl Zengui {
                         let sink = move |p| {
                             let _ = tx.send(p);
                         };
-                        zenkey_fleet::blob_fetch(
+                        let out = zenkey_fleet::blob_fetch(
                             &session, &base, &origin, &target, &dest, &spec, &sink,
                         )
                         .await
                         .map(Arc::new)
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| e.to_string());
+                        (base, out)
                     },
-                    |out| Message::Blob(BlobMsg::FetchDone(out)),
+                    |(ran, out)| Message::Blob(BlobMsg::FetchDone(ran, out)),
                 );
                 Task::batch([progress, run])
             }
             BlobMsg::Progress(p) => {
                 use zenkey_fleet::report::BlobProgress;
+                // No base guard needed (#109 audit): progress only mutates
+                // while Fetch::InFlight, and a base change resets the pane to
+                // NotAsked via blob.clear() — stale ticks fall through.
                 if let crate::blob::Fetch::InFlight {
                     received,
                     total,
@@ -1776,12 +1826,9 @@ impl Zengui {
                 }
                 Task::none()
             }
-            BlobMsg::FetchDone(outcome) => {
-                self.blob.cancel = None;
-                self.blob.fetch = match outcome {
-                    Ok(report) => crate::blob::Fetch::Done(report),
-                    Err(e) => crate::blob::Fetch::Failed(e),
-                };
+            BlobMsg::FetchDone(ran_against, outcome) => {
+                self.blob
+                    .fetch_finished(outcome, &ran_against, &self.settings.base);
                 Task::none()
             }
             BlobMsg::Cancel => {
@@ -2287,11 +2334,9 @@ impl Zengui {
         // modal widget because the layering rule is ours — palette above
         // panes, Esc peeling one layer at a time — and a widget with its own
         // dismissal policy would fight it.
-        match view::palette::overlay(
-            &self.palette,
-            &self.context_form.known,
-            &self.observed_keys(),
-        ) {
+        // A lazy iterator: a closed overlay never touches the cache, and
+        // the open one clones only what it draws (#110).
+        match view::palette::overlay(&self.palette, &self.context_form.known, self.facts.keys()) {
             None => layout.into(),
             Some(overlay) => iced::widget::stack![
                 layout,

@@ -715,7 +715,13 @@ fn the_doctor_pane_never_invents_a_verdict() {
         deep: false,
     };
     let mut state = DoctorState::default();
-    state.finish(Ok(Arc::new(report.clone())));
+    state.finish(
+        Ok(zengui::doctor::DoctorRun {
+            report: Arc::new(report.clone()),
+            base: String::new(),
+        }),
+        "",
+    );
     let mut ui = simulator::<Message, _, _>(pane(&state, ""));
     assert!(ui.find("slice-sync").is_ok(), "the stable check id renders");
     assert!(ui.find("RFC 08 §6").is_ok(), "the citation renders");
@@ -743,7 +749,13 @@ fn the_doctor_pane_never_invents_a_verdict() {
         }],
         ..report
     };
-    state.finish(Ok(Arc::new(second)));
+    state.finish(
+        Ok(zengui::doctor::DoctorRun {
+            report: Arc::new(second),
+            base: String::new(),
+        }),
+        "",
+    );
     let mut ui = simulator::<Message, _, _>(pane(&state, ""));
     assert!(
         ui.find("vs previous run: 1 new · 1 fixed · 0 unchanged")
@@ -850,7 +862,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     use zengui::view::palette::{Overlay, PaletteState, overlay};
 
     let contexts = vec!["lab".to_string()];
-    let keys = vec![
+    let keys = [
         "v1/h-3fa9c2d41b7e/state/sysinfo/health".to_string(),
         "demo/example/foo".to_string(),
     ];
@@ -858,7 +870,8 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     let mut state = PaletteState::default();
     state.open(Overlay::Commands);
     {
-        let element = overlay(&state, &contexts, &keys).expect("commands overlay");
+        let element =
+            overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("go to doctor pane").is_ok());
         assert!(ui.find("context: lab").is_ok(), "contexts are offered");
@@ -868,7 +881,8 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // what typing is for — which is also the fuzzy match's real workload.
     state.query = "ndjson".into();
     {
-        let element = overlay(&state, &contexts, &keys).expect("commands overlay");
+        let element =
+            overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("export echo as ndjson").is_ok());
         assert!(
@@ -882,7 +896,8 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // as an inventory of the keyspace (O4).
     state.open(Overlay::Keys);
     {
-        let element = overlay(&state, &contexts, &keys).expect("keys overlay");
+        let element =
+            overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("keys overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("v1/h-3fa9c2d41b7e/state/sysinfo/health").is_ok());
         assert!(
@@ -895,7 +910,8 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // from what `resolve` dispatches.
     state.open(Overlay::Help);
     {
-        let element = overlay(&state, &contexts, &keys).expect("help overlay");
+        let element =
+            overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("help overlay");
         let mut ui = simulator::<Message, _, _>(element);
         for binding in zengui::shortcuts::map() {
             assert!(
@@ -909,7 +925,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
 
     // Closed means nothing renders.
     state.close();
-    assert!(overlay(&state, &contexts, &keys).is_none());
+    assert!(overlay(&state, &contexts, keys.iter().map(String::as_str)).is_none());
 }
 
 // ── History pane (#63) ───────────────────────────────────────────────────
