@@ -19,6 +19,8 @@ pub fn format_sample(
     timestamp: Option<&str>,
     value: &str,
     attachment: Option<&str>,
+    qos: Option<&str>,
+    source: Option<&str>,
 ) -> String {
     let parsed = zenkey::grammar::parse_full(base, wire_key);
     let mut out = String::with_capacity(fmt.len() + value.len());
@@ -108,6 +110,8 @@ pub fn format_sample(
                 let _ = write!(out, "{n}");
             }
             Some('a') => out.push_str(attachment.unwrap_or("")),
+            Some('q') => out.push_str(qos.unwrap_or("")),
+            Some('S') => out.push_str(source.unwrap_or("")),
             Some('T') => out.push_str(timestamp.unwrap_or("-")),
             Some('%') => out.push('%'),
             Some(other) => {
@@ -151,6 +155,42 @@ pub fn attachment_json(att: &zenoh::bytes::ZBytes) -> serde_json::Value {
         .unwrap_or_else(|| serde_json::Value::String(zenkey_fleet::decode::structural(&bytes)))
 }
 
+/// The wire's QoS axes as one stable token (#120):
+/// `priority/congestion/reliability`, `+express` when set — lowercase,
+/// cut/awk-friendly, never Debug formatting.
+pub fn qos_summary(
+    priority: zenoh::qos::Priority,
+    congestion_control: zenoh::qos::CongestionControl,
+    reliability: zenoh::qos::Reliability,
+    express: bool,
+) -> String {
+    use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
+    let p = match priority {
+        P::RealTime => "real_time",
+        P::InteractiveHigh => "interactive_high",
+        P::InteractiveLow => "interactive_low",
+        P::DataHigh => "data_high",
+        P::Data => "data",
+        P::DataLow => "data_low",
+        P::Background => "background",
+    };
+    let c = match congestion_control {
+        Cc::Drop => "drop",
+        Cc::Block => "block",
+        _ => "other",
+    };
+    let r = match reliability {
+        R::BestEffort => "best_effort",
+        R::Reliable => "reliable",
+    };
+    format!("{p}/{c}/{r}{}", if express { "+express" } else { "" })
+}
+
+/// The publishing entity, when SourceInfo rode the sample: `zid:eid#sn`.
+pub fn source_summary(source: &zenkey_fleet::SampleSource) -> String {
+    format!("{}:{}#{}", source.zid, source.eid, source.sn)
+}
+
 /// The type tag: `<T>` schema-decoded, `<T?>` registered but rendered
 /// structurally, `<unregistered>` when no slice names the key.
 pub fn type_tag(type_name: Option<&str>, typed: bool) -> String {
@@ -178,6 +218,8 @@ mod tests {
             None,
             r#"{"iface":{"name":"eth0","up":true}}"#,
             None,
+            None,
+            None,
         );
         assert_eq!(line, "eth0 up=true missing=[]");
     }
@@ -194,6 +236,8 @@ mod tests {
             12,
             None,
             r#"{"up":true}"#,
+            None,
+            None,
             None,
         );
         assert_eq!(
@@ -213,6 +257,8 @@ mod tests {
                 None,
                 "v",
                 None,
+                None,
+                None,
             ),
             "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
         );
@@ -222,8 +268,11 @@ mod tests {
     /// empty field when none did — the line shape stays stable (#117).
     #[test]
     fn the_attachment_field_is_empty_when_absent() {
-        let line =
-            |att: Option<&str>| format_sample("%v|%a", 1, "k", "", None, "e", 0, None, "v", att);
+        let line = |att: Option<&str>| {
+            format_sample(
+                "%v|%a", 1, "k", "", None, "e", 0, None, "v", att, None, None,
+            )
+        };
         assert_eq!(line(Some("meta (4 bytes)")), "v|meta (4 bytes)");
         assert_eq!(line(None), "v|");
     }
@@ -237,6 +286,46 @@ mod tests {
         assert_eq!(attachment_display(&json), r#"{"who":"me"} (12 bytes)"#);
         let text = zenoh::bytes::ZBytes::from("plain");
         assert_eq!(attachment_json(&text), serde_json::json!("plain"));
+    }
+
+    /// #120: the QoS token is stable and lowercase, never Debug output —
+    /// and %q/%S render empty when the fact was not carried.
+    #[test]
+    fn the_qos_token_is_stable_and_the_fields_degrade_empty() {
+        use zenoh::qos::{CongestionControl, Priority, Reliability};
+        assert_eq!(
+            qos_summary(
+                Priority::DataHigh,
+                CongestionControl::Block,
+                Reliability::Reliable,
+                true
+            ),
+            "data_high/block/reliable+express"
+        );
+        assert_eq!(
+            qos_summary(
+                Priority::Data,
+                CongestionControl::Drop,
+                Reliability::BestEffort,
+                false
+            ),
+            "data/drop/best_effort"
+        );
+        let line = format_sample(
+            "%q|%S",
+            1,
+            "k",
+            "",
+            None,
+            "e",
+            0,
+            None,
+            "v",
+            None,
+            Some("data/drop/reliable"),
+            None,
+        );
+        assert_eq!(line, "data/drop/reliable|");
     }
 
     /// The three-rung ladder every payload print shares.
