@@ -276,6 +276,7 @@ mod tests {
             origin: origin.into(),
             key: format!("v1/{origin}/state/x/y"),
             encoding: None,
+            attachment: None,
             answer: Answer::Value(zenoh::bytes::ZBytes::from("1")),
         }
     }
@@ -285,6 +286,7 @@ mod tests {
             origin: origin.into(),
             key: String::new(),
             encoding: None,
+            attachment: None,
             answer: Answer::Error {
                 name: "error/unavailable".into(),
                 message: "busy".into(),

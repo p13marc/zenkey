@@ -99,7 +99,7 @@ pub async fn run(
     }
     let times = repeat.max(1);
     for n in 0..times {
-        publication.send(prepared.bytes.clone()).await?;
+        publication.send(prepared.bytes.clone(), None).await?;
         eprintln!(
             "published {key} ({} bytes) [{}/{times}]",
             prepared.bytes.len(),

@@ -42,7 +42,10 @@ async fn a_tombstone_reaches_the_subscriber_as_delete() {
         .expect("listener alive");
     assert!(matched);
 
-    publication.send(b"{\"ok\":true}".to_vec()).await.expect("put");
+    publication
+        .send(b"{\"ok\":true}".to_vec(), None)
+        .await
+        .expect("put");
     publication.retire().await.expect("retire");
     publication.undeclare().await.expect("undeclare");
 

@@ -254,6 +254,7 @@ mod tests {
             encoding: "zenoh/bytes".to_string(),
             kind,
             timestamp: None,
+            attachment: None,
             received: Instant::now(),
         }
     }

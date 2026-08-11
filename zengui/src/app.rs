@@ -591,7 +591,7 @@ impl Zengui {
                 Task::perform(
                     async move {
                         publication
-                            .send(bytes.as_ref().clone())
+                            .send(bytes.as_ref().clone(), None)
                             .await
                             .map(|()| bytes.len())
                             .map_err(|e| e.to_string())
@@ -978,7 +978,7 @@ impl Zengui {
                         .await
                         .map_err(|e| e.to_string())?;
                         publication
-                            .send(prepared.bytes.clone())
+                            .send(prepared.bytes.clone(), None)
                             .await
                             .map_err(|e| e.to_string())?;
                         // The badge is a routing fact about this publisher and

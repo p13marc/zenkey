@@ -48,6 +48,11 @@ pub struct FleetAnswer {
     /// answer": the first is an observation, the second is silence, and RFC 09
     /// §5.1 O4 forbids rendering them alike.
     pub encoding: Option<String>,
+    /// The reply's attachment, when it carried one (refcounted, like the
+    /// payload). `None` on an error reply is the only truth available:
+    /// zenoh's `ReplyError` carries no attachment — a fact about the wire,
+    /// not an unobserved field.
+    pub attachment: Option<zenoh::bytes::ZBytes>,
     pub answer: Answer,
 }
 
@@ -141,6 +146,7 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
             origin: origin_of(base, sample.key_expr().as_str()),
             key: sample.key_expr().as_str().to_string(),
             encoding: Some(sample.encoding().to_string()),
+            attachment: sample.attachment().cloned(),
             answer: Answer::Value(sample.payload().clone()),
         },
         Err(err) => {
@@ -171,6 +177,7 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
                 origin: "?".to_string(),
                 key: String::new(),
                 encoding: None,
+                attachment: None,
                 answer: Answer::Error { name, message },
             }
         }
@@ -515,6 +522,8 @@ pub struct FetchedValue {
     pub payload: zenoh::bytes::ZBytes,
     pub encoding: String,
     pub timestamp: Option<zenoh::time::Timestamp>,
+    /// The value's attachment, when the sample carried one (#117).
+    pub attachment: Option<zenoh::bytes::ZBytes>,
     pub source: ValueSource,
 }
 
@@ -587,6 +596,7 @@ pub async fn fetch_value(session: &Session, key: &str, spec: FetchSpec) -> Resul
                     payload: sample.payload().clone(),
                     encoding: sample.encoding().to_string(),
                     timestamp: sample.timestamp().copied(),
+                    attachment: sample.attachment().cloned(),
                     source: ValueSource::Window,
                 });
             }
@@ -634,6 +644,7 @@ async fn get_latest(
             payload: sample.payload().clone(),
             encoding: sample.encoding().to_string(),
             timestamp: sample.timestamp().copied(),
+            attachment: sample.attachment().cloned(),
             source,
         };
         best = Some(match best.take() {

@@ -67,12 +67,18 @@ pub async fn declare_publication(
 }
 
 impl Publication {
-    /// Publish one payload. Sets the wire `Encoding` when one was declared
+    /// Publish one payload, with an optional attachment riding beside it
+    /// (#117 — attachments are outside the registry's vocabulary and are
+    /// never schema-encoded). Sets the wire `Encoding` when one was declared
     /// (RFC 04 v1.5's recommendation: publishers say what they carry).
-    pub async fn send(&self, payload: Vec<u8>) -> Result<()> {
+    pub async fn send(&self, payload: Vec<u8>, attachment: Option<Vec<u8>>) -> Result<()> {
         let put = self.publisher.put(payload);
         let put = match &self.encoding {
             Some(e) => put.encoding(e.as_str()),
+            None => put,
+        };
+        let put = match attachment {
+            Some(a) => put.attachment(a),
             None => put,
         };
         put.await

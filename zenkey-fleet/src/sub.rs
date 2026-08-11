@@ -42,6 +42,13 @@ pub struct SampleView {
     /// two are never mixed (a consumer plotting a time axis states which one
     /// it plotted).
     pub timestamp: Option<zenoh::time::Timestamp>,
+    /// The sample's attachment, when it carried one — zenoh's refcounted
+    /// buffer, like the payload, so retaining it is a refcount bump and the
+    /// per-sample allocation floor stands (`docs/zero-copy.md` §4).
+    ///
+    /// `None` means the sample carried none: an attachment is a wire fact,
+    /// not a decode, and what arrived is a fact to show (#117).
+    pub attachment: Option<zenoh::bytes::ZBytes>,
     /// Arrival, on **this observer's** monotonic clock — always available,
     /// never wall-clock, and never a claim about when the sample was produced.
     ///
@@ -356,6 +363,7 @@ impl Monitor {
                         encoding: sample.encoding().to_string(),
                         kind: sample.kind(),
                         timestamp: sample.timestamp().copied(),
+                        attachment: sample.attachment().cloned(),
                         received: Instant::now(),
                     },
                     sn,
@@ -577,6 +585,7 @@ mod tests {
             encoding: "zenoh/bytes".to_string(),
             kind: SampleKind::Put,
             timestamp: None,
+            attachment: None,
             received: Instant::now(),
         }
     }
