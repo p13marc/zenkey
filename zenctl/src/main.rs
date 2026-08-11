@@ -49,6 +49,38 @@ enum Command {
     /// Subjects: what data exists, and what it means.
     #[command(subcommand)]
     Topic(TopicCmd),
+    /// GET any selector with the fleet discipline (RFC 05 §2.1).
+    ///
+    /// Target All, consolidation None, every reply attributed by its own
+    /// key; error envelopes render as errors (RFC 05 §3), and payloads ride
+    /// the same rendering ladder as `topic echo` (served-schema decode →
+    /// structural → text → hex). `@/**` browses the zenoh admin space.
+    /// Exit codes: 0 values only, 1 an error reply, 2 silence.
+    Get {
+        /// Any key expression, params included (`key?k=v`).
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
+        selector: String,
+        /// Query body: inline text, `@file`, or `-` for stdin — rides the
+        /// same encode ladder as `topic pub` when the selector's key part
+        /// refines to a registered subject.
+        #[arg(long)]
+        body: Option<String>,
+        /// Ship the body verbatim and print payloads as hex; no decode.
+        #[arg(long)]
+        raw: bool,
+        /// Decode the type name, print the payload as hex.
+        #[arg(long)]
+        hex: bool,
+        /// Per-reply line template — the `topic echo` % vocabulary
+        /// (%k %K %o %c %p %s %t %v %e %l %n %{a.b.c}).
+        #[arg(long, value_name = "TEMPLATE")]
+        fmt: Option<String>,
+        /// Skip schema decode; render structurally.
+        #[arg(long)]
+        no_decode: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Producers: who is alive on the bus.
     #[command(subcommand)]
     Node(NodeCmd),
@@ -271,18 +303,10 @@ enum RegistryCmd {
 
 #[derive(Subcommand)]
 enum AdminCmd {
-    /// GET an admin selector and print key/value pairs.
-    ///
-    /// Admin key layouts vary between zenoh versions — this is a raw,
-    /// honest browse. Requires an un-namespaced session (which zenctl
-    /// always runs, RFC 09 §5).
-    Get {
-        /// Admin selector.
-        #[arg(default_value = "@/**")]
-        selector: String,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    // `admin get` was folded into the first-class `zenctl get` (#114): the
+    // generic browse lost its misleading name, and the new verb keeps the
+    // admin space reachable (`zenctl get '@/**'`) with strictly more honest
+    // rendering (error envelopes, typed payloads, non-lossy bytes).
     /// Enumerate routers/peers (zid, version, locators).
     Routers {
         #[command(flatten)]
@@ -1072,8 +1096,27 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::Admin(AdminCmd::Get { selector, bus }) => cmd::admin::get(&selector, &bus).await,
         Command::Admin(AdminCmd::Routers { bus }) => cmd::admin::routers(&bus).await,
+        Command::Get {
+            selector,
+            body,
+            raw,
+            hex,
+            fmt,
+            no_decode,
+            bus,
+        } => {
+            cmd::get::run(
+                &selector,
+                body.as_deref(),
+                raw,
+                hex,
+                fmt.as_deref(),
+                no_decode,
+                &bus,
+            )
+            .await
+        }
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let slices = bus.slices().await?;
             let report = offline::service_list(&slices, producer.as_deref())?;

@@ -11,6 +11,7 @@ pub mod cache;
 pub mod call;
 pub mod doctor;
 pub mod echo;
+pub mod get;
 pub mod node;
 pub mod publish;
 pub mod rate;
