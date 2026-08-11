@@ -1155,7 +1155,7 @@ impl Zengui {
                     .palette
                     .cursor
                     .saturating_add(1)
-                    .min(self.palette_rows().len().saturating_sub(1));
+                    .min(self.palette_row_count().saturating_sub(1));
                 Task::none()
             }
             PaletteMsg::Activate => self.run_palette_row(self.palette.cursor),
@@ -1163,38 +1163,50 @@ impl Zengui {
         }
     }
 
-    /// The rows the open overlay currently shows, in display order.
-    fn palette_rows(&self) -> Vec<Message> {
+    /// How many rows the open overlay currently shows. Ranks over borrowed
+    /// keys (fat pointers, no string bytes) — runs per keypress, not per
+    /// frame (#110).
+    fn palette_row_count(&self) -> usize {
         use view::palette::{Overlay, actions, rank};
         match self.palette.overlay {
             Overlay::Commands => {
                 let items = actions(&self.context_form.known);
-                rank(&items, &self.palette.query, |a| a.label.as_str())
-                    .into_iter()
-                    .map(|i| items[i].message.clone())
-                    .collect()
+                rank(&items, &self.palette.query, |a| a.label.as_str()).len()
             }
             Overlay::Keys => {
-                let keys = self.observed_keys();
-                rank(&keys, &self.palette.query, |k| k.as_str())
-                    .into_iter()
-                    .map(|i| Message::SelectKey(Some(keys[i].clone())))
-                    .collect()
+                // Observed keys only — never a guess (O4): the jump-to
+                // overlay offers what is on the bus, not what a registry
+                // says could be.
+                let keys: Vec<&str> = self.facts.keys().collect();
+                rank(&keys, &self.palette.query, |k| *k).len()
             }
-            _ => Vec::new(),
+            _ => 0,
         }
     }
 
-    /// Keys the session has actually observed — never a guess (O4): the
-    /// jump-to overlay offers what is on the bus, not what a registry says
-    /// could be.
-    fn observed_keys(&self) -> Vec<String> {
-        self.facts.keys().map(str::to_string).collect()
+    /// The message behind row `index` — on the Keys overlay, the one place
+    /// the palette ever clones a key `String` (#110): the activated row.
+    fn palette_row(&self, index: usize) -> Option<Message> {
+        use view::palette::{Overlay, actions, rank};
+        match self.palette.overlay {
+            Overlay::Commands => {
+                let items = actions(&self.context_form.known);
+                let order = rank(&items, &self.palette.query, |a| a.label.as_str());
+                order.get(index).map(|i| items[*i].message.clone())
+            }
+            Overlay::Keys => {
+                let keys: Vec<&str> = self.facts.keys().collect();
+                let order = rank(&keys, &self.palette.query, |k| *k);
+                order
+                    .get(index)
+                    .map(|i| Message::SelectKey(Some(keys[*i].to_string())))
+            }
+            _ => None,
+        }
     }
 
     fn run_palette_row(&mut self, index: usize) -> Task<Message> {
-        let rows = self.palette_rows();
-        let Some(message) = rows.get(index).cloned() else {
+        let Some(message) = self.palette_row(index) else {
             return Task::none();
         };
         // Jumping to a key also shows it: selecting without switching panes
@@ -2322,11 +2334,9 @@ impl Zengui {
         // modal widget because the layering rule is ours — palette above
         // panes, Esc peeling one layer at a time — and a widget with its own
         // dismissal policy would fight it.
-        match view::palette::overlay(
-            &self.palette,
-            &self.context_form.known,
-            &self.observed_keys(),
-        ) {
+        // A lazy iterator: a closed overlay never touches the cache, and
+        // the open one clones only what it draws (#110).
+        match view::palette::overlay(&self.palette, &self.context_form.known, self.facts.keys()) {
             None => layout.into(),
             Some(overlay) => iced::widget::stack![
                 layout,
