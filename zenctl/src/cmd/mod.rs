@@ -15,6 +15,7 @@ pub mod node;
 pub mod publish;
 pub mod rate;
 pub mod registry;
+pub mod render;
 pub mod schema;
 pub mod scout;
 pub mod watch;
