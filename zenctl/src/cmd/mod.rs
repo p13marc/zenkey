@@ -16,6 +16,7 @@ pub mod publish;
 pub mod rate;
 pub mod registry;
 pub mod schema;
+pub mod scout;
 pub mod watch;
 
 use anyhow::{Result, anyhow};

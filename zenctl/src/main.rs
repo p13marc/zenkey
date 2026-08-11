@@ -93,6 +93,35 @@ enum Command {
     /// The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2).
     #[command(subcommand)]
     Blob(BlobCmd),
+    /// Listen for raw scouting Hellos: zid, whatami, locators.
+    ///
+    /// The layer *below* `base list`: no session is opened, so this answers
+    /// "is anything out there at all" and "is multicast working on this
+    /// segment". It is also the one zenctl verb where multicast is ON by
+    /// default — scouting is the point, and a scout only listens for Hellos
+    /// and joins nothing.
+    Scout {
+        /// Filter by advertised kind. Repeatable; default: all three.
+        #[arg(long, value_enum)]
+        what: Vec<cmd::scout::ScoutWhat>,
+        /// Seconds to listen (default 5; a context may override).
+        #[arg(long)]
+        timeout: Option<u64>,
+        /// Endpoint to connect to, repeatable — reaches gossip scouting
+        /// where multicast is filtered.
+        #[arg(long, short = 'c')]
+        connect: Vec<String>,
+        /// Endpoint to listen on, repeatable.
+        #[arg(long, short = 'l')]
+        listen: Vec<String>,
+        /// Use a named context for endpoints/timeout defaults.
+        #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
+        context: Option<String>,
+        /// table = census (deduped by zid); ndjson = arrival log, one Hello
+        /// per line as heard.
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+        format: output::Format,
+    },
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
     Context(ContextCmd),
@@ -1183,5 +1212,39 @@ async fn main() -> Result<()> {
             fail_on,
             bus,
         } => cmd::doctor::run(deep, sample, fail_on, &bus).await,
+        Command::Scout {
+            what,
+            timeout,
+            connect,
+            listen,
+            context,
+            format,
+        } => {
+            // No BusArgs here: --base/--registry are meaningless before a
+            // session exists. Contexts still resolve, for endpoints/timeout.
+            let stored = match context::active(context.as_deref()) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(2);
+                }
+            };
+            let connect = if connect.is_empty() {
+                stored.as_ref().map(|c| c.connect.clone()).unwrap_or_default()
+            } else {
+                connect
+            };
+            let listen = if listen.is_empty() {
+                stored.as_ref().map(|c| c.listen.clone()).unwrap_or_default()
+            } else {
+                listen
+            };
+            let timeout = Duration::from_secs(
+                timeout
+                    .or_else(|| stored.as_ref().and_then(|c| c.timeout))
+                    .unwrap_or(5),
+            );
+            cmd::scout::run(&what, timeout, &connect, &listen, format).await
+        }
     }
 }
