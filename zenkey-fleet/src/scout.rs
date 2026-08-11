@@ -53,7 +53,11 @@ impl std::fmt::Debug for ScoutStream {
 impl ScoutStream {
     /// The next Hello, or `None` once the scout has stopped.
     pub async fn recv(&self) -> Option<HelloView> {
-        self.inner.recv_async().await.ok().map(|h| HelloView::of(&h))
+        self.inner
+            .recv_async()
+            .await
+            .ok()
+            .map(|h| HelloView::of(&h))
     }
 
     /// Stop scouting, explicitly — a drop would stop it too, but silently.

@@ -1308,12 +1308,18 @@ async fn main() -> Result<()> {
                 }
             };
             let connect = if connect.is_empty() {
-                stored.as_ref().map(|c| c.connect.clone()).unwrap_or_default()
+                stored
+                    .as_ref()
+                    .map(|c| c.connect.clone())
+                    .unwrap_or_default()
             } else {
                 connect
             };
             let listen = if listen.is_empty() {
-                stored.as_ref().map(|c| c.listen.clone()).unwrap_or_default()
+                stored
+                    .as_ref()
+                    .map(|c| c.listen.clone())
+                    .unwrap_or_default()
             } else {
                 listen
             };

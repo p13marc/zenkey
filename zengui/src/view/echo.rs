@@ -524,8 +524,7 @@ mod tests {
         let mut with_att = l.clone();
         with_att.attachment = Some(r#"{"who":"me"}"#.to_string());
         with_att.attachment_len = Some(12);
-        let json: serde_json::Value =
-            serde_json::from_str(&ndjson_line(&with_att, "")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&ndjson_line(&with_att, "")).unwrap();
         assert_eq!(json["attachment"]["who"], "me");
         assert_eq!(json["attachment_bytes"], 12);
     }

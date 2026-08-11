@@ -91,7 +91,8 @@ pub async fn run(
         }
     };
 
-    let answers = zenkey_fleet::fleet_get(&session, &base, selector, payload, args.timeout()).await?;
+    let answers =
+        zenkey_fleet::fleet_get(&session, &base, selector, payload, args.timeout()).await?;
 
     let secs = args.timeout().as_secs();
     match args.format.resolved() {

@@ -222,9 +222,8 @@ mod tests {
     /// empty field when none did — the line shape stays stable (#117).
     #[test]
     fn the_attachment_field_is_empty_when_absent() {
-        let line = |att: Option<&str>| {
-            format_sample("%v|%a", 1, "k", "", None, "e", 0, None, "v", att)
-        };
+        let line =
+            |att: Option<&str>| format_sample("%v|%a", 1, "k", "", None, "e", 0, None, "v", att);
         assert_eq!(line(Some("meta (4 bytes)")), "v|meta (4 bytes)");
         assert_eq!(line(None), "v|");
     }

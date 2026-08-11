@@ -87,9 +87,7 @@ impl EchoLine {
     /// What this line costs the ring's byte budget. The attachment preview
     /// counts too — a bound that ignores what it stores stops being a bound.
     fn weight(&self) -> usize {
-        self.key.len()
-            + self.preview.len()
-            + self.attachment.as_ref().map_or(0, String::len)
+        self.key.len() + self.preview.len() + self.attachment.as_ref().map_or(0, String::len)
     }
 }
 
