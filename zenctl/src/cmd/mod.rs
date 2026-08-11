@@ -20,6 +20,7 @@ pub mod registry;
 pub mod render;
 pub mod schema;
 pub mod scout;
+pub mod serve;
 pub mod watch;
 
 use anyhow::{Result, anyhow};

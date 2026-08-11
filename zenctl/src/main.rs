@@ -128,6 +128,41 @@ enum Command {
     /// The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2).
     #[command(subcommand)]
     Blob(BlobCmd),
+    /// Stand up a mock queryable: answer every query on a keyexpr with one
+    /// static body, and log every ask (#121).
+    ///
+    /// The log doubles as a "who is querying this key" probe. Deliberately
+    /// no reply scripting — static and file bodies cover the dev-loop case;
+    /// the shell covers dynamic replies by restarting serve. (nuze and zsak
+    /// own the embedded-language lane, at the cost of a Nushell dependency
+    /// and a linked libpython respectively.)
+    Serve {
+        /// Key expression to serve (full wire form; wildcards welcome).
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
+        keyexpr: String,
+        /// Reply body: inline text, `@file`, or `-` for stdin (read once) —
+        /// through the same encode ladder as `topic pub`.
+        reply: String,
+        /// Wire encoding to declare on replies. Defaults to the registry's
+        /// declared encoding when the keyexpr refines, else none.
+        #[arg(long)]
+        encoding: Option<String>,
+        /// Do not refuse a body the served schema rejects.
+        #[arg(long)]
+        no_validate: bool,
+        /// Reply the bytes verbatim: no schema lookup, no refusal.
+        #[arg(long)]
+        raw: bool,
+        /// Declare the queryable complete — a claim this responder holds
+        /// ALL the data the expression names. Say it only when you mean it.
+        #[arg(long)]
+        complete: bool,
+        /// Exit after N queries (0 = until ctrl-c).
+        #[arg(long, default_value_t = 0)]
+        count: usize,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Listen for raw scouting Hellos: zid, whatami, locators.
     ///
     /// The layer *below* `base list`: no session is opened, so this answers
@@ -1321,6 +1356,28 @@ async fn main() -> Result<()> {
             fail_on,
             bus,
         } => cmd::doctor::run(deep, sample, fail_on, &bus).await,
+        Command::Serve {
+            keyexpr,
+            reply,
+            encoding,
+            no_validate,
+            raw,
+            complete,
+            count,
+            bus,
+        } => {
+            cmd::serve::run(
+                &keyexpr,
+                &reply,
+                encoding.as_deref(),
+                no_validate,
+                raw,
+                complete,
+                count,
+                &bus,
+            )
+            .await
+        }
         Command::Key(KeyCmd::Includes { a, b, format }) => {
             cmd::key::relate("includes", &a, &b, format)
         }
