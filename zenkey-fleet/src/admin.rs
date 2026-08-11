@@ -598,3 +598,152 @@ mod tests {
         assert!(declared_from_admin_entry("not/admin/at/all", &v).is_none());
     }
 }
+
+/// One node of the mesh, as the topology join sees it (#118).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TopologyNode {
+    pub zid: String,
+    /// `router` | `peer` | `client`, as the admin key (or a neighbour's
+    /// session list) spells it.
+    pub whatami: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub locators: Vec<String>,
+    /// `true` = this node's own admin space answered; `false` = only heard
+    /// of via a neighbour's session list — "heard of, not queryable",
+    /// rendered as such rather than omitted (the issue's honesty rule).
+    pub answered: bool,
+}
+
+/// One reported link. Kept per-reporter — a renderer that wants an
+/// undirected mesh dedups by unordered zid pair, and reciprocal reports
+/// are corroboration, not duplication.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TopologyEdge {
+    /// The zid whose admin doc reported this session.
+    pub reporter: String,
+    /// The far end's zid.
+    pub peer: String,
+    /// The far end's whatami, as the reporter says it.
+    pub whatami: String,
+    /// Link endpoints, `src -> dst`, protocol included.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<String>,
+}
+
+/// The mesh as the admin space answered it, joined with nothing invented
+/// (#118): what answered, what was only mentioned, and who we are.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TopologyReport {
+    pub nodes: Vec<TopologyNode>,
+    pub edges: Vec<TopologyEdge>,
+    /// The selector the sweep asked.
+    pub asked: String,
+    /// Root docs that answered. Zero is "the admin space did not answer" —
+    /// a reading about reachability, never an empty mesh.
+    pub answered: usize,
+    /// This session's own zid — the "you are here" marker.
+    pub self_zid: String,
+}
+
+/// Join the admin root docs (`@/<zid>/<whatami>`) into a topology: every
+/// answering node with its locators and version, every session it reports
+/// as an edge, and every zid that is *only* mentioned as a
+/// heard-of-not-queryable node.
+pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyReport> {
+    const ASKED: &str = "@/*/*";
+    let entries = admin_get(session, ASKED, timeout).await?;
+    let mut nodes: Vec<TopologyNode> = Vec::new();
+    let mut edges: Vec<TopologyEdge> = Vec::new();
+    for e in &entries {
+        // Root docs only: @/<zid>/<whatami>. Anything deeper is a
+        // different handler and not a node document.
+        let mut chunks = e.key.split('/');
+        let (Some("@"), Some(zid), Some(whatami), None) =
+            (chunks.next(), chunks.next(), chunks.next(), chunks.next())
+        else {
+            continue;
+        };
+        let doc = &e.value;
+        nodes.push(TopologyNode {
+            zid: doc
+                .get("zid")
+                .and_then(|v| v.as_str())
+                .unwrap_or(zid)
+                .to_string(),
+            whatami: whatami.to_string(),
+            version: doc
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            locators: doc
+                .get("locators")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|l| l.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            answered: true,
+        });
+        for s in doc
+            .get("sessions")
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or_default()
+        {
+            let Some(peer) = s.get("peer").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            edges.push(TopologyEdge {
+                reporter: zid.to_string(),
+                peer: peer.to_string(),
+                whatami: s
+                    .get("whatami")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                links: s
+                    .get("links")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|l| {
+                                Some(format!(
+                                    "{} -> {}",
+                                    l.get("src")?.as_str()?,
+                                    l.get("dst")?.as_str()?
+                                ))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            });
+        }
+    }
+    let answered = nodes.len();
+    // Heard-of nodes: mentioned as a session peer, but no root doc answered
+    // for them (admin space off, or out of reach). Shown, never omitted.
+    for e in &edges {
+        if !nodes.iter().any(|n| n.zid == e.peer) {
+            nodes.push(TopologyNode {
+                zid: e.peer.clone(),
+                whatami: e.whatami.clone(),
+                version: None,
+                locators: Vec::new(),
+                answered: false,
+            });
+        }
+    }
+    nodes.sort_by(|a, b| a.zid.cmp(&b.zid));
+    nodes.dedup_by(|a, b| a.zid == b.zid);
+    Ok(TopologyReport {
+        nodes,
+        edges,
+        asked: ASKED.to_string(),
+        answered,
+        self_zid: session.zid().to_string(),
+    })
+}

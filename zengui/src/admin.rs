@@ -31,6 +31,9 @@ pub struct AdminSweep {
     /// of the `note:` zenctl prints to stderr. An absent table and an empty
     /// one are different facts, and the pane renders them differently.
     pub coverage_note: Option<String>,
+    /// The mesh as the admin space answered it (#118) — nodes, edges, and
+    /// who only got mentioned. Same struct `zenctl admin graph` renders.
+    pub topology: zenkey_fleet::TopologyReport,
     /// The base the coverage was judged against — the staleness guard.
     pub base: String,
 }
@@ -109,6 +112,13 @@ mod tests {
             },
             declared: None,
             coverage_note: None,
+            topology: zenkey_fleet::TopologyReport {
+                nodes: vec![],
+                edges: vec![],
+                asked: "@/*/*".into(),
+                answered: 0,
+                self_zid: String::new(),
+            },
             base: base.to_string(),
         })
     }

@@ -378,6 +378,19 @@ enum AdminCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// The mesh as the admin space answers it (#118): nodes, edges, and
+    /// who only got mentioned.
+    ///
+    /// Their pictures are unlabeled circles; ours says which of admin space
+    /// and liveliness backs each element. Nodes whose admin space is off
+    /// render "heard of, not queryable" — never omitted.
+    Graph {
+        /// Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
+        #[arg(long)]
+        dot: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1256,6 +1269,7 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Admin(AdminCmd::Routers { bus }) => cmd::admin::routers(&bus).await,
+        Command::Admin(AdminCmd::Graph { dot, bus }) => cmd::admin::graph(dot, &bus).await,
         Command::Get {
             selector,
             body,

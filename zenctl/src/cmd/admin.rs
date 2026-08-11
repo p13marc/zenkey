@@ -37,3 +37,216 @@ pub async fn routers(args: &BusArgs) -> Result<()> {
     }
     Ok(())
 }
+
+/// `admin graph` — the mesh as the admin space answered it (#118), as a
+/// table, `--dot` Graphviz for piping (`| dot -Tsvg`), or json/ndjson.
+pub async fn graph(dot: bool, args: &BusArgs) -> Result<()> {
+    let session = args.session().await?;
+    let report = zenkey_fleet::topology(&session, args.timeout()).await?;
+    if dot {
+        println!("{}", render_dot(&report));
+        honesty(&report);
+        return Ok(());
+    }
+    match args.format.resolved() {
+        output::Format::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        output::Format::Ndjson => {
+            for n in &report.nodes {
+                println!("{}", serde_json::to_string(n)?);
+            }
+            for e in &report.edges {
+                println!("{}", serde_json::to_string(e)?);
+            }
+        }
+        _ => {
+            for n in &report.nodes {
+                let you = if n.zid == report.self_zid {
+                    "  ← you"
+                } else {
+                    ""
+                };
+                if n.answered {
+                    println!(
+                        "{}  {}  {}  {}{you}",
+                        n.zid,
+                        n.whatami,
+                        n.version.as_deref().unwrap_or("-"),
+                        n.locators.join(" "),
+                    );
+                } else {
+                    println!("{}  {}  (heard of, not queryable){you}", n.zid, n.whatami);
+                }
+            }
+            for (a, b, both, links) in deduped_edges(&report) {
+                println!(
+                    "  {a} —— {b}{}{}",
+                    if both { "  (both report it)" } else { "" },
+                    if links.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  [{}]", links.join(", "))
+                    }
+                );
+            }
+            honesty(&report);
+        }
+    }
+    Ok(())
+}
+
+fn honesty(report: &zenkey_fleet::TopologyReport) {
+    match report.answered {
+        0 => eprintln!(
+            "no admin space answered {} — adminspace.enabled defaults off; this is a \
+             reading about reachability, never an empty mesh (RFC 05 §3.1)",
+            report.asked
+        ),
+        n => eprintln!(
+            "{n} root doc(s) answered {}; {} node(s) total ({} only heard of)",
+            report.asked,
+            report.nodes.len(),
+            report.nodes.iter().filter(|x| !x.answered).count()
+        ),
+    }
+}
+
+/// Edges collapsed to unordered pairs for display; reciprocal reports are
+/// corroboration, marked as such.
+fn deduped_edges(
+    report: &zenkey_fleet::TopologyReport,
+) -> Vec<(String, String, bool, Vec<String>)> {
+    let mut out: Vec<(String, String, bool, Vec<String>)> = Vec::new();
+    for e in &report.edges {
+        let (a, b) = if e.reporter <= e.peer {
+            (e.reporter.clone(), e.peer.clone())
+        } else {
+            (e.peer.clone(), e.reporter.clone())
+        };
+        match out.iter_mut().find(|(x, y, _, _)| *x == a && *y == b) {
+            Some(row) => row.2 = true,
+            None => out.push((a, b, false, e.links.clone())),
+        }
+    }
+    out
+}
+
+/// Graphviz, self-contained: routers as boxes, peers/clients as ellipses,
+/// heard-of nodes dashed, our own session bold.
+fn render_dot(report: &zenkey_fleet::TopologyReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from("graph zenoh_mesh {\n");
+    for n in &report.nodes {
+        let shape = if n.whatami == "router" {
+            "box"
+        } else {
+            "ellipse"
+        };
+        let mut style = Vec::new();
+        if !n.answered {
+            style.push("dashed");
+        }
+        if n.zid == report.self_zid {
+            style.push("bold");
+        }
+        let label = match (&n.answered, &n.version) {
+            (false, _) => format!("{}\\n{} (heard of)", n.zid, n.whatami),
+            (true, Some(v)) => format!("{}\\n{} {v}", n.zid, n.whatami),
+            (true, None) => format!("{}\\n{}", n.zid, n.whatami),
+        };
+        let _ = writeln!(
+            out,
+            "  \"{}\" [shape={shape}, label=\"{label}\"{}];",
+            n.zid,
+            if style.is_empty() {
+                String::new()
+            } else {
+                format!(", style=\"{}\"", style.join(","))
+            }
+        );
+    }
+    for (a, b, _, links) in deduped_edges(report) {
+        let proto = links
+            .first()
+            .and_then(|l| l.split('/').next())
+            .unwrap_or("");
+        let _ = writeln!(
+            out,
+            "  \"{a}\" -- \"{b}\"{};",
+            if proto.is_empty() {
+                String::new()
+            } else {
+                format!(" [label=\"{proto}\"]")
+            }
+        );
+    }
+    out.push('}');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zenkey_fleet::{TopologyEdge, TopologyNode, TopologyReport};
+
+    fn report() -> TopologyReport {
+        TopologyReport {
+            nodes: vec![
+                TopologyNode {
+                    zid: "aaa".into(),
+                    whatami: "router".into(),
+                    version: Some("1.9.0".into()),
+                    locators: vec!["tcp/10.0.0.1:7447".into()],
+                    answered: true,
+                },
+                TopologyNode {
+                    zid: "bbb".into(),
+                    whatami: "peer".into(),
+                    version: None,
+                    locators: vec![],
+                    answered: false,
+                },
+            ],
+            edges: vec![
+                TopologyEdge {
+                    reporter: "aaa".into(),
+                    peer: "bbb".into(),
+                    whatami: "peer".into(),
+                    links: vec!["tcp/10.0.0.1:7447 -> tcp/10.0.0.2:53210".into()],
+                },
+                TopologyEdge {
+                    reporter: "bbb".into(),
+                    peer: "aaa".into(),
+                    whatami: "router".into(),
+                    links: vec![],
+                },
+            ],
+            asked: "@/*/*".into(),
+            answered: 1,
+            self_zid: "bbb".into(),
+        }
+    }
+
+    /// Reciprocal reports collapse to one undirected edge, marked as
+    /// corroborated — not drawn twice, not silently merged.
+    #[test]
+    fn reciprocal_reports_corroborate_one_edge() {
+        let edges = deduped_edges(&report());
+        assert_eq!(edges.len(), 1);
+        let (a, b, both, _) = &edges[0];
+        assert_eq!((a.as_str(), b.as_str()), ("aaa", "bbb"));
+        assert!(both, "both ends reported it");
+    }
+
+    /// The DOT form: routers boxed, heard-of nodes dashed, our session
+    /// bold, edges labeled by protocol — pipeable to `dot -Tsvg` as-is.
+    #[test]
+    fn the_dot_form_marks_what_the_join_knows() {
+        let dot = render_dot(&report());
+        assert!(dot.starts_with("graph zenoh_mesh {"), "{dot}");
+        assert!(dot.contains("\"aaa\" [shape=box"), "{dot}");
+        assert!(dot.contains("heard of"), "{dot}");
+        assert!(dot.contains("style=\"dashed,bold\""), "{dot}");
+        assert!(dot.contains("\"aaa\" -- \"bbb\" [label=\"tcp\"]"), "{dot}");
+        assert!(dot.ends_with('}'), "{dot}");
+    }
+}
