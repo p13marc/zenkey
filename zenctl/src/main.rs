@@ -81,6 +81,9 @@ enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed).
+    #[command(subcommand)]
+    Key(KeyCmd),
     /// Producers: who is alive on the bus.
     #[command(subcommand)]
     Node(NodeCmd),
@@ -198,6 +201,34 @@ enum Command {
         fail_on: Option<FailOn>,
         #[command(flatten)]
         bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeyCmd {
+    /// Does `a` include every key `b` can name? Exit 0 yes / 1 no / 2 invalid.
+    Includes {
+        a: String,
+        b: String,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+        format: output::Format,
+    },
+    /// Can `a` and `b` name a common key? Exit 0 yes / 1 no / 2 invalid.
+    ///
+    /// When a 'no' is the convention's doing — `**` never crosses an
+    /// `@`-chunk (RFC 03 §4 D2), `*` never matches a verbatim service
+    /// origin (D4) — the output says so, with the citation.
+    Intersects {
+        a: String,
+        b: String,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+        format: output::Format,
+    },
+    /// Canonicalize an expression, or print its parse error verbatim.
+    Canon {
+        expr: String,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+        format: output::Format,
     },
 }
 
@@ -1290,6 +1321,13 @@ async fn main() -> Result<()> {
             fail_on,
             bus,
         } => cmd::doctor::run(deep, sample, fail_on, &bus).await,
+        Command::Key(KeyCmd::Includes { a, b, format }) => {
+            cmd::key::relate("includes", &a, &b, format)
+        }
+        Command::Key(KeyCmd::Intersects { a, b, format }) => {
+            cmd::key::relate("intersects", &a, &b, format)
+        }
+        Command::Key(KeyCmd::Canon { expr, format }) => cmd::key::canon(&expr, format),
         Command::Scout {
             what,
             timeout,
