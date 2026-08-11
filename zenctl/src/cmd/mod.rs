@@ -12,6 +12,7 @@ pub mod call;
 pub mod doctor;
 pub mod echo;
 pub mod get;
+pub mod key;
 pub mod node;
 pub mod publish;
 pub mod rate;
@@ -19,6 +20,7 @@ pub mod registry;
 pub mod render;
 pub mod schema;
 pub mod scout;
+pub mod serve;
 pub mod watch;
 
 use anyhow::{Result, anyhow};
@@ -66,6 +68,7 @@ mod tests {
             listen: vec![],
             scouting: false,
             timeout: None,
+            zenoh_config: None,
             format: output::Format::Table,
         };
         assert_eq!(

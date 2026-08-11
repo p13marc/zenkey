@@ -47,6 +47,11 @@ pub struct StoredContext {
     pub registry: Vec<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scouting: Option<bool>,
+    /// Path to a zenoh JSON5 config file (#122) — the passthrough that makes
+    /// a secured bus (TLS/QUIC/usrpwd) reachable. The explorer's own knobs
+    /// apply on top: flag > env > context > file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zenoh_config: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
 }
@@ -201,6 +206,7 @@ mod tests {
                 registry: vec![PathBuf::from("/tmp/reg")],
                 scouting: Some(false),
                 timeout: Some(5),
+                zenoh_config: None,
             },
         );
         let rendered = toml::to_string_pretty(&cfg).unwrap();

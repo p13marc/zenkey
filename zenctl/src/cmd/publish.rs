@@ -187,3 +187,123 @@ mod tests {
         assert_eq!(mode(true, true), PrepareMode::Raw);
     }
 }
+
+/// Where `topic pub` reads from, besides its arguments.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PubSource {
+    /// The echo/export row shape, one JSON object per stdin line.
+    Ndjson,
+}
+
+/// `topic pub --from ndjson` (#125): the pipe made symmetric. Reads the
+/// exact row shape `topic echo --format ndjson` emits, publishes each row
+/// through a declared publisher — one per distinct key, reusing the write
+/// facade, never ad-hoc puts — and counts what it could not publish
+/// instead of silently skipping it.
+pub async fn run_from_ndjson(
+    default_qos: &str,
+    interval: f64,
+    i_know: bool,
+    args: &BusArgs,
+) -> Result<()> {
+    use std::io::BufRead as _;
+
+    let session = args.session().await?;
+    let slices = args.slice_set().await.ok();
+    let base = args.base().to_string();
+
+    let mut publications: std::collections::HashMap<String, zenkey_fleet::Publication> =
+        std::collections::HashMap::new();
+    let mut published = 0usize;
+    let mut tombstones = 0usize;
+    let mut malformed = 0usize;
+    let mut refused = 0usize;
+    let mut first_errors: Vec<String> = Vec::new();
+    let mut record_err = |line_no: usize, reason: String, count: &mut usize| {
+        *count += 1;
+        if first_errors.len() < 3 {
+            first_errors.push(format!("line {line_no}: {reason}"));
+        }
+    };
+
+    let stdin = std::io::stdin();
+    for (i, line) in stdin.lock().lines().enumerate() {
+        let line_no = i + 1;
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let row = match zenkey_fleet::parse_row(&line) {
+            Ok(r) => r,
+            Err(e) => {
+                record_err(line_no, e, &mut malformed);
+                continue;
+            }
+        };
+        // A delete row is a tombstone (RFC 04 §1.2): even in a pipe, the
+        // off-state operator act keeps its price (v1.12) — refused rows are
+        // counted, never silently dropped.
+        if row.delete
+            && let Err(e) = zenkey_fleet::check_retire(&base, &row.key, slices.as_ref(), i_know)
+        {
+            record_err(line_no, e.to_string(), &mut refused);
+            continue;
+        }
+        let publication = match publications.entry(row.key.clone()) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                let qos_name = row.qos.as_deref().unwrap_or(default_qos);
+                let Some(qos) = zenkey::qos::QosProfile::from_name(qos_name) else {
+                    record_err(
+                        line_no,
+                        format!("unknown QoS profile {qos_name:?}"),
+                        &mut malformed,
+                    );
+                    continue;
+                };
+                let publication = zenkey_fleet::declare_publication(
+                    &session,
+                    &row.key,
+                    qos,
+                    row.encoding.as_deref(),
+                )
+                .await?;
+                e.insert(publication)
+            }
+        };
+        if row.delete {
+            publication.retire().await?;
+            tombstones += 1;
+        } else {
+            publication.send(row.payload, row.attachment).await?;
+            published += 1;
+        }
+        if interval > 0.0 {
+            tokio::time::sleep(Duration::from_secs_f64(interval)).await;
+        }
+    }
+
+    for (_, publication) in publications.drain() {
+        publication.undeclare().await?;
+    }
+    let keys = published + tombstones;
+    eprintln!(
+        "published {published} row(s) and {tombstones} tombstone(s){}",
+        if keys > 0 {
+            ""
+        } else {
+            " — stdin held no publishable rows"
+        }
+    );
+    if malformed > 0 || refused > 0 {
+        eprintln!(
+            "{malformed} malformed row(s), {refused} refused delete row(s) — counted, \
+             not silently skipped:"
+        );
+        for e in &first_errors {
+            eprintln!("  {e}");
+        }
+        std::process::exit(1);
+    }
+    Ok(())
+}

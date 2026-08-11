@@ -81,6 +81,9 @@ enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed).
+    #[command(subcommand)]
+    Key(KeyCmd),
     /// Producers: who is alive on the bus.
     #[command(subcommand)]
     Node(NodeCmd),
@@ -125,6 +128,41 @@ enum Command {
     /// The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2).
     #[command(subcommand)]
     Blob(BlobCmd),
+    /// Stand up a mock queryable: answer every query on a keyexpr with one
+    /// static body, and log every ask (#121).
+    ///
+    /// The log doubles as a "who is querying this key" probe. Deliberately
+    /// no reply scripting — static and file bodies cover the dev-loop case;
+    /// the shell covers dynamic replies by restarting serve. (nuze and zsak
+    /// own the embedded-language lane, at the cost of a Nushell dependency
+    /// and a linked libpython respectively.)
+    Serve {
+        /// Key expression to serve (full wire form; wildcards welcome).
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
+        keyexpr: String,
+        /// Reply body: inline text, `@file`, or `-` for stdin (read once) —
+        /// through the same encode ladder as `topic pub`.
+        reply: String,
+        /// Wire encoding to declare on replies. Defaults to the registry's
+        /// declared encoding when the keyexpr refines, else none.
+        #[arg(long)]
+        encoding: Option<String>,
+        /// Do not refuse a body the served schema rejects.
+        #[arg(long)]
+        no_validate: bool,
+        /// Reply the bytes verbatim: no schema lookup, no refusal.
+        #[arg(long)]
+        raw: bool,
+        /// Declare the queryable complete — a claim this responder holds
+        /// ALL the data the expression names. Say it only when you mean it.
+        #[arg(long)]
+        complete: bool,
+        /// Exit after N queries (0 = until ctrl-c).
+        #[arg(long, default_value_t = 0)]
+        count: usize,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Listen for raw scouting Hellos: zid, whatami, locators.
     ///
     /// The layer *below* `base list`: no session is opened, so this answers
@@ -198,6 +236,34 @@ enum Command {
         fail_on: Option<FailOn>,
         #[command(flatten)]
         bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeyCmd {
+    /// Does `a` include every key `b` can name? Exit 0 yes / 1 no / 2 invalid.
+    Includes {
+        a: String,
+        b: String,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+        format: output::Format,
+    },
+    /// Can `a` and `b` name a common key? Exit 0 yes / 1 no / 2 invalid.
+    ///
+    /// When a 'no' is the convention's doing — `**` never crosses an
+    /// `@`-chunk (RFC 03 §4 D2), `*` never matches a verbatim service
+    /// origin (D4) — the output says so, with the citation.
+    Intersects {
+        a: String,
+        b: String,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+        format: output::Format,
+    },
+    /// Canonicalize an expression, or print its parse error verbatim.
+    Canon {
+        expr: String,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+        format: output::Format,
     },
 }
 
@@ -408,6 +474,11 @@ enum ContextCmd {
         /// Default reply timeout in seconds.
         #[arg(long)]
         timeout: Option<u64>,
+        /// Zenoh JSON5 config file for this context (#122) — the
+        /// passthrough that reaches a secured bus; explorer knobs apply
+        /// on top (flag > env > context > file).
+        #[arg(long, value_name = "FILE")]
+        zenoh_config: Option<PathBuf>,
         /// Select it as the current context.
         #[arg(long)]
         select: bool,
@@ -519,10 +590,22 @@ enum TopicCmd {
     /// Publish to a key (issue #47) — a declared publisher, never an ad-hoc
     /// put (P7).
     Pub {
-        /// Full wire key to publish on.
-        key: String,
-        /// Payload: inline text, `@file`, or `-` for stdin.
-        body: String,
+        /// Full wire key to publish on (omit with --from ndjson).
+        key: Option<String>,
+        /// Payload: inline text, `@file`, or `-` for stdin (omit with --from).
+        body: Option<String>,
+        /// Read rows from stdin instead: `--from ndjson` accepts the exact
+        /// row shape `topic echo --format ndjson` (and the zengui export)
+        /// emits — key + value per row, optionally encoding/qos/delete/
+        /// attachment. One shape, both directions; malformed rows are
+        /// counted and reported, never silently skipped.
+        #[arg(long, value_enum)]
+        from: Option<cmd::publish::PubSource>,
+        /// With --from: delete rows on keys that are not state-shaped are
+        /// refused (and counted) unless this is passed — RFC 04 §1.2
+        /// (v1.12) prices the off-state tombstone even in a pipe.
+        #[arg(long = "i-know")]
+        i_know: bool,
         /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
         #[arg(long, default_value = "sampled", add = ArgValueCandidates::new(completion::qos_profiles))]
         qos: String,
@@ -766,6 +849,13 @@ struct BusArgs {
     /// context may override the default).
     #[arg(long)]
     timeout: Option<u64>,
+    /// Zenoh JSON5 config file (#122): the passthrough that reaches a
+    /// secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base
+    /// layer; --connect/--listen/--scouting apply on top when given
+    /// (flag > env > context > file). A file that sets a session namespace
+    /// is refused — explorers run un-namespaced (RFC 09 §5).
+    #[arg(long, value_name = "FILE", env = "ZENCTL_ZENOH_CONFIG")]
+    zenoh_config: Option<PathBuf>,
     /// Output format: table for humans, json (one document) or ndjson (one
     /// object per row) for scripts; auto = table on a tty, ndjson piped.
     #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
@@ -809,8 +899,18 @@ impl BusArgs {
         } else {
             self.listen.clone()
         };
-        let scouting = self.scouting || stored.and_then(|c| c.scouting).unwrap_or(false);
-        bus::open(&connect, &listen, scouting).await
+        // Not-given stays distinguishable from off: with a config file the
+        // file's scouting choice must survive an absent flag (#122).
+        let scouting = if self.scouting {
+            Some(true)
+        } else {
+            stored.and_then(|c| c.scouting)
+        };
+        let file = self
+            .zenoh_config
+            .clone()
+            .or_else(|| stored.and_then(|c| c.zenoh_config.clone()));
+        bus::open_with_config(file.as_deref(), &connect, &listen, scouting).await
     }
     /// The `--context` name this invocation was given, if any.
     fn context_name(&self) -> Option<&str> {
@@ -990,6 +1090,8 @@ async fn main() -> Result<()> {
         Command::Topic(TopicCmd::Pub {
             key,
             body,
+            from,
+            i_know,
             qos,
             encoding,
             repeat,
@@ -998,21 +1100,32 @@ async fn main() -> Result<()> {
             raw,
             attachment,
             bus,
-        }) => {
-            cmd::publish::run(
-                &key,
-                &body,
-                &qos,
-                encoding.as_deref(),
-                repeat,
-                interval,
-                no_validate,
-                raw,
-                attachment.as_deref(),
-                &bus,
-            )
-            .await
-        }
+        }) => match (from, key, body) {
+            (Some(cmd::publish::PubSource::Ndjson), None, None) => {
+                cmd::publish::run_from_ndjson(&qos, interval, i_know, &bus).await
+            }
+            (Some(_), _, _) => Err(anyhow::anyhow!(
+                "--from ndjson reads keys and payloads from stdin rows — drop the                  key/body arguments"
+            )),
+            (None, Some(key), Some(body)) => {
+                cmd::publish::run(
+                    &key,
+                    &body,
+                    &qos,
+                    encoding.as_deref(),
+                    repeat,
+                    interval,
+                    no_validate,
+                    raw,
+                    attachment.as_deref(),
+                    &bus,
+                )
+                .await
+            }
+            (None, _, _) => Err(anyhow::anyhow!(
+                "topic pub needs <KEY> <BODY>, or --from ndjson with rows on stdin"
+            )),
+        },
         Command::Topic(TopicCmd::Retire {
             key,
             qos,
@@ -1252,6 +1365,7 @@ async fn main() -> Result<()> {
                 registry,
                 scouting,
                 timeout,
+                zenoh_config,
                 select,
             } => context::create(
                 &name,
@@ -1262,6 +1376,7 @@ async fn main() -> Result<()> {
                     registry,
                     scouting: scouting.then_some(true),
                     timeout,
+                    zenoh_config,
                 },
                 select,
             ),
@@ -1290,6 +1405,35 @@ async fn main() -> Result<()> {
             fail_on,
             bus,
         } => cmd::doctor::run(deep, sample, fail_on, &bus).await,
+        Command::Serve {
+            keyexpr,
+            reply,
+            encoding,
+            no_validate,
+            raw,
+            complete,
+            count,
+            bus,
+        } => {
+            cmd::serve::run(
+                &keyexpr,
+                &reply,
+                encoding.as_deref(),
+                no_validate,
+                raw,
+                complete,
+                count,
+                &bus,
+            )
+            .await
+        }
+        Command::Key(KeyCmd::Includes { a, b, format }) => {
+            cmd::key::relate("includes", &a, &b, format)
+        }
+        Command::Key(KeyCmd::Intersects { a, b, format }) => {
+            cmd::key::relate("intersects", &a, &b, format)
+        }
+        Command::Key(KeyCmd::Canon { expr, format }) => cmd::key::canon(&expr, format),
         Command::Scout {
             what,
             timeout,

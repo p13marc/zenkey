@@ -18,12 +18,14 @@ pub mod context_store;
 pub mod diff;
 pub mod discover;
 pub mod facts;
+pub mod ingest;
 pub mod query;
 pub mod registry;
 pub mod report;
 pub mod roster;
 pub mod scout;
 pub mod seed;
+pub mod serve;
 pub mod session;
 pub mod skeleton;
 pub mod stats;
@@ -61,6 +63,7 @@ pub use context_store::{StoredContext, active_name, cache_dir};
 pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
+pub use ingest::{IngestRow, parse_row};
 pub use query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
     StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,
@@ -70,7 +73,8 @@ pub use registry::SliceSet;
 pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
 pub use scout::{HelloView, ScoutStream, scout};
 pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
-pub use session::open;
+pub use serve::{MockResponder, ServedQuery, declare_responder};
+pub use session::{open, open_with_config};
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem, WatchId,

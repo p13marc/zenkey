@@ -40,6 +40,9 @@ pub struct ContextForm {
     pub listen: String,
     pub base: String,
     pub scouting: bool,
+    /// Path to a zenoh JSON5 config file; empty = none (#122). The file is
+    /// the UI for everything past the three knobs — no TLS form grows here.
+    pub zenoh_config: String,
     /// The last action's outcome, rendered verbatim.
     pub status: Option<Result<String, String>>,
 }
@@ -53,6 +56,7 @@ pub enum ContextMsg {
     ListenChanged(String),
     BaseChanged(String),
     ScoutingToggled(bool),
+    ZenohConfigChanged(String),
     /// Load the named context's values into the editor.
     Load,
     /// Write the editor's values to the shared config.
@@ -118,6 +122,10 @@ impl ContextForm {
             registry: Vec::new(),
             scouting: Some(self.scouting),
             timeout: None,
+            zenoh_config: {
+                let path = self.zenoh_config.trim();
+                (!path.is_empty()).then(|| std::path::PathBuf::from(path))
+            },
         })
     }
 
@@ -128,6 +136,11 @@ impl ContextForm {
         self.connect = stored.connect.join(" ");
         self.listen = stored.listen.join(" ");
         self.scouting = stored.scouting.unwrap_or(false);
+        self.zenoh_config = stored
+            .zenoh_config
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
     }
 }
 
@@ -191,6 +204,14 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         text_input("listen: tcp/0.0.0.0:7448 …", &form.listen)
             .on_input(|t| msg(ContextMsg::ListenChanged(t)))
             .size(font::CAPTION),
+    );
+    col = col.push(
+        text_input(
+            "zenoh config file (JSON5) — reaches a secured bus; knobs above apply on top",
+            &form.zenoh_config,
+        )
+        .on_input(|t| msg(ContextMsg::ZenohConfigChanged(t)))
+        .size(font::CAPTION),
     );
     col = col.push(
         checkbox(form.scouting)
@@ -284,6 +305,7 @@ mod tests {
             registry: vec![],
             scouting: Some(true),
             timeout: None,
+            zenoh_config: None,
         };
         let mut form = ContextForm::default();
         form.load_from("lab", &stored);
