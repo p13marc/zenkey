@@ -76,7 +76,9 @@ pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem, WatchId,
 };
 pub use tree::KeyTreeSnapshot;
-pub use write::{CallTarget, MatchingEvents, Publication, call, declare_publication};
+pub use write::{
+    CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire, declare_publication,
+};
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.
 #[cfg(feature = "blob")]
