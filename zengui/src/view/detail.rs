@@ -57,6 +57,24 @@ pub struct DetailData<'a> {
     /// The newest recorded sample for this key, when observation has seen
     /// one — the source of the *observed* QoS axes (#120).
     pub observed: Option<&'a crate::history::HistoryEntry>,
+    /// The key's observed skewed-latency summary and unstamped count,
+    /// refreshed per bus tick (#119). Absent = nothing stamped, which is
+    /// not zero latency.
+    pub latency: Option<(zenkey_fleet::LatencySummary, u64)>,
+}
+
+/// Microseconds humanised with the sign kept — a negative latency is the
+/// skew evidence (#119), same spelling as `zenctl topic hz --latency`.
+pub fn human_us(us: i64) -> String {
+    let sign = if us < 0 { "-" } else { "" };
+    let abs = us.unsigned_abs();
+    if abs >= 1_000_000 {
+        format!("{sign}{:.2}s", abs as f64 / 1_000_000.0)
+    } else if abs >= 1_000 {
+        format!("{sign}{:.1}ms", abs as f64 / 1_000.0)
+    } else {
+        format!("{sign}{abs}µs")
+    }
 }
 
 /// The wire's QoS axes as one stable lowercase token — the same spelling
@@ -178,6 +196,20 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
     }
     if let Some(qos) = qos_section(&data) {
         col = col.push(qos);
+    }
+    if let Some((lat, unstamped)) = &data.latency {
+        col = col.push(kit::mono(format!(
+            "observed skewed latency: med {} · p95 {} (min {} · max {}, {} stamped, {} unstamped)",
+            human_us(lat.median_us),
+            human_us(lat.p95_us),
+            human_us(lat.min_us),
+            human_us(lat.max_us),
+            lat.samples,
+            unstamped,
+        )));
+        col = col.push(kit::muted(
+            "arrival wall-clock − publisher HLC: contains clock skew; negative is the              skew evidence, an observation, not a transport verdict (RFC 09 §5.1)",
+        ));
     }
 
     // — Value: the fetch outcome + hex-beside-decoded.
