@@ -1585,11 +1585,89 @@ mod admin {
                 storage: StorageList { storages, coverage },
                 declared,
                 coverage_note: note.map(str::to_string),
+                topology: zenkey_fleet::TopologyReport {
+                    nodes: vec![],
+                    edges: vec![],
+                    asked: "@/*/*".into(),
+                    answered: 0,
+                    self_zid: String::new(),
+                },
                 base: String::new(),
             })),
             "",
         );
         state
+    }
+
+    /// #118: the topology caption is the testable surface (the canvas is
+    /// find-opaque) — it names the heard-of nodes, the storage hosts, and
+    /// this session, and an unanswered admin space stays a reachability
+    /// reading, never an empty mesh.
+    #[test]
+    fn the_topology_caption_carries_the_overlay_facts() {
+        let mut state = AdminState::default();
+        state.finish(
+            Ok(Arc::new(AdminSweep {
+                routers: vec![],
+                storage: StorageList {
+                    storages: vec![storage("s1")],
+                    coverage: vec![],
+                },
+                declared: None,
+                coverage_note: None,
+                topology: zenkey_fleet::TopologyReport {
+                    nodes: vec![
+                        zenkey_fleet::TopologyNode {
+                            zid: "z1".into(),
+                            whatami: "router".into(),
+                            version: Some("1.9.0".into()),
+                            locators: vec!["tcp/10.0.0.1:7447".into()],
+                            answered: true,
+                        },
+                        zenkey_fleet::TopologyNode {
+                            zid: "z2".into(),
+                            whatami: "peer".into(),
+                            version: None,
+                            locators: vec![],
+                            answered: false,
+                        },
+                    ],
+                    edges: vec![zenkey_fleet::TopologyEdge {
+                        reporter: "z1".into(),
+                        peer: "z2".into(),
+                        whatami: "peer".into(),
+                        links: vec![],
+                    }],
+                    asked: "@/*/*".into(),
+                    answered: 1,
+                    self_zid: "z2".into(),
+                },
+                base: String::new(),
+            })),
+            "",
+        );
+        let mut ui = simulator::<Message, _, _>(pane(&state));
+        // iced_test's find matches a widget's WHOLE text.
+        assert!(
+            ui.find("z1  router  ⌂ storage").is_ok(),
+            "the answered node rolls, with the storage overlay marking its host"
+        );
+        assert!(
+            ui.find("z2  peer  (heard of)  ← you").is_ok(),
+            "heard-of and you-are-here ride the caption"
+        );
+
+        // And the unanswered mesh stays a reading.
+        let empty = sweep(vec![], vec![], vec![], None, None);
+        let mut ui = simulator::<Message, _, _>(pane(&empty));
+        assert!(
+            ui.find(
+                "no admin space answered @/*/* — adminspace.enabled defaults off; this is a \
+             reading about reachability, never an empty mesh (RFC 05 §3.1)"
+            )
+            .is_ok(),
+            "zero answers is reachability, not topology"
+        );
     }
 
     fn storage(name: &str) -> StorageInfo {

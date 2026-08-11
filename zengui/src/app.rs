@@ -1913,11 +1913,15 @@ impl Zengui {
                                 ),
                             ),
                         };
+                        let topology = zenkey_fleet::topology(&session, timeout)
+                            .await
+                            .map_err(|e| e.to_string())?;
                         Ok(Arc::new(crate::admin::AdminSweep {
                             routers,
                             storage: zenkey_fleet::report::StorageList { storages, coverage },
                             declared,
                             coverage_note,
+                            topology,
                             base,
                         }))
                     },
