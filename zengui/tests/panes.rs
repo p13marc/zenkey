@@ -945,6 +945,11 @@ fn recording(key: &str, max_entries: usize, samples: &[(&[u8], bool)]) -> Histor
             },
             timestamp: None,
             attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
             received: Instant::now(),
         });
     }

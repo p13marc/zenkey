@@ -163,6 +163,15 @@ pub(crate) fn view_of(sample: &zenoh::sample::Sample) -> SampleView {
         kind: sample.kind(),
         timestamp: sample.timestamp().copied(),
         attachment: sample.attachment().cloned(),
+        priority: sample.priority(),
+        congestion_control: sample.congestion_control(),
+        reliability: sample.reliability(),
+        express: sample.express(),
+        source: sample.source_info().map(|si| crate::sub::SampleSource {
+            zid: si.source_id().zid(),
+            eid: si.source_id().eid(),
+            sn: si.source_sn(),
+        }),
         // Arrival, not production: a seed reply is *received* now, however old
         // the value it carries is. The HLC above is the only thing that speaks
         // for when it was produced, and it is often absent.

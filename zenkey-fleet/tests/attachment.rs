@@ -67,6 +67,16 @@ async fn a_watched_sample_carries_its_attachment() {
     }
     let first = views[0].attachment.as_ref().expect("first carried one");
     assert_eq!(first.to_bytes().as_ref(), b"meta");
+    // #120: the wire's actual QoS axes ride the view and match the profile
+    // the publication declared.
+    assert!(
+        views[0].qos_matches(QosProfile::Transition),
+        "declared transition, observed {:?}/{:?}/{:?}/express={}",
+        views[0].priority,
+        views[0].congestion_control,
+        views[0].reliability,
+        views[0].express
+    );
     assert!(
         views[1].attachment.is_none(),
         "no attachment on the wire is None, not an empty buffer"
