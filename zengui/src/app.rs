@@ -2285,6 +2285,7 @@ impl Zengui {
                     decoded: self.decoded.as_ref(),
                     series: self.series_data(),
                     history_entries: self.history.as_ref().map(|r| r.ring.len()),
+                    observed: self.history.as_ref().and_then(|r| r.ring.newest()),
                 }),
                 RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
                     roster: &self.roster,

@@ -544,6 +544,7 @@ fn the_detail_pane_tags_decode_provenance() {
         decoded: Some(&decoded),
         series: None,
         history_entries: None,
+        observed: None,
     }));
     assert!(ui.find("registered").is_ok(), "the facts section renders");
     assert!(
@@ -564,6 +565,7 @@ fn the_detail_pane_tags_decode_provenance() {
         decoded: None,
         series: None,
         history_entries: None,
+        observed: None,
     }));
     assert!(
         ui.find("no value — asked get, @adv cache, subscribe window — a non-verdict, not proof of absence (RFC 05 §3.1)")
@@ -1157,6 +1159,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         decoded: None,
         series: Some(series),
         history_entries: Some(3),
+        observed: None,
     }));
     assert!(
         ui.find("Series").is_err(),
@@ -1197,6 +1200,7 @@ fn the_detail_pane_labels_the_series_it_plots() {
         decoded: None,
         series: Some(series),
         history_entries: Some(3),
+        observed: None,
     }));
     assert!(ui.find("Series").is_ok());
     assert!(

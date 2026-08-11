@@ -54,6 +54,95 @@ pub struct DetailData<'a> {
     /// How many history entries have been recorded for this key, when a
     /// recording is running — the link into the history pane.
     pub history_entries: Option<usize>,
+    /// The newest recorded sample for this key, when observation has seen
+    /// one — the source of the *observed* QoS axes (#120).
+    pub observed: Option<&'a crate::history::HistoryEntry>,
+}
+
+/// The wire's QoS axes as one stable lowercase token — the same spelling
+/// `zenctl topic echo --fmt %q` prints, so the two frontends agree.
+pub fn qos_token(entry: &crate::history::HistoryEntry) -> String {
+    use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
+    let p = match entry.priority {
+        P::RealTime => "real_time",
+        P::InteractiveHigh => "interactive_high",
+        P::InteractiveLow => "interactive_low",
+        P::DataHigh => "data_high",
+        P::Data => "data",
+        P::DataLow => "data_low",
+        P::Background => "background",
+    };
+    let c = match entry.congestion_control {
+        Cc::Drop => "drop",
+        Cc::Block => "block",
+        _ => "other",
+    };
+    let r = match entry.reliability {
+        R::BestEffort => "best_effort",
+        R::Reliable => "reliable",
+    };
+    format!("{p}/{c}/{r}{}", if entry.express { "+express" } else { "" })
+}
+
+/// Declared-vs-observed (#120): the comparison nobody else in the field can
+/// render, because nobody else holds a registry that declares QoS.
+/// `None` = the declared name is not a profile, so there is nothing to
+/// judge (O4).
+pub fn qos_verdict(declared: &str, entry: &crate::history::HistoryEntry) -> Option<bool> {
+    let profile = zenkey::qos::QosProfile::from_name(declared)?;
+    Some(
+        entry.priority == profile.priority()
+            && entry.congestion_control == profile.congestion_control()
+            && entry.reliability == profile.reliability()
+            && entry.express == profile.express(),
+    )
+}
+
+/// The declared-vs-observed QoS lines, when there is anything to say.
+fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
+    let declared = data.facts.and_then(|f| match &f.registration {
+        zenkey_fleet::Registration::Registered(s) => s.qos.clone(),
+        _ => None,
+    });
+    let observed = data.observed;
+    if declared.is_none() && observed.is_none() {
+        return None;
+    }
+    let mut col = Column::new().spacing(2);
+    col = col.push(kit::muted("QoS — declared vs observed (RFC 04 §3)"));
+    match &declared {
+        Some(q) => col = col.push(kit::mono(format!("declared: {q}"))),
+        None => col = col.push(kit::muted("declared: (registry names no profile)")),
+    }
+    match observed {
+        Some(entry) => {
+            let mut line = format!("observed: {}", qos_token(entry));
+            if let Some(src) = &entry.source {
+                use std::fmt::Write as _;
+                let _ = write!(line, "  ·  source {}:{}#{}", src.zid, src.eid, src.sn);
+            }
+            col = col.push(kit::mono(line));
+            if let Some(declared) = &declared {
+                match qos_verdict(declared, entry) {
+                    Some(true) => {
+                        col = col.push(kit::muted("observed axes match the declared profile"))
+                    }
+                    Some(false) => {
+                        col = col.push(kit::muted(
+                            "⚠ observed axes differ from the declared profile — the wire                              is the fact, the registry is the claim (RFC 04 §3)",
+                        ));
+                    }
+                    None => {}
+                }
+            }
+        }
+        None => {
+            col = col.push(kit::muted(
+                "observed: nothing recorded yet — axes appear once the key is observed (O4)",
+            ));
+        }
+    }
+    Some(col.into())
 }
 
 /// Everything the series section plots, computed by the app from the history
@@ -86,6 +175,9 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
         Some(f) => {
             col = col.push(facts_section(f));
         }
+    }
+    if let Some(qos) = qos_section(&data) {
+        col = col.push(qos);
     }
 
     // — Value: the fetch outcome + hex-beside-decoded.
@@ -368,4 +460,50 @@ fn decoded_pane<'a>(
     iced::widget::container(col)
         .width(Length::FillPortion(1))
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn entry(profile: zenkey::qos::QosProfile) -> crate::history::HistoryEntry {
+        crate::history::HistoryEntry {
+            seq: 0,
+            received: Instant::now(),
+            timestamp: None,
+            is_delete: false,
+            len: 2,
+            encoding: "application/json".into(),
+            payload: zenoh::bytes::ZBytes::from("{}"),
+            priority: profile.priority(),
+            congestion_control: profile.congestion_control(),
+            reliability: profile.reliability(),
+            express: profile.express(),
+            source: None,
+            value: None,
+            preview: "{}".into(),
+        }
+    }
+
+    /// #120: the verdict compares axes, not names — and an undeclarable
+    /// name judges nothing rather than judging falsely (O4).
+    #[test]
+    fn declared_vs_observed_judges_axes_not_names() {
+        use zenkey::qos::QosProfile;
+        let observed_alert = entry(QosProfile::Alert);
+        assert_eq!(qos_verdict("alert", &observed_alert), Some(true));
+        assert_eq!(qos_verdict("sampled", &observed_alert), Some(false));
+        assert_eq!(qos_verdict("not-a-profile", &observed_alert), None);
+    }
+
+    /// The token spelling is byte-for-byte the CLI's %q, so the two
+    /// frontends agree on what the wire said.
+    #[test]
+    fn the_token_matches_the_cli_spelling() {
+        use zenkey::qos::QosProfile;
+        let e = entry(QosProfile::Alert);
+        // alert = interactive_high / block / reliable / express (RFC 04 §3).
+        assert_eq!(qos_token(&e), "interactive_high/block/reliable+express");
+    }
 }

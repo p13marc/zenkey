@@ -56,6 +56,13 @@ pub struct HistoryEntry {
     pub encoding: String,
     /// The payload itself, retained by refcount.
     pub payload: zenoh::bytes::ZBytes,
+    /// The wire's actual QoS axes (#120) — all `Copy`, always stamped.
+    pub priority: zenoh::qos::Priority,
+    pub congestion_control: zenoh::qos::CongestionControl,
+    pub reliability: zenoh::qos::Reliability,
+    pub express: bool,
+    /// The publishing entity, when SourceInfo rode the sample.
+    pub source: Option<zenkey_fleet::SampleSource>,
     /// The structural document, when the bytes carry one — the diff's
     /// field-level side. `None` means plain text or opaque bytes, and the
     /// diff falls back to bytes rather than inventing fields.
@@ -87,6 +94,11 @@ impl HistoryEntry {
             len,
             encoding: view.encoding.clone(),
             payload: view.payload.clone(),
+            priority: view.priority,
+            congestion_control: view.congestion_control,
+            reliability: view.reliability,
+            express: view.express,
+            source: view.source,
             value,
             preview,
         }
