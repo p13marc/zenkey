@@ -67,16 +67,34 @@ pub async fn declare_publication(
 }
 
 impl Publication {
-    /// Publish one payload. Sets the wire `Encoding` when one was declared
+    /// Publish one payload, with an optional attachment riding beside it
+    /// (#117 — attachments are outside the registry's vocabulary and are
+    /// never schema-encoded). Sets the wire `Encoding` when one was declared
     /// (RFC 04 v1.5's recommendation: publishers say what they carry).
-    pub async fn send(&self, payload: Vec<u8>) -> Result<()> {
+    pub async fn send(&self, payload: Vec<u8>, attachment: Option<Vec<u8>>) -> Result<()> {
         let put = self.publisher.put(payload);
         let put = match &self.encoding {
             Some(e) => put.encoding(e.as_str()),
             None => put,
         };
+        let put = match attachment {
+            Some(a) => put.attachment(a),
+            None => put,
+        };
         put.await
             .map_err(|e| anyhow!("put {}: {e}", self.publisher.key_expr()))
+    }
+
+    /// Publish a tombstone — an authoritative retirement (RFC 04 §1.2),
+    /// never a payload marker. The only delete path: it rides the declared
+    /// publisher, and `Session::delete` stays unexposed for the same reason
+    /// there is no bare-put helper. Gate dynamic keys through
+    /// [`check_retire`] first — the class semantics live there.
+    pub async fn retire(&self) -> Result<()> {
+        self.publisher
+            .delete()
+            .await
+            .map_err(|e| anyhow!("delete {}: {e}", self.publisher.key_expr()))
     }
 
     /// Undeclare, acknowledged.
@@ -110,6 +128,103 @@ impl Publication {
             .await
             .map_err(|e| anyhow!("matching listener: {e}"))?;
         Ok(MatchingEvents { listener })
+    }
+}
+
+/// What a key is, for the purpose of retiring it — the guard's positive
+/// verdict, so callers print facts instead of re-deriving them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RetireClass {
+    /// State-shaped: retirement is the class's own semantics (RFC 04 §1.2).
+    State {
+        /// Whether a loaded registry recognises the subject. An unregistered
+        /// state key still tombstones authoritatively — but no `ttl_s`
+        /// bounds how long the tombstone stays observable.
+        registered: bool,
+        /// The registry's `ttl_s`, when declared: storages keep the
+        /// tombstone observable at least this long (RFC 04 §1.2).
+        ttl_s: Option<i64>,
+    },
+    /// A v1 key off the state class (telemetry/events, or a verbatim
+    /// plane) — retired anyway, as a forced operator cleanup (v1.12).
+    NonState { class: String },
+    /// The grammar could not say what the key is — retired blind, forced.
+    Unclassified { reason: String },
+}
+
+/// Refuse a tombstone the class semantics do not license, unless forced.
+///
+/// The judgment mirrors `bench`'s idempotence guard: the refusal is
+/// grammar- and registry-driven, and the messages cite what they know.
+/// Unlike `bench`, a missing registry does not blind us on the happy path —
+/// the class is written in the key itself, so a state key passes with no
+/// slices loaded. The one unconditional refusal is a wildcard: a tombstone
+/// is addressed to one concrete key (RFC 04 §1.2, v1.12), and no `force`
+/// overrides a blast radius.
+pub fn check_retire(
+    base: &str,
+    key: &str,
+    slices: Option<&SliceSet>,
+    force: bool,
+) -> Result<RetireClass> {
+    if key.contains('*') || key.contains('$') {
+        bail!(
+            "{key} is a wildcard — a tombstone is addressed to one concrete key; \
+             a wildcard delete is not an operator act, it is a blast radius \
+             (RFC 04 §1.2, v1.12). Not overridable."
+        );
+    }
+    let facts = crate::facts::describe_key(base, key, slices).facts;
+    use crate::facts::{ClassKind, KeyShape, Registration};
+    match &facts.shape {
+        KeyShape::V1(v) if v.class_kind == ClassKind::State => {
+            let (registered, ttl_s) = match &facts.registration {
+                Registration::Registered(s) => (true, s.ttl_s),
+                _ => (false, None),
+            };
+            Ok(RetireClass::State { registered, ttl_s })
+        }
+        KeyShape::V1(v) if matches!(v.class_kind, ClassKind::Telemetry | ClassKind::Events) => {
+            if force {
+                return Ok(RetireClass::NonState {
+                    class: v.class.clone(),
+                });
+            }
+            bail!(
+                "{key} is {class}-shaped — RFC 04 §1: a delete there is meaningless \
+                 and MUST NOT be sent by the class's publisher. Retiring it anyway \
+                 is an operator cleanup (RFC 04 §1.2, v1.12) — pass --i-know to \
+                 mean it.",
+                class = v.class
+            );
+        }
+        KeyShape::V1(v) => {
+            if force {
+                return Ok(RetireClass::NonState {
+                    class: v.class.clone(),
+                });
+            }
+            bail!(
+                "{key} sits on the {class} plane — a plane key answers GETs or \
+                 carries frames; a tombstone there is at most a storage purge \
+                 (RFC 04 §1.2, v1.12) — pass --i-know to mean it.",
+                class = v.class
+            );
+        }
+        KeyShape::NotUnderBase | KeyShape::Unparsed { .. } => {
+            let reason = match &facts.shape {
+                KeyShape::Unparsed { reason } => reason.clone(),
+                _ => format!("not under base {base:?}"),
+            };
+            if force {
+                return Ok(RetireClass::Unclassified { reason });
+            }
+            bail!(
+                "cannot classify {key} under base {base:?} ({reason}) — 'not asked' \
+                 is not 'state' (RFC 09 §5.1 O4); pass --i-know to retire an \
+                 unclassified key."
+            );
+        }
     }
 }
 
@@ -268,7 +383,121 @@ pub async fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey::slice::{ProcedureDecl, RegistrySlice};
+    use zenkey::slice::{ProcedureDecl, RegistrySlice, SubjectDecl};
+
+    fn slice_with_state_subject() -> SliceSet {
+        SliceSet::from_slices(vec![RegistrySlice {
+            version: "1.0".into(),
+            app: "t".into(),
+            convention: 1,
+            name: "sysinfo".into(),
+            service_origin: None,
+            description: None,
+            subjects: vec![SubjectDecl {
+                path: "health".into(),
+                class: "state".into(),
+                type_name: "Health".into(),
+                common: None,
+                since: None,
+                description: None,
+                qos: None,
+                ttl_s: Some(900),
+                unit: None,
+                rate: None,
+                cardinality: None,
+                encoding: None,
+            }],
+            procedures: vec![],
+            blob: vec![],
+            deprecated: vec![],
+        }])
+    }
+
+    /// The five outcomes of the retire guard (RFC 04 §1.2, v1.12), each
+    /// citing what it knows.
+    #[test]
+    fn a_wildcard_retire_is_refused_unconditionally() {
+        for force in [false, true] {
+            let err = check_retire("", "v1/h-3fa9c2d41b7e/state/sysinfo/**", None, force)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("blast radius"), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_state_key_retires_without_a_registry() {
+        // The class is written in the key itself — unlike bench's
+        // idempotence, a missing registry does not blind the guard.
+        let got = check_retire("", "v1/h-3fa9c2d41b7e/state/sysinfo/health", None, false).unwrap();
+        assert_eq!(
+            got,
+            RetireClass::State {
+                registered: false,
+                ttl_s: None
+            }
+        );
+        // With the registry loaded, the tombstone-visibility bound rides out.
+        let slices = slice_with_state_subject();
+        let got = check_retire(
+            "",
+            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+            Some(&slices),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            got,
+            RetireClass::State {
+                registered: true,
+                ttl_s: Some(900)
+            }
+        );
+    }
+
+    #[test]
+    fn a_telemetry_retire_needs_i_know_and_cites_the_rfc() {
+        let key = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage";
+        let err = check_retire("", key, None, false).unwrap_err().to_string();
+        assert!(err.contains("MUST NOT"), "{err}");
+        assert!(err.contains("v1.12"), "{err}");
+        assert!(err.contains("--i-know"), "{err}");
+        assert_eq!(
+            check_retire("", key, None, true).unwrap(),
+            RetireClass::NonState {
+                class: "telemetry".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_plane_retire_needs_i_know_too() {
+        let key = "v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect";
+        let err = check_retire("", key, None, false).unwrap_err().to_string();
+        assert!(err.contains("plane"), "{err}");
+        assert!(matches!(
+            check_retire("", key, None, true).unwrap(),
+            RetireClass::NonState { class } if class == "@rpc"
+        ));
+    }
+
+    #[test]
+    fn an_unclassified_retire_needs_i_know_and_names_o4() {
+        // A foreign key under an empty base parses as... nothing v1.
+        let err = check_retire("", "some/foreign/key", None, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("O4"), "{err}");
+        assert!(matches!(
+            check_retire("", "some/foreign/key", None, true).unwrap(),
+            RetireClass::Unclassified { .. }
+        ));
+        // And a key under another base is unclassified, not misclassified.
+        let err = check_retire("acme", "other/v1/h-3fa9c2d41b7e/state/x/y", None, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot classify"), "{err}");
+    }
 
     fn slice_with_proc(fanout: Option<&str>) -> SliceSet {
         SliceSet::from_slices(vec![RegistrySlice {

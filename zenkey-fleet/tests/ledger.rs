@@ -69,6 +69,7 @@ fn view(key: &str, len: usize) -> SampleView {
         encoding: "application/json".to_string(),
         kind: zenoh::sample::SampleKind::Put,
         timestamp: None,
+        attachment: None,
         received: Instant::now(),
     }
 }

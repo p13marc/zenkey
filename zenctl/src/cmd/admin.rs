@@ -1,38 +1,10 @@
-//! `admin get` / `admin routers` — the zenoh admin space (`@/**`), the
-//! middleware's own introspection. Key layouts vary between zenoh versions,
-//! so this is a raw, honest browse.
+//! `admin routers` — the zenoh admin space (`@/**`), the middleware's own
+//! introspection. The generic admin browse moved to the first-class
+//! `zenctl get` (#114); what stays here is the genuinely admin-shaped.
 
 use anyhow::Result;
 
 use crate::{BusArgs, output};
-
-pub async fn get(selector: &str, args: &BusArgs) -> Result<()> {
-    let session = args.session().await?;
-    let entries = zenkey_fleet::admin_get(&session, selector, args.timeout()).await?;
-    match args.format.resolved() {
-        output::Format::Json => println!(
-            "{}",
-            serde_json::to_string_pretty(
-                &entries
-                    .iter()
-                    .map(|e| serde_json::json!({"key": e.key, "value": e.value}))
-                    .collect::<Vec<_>>()
-            )?
-        ),
-        output::Format::Ndjson => {
-            for e in &entries {
-                println!("{}", serde_json::json!({"key": e.key, "value": e.value}));
-            }
-        }
-        _ => {
-            for e in &entries {
-                println!("{}\n  {}", e.key, e.value);
-            }
-            eprintln!("{} admin entr(ies)", entries.len());
-        }
-    }
-    Ok(())
-}
 
 pub async fn routers(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;

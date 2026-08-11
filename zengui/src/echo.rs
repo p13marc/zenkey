@@ -42,6 +42,11 @@ pub struct EchoLine {
     pub is_delete: bool,
     /// Publisher HLC timestamp, when the publisher's session stamps one.
     pub timestamp: Option<String>,
+    /// A bounded structural preview of the attachment, when the sample
+    /// carried one (#117). Same sync-only rendering rule as the payload.
+    pub attachment: Option<String>,
+    /// True attachment size, regardless of the preview bound.
+    pub attachment_len: Option<usize>,
 }
 
 impl EchoLine {
@@ -58,6 +63,14 @@ impl EchoLine {
         } else {
             truncate(zenkey_fleet::decode::structural(&view.payload.to_bytes()))
         };
+        let attachment = view.attachment.as_ref().map(|a| {
+            let alen = a.len();
+            if alen > DECODE_LIMIT {
+                format!("<{alen} bytes — too large to preview>")
+            } else {
+                truncate(zenkey_fleet::decode::structural(&a.to_bytes()))
+            }
+        });
         EchoLine {
             seq,
             key: view.key.clone(),
@@ -66,12 +79,15 @@ impl EchoLine {
             encoding: view.encoding.clone(),
             is_delete: view.kind == zenoh::sample::SampleKind::Delete,
             timestamp: view.timestamp.map(|t| t.to_string()),
+            attachment_len: view.attachment.as_ref().map(|a| a.len()),
+            attachment,
         }
     }
 
-    /// What this line costs the ring's byte budget.
+    /// What this line costs the ring's byte budget. The attachment preview
+    /// counts too — a bound that ignores what it stores stops being a bound.
     fn weight(&self) -> usize {
-        self.key.len() + self.preview.len()
+        self.key.len() + self.preview.len() + self.attachment.as_ref().map_or(0, String::len)
     }
 }
 
@@ -207,6 +223,8 @@ mod tests {
             encoding: String::new(),
             is_delete: false,
             timestamp: None,
+            attachment: None,
+            attachment_len: None,
         }
     }
 
@@ -275,6 +293,24 @@ mod tests {
         assert!(ring.is_empty());
         assert_eq!(ring.evicted(), 3);
         assert_eq!(ring.lagged(), 4);
+    }
+
+    /// The ring's byte bound counts the attachment preview (#117) — an
+    /// attachment-heavy stream must evict as readily as a payload-heavy one.
+    #[test]
+    fn the_byte_bound_counts_the_attachment() {
+        let mut ring = EchoRing::new(1000);
+        for i in 0..50 {
+            let mut l = line(i, "k", 1);
+            l.attachment = Some("x".repeat(100_000));
+            l.attachment_len = Some(100_000);
+            push(&mut ring, l);
+        }
+        assert!(
+            ring.len() < 50,
+            "attachment bytes must count against the budget, got {}",
+            ring.len()
+        );
     }
 
     #[test]

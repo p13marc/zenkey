@@ -254,6 +254,7 @@ fn bench_monitor(c: &mut Criterion) {
             encoding: "application/json".to_string(),
             kind: zenoh::sample::SampleKind::Put,
             timestamp: None,
+            attachment: None,
             received: Instant::now(),
         }
     }

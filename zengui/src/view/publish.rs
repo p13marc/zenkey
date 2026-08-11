@@ -75,6 +75,10 @@ pub struct PublishForm {
     /// Send the bytes verbatim — the explicit escape hatch, mirroring
     /// `zenctl topic pub --raw`.
     pub raw: bool,
+    /// Attachment text riding beside the payload; empty = none. Shipped
+    /// verbatim — never schema-encoded, the registry's vocabulary ends at
+    /// the payload (#117).
+    pub attachment: String,
     /// Keep publishing on an interval once armed.
     pub repeat: bool,
     pub interval: String,
@@ -99,6 +103,10 @@ pub struct PublishForm {
     pub in_flight: bool,
     /// The last refusal, when a send did not happen at all.
     pub error: Option<String>,
+    /// The v1.12 confirmation: retiring a key that is not state-shaped is an
+    /// operator cleanup, priced with the same `--i-know` vocabulary as the
+    /// CLI. The engine's `check_retire` stays the judge — this only arms it.
+    pub retire_i_know: bool,
 }
 
 impl Default for PublishForm {
@@ -109,6 +117,7 @@ impl Default for PublishForm {
             qos: QosChoice(QosProfile::Sampled),
             encoding: String::new(),
             raw: false,
+            attachment: String::new(),
             repeat: false,
             interval: "1.0".into(),
             facts: None,
@@ -121,6 +130,7 @@ impl Default for PublishForm {
             dropped: 0,
             in_flight: false,
             error: None,
+            retire_i_know: false,
         }
     }
 }
@@ -154,6 +164,7 @@ pub enum PublishMsg {
     BodyChanged(String),
     QosPicked(QosChoice),
     EncodingChanged(String),
+    AttachmentChanged(String),
     RawToggled(bool),
     RepeatToggled(bool),
     IntervalChanged(String),
@@ -161,6 +172,21 @@ pub enum PublishMsg {
     Send,
     /// Undeclare the armed publication.
     Stop,
+    /// Retire the key with a tombstone (RFC 04 §1.2, #115).
+    Retire,
+    /// The v1.12 operator confirmation for an off-state retire.
+    RetireIKnowToggled(bool),
+}
+
+/// Whether retiring this key is the v1.12 operator act — i.e. anything but a
+/// state key, where retirement is the class's own semantics. Display logic
+/// only: the engine's `check_retire` is the judge at submit.
+pub fn retire_needs_i_know(facts: Option<&KeyFacts>) -> bool {
+    use zenkey_fleet::facts::{ClassKind, KeyShape};
+    match facts.map(|f| &f.shape) {
+        Some(KeyShape::V1(v)) => v.class_kind != ClassKind::State,
+        _ => true,
+    }
 }
 
 fn msg(m: PublishMsg) -> Message {
@@ -208,6 +234,13 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
         .on_input(|t| msg(PublishMsg::EncodingChanged(t)))
         .size(font::CAPTION);
 
+    let attachment = text_input(
+        "attachment (optional — ships verbatim, never schema-encoded)",
+        &form.attachment,
+    )
+    .on_input(|t| msg(PublishMsg::AttachmentChanged(t)))
+    .size(font::CAPTION);
+
     let raw = checkbox(form.raw)
         .label("send raw")
         .on_toggle(|b| msg(PublishMsg::RawToggled(b)))
@@ -244,6 +277,23 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
                 .on_press(msg(PublishMsg::Stop)),
         );
     }
+    // Retire (#115): a tombstone, not an empty put. Off the state class it
+    // is the v1.12 operator act and stays disabled until confirmed.
+    let needs_i_know = retire_needs_i_know(form.facts.as_ref());
+    let mut retire = button(text("retire").size(font::CAPTION)).padding(4);
+    if ready && (!needs_i_know || form.retire_i_know) {
+        retire = retire.on_press(msg(PublishMsg::Retire));
+    }
+    controls = controls.push(retire);
+    let i_know_row: Option<Element<'a, Message>> = (needs_i_know
+        && !form.key.trim().is_empty())
+    .then(|| {
+        checkbox(form.retire_i_know)
+            .label("--i-know: not state-shaped — retiring is an operator cleanup (RFC 04 §1.2, v1.12)")
+            .on_toggle(|b| msg(PublishMsg::RetireIKnowToggled(b)))
+            .text_size(font::CAPTION)
+            .into()
+    });
 
     let mut col = column![
         kit::section_header("Publish", None),
@@ -251,12 +301,16 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
         facts_col,
         body,
         row![qos, encoding].spacing(space::SM),
+        attachment,
         row![raw, repeat, interval]
             .spacing(space::SM)
             .align_y(iced::Alignment::Center),
         controls,
     ]
     .spacing(space::SM);
+    if let Some(row) = i_know_row {
+        col = col.push(row);
+    }
 
     if let Some(e) = &form.error {
         col = col.push(text(format!("refused: {e}")).size(font::CAPTION).style(
@@ -362,6 +416,24 @@ mod tests {
         assert_eq!(form.interval_secs(), 1.0);
         form.interval = "2.5".into();
         assert_eq!(form.interval_secs(), 2.5);
+    }
+
+    /// The retire gate mirrors the engine guard's happy path (#115): state
+    /// keys retire freely — the class is written in the key — and everything
+    /// else, including a key nobody classified, needs the confirmation.
+    #[test]
+    fn only_a_state_key_retires_without_the_i_know() {
+        let facts = |k: &str| KeyFacts::project("", k);
+        let state = facts("v1/h-3fa9c2d41b7e/state/sysinfo/health");
+        assert!(!retire_needs_i_know(Some(&state)));
+        let telemetry = facts("v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage");
+        assert!(retire_needs_i_know(Some(&telemetry)));
+        let plane = facts("v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect");
+        assert!(retire_needs_i_know(Some(&plane)));
+        let foreign = facts("some/foreign/key");
+        assert!(retire_needs_i_know(Some(&foreign)));
+        // Not classified at all is not "state" (O4).
+        assert!(retire_needs_i_know(None));
     }
 
     /// The picker is the enum, not a copy of it.

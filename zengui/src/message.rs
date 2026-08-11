@@ -70,6 +70,9 @@ pub enum Message {
     PublishSent(Result<usize, String>),
     /// The armed publication was undeclared.
     PublishStopped(Result<(), String>),
+    /// A retire round finished (#115): the tombstone shipped (with the
+    /// publication's matching fact), or it did not.
+    PublishRetired(Result<Option<bool>, String>),
     /// Node dashboard interactions (issue #61).
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).
@@ -139,6 +142,9 @@ pub struct PublishOutcome {
     pub publication: Option<Arc<zenkey_fleet::Publication>>,
     /// `None` = the status could not be asked, which is not `false` (O4).
     pub matching: Option<bool>,
+    /// The attachment that rode the send, kept so a repeating publish
+    /// resends it (#117).
+    pub attachment: Option<Arc<Vec<u8>>>,
 }
 
 /// The right-hand pane switch — a tab strip, not a cycle, because the pane

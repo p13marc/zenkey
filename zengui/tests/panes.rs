@@ -528,6 +528,7 @@ fn the_detail_pane_tags_decode_provenance() {
             payload: zenoh::bytes::ZBytes::from(br#"{"value":42.0}"#.to_vec()),
             encoding: "application/json".into(),
             timestamp: None,
+            attachment: None,
             source: ValueSource::Storage,
         })));
 
@@ -927,6 +928,7 @@ fn recording(key: &str, max_entries: usize, samples: &[(&[u8], bool)]) -> Histor
                 zenoh::sample::SampleKind::Put
             },
             timestamp: None,
+            attachment: None,
             received: Instant::now(),
         });
     }

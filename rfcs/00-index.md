@@ -1,9 +1,32 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.11 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.12 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.12 (2026-08-11, the explorer-tombstone amendment)** — [04 §1.2](04-planes.md)
+> gains one bullet: an explorer or operator tool MAY retire any **concrete**
+> key with a tombstone as a deliberate operator act, with an explicit
+> confirmation required off the `state` class, and wildcard deletes refused
+> outright. Motivated by zenkey #115 (`zenctl topic retire` / the zengui
+> publish pane's retire action): the suite could observe tombstones but not
+> produce one, and "the explorer cannot retire a test key" is a real
+> dev-loop hole with no other remedy once a stray key lodges in storage.
+>
+> **What did *not* change.** §1's class table is quoted, not weakened: a
+> delete on `telemetry`/`events` remains "meaningless; MUST NOT be sent"
+> *for the class's publishers* — the amendment names the one actor to whom
+> that row never spoke (an operator cleaning the keyspace) and prices the
+> act (confirmation) instead of leaving it to raw zenoh tooling, which
+> would send the same delete with no class awareness at all. The refresh /
+> aging / retirement / tombstone-visibility table, `ttl_s` semantics, and
+> §1.2's cardinality budget are untouched.
+>
+> **Provenance.** The 2026-08 competitive analysis (`docs/`): nuze,
+> zenoh-cli and zsak all publish DELETEs with no class consciousness
+> whatsoever; the convention's answer is not to refuse the verb but to
+> make its semantics legible at the point of use.
 
 > **v1.11 (2026-08-10, the blob-id spelling erratum)** — [07 §2.2](07-bulk-planes.md)
 > says a Tier-1 `<id>` "is the ULID minted by the RPC that created it" and

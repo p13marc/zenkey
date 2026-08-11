@@ -22,6 +22,7 @@ pub mod query;
 pub mod registry;
 pub mod report;
 pub mod roster;
+pub mod scout;
 pub mod seed;
 pub mod session;
 pub mod skeleton;
@@ -67,6 +68,7 @@ pub use query::{
 };
 pub use registry::SliceSet;
 pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
+pub use scout::{HelloView, ScoutStream, scout};
 pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use session::open;
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
@@ -74,7 +76,9 @@ pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem, WatchId,
 };
 pub use tree::KeyTreeSnapshot;
-pub use write::{CallTarget, MatchingEvents, Publication, call, declare_publication};
+pub use write::{
+    CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire, declare_publication,
+};
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.
 #[cfg(feature = "blob")]

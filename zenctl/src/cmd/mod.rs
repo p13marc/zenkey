@@ -11,11 +11,14 @@ pub mod cache;
 pub mod call;
 pub mod doctor;
 pub mod echo;
+pub mod get;
 pub mod node;
 pub mod publish;
 pub mod rate;
 pub mod registry;
+pub mod render;
 pub mod schema;
+pub mod scout;
 pub mod watch;
 
 use anyhow::{Result, anyhow};

@@ -440,6 +440,7 @@ mod tests {
             origin: "?".to_string(),
             key: "zensight/v1/h-3fa9c2d41b7e/@blob/artifact/NOPE/have".to_string(),
             encoding: None,
+            attachment: None,
             answer: Answer::Error {
                 name: "error/x".into(),
                 message: String::new(),

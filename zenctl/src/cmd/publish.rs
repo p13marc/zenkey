@@ -29,6 +29,7 @@ pub async fn run(
     interval: f64,
     no_validate: bool,
     raw: bool,
+    attachment: Option<&str>,
     args: &BusArgs,
 ) -> Result<()> {
     let qos = zenkey::qos::QosProfile::from_name(qos).ok_or_else(|| {
@@ -47,6 +48,15 @@ pub async fn run(
             Some(path) => std::fs::read(path)?,
             None => b.as_bytes().to_vec(),
         },
+    };
+    // The attachment ships verbatim (#117): never schema-encoded, the
+    // registry's vocabulary ends at the payload.
+    let attachment: Option<Vec<u8>> = match attachment {
+        None => None,
+        Some(a) => Some(match a.strip_prefix('@') {
+            Some(path) => std::fs::read(path)?,
+            None => a.as_bytes().to_vec(),
+        }),
     };
 
     let session = args.session().await?;
@@ -99,7 +109,9 @@ pub async fn run(
     }
     let times = repeat.max(1);
     for n in 0..times {
-        publication.send(prepared.bytes.clone()).await?;
+        publication
+            .send(prepared.bytes.clone(), attachment.clone())
+            .await?;
         eprintln!(
             "published {key} ({} bytes) [{}/{times}]",
             prepared.bytes.len(),
@@ -109,6 +121,55 @@ pub async fn run(
             tokio::time::sleep(Duration::from_secs_f64(interval.max(0.0))).await;
         }
     }
+    publication.undeclare().await?;
+    Ok(())
+}
+
+/// `topic retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
+pub async fn retire(key: &str, qos: &str, i_know: bool, args: &BusArgs) -> Result<()> {
+    let qos = zenkey::qos::QosProfile::from_name(qos).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unknown QoS profile {qos:?} — sampled|refreshed|transition|alert|frame (RFC 04 §3)"
+        )
+    })?;
+    // Slices are best-effort, like pub: the guard is honest about a missing
+    // registry (a state key still passes — the class is in the key).
+    let slices = args.slice_set().await.ok();
+    let verdict = zenkey_fleet::check_retire(args.base(), key, slices.as_ref(), i_know)?;
+    match &verdict {
+        zenkey_fleet::RetireClass::State { registered, ttl_s } => match (registered, ttl_s) {
+            (true, Some(ttl)) => eprintln!(
+                "retiring a state key — the tombstone stays observable ≥ {ttl}s \
+                 where storages enforce gc.lifespan (RFC 04 §1.2)"
+            ),
+            (true, None) => eprintln!("retiring a state key (no ttl_s declared)"),
+            (false, _) => eprintln!(
+                "retiring an unregistered state key — the tombstone is still \
+                 authoritative; no ttl_s bounds its observability"
+            ),
+        },
+        zenkey_fleet::RetireClass::NonState { class } => eprintln!(
+            "retiring a {class} key as an operator cleanup (RFC 04 §1.2, v1.12) — \
+             --i-know acknowledged"
+        ),
+        zenkey_fleet::RetireClass::Unclassified { reason } => {
+            eprintln!("retiring an unclassified key ({reason}) — --i-know acknowledged")
+        }
+    }
+
+    let session = args.session().await?;
+    let publication = zenkey_fleet::declare_publication(&session, key, qos, None).await?;
+    // The same routing fact pub prints, with the same bounds (RFC 05 §3.1).
+    match publication.matching_status().await {
+        Ok(true) => eprintln!("matching: a subscriber currently matches {key}"),
+        Ok(false) => eprintln!(
+            "matching: no subscriber currently matches {key} — a routing fact about \
+             this publisher, not a fleet verdict (RFC 05 §3.1)"
+        ),
+        Err(_) => {}
+    }
+    publication.retire().await?;
+    eprintln!("retired {key}");
     publication.undeclare().await?;
     Ok(())
 }

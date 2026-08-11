@@ -3,127 +3,8 @@
 
 use anyhow::Result;
 
+use super::render::{attachment_display, attachment_json, format_sample, hex, type_tag};
 use crate::{BusArgs, output};
-
-/// One decoded/rendered sample line for echo.
-#[allow(clippy::too_many_arguments)]
-fn format_sample(
-    fmt: &str,
-    n: usize,
-    wire_key: &str,
-    base: &str,
-    type_name: Option<&str>,
-    encoding: &str,
-    payload_len: usize,
-    timestamp: Option<&str>,
-    value: &str,
-) -> String {
-    let parsed = zenkey::grammar::parse_full(base, wire_key);
-    let mut out = String::with_capacity(fmt.len() + value.len());
-    let mut chars = fmt.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next() {
-                Some('n') => out.push('\n'),
-                Some('t') => out.push('\t'),
-                Some(other) => out.push(other),
-                None => {}
-            }
-            continue;
-        }
-        if c != '%' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('{') => {
-                // %{a.b.c}: a decoded payload field by dot-path. Unresolvable
-                // paths render as an empty field, honestly (the line shape
-                // stays stable for cut/awk).
-                let mut path = String::new();
-                for c in chars.by_ref() {
-                    if c == '}' {
-                        break;
-                    }
-                    path.push(c);
-                }
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(value) {
-                    let mut cur = &v;
-                    let mut ok = true;
-                    for seg in path.split('.') {
-                        match cur.get(seg) {
-                            Some(next) => cur = next,
-                            None => {
-                                ok = false;
-                                break;
-                            }
-                        }
-                    }
-                    if ok {
-                        match cur {
-                            serde_json::Value::String(s) => out.push_str(s),
-                            other => out.push_str(&other.to_string()),
-                        }
-                    }
-                }
-            }
-            Some('k') => out.push_str(wire_key),
-            Some('K') => {
-                out.push_str(zenkey::grammar::strip_base(base, wire_key).unwrap_or(wire_key))
-            }
-            Some('o') => {
-                if let Some(p) = &parsed {
-                    out.push_str(p.origin.chunk());
-                }
-            }
-            Some('c') => {
-                if let Some(p) = &parsed {
-                    out.push_str(match &p.class {
-                        zenkey::grammar::ClassOrPlane::Class(c) => c.chunk(),
-                        zenkey::grammar::ClassOrPlane::Plane(pl) => pl.chunk(),
-                    });
-                }
-            }
-            Some('p') => {
-                if let Some(name) = parsed.as_ref().and_then(|p| p.producer.as_ref()) {
-                    out.push_str(name.name());
-                }
-            }
-            Some('s') => {
-                if let Some(p) = &parsed {
-                    out.push_str(&p.subject.join("/"));
-                }
-            }
-            Some('t') => out.push_str(type_name.unwrap_or("unregistered")),
-            Some('v') => out.push_str(value),
-            Some('e') => out.push_str(encoding),
-            Some('l') => {
-                use std::fmt::Write as _;
-                let _ = write!(out, "{payload_len}");
-            }
-            Some('n') => {
-                use std::fmt::Write as _;
-                let _ = write!(out, "{n}");
-            }
-            Some('T') => out.push_str(timestamp.unwrap_or("-")),
-            Some('%') => out.push('%'),
-            Some(other) => {
-                out.push('%');
-                out.push(other);
-            }
-            None => out.push('%'),
-        }
-    }
-    out
-}
-
-pub fn hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 
 /// `topic echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
 /// GET-then-subscribe (it drops everything published in the gap).
@@ -240,6 +121,9 @@ pub async fn run(
         let bytes = sample.payload.to_bytes();
         let encoding = sample.encoding.as_str();
         let timestamp = sample.timestamp.map(|t| t.to_string());
+        // The attachment is a wire fact, rendered once (structural → hex,
+        // size-tagged, never schema-decoded) and shown wherever the sample is.
+        let att = sample.attachment.as_ref().map(attachment_display);
         let rate_suffix = if rate {
             let (_, _, hz) = monitor.core().with_stats(|s| s.totals());
             format!("  @ {hz:.1}/s")
@@ -247,8 +131,39 @@ pub async fn run(
             String::new()
         };
 
-        if raw {
+        if sample.kind == zenoh::sample::SampleKind::Delete {
+            // A tombstone is not an empty put (#115): render the retirement,
+            // decode nothing — there is nothing to decode.
+            if ndjson {
+                let parsed = zenkey::grammar::parse_full(&base, key);
+                let mut obj = serde_json::json!({
+                    "key": key,
+                    "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
+                    "subject": parsed.as_ref().map(|p| p.subject.join("/")),
+                    "encoding": encoding,
+                    "timestamp": timestamp,
+                    "delete": true,
+                    "value": serde_json::Value::Null,
+                });
+                if let Some(a) = &sample.attachment {
+                    obj["attachment"] = attachment_json(a);
+                    obj["attachment_bytes"] = a.len().into();
+                }
+                println!("{obj}");
+            } else {
+                println!(
+                    "{key}\n  <tombstone — authoritative retirement (RFC 04 §1.2), \
+                     not an empty value>{rate_suffix}"
+                );
+                if let Some(a) = &att {
+                    println!("  attachment: {a}");
+                }
+            }
+        } else if raw {
             println!("{key}\n  {}{rate_suffix}", hex(&bytes));
+            if let Some(a) = &sample.attachment {
+                println!("  attachment: {}", hex(&a.to_bytes()));
+            }
         } else if hex_payload {
             // --hex: the decode pipeline still names the type, the payload
             // shows as bytes.
@@ -262,10 +177,14 @@ pub async fn run(
                 &bytes,
             )
             .await;
-            let tag = type_name
-                .map(|t| format!("<{t}>"))
-                .unwrap_or_else(|| "<unregistered>".to_string());
+            // The tag names the registered type; the payload is shown as
+            // bytes at the user's request, which is not a failed decode —
+            // so no `?`.
+            let tag = type_tag(type_name.as_deref(), true);
             println!("{key}\n  {tag} {}{rate_suffix}", hex(&bytes));
+            if let Some(a) = &sample.attachment {
+                println!("  attachment: {}", hex(&a.to_bytes()));
+            }
         } else {
             let (type_name, rendering) = if no_decode {
                 (
@@ -298,7 +217,7 @@ pub async fn run(
             };
             if ndjson {
                 let parsed = zenkey::grammar::parse_full(&base, key);
-                let obj = serde_json::json!({
+                let mut obj = serde_json::json!({
                     "key": key,
                     "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
                     "subject": parsed.as_ref().map(|p| p.subject.join("/")),
@@ -306,9 +225,16 @@ pub async fn run(
                     "typed": typed,
                     "encoding": encoding,
                     "timestamp": timestamp,
+                    "delete": false,
                     "value": serde_json::from_str::<serde_json::Value>(&value)
                         .unwrap_or(serde_json::Value::String(value.clone())),
                 });
+                // Present only when the wire carried one — absent, never
+                // null-when-unknown (#117).
+                if let Some(a) = &sample.attachment {
+                    obj["attachment"] = attachment_json(a);
+                    obj["attachment_bytes"] = a.len().into();
+                }
                 println!("{obj}");
             } else if let Some(fmt) = fmt {
                 println!(
@@ -323,15 +249,15 @@ pub async fn run(
                         bytes.len(),
                         timestamp.as_deref(),
                         &value,
+                        att.as_deref(),
                     )
                 );
             } else {
-                let tag = match (&type_name, typed) {
-                    (Some(t), true) => format!("<{t}>"),
-                    (Some(t), false) => format!("<{t}?>"),
-                    (None, _) => "<unregistered>".to_string(),
-                };
+                let tag = type_tag(type_name.as_deref(), typed);
                 println!("{key}\n  {tag} {value}{rate_suffix}");
+                if let Some(a) = &att {
+                    println!("  attachment: {a}");
+                }
                 for note in notes {
                     eprintln!("  note: {note}");
                 }
@@ -353,59 +279,4 @@ pub async fn run(
         );
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn format_sample_extracts_payload_fields() {
-        let line = format_sample(
-            "%{iface.name} up=%{iface.up} missing=[%{no.such}]",
-            1,
-            "k",
-            "",
-            None,
-            "application/json",
-            2,
-            None,
-            r#"{"iface":{"name":"eth0","up":true}}"#,
-        );
-        assert_eq!(line, "eth0 up=true missing=[]");
-    }
-
-    #[test]
-    fn format_sample_expands_fields() {
-        let line = format_sample(
-            "%n %o %c/%p %s <%t> %v (%l B, %e)",
-            3,
-            "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
-            "tcgui",
-            Some("NetworkInterface"),
-            "application/json",
-            12,
-            None,
-            r#"{"up":true}"#,
-        );
-        assert_eq!(
-            line,
-            r#"3 h-3fa9c2d41b7e state/tc iface/eth0/state <NetworkInterface> {"up":true} (12 B, application/json)"#
-        );
-        // Escapes and literals.
-        assert_eq!(
-            format_sample(
-                "%%|%K\\t.",
-                1,
-                "b/v1/h-3fa9c2d41b7e/state/tc/x",
-                "b",
-                None,
-                "e",
-                0,
-                None,
-                "v"
-            ),
-            "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
-        );
-    }
 }

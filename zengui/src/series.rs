@@ -341,6 +341,7 @@ mod tests {
                     zenoh::sample::SampleKind::Put
                 },
                 timestamp: None,
+                attachment: None,
                 received: std::time::Instant::now(),
             });
         }

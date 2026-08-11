@@ -34,6 +34,14 @@ const MAX_ROWS: usize = 50_000;
 
 use crate::message::RightPane;
 
+/// What an armed repeating publication resends each tick: the declaration,
+/// the prepared bytes, and the attachment that rode the first send (#117).
+struct RepeatLoad {
+    publication: Arc<zenkey_fleet::Publication>,
+    bytes: Arc<Vec<u8>>,
+    attachment: Option<Arc<Vec<u8>>>,
+}
+
 pub struct Zengui {
     settings: Settings,
     session: Option<zenoh::Session>,
@@ -108,10 +116,10 @@ pub struct Zengui {
 
     call_form: view::call::CallForm,
     publish_form: view::publish::PublishForm,
-    /// The armed publication and the bytes it repeats (#60). Held here rather
+    /// The armed publication and what it repeats (#60). Held here rather
     /// than in the form because a `Publication` is a live bus declaration, not
     /// view state — dropping it undeclares.
-    publication: Option<(Arc<zenkey_fleet::Publication>, Arc<Vec<u8>>)>,
+    publication: Option<RepeatLoad>,
     /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
     schema_store: Option<Arc<zenkey_fleet::decode::SchemaStore>>,
     /// The decode of the last fetched value.
@@ -562,10 +570,11 @@ impl Zengui {
                 match &outcome.publication {
                     Some(publication) => {
                         form.armed = true;
-                        self.publication = Some((
-                            publication.clone(),
-                            Arc::new(outcome.prepared.bytes.clone()),
-                        ));
+                        self.publication = Some(RepeatLoad {
+                            publication: publication.clone(),
+                            bytes: Arc::new(outcome.prepared.bytes.clone()),
+                            attachment: outcome.attachment.clone(),
+                        });
                     }
                     // One-shot: the task already undeclared.
                     None => {
@@ -585,13 +594,19 @@ impl Zengui {
                 Task::none()
             }
             Message::PublishTick => {
-                let Some((publication, bytes)) = self.publication.clone() else {
+                let Some(load) = self.publication.as_ref() else {
                     return Task::none();
                 };
+                let publication = load.publication.clone();
+                let bytes = load.bytes.clone();
+                let attachment = load.attachment.clone();
                 Task::perform(
                     async move {
                         publication
-                            .send(bytes.as_ref().clone())
+                            .send(
+                                bytes.as_ref().clone(),
+                                attachment.as_ref().map(|a| a.as_ref().clone()),
+                            )
                             .await
                             .map(|()| bytes.len())
                             .map_err(|e| e.to_string())
@@ -611,6 +626,39 @@ impl Zengui {
                 self.publish_form.log(false, format!("send failed: {e}"));
                 self.publish_form.armed = false;
                 self.publication = None;
+                Task::none()
+            }
+            Message::PublishRetired(result) => {
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                match result {
+                    Ok(matching) => {
+                        // A tombstone has no body provenance: a stale
+                        // encoded/as-typed/raw line claiming a body shipped
+                        // would be the pane's own O4 mistake.
+                        form.source = None;
+                        form.note = None;
+                        let key = form.key.clone();
+                        form.log(
+                            true,
+                            format!(
+                                "retired {key} — an authoritative delete (RFC 04 §1.2), \
+                                 not an empty value"
+                            ),
+                        );
+                        if matching == Some(false) {
+                            form.log(
+                                true,
+                                "matching: no subscriber matched the tombstone — a routing \
+                                 fact, not a fleet verdict (RFC 05 §3.1)",
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        form.error = Some(e.clone());
+                        form.log(false, format!("retire failed: {e}"));
+                    }
+                }
                 Task::none()
             }
             Message::PublishStopped(result) => {
@@ -815,6 +863,10 @@ impl Zengui {
                 self.publish_form.encoding = e;
                 Task::none()
             }
+            PublishMsg::AttachmentChanged(a) => {
+                self.publish_form.attachment = a;
+                Task::none()
+            }
             PublishMsg::RawToggled(b) => {
                 self.publish_form.raw = b;
                 Task::none()
@@ -834,7 +886,7 @@ impl Zengui {
             }
             PublishMsg::Stop => {
                 self.publish_form.armed = false;
-                let Some((publication, _)) = self.publication.take() else {
+                let Some(RepeatLoad { publication, .. }) = self.publication.take() else {
                     return Task::none();
                 };
                 // Acknowledged undeclare when we hold the last reference; a
@@ -846,6 +898,57 @@ impl Zengui {
                     ),
                     Err(_) => Task::none(),
                 }
+            }
+            PublishMsg::RetireIKnowToggled(b) => {
+                self.publish_form.retire_i_know = b;
+                Task::none()
+            }
+            PublishMsg::Retire => {
+                let Some(session) = self.session.clone() else {
+                    return Task::none();
+                };
+                let key = self.publish_form.key.trim().to_string();
+                if key.is_empty() {
+                    return Task::none();
+                }
+                // Same stop-first discipline as Send: a retire must not race
+                // an armed publication on the key.
+                let stop = self.update_publish(PublishMsg::Stop);
+                // The engine is the judge (check_retire, RFC 04 §1.2 v1.12);
+                // the pane's checkbox only arms the force.
+                if let Err(e) = zenkey_fleet::check_retire(
+                    &self.settings.base,
+                    &key,
+                    self.slices.as_deref(),
+                    self.publish_form.retire_i_know,
+                ) {
+                    let e = e.to_string();
+                    self.publish_form.error = Some(e.clone());
+                    self.publish_form.log(false, format!("refused: {e}"));
+                    return stop;
+                }
+                self.publish_form.in_flight = true;
+                self.publish_form.error = None;
+                let send = Task::perform(
+                    async move {
+                        // A retirement is the final state transition: the
+                        // reliable profile, like `zenctl topic retire`.
+                        let publication = zenkey_fleet::declare_publication(
+                            &session,
+                            &key,
+                            zenkey::qos::QosProfile::Transition,
+                            None,
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                        let matching = publication.matching_status().await.ok();
+                        publication.retire().await.map_err(|e| e.to_string())?;
+                        publication.undeclare().await.map_err(|e| e.to_string())?;
+                        Ok(matching)
+                    },
+                    Message::PublishRetired,
+                );
+                Task::batch([stop, send])
             }
             PublishMsg::Send => {
                 let (Some(session), Some(store)) =
@@ -869,6 +972,9 @@ impl Zengui {
                 let base = self.settings.base.clone();
                 let slices = self.slices.clone();
                 let repeat = form.repeat;
+                // Verbatim, never schema-encoded (#117); empty = none.
+                let attachment: Option<Arc<Vec<u8>>> = (!form.attachment.is_empty())
+                    .then(|| Arc::new(form.attachment.clone().into_bytes()));
                 self.publish_form.in_flight = true;
                 self.publish_form.error = None;
                 let send = Task::perform(
@@ -894,7 +1000,10 @@ impl Zengui {
                         .await
                         .map_err(|e| e.to_string())?;
                         publication
-                            .send(prepared.bytes.clone())
+                            .send(
+                                prepared.bytes.clone(),
+                                attachment.as_ref().map(|a| a.as_ref().clone()),
+                            )
                             .await
                             .map_err(|e| e.to_string())?;
                         // The badge is a routing fact about this publisher and
@@ -914,6 +1023,7 @@ impl Zengui {
                             prepared,
                             publication,
                             matching,
+                            attachment,
                         }))
                     },
                     Message::PublishReady,

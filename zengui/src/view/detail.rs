@@ -132,6 +132,23 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
                 col = col.push(
                     row![hex_pane(&bytes), decoded_pane(data.decoded, len)].spacing(space::MD),
                 );
+                // The attachment, when the value carried one (#117): rendered
+                // structurally beside its hex — the registry does not describe
+                // attachments, so structural is where the rendering stops.
+                if let Some(att) = &v.attachment {
+                    let abytes = att.to_bytes();
+                    col = col.push(kit::muted(format!(
+                        "attachment: {} bytes — rendered structurally; the registry                          does not describe attachments",
+                        abytes.len()
+                    )));
+                    col = col.push(
+                        row![
+                            hex_pane(&abytes),
+                            kit::mono(zenkey_fleet::decode::structural(&abytes))
+                        ]
+                        .spacing(space::MD),
+                    );
+                }
             }
         },
     }

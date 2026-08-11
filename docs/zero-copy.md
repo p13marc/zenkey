@@ -125,6 +125,11 @@ Ingesting one sample allocates exactly three things:
 `monitor/ingest` measures all of it. **Anything above that floor on the
 per-sample path is a bug.** If a change moves that number, it moved the floor.
 
+`SampleView::attachment` (#117) does not move it: an attachment, when
+present, is a fourth *refcount bump* (`Option<ZBytes>`, cloned like the
+payload), not a fourth allocation — and absent it is a `None`. The
+three-allocation floor stands.
+
 The per-tick floor is `KeyTreeSnapshot::build`: one `TreeNode` per *new* node,
 and — since the `contains_key`/`get_mut` fix — no `String` at all for a chunk
 that already exists. `tree/build_50k` is the number that says so.

@@ -49,6 +49,38 @@ enum Command {
     /// Subjects: what data exists, and what it means.
     #[command(subcommand)]
     Topic(TopicCmd),
+    /// GET any selector with the fleet discipline (RFC 05 §2.1).
+    ///
+    /// Target All, consolidation None, every reply attributed by its own
+    /// key; error envelopes render as errors (RFC 05 §3), and payloads ride
+    /// the same rendering ladder as `topic echo` (served-schema decode →
+    /// structural → text → hex). `@/**` browses the zenoh admin space.
+    /// Exit codes: 0 values only, 1 an error reply, 2 silence.
+    Get {
+        /// Any key expression, params included (`key?k=v`).
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
+        selector: String,
+        /// Query body: inline text, `@file`, or `-` for stdin — rides the
+        /// same encode ladder as `topic pub` when the selector's key part
+        /// refines to a registered subject.
+        #[arg(long)]
+        body: Option<String>,
+        /// Ship the body verbatim and print payloads as hex; no decode.
+        #[arg(long)]
+        raw: bool,
+        /// Decode the type name, print the payload as hex.
+        #[arg(long)]
+        hex: bool,
+        /// Per-reply line template — the `topic echo` % vocabulary
+        /// (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c}).
+        #[arg(long, value_name = "TEMPLATE")]
+        fmt: Option<String>,
+        /// Skip schema decode; render structurally.
+        #[arg(long)]
+        no_decode: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Producers: who is alive on the bus.
     #[command(subcommand)]
     Node(NodeCmd),
@@ -93,6 +125,35 @@ enum Command {
     /// The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2).
     #[command(subcommand)]
     Blob(BlobCmd),
+    /// Listen for raw scouting Hellos: zid, whatami, locators.
+    ///
+    /// The layer *below* `base list`: no session is opened, so this answers
+    /// "is anything out there at all" and "is multicast working on this
+    /// segment". It is also the one zenctl verb where multicast is ON by
+    /// default — scouting is the point, and a scout only listens for Hellos
+    /// and joins nothing.
+    Scout {
+        /// Filter by advertised kind. Repeatable; default: all three.
+        #[arg(long, value_enum)]
+        what: Vec<cmd::scout::ScoutWhat>,
+        /// Seconds to listen (default 5; a context may override).
+        #[arg(long)]
+        timeout: Option<u64>,
+        /// Endpoint to connect to, repeatable — reaches gossip scouting
+        /// where multicast is filtered.
+        #[arg(long, short = 'c')]
+        connect: Vec<String>,
+        /// Endpoint to listen on, repeatable.
+        #[arg(long, short = 'l')]
+        listen: Vec<String>,
+        /// Use a named context for endpoints/timeout defaults.
+        #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
+        context: Option<String>,
+        /// table = census (deduped by zid); ndjson = arrival log, one Hello
+        /// per line as heard.
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
+        format: output::Format,
+    },
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
     Context(ContextCmd),
@@ -242,18 +303,10 @@ enum RegistryCmd {
 
 #[derive(Subcommand)]
 enum AdminCmd {
-    /// GET an admin selector and print key/value pairs.
-    ///
-    /// Admin key layouts vary between zenoh versions — this is a raw,
-    /// honest browse. Requires an un-namespaced session (which zenctl
-    /// always runs, RFC 09 §5).
-    Get {
-        /// Admin selector.
-        #[arg(default_value = "@/**")]
-        selector: String,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    // `admin get` was folded into the first-class `zenctl get` (#114): the
+    // generic browse lost its misleading name, and the new verb keeps the
+    // admin space reachable (`zenctl get '@/**'`) with strictly more honest
+    // rendering (error envelopes, typed payloads, non-lossy bytes).
     /// Enumerate routers/peers (zid, version, locators).
     Routers {
         #[command(flatten)]
@@ -434,8 +487,9 @@ enum TopicCmd {
         producer: Option<String>,
         /// kcat-style format string: %k wire key, %K base-relative, %o origin,
         /// %c class, %p producer, %s subject, %t type, %v value, %e encoding,
-        /// %l payload bytes, %n counter, %T timestamp, %{a.b.c} a decoded
-        /// payload field by dot-path, %% literal percent.
+        /// %l payload bytes, %n counter, %T timestamp, %a attachment (empty
+        /// when none arrived), %{a.b.c} a decoded payload field by dot-path,
+        /// %% literal percent.
         #[arg(long)]
         fmt: Option<String>,
         /// Print raw payload bytes as hex instead of decoding.
@@ -490,6 +544,32 @@ enum TopicCmd {
         /// The escape hatch for a subject this tool cannot type.
         #[arg(long)]
         raw: bool,
+        /// Attachment riding beside the payload: inline text or `@file`.
+        /// Never schema-encoded — the registry's vocabulary ends at the
+        /// payload (#117).
+        #[arg(long, value_name = "TEXT|@FILE")]
+        attachment: Option<String>,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Retire a key with a tombstone — an authoritative delete
+    /// (RFC 04 §1.2), riding a declared publisher like `topic pub` (P7).
+    ///
+    /// State keys retire freely (retirement is the class's own semantics);
+    /// anything else is an operator cleanup (v1.12) and needs --i-know.
+    /// Wildcards are refused outright.
+    Retire {
+        /// Full wire key to retire (concrete — wildcards are refused).
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
+        key: String,
+        /// QoS profile for the tombstone (RFC 04 §3). A retirement is the
+        /// final state transition, so it defaults to the reliable profile.
+        #[arg(long, default_value = "transition", add = ArgValueCandidates::new(completion::qos_profiles))]
+        qos: String,
+        /// Retire a key that is not state-shaped — the RFC 04 §1.2 (v1.12)
+        /// operator act. The refusal you are overriding names its reason.
+        #[arg(long = "i-know")]
+        i_know: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -916,6 +996,7 @@ async fn main() -> Result<()> {
             interval,
             no_validate,
             raw,
+            attachment,
             bus,
         }) => {
             cmd::publish::run(
@@ -927,10 +1008,17 @@ async fn main() -> Result<()> {
                 interval,
                 no_validate,
                 raw,
+                attachment.as_deref(),
                 &bus,
             )
             .await
         }
+        Command::Topic(TopicCmd::Retire {
+            key,
+            qos,
+            i_know,
+            bus,
+        }) => cmd::publish::retire(&key, &qos, i_know, &bus).await,
         Command::Topic(TopicCmd::Hz {
             selector,
             origin,
@@ -1043,8 +1131,27 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::Admin(AdminCmd::Get { selector, bus }) => cmd::admin::get(&selector, &bus).await,
         Command::Admin(AdminCmd::Routers { bus }) => cmd::admin::routers(&bus).await,
+        Command::Get {
+            selector,
+            body,
+            raw,
+            hex,
+            fmt,
+            no_decode,
+            bus,
+        } => {
+            cmd::get::run(
+                &selector,
+                body.as_deref(),
+                raw,
+                hex,
+                fmt.as_deref(),
+                no_decode,
+                &bus,
+            )
+            .await
+        }
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let slices = bus.slices().await?;
             let report = offline::service_list(&slices, producer.as_deref())?;
@@ -1183,5 +1290,45 @@ async fn main() -> Result<()> {
             fail_on,
             bus,
         } => cmd::doctor::run(deep, sample, fail_on, &bus).await,
+        Command::Scout {
+            what,
+            timeout,
+            connect,
+            listen,
+            context,
+            format,
+        } => {
+            // No BusArgs here: --base/--registry are meaningless before a
+            // session exists. Contexts still resolve, for endpoints/timeout.
+            let stored = match context::active(context.as_deref()) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(2);
+                }
+            };
+            let connect = if connect.is_empty() {
+                stored
+                    .as_ref()
+                    .map(|c| c.connect.clone())
+                    .unwrap_or_default()
+            } else {
+                connect
+            };
+            let listen = if listen.is_empty() {
+                stored
+                    .as_ref()
+                    .map(|c| c.listen.clone())
+                    .unwrap_or_default()
+            } else {
+                listen
+            };
+            let timeout = Duration::from_secs(
+                timeout
+                    .or_else(|| stored.as_ref().and_then(|c| c.timeout))
+                    .unwrap_or(5),
+            );
+            cmd::scout::run(&what, timeout, &connect, &listen, format).await
+        }
     }
 }

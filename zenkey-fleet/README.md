@@ -23,6 +23,12 @@ tooling — the shared core of the `zenctl` and `zengui` explorers:
   native encoding (never a sniff of the operator's text). A body that could
   not be encoded is reported as such — `BodySource` distinguishes encoded,
   as-typed, and raw, so no caller can ship an unencoded payload silently.
+- **`write`** — the only two ways an explorer writes: `Publication` (a
+  declared publisher with the closed QoS enum applied — `send`, and since
+  #115 `retire`, the RFC 04 §1.2 tombstone; there is deliberately no
+  bare-put and no bare-delete helper) and `call`, the disciplined RPC.
+  `check_retire` is the class guard: state keys pass, everything else
+  prices the operator act (`--i-know`), wildcards refuse outright.
 - **`sub`** — `Monitor`: subscription multiplexing + liveliness watching
   (with `history(true)` — the roster arrives on join) into a bounded
   broadcast of events. Overflow surfaces as an explicit `Dropped(n)`;
