@@ -128,7 +128,30 @@ pub async fn run(
             String::new()
         };
 
-        if raw {
+        if sample.kind == zenoh::sample::SampleKind::Delete {
+            // A tombstone is not an empty put (#115): render the retirement,
+            // decode nothing — there is nothing to decode.
+            if ndjson {
+                let parsed = zenkey::grammar::parse_full(&base, key);
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "key": key,
+                        "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
+                        "subject": parsed.as_ref().map(|p| p.subject.join("/")),
+                        "encoding": encoding,
+                        "timestamp": timestamp,
+                        "delete": true,
+                        "value": serde_json::Value::Null,
+                    })
+                );
+            } else {
+                println!(
+                    "{key}\n  <tombstone — authoritative retirement (RFC 04 §1.2), \
+                     not an empty value>{rate_suffix}"
+                );
+            }
+        } else if raw {
             println!("{key}\n  {}{rate_suffix}", hex(&bytes));
         } else if hex_payload {
             // --hex: the decode pipeline still names the type, the payload
@@ -188,6 +211,7 @@ pub async fn run(
                     "typed": typed,
                     "encoding": encoding,
                     "timestamp": timestamp,
+                    "delete": false,
                     "value": serde_json::from_str::<serde_json::Value>(&value)
                         .unwrap_or(serde_json::Value::String(value.clone())),
                 });

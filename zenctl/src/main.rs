@@ -546,6 +546,27 @@ enum TopicCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Retire a key with a tombstone — an authoritative delete
+    /// (RFC 04 §1.2), riding a declared publisher like `topic pub` (P7).
+    ///
+    /// State keys retire freely (retirement is the class's own semantics);
+    /// anything else is an operator cleanup (v1.12) and needs --i-know.
+    /// Wildcards are refused outright.
+    Retire {
+        /// Full wire key to retire (concrete — wildcards are refused).
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
+        key: String,
+        /// QoS profile for the tombstone (RFC 04 §3). A retirement is the
+        /// final state transition, so it defaults to the reliable profile.
+        #[arg(long, default_value = "transition", add = ArgValueCandidates::new(completion::qos_profiles))]
+        qos: String,
+        /// Retire a key that is not state-shaped — the RFC 04 §1.2 (v1.12)
+        /// operator act. The refusal you are overriding names its reason.
+        #[arg(long = "i-know")]
+        i_know: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Measure publish rate over a window (ros2-style).
     Hz {
         /// Key expression (or use --origin/--class/--producer composition).
@@ -984,6 +1005,12 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Command::Topic(TopicCmd::Retire {
+            key,
+            qos,
+            i_know,
+            bus,
+        }) => cmd::publish::retire(&key, &qos, i_know, &bus).await,
         Command::Topic(TopicCmd::Hz {
             selector,
             origin,
