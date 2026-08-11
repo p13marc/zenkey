@@ -167,6 +167,7 @@ impl Zengui {
         let connect = settings.connect.clone();
         let listen = settings.listen.clone();
         let scouting = settings.scouting;
+        let zenoh_config = settings.zenoh_config.clone();
         let app = Zengui {
             settings,
             session: None,
@@ -222,7 +223,7 @@ impl Zengui {
         };
         let open = Task::perform(
             async move {
-                zenkey_fleet::session::open(&connect, &listen, scouting)
+                zenkey_fleet::open_with_config(zenoh_config.as_deref(), &connect, &listen, scouting)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -1240,6 +1241,10 @@ impl Zengui {
                 self.context_form.base = v;
                 Task::none()
             }
+            ContextMsg::ZenohConfigChanged(p) => {
+                self.context_form.zenoh_config = p;
+                Task::none()
+            }
             ContextMsg::ScoutingToggled(b) => {
                 self.context_form.scouting = b;
                 Task::none()
@@ -1360,7 +1365,8 @@ impl Zengui {
         self.settings.base = stored.base.unwrap_or_default();
         self.settings.connect = stored.connect;
         self.settings.listen = stored.listen;
-        self.settings.scouting = stored.scouting.unwrap_or(false);
+        self.settings.scouting = stored.scouting;
+        self.settings.zenoh_config = stored.zenoh_config;
         if !stored.registry.is_empty() {
             self.settings.registry = stored.registry;
         }
@@ -1395,9 +1401,10 @@ impl Zengui {
         let connect = self.settings.connect.clone();
         let listen = self.settings.listen.clone();
         let scouting = self.settings.scouting;
+        let zenoh_config = self.settings.zenoh_config.clone();
         Task::perform(
             async move {
-                zenkey_fleet::session::open(&connect, &listen, scouting)
+                zenkey_fleet::open_with_config(zenoh_config.as_deref(), &connect, &listen, scouting)
                     .await
                     .map_err(|e| e.to_string())
             },

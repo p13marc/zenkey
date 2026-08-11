@@ -65,6 +65,14 @@ pub struct Cli {
     #[arg(long)]
     pub timeout: Option<u64>,
 
+    /// Zenoh JSON5 config file (#122): the passthrough that reaches a
+    /// secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base
+    /// layer; --connect/--listen/--scouting apply on top when given
+    /// (flag > env > context > file). A file that sets a session namespace
+    /// is refused — explorers run un-namespaced (RFC 09 §5).
+    #[arg(long, value_name = "FILE", env = "ZENGUI_ZENOH_CONFIG")]
+    pub zenoh_config: Option<PathBuf>,
+
     /// What to watch.
     #[arg(long, value_enum, default_value_t = ScopePreset::Everything)]
     pub scope: ScopePreset,
@@ -109,7 +117,11 @@ pub struct Settings {
     pub base: String,
     pub connect: Vec<String>,
     pub listen: Vec<String>,
-    pub scouting: bool,
+    /// `None` = not stated by flag or context: the engine leaves a config
+    /// file's choice alone and defaults off without one (#122).
+    pub scouting: Option<bool>,
+    /// The zenoh JSON5 passthrough file, when one is configured (#122).
+    pub zenoh_config: Option<PathBuf>,
     pub registry: Vec<PathBuf>,
     pub timeout_secs: u64,
     pub scope: ScopePreset,
@@ -169,7 +181,12 @@ impl Cli {
             } else {
                 self.listen
             },
-            scouting: self.scouting || context.scouting.unwrap_or(false),
+            scouting: if self.scouting {
+                Some(true)
+            } else {
+                context.scouting
+            },
+            zenoh_config: self.zenoh_config.or(context.zenoh_config),
             registry: if self.registry.is_empty() {
                 context.registry
             } else {
@@ -211,7 +228,12 @@ impl Settings {
     /// indistinguishable from a quiet bus — the false verdict of RFC 05 §3.1.
     /// The UI turns this into a banner rather than letting the user infer.
     pub fn is_unreachable(&self) -> bool {
-        self.connect.is_empty() && self.listen.is_empty() && !self.scouting
+        self.connect.is_empty()
+            && self.listen.is_empty()
+            && !self.scouting.unwrap_or(false)
+            // A config file may carry endpoints or scouting of its own —
+            // reachability is then the file's question, not the flags'.
+            && self.zenoh_config.is_none()
     }
 }
 
@@ -248,7 +270,7 @@ mod tests {
     fn defaults_match_the_documented_ones() {
         let s = parse(&[]).unwrap();
         assert_eq!(s.timeout(), Duration::from_secs(5));
-        assert!(!s.scouting, "scouting is opt-in (RFC 09 §0.1)");
+        assert_eq!(s.scouting, None, "scouting is opt-in (RFC 09 §0.1)");
         assert_eq!(s.scope, ScopePreset::Everything);
         assert!(!s.eager, "lazy is the default (issue #85)");
         assert_eq!(s.echo_lines, 2000);
@@ -315,6 +337,7 @@ mod tests {
             registry: vec![],
             scouting: Some(true),
             timeout: Some(9),
+            zenoh_config: None,
         };
         let cli = |args: &[&str]| {
             Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied())).unwrap()
@@ -323,8 +346,28 @@ mod tests {
         let s = cli(&[]).settings_with(Some(ctx.clone())).unwrap();
         assert_eq!(s.base, "zensight");
         assert_eq!(s.connect, ["tcp/10.0.0.1:7447"]);
-        assert!(s.scouting);
+        assert_eq!(s.scouting, Some(true));
         assert_eq!(s.timeout_secs, 9);
+
+        // #122: the passthrough file resolves flag > context, and its
+        // presence alone makes the session reachable (the file may carry
+        // endpoints of its own).
+        let mut with_file = ctx.clone();
+        with_file.zenoh_config = Some(PathBuf::from("/etc/zenoh/ctx.json5"));
+        let mut s = cli(&[]).settings_with(Some(with_file)).unwrap();
+        assert_eq!(
+            s.zenoh_config.as_deref(),
+            Some(std::path::Path::new("/etc/zenoh/ctx.json5"))
+        );
+        s.connect.clear();
+        assert!(!s.is_unreachable(), "a config file may reach on its own");
+        let s = cli(&["--zenoh-config", "/tmp/flag.json5"])
+            .settings_with(Some(ctx.clone()))
+            .unwrap();
+        assert_eq!(
+            s.zenoh_config.as_deref(),
+            Some(std::path::Path::new("/tmp/flag.json5"))
+        );
         // Flags override field-by-field, including an explicit empty base.
         let s = cli(&["--base", "", "-c", "tcp/127.0.0.1:7447", "--timeout", "2"])
             .settings_with(Some(ctx))

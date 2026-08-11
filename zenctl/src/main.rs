@@ -474,6 +474,11 @@ enum ContextCmd {
         /// Default reply timeout in seconds.
         #[arg(long)]
         timeout: Option<u64>,
+        /// Zenoh JSON5 config file for this context (#122) — the
+        /// passthrough that reaches a secured bus; explorer knobs apply
+        /// on top (flag > env > context > file).
+        #[arg(long, value_name = "FILE")]
+        zenoh_config: Option<PathBuf>,
         /// Select it as the current context.
         #[arg(long)]
         select: bool,
@@ -844,6 +849,13 @@ struct BusArgs {
     /// context may override the default).
     #[arg(long)]
     timeout: Option<u64>,
+    /// Zenoh JSON5 config file (#122): the passthrough that reaches a
+    /// secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base
+    /// layer; --connect/--listen/--scouting apply on top when given
+    /// (flag > env > context > file). A file that sets a session namespace
+    /// is refused — explorers run un-namespaced (RFC 09 §5).
+    #[arg(long, value_name = "FILE", env = "ZENCTL_ZENOH_CONFIG")]
+    zenoh_config: Option<PathBuf>,
     /// Output format: table for humans, json (one document) or ndjson (one
     /// object per row) for scripts; auto = table on a tty, ndjson piped.
     #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
@@ -887,8 +899,18 @@ impl BusArgs {
         } else {
             self.listen.clone()
         };
-        let scouting = self.scouting || stored.and_then(|c| c.scouting).unwrap_or(false);
-        bus::open(&connect, &listen, scouting).await
+        // Not-given stays distinguishable from off: with a config file the
+        // file's scouting choice must survive an absent flag (#122).
+        let scouting = if self.scouting {
+            Some(true)
+        } else {
+            stored.and_then(|c| c.scouting)
+        };
+        let file = self
+            .zenoh_config
+            .clone()
+            .or_else(|| stored.and_then(|c| c.zenoh_config.clone()));
+        bus::open_with_config(file.as_deref(), &connect, &listen, scouting).await
     }
     /// The `--context` name this invocation was given, if any.
     fn context_name(&self) -> Option<&str> {
@@ -1343,6 +1365,7 @@ async fn main() -> Result<()> {
                 registry,
                 scouting,
                 timeout,
+                zenoh_config,
                 select,
             } => context::create(
                 &name,
@@ -1353,6 +1376,7 @@ async fn main() -> Result<()> {
                     registry,
                     scouting: scouting.then_some(true),
                     timeout,
+                    zenoh_config,
                 },
                 select,
             ),

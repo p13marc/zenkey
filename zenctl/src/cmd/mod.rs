@@ -68,6 +68,7 @@ mod tests {
             listen: vec![],
             scouting: false,
             timeout: None,
+            zenoh_config: None,
             format: output::Format::Table,
         };
         assert_eq!(

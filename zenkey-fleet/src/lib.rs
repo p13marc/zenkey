@@ -74,7 +74,7 @@ pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
 pub use scout::{HelloView, ScoutStream, scout};
 pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use serve::{MockResponder, ServedQuery, declare_responder};
-pub use session::open;
+pub use session::{open, open_with_config};
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleView, StreamItem, WatchId,

@@ -40,6 +40,7 @@ fn contexts_round_trip_between_the_two_explorers() {
             registry: vec![],
             scouting: Some(false),
             timeout: Some(9),
+            zenoh_config: None,
         },
     );
     config.contexts.insert(
@@ -51,6 +52,7 @@ fn contexts_round_trip_between_the_two_explorers() {
             registry: vec![],
             scouting: Some(true),
             timeout: None,
+            zenoh_config: None,
         },
     );
     config.current = Some("lab".into());
