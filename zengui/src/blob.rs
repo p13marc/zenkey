@@ -130,6 +130,48 @@ impl BlobState {
         Ok(())
     }
 
+    /// A probe finished. Judged against the base it *ran* against (#109):
+    /// a probe from another base is dropped whole — Ok and Err alike, unlike
+    /// doctor/admin, because here the base rides beside the `Result` and a
+    /// stale error would misexplain the deployment the window now shows.
+    /// `clear()` already reset the pane; there is nothing true to add.
+    pub fn probe_finished(
+        &mut self,
+        outcome: Result<Arc<BlobProbeReport>, String>,
+        ran_against: &str,
+        base: &str,
+    ) {
+        if ran_against != base {
+            return;
+        }
+        self.probe = match outcome {
+            Ok(report) => Probe::Done(report),
+            Err(e) => Probe::Failed(e),
+        };
+    }
+
+    /// A fetch finished, same judgment — with one more reason to drop a
+    /// mismatch whole: a base change *cancels* the fetch via [`Self::clear`],
+    /// so its `Err("cancelled")` completion is a direct product of the
+    /// switch. Landing it would make every base change manufacture an error,
+    /// and it would also null the cancel token out from under a fetch the
+    /// user started on the new base.
+    pub fn fetch_finished(
+        &mut self,
+        outcome: Result<Arc<BlobFetchReport>, String>,
+        ran_against: &str,
+        base: &str,
+    ) {
+        if ran_against != base {
+            return;
+        }
+        self.cancel = None;
+        self.fetch = match outcome {
+            Ok(report) => Fetch::Done(report),
+            Err(e) => Fetch::Failed(e),
+        };
+    }
+
     /// Base change / reconnect / context switch: answers about another
     /// deployment are not evidence here.
     pub fn clear(&mut self) {
@@ -175,6 +217,78 @@ mod tests {
             roots,
             declared_by: vec![],
         }));
+    }
+
+    fn probe_report(holders: Vec<BlobHolder>) -> Arc<BlobProbeReport> {
+        Arc::new(BlobProbeReport {
+            target: "artifact/01jqz3demo0001".into(),
+            tier: "artifact".into(),
+            asked: vec!["v1/*/@blob/artifact/01jqz3demo0001/have".into()],
+            not_probed: None,
+            answered: holders.len(),
+            holders,
+            roots: vec![],
+            declared_by: vec![],
+        })
+    }
+
+    /// #109: the user switched deployment while a probe was in flight. Its
+    /// holders are holders on a bus this window no longer shows — dropped
+    /// whole, Ok and Err alike, and no error appears (clear() already reset
+    /// the pane; a stale error would misexplain the new deployment).
+    #[test]
+    fn a_probe_from_another_base_is_not_evidence_here() {
+        let mut state = BlobState::default();
+        state.probe_finished(Ok(probe_report(vec![])), "acme", "acme");
+        assert!(matches!(state.probe, Probe::Done(_)), "matched base lands");
+
+        state.clear();
+        state.probe_finished(
+            Ok(probe_report(vec![holder("h-aaaaaaaaaaaa", "ab")])),
+            "acme",
+            "other",
+        );
+        assert!(
+            matches!(state.probe, Probe::NotAsked),
+            "holders on acme say nothing about other"
+        );
+        state.probe_finished(Err("timeout".into()), "acme", "other");
+        assert!(
+            matches!(state.probe, Probe::NotAsked),
+            "a stale error is not an error about this deployment either"
+        );
+    }
+
+    /// #109: a base change cancels the running fetch, so its cancellation
+    /// lands *after* the clear — and must touch neither the fresh fetch
+    /// state nor the fresh cancel token.
+    #[test]
+    fn a_stale_fetch_completion_does_not_touch_the_new_fetch() {
+        // The user has already started a new fetch on the new base.
+        let mut state = BlobState {
+            fetch: Fetch::InFlight {
+                received: 1,
+                total: 4,
+                bytes: 65536,
+            },
+            cancel: Some(zenkey_fleet::zblob::CancelToken::new()),
+            ..BlobState::default()
+        };
+
+        state.fetch_finished(Err("cancelled".into()), "old", "new");
+        assert!(
+            matches!(state.fetch, Fetch::InFlight { .. }),
+            "the old base's cancellation must not overwrite the new fetch"
+        );
+        assert!(
+            state.cancel.is_some(),
+            "and must not null the new fetch's cancel token"
+        );
+
+        // The new base's own completion still lands and clears the token.
+        state.fetch_finished(Err("io: disk full".into()), "new", "new");
+        assert!(matches!(state.fetch, Fetch::Failed(_)));
+        assert!(state.cancel.is_none());
     }
 
     #[test]

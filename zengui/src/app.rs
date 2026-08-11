@@ -382,6 +382,12 @@ impl Zengui {
                 }
             }
             Message::ValueFetched(key, outcome) => {
+                // No base guard needed (#109 audit): the evidence is keyed by
+                // the full wire key, which names its own base (an explorer
+                // runs un-namespaced, RFC 09 §5), and the view passes
+                // `fetched` through only while that exact key is selected.
+                // Residual: a stale landing can still flip the right pane to
+                // Detail — a focus nit, not a misattributed verdict.
                 self.decoded = None;
                 // A fetch normally lands the detail pane in view — except
                 // from the doctor's click-through, where losing the finding
@@ -550,12 +556,21 @@ impl Zengui {
             }
             Message::Publish(msg) => self.update_publish(msg),
             Message::CallDone(outcome) => {
+                // No base guard needed (#109 audit): a call reply is the
+                // answer to the exact question the user pressed the button
+                // for, addressed by a full wire key naming its base — user
+                // output, not projected deployment state.
                 self.call_form.in_flight = false;
                 self.call_form.outcome =
                     Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
                 Task::none()
             }
             Message::PublishReady(Ok(outcome)) => {
+                // No base guard needed (#109 audit): publishing is
+                // user-initiated *output* on a full wire key, not observed
+                // evidence. (A publication straddling a context switch rides
+                // the old session's Arc until stopped — a session-lifetime
+                // question, out of #109's scope.)
                 let form = &mut self.publish_form;
                 form.in_flight = false;
                 form.error = None;
@@ -1039,6 +1054,13 @@ impl Zengui {
     /// reconnect, and a context switch — and each one that forgot a different
     /// subset would leave a stale verdict on screen about a fleet it is no
     /// longer looking at (O4).
+    ///
+    /// What survives, deliberately (#109 audit): the tree selection, the
+    /// fetched value, the history recorder, and the call/publish forms —
+    /// each keyed by a full wire key that names its own base, or user input
+    /// rather than projected evidence. What cannot be cleared here — a task
+    /// already in flight — is judged at its landing instead: doctor, blob
+    /// probe/fetch and node_info each carry the base they ran against.
     fn forget_deployment(&mut self) {
         self.facts.clear();
         self.roster.clear();
@@ -1441,14 +1463,20 @@ impl Zengui {
                             .await
                             .map(Arc::new)
                             .map_err(|e| e.to_string());
-                        (origin, out)
+                        (origin, base, out)
                     },
-                    |(origin, out)| Message::Nodes(NodesMsg::InfoLoaded(origin, out)),
+                    |(origin, ran, out)| Message::Nodes(NodesMsg::InfoLoaded(origin, ran, out)),
                 )
             }
-            NodesMsg::InfoLoaded(origin, outcome) => {
-                // Stale guard: only the currently selected origin's info lands.
-                if self.node_selected.as_deref() == Some(origin.as_str()) {
+            NodesMsg::InfoLoaded(origin, ran_against, outcome) => {
+                // Stale guard: only the currently selected origin's info lands
+                // — and only when it ran against the base this window shows.
+                // Origin ids are base-independent (#109): re-selecting the
+                // same host after a base switch would otherwise admit the old
+                // deployment's reply through the selection-only check.
+                if self.node_selected.as_deref() == Some(origin.as_str())
+                    && ran_against == self.settings.base
+                {
                     self.node_detail = DetailState::Loaded(origin, outcome);
                 }
                 Task::none()
@@ -1658,19 +1686,19 @@ impl Zengui {
                     .unwrap_or_default();
                 Task::perform(
                     async move {
-                        zenkey_fleet::blob_probe(&session, &base, &target, &slices, timeout)
-                            .await
-                            .map(Arc::new)
-                            .map_err(|e| e.to_string())
+                        let out =
+                            zenkey_fleet::blob_probe(&session, &base, &target, &slices, timeout)
+                                .await
+                                .map(Arc::new)
+                                .map_err(|e| e.to_string());
+                        (base, out)
                     },
-                    |out| Message::Blob(BlobMsg::ProbeDone(out)),
+                    |(ran, out)| Message::Blob(BlobMsg::ProbeDone(ran, out)),
                 )
             }
-            BlobMsg::ProbeDone(outcome) => {
-                self.blob.probe = match outcome {
-                    Ok(report) => crate::blob::Probe::Done(report),
-                    Err(e) => crate::blob::Probe::Failed(e),
-                };
+            BlobMsg::ProbeDone(ran_against, outcome) => {
+                self.blob
+                    .probe_finished(outcome, &ran_against, &self.settings.base);
                 Task::none()
             }
             BlobMsg::Fetch => {
@@ -1736,19 +1764,23 @@ impl Zengui {
                         let sink = move |p| {
                             let _ = tx.send(p);
                         };
-                        zenkey_fleet::blob_fetch(
+                        let out = zenkey_fleet::blob_fetch(
                             &session, &base, &origin, &target, &dest, &spec, &sink,
                         )
                         .await
                         .map(Arc::new)
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| e.to_string());
+                        (base, out)
                     },
-                    |out| Message::Blob(BlobMsg::FetchDone(out)),
+                    |(ran, out)| Message::Blob(BlobMsg::FetchDone(ran, out)),
                 );
                 Task::batch([progress, run])
             }
             BlobMsg::Progress(p) => {
                 use zenkey_fleet::report::BlobProgress;
+                // No base guard needed (#109 audit): progress only mutates
+                // while Fetch::InFlight, and a base change resets the pane to
+                // NotAsked via blob.clear() — stale ticks fall through.
                 if let crate::blob::Fetch::InFlight {
                     received,
                     total,
@@ -1782,12 +1814,9 @@ impl Zengui {
                 }
                 Task::none()
             }
-            BlobMsg::FetchDone(outcome) => {
-                self.blob.cancel = None;
-                self.blob.fetch = match outcome {
-                    Ok(report) => crate::blob::Fetch::Done(report),
-                    Err(e) => crate::blob::Fetch::Failed(e),
-                };
+            BlobMsg::FetchDone(ran_against, outcome) => {
+                self.blob
+                    .fetch_finished(outcome, &ran_against, &self.settings.base);
                 Task::none()
             }
             BlobMsg::Cancel => {

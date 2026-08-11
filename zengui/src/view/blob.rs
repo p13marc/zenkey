@@ -37,7 +37,7 @@ pub enum BlobMsg {
     AllowUnpinnedToggled(bool),
     /// The probe button — the only way the bus is asked who holds this.
     Probe,
-    ProbeDone(Result<std::sync::Arc<BlobProbeReport>, String>),
+    ProbeDone(String, Result<std::sync::Arc<BlobProbeReport>, String>),
     /// A holder row was chosen. The *only* way an origin enters a fetch.
     HolderPicked(usize),
     /// Copy the selected holder's advisory filename into the destination
@@ -45,7 +45,10 @@ pub enum BlobMsg {
     UseSuggestedName,
     Fetch,
     Progress(zenkey_fleet::report::BlobProgress),
-    FetchDone(Result<std::sync::Arc<zenkey_fleet::report::BlobFetchReport>, String>),
+    FetchDone(
+        String,
+        Result<std::sync::Arc<zenkey_fleet::report::BlobFetchReport>, String>,
+    ),
     Cancel,
 }
 
