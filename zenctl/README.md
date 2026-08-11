@@ -85,6 +85,7 @@ zenctl serve 'demo/mock/**' '{"ok":1}'  # mock queryable; logs every ask (who qu
 zenctl key intersects 'v1/**' 'v1/h-1/@rpc/p/x'  # keyexpr algebra, no session; cites D2/D4 on a convention-shaped no
 zenctl topic echo --format ndjson > f   # …and back: topic pub --from ndjson < f (one row shape, both directions)
 zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
+zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold
 zenctl storage list --base acme         # declared state subjects vs storage coverage
 zenctl blob list --base acme            # who declares which @blob tier (registry only)
 zenctl blob probe 01jqz3demo0001        # who *holds* it, and at which content root
