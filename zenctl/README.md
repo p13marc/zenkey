@@ -76,7 +76,11 @@ zenctl topic list --base acme --watch 5 # topic/storage/base list poll+diff; +/-
 zenctl topic hz --base acme             # per-key sample rates; topic bw for bytes
 zenctl service call --base acme '*' sysinfo processes --param sort=cpu
 zenctl service call --base acme h-3fa9 netring capture/trigger --body @trigger.json
-zenctl admin get                        # raw admin-space browse; admin routers
+zenctl get 'acme/v1/*/state/**'         # fan-in GET on any selector, replies attributed
+zenctl get '@/**'                       # …including the zenoh admin space (was: admin get)
+zenctl topic pub k '{"v":1}' --attachment meta   # attachments ship and render (#117)
+zenctl topic retire acme/v1/h-3fa9…/state/sysinfo/health  # RFC 04 §1.2 tombstone, class-guarded
+zenctl scout                            # raw Hellos: zid/whatami/locators (multicast ON here)
 zenctl storage list --base acme         # declared state subjects vs storage coverage
 zenctl blob list --base acme            # who declares which @blob tier (registry only)
 zenctl blob probe 01jqz3demo0001        # who *holds* it, and at which content root
@@ -92,6 +96,16 @@ disappeared rows linger one cycle marked `-`); `--watch --format ndjson`
 streams one `{snapshot, appeared, disappeared}` object per cycle. `node list
 --watch` is event-driven — a producer stopping shows within one liveliness
 event, not one poll interval.
+
+`get` speaks the fleet discipline on any selector — target All,
+consolidation None, every reply attributed by its own key, RFC 05 §3 error
+envelopes rendered as errors, and exit codes scripts can branch on (0 values,
+1 an error reply, 2 silence — which still prints its non-verdict paragraph).
+`topic retire` publishes an authoritative tombstone through a declared
+publisher: state keys retire freely, anything else is the RFC 04 §1.2 (v1.12)
+operator act and needs `--i-know`; wildcards are refused outright. `scout` is
+the one verb where multicast is on by default — it only listens, and an empty
+result names the boundary it heard.
 
 `topic pub` and `service call` **encode** a JSON body against the producer's
 served schema (request types come from the slice's procedure declaration),
