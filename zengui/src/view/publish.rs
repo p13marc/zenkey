@@ -75,6 +75,10 @@ pub struct PublishForm {
     /// Send the bytes verbatim — the explicit escape hatch, mirroring
     /// `zenctl topic pub --raw`.
     pub raw: bool,
+    /// Attachment text riding beside the payload; empty = none. Shipped
+    /// verbatim — never schema-encoded, the registry's vocabulary ends at
+    /// the payload (#117).
+    pub attachment: String,
     /// Keep publishing on an interval once armed.
     pub repeat: bool,
     pub interval: String,
@@ -113,6 +117,7 @@ impl Default for PublishForm {
             qos: QosChoice(QosProfile::Sampled),
             encoding: String::new(),
             raw: false,
+            attachment: String::new(),
             repeat: false,
             interval: "1.0".into(),
             facts: None,
@@ -159,6 +164,7 @@ pub enum PublishMsg {
     BodyChanged(String),
     QosPicked(QosChoice),
     EncodingChanged(String),
+    AttachmentChanged(String),
     RawToggled(bool),
     RepeatToggled(bool),
     IntervalChanged(String),
@@ -228,6 +234,13 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
         .on_input(|t| msg(PublishMsg::EncodingChanged(t)))
         .size(font::CAPTION);
 
+    let attachment = text_input(
+        "attachment (optional — ships verbatim, never schema-encoded)",
+        &form.attachment,
+    )
+    .on_input(|t| msg(PublishMsg::AttachmentChanged(t)))
+    .size(font::CAPTION);
+
     let raw = checkbox(form.raw)
         .label("send raw")
         .on_toggle(|b| msg(PublishMsg::RawToggled(b)))
@@ -288,6 +301,7 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
         facts_col,
         body,
         row![qos, encoding].spacing(space::SM),
+        attachment,
         row![raw, repeat, interval]
             .spacing(space::SM)
             .align_y(iced::Alignment::Center),

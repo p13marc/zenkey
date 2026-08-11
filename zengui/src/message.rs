@@ -142,6 +142,9 @@ pub struct PublishOutcome {
     pub publication: Option<Arc<zenkey_fleet::Publication>>,
     /// `None` = the status could not be asked, which is not `false` (O4).
     pub matching: Option<bool>,
+    /// The attachment that rode the send, kept so a repeating publish
+    /// resends it (#117).
+    pub attachment: Option<Arc<Vec<u8>>>,
 }
 
 /// The right-hand pane switch — a tab strip, not a cycle, because the pane

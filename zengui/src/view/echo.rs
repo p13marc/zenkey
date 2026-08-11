@@ -179,7 +179,7 @@ pub fn visible<'a>(
 ///   not spell.
 pub fn ndjson_line(line: &EchoLine, base: &str) -> String {
     let parsed = zenkey::grammar::parse_full(base, &line.key);
-    let obj = serde_json::json!({
+    let mut obj = serde_json::json!({
         "key": line.key,
         "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
         "subject": parsed.as_ref().map(|p| p.subject.join("/")),
@@ -190,6 +190,13 @@ pub fn ndjson_line(line: &EchoLine, base: &str) -> String {
         "value": serde_json::from_str::<serde_json::Value>(&line.preview)
             .unwrap_or(serde_json::Value::String(line.preview.clone())),
     });
+    // Present only when the wire carried one — absent, never null (#117),
+    // byte-for-byte the CLI row's convention.
+    if let Some(att) = &line.attachment {
+        obj["attachment"] = serde_json::from_str::<serde_json::Value>(att)
+            .unwrap_or(serde_json::Value::String(att.clone()));
+        obj["attachment_bytes"] = line.attachment_len.into();
+    }
     obj.to_string()
 }
 
@@ -401,6 +408,8 @@ mod tests {
             encoding: "application/json".into(),
             is_delete: false,
             timestamp: None,
+            attachment: None,
+            attachment_len: None,
         }
     }
 
@@ -506,5 +515,18 @@ mod tests {
                 "{cli_only} must be absent, not null — the decode never ran"
             );
         }
+        assert!(
+            !obj.contains_key("attachment"),
+            "attachment must be absent when the wire carried none, never null (#117)"
+        );
+
+        // And when one arrived, it rides — with its true size beside it.
+        let mut with_att = l.clone();
+        with_att.attachment = Some(r#"{"who":"me"}"#.to_string());
+        with_att.attachment_len = Some(12);
+        let json: serde_json::Value =
+            serde_json::from_str(&ndjson_line(&with_att, "")).unwrap();
+        assert_eq!(json["attachment"]["who"], "me");
+        assert_eq!(json["attachment_bytes"], 12);
     }
 }

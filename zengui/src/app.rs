@@ -34,6 +34,14 @@ const MAX_ROWS: usize = 50_000;
 
 use crate::message::RightPane;
 
+/// What an armed repeating publication resends each tick: the declaration,
+/// the prepared bytes, and the attachment that rode the first send (#117).
+struct RepeatLoad {
+    publication: Arc<zenkey_fleet::Publication>,
+    bytes: Arc<Vec<u8>>,
+    attachment: Option<Arc<Vec<u8>>>,
+}
+
 pub struct Zengui {
     settings: Settings,
     session: Option<zenoh::Session>,
@@ -108,10 +116,10 @@ pub struct Zengui {
 
     call_form: view::call::CallForm,
     publish_form: view::publish::PublishForm,
-    /// The armed publication and the bytes it repeats (#60). Held here rather
+    /// The armed publication and what it repeats (#60). Held here rather
     /// than in the form because a `Publication` is a live bus declaration, not
     /// view state — dropping it undeclares.
-    publication: Option<(Arc<zenkey_fleet::Publication>, Arc<Vec<u8>>)>,
+    publication: Option<RepeatLoad>,
     /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
     schema_store: Option<Arc<zenkey_fleet::decode::SchemaStore>>,
     /// The decode of the last fetched value.
@@ -562,10 +570,11 @@ impl Zengui {
                 match &outcome.publication {
                     Some(publication) => {
                         form.armed = true;
-                        self.publication = Some((
-                            publication.clone(),
-                            Arc::new(outcome.prepared.bytes.clone()),
-                        ));
+                        self.publication = Some(RepeatLoad {
+                            publication: publication.clone(),
+                            bytes: Arc::new(outcome.prepared.bytes.clone()),
+                            attachment: outcome.attachment.clone(),
+                        });
                     }
                     // One-shot: the task already undeclared.
                     None => {
@@ -585,13 +594,19 @@ impl Zengui {
                 Task::none()
             }
             Message::PublishTick => {
-                let Some((publication, bytes)) = self.publication.clone() else {
+                let Some(load) = self.publication.as_ref() else {
                     return Task::none();
                 };
+                let publication = load.publication.clone();
+                let bytes = load.bytes.clone();
+                let attachment = load.attachment.clone();
                 Task::perform(
                     async move {
                         publication
-                            .send(bytes.as_ref().clone(), None)
+                            .send(
+                                bytes.as_ref().clone(),
+                                attachment.as_ref().map(|a| a.as_ref().clone()),
+                            )
                             .await
                             .map(|()| bytes.len())
                             .map_err(|e| e.to_string())
@@ -848,6 +863,10 @@ impl Zengui {
                 self.publish_form.encoding = e;
                 Task::none()
             }
+            PublishMsg::AttachmentChanged(a) => {
+                self.publish_form.attachment = a;
+                Task::none()
+            }
             PublishMsg::RawToggled(b) => {
                 self.publish_form.raw = b;
                 Task::none()
@@ -867,7 +886,7 @@ impl Zengui {
             }
             PublishMsg::Stop => {
                 self.publish_form.armed = false;
-                let Some((publication, _)) = self.publication.take() else {
+                let Some(RepeatLoad { publication, .. }) = self.publication.take() else {
                     return Task::none();
                 };
                 // Acknowledged undeclare when we hold the last reference; a
@@ -953,6 +972,9 @@ impl Zengui {
                 let base = self.settings.base.clone();
                 let slices = self.slices.clone();
                 let repeat = form.repeat;
+                // Verbatim, never schema-encoded (#117); empty = none.
+                let attachment: Option<Arc<Vec<u8>>> = (!form.attachment.is_empty())
+                    .then(|| Arc::new(form.attachment.clone().into_bytes()));
                 self.publish_form.in_flight = true;
                 self.publish_form.error = None;
                 let send = Task::perform(
@@ -978,7 +1000,10 @@ impl Zengui {
                         .await
                         .map_err(|e| e.to_string())?;
                         publication
-                            .send(prepared.bytes.clone(), None)
+                            .send(
+                                prepared.bytes.clone(),
+                                attachment.as_ref().map(|a| a.as_ref().clone()),
+                            )
                             .await
                             .map_err(|e| e.to_string())?;
                         // The badge is a routing fact about this publisher and
@@ -998,6 +1023,7 @@ impl Zengui {
                             prepared,
                             publication,
                             matching,
+                            attachment,
                         }))
                     },
                     Message::PublishReady,
