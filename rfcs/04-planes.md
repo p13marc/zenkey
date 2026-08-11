@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified)** · normative chapter
+**Status: v1.0 (ratified), amended v1.12** · normative chapter
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -58,6 +58,14 @@ rules for deciding where a given piece of information belongs.
   | aging | consumer | state older than `ttl_s` is stale; producer's `alive` token absent ([§5](#5-liveliness-presence)) ⇒ suspect immediately, stale at TTL — this retires a firing alert whose publisher crashed without tombstoning | liveliness roster |
   | retirement | publisher | retire a key with a Zenoh delete (`SampleKind::Delete` — never a payload marker); consumers treat it as authoritative | class semantics (§1) |
   | tombstone visibility | deployment | a delete stays observable ≥ `ttl_s`; seed replies (§3.2) never present a deleted key as live | storage `gc.lifespan` ≥ max `ttl_s` ([09-operations.md §2.3](09-operations.md)) |
+- **Explorer-initiated tombstones (v1.12).** The retirement rule above binds
+  the key's *publisher*; an explorer or operator tool MAY nevertheless issue
+  a tombstone on any **concrete** key as a deliberate operator act — retiring
+  a test key, purging a stray key from storage. On `telemetry`/`events` keys
+  this is keyspace cleanup, not a data-class semantic (§1's MUST NOT still
+  binds conforming publishers of those classes), and tooling MUST require an
+  explicit operator confirmation before sending one there. A wildcard delete
+  is not an operator act and MUST be refused outright.
 - **Cardinality budget.** A state subject keyed by an *observed population*
   (one key per seen IP, device, unit — e.g. `evidence/names/<ip-slug>`,
   `@catalog/state/pdns/<ip-slug>`) is permitted only with an explicit
