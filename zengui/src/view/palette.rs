@@ -214,7 +214,8 @@ pub fn rank<T>(items: &[T], query: &str, label: impl Fn(&T) -> &str) -> Vec<usiz
 /// Render the open overlay, if any.
 ///
 /// `keys` is consumed only by the jump-to overlay, and only the rows
-/// actually drawn (≤ [`MAX_ROWS`]) are cloned into the element — opening
+/// actually drawn (≤ `MAX_ROWS`, a private bound) are cloned into the
+/// element — opening
 /// the overlay costs what it draws, not the cache's population, and any
 /// other overlay state never touches the iterator (#110). One deliberate
 /// non-change: `rank` breaks score ties by index, and the indices now come
