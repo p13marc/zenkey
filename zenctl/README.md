@@ -81,6 +81,10 @@ zenctl get '@/**'                       # …including the zenoh admin space (wa
 zenctl topic pub k '{"v":1}' --attachment meta   # attachments ship and render (#117)
 zenctl topic retire acme/v1/h-3fa9…/state/sysinfo/health  # RFC 04 §1.2 tombstone, class-guarded
 zenctl scout                            # raw Hellos: zid/whatami/locators (multicast ON here)
+zenctl serve 'demo/mock/**' '{"ok":1}'  # mock queryable; logs every ask (who queries this key?)
+zenctl key intersects 'v1/**' 'v1/h-1/@rpc/p/x'  # keyexpr algebra, no session; cites D2/D4 on a convention-shaped no
+zenctl topic echo --format ndjson > f   # …and back: topic pub --from ndjson < f (one row shape, both directions)
+zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
 zenctl storage list --base acme         # declared state subjects vs storage coverage
 zenctl blob list --base acme            # who declares which @blob tier (registry only)
 zenctl blob probe 01jqz3demo0001        # who *holds* it, and at which content root
