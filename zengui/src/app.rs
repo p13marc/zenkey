@@ -1523,14 +1523,20 @@ impl Zengui {
                             },
                         )
                         .await
-                        .map(Arc::new)
+                        // The run carries the base it was judged against —
+                        // the staleness guard's other half (#109).
+                        .map(|r| crate::doctor::DoctorRun {
+                            report: Arc::new(r),
+                            base,
+                        })
                         .map_err(|e| e.to_string())
                     },
                     |out| Message::Doctor(DoctorMsg::Done(out)),
                 )
             }
             DoctorMsg::Done(outcome) => {
-                self.doctor.finish(outcome);
+                let base = self.settings.base.clone();
+                self.doctor.finish(outcome, &base);
                 Task::none()
             }
             DoctorMsg::FindingClicked(index) => {

@@ -7,7 +7,7 @@
 
 use iced::widget::{checkbox, column, row, scrollable, text};
 use iced::{Element, Length};
-use zenkey_fleet::report::{DoctorFinding, DoctorReport, DoctorSeverity};
+use zenkey_fleet::report::{DoctorFinding, DoctorSeverity};
 
 use crate::doctor::{DoctorState, finding_target};
 use crate::message::Message;
@@ -22,7 +22,7 @@ pub enum DoctorMsg {
     Run,
     DeepToggled(bool),
     /// A run finished.
-    Done(Result<std::sync::Arc<DoctorReport>, String>),
+    Done(Result<crate::doctor::DoctorRun, String>),
     /// A finding row was clicked — navigate to its subject.
     FindingClicked(usize),
     /// Drop every cached `describe` so the next decode asks the bus again

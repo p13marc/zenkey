@@ -44,6 +44,16 @@ pub fn delta(previous: &DoctorReport, current: &DoctorReport) -> Delta {
     }
 }
 
+/// One finished run and the base it was judged against — the staleness
+/// guard (#109). `DoctorReport` is the engine's serde type, shared with
+/// `zenctl doctor --format json`, so the base rides *beside* the report
+/// rather than inside it.
+#[derive(Debug, Clone)]
+pub struct DoctorRun {
+    pub report: Arc<DoctorReport>,
+    pub base: String,
+}
+
 /// The panel's whole state.
 #[derive(Debug, Default)]
 pub struct DoctorState {
@@ -62,14 +72,26 @@ pub struct DoctorState {
 }
 
 impl DoctorState {
-    /// A run finished. Shifts current → previous only on success.
-    pub fn finish(&mut self, outcome: Result<Arc<DoctorReport>, String>) {
+    /// A run finished. Shifts current → previous only on success — and only
+    /// when the run was judged against the base this window is looking at.
+    ///
+    /// A run from another base is dropped silently, deliberately (#109,
+    /// mirroring `AdminState::finish`): it is not an error, and reporting it
+    /// would explain a deployment the user has left. `clear()` cannot stop a
+    /// task already in flight, and a doctor run takes seconds — this is what
+    /// catches the one that lands after the switch. The `Err` arm is *not*
+    /// base-guarded, same asymmetry as admin: an error carries no base to
+    /// judge, and it rides the Ok carrier only.
+    pub fn finish(&mut self, outcome: Result<DoctorRun, String>, base: &str) {
         self.in_flight = false;
         match outcome {
-            Ok(report) => {
-                self.delta = self.current.as_deref().map(|prev| delta(prev, &report));
-                self.previous = self.current.replace(report);
+            Ok(run) if run.base == base => {
+                self.delta = self.current.as_deref().map(|prev| delta(prev, &run.report));
+                self.previous = self.current.replace(run.report);
                 self.error = None;
+            }
+            Ok(_) => {
+                // A run about another deployment says nothing about this one.
             }
             Err(e) => self.error = Some(e),
         }
@@ -164,15 +186,48 @@ mod tests {
         );
     }
 
+    fn run(base: &str, findings: Vec<DoctorFinding>) -> DoctorRun {
+        DoctorRun {
+            report: Arc::new(report(findings)),
+            base: base.into(),
+        }
+    }
+
     #[test]
     fn a_failed_run_keeps_the_baseline() {
         let mut state = DoctorState::default();
-        state.finish(Ok(Arc::new(report(vec![finding("slice-sync", "h-1/p")]))));
+        state.finish(
+            Ok(run("acme", vec![finding("slice-sync", "h-1/p")])),
+            "acme",
+        );
         assert!(state.current.is_some());
 
-        state.finish(Err("bus went away".into()));
+        state.finish(Err("bus went away".into()), "acme");
         assert!(state.current.is_some(), "the baseline survives a failure");
         assert!(state.error.is_some());
+    }
+
+    /// #109: the user switched deployment while a run was in flight. Its
+    /// findings are about a deployment this window no longer shows — dropped,
+    /// not displayed, and not an error either (the shape of
+    /// `admin.rs::a_sweep_from_another_base_is_not_evidence_here`).
+    #[test]
+    fn a_run_from_another_base_is_not_evidence_here() {
+        let mut state = DoctorState::default();
+        state.finish(
+            Ok(run("acme", vec![finding("slice-sync", "h-1/p")])),
+            "acme",
+        );
+        assert!(state.current.is_some());
+
+        state.clear();
+        state.finish(Ok(run("acme", vec![finding("stale-state", "k")])), "other");
+        assert!(
+            state.current.is_none(),
+            "a run about acme says nothing about other"
+        );
+        assert!(state.delta.is_none());
+        assert!(state.error.is_none(), "and it is not an error either");
     }
 
     #[test]

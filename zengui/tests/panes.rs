@@ -715,7 +715,13 @@ fn the_doctor_pane_never_invents_a_verdict() {
         deep: false,
     };
     let mut state = DoctorState::default();
-    state.finish(Ok(Arc::new(report.clone())));
+    state.finish(
+        Ok(zengui::doctor::DoctorRun {
+            report: Arc::new(report.clone()),
+            base: String::new(),
+        }),
+        "",
+    );
     let mut ui = simulator::<Message, _, _>(pane(&state, ""));
     assert!(ui.find("slice-sync").is_ok(), "the stable check id renders");
     assert!(ui.find("RFC 08 §6").is_ok(), "the citation renders");
@@ -743,7 +749,13 @@ fn the_doctor_pane_never_invents_a_verdict() {
         }],
         ..report
     };
-    state.finish(Ok(Arc::new(second)));
+    state.finish(
+        Ok(zengui::doctor::DoctorRun {
+            report: Arc::new(second),
+            base: String::new(),
+        }),
+        "",
+    );
     let mut ui = simulator::<Message, _, _>(pane(&state, ""));
     assert!(
         ui.find("vs previous run: 1 new · 1 fixed · 0 unchanged")
