@@ -585,10 +585,22 @@ enum TopicCmd {
     /// Publish to a key (issue #47) — a declared publisher, never an ad-hoc
     /// put (P7).
     Pub {
-        /// Full wire key to publish on.
-        key: String,
-        /// Payload: inline text, `@file`, or `-` for stdin.
-        body: String,
+        /// Full wire key to publish on (omit with --from ndjson).
+        key: Option<String>,
+        /// Payload: inline text, `@file`, or `-` for stdin (omit with --from).
+        body: Option<String>,
+        /// Read rows from stdin instead: `--from ndjson` accepts the exact
+        /// row shape `topic echo --format ndjson` (and the zengui export)
+        /// emits — key + value per row, optionally encoding/qos/delete/
+        /// attachment. One shape, both directions; malformed rows are
+        /// counted and reported, never silently skipped.
+        #[arg(long, value_enum)]
+        from: Option<cmd::publish::PubSource>,
+        /// With --from: delete rows on keys that are not state-shaped are
+        /// refused (and counted) unless this is passed — RFC 04 §1.2
+        /// (v1.12) prices the off-state tombstone even in a pipe.
+        #[arg(long = "i-know")]
+        i_know: bool,
         /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
         #[arg(long, default_value = "sampled", add = ArgValueCandidates::new(completion::qos_profiles))]
         qos: String,
@@ -1056,6 +1068,8 @@ async fn main() -> Result<()> {
         Command::Topic(TopicCmd::Pub {
             key,
             body,
+            from,
+            i_know,
             qos,
             encoding,
             repeat,
@@ -1064,21 +1078,32 @@ async fn main() -> Result<()> {
             raw,
             attachment,
             bus,
-        }) => {
-            cmd::publish::run(
-                &key,
-                &body,
-                &qos,
-                encoding.as_deref(),
-                repeat,
-                interval,
-                no_validate,
-                raw,
-                attachment.as_deref(),
-                &bus,
-            )
-            .await
-        }
+        }) => match (from, key, body) {
+            (Some(cmd::publish::PubSource::Ndjson), None, None) => {
+                cmd::publish::run_from_ndjson(&qos, interval, i_know, &bus).await
+            }
+            (Some(_), _, _) => Err(anyhow::anyhow!(
+                "--from ndjson reads keys and payloads from stdin rows — drop the                  key/body arguments"
+            )),
+            (None, Some(key), Some(body)) => {
+                cmd::publish::run(
+                    &key,
+                    &body,
+                    &qos,
+                    encoding.as_deref(),
+                    repeat,
+                    interval,
+                    no_validate,
+                    raw,
+                    attachment.as_deref(),
+                    &bus,
+                )
+                .await
+            }
+            (None, _, _) => Err(anyhow::anyhow!(
+                "topic pub needs <KEY> <BODY>, or --from ndjson with rows on stdin"
+            )),
+        },
         Command::Topic(TopicCmd::Retire {
             key,
             qos,
