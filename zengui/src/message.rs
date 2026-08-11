@@ -70,6 +70,9 @@ pub enum Message {
     PublishSent(Result<usize, String>),
     /// The armed publication was undeclared.
     PublishStopped(Result<(), String>),
+    /// A retire round finished (#115): the tombstone shipped (with the
+    /// publication's matching fact), or it did not.
+    PublishRetired(Result<Option<bool>, String>),
     /// Node dashboard interactions (issue #61).
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).

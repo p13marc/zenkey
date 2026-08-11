@@ -613,6 +613,39 @@ impl Zengui {
                 self.publication = None;
                 Task::none()
             }
+            Message::PublishRetired(result) => {
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                match result {
+                    Ok(matching) => {
+                        // A tombstone has no body provenance: a stale
+                        // encoded/as-typed/raw line claiming a body shipped
+                        // would be the pane's own O4 mistake.
+                        form.source = None;
+                        form.note = None;
+                        let key = form.key.clone();
+                        form.log(
+                            true,
+                            format!(
+                                "retired {key} — an authoritative delete (RFC 04 §1.2), \
+                                 not an empty value"
+                            ),
+                        );
+                        if matching == Some(false) {
+                            form.log(
+                                true,
+                                "matching: no subscriber matched the tombstone — a routing \
+                                 fact, not a fleet verdict (RFC 05 §3.1)",
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        form.error = Some(e.clone());
+                        form.log(false, format!("retire failed: {e}"));
+                    }
+                }
+                Task::none()
+            }
             Message::PublishStopped(result) => {
                 match result {
                     Ok(()) => self
@@ -846,6 +879,57 @@ impl Zengui {
                     ),
                     Err(_) => Task::none(),
                 }
+            }
+            PublishMsg::RetireIKnowToggled(b) => {
+                self.publish_form.retire_i_know = b;
+                Task::none()
+            }
+            PublishMsg::Retire => {
+                let Some(session) = self.session.clone() else {
+                    return Task::none();
+                };
+                let key = self.publish_form.key.trim().to_string();
+                if key.is_empty() {
+                    return Task::none();
+                }
+                // Same stop-first discipline as Send: a retire must not race
+                // an armed publication on the key.
+                let stop = self.update_publish(PublishMsg::Stop);
+                // The engine is the judge (check_retire, RFC 04 §1.2 v1.12);
+                // the pane's checkbox only arms the force.
+                if let Err(e) = zenkey_fleet::check_retire(
+                    &self.settings.base,
+                    &key,
+                    self.slices.as_deref(),
+                    self.publish_form.retire_i_know,
+                ) {
+                    let e = e.to_string();
+                    self.publish_form.error = Some(e.clone());
+                    self.publish_form.log(false, format!("refused: {e}"));
+                    return stop;
+                }
+                self.publish_form.in_flight = true;
+                self.publish_form.error = None;
+                let send = Task::perform(
+                    async move {
+                        // A retirement is the final state transition: the
+                        // reliable profile, like `zenctl topic retire`.
+                        let publication = zenkey_fleet::declare_publication(
+                            &session,
+                            &key,
+                            zenkey::qos::QosProfile::Transition,
+                            None,
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                        let matching = publication.matching_status().await.ok();
+                        publication.retire().await.map_err(|e| e.to_string())?;
+                        publication.undeclare().await.map_err(|e| e.to_string())?;
+                        Ok(matching)
+                    },
+                    Message::PublishRetired,
+                );
+                Task::batch([stop, send])
             }
             PublishMsg::Send => {
                 let (Some(session), Some(store)) =

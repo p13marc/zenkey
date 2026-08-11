@@ -166,17 +166,17 @@ pub fn visible<'a>(
 /// One line in `zenctl topic echo --format ndjson`'s row shape (#72).
 ///
 /// The **shared** fields are byte-for-byte the CLI's — `key`, `origin`,
-/// `subject`, `encoding`, `timestamp`, `value` — so one `jq` script reads a
-/// GUI export and a CLI pipe alike. The two differ in exactly the places the
-/// two tools differ, and neither difference is faked:
+/// `subject`, `encoding`, `timestamp`, `delete`, `value` — so one `jq` script
+/// reads a GUI export and a CLI pipe alike (`delete` joined the shared set
+/// when the CLI learned tombstones, #115). The two differ in exactly the
+/// places the two tools differ, and neither difference is faked:
 ///
 /// - the CLI carries `type`/`typed` from its schema decode; that decode is
 ///   async and must never run on a render path, so it is **absent** here
 ///   rather than defaulted to `null`/`false`, which would claim the lookup
 ///   happened and found nothing;
-/// - this row carries `bytes` and `delete`, which the ring knows and the CLI's
-///   row does not spell — a tombstone in particular is authoritative
-///   retirement (RFC 04 §1.2) and worth exporting as such.
+/// - this row carries `bytes`, which the ring knows and the CLI's row does
+///   not spell.
 pub fn ndjson_line(line: &EchoLine, base: &str) -> String {
     let parsed = zenkey::grammar::parse_full(base, &line.key);
     let obj = serde_json::json!({
