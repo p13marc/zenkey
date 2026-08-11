@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 const LAT_WINDOW: usize = 256;
 
 /// The observed **skewed** latency distribution of one key (#119):
-/// (arrival wall-clock − publisher HLC), µs, over the last [`LAT_WINDOW`]
-/// stamped samples.
+/// (arrival wall-clock − publisher HLC), µs, over the last `LAT_WINDOW`
+/// (a private bound) stamped samples.
 ///
 /// The caveat is part of the measurement: this contains clock skew, and
 /// HLCs are only as good as the fleet's time discipline. Negative values
@@ -54,6 +54,7 @@ pub struct KeyStats {
 
 impl KeyStats {
     /// The window's distribution, or `None` before any stamped sample.
+    ///
     pub fn latency(&self) -> Option<LatencySummary> {
         if self.lat.is_empty() {
             return None;
