@@ -24,6 +24,19 @@ use zenoh::sample::SampleKind;
 use crate::stats::StatsTable;
 use crate::tree::KeyTreeSnapshot;
 
+/// The publisher a sample came from, when its session attaches SourceInfo
+/// — the same signal the gap counter reads, surfaced (#120). All `Copy`:
+/// carrying it costs no allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SampleSource {
+    /// The publishing session's Zenoh id.
+    pub zid: zenoh::config::ZenohId,
+    /// The entity id within that session.
+    pub eid: u32,
+    /// The per-entity sequence number — what the gap counter diffs.
+    pub sn: u32,
+}
+
 /// One observed sample, cheap to clone (the payload is zenoh's refcounted
 /// buffer, not a copy — report §14's zero-copy discipline).
 #[derive(Debug, Clone)]
@@ -49,6 +62,23 @@ pub struct SampleView {
     /// `None` means the sample carried none: an attachment is a wire fact,
     /// not a decode, and what arrived is a fact to show (#117).
     pub attachment: Option<zenoh::bytes::ZBytes>,
+    /// The wire's actual QoS axes (#120) — always present: zenoh stamps
+    /// every sample with them, defaults included. A registry *declares* a
+    /// profile; these are what actually rode, and the two can disagree —
+    /// which is exactly what a frontend renders. All `Copy`.
+    ///
+    /// Deliberately absent: SHM-vs-raw buffer provenance. zenoh 1.9's
+    /// public API does not expose it on a received sample, and chasing it
+    /// through `zenoh::internal` is the dependency this crate refuses
+    /// (nuze's decoder is the cautionary tale).
+    pub priority: zenoh::qos::Priority,
+    pub congestion_control: zenoh::qos::CongestionControl,
+    pub reliability: zenoh::qos::Reliability,
+    pub express: bool,
+    /// The publishing entity, when SourceInfo rode the sample. `None` is
+    /// "the publisher's session does not attach it" — common, and not a
+    /// defect.
+    pub source: Option<SampleSource>,
     /// Arrival, on **this observer's** monotonic clock — always available,
     /// never wall-clock, and never a claim about when the sample was produced.
     ///
@@ -56,6 +86,18 @@ pub struct SampleView {
     /// (zengui ticks at 250 ms) can still space a 5 Hz key's samples truthfully
     /// instead of collapsing a tick's worth onto one instant.
     pub received: Instant,
+}
+
+impl SampleView {
+    /// Whether the wire's actual axes match a declared profile (RFC 04 §3)
+    /// — the declared-vs-observed comparison nobody else in the field can
+    /// render, because nobody else holds a registry that declares QoS.
+    pub fn qos_matches(&self, profile: zenkey::qos::QosProfile) -> bool {
+        self.priority == profile.priority()
+            && self.congestion_control == profile.congestion_control()
+            && self.reliability == profile.reliability()
+            && self.express == profile.express()
+    }
 }
 
 /// What the monitor emits.
@@ -158,8 +200,28 @@ impl MonitorCore {
     /// tree work (that happens on the tick).
     pub fn ingest(&self, view: SampleView, sn: Option<u32>) {
         {
+            // Observed *skewed* latency (#119): our wall clock minus the
+            // publisher's HLC — both halves this crate deliberately never
+            // mixes elsewhere, subtracted here on purpose and labeled as
+            // containing clock skew. Unstamped samples pass None and are
+            // counted, not defaulted (no latency ≠ zero latency).
+            let latency_us = view.timestamp.map(|t| {
+                let published = t.get_time().to_system_time();
+                match std::time::SystemTime::now().duration_since(published) {
+                    Ok(d) => i64::try_from(d.as_micros()).unwrap_or(i64::MAX),
+                    // The publisher's clock is ahead of ours: negative, and
+                    // shown as such — that *is* the skew evidence.
+                    Err(e) => -i64::try_from(e.duration().as_micros()).unwrap_or(i64::MAX),
+                }
+            });
             let mut stats = self.stats.lock().expect("stats lock");
-            stats.record(&view.key, view.payload.len(), sn, Instant::now());
+            stats.record(
+                &view.key,
+                view.payload.len(),
+                sn,
+                Instant::now(),
+                latency_us,
+            );
         }
         // Send errors mean "no receiver right now" — not a failure.
         let _ = self.tx.send(FleetEvent::Sample(Arc::new(view)));
@@ -355,7 +417,11 @@ impl Monitor {
             .session
             .declare_subscriber(selector)
             .callback(move |sample| {
-                let sn = sample.source_info().map(|si| si.source_sn());
+                let source = sample.source_info().map(|si| SampleSource {
+                    zid: si.source_id().zid(),
+                    eid: si.source_id().eid(),
+                    sn: si.source_sn(),
+                });
                 core.ingest(
                     SampleView {
                         key: sample.key_expr().as_str().to_string(),
@@ -364,9 +430,14 @@ impl Monitor {
                         kind: sample.kind(),
                         timestamp: sample.timestamp().copied(),
                         attachment: sample.attachment().cloned(),
+                        priority: sample.priority(),
+                        congestion_control: sample.congestion_control(),
+                        reliability: sample.reliability(),
+                        express: sample.express(),
+                        source,
                         received: Instant::now(),
                     },
-                    sn,
+                    source.map(|s| s.sn),
                 );
             })
             .await
@@ -586,6 +657,11 @@ mod tests {
             kind: SampleKind::Put,
             timestamp: None,
             attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
             received: Instant::now(),
         }
     }

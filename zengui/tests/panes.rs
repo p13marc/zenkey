@@ -29,7 +29,7 @@ fn snapshot(keys: &[&str]) -> zenkey_fleet::skeleton::MergedNode {
     let mut stats = StatsTable::new();
     let now = Instant::now();
     for k in keys {
-        stats.record(k, 8, None, now);
+        stats.record(k, 8, None, now, None);
     }
     let observed = KeyTreeSnapshot::build(&stats);
     // Pane tests watch everything: rows read Observed, as the bootstrap did.
@@ -544,6 +544,8 @@ fn the_detail_pane_tags_decode_provenance() {
         decoded: Some(&decoded),
         series: None,
         history_entries: None,
+        observed: None,
+        latency: None,
     }));
     assert!(ui.find("registered").is_ok(), "the facts section renders");
     assert!(
@@ -564,6 +566,8 @@ fn the_detail_pane_tags_decode_provenance() {
         decoded: None,
         series: None,
         history_entries: None,
+        observed: None,
+        latency: None,
     }));
     assert!(
         ui.find("no value — asked get, @adv cache, subscribe window — a non-verdict, not proof of absence (RFC 05 §3.1)")
@@ -945,6 +949,11 @@ fn recording(key: &str, max_entries: usize, samples: &[(&[u8], bool)]) -> Histor
             },
             timestamp: None,
             attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
             received: Instant::now(),
         });
     }
@@ -1152,6 +1161,8 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         decoded: None,
         series: Some(series),
         history_entries: Some(3),
+        observed: None,
+        latency: None,
     }));
     assert!(
         ui.find("Series").is_err(),
@@ -1192,6 +1203,8 @@ fn the_detail_pane_labels_the_series_it_plots() {
         decoded: None,
         series: Some(series),
         history_entries: Some(3),
+        observed: None,
+        latency: None,
     }));
     assert!(ui.find("Series").is_ok());
     assert!(

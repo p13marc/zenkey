@@ -105,6 +105,10 @@ pub struct Zengui {
     roster: crate::nodes::NodeRoster,
     /// The selected origin in the nodes pane.
     node_selected: Option<String>,
+    /// The selected key's observed skewed-latency summary, refreshed on the
+    /// bus tick (#119) — never computed on the render path, and cleared
+    /// with the selection.
+    selected_latency: Option<(zenkey_fleet::LatencySummary, u64)>,
     /// Its one-shot `node_info` detail — the pane's only data-plane cost.
     node_detail: view::nodes::DetailState,
     /// The doctor panel's run state (#71) — run-on-demand only.
@@ -200,6 +204,7 @@ impl Zengui {
             palette: view::palette::PaletteState::default(),
             roster: crate::nodes::NodeRoster::default(),
             node_selected: None,
+            selected_latency: None,
             node_detail: view::nodes::DetailState::default(),
             doctor: crate::doctor::DoctorState::default(),
             blob: crate::blob::BlobState::default(),
@@ -499,6 +504,9 @@ impl Zengui {
             }
             Message::SelectKey(key) => {
                 self.selected = key.clone();
+                // The old key's latency summary is not evidence about the
+                // new one — cleared now, refreshed on the next tick (#119).
+                self.selected_latency = None;
                 // History follows the selection and nothing else (issue #63):
                 // the previous recording is dropped here, which is what makes
                 // deselecting free. A symbolic skeleton path names no concrete
@@ -2070,6 +2078,15 @@ impl Zengui {
     }
 
     fn apply_tick(&mut self, tick: &BusTick) {
+        // Per tick, not per frame: one bounded lock for one key's latency
+        // summary (#119). None when unselected, unobserved, or unstamped.
+        self.selected_latency = match (&self.selected, &self.monitor) {
+            (Some(key), Some(monitor)) => monitor
+                .core()
+                .with_stats(|s| s.get(key).map(|k| (k.latency(), k.unstamped)))
+                .and_then(|(lat, unstamped)| lat.map(|l| (l, unstamped))),
+            _ => None,
+        };
         self.observed = Arc::clone(&tick.tree);
         self.keys = tick.keys;
         self.keys_evicted = tick.keys_evicted;
@@ -2285,6 +2302,8 @@ impl Zengui {
                     decoded: self.decoded.as_ref(),
                     series: self.series_data(),
                     history_entries: self.history.as_ref().map(|r| r.ring.len()),
+                    observed: self.history.as_ref().and_then(|r| r.ring.newest()),
+                    latency: self.selected_latency,
                 }),
                 RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
                     roster: &self.roster,

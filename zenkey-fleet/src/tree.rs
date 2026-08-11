@@ -120,10 +120,10 @@ mod tests {
     fn builds_grouped_counts() {
         let mut stats = StatsTable::new();
         let now = Instant::now();
-        stats.record("zs/v1/h-a/telemetry/x/m1", 4, None, now);
-        stats.record("zs/v1/h-a/telemetry/x/m1", 4, None, now);
-        stats.record("zs/v1/h-a/telemetry/x/m2", 4, None, now);
-        stats.record("zs/v1/h-b/state/x/health", 4, None, now);
+        stats.record("zs/v1/h-a/telemetry/x/m1", 4, None, now, None);
+        stats.record("zs/v1/h-a/telemetry/x/m1", 4, None, now, None);
+        stats.record("zs/v1/h-a/telemetry/x/m2", 4, None, now, None);
+        stats.record("zs/v1/h-b/state/x/health", 4, None, now, None);
 
         let snap = KeyTreeSnapshot::build(&stats);
         assert_eq!(snap.keys, 3);
@@ -144,10 +144,10 @@ mod tests {
     fn collapsed_nodes_aggregate_their_subtree() {
         let mut stats = StatsTable::new();
         let now = Instant::now();
-        stats.record("zs/v1/h-a/telemetry/x/m1", 4, None, now);
-        stats.record("zs/v1/h-a/telemetry/x/m1", 4, None, now);
-        stats.record("zs/v1/h-a/telemetry/x/m2", 10, None, now);
-        stats.record("zs/v1/h-b/state/x/health", 7, None, now);
+        stats.record("zs/v1/h-a/telemetry/x/m1", 4, None, now, None);
+        stats.record("zs/v1/h-a/telemetry/x/m1", 4, None, now, None);
+        stats.record("zs/v1/h-a/telemetry/x/m2", 10, None, now, None);
+        stats.record("zs/v1/h-b/state/x/health", 7, None, now, None);
 
         let snap = KeyTreeSnapshot::build(&stats);
         let root = &snap.root;

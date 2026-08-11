@@ -619,8 +619,14 @@ mod tests {
         // Observed traffic: cpu (watched) and a foreign key (not watched).
         let mut stats = StatsTable::new();
         let now = Instant::now();
-        stats.record("v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu", 4, None, now);
-        stats.record("demo/foreign", 4, None, now);
+        stats.record(
+            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+            4,
+            None,
+            now,
+            None,
+        );
+        stats.record("demo/foreign", 4, None, now, None);
         let observed = KeyTreeSnapshot::build(&stats);
 
         let watched = vec!["v1/h-3fa9c2d41b7e/telemetry/**".to_string()];

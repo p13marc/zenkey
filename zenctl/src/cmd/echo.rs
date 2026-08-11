@@ -3,7 +3,9 @@
 
 use anyhow::Result;
 
-use super::render::{attachment_display, attachment_json, format_sample, hex, type_tag};
+use super::render::{
+    attachment_display, attachment_json, format_sample, hex, qos_summary, source_summary, type_tag,
+};
 use crate::{BusArgs, output};
 
 /// `topic echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
@@ -124,6 +126,15 @@ pub async fn run(
         // The attachment is a wire fact, rendered once (structural → hex,
         // size-tagged, never schema-decoded) and shown wherever the sample is.
         let att = sample.attachment.as_ref().map(attachment_display);
+        // The wire's actual QoS axes (#120) — always stamped, defaults
+        // included; the source only when the publisher attaches it.
+        let qos = qos_summary(
+            sample.priority,
+            sample.congestion_control,
+            sample.reliability,
+            sample.express,
+        );
+        let source = sample.source.as_ref().map(source_summary);
         let rate_suffix = if rate {
             let (_, _, hz) = monitor.core().with_stats(|s| s.totals());
             format!("  @ {hz:.1}/s")
@@ -225,10 +236,18 @@ pub async fn run(
                     "typed": typed,
                     "encoding": encoding,
                     "timestamp": timestamp,
+                    "qos": qos,
                     "delete": false,
                     "value": serde_json::from_str::<serde_json::Value>(&value)
                         .unwrap_or(serde_json::Value::String(value.clone())),
                 });
+                // Present only when the publisher attached SourceInfo —
+                // absent, never null-when-unknown (#120).
+                if let Some(s) = &sample.source {
+                    obj["source"] = serde_json::json!({
+                        "zid": s.zid.to_string(), "eid": s.eid, "sn": s.sn,
+                    });
+                }
                 // Present only when the wire carried one — absent, never
                 // null-when-unknown (#117).
                 if let Some(a) = &sample.attachment {
@@ -250,6 +269,8 @@ pub async fn run(
                         timestamp.as_deref(),
                         &value,
                         att.as_deref(),
+                        Some(&qos),
+                        source.as_deref(),
                     )
                 );
             } else {

@@ -420,6 +420,12 @@ pub struct RateRow {
     /// Source-sequence gaps (zero also means "publishers attach no
     /// SourceInfo" — an observation, not proof of losslessness).
     pub sn_gaps: u64,
+    /// Observed **skewed** latency over the window (#119) — absent when no
+    /// sample was HLC-stamped, which is not zero latency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency: Option<crate::stats::LatencySummary>,
+    /// Samples that carried no HLC — the other half of the observation.
+    pub unstamped: u64,
 }
 
 /// The `topic hz` / `topic bw` report (issue #46) — measured counts plus the

@@ -559,8 +559,10 @@ enum TopicCmd {
         /// kcat-style format string: %k wire key, %K base-relative, %o origin,
         /// %c class, %p producer, %s subject, %t type, %v value, %e encoding,
         /// %l payload bytes, %n counter, %T timestamp, %a attachment (empty
-        /// when none arrived), %{a.b.c} a decoded payload field by dot-path,
-        /// %% literal percent.
+        /// when none arrived), %q QoS axes (priority/congestion/reliability,
+        /// +express — the wire's actual axes, #120), %S source zid:eid#sn
+        /// (empty when the publisher attaches no SourceInfo), %{a.b.c} a
+        /// decoded payload field by dot-path, %% literal percent.
         #[arg(long)]
         fmt: Option<String>,
         /// Print raw payload bytes as hex instead of decoding.
@@ -676,6 +678,12 @@ enum TopicCmd {
         /// SourceInfo; absent info reads as zero, honestly labeled).
         #[arg(long)]
         loss: bool,
+        /// Also report observed pub→sub latency per key (implies --per-key):
+        /// arrival wall-clock minus publisher HLC — contains clock skew, and
+        /// is labeled as such; negative values are the skew evidence
+        /// (#119). Unstamped samples are counted, never treated as zero.
+        #[arg(long)]
+        latency: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -1140,6 +1148,7 @@ async fn main() -> Result<()> {
             window,
             per_key,
             loss,
+            latency,
             bus,
         }) => {
             cmd::rate::run(
@@ -1148,8 +1157,9 @@ async fn main() -> Result<()> {
                 class.as_deref(),
                 producer.as_deref(),
                 window,
-                per_key,
+                per_key || latency,
                 loss,
+                latency,
                 false,
                 &bus,
             )
@@ -1171,6 +1181,7 @@ async fn main() -> Result<()> {
                 producer.as_deref(),
                 window,
                 per_key,
+                false,
                 false,
                 true,
                 &bus,

@@ -156,6 +156,11 @@ pub async fn run(
                                     None,
                                     &value,
                                     a.attachment.as_ref().map(attachment_display).as_deref(),
+                                    // A reply is not a subscribe-path sample:
+                                    // FleetAnswer carries no QoS axes, and an
+                                    // empty field is honest (#120).
+                                    None,
+                                    None,
                                 )
                             );
                         } else {

@@ -6,8 +6,31 @@
 //! keys — no per-sample allocation on the hot hit path); one allocation per
 //! *new* key is the floor.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
+
+/// How many per-key latency observations the summary window keeps. Bounded
+/// like everything else an hours-long observer accumulates (O6).
+const LAT_WINDOW: usize = 256;
+
+/// The observed **skewed** latency distribution of one key (#119):
+/// (arrival wall-clock − publisher HLC), µs, over the last `LAT_WINDOW`
+/// (a private bound) stamped samples.
+///
+/// The caveat is part of the measurement: this contains clock skew, and
+/// HLCs are only as good as the fleet's time discipline. Negative values
+/// are the skew *evidence* and are never clamped — render this as
+/// "observed skewed latency", an observation, not a verdict on the
+/// transport (RFC 09 §5.1 applied to a number).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct LatencySummary {
+    pub min_us: i64,
+    pub median_us: i64,
+    pub p95_us: i64,
+    pub max_us: i64,
+    /// Stamped samples in the window.
+    pub samples: usize,
+}
 
 /// One key's running statistics.
 #[derive(Debug, Clone)]
@@ -20,7 +43,33 @@ pub struct KeyStats {
     /// Consecutive source-sequence-number gap count, when publishers attach
     /// SourceInfo (unstable API) — loss visibility, `--loss`.
     pub sn_gaps: u64,
+    /// Samples that carried **no** HLC timestamp — an observation of their
+    /// own, counted separately: an unstamped sample has no latency, which
+    /// is not the same as zero latency (#119).
+    pub unstamped: u64,
     last_sn: Option<u32>,
+    /// Bounded window of observed skewed latencies, µs.
+    lat: VecDeque<i64>,
+}
+
+impl KeyStats {
+    /// The window's distribution, or `None` before any stamped sample.
+    ///
+    pub fn latency(&self) -> Option<LatencySummary> {
+        if self.lat.is_empty() {
+            return None;
+        }
+        let mut sorted: Vec<i64> = self.lat.iter().copied().collect();
+        sorted.sort_unstable();
+        let at = |q: f64| sorted[((sorted.len() - 1) as f64 * q) as usize];
+        Some(LatencySummary {
+            min_us: sorted[0],
+            median_us: at(0.5),
+            p95_us: at(0.95),
+            max_us: *sorted.last().expect("non-empty"),
+            samples: sorted.len(),
+        })
+    }
 }
 
 /// The table. Feed it samples; read it per key or in aggregate.
@@ -153,8 +202,17 @@ impl StatsTable {
         }
     }
 
-    /// Record one sample. `now` is injected for deterministic tests.
-    pub fn record(&mut self, key: &str, payload_len: usize, sn: Option<u32>, now: Instant) {
+    /// Record one sample. `now` is injected for deterministic tests;
+    /// `latency_us` is the pre-computed skewed latency (#119) — `None` for
+    /// an unstamped sample, which is counted, not defaulted.
+    pub fn record(
+        &mut self,
+        key: &str,
+        payload_len: usize,
+        sn: Option<u32>,
+        now: Instant,
+        latency_us: Option<i64>,
+    ) {
         if let Some(s) = self.keys.get_mut(key) {
             let dt = now.saturating_duration_since(s.last_seen).as_secs_f64();
             if dt > 0.0 {
@@ -171,6 +229,15 @@ impl StatsTable {
                 s.sn_gaps += u64::from(cur - prev - 1);
             }
             s.last_sn = sn;
+            match latency_us {
+                Some(us) => {
+                    if s.lat.len() >= LAT_WINDOW {
+                        s.lat.pop_front();
+                    }
+                    s.lat.push_back(us);
+                }
+                None => s.unstamped += 1,
+            }
         } else {
             if self.keys.len() >= self.max_keys {
                 self.evict();
@@ -183,7 +250,9 @@ impl StatsTable {
                     rate_hz: 0.0,
                     last_seen: now,
                     sn_gaps: 0,
+                    unstamped: u64::from(latency_us.is_none()),
                     last_sn: sn,
+                    lat: latency_us.into_iter().collect(),
                 },
             );
         }
@@ -224,7 +293,7 @@ mod tests {
         let mut t = StatsTable::with_capacity(100);
         let now = Instant::now();
         for i in 0..1000 {
-            t.record(&format!("demo/k{i}"), 4, None, now);
+            t.record(&format!("demo/k{i}"), 4, None, now, None);
         }
         assert!(t.len() <= 100, "len {} exceeds the bound", t.len());
         assert!(t.evicted() > 0);
@@ -241,11 +310,17 @@ mod tests {
 
         // Ten keys, oldest first.
         for i in 0..10 {
-            t.record(&format!("old/k{i}"), 4, None, t0 + Duration::from_millis(i));
+            t.record(
+                &format!("old/k{i}"),
+                4,
+                None,
+                t0 + Duration::from_millis(i),
+                None,
+            );
         }
         // One of them keeps publishing, much later.
         let fresh = t0 + Duration::from_secs(60);
-        t.record("old/k0", 4, None, fresh);
+        t.record("old/k0", 4, None, fresh, None);
 
         // Now push new keys in, forcing eviction. Each is strictly newer than
         // `old/k0`'s refresh, so there is no tie for "oldest" to break.
@@ -255,6 +330,7 @@ mod tests {
                 4,
                 None,
                 fresh + Duration::from_millis(i),
+                None,
             );
         }
 
@@ -268,6 +344,31 @@ mod tests {
         );
     }
 
+    /// #119: the latency window summarises stamped samples and counts
+    /// unstamped ones separately — no latency is not zero latency, and a
+    /// negative value is the skew evidence, kept.
+    #[test]
+    fn latency_is_summarised_and_unstamped_is_counted_not_defaulted() {
+        let mut t = StatsTable::new();
+        let now = Instant::now();
+        for us in [1000, -200, 5000, 3000] {
+            t.record("k", 4, None, now, Some(us));
+        }
+        t.record("k", 4, None, now, None);
+        let s = t.get("k").unwrap();
+        assert_eq!(s.unstamped, 1);
+        let lat = s.latency().unwrap();
+        assert_eq!(lat.min_us, -200, "negative skew is shown, not clamped");
+        assert_eq!(lat.max_us, 5000);
+        assert_eq!(lat.samples, 4);
+        assert!(lat.median_us >= -200 && lat.median_us <= 5000);
+
+        // Never stamped: no summary, rather than an invented zero.
+        t.record("quiet", 4, None, now, None);
+        assert!(t.get("quiet").unwrap().latency().is_none());
+        assert_eq!(t.get("quiet").unwrap().unstamped, 1);
+    }
+
     /// Updating a known key must never evict — the bound is on distinct keys,
     /// not on samples.
     #[test]
@@ -275,7 +376,7 @@ mod tests {
         let mut t = StatsTable::with_capacity(4);
         let t0 = Instant::now();
         for i in 0..1000 {
-            t.record("demo/one", 4, None, t0 + Duration::from_millis(i));
+            t.record("demo/one", 4, None, t0 + Duration::from_millis(i), None);
         }
         assert_eq!(t.len(), 1);
         assert_eq!(t.evicted(), 0);
@@ -287,8 +388,8 @@ mod tests {
     fn a_capacity_of_one_still_works() {
         let mut t = StatsTable::with_capacity(1);
         let now = Instant::now();
-        t.record("a", 1, None, now);
-        t.record("b", 1, None, now);
+        t.record("a", 1, None, now, None);
+        t.record("b", 1, None, now, None);
         assert_eq!(t.len(), 1);
         assert_eq!(t.evicted(), 1);
         // Zero is clamped rather than accepted.
@@ -306,6 +407,7 @@ mod tests {
                 8,
                 Some(i),
                 t0 + Duration::from_millis(100 * u64::from(i)),
+                None,
             );
         }
         let s = t.get("v1/h-a/telemetry/x/m").unwrap();
@@ -320,6 +422,7 @@ mod tests {
             8,
             Some(105),
             t0 + Duration::from_millis(10_100),
+            None,
         );
         assert_eq!(t.get("v1/h-a/telemetry/x/m").unwrap().sn_gaps, 5);
     }
@@ -328,8 +431,8 @@ mod tests {
     fn totals_aggregate() {
         let mut t = StatsTable::new();
         let now = Instant::now();
-        t.record("a", 10, None, now);
-        t.record("b", 20, None, now);
+        t.record("a", 10, None, now, None);
+        t.record("b", 20, None, now, None);
         let (count, bytes, _) = t.totals();
         assert_eq!((count, bytes), (2, 30));
         assert_eq!(t.len(), 2);
@@ -341,9 +444,9 @@ mod tests {
     fn retire_unwatched_respects_remaining_coverage() {
         let mut t = StatsTable::new();
         let now = Instant::now();
-        t.record("v1/h-a/telemetry/x/m1", 4, None, now);
-        t.record("v1/h-a/state/x/health", 4, None, now);
-        t.record("v1/h-b/telemetry/y/m2", 4, None, now);
+        t.record("v1/h-a/telemetry/x/m1", 4, None, now, None);
+        t.record("v1/h-a/state/x/health", 4, None, now, None);
+        t.record("v1/h-b/telemetry/y/m2", 4, None, now, None);
 
         // Release the telemetry watch, but keep watching h-a entirely.
         let retired = t.retire_unwatched("v1/*/telemetry/**", &["v1/h-a/**".to_string()]);
@@ -367,7 +470,7 @@ mod tests {
     #[test]
     fn retire_unwatched_tolerates_bad_selectors() {
         let mut t = StatsTable::new();
-        t.record("a/b", 1, None, Instant::now());
+        t.record("a/b", 1, None, Instant::now(), None);
         assert_eq!(t.retire_unwatched("", &[]), 0);
         assert_eq!(t.len(), 1);
     }

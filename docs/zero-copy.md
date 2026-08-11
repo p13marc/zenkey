@@ -130,6 +130,10 @@ present, is a fourth *refcount bump* (`Option<ZBytes>`, cloned like the
 payload), not a fourth allocation — and absent it is a `None`. The
 three-allocation floor stands.
 
+The #120 QoS axes (`priority`/`congestion_control`/`reliability`/`express`)
+and `source: Option<SampleSource>` do not move it either: every one is
+`Copy`. The floor is still three.
+
 The per-tick floor is `KeyTreeSnapshot::build`: one `TreeNode` per *new* node,
 and — since the `contains_key`/`get_mut` fix — no `String` at all for a chunk
 that already exists. `tree/build_50k` is the number that says so.
