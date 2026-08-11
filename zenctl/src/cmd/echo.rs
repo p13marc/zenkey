@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::render::{format_sample, hex, type_tag};
+use super::render::{attachment_display, attachment_json, format_sample, hex, type_tag};
 use crate::{BusArgs, output};
 
 /// `topic echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
@@ -121,6 +121,9 @@ pub async fn run(
         let bytes = sample.payload.to_bytes();
         let encoding = sample.encoding.as_str();
         let timestamp = sample.timestamp.map(|t| t.to_string());
+        // The attachment is a wire fact, rendered once (structural → hex,
+        // size-tagged, never schema-decoded) and shown wherever the sample is.
+        let att = sample.attachment.as_ref().map(attachment_display);
         let rate_suffix = if rate {
             let (_, _, hz) = monitor.core().with_stats(|s| s.totals());
             format!("  @ {hz:.1}/s")
@@ -133,26 +136,34 @@ pub async fn run(
             // decode nothing — there is nothing to decode.
             if ndjson {
                 let parsed = zenkey::grammar::parse_full(&base, key);
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "key": key,
-                        "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
-                        "subject": parsed.as_ref().map(|p| p.subject.join("/")),
-                        "encoding": encoding,
-                        "timestamp": timestamp,
-                        "delete": true,
-                        "value": serde_json::Value::Null,
-                    })
-                );
+                let mut obj = serde_json::json!({
+                    "key": key,
+                    "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
+                    "subject": parsed.as_ref().map(|p| p.subject.join("/")),
+                    "encoding": encoding,
+                    "timestamp": timestamp,
+                    "delete": true,
+                    "value": serde_json::Value::Null,
+                });
+                if let Some(a) = &sample.attachment {
+                    obj["attachment"] = attachment_json(a);
+                    obj["attachment_bytes"] = a.len().into();
+                }
+                println!("{obj}");
             } else {
                 println!(
                     "{key}\n  <tombstone — authoritative retirement (RFC 04 §1.2), \
                      not an empty value>{rate_suffix}"
                 );
+                if let Some(a) = &att {
+                    println!("  attachment: {a}");
+                }
             }
         } else if raw {
             println!("{key}\n  {}{rate_suffix}", hex(&bytes));
+            if let Some(a) = &sample.attachment {
+                println!("  attachment: {}", hex(&a.to_bytes()));
+            }
         } else if hex_payload {
             // --hex: the decode pipeline still names the type, the payload
             // shows as bytes.
@@ -171,6 +182,9 @@ pub async fn run(
             // so no `?`.
             let tag = type_tag(type_name.as_deref(), true);
             println!("{key}\n  {tag} {}{rate_suffix}", hex(&bytes));
+            if let Some(a) = &sample.attachment {
+                println!("  attachment: {}", hex(&a.to_bytes()));
+            }
         } else {
             let (type_name, rendering) = if no_decode {
                 (
@@ -203,7 +217,7 @@ pub async fn run(
             };
             if ndjson {
                 let parsed = zenkey::grammar::parse_full(&base, key);
-                let obj = serde_json::json!({
+                let mut obj = serde_json::json!({
                     "key": key,
                     "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
                     "subject": parsed.as_ref().map(|p| p.subject.join("/")),
@@ -215,6 +229,12 @@ pub async fn run(
                     "value": serde_json::from_str::<serde_json::Value>(&value)
                         .unwrap_or(serde_json::Value::String(value.clone())),
                 });
+                // Present only when the wire carried one — absent, never
+                // null-when-unknown (#117).
+                if let Some(a) = &sample.attachment {
+                    obj["attachment"] = attachment_json(a);
+                    obj["attachment_bytes"] = a.len().into();
+                }
                 println!("{obj}");
             } else if let Some(fmt) = fmt {
                 println!(
@@ -229,11 +249,15 @@ pub async fn run(
                         bytes.len(),
                         timestamp.as_deref(),
                         &value,
+                        att.as_deref(),
                     )
                 );
             } else {
                 let tag = type_tag(type_name.as_deref(), typed);
                 println!("{key}\n  {tag} {value}{rate_suffix}");
+                if let Some(a) = &att {
+                    println!("  attachment: {a}");
+                }
                 for note in notes {
                     eprintln!("  note: {note}");
                 }

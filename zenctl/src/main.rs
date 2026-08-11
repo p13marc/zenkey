@@ -72,7 +72,7 @@ enum Command {
         #[arg(long)]
         hex: bool,
         /// Per-reply line template — the `topic echo` % vocabulary
-        /// (%k %K %o %c %p %s %t %v %e %l %n %{a.b.c}).
+        /// (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c}).
         #[arg(long, value_name = "TEMPLATE")]
         fmt: Option<String>,
         /// Skip schema decode; render structurally.
@@ -487,8 +487,9 @@ enum TopicCmd {
         producer: Option<String>,
         /// kcat-style format string: %k wire key, %K base-relative, %o origin,
         /// %c class, %p producer, %s subject, %t type, %v value, %e encoding,
-        /// %l payload bytes, %n counter, %T timestamp, %{a.b.c} a decoded
-        /// payload field by dot-path, %% literal percent.
+        /// %l payload bytes, %n counter, %T timestamp, %a attachment (empty
+        /// when none arrived), %{a.b.c} a decoded payload field by dot-path,
+        /// %% literal percent.
         #[arg(long)]
         fmt: Option<String>,
         /// Print raw payload bytes as hex instead of decoding.
@@ -543,6 +544,11 @@ enum TopicCmd {
         /// The escape hatch for a subject this tool cannot type.
         #[arg(long)]
         raw: bool,
+        /// Attachment riding beside the payload: inline text or `@file`.
+        /// Never schema-encoded — the registry's vocabulary ends at the
+        /// payload (#117).
+        #[arg(long, value_name = "TEXT|@FILE")]
+        attachment: Option<String>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -990,6 +996,7 @@ async fn main() -> Result<()> {
             interval,
             no_validate,
             raw,
+            attachment,
             bus,
         }) => {
             cmd::publish::run(
@@ -1001,6 +1008,7 @@ async fn main() -> Result<()> {
                 interval,
                 no_validate,
                 raw,
+                attachment.as_deref(),
                 &bus,
             )
             .await

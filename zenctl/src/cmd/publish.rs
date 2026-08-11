@@ -29,6 +29,7 @@ pub async fn run(
     interval: f64,
     no_validate: bool,
     raw: bool,
+    attachment: Option<&str>,
     args: &BusArgs,
 ) -> Result<()> {
     let qos = zenkey::qos::QosProfile::from_name(qos).ok_or_else(|| {
@@ -47,6 +48,15 @@ pub async fn run(
             Some(path) => std::fs::read(path)?,
             None => b.as_bytes().to_vec(),
         },
+    };
+    // The attachment ships verbatim (#117): never schema-encoded, the
+    // registry's vocabulary ends at the payload.
+    let attachment: Option<Vec<u8>> = match attachment {
+        None => None,
+        Some(a) => Some(match a.strip_prefix('@') {
+            Some(path) => std::fs::read(path)?,
+            None => a.as_bytes().to_vec(),
+        }),
     };
 
     let session = args.session().await?;
@@ -99,7 +109,9 @@ pub async fn run(
     }
     let times = repeat.max(1);
     for n in 0..times {
-        publication.send(prepared.bytes.clone(), None).await?;
+        publication
+            .send(prepared.bytes.clone(), attachment.clone())
+            .await?;
         eprintln!(
             "published {key} ({} bytes) [{}/{times}]",
             prepared.bytes.len(),

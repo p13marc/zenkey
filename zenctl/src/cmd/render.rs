@@ -3,6 +3,10 @@
 //! type tag. One vocabulary, wherever a payload is printed.
 
 /// One decoded/rendered sample line for `--fmt`.
+///
+/// `attachment` is the already-rendered attachment text; `%a` expands to it,
+/// or to an empty field when the sample carried none (the line shape stays
+/// stable for cut/awk, like `%{path}`).
 #[allow(clippy::too_many_arguments)]
 pub fn format_sample(
     fmt: &str,
@@ -14,6 +18,7 @@ pub fn format_sample(
     payload_len: usize,
     timestamp: Option<&str>,
     value: &str,
+    attachment: Option<&str>,
 ) -> String {
     let parsed = zenkey::grammar::parse_full(base, wire_key);
     let mut out = String::with_capacity(fmt.len() + value.len());
@@ -102,6 +107,7 @@ pub fn format_sample(
                 use std::fmt::Write as _;
                 let _ = write!(out, "{n}");
             }
+            Some('a') => out.push_str(attachment.unwrap_or("")),
             Some('T') => out.push_str(timestamp.unwrap_or("-")),
             Some('%') => out.push('%'),
             Some(other) => {
@@ -121,6 +127,28 @@ pub fn hex(bytes: &[u8]) -> String {
         .map(|b| format!("{b:02x}"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// An attachment, rendered structurally (JSON → CBOR → text → hex) and
+/// tagged with its size. Deliberately **no schema decode**: the registry's
+/// vocabulary ends at the payload, so an attachment renders structurally or
+/// as hex, labeled, and that is where it stops (#117).
+pub fn attachment_display(att: &zenoh::bytes::ZBytes) -> String {
+    let bytes = att.to_bytes();
+    format!(
+        "{} ({} bytes)",
+        zenkey_fleet::decode::structural(&bytes),
+        bytes.len()
+    )
+}
+
+/// The ndjson half: the attachment as a JSON value (parsed when it is JSON,
+/// a string otherwise). Callers add the key only when a wire attachment
+/// exists — present-only-when-present, never null-when-absent.
+pub fn attachment_json(att: &zenoh::bytes::ZBytes) -> serde_json::Value {
+    let bytes = att.to_bytes();
+    zenkey_fleet::decode::structural_value(&bytes)
+        .unwrap_or_else(|| serde_json::Value::String(zenkey_fleet::decode::structural(&bytes)))
 }
 
 /// The type tag: `<T>` schema-decoded, `<T?>` registered but rendered
@@ -149,6 +177,7 @@ mod tests {
             2,
             None,
             r#"{"iface":{"name":"eth0","up":true}}"#,
+            None,
         );
         assert_eq!(line, "eth0 up=true missing=[]");
     }
@@ -165,6 +194,7 @@ mod tests {
             12,
             None,
             r#"{"up":true}"#,
+            None,
         );
         assert_eq!(
             line,
@@ -181,10 +211,33 @@ mod tests {
                 "e",
                 0,
                 None,
-                "v"
+                "v",
+                None,
             ),
             "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
         );
+    }
+
+    /// `%a` is the attachment field: the rendered text when one arrived, an
+    /// empty field when none did — the line shape stays stable (#117).
+    #[test]
+    fn the_attachment_field_is_empty_when_absent() {
+        let line = |att: Option<&str>| {
+            format_sample("%v|%a", 1, "k", "", None, "e", 0, None, "v", att)
+        };
+        assert_eq!(line(Some("meta (4 bytes)")), "v|meta (4 bytes)");
+        assert_eq!(line(None), "v|");
+    }
+
+    /// The ndjson attachment value parses JSON and falls back to the
+    /// structural string; the display form is size-tagged.
+    #[test]
+    fn attachments_render_structurally_and_stop_there() {
+        let json = zenoh::bytes::ZBytes::from(r#"{"who":"me"}"#);
+        assert_eq!(attachment_json(&json), serde_json::json!({"who": "me"}));
+        assert_eq!(attachment_display(&json), r#"{"who":"me"} (12 bytes)"#);
+        let text = zenoh::bytes::ZBytes::from("plain");
+        assert_eq!(attachment_json(&text), serde_json::json!("plain"));
     }
 
     /// The three-rung ladder every payload print shares.

@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 
-use super::render::{format_sample, hex, type_tag};
+use super::render::{attachment_display, attachment_json, format_sample, hex, type_tag};
 use crate::{BusArgs, output};
 use zenkey_fleet::{Answer, FleetAnswer};
 
@@ -121,6 +121,9 @@ pub async fn run(
                         let encoding = a.encoding.as_deref();
                         if raw {
                             println!("{}\n  [{}] {}", a.key, a.origin, hex(&bytes));
+                            if let Some(att) = &a.attachment {
+                                println!("  attachment: {}", hex(&att.to_bytes()));
+                            }
                             continue;
                         }
                         let (type_name, rendering) = decoded(
@@ -132,6 +135,9 @@ pub async fn run(
                             // request are not a failed decode — no `?`.
                             let tag = type_tag(type_name.as_deref(), true);
                             println!("{}\n  [{}] {tag} {}", a.key, a.origin, hex(&bytes));
+                            if let Some(att) = &a.attachment {
+                                println!("  attachment: {}", hex(&att.to_bytes()));
+                            }
                             continue;
                         }
                         let (value, typed, notes) = value_of(&rendering);
@@ -148,11 +154,15 @@ pub async fn run(
                                     bytes.len(),
                                     None,
                                     &value,
+                                    a.attachment.as_ref().map(attachment_display).as_deref(),
                                 )
                             );
                         } else {
                             let tag = type_tag(type_name.as_deref(), typed);
                             println!("{}\n  [{}] {tag} {value}", a.key, a.origin);
+                            if let Some(att) = &a.attachment {
+                                println!("  attachment: {}", attachment_display(att));
+                            }
                             for note in notes {
                                 eprintln!("  note: {note}");
                             }
@@ -235,12 +245,17 @@ async fn row(
         Answer::Value(payload) => {
             let bytes = payload.to_bytes();
             if raw {
-                return serde_json::json!({
+                let mut obj = serde_json::json!({
                     "key": a.key,
                     "origin": a.origin,
                     "encoding": a.encoding,
                     "hex": hex(&bytes),
                 });
+                if let Some(att) = &a.attachment {
+                    obj["attachment"] = serde_json::Value::String(hex(&att.to_bytes()));
+                    obj["attachment_bytes"] = att.len().into();
+                }
+                return obj;
             }
             let (type_name, rendering) = decoded(
                 store,
@@ -254,7 +269,7 @@ async fn row(
             )
             .await;
             let (value, typed, _) = value_of(&rendering);
-            serde_json::json!({
+            let mut obj = serde_json::json!({
                 "key": a.key,
                 "origin": a.origin,
                 "type": type_name,
@@ -262,7 +277,13 @@ async fn row(
                 "encoding": a.encoding,
                 "value": serde_json::from_str::<serde_json::Value>(&value)
                     .unwrap_or(serde_json::Value::String(value)),
-            })
+            });
+            // Present only when the wire carried one (#117).
+            if let Some(att) = &a.attachment {
+                obj["attachment"] = attachment_json(att);
+                obj["attachment_bytes"] = att.len().into();
+            }
+            obj
         }
     }
 }
