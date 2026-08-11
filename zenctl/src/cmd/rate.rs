@@ -18,6 +18,7 @@ pub async fn run(
     window: u64,
     per_key: bool,
     loss: bool,
+    latency: bool,
     bandwidth: bool,
     args: &BusArgs,
 ) -> Result<()> {
@@ -49,6 +50,8 @@ pub async fn run(
                     count: s.count,
                     bytes: s.bytes,
                     sn_gaps: s.sn_gaps,
+                    latency: s.latency(),
+                    unstamped: s.unstamped,
                 })
                 .collect::<Vec<_>>();
             rows.sort_by_key(|r| std::cmp::Reverse(r.count));
@@ -66,6 +69,6 @@ pub async fn run(
         }
     });
     monitor.stop();
-    output::rate(&rep, args.format, bandwidth, loss);
+    output::rate(&rep, args.format, bandwidth, loss, latency);
     Ok(())
 }

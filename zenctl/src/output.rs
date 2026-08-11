@@ -805,7 +805,14 @@ pub fn storage_list(report: &StorageList, format: Format) -> Result<()> {
 /// `topic hz` / `topic bw` (issue #46): the typed report renders through the
 /// global `--format` like every other command; the O6 eviction note prints in
 /// every mode.
-pub fn rate(report: &RateReport, format: Format, bandwidth: bool, loss: bool) {
+pub fn rate(report: &RateReport, format: Format, bandwidth: bool, loss: bool, latency: bool) {
+    if latency {
+        // The caveat is part of the measurement (#119): both clocks named,
+        // never a verdict on the transport.
+        eprintln!(
+            "latency = arrival wall-clock − publisher HLC: observed *skewed*              latency — it contains clock skew, and negative values are the              skew evidence, not an error (RFC 09 §5.1)"
+        );
+    }
     match format.resolved() {
         Format::Json => json_doc(report),
         Format::Ndjson => {
@@ -832,6 +839,23 @@ pub fn rate(report: &RateReport, format: Format, bandwidth: bool, loss: bool) {
                     print!("{:>8.2} Hz  {}", row.count as f64 / secs, row.key);
                     if loss {
                         print!("  ({} sn gap(s))", row.sn_gaps);
+                    }
+                    if latency {
+                        match &row.latency {
+                            Some(l) => print!(
+                                "  lat med {} p95 {} (min {} max {}, {} stamped, {} unstamped)",
+                                human_us(l.median_us),
+                                human_us(l.p95_us),
+                                human_us(l.min_us),
+                                human_us(l.max_us),
+                                l.samples,
+                                row.unstamped,
+                            ),
+                            None => print!(
+                                "  lat — ({} unstamped: no HLC, no latency — not zero)",
+                                row.unstamped
+                            ),
+                        }
                     }
                     println!();
                 }
@@ -929,4 +953,18 @@ pub fn doctor(report: &DoctorReport, format: Format) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Microseconds, humanised with sign kept — a negative latency is the skew
+/// evidence (#119).
+fn human_us(us: i64) -> String {
+    let sign = if us < 0 { "-" } else { "" };
+    let abs = us.unsigned_abs();
+    if abs >= 1_000_000 {
+        format!("{sign}{:.2}s", abs as f64 / 1_000_000.0)
+    } else if abs >= 1_000 {
+        format!("{sign}{:.1}ms", abs as f64 / 1_000.0)
+    } else {
+        format!("{sign}{abs}µs")
+    }
 }

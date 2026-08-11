@@ -22,7 +22,7 @@ const LAT_WINDOW: usize = 256;
 /// are the skew *evidence* and are never clamped — render this as
 /// "observed skewed latency", an observation, not a verdict on the
 /// transport (RFC 09 §5.1 applied to a number).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct LatencySummary {
     pub min_us: i64,
     pub median_us: i64,
