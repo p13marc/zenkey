@@ -29,7 +29,7 @@ fn snapshot(keys: &[&str]) -> zenkey_fleet::skeleton::MergedNode {
     let mut stats = StatsTable::new();
     let now = Instant::now();
     for k in keys {
-        stats.record(k, 8, None, now);
+        stats.record(k, 8, None, now, None);
     }
     let observed = KeyTreeSnapshot::build(&stats);
     // Pane tests watch everything: rows read Observed, as the bootstrap did.

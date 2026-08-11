@@ -76,6 +76,7 @@ pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscr
 pub use serve::{MockResponder, ServedQuery, declare_responder};
 pub use session::{open, open_with_config};
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
+pub use stats::LatencySummary;
 pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
     StreamItem, WatchId,

@@ -1189,7 +1189,7 @@ mod tests {
         let mut stats = StatsTable::new();
         let now = Instant::now();
         for k in keys {
-            stats.record(k, 8, None, now);
+            stats.record(k, 8, None, now, None);
         }
         let observed = zenkey_fleet::KeyTreeSnapshot::build(&stats);
         // Tests watch everything: every observed node reads Observed.

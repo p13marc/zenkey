@@ -200,8 +200,28 @@ impl MonitorCore {
     /// tree work (that happens on the tick).
     pub fn ingest(&self, view: SampleView, sn: Option<u32>) {
         {
+            // Observed *skewed* latency (#119): our wall clock minus the
+            // publisher's HLC — both halves this crate deliberately never
+            // mixes elsewhere, subtracted here on purpose and labeled as
+            // containing clock skew. Unstamped samples pass None and are
+            // counted, not defaulted (no latency ≠ zero latency).
+            let latency_us = view.timestamp.map(|t| {
+                let published = t.get_time().to_system_time();
+                match std::time::SystemTime::now().duration_since(published) {
+                    Ok(d) => i64::try_from(d.as_micros()).unwrap_or(i64::MAX),
+                    // The publisher's clock is ahead of ours: negative, and
+                    // shown as such — that *is* the skew evidence.
+                    Err(e) => -i64::try_from(e.duration().as_micros()).unwrap_or(i64::MAX),
+                }
+            });
             let mut stats = self.stats.lock().expect("stats lock");
-            stats.record(&view.key, view.payload.len(), sn, Instant::now());
+            stats.record(
+                &view.key,
+                view.payload.len(),
+                sn,
+                Instant::now(),
+                latency_us,
+            );
         }
         // Send errors mean "no receiver right now" — not a failure.
         let _ = self.tx.send(FleetEvent::Sample(Arc::new(view)));
