@@ -22,6 +22,7 @@ pub mod query;
 pub mod registry;
 pub mod report;
 pub mod roster;
+pub mod scout;
 pub mod seed;
 pub mod session;
 pub mod skeleton;
@@ -67,6 +68,7 @@ pub use query::{
 };
 pub use registry::SliceSet;
 pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
+pub use scout::{HelloView, ScoutStream, scout};
 pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use session::open;
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
