@@ -147,6 +147,28 @@ pub struct Zengui {
     keys_evicted: u64,
     keys_unwatched: u64,
     totals: (u64, u64, f64),
+
+    /// Replay mode (issue #74): while `Some`, the panes are fed from the
+    /// file and the live link subscription is not built at all — nothing in
+    /// replay can publish or subscribe, structurally.
+    replay: Option<crate::replay::ReplayState>,
+    /// The open row's path input; `None` = row hidden.
+    replay_open: Option<String>,
+    /// Why the last open failed, shown beside the path box.
+    replay_note: Option<String>,
+    /// A capture in flight (the toolbar's record toggle): the stop signal
+    /// and where it is writing.
+    recording: Option<RecordingHandle>,
+    /// The last finished capture, for the status strip: (samples, dropped,
+    /// path) or the failure.
+    recorded: Option<Result<(u64, u64, String), String>>,
+}
+
+/// A running toolbar capture (#74): dropping the notify without firing it
+/// would leak the task, so `stop` is fired on toggle-off and on exit.
+struct RecordingHandle {
+    stop: Arc<tokio::sync::Notify>,
+    path: String,
 }
 
 impl Zengui {
@@ -225,6 +247,11 @@ impl Zengui {
             keys_evicted: 0,
             keys_unwatched: 0,
             totals: (0, 0, 0.0),
+            replay: None,
+            replay_open: None,
+            replay_note: None,
+            recording: None,
+            recorded: None,
         };
         let open = Task::perform(
             async move {
@@ -697,6 +724,7 @@ impl Zengui {
                 Task::none()
             }
             Message::Echo(msg) => self.update_echo(msg),
+            Message::Replay(msg) => self.update_replay(msg),
             Message::Context(msg) => self.update_context(msg),
             Message::ContextSwitched(Ok(session)) => {
                 // A new session is a new everything: the base may differ, so
@@ -2081,10 +2109,189 @@ impl Zengui {
         self.prefs.save();
     }
 
+    /// Replay mode (issue #74). The transport verbs synthesize ticks from
+    /// the loaded file and push them through the exact pipeline the live
+    /// pump feeds — `apply_tick` — so the panes never know the difference.
+    fn update_replay(&mut self, msg: view::replay::ReplayMsg) -> Task<Message> {
+        use view::replay::ReplayMsg as R;
+        match msg {
+            R::OpenToggled => {
+                self.replay_open = match self.replay_open {
+                    Some(_) => None,
+                    None => Some(String::new()),
+                };
+                self.replay_note = None;
+                Task::none()
+            }
+            R::PathChanged(s) => {
+                if let Some(p) = &mut self.replay_open {
+                    *p = s;
+                }
+                Task::none()
+            }
+            R::Open => {
+                let Some(path) = self
+                    .replay_open
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                else {
+                    return Task::none();
+                };
+                let loaded = std::fs::File::open(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|f| {
+                        crate::replay::ReplayState::load(&path, std::io::BufReader::new(f))
+                    });
+                match loaded {
+                    Ok(mut state) => {
+                        self.replay_open = None;
+                        self.replay_note = None;
+                        // Mode honesty: the panes now show the file, from
+                        // its start — nothing live bleeds through.
+                        self.echo.clear();
+                        self.history = None;
+                        let tick = state.scrub_to(0);
+                        self.replay = Some(state);
+                        self.apply_tick(&tick);
+                    }
+                    Err(e) => self.replay_note = Some(e),
+                }
+                Task::none()
+            }
+            R::Toggled => {
+                let tick = self.replay.as_mut().map(|r| {
+                    // Play at the end means "from the top" — the one
+                    // rewind that needs no scrubber.
+                    if !r.playing && r.position_us >= r.span_us {
+                        let t = r.scrub_to(0);
+                        r.playing = true;
+                        Some(t)
+                    } else {
+                        r.playing = !r.playing;
+                        None
+                    }
+                });
+                if let Some(Some(tick)) = tick {
+                    self.echo.clear();
+                    self.apply_tick(&tick);
+                }
+                Task::none()
+            }
+            R::SpeedSelected(s) => {
+                if let Some(r) = &mut self.replay {
+                    r.speed = s.0;
+                }
+                Task::none()
+            }
+            R::Scrubbed(t_us) => {
+                let rewound = self.replay.as_ref().is_some_and(|r| t_us < r.position_us);
+                let tick = self.replay.as_mut().map(|r| r.scrub_to(t_us));
+                if let Some(tick) = tick {
+                    if rewound {
+                        // Backwards is a rebuild (LWW does not invert), and
+                        // the scrollback rebuilds with it.
+                        self.echo.clear();
+                    }
+                    self.apply_tick(&tick);
+                }
+                Task::none()
+            }
+            R::Advance => {
+                let tick = self
+                    .replay
+                    .as_mut()
+                    .filter(|r| r.playing)
+                    .map(|r| r.advance(std::time::Duration::from_millis(250)));
+                if let Some(tick) = tick {
+                    self.apply_tick(&tick);
+                }
+                Task::none()
+            }
+            R::Exit => {
+                self.replay = None;
+                // The next live tick repaints the tree; the scrollback must
+                // not mix file lines into it.
+                self.echo.clear();
+                Task::none()
+            }
+            R::RecordToggled => {
+                if let Some(handle) = self.recording.take() {
+                    handle.stop.notify_waiters();
+                    return Task::none();
+                }
+                let Some(monitor) = self.monitor.clone() else {
+                    return Task::none();
+                };
+                if self.replay.is_some() {
+                    // Recording captures the live monitor; replay mode has
+                    // nothing live to capture.
+                    return Task::none();
+                }
+                let stop = Arc::new(tokio::sync::Notify::new());
+                let path = format!(
+                    "zengui-{}.zrec",
+                    zenkey_fleet::record::rfc3339_now().replace(':', "-")
+                );
+                let base = self.settings.base.clone();
+                self.recording = Some(RecordingHandle {
+                    stop: Arc::clone(&stop),
+                    path: path.clone(),
+                });
+                self.recorded = None;
+                Task::perform(
+                    async move {
+                        let selectors: Vec<String> = monitor
+                            .watched()
+                            .await
+                            .into_iter()
+                            .map(|(_, s)| s)
+                            .collect();
+                        let header = zenkey_fleet::ZrecHeader {
+                            zrec: zenkey_fleet::ZREC_VERSION,
+                            selectors,
+                            base,
+                            captured_at: zenkey_fleet::record::rfc3339_now(),
+                        };
+                        let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+                        let mut writer =
+                            zenkey_fleet::ZrecWriter::new(std::io::BufWriter::new(file), &header)
+                                .map_err(|e| e.to_string())?;
+                        let mut events = monitor.events();
+                        let recording = zenkey_fleet::record(
+                            &mut events,
+                            &mut writer,
+                            zenkey_fleet::RecordBounds::default(),
+                            |_, _| {},
+                        );
+                        tokio::select! {
+                            r = recording => r.map_err(|e| e.to_string())?,
+                            _ = stop.notified() => {}
+                        }
+                        let (samples, dropped) = writer.counts();
+                        writer.finish().map_err(|e| e.to_string())?;
+                        Ok((samples, dropped, path))
+                    },
+                    |r| Message::Replay(R::RecordFinished(r)),
+                )
+            }
+            R::RecordFinished(result) => {
+                self.recording = None;
+                self.recorded = Some(result);
+                Task::none()
+            }
+        }
+    }
+
     fn apply_tick(&mut self, tick: &BusTick) {
         // Per tick, not per frame: one bounded lock for one key's latency
         // summary (#119). None when unselected, unobserved, or unstamped.
         self.selected_latency = match (&self.selected, &self.monitor) {
+            // During replay the live monitor's stats are about a different
+            // world than the panes are showing — consulting them would put
+            // live latency under file data (O4 in miniature).
+            (Some(_), Some(_)) if self.replay.is_some() => None,
             (Some(key), Some(monitor)) => monitor
                 .core()
                 .with_stats(|s| s.get(key).map(|k| (k.latency(), k.unstamped)))
@@ -2238,11 +2445,24 @@ impl Zengui {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = Vec::new();
-        if let Some(monitor) = self.monitor.clone() {
+        // Replay mode replaces the link (#74): while a `.zrec` feeds the
+        // panes, the live pump is not built at all — the mode cannot leak.
+        if self.replay.is_none()
+            && let Some(monitor) = self.monitor.clone()
+        {
             subs.push(link::subscribe(LinkKey {
                 monitor,
                 epoch: self.epoch,
             }));
+        }
+        // The play clock, only while actually playing (a paused replay
+        // costs nothing) — the same cadence as the live stats tick, so the
+        // panes tick at the rate they were built for.
+        if self.replay.as_ref().is_some_and(|r| r.playing) {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(250))
+                    .map(|_| Message::Replay(view::replay::ReplayMsg::Advance)),
+            );
         }
         // The repeat clock for a sustained publish (#60). It exists only while
         // a publication is armed, so an idle pane costs nothing.
@@ -2333,32 +2553,56 @@ impl Zengui {
         ]
         .spacing(space::MD);
 
-        let layout = column![
-            self.toolbar(),
-            panes,
-            view::status::strip(Status {
-                link: &self.link,
-                base_label: self.settings.base_label(),
-                scope_label: self.settings.scope.short(),
-                keys: self.keys,
-                keys_evicted: self.keys_evicted,
-                keys_unwatched: self.keys_unwatched,
-                facts_cached: self.facts.len(),
-                facts_evicted: self.facts.evicted(),
-                watched: &self.watched,
-                skeleton: self.skeleton.as_deref().map(|s| s.coverage),
-                fetched: self.fetched.as_ref(),
-                totals: self.totals,
-                slices: &self.slice_source,
-                seeding: self.seeding.len(),
-                seeded_watches: self.seeded_watches,
-                seed_totals: self.seed_totals,
-                unreachable: self.settings.is_unreachable(),
-                prefs_note: self.prefs_note.as_deref(),
-            }),
-        ]
-        .spacing(space::MD)
-        .padding(space::MD);
+        let mut layout = column![self.toolbar()]
+            .spacing(space::MD)
+            .padding(space::MD);
+        // Replay-mode surfaces (#74), between the toolbar and the panes so
+        // the mode is unmistakable: the open row, the REPLAY banner with
+        // the scrubber, and the capture status line.
+        if let Some(path) = &self.replay_open {
+            layout = layout.push(view::replay::open_row(path));
+            if let Some(note) = &self.replay_note {
+                layout = layout.push(view::kit::muted(format!("could not open: {note}")));
+            }
+        }
+        if let Some(replay) = &self.replay {
+            layout = layout.push(view::replay::banner(replay));
+        }
+        if let Some(rec) = &self.recording {
+            layout = layout.push(view::kit::muted(format!(
+                "● recording current watches to {} — toolbar 'stop recording' finishes the file",
+                rec.path
+            )));
+        }
+        if let Some(done) = &self.recorded {
+            layout = layout.push(view::kit::muted(match done {
+                Ok((samples, dropped, path)) => format!(
+                    "recorded {samples} sample(s) to {path} ({dropped} dropped — in-file ledger)"
+                ),
+                Err(e) => format!("recording failed: {e}"),
+            }));
+        }
+        let layout = layout.push(panes).push(view::status::strip(Status {
+            link: &self.link,
+            base_label: self.settings.base_label(),
+            scope_label: self.settings.scope.short(),
+            keys: self.keys,
+            keys_evicted: self.keys_evicted,
+            keys_unwatched: self.keys_unwatched,
+            facts_cached: self.facts.len(),
+            facts_evicted: self.facts.evicted(),
+            watched: &self.watched,
+            skeleton: self.skeleton.as_deref().map(|s| s.coverage),
+            fetched: self.fetched.as_ref(),
+            totals: self.totals,
+            slices: &self.slice_source,
+            seeding: self.seeding.len(),
+            seeded_watches: self.seeded_watches,
+            seed_totals: self.seed_totals,
+            unreachable: self.settings.is_unreachable(),
+            prefs_note: self.prefs_note.as_deref(),
+            replaying: self.replay.is_some(),
+        }));
 
         // The overlay floats above everything (#75). `stack` rather than a
         // modal widget because the layering rule is ours — palette above
@@ -2427,6 +2671,21 @@ impl Zengui {
             }))
             .spacing(space::XS),
             crate::view::kit::muted(self.settings.scope.label()),
+            // Capture and replay (#74): record writes the current watches
+            // to a .zrec; replay feeds the panes from one.
+            iced::widget::button(
+                text(if self.recording.is_some() {
+                    "stop recording"
+                } else {
+                    "record"
+                })
+                .size(crate::view::tokens::font::CAPTION)
+            )
+            .on_press(Message::Replay(view::replay::ReplayMsg::RecordToggled))
+            .padding(4),
+            iced::widget::button(text("replay…").size(crate::view::tokens::font::CAPTION))
+                .on_press(Message::Replay(view::replay::ReplayMsg::OpenToggled))
+                .padding(4),
             iced::widget::space::horizontal(),
             // Window preferences (issue #73): the theme name is the button,
             // so the label says what you get rather than what you have.

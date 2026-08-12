@@ -16,6 +16,7 @@ pub mod kit;
 pub mod nodes;
 pub mod palette;
 pub mod publish;
+pub mod replay;
 pub mod spark;
 pub mod status;
 pub mod theme;

@@ -98,6 +98,9 @@ pub struct Status<'a> {
     /// Why the persisted preferences are not in force, when a file could not
     /// be read (issue #73). `None` on the ordinary path, including first run.
     pub prefs_note: Option<&'a str>,
+    /// Replay mode (issue #74): the panes are fed from a file and the live
+    /// link is off — the strip must not describe a link nobody is pumping.
+    pub replaying: bool,
 }
 
 /// The key count, and — if the table has evicted — what that count omits.
@@ -143,6 +146,9 @@ pub fn facts_text(cached: usize, evicted: u64) -> String {
 
 pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     let (link_text, link_is_bad) = match s.link {
+        // Replay wins over whatever the link was doing: the panes are
+        // showing a file, and the strip says so (#74).
+        _ if s.replaying => ("REPLAY — live link off".to_string(), true),
         LinkState::Connecting => ("connecting…".to_string(), false),
         LinkState::Pumping if s.watched.is_empty() => (
             // The lazy resting state, stated as a posture, not an absence.
