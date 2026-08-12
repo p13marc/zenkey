@@ -31,6 +31,9 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The `.zrec` row dialect carries wire payloads lossless (RFC 09 §5.2) —
+# `"value"` is a rendering; `"bytes"` is the payload.
+base64 = { workspace = true }
 ciborium = { workspace = true }
 arc-swap = { workspace = true }
 toml = { workspace = true }

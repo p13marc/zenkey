@@ -8,10 +8,15 @@
 //!
 //! A row names its key and payload, and optionally its encoding, QoS
 //! profile, tombstone-ness, and attachment. Unknown fields are ignored
-//! (rows carry observer-side extras like `type`/`typed`/`bytes`); a row
-//! that cannot be published is an error *naming the reason*, and callers
-//! MUST count those rather than silently skipping (zenoh-cli logs-and-
-//! drops; we count).
+//! (rows carry observer-side extras like `type`/`typed`); a row that
+//! cannot be published is an error *naming the reason*, and callers MUST
+//! count those rather than silently skipping (zenoh-cli logs-and-drops;
+//! we count).
+//!
+//! A row MAY carry its payload lossless as `"bytes"` (base64 of the exact
+//! wire bytes — the `.zrec` dialect, RFC 09 §5.2), which wins over
+//! `"value"`: a `value` is a decoded *rendering* and does not round-trip a
+//! binary payload. Same for `"attachment_b64"` over `"attachment"`.
 
 /// One publishable row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +46,22 @@ fn value_bytes(v: &serde_json::Value) -> Vec<u8> {
     }
 }
 
+/// Decode a base64 field, naming the field in the error.
+fn b64_bytes(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    use base64::Engine as _;
+    match obj.get(field) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => base64::engine::general_purpose::STANDARD
+            .decode(s)
+            .map(Some)
+            .map_err(|e| format!("\"{field}\" is not base64: {e}")),
+        Some(_) => Err(format!("\"{field}\" is not a base64 string")),
+    }
+}
+
 /// Parse one ndjson line into a publishable row.
 pub fn parse_row(line: &str) -> Result<IngestRow, String> {
     let v: serde_json::Value =
@@ -55,12 +76,19 @@ pub fn parse_row(line: &str) -> Result<IngestRow, String> {
         return Err("empty \"key\"".into());
     }
     let delete = obj.get("delete").and_then(|d| d.as_bool()).unwrap_or(false);
-    let payload = match obj.get("value") {
-        Some(serde_json::Value::Null) | None if delete => Vec::new(),
-        Some(serde_json::Value::Null) | None => {
-            return Err("no \"value\" field (and not a delete row)".into());
+    // The lossless bytes win over the rendering (`.zrec` rows carry both
+    // clocks and neither payload shape lies — RFC 09 §5.2).
+    let payload = match (b64_bytes(obj, "bytes")?, obj.get("value")) {
+        (Some(raw), _) => raw,
+        (None, Some(serde_json::Value::Null) | None) if delete => Vec::new(),
+        (None, Some(serde_json::Value::Null) | None) => {
+            return Err("no \"value\" or \"bytes\" field (and not a delete row)".into());
         }
-        Some(v) => value_bytes(v),
+        (None, Some(v)) => value_bytes(v),
+    };
+    let attachment = match b64_bytes(obj, "attachment_b64")? {
+        Some(raw) => Some(raw),
+        None => obj.get("attachment").map(value_bytes),
     };
     Ok(IngestRow {
         key,
@@ -72,7 +100,7 @@ pub fn parse_row(line: &str) -> Result<IngestRow, String> {
             .map(str::to_string),
         qos: obj.get("qos").and_then(|q| q.as_str()).map(str::to_string),
         delete,
-        attachment: obj.get("attachment").map(value_bytes),
+        attachment,
     })
 }
 
@@ -113,6 +141,29 @@ mod tests {
         assert!(err.contains("key"), "{err}");
         let err = parse_row("not json").unwrap_err();
         assert!(err.contains("JSON"), "{err}");
+    }
+
+    /// The `.zrec` dialect: `bytes` is the exact wire payload and wins over
+    /// the `value` rendering; `attachment_b64` likewise. Bad base64 is a
+    /// counted error, not a skip (RFC 09 §5.2).
+    #[test]
+    fn lossless_bytes_win_over_the_rendering() {
+        let row = parse_row(
+            r#"{"key":"k","t":125000,"bytes":"AAEC/w==","value":"lossy render",
+                "attachment_b64":"3q0=","encoding":"application/octet-stream"}"#,
+        )
+        .unwrap();
+        assert_eq!(row.payload, vec![0x00, 0x01, 0x02, 0xff]);
+        assert_eq!(row.attachment.as_deref(), Some([0xde, 0xad].as_ref()));
+
+        // A bytes-only row needs no value at all.
+        let row = parse_row(r#"{"key":"k","bytes":"aGk="}"#).unwrap();
+        assert_eq!(row.payload, b"hi");
+
+        let err = parse_row(r#"{"key":"k","bytes":"not base64!"}"#).unwrap_err();
+        assert!(err.contains("base64"), "{err}");
+        let err = parse_row(r#"{"key":"k","bytes":7}"#).unwrap_err();
+        assert!(err.contains("base64"), "{err}");
     }
 
     /// Attachments ride the same value rules (#117).

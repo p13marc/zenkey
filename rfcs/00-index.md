@@ -1,9 +1,48 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.12 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.13 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.13 (2026-08-12, the capture-and-replay amendment)** — [09 §5](09-operations.md)
+> gains **§5.2, capture and replay etiquette** *(new)*: the `.zrec` format in
+> one screen (informative — the code in `zenkey-fleet::record` is normative)
+> and the etiquette that makes replay survivable, because replay is
+> *publishing* and a re-stamped capture **wins LWW against a live fleet**.
+> The section decides and documents the one genuinely open design question:
+> replayed samples are **re-stamped** with the replaying session's HLC — a
+> preserved foreign HLC would silently lose every [04 §3.2](04-planes.md)
+> reconciliation and turn a replay into a no-op that looks like one — and it
+> prices the inverse hazard with rules rather than hope: dry-run-first,
+> header-base refusal without an explicit override ([09 §5.1](09-operations.md)
+> O3 — never re-derive a base from recorded keys), tombstone rows through the
+> v1.12 retire gate, and the two-clock rule (a scrubber states whether it
+> plots arrival offsets or publisher HLCs). The file format itself is §5.1
+> applied to disk: the header names selectors and base and states the
+> `@`-plane exclusion of a wildcard scope (O4/O5), non-conformant keys are
+> recorded verbatim (O1), and drop records are interleaved **where the gap
+> happened** (O6) — a capture taken while behind is a partial view and the
+> file says so at the position of the loss.
+>
+> **What did *not* change.** No grammar change, no wire change, no registry
+> format change, no new plane, no new field on any live key: `.zrec` is a
+> file on an operator's disk, and every sample a replay publishes rides the
+> existing write path — declared publishers, class-conscious retire
+> confirmation ([04 §1.2](04-planes.md), quoted not weakened), QoS profiles
+> by name ([04 §3](04-planes.md)). §5.1's obligations O1–O6 are applied, not
+> amended. The ndjson row dialect the explorers already emit and read is
+> *extended* (a lossless `bytes` field, a pacing offset `t`), not replaced —
+> one row dialect remains the rule.
+>
+> **Provenance.** H7 of the v1.5 amendment slate scoped "record/replay
+> etiquette" into this chapter and the slate landed without it — there was
+> nothing to document until the engine existed (zenkey #39, #53; the epic is
+> zenkey #33). The 2026-08 competitive analysis (`docs/`) found no shipped
+> tool in the field with any capture/replay story at all, which makes the
+> etiquette *more* urgent, not less: the first tool to replay a bus is the
+> first tool that can overwrite current state with last Tuesday, and it
+> should be the one that documented why it refuses to do so casually.
 
 > **v1.12 (2026-08-11, the explorer-tombstone amendment)** — [04 §1.2](04-planes.md)
 > gains one bullet: an explorer or operator tool MAY retire any **concrete**
@@ -424,7 +463,7 @@ Chapters are numbered for reference, not reading. Suggested paths:
 | 06 | [06-identity.md](06-identity.md) | origin minting, observed devices, evidence, the `@catalog` contract |
 | 07 | [07-bulk-planes.md](07-bulk-planes.md) | `@media` (live frames) and `@blob` (bulk/content-addressed transfer) |
 | 08 | [08-registry.md](08-registry.md) | the subject registry: format, versioning policy, naming rules, ownership |
-| 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy, **observer obligations (§5.1, normative for tools)** |
+| 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy, **observer obligations (§5.1, normative for tools)**, capture/replay etiquette (§5.2) |
 | 10 | [10-prior-art.md](10-prior-art.md) | Keelson, uProtocol/automotive, rmw_zenoh, Sparkplug, OTel, NATS, Zenoh guidance, D-Bus, Homie, OPC UA — took/rejected per system |
 | 11 | [11-zensight-profile.md](11-zensight-profile.md) | the reference application: profile constants, worked keys per sensor, full shipped-family mapping |
 | 12 | [12-open-questions.md](12-open-questions.md) | the decision record: all six former open questions decided, each with its alternatives and revisit trigger |
