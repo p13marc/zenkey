@@ -468,6 +468,20 @@ enum RegistryCmd {
         #[arg(long, value_name = "FILE")]
         ledger: Option<PathBuf>,
     },
+    /// Write or update the RFC 08 §3.1 compatibility lock (registry.lock).
+    ///
+    /// Additive evolution and `[[deprecated]]` retirement regenerate cleanly;
+    /// an INCOMPATIBLE edit (changed type/class/kind/shape on an existing
+    /// path) is refused — retire and add a sibling instead. `--force`
+    /// overrides, and prints every broken pin: the escape hatch is legal,
+    /// silent it is not.
+    Lock {
+        /// The registry directory (the one a build script points at).
+        dir: PathBuf,
+        /// Rewrite pins over an incompatible edit — the loud break.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1467,6 +1481,7 @@ async fn main() -> Result<()> {
         Command::Registry(RegistryCmd::Lint { dir, ledger }) => {
             cmd::registry::lint(&dir, ledger.as_ref())
         }
+        Command::Registry(RegistryCmd::Lock { dir, force }) => cmd::registry::lock(&dir, force),
         Command::Bench(BenchCmd::Rpc {
             origin,
             producer,

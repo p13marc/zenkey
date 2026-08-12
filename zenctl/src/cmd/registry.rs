@@ -340,6 +340,29 @@ pub fn lint(dir: &Path, ledger: Option<&PathBuf>) -> Result<()> {
     }
 }
 
+/// `registry lock <dir>` — regenerate the RFC 08 §3.1 compatibility lock.
+/// Refuses an incompatible rewrite without `--force`; a forced break prints
+/// every broken pin (loud by contract).
+pub fn lock(dir: &Path, force: bool) -> Result<()> {
+    let update = zenkey_build::Config::new()
+        .registry_dir(dir)
+        .no_rerun_if_changed()
+        .write_compat_lock(force)
+        .map_err(|e| anyhow!("{e}"))?;
+    println!(
+        "{}: {} ({} pinned entr{} added, {} released)",
+        update.path.display(),
+        if update.created { "created" } else { "updated" },
+        update.added,
+        if update.added == 1 { "y" } else { "ies" },
+        update.retired,
+    );
+    for broken in &update.forced {
+        eprintln!("FORCED BREAK (RFC 08 §3.1):\n{broken}");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,9 +1,42 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.14 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.15 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.15 (2026-08-12, the compatibility-lock amendment)** — [08 §3.1](08-registry.md)
+> *(new)*: H3 from the v1.5 slate, held for review and then never filed,
+> finally revived. §3's rules were already normative — deprecate never
+> reuse, payload types evolve additively or become suffixed siblings — but
+> only silent *retirement* was mechanically checked (`deprecated.lock`); a
+> changed type on an existing subject, a re-shaped procedure, or a deleted
+> entry sailed through CI. Every registry file now declares
+> `compat = "backward"` (the default) or `"none"` (the loud escape: a
+> build warning per file, every build), and `zenkey-build` verifies a
+> generated **`registry.lock`** snapshot beside the ledger: an
+> incompatible edit fails the build naming the pin and the sanctioned
+> move; an additive edit fails only as *stale*, fixed by regeneration
+> (`zenctl registry lock <dir>`, which itself refuses to paper over a
+> break without `--force`, and a forced break prints every broken pin).
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **H3** | [08 §3.1](08-registry.md) *(new)* | **Compatibility levels + `registry.lock`.** `backward` pins each subject's class/type and each procedure's kind/request/reply; additive evolution free; removal only through `[[deprecated]]`; a missing lock is an empty snapshot that bootstraps with one command. Enforced identically by the consumer's build and `zenctl registry lint` — one check, two mouths. |
+>
+> **What did *not* change.** §3's rules themselves are quoted, not
+> amended — this is enforcement, not new semantics. No wire change, no
+> grammar change, no key or payload format change; the registry TOML
+> format gains one optional header field with a safe default. And,
+> recorded deliberately: no `forward`/`full` levels (additive tolerance is
+> §3's construction already), no cross-file or global lock (files version
+> independently), no payload-schema hashing (served-schema drift is §7's
+> job) — the parts of the original H3 sketch that did not survive review.
+>
+> **Provenance.** zenkey #78 (epic #33 phase 4). The gap was verified
+> before filing: zero hits for `registry.lock`/`Compat` in code or RFC,
+> and a type edit in the fixture corpus passed CI. The same edit now fails
+> with the §3.1 citation — the acceptance case, run against the corpus.
 
 > **v1.14 (2026-08-12, the matching-adoption note)** — [12 §9](12-open-questions.md)
 > absorbs what shipping the matching badges (zenkey #38) actually taught,
@@ -491,7 +524,7 @@ Chapters are numbered for reference, not reading. Suggested paths:
 | 05 | [05-control-rpc.md](05-control-rpc.md) | the `@rpc` plane: targeting, read/write/long-running idioms, mapping of every incumbent control channel |
 | 06 | [06-identity.md](06-identity.md) | origin minting, observed devices, evidence, the `@catalog` contract |
 | 07 | [07-bulk-planes.md](07-bulk-planes.md) | `@media` (live frames) and `@blob` (bulk/content-addressed transfer) |
-| 08 | [08-registry.md](08-registry.md) | the subject registry: format, versioning policy, naming rules, ownership |
+| 08 | [08-registry.md](08-registry.md) | the subject registry: format, versioning policy + compatibility lock (§3.1), naming rules, ownership |
 | 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy, **observer obligations (§5.1, normative for tools)**, capture/replay etiquette (§5.2) |
 | 10 | [10-prior-art.md](10-prior-art.md) | Keelson, uProtocol/automotive, rmw_zenoh, Sparkplug, OTel, NATS, Zenoh guidance, D-Bus, Homie, OPC UA — took/rejected per system |
 | 11 | [11-zensight-profile.md](11-zensight-profile.md) | the reference application: profile constants, worked keys per sensor, full shipped-family mapping |
