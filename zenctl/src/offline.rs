@@ -344,6 +344,32 @@ mod tests {
         assert_eq!(info.verdict, crate::report::TopicVerdict::Registered);
     }
 
+    /// A slice that declares `[[media]]` (RFC 08 §2, reaching the slice in
+    /// v1.16) is readable by a bus explorer — and, the forward-compat half:
+    /// the tcgui slice above declares none and parses unchanged (media
+    /// defaults to empty), so every pre-v1.16 slice keeps parsing.
+    #[test]
+    fn a_media_bearing_slice_is_readable_by_an_explorer() {
+        let src = format!(
+            "{}\n[[media]]\npath = \"{{stream}}/preview/jpeg\"\nencoding = \"image/jpeg\"\n\
+             attachment = \"FrameMeta\"\ncardinality = 16\nsince = \"1.0\"\n",
+            TCGUI_SLICE
+        );
+        let slice = parse_slice(&src).unwrap();
+        assert_eq!(slice.media.len(), 1);
+        assert_eq!(slice.media[0].path, "{stream}/preview/jpeg");
+        assert_eq!(slice.media[0].encoding, "image/jpeg");
+        assert_eq!(slice.media[0].attachment.as_deref(), Some("FrameMeta"));
+
+        // The pre-v1.16 posture, pinned: no [[media]] = empty, no error.
+        assert!(parse_slice(TCGUI_SLICE).unwrap().media.is_empty());
+        // A stream needs at least a name and a codec to exist.
+        assert!(
+            parse_slice(&format!("{}\n[[media]]\npath = \"x\"\n", TCGUI_SLICE)).is_err(),
+            "encoding is required — the codec is declared, never sniffed"
+        );
+    }
+
     /// A slice that declares `[[blob]]` (RFC 08 §2, v1.8) is readable by a
     /// bus explorer — which is the whole reason for modelling the plane:
     /// answering "who serves blobs, and of which tier?" without probing the

@@ -37,7 +37,7 @@ pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
                 match (&p.app, &p.registry_version) {
                     (Some(app), Some(v)) => println!(
                         "  {}  [{alive}]  app {app} · registry v{v} · {} subject(s) · \
-                         {} procedure(s){}{}",
+                         {} procedure(s){}{}{}",
                         p.name,
                         p.subjects,
                         p.procedures,
@@ -45,6 +45,18 @@ pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
                             String::new()
                         } else {
                             format!(" · blob: {}", p.blob_tiers.join(","))
+                        },
+                        if p.media.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " · media: {}",
+                                p.media
+                                    .iter()
+                                    .map(|m| format!("{} ({})", m.path, m.encoding))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
                         },
                         if p.deprecated_served > 0 {
                             format!(" · {} DEPRECATED still served", p.deprecated_served)

@@ -239,6 +239,7 @@ mod tests {
                 description: None,
             }],
             blob: vec![],
+            media: vec![],
             deprecated: vec![],
         }])
     }

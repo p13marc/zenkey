@@ -107,6 +107,31 @@ pub struct BlobDecl {
     pub description: Option<String>,
 }
 
+/// One `[[media]]` stream shape (RFC 08 §2; reaching the slice in v1.16).
+///
+/// Through v1.7 §6 *claimed* the introspect slice carried "media shapes" and
+/// it never had; v1.8 corrected the claim and deferred the retrofit; this is
+/// the retrofit. Same forward-compat posture as [`BlobDecl`]: optional
+/// fields stay optional, unknown vocabulary is carried rather than refused —
+/// this parser reads *foreign* slices, and the strict checks belong to that
+/// build's own `zenkey-build`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaDecl {
+    /// Media sub-path after `@media/<producer>/` — the stream pattern
+    /// (`{stream}/preview/jpeg`), same variable rules as a subject.
+    pub path: String,
+    /// The wire `Encoding` on every frame (`image/jpeg`, `video/*` — may be
+    /// a family): the codec is declared here, never in a payload envelope
+    /// (RFC 07 §1).
+    pub encoding: String,
+    /// The per-frame sidecar type on the attachment (`FrameMeta`).
+    pub attachment: Option<String>,
+    /// Key-population bound, when the path carries variables.
+    pub cardinality: Option<i64>,
+    pub since: Option<String>,
+    pub description: Option<String>,
+}
+
 /// One `[[deprecated]]` entry — RFC 08 §3's append-only retirement ledger.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeprecationDecl {
@@ -138,6 +163,10 @@ pub struct RegistrySlice {
     /// v1.8 — the parser is forward- *and* backward-tolerant here, which is
     /// the same posture it takes to unknown keys.
     pub blob: Vec<BlobDecl>,
+    /// The `@media` streams this build publishes (RFC 08 §2/§6, v1.16 —
+    /// closing the asymmetry v1.8 recorded). Same tolerance as `blob`:
+    /// empty for non-media producers and for every slice written earlier.
+    pub media: Vec<MediaDecl>,
     pub deprecated: Vec<DeprecationDecl>,
 }
 
@@ -282,6 +311,22 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         });
     }
 
+    // `[[media]]` (RFC 08 §2, reaching the slice in v1.16): the same
+    // foreign-slice tolerance as `[[blob]]` — `path` and `encoding` are the
+    // two fields without which a stream cannot even be named; everything
+    // else is carried when present.
+    let mut media = Vec::new();
+    for e in array("media") {
+        media.push(MediaDecl {
+            path: s(e.get("path")).ok_or_else(|| err("[[media]] missing path"))?,
+            encoding: s(e.get("encoding")).ok_or_else(|| err("[[media]] missing encoding"))?,
+            attachment: s(e.get("attachment")),
+            cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
+            since: s(e.get("since")),
+            description: s(e.get("description")),
+        });
+    }
+
     let mut deprecated = Vec::new();
     for e in array("deprecated") {
         deprecated.push(DeprecationDecl {
@@ -301,6 +346,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         subjects,
         procedures,
         blob,
+        media,
         deprecated,
     })
 }
@@ -410,6 +456,18 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         opt(&mut out, "algo", d.algo.as_deref());
         opt(&mut out, "reference", d.reference.as_deref());
         opt(&mut out, "encoding", d.encoding.as_deref());
+        opt(&mut out, "since", d.since.as_deref());
+        opt(&mut out, "description", d.description.as_deref());
+    }
+
+    for d in &slice.media {
+        out.push_str("\n[[media]]\n");
+        out.push_str(&format!("path = {}\n", s(&d.path)));
+        out.push_str(&format!("encoding = {}\n", s(&d.encoding)));
+        opt(&mut out, "attachment", d.attachment.as_deref());
+        if let Some(c) = d.cardinality {
+            out.push_str(&format!("cardinality = {c}\n"));
+        }
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -616,6 +674,13 @@ mod tests {
             tier = "store"
             algo = "blake3"
             since = "1.2"
+            [[media]]
+            path = "{stream}/preview/jpeg"
+            encoding = "image/jpeg"
+            attachment = "FrameMeta"
+            cardinality = 16
+            since = "1.3"
+            description = "preview rung"
             [[deprecated]]
             path = "flows/legacy"
             since = "2.0"

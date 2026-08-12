@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.5, v1.8, v1.10 and v1.15 — see [00-index.md](00-index.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.5, v1.8, v1.10, v1.15 and v1.16 — see [00-index.md](00-index.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -335,13 +335,17 @@ stylistic:
   fetch prefix is expected. Probe-then-fetch becomes expressible from the
   registry rather than being prose a caller must obey.
 
-One asymmetry is created here and recorded rather than hidden: blob entries
-appear in the **runtime introspect slice** (§6), while `[[media]]` entries —
-which have had a field table since v1.3 and codegen since v1.5 — still do
-not. That is a pre-existing gap in the slice, not a decision about `@blob`;
-retrofitting media is separate work and is deliberately not bundled here,
-because the whole stated value of modelling `@blob` is that an explorer can
-see which origins serve blobs and of which tier.
+One asymmetry was created here and recorded rather than hidden: blob entries
+appeared in the **runtime introspect slice** (§6) while `[[media]]` entries —
+which have had a field table since v1.3 and codegen since v1.5 — did not.
+That was a pre-existing gap in the slice, not a decision about `@blob`;
+retrofitting media was deliberately not bundled into v1.8. **Closed in
+v1.16**: `[[media]]` entries now ride the slice like every other entry kind
+(§6), with the same forward-compat posture as blob — a consumer reading a
+pre-v1.16 slice sees an empty media list, never an error, and `path` +
+`encoding` are the two fields a foreign reader requires (a stream that names
+no codec cannot be subscribed honestly; RFC 07 §1 puts the codec on the wire
+`Encoding`, declared here, never sniffed).
 
 `[[procedure]]` entries (the `@rpc` plane, RFC 05) are the fourth shape and,
 like `[[media]]`, carry request/reply *types* rather than a class payload, so
@@ -582,9 +586,10 @@ The static TOML is the *authority*; a running fleet additionally serves
 the *observation* of it. Every producer MUST serve
 `@rpc/<producer>/introspect` (read, idempotent) returning the registry
 slice it was **compiled against** — its subjects, procedures, blob tiers
-(v1.8), and registry file version. (Through v1.7 this sentence also said
-"media shapes"; the slice has never carried them. v1.8 corrects the claim
-rather than quietly widening it — see the asymmetry note in §2.) The reply is generated from the same
+(v1.8), media streams (v1.16), and registry file version. (Through v1.7
+this sentence claimed "media shapes" while the slice never carried them;
+v1.8 corrected the claim rather than quietly widening it, and v1.16
+delivers it — see the asymmetry note in §2.) The reply is generated from the same
 source as the producer's key constants, so it cannot drift from behavior
 (the reason D-Bus introspection XML is trustworthy: the implementation
 emits it — [10-prior-art.md](10-prior-art.md)).

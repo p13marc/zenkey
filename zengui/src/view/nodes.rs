@@ -164,13 +164,25 @@ fn detail_view(detail: &DetailState) -> Element<'_, Message> {
             for p in &info.producers {
                 let caps = match (&p.app, &p.registry_version) {
                     (Some(app), Some(v)) => format!(
-                        "app {app} · registry v{v} · {} subject(s) · {} procedure(s){}{}",
+                        "app {app} · registry v{v} · {} subject(s) · {} procedure(s){}{}{}",
                         p.subjects,
                         p.procedures,
                         if p.blob_tiers.is_empty() {
                             String::new()
                         } else {
                             format!(" · blob: {}", p.blob_tiers.join(","))
+                        },
+                        if p.media.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " · media: {}",
+                                p.media
+                                    .iter()
+                                    .map(|m| format!("{} ({})", m.path, m.encoding))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
                         },
                         if p.deprecated_served > 0 {
                             format!(" · {} DEPRECATED still served", p.deprecated_served)

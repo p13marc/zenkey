@@ -73,9 +73,23 @@ pub struct ProducerInfo {
     pub procedures: usize,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub blob_tiers: Vec<String>,
+    /// Declared `@media` streams (RFC 08 §2/§6, v1.16 — the slice finally
+    /// carries what §6 claimed through v1.7): discoverable off the bus, so
+    /// a viewer can enumerate streams without a compiled-in registry.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub media: Vec<MediaStreamInfo>,
     /// Deprecated subjects this build still serves — RFC 08 §6's headline
     /// buy ("which hosts still serve a deprecated subject").
     pub deprecated_served: usize,
+}
+
+/// One declared media stream, as the slice states it (RFC 08 §2).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MediaStreamInfo {
+    /// The stream pattern after `@media/<producer>/`.
+    pub path: String,
+    /// The declared wire encoding (`image/jpeg`, `video/*`).
+    pub encoding: String,
 }
 
 /// Freshness of one declared state subject on this node (RFC 04 §1.2).
@@ -244,6 +258,17 @@ pub async fn node_info(
                 procedures: slice.map(|s| s.procedures.len()).unwrap_or(0),
                 blob_tiers: slice
                     .map(|s| s.blob.iter().map(|b| b.tier.clone()).collect())
+                    .unwrap_or_default(),
+                media: slice
+                    .map(|s| {
+                        s.media
+                            .iter()
+                            .map(|m| MediaStreamInfo {
+                                path: m.path.clone(),
+                                encoding: m.encoding.clone(),
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default(),
                 deprecated_served: slice.map(|s| s.deprecated.len()).unwrap_or(0),
             }

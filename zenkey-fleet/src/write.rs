@@ -444,6 +444,7 @@ mod tests {
             }],
             procedures: vec![],
             blob: vec![],
+            media: vec![],
             deprecated: vec![],
         }])
     }
@@ -555,6 +556,7 @@ mod tests {
                 description: None,
             }],
             blob: vec![],
+            media: vec![],
             deprecated: vec![],
         }])
     }
