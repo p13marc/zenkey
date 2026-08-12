@@ -89,6 +89,9 @@ pub struct CallForm {
     pub target: String,
     pub params: String,
     pub body: String,
+    /// Attachment riding beside the body, verbatim — never schema-encoded
+    /// (#117's rule on the call side, #126). Empty = none.
+    pub attachment: String,
     /// The selected procedure's request-schema fields. `None` = **not asked**
     /// (no schema fetched yet), which is not "the request has no fields".
     pub request_fields: Option<Vec<SchemaField>>,
@@ -121,6 +124,7 @@ pub enum CallMsg {
     TargetChanged(String),
     ParamsChanged(String),
     BodyChanged(String),
+    AttachmentChanged(String),
     /// Fill the body editor from the served request schema.
     ScaffoldBody,
     Submit,
@@ -251,6 +255,12 @@ pub fn pane<'a>(
     let body = text_input("body: JSON (query payload)", &form.body)
         .on_input(|t| Message::Call(CallMsg::BodyChanged(t)))
         .size(font::CAPTION);
+    let attachment = text_input(
+        "attachment: verbatim, beside the body (empty = none)",
+        &form.attachment,
+    )
+    .on_input(|t| Message::Call(CallMsg::AttachmentChanged(t)))
+    .size(font::CAPTION);
 
     let ready = decl.is_some()
         && !form.target.is_empty()
@@ -272,6 +282,7 @@ pub fn pane<'a>(
         target,
         params,
         body,
+        attachment,
         submit,
     ]
     .spacing(space::SM);
@@ -339,6 +350,11 @@ fn outcome_view<'a>(
                     _ => format!("{}  ✓", a.origin),
                 };
                 col = col.push(kit::mono(line));
+                // A reply attachment is a wire fact, shown where the reply
+                // is — present only when the wire carried one (#126).
+                if let (Some(att), Some(n)) = (&a.attachment, a.attachment_bytes) {
+                    col = col.push(kit::muted(format!("   attachment ({n} B): {att}")));
+                }
             }
             let silent = non_repliers(report, form, roster);
             if !silent.is_empty() {

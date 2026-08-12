@@ -836,6 +836,10 @@ impl Zengui {
                 self.call_form.body = t;
                 Task::none()
             }
+            CallMsg::AttachmentChanged(t) => {
+                self.call_form.attachment = t;
+                Task::none()
+            }
             CallMsg::Submit => {
                 let (Some(session), Some(producer), Some(procedure)) = (
                     self.session.clone(),
@@ -857,6 +861,12 @@ impl Zengui {
                 } else {
                     Some(self.call_form.body.clone().into_bytes())
                 };
+                // Verbatim beside the body — never schema-encoded (#126).
+                let attachment = if self.call_form.attachment.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.call_form.attachment.clone().into_bytes())
+                };
                 let base = self.settings.base.clone();
                 let timeout = self.settings.timeout();
                 let slices = self.slices.clone();
@@ -874,6 +884,7 @@ impl Zengui {
                             &procedure,
                             &params,
                             body,
+                            attachment,
                             timeout,
                             slices.as_deref(),
                         )

@@ -107,6 +107,45 @@ pub async fn fleet_get_at(
     timeout: Duration,
     priority: Priority,
 ) -> Result<Vec<FleetAnswer>> {
+    fleet_get_inner(session, base, key, payload, None, timeout, priority).await
+}
+
+/// [`fleet_get`] with a query **attachment** riding beside the body (#126) —
+/// the RPC caller's variant, a named sibling for the same reason
+/// [`fleet_get_at`] is one: "who sends attachments on queries?" stays a grep.
+///
+/// The attachment is verbatim, never schema-encoded — the encode ladder is
+/// for bodies; an attachment is outside the registry's vocabulary (#117),
+/// on a query exactly as on a publish.
+pub async fn fleet_get_call(
+    session: &Session,
+    base: &str,
+    key: &str,
+    payload: Option<Vec<u8>>,
+    attachment: Option<Vec<u8>>,
+    timeout: Duration,
+) -> Result<Vec<FleetAnswer>> {
+    fleet_get_inner(
+        session,
+        base,
+        key,
+        payload,
+        attachment,
+        timeout,
+        Priority::DEFAULT,
+    )
+    .await
+}
+
+async fn fleet_get_inner(
+    session: &Session,
+    base: &str,
+    key: &str,
+    payload: Option<Vec<u8>>,
+    attachment: Option<Vec<u8>>,
+    timeout: Duration,
+    priority: Priority,
+) -> Result<Vec<FleetAnswer>> {
     let mut builder = session
         .get(key)
         .target(QueryTarget::All)
@@ -115,6 +154,9 @@ pub async fn fleet_get_at(
         .timeout(timeout);
     if let Some(body) = payload {
         builder = builder.payload(body);
+    }
+    if let Some(att) = attachment {
+        builder = builder.attachment(att);
     }
     let replies = builder
         .await

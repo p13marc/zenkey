@@ -69,7 +69,7 @@ pub use ingest::{IngestRow, parse_row};
 pub use query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
     StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,
-    fleet_get_at, fleet_registry, state_snapshot,
+    fleet_get_at, fleet_get_call, fleet_registry, state_snapshot,
 };
 pub use record::{
     RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplayTarget, ZREC_VERSION, ZrecHeader,

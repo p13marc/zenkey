@@ -386,6 +386,16 @@ pub struct CallAnswer {
     /// Raw text when the value is not JSON-shaped (TOML introspect replies…).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// The reply's attachment, projected (JSON if it parses, UTF-8 text if
+    /// it decodes, else a size tag) — never schema-decoded, an attachment is
+    /// outside the registry's vocabulary (#117, #126). **Present only when
+    /// the wire carried one** — absent, never null-when-unknown (O4); both
+    /// fields are additive, so scripts on the old shape keep parsing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<serde_json::Value>,
+    /// Its true size, regardless of how the projection reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment_bytes: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<CallError>,
 }
@@ -752,6 +762,8 @@ mod tests {
             ok: true,
             value: None,
             text: Some("x".into()),
+            attachment: None,
+            attachment_bytes: None,
             error: None,
         });
         assert_eq!(r.exit_code(), 0);
@@ -760,6 +772,8 @@ mod tests {
             ok: false,
             value: None,
             text: None,
+            attachment: None,
+            attachment_bytes: None,
             error: Some(CallError {
                 name: "error/busy".into(),
                 message: "later".into(),
