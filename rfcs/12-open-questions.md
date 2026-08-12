@@ -2,7 +2,9 @@
 
 **Status: v1.2 — all six original items DECIDED** (2026-07-12, review round 4);
 **§7 added 2026-07-14** (the version chunk is plain, not verbatim);
-**§8 added 2026-07-14** (the v1.2 amendments that were *rejected*). This
+**§8 added 2026-07-14** (the v1.2 amendments that were *rejected*);
+**§9 adoption note added in v1.14** (matching badges shipped; deferral
+re-affirmed). This
 chapter began as the open-questions list; it is kept as the decision
 record — each item preserves the alternatives and names its
 **revisit trigger**, the concrete future fact that would reopen it.
@@ -294,7 +296,7 @@ chapter it was rejected against changes — and when that happens the outcome is
 recorded in place, whichever way it goes (see §8.2, where v1.7's rewrite of
 chapter 07 fired the trigger and the rejection was re-affirmed).
 
-## 9. Matching-status introspection — DEFERRED (v1.5)
+## 9. Matching-status introspection — DEFERRED (v1.5); adoption recorded (v1.14)
 
 The middleware exposes per-publisher/per-querier **matching status** ("is
 anyone listening / is anyone serving"). Fleet tooling adopts it for
@@ -307,3 +309,34 @@ version-dependent surface. Revisit when the middleware exposes remote
 matching status as stable admin-space data; until then, tooling reports
 what it can observe honestly (its own matches) and never infers a
 fleet-wide verdict from silence.
+
+**Adoption note (2026-08-12, after zenkey #38 shipped the badges).** The
+allowed half is implemented and the deferral stands — with one correction
+to what this section imagined, learned the honest way:
+
+- **What landed.** `matching_status()` / `matching_events()` on the two
+  entities an explorer declares itself: a *publication* ("a subscriber
+  currently matches this publication") and a *repeating query* ("a
+  queryable currently serves what we ask"). The CLI prints the note line
+  on `topic pub`; the GUI badges its publish surface.
+- **What adoption taught.** zenoh 1.9's matching listeners exist on
+  publishers and queriers **only** — the "per-publisher/per-querier"
+  wording above was exactly right, and the further half this repo had
+  imagined ("badges on our own *subscriptions*": a subscriber asking
+  "does anyone publish what I watch") is not obtainable from the API at
+  all. It joins the deferred foreign half; the engine's event vocabulary
+  records the refusal in place, so the monitor never grows a dishonest
+  variant.
+- **The temptation, recorded (what §8.1 asks for).** While wiring the
+  CLI, the obvious wording for a false matching status was "nobody is
+  listening on this key" — a fleet verdict own-matching cannot support:
+  another process's publisher may have matched subscribers this one
+  cannot see. The shipped wording is "no subscriber currently matches
+  *this publisher* — a routing fact, not a fleet verdict
+  ([05 §3.1](05-control-rpc.md))", and the engine's doc comments carry
+  the same fence.
+- **Revisit trigger, checked.** zenoh 1.9 exposes no remote/foreign
+  matching as stable admin-space data — the admin sweep shows declared
+  entities, not their matching status — so the trigger has not fired.
+  It needs no sharpening; it now names 1.9 as the version it was last
+  checked against.

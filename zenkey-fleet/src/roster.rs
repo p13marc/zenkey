@@ -305,3 +305,68 @@ pub async fn node_info(
         freshness,
     })
 }
+
+/// One origin claiming a human identity label, through the health-document
+/// bridge (RFC 06 §6.2 bridge 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeMatch {
+    /// The origin id — the payload `host_id`, which IS the origin (§6.1).
+    pub host_id: zenkey::origin::HostId,
+    /// The display label the document carried (`source`).
+    pub source: String,
+    /// The key the claim arrived on — self-certifying, because the doc is
+    /// origin-scoped and carries `host_id` beside `source`.
+    pub key: String,
+}
+
+/// Resolve a human identity (hostname, `source` label) to the origin(s)
+/// claiming it — the consumer identity bridge, run the sanctioned way
+/// (RFC 06 §6.2): GET the fleet's `state/<producer>/health` documents and
+/// read `host_id` beside `source`. Every match is returned; the *caller*
+/// prices zero (the bridge yielded nothing — a probe MUST fail there,
+/// RFC 09 §6) and more-than-one (a hostname collision is exactly the
+/// misrouting hazard §6.2 names).
+///
+/// A document without both fields is skipped silently here — it is not a
+/// claim about this label either way — but the total documents seen ride
+/// back so the caller can tell "no claims" from "nobody answered".
+pub async fn bridge_resolve(
+    session: &zenoh::Session,
+    base: &str,
+    producer: &str,
+    label: &str,
+    timeout: std::time::Duration,
+) -> Result<(Vec<BridgeMatch>, usize)> {
+    let relative =
+        zenkey::selector::producer_state(zenkey::selector::Scope::fleet(), producer, &["health"])
+            .to_string();
+    let key = zenkey::grammar::with_base(base, relative);
+    let answers = crate::query::fleet_get(session, base, &key, None, timeout).await?;
+    let mut matches = Vec::new();
+    let seen = answers.len();
+    for a in &answers {
+        let crate::query::Answer::Value(bytes) = &a.answer else {
+            continue;
+        };
+        let Ok(doc) = serde_json::from_slice::<serde_json::Value>(&bytes.to_bytes()) else {
+            continue;
+        };
+        let (Some(host_id), Some(source)) = (
+            doc.get("host_id").and_then(|v| v.as_str()),
+            doc.get("source").and_then(|v| v.as_str()),
+        ) else {
+            continue;
+        };
+        if source == label
+            && let Ok(id) = zenkey::origin::HostId::parse(host_id)
+        {
+            matches.push(BridgeMatch {
+                host_id: id,
+                source: source.to_string(),
+                key: a.key.clone(),
+            });
+        }
+    }
+    matches.dedup_by(|a, b| a.host_id == b.host_id);
+    Ok((matches, seen))
+}

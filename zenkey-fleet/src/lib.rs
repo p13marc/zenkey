@@ -76,7 +76,9 @@ pub use record::{
     ZrecItem, ZrecReader, ZrecWriter, record, replay,
 };
 pub use registry::SliceSet;
-pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
+pub use roster::{
+    BridgeMatch, Freshness, NodeInfo, ProducerInfo, bridge_resolve, node_info, roster,
+};
 pub use scout::{HelloView, ScoutStream, scout};
 pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use serve::{MockResponder, ServedQuery, declare_responder};

@@ -163,6 +163,43 @@ enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Cutover acceptance, half one (RFC 09 §6): assert a retired key
+    /// family SILENT while the new plane carries traffic.
+    ///
+    /// Three verdicts, three exits: 0 = old silent AND new speaking; 1 =
+    /// the old family still speaks; 2 = everything was quiet — a
+    /// non-verdict, because a dead fleet passes the silence half for free.
+    /// The leak check's meaning is stated, not inferred: anything outside
+    /// `<base>/v1/` that is not the old root.
+    Cutover {
+        /// The retired key family (a full wire key expression).
+        #[arg(long = "old-root", value_name = "KEYEXPR")]
+        old_root: String,
+        /// Listening window, seconds.
+        #[arg(long, default_value_t = 30)]
+        window: u64,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Cutover acceptance, half two (RFC 09 §6): a consumer-shaped,
+    /// CONCRETE-KEY probe.
+    ///
+    /// "A probe MUST build its keys the way the product builds them" — a
+    /// `*`-origin probe cannot catch a broken origin path. An origin id is
+    /// called directly; a hostname resolves through the RFC 06 §6 identity
+    /// bridge first, and the probe FAILS if the bridge yields nothing.
+    Probe {
+        /// Origin id (`h-…`) or hostname (resolved via the bridge).
+        target: String,
+        /// Producer name.
+        #[arg(add = ArgValueCandidates::new(completion::producers))]
+        producer: String,
+        /// Procedure path, e.g. `introspect`.
+        #[arg(add = ArgValueCandidates::new(completion::procedures))]
+        procedure: String,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Capture a selector's traffic to a .zrec file (RFC 09 §5.2).
     ///
     /// Through the Monitor: a bus that outruns the disk surfaces as drop
@@ -1532,6 +1569,17 @@ async fn main() -> Result<()> {
             cmd::key::relate("intersects", &a, &b, format)
         }
         Command::Key(KeyCmd::Canon { expr, format }) => cmd::key::canon(&expr, format),
+        Command::Cutover {
+            old_root,
+            window,
+            bus,
+        } => cmd::cutover::run(&old_root, window, &bus).await,
+        Command::Probe {
+            target,
+            producer,
+            procedure,
+            bus,
+        } => cmd::probe::run(&target, &producer, &procedure, &bus).await,
         Command::Record {
             selector,
             origin,
