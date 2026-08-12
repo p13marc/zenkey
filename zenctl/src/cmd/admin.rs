@@ -40,11 +40,18 @@ pub async fn routers(args: &BusArgs) -> Result<()> {
 
 /// `admin graph` — the mesh as the admin space answered it (#118), as a
 /// table, `--dot` Graphviz for piping (`| dot -Tsvg`), or json/ndjson.
-pub async fn graph(dot: bool, args: &BusArgs) -> Result<()> {
+pub async fn graph(dot: bool, origins: bool, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let report = zenkey_fleet::topology(&session, args.timeout()).await?;
+    // The origin join is opt-in (#131): it costs one more admin sweep, and
+    // the lazy rule holds even for pictures.
+    let attachments = if origins {
+        zenkey_fleet::origin_attachments(&session, args.base(), args.timeout()).await?
+    } else {
+        Vec::new()
+    };
     if dot {
-        println!("{}", render_dot(&report));
+        println!("{}", render_dot(&report, &attachments));
         honesty(&report);
         return Ok(());
     }
@@ -56,6 +63,9 @@ pub async fn graph(dot: bool, args: &BusArgs) -> Result<()> {
             }
             for e in &report.edges {
                 println!("{}", serde_json::to_string(e)?);
+            }
+            for a in &attachments {
+                println!("{}", serde_json::to_string(a)?);
             }
         }
         _ => {
@@ -75,6 +85,16 @@ pub async fn graph(dot: bool, args: &BusArgs) -> Result<()> {
                     );
                 } else {
                     println!("{}  {}  (heard of, not queryable){you}", n.zid, n.whatami);
+                }
+            }
+            for a in &attachments {
+                match &a.session_zid {
+                    Some(z) => println!("  {}  ⚓ session {z}  (token {})", a.origin, a.token_key),
+                    None => println!(
+                        "  {}  reported by {} — sources named no single session; \
+                         shown as reported, not attached (O4)",
+                        a.origin, a.reporter_zid
+                    ),
                 }
             }
             for (a, b, both, links) in deduped_edges(&report) {
@@ -132,7 +152,10 @@ fn deduped_edges(
 
 /// Graphviz, self-contained: routers as boxes, peers/clients as ellipses,
 /// heard-of nodes dashed, our own session bold.
-fn render_dot(report: &zenkey_fleet::TopologyReport) -> String {
+fn render_dot(
+    report: &zenkey_fleet::TopologyReport,
+    attachments: &[zenkey_fleet::OriginAttachment],
+) -> String {
     use std::fmt::Write as _;
     let mut out = String::from("graph zenoh_mesh {\n");
     for n in &report.nodes {
@@ -178,6 +201,29 @@ fn render_dot(report: &zenkey_fleet::TopologyReport) -> String {
                 format!(" [label=\"{proto}\"]")
             }
         );
+    }
+    // Origins as their own small nodes (#131): attached by a solid edge to
+    // the session the admin sources named, or by a dotted one to the mere
+    // reporter — the picture keeps the evidence distinction the join made.
+    for (i, a) in attachments.iter().enumerate() {
+        let id = format!("origin_{i}");
+        let _ = writeln!(
+            out,
+            "  \"{id}\" [shape=hexagon, label=\"{}\", fontsize=10];",
+            a.origin
+        );
+        match &a.session_zid {
+            Some(z) => {
+                let _ = writeln!(out, "  \"{id}\" -- \"{z}\";");
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "  \"{id}\" -- \"{}\" [style=dotted, label=\"reported\"];",
+                    a.reporter_zid
+                );
+            }
+        }
     }
     out.push('}');
     out
@@ -241,12 +287,40 @@ mod tests {
     /// bold, edges labeled by protocol — pipeable to `dot -Tsvg` as-is.
     #[test]
     fn the_dot_form_marks_what_the_join_knows() {
-        let dot = render_dot(&report());
+        let dot = render_dot(&report(), &[]);
         assert!(dot.starts_with("graph zenoh_mesh {"), "{dot}");
         assert!(dot.contains("\"aaa\" [shape=box"), "{dot}");
         assert!(dot.contains("heard of"), "{dot}");
         assert!(dot.contains("style=\"dashed,bold\""), "{dot}");
         assert!(dot.contains("\"aaa\" -- \"bbb\" [label=\"tcp\"]"), "{dot}");
         assert!(dot.ends_with('}'), "{dot}");
+    }
+
+    /// The origin overlay (#131): a sources-named attachment is a solid
+    /// edge; a reporter-only one is dotted and says "reported" — the DOT
+    /// keeps the evidence distinction the join made.
+    #[test]
+    fn the_dot_form_keeps_the_attachment_evidence_distinction() {
+        let attachments = vec![
+            zenkey_fleet::OriginAttachment {
+                origin: "h-cccccccccccc".into(),
+                session_zid: Some("bbb".into()),
+                reporter_zid: "aaa".into(),
+                token_key: "v1/h-cccccccccccc/state/demo/alive".into(),
+            },
+            zenkey_fleet::OriginAttachment {
+                origin: "h-dddddddddddd".into(),
+                session_zid: None,
+                reporter_zid: "aaa".into(),
+                token_key: "v1/h-dddddddddddd/state/demo/alive".into(),
+            },
+        ];
+        let dot = render_dot(&report(), &attachments);
+        assert!(dot.contains("label=\"h-cccccccccccc\""), "{dot}");
+        assert!(dot.contains("\"origin_0\" -- \"bbb\";"), "{dot}");
+        assert!(
+            dot.contains("\"origin_1\" -- \"aaa\" [style=dotted, label=\"reported\"]"),
+            "{dot}"
+        );
     }
 }

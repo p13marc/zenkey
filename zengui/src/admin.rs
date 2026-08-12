@@ -34,6 +34,9 @@ pub struct AdminSweep {
     /// The mesh as the admin space answered it (#118) — nodes, edges, and
     /// who only got mentioned. Same struct `zenctl admin graph` renders.
     pub topology: zenkey_fleet::TopologyReport,
+    /// Liveliness origins joined to their sessions (#131) — evidence from
+    /// the admin token sweep, never guessed; the overlay draws only these.
+    pub origins: Vec<zenkey_fleet::OriginAttachment>,
     /// The base the coverage was judged against — the staleness guard.
     pub base: String,
 }
@@ -119,6 +122,7 @@ mod tests {
                 answered: 0,
                 self_zid: String::new(),
             },
+            origins: vec![],
             base: base.to_string(),
         })
     }

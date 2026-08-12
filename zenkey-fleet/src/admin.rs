@@ -599,6 +599,99 @@ mod tests {
     }
 }
 
+/// One liveliness origin attached to the session that declared its token —
+/// the #131 join, evidence-first: an attachment is made only from what the
+/// admin space actually said, never guessed (a guessed attachment would be
+/// the O4 failure on a picture).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OriginAttachment {
+    /// The origin the token names (`h-…` or `@service`).
+    pub origin: String,
+    /// The declaring session's zid, when the token's admin `sources` names
+    /// exactly one. `None` = the sources were absent or ambiguous — the
+    /// origin is then only *reported by* the answering admin space, and a
+    /// renderer says so instead of drawing a line it cannot back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_zid: Option<String>,
+    /// The admin space that reported the token: the origin's own session in
+    /// a peer mesh serving its admin space, a router in a routed one.
+    pub reporter_zid: String,
+    /// The token key the evidence rode — the audit trail.
+    pub token_key: String,
+}
+
+/// Collect every zid string under the zenoh 1.9 `Sources` shape
+/// (`{ routers: [...], peers: [...], clients: [...] }`) — tolerant of the
+/// layout varying by version: unknown shapes yield nothing, never an error.
+fn source_zids(sources: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for kind in ["routers", "peers", "clients"] {
+        if let Some(list) = sources.get(kind).and_then(|v| v.as_array()) {
+            out.extend(list.iter().filter_map(|z| z.as_str().map(str::to_string)));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Join the admin space's declared liveliness tokens against the keyspace:
+/// which origin hangs off which session (#131).
+///
+/// One `@/*/*/token/**` sweep; each token whose keyexpr parses under `base`
+/// as an `alive` leaf yields an attachment. The session zid is taken from
+/// the token's `sources` **only when they name exactly one** — several
+/// candidates or none degrade to reporter-only, stated rather than guessed.
+/// An empty result means the admin space served no tokens (or none parse
+/// under this base) — an observation, not an empty fleet (O4).
+pub async fn origin_attachments(
+    session: &Session,
+    base: &str,
+    timeout: Duration,
+) -> Result<Vec<OriginAttachment>> {
+    let entries = admin_get(session, "@/*/*/token/**", timeout).await?;
+    let mut out: Vec<OriginAttachment> = Vec::new();
+    for e in &entries {
+        let Some(decl) = declared_from_admin_entry(&e.key, &e.value) else {
+            continue;
+        };
+        if decl.kind != EntityKind::Token {
+            continue;
+        }
+        let Some(parsed) = zenkey::grammar::parse_full(base, &decl.keyexpr) else {
+            continue;
+        };
+        // The framework liveliness shape: an `alive` leaf on the state
+        // class (RFC 04 §5). Anything else declared as a token is not an
+        // origin claim and is left alone.
+        if parsed.subject.last().copied() != Some("alive") {
+            continue;
+        }
+        let origin = parsed.origin.chunk().to_string();
+        let zids = source_zids(&decl.sources);
+        let session_zid = match zids.as_slice() {
+            [only] => Some(only.clone()),
+            _ => None,
+        };
+        let attachment = OriginAttachment {
+            origin,
+            session_zid,
+            reporter_zid: decl.node_zid.clone(),
+            token_key: decl.keyexpr.clone(),
+        };
+        // One origin can hold several sessions (one per producer process);
+        // dedup only exact repeats.
+        if !out.iter().any(|a| {
+            a.origin == attachment.origin
+                && a.session_zid == attachment.session_zid
+                && a.reporter_zid == attachment.reporter_zid
+        }) {
+            out.push(attachment);
+        }
+    }
+    Ok(out)
+}
+
 /// One node of the mesh, as the topology join sees it (#118).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TopologyNode {

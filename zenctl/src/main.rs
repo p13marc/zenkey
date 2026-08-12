@@ -505,6 +505,11 @@ enum AdminCmd {
         /// Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
         #[arg(long)]
         dot: bool,
+        /// Also join liveliness origins to their sessions (#131) — one
+        /// extra admin sweep; attachments come from the admin sources or
+        /// they are shown as merely reported, never guessed.
+        #[arg(long)]
+        origins: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -1391,7 +1396,9 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Admin(AdminCmd::Routers { bus }) => cmd::admin::routers(&bus).await,
-        Command::Admin(AdminCmd::Graph { dot, bus }) => cmd::admin::graph(dot, &bus).await,
+        Command::Admin(AdminCmd::Graph { dot, origins, bus }) => {
+            cmd::admin::graph(dot, origins, &bus).await
+        }
         Command::Get {
             selector,
             body,
