@@ -163,6 +163,72 @@ enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Capture a selector's traffic to a .zrec file (RFC 09 §5.2).
+    ///
+    /// Through the Monitor: a bus that outruns the disk surfaces as drop
+    /// records *in the file*, where the gaps happened (RFC 09 §5.1 O6) —
+    /// a capture is a bounded observer and says what it cost. Replay with
+    /// `zenctl replay`; the file is ndjson (one row per line, payloads
+    /// lossless as base64 `bytes`), so `jq` reads it too.
+    Record {
+        /// Full wire selector to capture. Defaults to all v1 data under
+        /// the base: `<base>/v1/**` — which `**` being unable to cross
+        /// `@`-chunks makes media-safe, and blind to the verbatim planes.
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
+        selector: Option<String>,
+        /// Only this origin (`h-…` or `@service`).
+        #[arg(long)]
+        origin: Option<String>,
+        /// Only this class: telemetry, state, or events.
+        #[arg(long)]
+        class: Option<String>,
+        /// Only this producer.
+        #[arg(long)]
+        producer: Option<String>,
+        /// Output file.
+        #[arg(long, short = 'o', value_name = "FILE")]
+        out: String,
+        /// Stop after this many seconds.
+        #[arg(long, value_name = "SECS")]
+        duration: Option<u64>,
+        /// Stop after this many samples (0 = until ctrl-c or --duration).
+        #[arg(long, default_value_t = 0)]
+        count: u64,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Replay a .zrec capture onto the bus — replay is PUBLISHING.
+    ///
+    /// Real puts through declared publishers, at the capture's own pacing
+    /// (scaled by --speed), re-stamped with this session's HLC: re-stamped
+    /// old data WINS last-writer-wins against a live fleet, which is why
+    /// the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the
+    /// capture header's base is a contract (`--force-base` to override).
+    Replay {
+        /// The .zrec file to replay.
+        file: String,
+        /// Pacing scale: 2.0 replays twice as fast as captured.
+        #[arg(long, default_value_t = 1.0)]
+        speed: f64,
+        /// List every would-be put and publish nothing (no session is
+        /// even opened). Preview pacing is not simulated.
+        #[arg(long)]
+        dry_run: bool,
+        /// Replay even though the resolved base differs from the capture
+        /// header's.
+        #[arg(long)]
+        force_base: bool,
+        /// Replay recorded deletes that fall off the state class — the
+        /// same operator price as `topic retire` (RFC 04 §1.2, v1.12).
+        #[arg(long = "i-know")]
+        i_know: bool,
+        /// QoS profile for rows that recorded none.
+        #[arg(long, default_value = "refreshed",
+              add = ArgValueCandidates::new(completion::qos_profiles))]
+        qos: String,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Listen for raw scouting Hellos: zid, whatami, locators.
     ///
     /// The layer *below* `base list`: no session is opened, so this answers
@@ -1459,6 +1525,37 @@ async fn main() -> Result<()> {
             cmd::key::relate("intersects", &a, &b, format)
         }
         Command::Key(KeyCmd::Canon { expr, format }) => cmd::key::canon(&expr, format),
+        Command::Record {
+            selector,
+            origin,
+            class,
+            producer,
+            out,
+            duration,
+            count,
+            bus,
+        } => {
+            cmd::record::run(
+                selector.as_deref(),
+                origin.as_deref(),
+                class.as_deref(),
+                producer.as_deref(),
+                &out,
+                duration,
+                count,
+                &bus,
+            )
+            .await
+        }
+        Command::Replay {
+            file,
+            speed,
+            dry_run,
+            force_base,
+            i_know,
+            qos,
+            bus,
+        } => cmd::replay::run(&file, speed, dry_run, force_base, i_know, &qos, &bus).await,
         Command::Scout {
             what,
             timeout,

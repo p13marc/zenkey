@@ -968,3 +968,72 @@ fn human_us(us: i64) -> String {
         format!("{sign}{abs}µs")
     }
 }
+
+/// `zenctl record`'s closing report — the counts are the honest record;
+/// the progress line was never more than progress (issue #53).
+pub fn record(report: &zenkey_fleet::RecordReport, format: Format) {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => json_line(report),
+        _ => {
+            println!(
+                "recorded {} sample(s) in {:.1}s{}",
+                report.samples,
+                report.duration_ms as f64 / 1000.0,
+                report
+                    .out
+                    .as_deref()
+                    .map(|o| format!(" to {o}"))
+                    .unwrap_or_default(),
+            );
+            if report.dropped > 0 {
+                println!(
+                    "{} sample(s) dropped while behind — recorded as in-file drop \
+                     records where the gaps happened; the capture is a partial \
+                     view and says so (RFC 09 §5.1 O6)",
+                    report.dropped
+                );
+            }
+        }
+    }
+}
+
+/// `zenctl replay`'s closing report: what was (or would have been)
+/// published, and what the capture itself had already lost (issue #53).
+pub fn replay(report: &zenkey_fleet::ReplayReport, format: Format) {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => json_line(report),
+        _ => {
+            let verb = if report.dry_run {
+                "would replay"
+            } else {
+                "replayed"
+            };
+            println!(
+                "{verb} {} put(s) and {} tombstone(s) from {} (captured {})",
+                report.published,
+                report.tombstones,
+                report.header.selectors.join(" + "),
+                report.header.captured_at,
+            );
+            if report.capture_dropped > 0 {
+                println!(
+                    "the capture dropped {} sample(s) at record time — this \
+                     replay is a partial view of a partial view (RFC 09 §5.2)",
+                    report.capture_dropped
+                );
+            }
+            if report.malformed > 0 || report.refused > 0 {
+                println!(
+                    "{} malformed row(s), {} refused delete row(s) — counted, \
+                     not silently skipped:",
+                    report.malformed, report.refused
+                );
+                for e in &report.first_errors {
+                    println!("  {e}");
+                }
+            }
+        }
+    }
+}

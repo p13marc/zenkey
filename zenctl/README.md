@@ -84,6 +84,8 @@ zenctl scout                            # raw Hellos: zid/whatami/locators (mult
 zenctl serve 'demo/mock/**' '{"ok":1}'  # mock queryable; logs every ask (who queries this key?)
 zenctl key intersects 'v1/**' 'v1/h-1/@rpc/p/x'  # keyexpr algebra, no session; cites D2/D4 on a convention-shaped no
 zenctl topic echo --format ndjson > f   # …and back: topic pub --from ndjson < f (one row shape, both directions)
+zenctl record --base acme -o bus.zrec --duration 10  # capture: same row shape + header + pacing + in-file drop ledger
+zenctl replay bus.zrec --dry-run        # ALWAYS preview first — replay is publishing, and re-stamped old data wins LWW (RFC 09 §5.2)
 zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
 zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold
 zenctl storage list --base acme         # declared state subjects vs storage coverage
