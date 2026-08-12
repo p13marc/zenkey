@@ -2061,12 +2061,18 @@ impl Zengui {
                         let topology = zenkey_fleet::topology(&session, timeout)
                             .await
                             .map_err(|e| e.to_string())?;
+                        // The origin join (#131): part of the same explicit
+                        // sweep the user asked for — one more admin GET.
+                        let origins = zenkey_fleet::origin_attachments(&session, &base, timeout)
+                            .await
+                            .map_err(|e| e.to_string())?;
                         Ok(Arc::new(crate::admin::AdminSweep {
                             routers,
                             storage: zenkey_fleet::report::StorageList { storages, coverage },
                             declared,
                             coverage_note,
                             topology,
+                            origins,
                             base,
                         }))
                     },

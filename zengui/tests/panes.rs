@@ -1601,6 +1601,7 @@ mod admin {
                     answered: 0,
                     self_zid: String::new(),
                 },
+                origins: vec![],
                 base: String::new(),
             })),
             "",
@@ -1651,11 +1652,45 @@ mod admin {
                     answered: 1,
                     self_zid: "z2".into(),
                 },
+                origins: vec![
+                    zenkey_fleet::OriginAttachment {
+                        origin: "h-cccccccccccc".into(),
+                        session_zid: Some("z2".into()),
+                        reporter_zid: "z1".into(),
+                        token_key: "v1/h-cccccccccccc/state/demo/alive".into(),
+                    },
+                    zenkey_fleet::OriginAttachment {
+                        origin: "h-dddddddddddd".into(),
+                        session_zid: None,
+                        reporter_zid: "z1".into(),
+                        token_key: "v1/h-dddddddddddd/state/demo/alive".into(),
+                    },
+                    zenkey_fleet::OriginAttachment {
+                        origin: "h-eeeeeeeeeeee".into(),
+                        session_zid: Some("z-not-drawn".into()),
+                        reporter_zid: "z9".into(),
+                        token_key: "v1/h-eeeeeeeeeeee/state/demo/alive".into(),
+                    },
+                ],
                 base: String::new(),
             })),
             "",
         );
         let mut ui = simulator::<Message, _, _>(pane(&state));
+        // #131: the origin join's evidence distinction reaches the caption —
+        // attached-by-declaration vs reported-only vs outside the mesh.
+        assert!(
+            ui.find(
+                "origins: 1 attached by declaration · 1 reported-only (dotted) · 1 naming a session outside the drawn mesh (listed, not drawn)"
+            )
+            .is_ok(),
+            "the three evidence grades are counted out loud"
+        );
+        assert!(
+            ui.find("drag to pan · scroll to zoom · right-click resets")
+                .is_ok(),
+            "the viewport controls are discoverable"
+        );
         // iced_test's find matches a widget's WHOLE text.
         assert!(
             ui.find("z1  router  ⌂ storage").is_ok(),

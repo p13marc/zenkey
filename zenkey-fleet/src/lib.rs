@@ -56,7 +56,9 @@ pub use admin::{
     storages,
 };
 pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
-pub use admin::{TopologyEdge, TopologyNode, TopologyReport, topology};
+pub use admin::{
+    OriginAttachment, TopologyEdge, TopologyNode, TopologyReport, origin_attachments, topology,
+};
 pub use bench::{BenchSpec, bench_rpc};
 #[cfg(feature = "blob")]
 pub use blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe};

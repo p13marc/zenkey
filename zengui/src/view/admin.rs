@@ -345,6 +345,15 @@ struct MeshNode {
     has_storage: bool,
 }
 
+/// One origin satellite (#131): drawn beside the node its evidence names.
+struct MeshOrigin {
+    label: String,
+    /// Index into `nodes` of the session (solid) or reporter (dotted).
+    anchor: usize,
+    /// `true` = only reported-by — the weaker evidence, drawn dotted.
+    reported: bool,
+}
+
 /// The caption + canvas pair.
 fn topology<'a>(sweep: &'a AdminSweep) -> Element<'a, Message> {
     let mut col = column![kit::section_header("topology", None)].spacing(space::XS);
@@ -386,13 +395,47 @@ fn topology<'a>(sweep: &'a AdminSweep) -> Element<'a, Message> {
             }
         }
     }
+    // The origin overlay (#131): anchor each attachment to the node its
+    // evidence names — session zid when the admin sources named one, the
+    // mere reporter (drawn dotted) otherwise. Unanchorable rows are counted
+    // out loud rather than dropped silently.
+    let mut origins: Vec<MeshOrigin> = Vec::new();
+    let mut unanchored = 0usize;
+    for a in &sweep.origins {
+        let (zid, reported) = match &a.session_zid {
+            Some(z) => (z.as_str(), false),
+            None => (a.reporter_zid.as_str(), true),
+        };
+        match index_of(zid) {
+            Some(anchor) => origins.push(MeshOrigin {
+                label: a.origin.clone(),
+                anchor,
+                reported,
+            }),
+            None => unanchored += 1,
+        }
+    }
     col = col.push(kit::muted(format!(
         "{} node(s) ({} answered, {heard_of} heard of, not queryable) · {} link(s) · \
-         filled = admin space answered · ⌂ = hosts a storage · ring = this session",
+         filled = admin space answered · ⌂ = hosts a storage · ring = this session · \
+         base {:?} (bases are deployment-global; the drawing is base-blind)",
         report.nodes.len(),
         report.answered,
         edges.len(),
+        sweep.base,
     )));
+    if !sweep.origins.is_empty() || unanchored > 0 {
+        let attached = origins.iter().filter(|o| !o.reported).count();
+        col = col.push(kit::muted(format!(
+            "origins: {} attached by declaration · {} reported-only (dotted) · \
+             {unanchored} naming a session outside the drawn mesh (listed, not drawn)",
+            attached,
+            origins.len() - attached,
+        )));
+    }
+    col = col.push(kit::muted(
+        "drag to pan · scroll to zoom · right-click resets",
+    ));
     // The caption *is* the testable surface: a bounded node roll-call.
     const LISTED: usize = 12;
     for n in report.nodes.iter().take(LISTED) {
@@ -420,9 +463,13 @@ fn topology<'a>(sweep: &'a AdminSweep) -> Element<'a, Message> {
         )));
     }
     col = col.push(
-        iced::widget::canvas(Mesh { nodes, edges })
-            .width(Length::Fill)
-            .height(Length::Fixed(MESH_HEIGHT)),
+        iced::widget::canvas(Mesh {
+            nodes,
+            edges,
+            origins,
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(MESH_HEIGHT)),
     );
     col.into()
 }
@@ -442,14 +489,85 @@ const NODE_R: f32 = 7.0;
 struct Mesh {
     nodes: Vec<MeshNode>,
     edges: Vec<(usize, usize)>,
+    origins: Vec<MeshOrigin>,
+}
+
+/// The canvas viewport (#131): pan by drag, zoom by wheel, double-click
+/// resets. Pure view state — nothing here touches the report.
+#[derive(Debug)]
+struct Viewport {
+    offset: iced::Vector,
+    zoom: f32,
+    drag: Option<iced::Point>,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Viewport {
+            offset: iced::Vector::new(0.0, 0.0),
+            zoom: 1.0,
+            drag: None,
+        }
+    }
 }
 
 impl iced::widget::canvas::Program<Message> for Mesh {
-    type State = ();
+    type State = Viewport;
+
+    fn update(
+        &self,
+        state: &mut Viewport,
+        event: &iced::Event,
+        bounds: iced::Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> Option<iced::widget::canvas::Action<Message>> {
+        use iced::mouse;
+        use iced::widget::canvas::Action;
+        let over = cursor.position_in(bounds);
+        match event {
+            iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) if over.is_some() => {
+                let ticks = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => *y,
+                    mouse::ScrollDelta::Pixels { y, .. } => *y / 40.0,
+                };
+                state.zoom = (state.zoom * (1.0 + ticks * 0.1)).clamp(0.25, 6.0);
+                Some(Action::request_redraw().and_capture())
+            }
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(p) = over {
+                    state.drag = Some(p);
+                    Some(Action::capture())
+                } else {
+                    None
+                }
+            }
+            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                let (Some(from), Some(to)) = (state.drag, over) else {
+                    return None;
+                };
+                state.offset += to - from;
+                state.drag = Some(to);
+                Some(Action::request_redraw().and_capture())
+            }
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.drag.is_some() =>
+            {
+                state.drag = None;
+                Some(Action::capture())
+            }
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                // Right-click resets too — double-click detection is not
+                // worth a timer; the caption says both.
+                *state = Viewport::default();
+                Some(Action::request_redraw().and_capture())
+            }
+            _ => None,
+        }
+    }
 
     fn draw(
         &self,
-        _state: &(),
+        state: &Viewport,
         renderer: &iced::Renderer,
         theme: &iced::Theme,
         bounds: iced::Rectangle,
@@ -462,8 +580,13 @@ impl iced::widget::canvas::Program<Message> for Mesh {
         if n == 0 {
             return vec![frame.into_geometry()];
         }
+        // Pan/zoom (#131): translate then scale around the panned center.
+        frame.translate(state.offset);
         let cx = bounds.width / 2.0;
         let cy = MESH_HEIGHT / 2.0;
+        frame.translate(iced::Vector::new(cx, cy));
+        frame.scale(state.zoom);
+        frame.translate(iced::Vector::new(-cx, -cy));
         let radius = (MESH_HEIGHT / 2.0 - 30.0).max(10.0);
         let pos = |i: usize| {
             let angle = std::f32::consts::TAU * (i as f32) / (n as f32);
@@ -517,6 +640,61 @@ impl iced::widget::canvas::Program<Message> for Mesh {
                 position: Point::new(p.x + NODE_R + 3.0, p.y + 3.0),
                 color: palette.text(),
                 size: iced::Pixels(11.0),
+                ..canvas::Text::default()
+            });
+        }
+        // Origin satellites (#131): hexagon-ish diamonds fanned around
+        // their anchor, solid line for a sources-named session, dotted for
+        // reported-only — the drawing keeps the evidence distinction.
+        let mut fan: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for o in &self.origins {
+            let slot = fan.entry(o.anchor).or_insert(0);
+            let k = *slot;
+            *slot += 1;
+            let a = pos(o.anchor);
+            let angle = std::f32::consts::TAU * (k as f32) / 6.0 + 0.5;
+            let d = NODE_R + 22.0 + 10.0 * (k / 6) as f32;
+            let p = Point::new(a.x + d * angle.cos(), a.y + d * angle.sin());
+            let tone = palette.success();
+            if o.reported {
+                // Dotted: short dashes along the anchor line.
+                let steps = 6;
+                for t in 0..steps {
+                    let f0 = t as f32 / steps as f32;
+                    let f1 = f0 + 0.5 / steps as f32;
+                    let seg = canvas::Path::line(
+                        Point::new(a.x + (p.x - a.x) * f0, a.y + (p.y - a.y) * f0),
+                        Point::new(a.x + (p.x - a.x) * f1, a.y + (p.y - a.y) * f1),
+                    );
+                    frame.stroke(
+                        &seg,
+                        canvas::Stroke::default()
+                            .with_width(1.0)
+                            .with_color(palette.text_muted()),
+                    );
+                }
+            } else {
+                frame.stroke(
+                    &canvas::Path::line(a, p),
+                    canvas::Stroke::default().with_width(1.0).with_color(tone),
+                );
+            }
+            let dot = canvas::Path::circle(p, NODE_R - 3.0);
+            if o.reported {
+                frame.stroke(
+                    &dot,
+                    canvas::Stroke::default()
+                        .with_width(1.2)
+                        .with_color(palette.text_muted()),
+                );
+            } else {
+                frame.fill(&dot, tone);
+            }
+            frame.fill_text(canvas::Text {
+                content: o.label.clone(),
+                position: Point::new(p.x + NODE_R, p.y + 3.0),
+                color: palette.text_muted(),
+                size: iced::Pixels(10.0),
                 ..canvas::Text::default()
             });
         }
