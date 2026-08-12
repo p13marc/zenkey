@@ -98,6 +98,7 @@ mod tests {
                     }]
                 })
                 .unwrap_or_default(),
+            media: vec![],
             blob: vec![BlobDecl {
                 tier: "artifact".into(),
                 endpoints: vec![],

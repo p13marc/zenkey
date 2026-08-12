@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.7 (proposed)** · normative chapter · *amended in v1.2, v1.7, v1.8 and v1.11 — see [00-index.md](00-index.md)*
+**Status: v1.7 (proposed)** · normative chapter · *amended in v1.2, v1.7, v1.8, v1.11 and v1.16 — see [00-index.md](00-index.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -295,6 +295,13 @@ prefix cannot be passed where the §3 prohibition forbids one. Declaring
 `push` in an entry remains a statement of capability — the authorization gate
 and the off-by-default posture of §2.2 are unaffected by anything a registry
 says.
+
+*Since v1.16 the symmetry this section created is restored the other way:
+`[[media]]` declarations (§1's plane) reach the runtime introspect slice
+exactly as blob entries do ([08 §2/§6](08-registry.md)), so a viewer can
+enumerate an origin's streams off the bus before subscribing to exactly
+one — §1's no-wildcard rule needs the enumeration to come from somewhere,
+and now it is served rather than compiled in.*
 
 ## 3. The wildcard rule (normative)
 

@@ -871,6 +871,7 @@ mod tests {
             }],
             procedures: vec![],
             blob: vec![],
+            media: vec![],
             deprecated: vec![],
         };
         let slices = crate::registry::SliceSet::from_slices(vec![slice]);
@@ -919,6 +920,7 @@ mod tests {
             }],
             procedures: vec![],
             blob: vec![],
+            media: vec![],
             deprecated: vec![],
         };
         let slices = crate::registry::SliceSet::from_slices(vec![slice]);

@@ -1,9 +1,41 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.15 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.16 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.16 (2026-08-12, the media-introspection amendment)** — the asymmetry
+> v1.8 recorded rather than hid is closed: `[[media]]` entries — a field
+> table since v1.3, codegen since v1.5, and *never in the slice* — now ride
+> [08 §6](08-registry.md)'s runtime introspect reply like every other entry
+> kind. §6's original sentence claimed "media shapes" through v1.7 and v1.8
+> shrank the claim to match reality; v1.16 grows reality to match the
+> original claim instead. Consequence: a media viewer can finally enumerate
+> an origin's declared streams **off the bus** — which
+> [07 §1](07-bulk-planes.md)'s no-wildcard rule quietly depended on, since a
+> viewer that must subscribe to exactly one concrete stream needs the stream
+> list to come from *somewhere*, and until now that somewhere was a
+> compiled-in registry.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **C4′** | [08 §2/§6](08-registry.md), [07 §2.7](07-bulk-planes.md) | **`[[media]]` reaches the slice.** Same forward-compat posture as v1.8's BlobDecl: a pre-v1.16 slice parses with an empty media list, never an error; optional fields stay optional. A foreign reader requires exactly `path` and `encoding` — a stream that names no codec cannot be subscribed honestly (07 §1 declares the codec on the wire `Encoding`, never sniffed, never in a payload envelope). Explorers surface the declarations (`zenctl node info`, the zengui node detail). |
+>
+> **What did *not* change.** The `[[media]]` field table itself (08 §2,
+> normative since v1.3) is untouched — no new field, no changed requiredness
+> in the *registry TOML*; what changed is which consumers can see it.
+> 07 §1's plane rules — fixed QoS, no wildcards, codec on the `Encoding`,
+> metadata on the attachment — are quoted, not amended. Introspection stays
+> the raw compiled-against slice served verbatim (08 §6); no wire change of
+> any kind, because the TOML already carried the entries — only readers
+> learned to keep them.
+>
+> **Provenance.** zenkey #77 (epic #33 phase 4), the "separate work" v1.8's
+> C4 note explicitly deferred. Verified consequence before: media codegen
+> was delivered (H2) while **no explorer could discover media streams off
+> the bus** — only compiled-in consumers knew the shapes. The media viewer
+> (zenkey #69) unblocks on this amendment.
 
 > **v1.15 (2026-08-12, the compatibility-lock amendment)** — [08 §3.1](08-registry.md)
 > *(new)*: H3 from the v1.5 slate, held for review and then never filed,

@@ -644,6 +644,7 @@ mod tests {
             subjects: vec![subject("flow/{q}"), subject("flow/special")],
             procedures: vec![],
             blob: vec![],
+            media: vec![],
             deprecated: vec![],
         };
         let slices = SliceSet::from_slices(vec![slice]);

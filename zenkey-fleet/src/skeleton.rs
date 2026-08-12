@@ -518,6 +518,7 @@ mod tests {
             subjects,
             procedures: vec![],
             blob: vec![],
+            media: vec![],
             deprecated: vec![],
         }
     }

@@ -227,6 +227,7 @@ fn the_call_pane_labels_forbidden_fanout() {
             description: None,
         }],
         blob: vec![],
+        media: vec![],
         deprecated: vec![],
     };
     let slices = SliceSet::from_slices(vec![slice]);
@@ -305,6 +306,7 @@ fn the_call_pane_names_the_origins_that_did_not_answer() {
             description: None,
         }],
         blob: vec![],
+        media: vec![],
         deprecated: vec![],
     }]);
     let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
@@ -343,6 +345,7 @@ fn the_call_pane_distinguishes_an_unasked_schema_from_an_empty_one() {
             description: None,
         }],
         blob: vec![],
+        media: vec![],
         deprecated: vec![],
     };
     let slices = SliceSet::from_slices(vec![slice]);
@@ -663,6 +666,7 @@ fn the_node_detail_reports_freshness_honestly() {
             subjects: 2,
             procedures: 1,
             blob_tiers: vec![],
+            media: vec![],
             deprecated_served: 0,
         }],
         freshness: vec![Freshness {
