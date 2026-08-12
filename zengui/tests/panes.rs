@@ -278,6 +278,8 @@ fn the_call_pane_names_the_origins_that_did_not_answer() {
                 ok: true,
                 value: None,
                 text: Some("slice".into()),
+                attachment: Some(serde_json::json!({"who": "me"})),
+                attachment_bytes: Some(12),
                 error: None,
             }],
         })),

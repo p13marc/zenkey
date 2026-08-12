@@ -11,6 +11,7 @@ pub async fn run(
     procedure: &str,
     params: &[String],
     body: Option<&str>,
+    attachment: Option<&str>,
     no_validate: bool,
     raw: bool,
     args: &BusArgs,
@@ -25,6 +26,15 @@ pub async fn run(
         Some(b) => Some(match b.strip_prefix('@') {
             Some(path) => std::fs::read(path)?,
             None => b.as_bytes().to_vec(),
+        }),
+        None => None,
+    };
+    // The attachment rides the query verbatim — never schema-encoded, same
+    // rule as `topic pub --attachment` (#117, now on the call side: #126).
+    let attachment = match attachment {
+        Some(a) => Some(match a.strip_prefix('@') {
+            Some(path) => std::fs::read(path)?,
+            None => a.as_bytes().to_vec(),
         }),
         None => None,
     };
@@ -78,15 +88,24 @@ pub async fn run(
         procedure,
         params,
         payload,
+        attachment,
         args.timeout(),
         slices.as_ref(),
     )
     .await?;
 
-    output::call(&report, args.format, |a| match (&a.value, &a.text) {
-        (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
-        (None, Some(t)) => t.clone(),
-        _ => String::new(),
+    output::call(&report, args.format, |a| {
+        let mut out = match (&a.value, &a.text) {
+            (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
+            (None, Some(t)) => t.clone(),
+            _ => String::new(),
+        };
+        // A reply attachment is a wire fact, shown where the reply is (#126)
+        // — present only when the wire carried one.
+        if let (Some(att), Some(n)) = (&a.attachment, a.attachment_bytes) {
+            out.push_str(&format!("\n  attachment ({n} B): {att}"));
+        }
+        out
     });
     // Exit-code discipline preserved: 1 = an error reply, 2 = zero replies
     // (silence stays a distinct non-verdict — RFC 05 §3.1).

@@ -858,6 +858,11 @@ enum ServiceCmd {
         /// Request body: inline JSON, or `@path` to read a file.
         #[arg(long)]
         body: Option<String>,
+        /// Attachment riding beside the request, verbatim — never
+        /// schema-encoded (#117's rule, on the call side: #126). Inline
+        /// text, or `@path` to read a file.
+        #[arg(long)]
+        attachment: Option<String>,
         /// Skip the registry lookup (and with it the registry-layer
         /// forbidden-fanout refusal and any body validation).
         #[arg(long)]
@@ -1367,6 +1372,7 @@ async fn main() -> Result<()> {
             procedure,
             params,
             body,
+            attachment,
             no_validate,
             raw,
             bus,
@@ -1377,6 +1383,7 @@ async fn main() -> Result<()> {
                 &procedure,
                 &params,
                 body.as_deref(),
+                attachment.as_deref(),
                 no_validate,
                 raw,
                 &bus,

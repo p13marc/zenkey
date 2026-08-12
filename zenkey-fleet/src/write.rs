@@ -288,6 +288,21 @@ impl CallTarget {
     }
 }
 
+/// A reply attachment, projected for the report: JSON if it parses, UTF-8
+/// text if it decodes, else a size tag. Never schema-decoded — an attachment
+/// is outside the registry's vocabulary (#117) — and deliberately
+/// dependency-free: the report shapes are unconditional while the decode
+/// module is feature-gated.
+fn attachment_value(bytes: &[u8]) -> serde_json::Value {
+    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
+        v
+    } else if let Ok(s) = std::str::from_utf8(bytes) {
+        serde_json::Value::String(s.to_string())
+    } else {
+        serde_json::Value::String(format!("<{} bytes>", bytes.len()))
+    }
+}
+
 /// Call a procedure and report every attributed answer.
 ///
 /// - The key composes through the typed builders (never `format!`), lifted to
@@ -310,6 +325,7 @@ pub async fn call(
     procedure: &str,
     params: &[String],
     body: Option<Vec<u8>>,
+    attachment: Option<Vec<u8>>,
     timeout: Duration,
     slices: Option<&SliceSet>,
 ) -> Result<CallReport> {
@@ -340,41 +356,60 @@ pub async fn call(
         key.push_str(&params.join(";"));
     }
 
-    let answers = crate::query::fleet_get(session, base, &key, body, timeout).await?;
+    let answers =
+        crate::query::fleet_get_call(session, base, &key, body, attachment, timeout).await?;
     Ok(CallReport {
         key: key.clone(),
         answers: answers
             .iter()
-            .map(|a| match &a.answer {
-                crate::query::Answer::Value(bytes) => {
-                    let bytes = bytes.to_bytes();
-                    match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                        Ok(v) => CallAnswer {
-                            origin: a.origin.clone(),
-                            ok: true,
-                            value: Some(v),
-                            text: None,
-                            error: None,
-                        },
-                        Err(_) => CallAnswer {
-                            origin: a.origin.clone(),
-                            ok: true,
-                            value: None,
-                            text: Some(String::from_utf8_lossy(&bytes).to_string()),
-                            error: None,
-                        },
+            .map(|a| {
+                // The reply attachment used to be visible at the fleet_get
+                // layer and dropped at this projection (#126) — carried now,
+                // present only when the wire carried one.
+                let (att, att_bytes) = match &a.attachment {
+                    Some(z) => {
+                        let bytes = z.to_bytes();
+                        (Some(attachment_value(&bytes)), Some(bytes.len()))
                     }
+                    None => (None, None),
+                };
+                match &a.answer {
+                    crate::query::Answer::Value(bytes) => {
+                        let bytes = bytes.to_bytes();
+                        match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                            Ok(v) => CallAnswer {
+                                origin: a.origin.clone(),
+                                ok: true,
+                                value: Some(v),
+                                text: None,
+                                attachment: att,
+                                attachment_bytes: att_bytes,
+                                error: None,
+                            },
+                            Err(_) => CallAnswer {
+                                origin: a.origin.clone(),
+                                ok: true,
+                                value: None,
+                                text: Some(String::from_utf8_lossy(&bytes).to_string()),
+                                attachment: att,
+                                attachment_bytes: att_bytes,
+                                error: None,
+                            },
+                        }
+                    }
+                    crate::query::Answer::Error { name, message } => CallAnswer {
+                        origin: a.origin.clone(),
+                        ok: false,
+                        value: None,
+                        text: None,
+                        attachment: att,
+                        attachment_bytes: att_bytes,
+                        error: Some(CallError {
+                            name: name.clone(),
+                            message: message.clone(),
+                        }),
+                    },
                 }
-                crate::query::Answer::Error { name, message } => CallAnswer {
-                    origin: a.origin.clone(),
-                    ok: false,
-                    value: None,
-                    text: None,
-                    error: Some(CallError {
-                        name: name.clone(),
-                        message: message.clone(),
-                    }),
-                },
             })
             .collect(),
     })
@@ -554,6 +589,7 @@ mod tests {
             "capture/trigger",
             &[],
             None,
+            None,
             Duration::from_millis(100),
             Some(&slices),
         )
@@ -572,6 +608,7 @@ mod tests {
             "netring",
             "capture/trigger",
             &[],
+            None,
             None,
             Duration::from_millis(100),
             Some(&slice_with_proc(None)),
