@@ -1,9 +1,38 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.13 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.14 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.14 (2026-08-12, the matching-adoption note)** — [12 §9](12-open-questions.md)
+> absorbs what shipping the matching badges (zenkey #38) actually taught,
+> the way §8.1 demands adoption be recorded: re-read, don't recall. The
+> allowed half landed as specified — `matching_status()`/`matching_events()`
+> on the two entities an explorer declares itself, a publication and a
+> repeating query — and the deferral of foreign-publisher probes is
+> **re-affirmed, not extended silently**: zenoh 1.9 still exposes no
+> remote matching as stable admin-space data, so the revisit trigger has
+> not fired and now names 1.9 as the version it was last checked against.
+> One correction the section could not have known: matching listeners
+> exist on publishers and queriers *only* — a subscriber asking "does
+> anyone publish what I watch" is not obtainable from the API at all, and
+> that imagined half joins the deferred side with its refusal recorded in
+> the engine's event vocabulary. The note also preserves the temptation
+> §8.1 exists for: the false-status wording that suggested itself
+> ("nobody is listening on this key") was a fleet verdict own-matching
+> cannot support, and the shipped wording fences it to a routing fact
+> ([05 §3.1](05-control-rpc.md)).
+>
+> **What did *not* change.** No normative rule changed anywhere: 12 §9's
+> deferral stands word for word, [05 §3.1](05-control-rpc.md) is applied
+> rather than amended, and no chapter gains or loses an obligation. This
+> is a decision-record entry — the §8.1 discipline applied to §9 — not a
+> wire, grammar, or registry change of any kind.
+>
+> **Provenance.** zenkey #80 (epic #33 phase 4), consuming the adoption
+> report attached to #38's chunk-H landing. The badge wording it records
+> ships in `zenctl topic pub` and the zengui publish pane since PR #95.
 
 > **v1.13 (2026-08-12, the capture-and-replay amendment)** — [09 §5](09-operations.md)
 > gains **§5.2, capture and replay etiquette** *(new)*: the `.zrec` format in
@@ -466,7 +495,7 @@ Chapters are numbered for reference, not reading. Suggested paths:
 | 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy, **observer obligations (§5.1, normative for tools)**, capture/replay etiquette (§5.2) |
 | 10 | [10-prior-art.md](10-prior-art.md) | Keelson, uProtocol/automotive, rmw_zenoh, Sparkplug, OTel, NATS, Zenoh guidance, D-Bus, Homie, OPC UA — took/rejected per system |
 | 11 | [11-zensight-profile.md](11-zensight-profile.md) | the reference application: profile constants, worked keys per sensor, full shipped-family mapping |
-| 12 | [12-open-questions.md](12-open-questions.md) | the decision record: all six former open questions decided, each with its alternatives and revisit trigger |
+| 12 | [12-open-questions.md](12-open-questions.md) | the decision record: all six former open questions decided, each with its alternatives and revisit trigger; §9 carries the matching-badge adoption note (v1.14) |
 
 ## Scope
 
