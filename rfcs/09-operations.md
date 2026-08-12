@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.9 (proposed)** · informative chapter, but §5.1 is normative for tools · *amended in v1.2 and v1.9 — see [00-index.md](00-index.md)*
+**Status: v1.13 (proposed)** · informative chapter, but §5.1 is normative for tools · *amended in v1.2, v1.9 and v1.13 — see [00-index.md](00-index.md)*
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links,
@@ -578,6 +578,79 @@ view that silently shrinks is indistinguishable from a bus that went quiet.
 > that had defended against `@media` frames arriving through a `**` scope —
 > which cannot happen — while missing that the same scope silently hid
 > `@catalog`.
+
+### 5.2 Capture and replay — `.zrec` etiquette (v1.13)
+
+*Added in v1.13. The v1.5 amendment slate's H7 promised cookbook material
+on "record/replay etiquette" and never delivered it — nothing existed to
+document. With the `record` module in `zenkey-fleet` (zenkey #39) and the
+`zenctl record` / `zenctl replay` commands (zenkey #53), the etiquette half
+matters, because replay is **publishing**, and publishing a capture onto a
+live fleet base is exactly the accident this convention exists to prevent.
+This section is informative; the code is normative for the format. The
+obligations of §5.1 apply throughout — a capture file is an observer whose
+window happens to be on disk.*
+
+**The format, in one screen.** A `.zrec` file is newline-delimited JSON —
+deliberately the *same row dialect* the explorers already emit
+(`zenctl topic echo --format ndjson`) and read back
+(`zenctl topic pub --from ndjson`), not a second format:
+
+- **Line 1 — the header**: `{"zrec": 1, "selectors": […], "base": "…",
+  "captured_at": "<RFC 3339>"}`. The header names what was asked (O4) and
+  under which base; a wildcard selector cannot cross an `@`-chunk, so a
+  `**` capture states that `@rpc`/`@blob`/`@media`/`@catalog` and service
+  origins are excluded rather than claiming "everything" (O5).
+- **Sample rows**: the echo row shape plus `"bytes"` (base64, the exact
+  wire payload — `"value"` is a decoded *rendering* and is not
+  round-trippable), `"t"` (microseconds since capture start, the
+  **observer's arrival clock** — this is what replay paces by), and the
+  publisher's HLC `"timestamp"` carried **informatively** (see below).
+  Tombstones are rows with `"delete": true`. Non-conformant keys are
+  recorded verbatim (O1) — a capture curates nothing.
+- **Drop records, interleaved where they happened**: `{"dropped": n}`.
+  O6 applied to a file: a capture taken while the observer was behind is a
+  partial view, and the file itself says so, at the position where the gap
+  is. A reader surfaces the sum; a replay repeats it.
+
+**Timestamps are re-stamped on replay, deliberately.** Replayed samples go
+through declared publishers and receive the *replaying* session's HLC; the
+capture's `"timestamp"` field is provenance, not a value to reproduce.
+Reconciliation is by HLC — newer value wins, newer delete wins, and an
+untimestamped sample cannot be reconciled at all
+([04-planes.md §3.2](04-planes.md)) — so carrying a foreign, hours-old HLC
+back onto the wire would make every replayed sample silently lose LWW
+against anything live, which turns "replay onto a quiet base" into a no-op
+that *looks* like a replay. Re-stamping keeps replay legible: what you
+published now is newest now. The cost is the inverse hazard, and it is the
+whole reason this section exists: **re-stamped old data wins LWW against a
+live fleet** ([04-planes.md §1.2](04-planes.md)) — a replayed capture can
+overwrite current state with last Tuesday.
+
+**Hence the etiquette:**
+
+- **Dry-run first.** A replay whose puts you have not previewed is a write
+  you have not reviewed. `zenctl replay --dry-run` lists every would-be
+  put and performs none.
+- **The header base is a contract.** Replaying under a base other than the
+  one in the capture header is refused unless explicitly forced
+  (`--force-base`) — the tool never re-derives a base from the recorded
+  keys (O3), and "same keys, different deployment" is presumed to be a
+  mistake until the operator says otherwise.
+- **Tombstone rows are operator deletes.** A recorded delete replays
+  through the same class-conscious retire gate as a live one
+  ([04-planes.md §1.2](04-planes.md), the v1.12 bullet): confirmation off
+  the `state` class, wildcards impossible by construction (rows carry
+  concrete keys).
+- **Two replays exist; do not confuse them.** *Re-publishing* replay (the
+  CLI) makes real puts through declared publishers and is governed by
+  everything above. *Pane* replay (the GUI's scrubber) feeds a tool's own
+  views from the file and never touches a session — it is reading, not
+  publishing, and needs no etiquette beyond honesty about its mode.
+- **A time scrubber states its clock.** A `.zrec` carries two clocks — the
+  observer's arrival offsets (`"t"`) and the publishers' HLCs — and a
+  consumer plotting a time axis says which one it plotted. The reference
+  scrubber plots `"t"`.
 
 ## 6. Cutover acceptance
 
