@@ -83,6 +83,8 @@ pub enum Message {
     Detail(crate::view::detail::DetailMsg),
     /// Blob browser interactions (issue #68).
     Blob(crate::view::blob::BlobMsg),
+    /// Media viewer interactions (issue #69).
+    Media(crate::view::media::MediaMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
 
@@ -164,6 +166,8 @@ pub enum RightPane {
     History,
     /// The `@blob` plane: who serves bulk content, and fetching it (issue #68).
     Blob,
+    /// The `@media` plane: declared streams, and viewing one (issue #69).
+    Media,
     /// Routers, storages and the state-coverage table (issue #70).
     Admin,
     /// Contexts and endpoints (issue #67).
@@ -173,7 +177,7 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 10] = [
+    pub const ALL: [RightPane; 11] = [
         RightPane::Echo,
         RightPane::Call,
         RightPane::Publish,
@@ -182,6 +186,7 @@ impl RightPane {
         RightPane::Doctor,
         RightPane::History,
         RightPane::Blob,
+        RightPane::Media,
         RightPane::Admin,
         RightPane::Connect,
     ];
@@ -196,6 +201,7 @@ impl RightPane {
             RightPane::Doctor => "doctor",
             RightPane::History => "history",
             RightPane::Blob => "blobs",
+            RightPane::Media => "media",
             RightPane::Admin => "admin",
             RightPane::Connect => "connect",
         }

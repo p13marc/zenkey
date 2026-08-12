@@ -66,7 +66,10 @@ pub fn map() -> Vec<Binding> {
     ];
     // The pane strip, in tab order — so the numbers on screen and the numbers
     // under the fingers are the same list.
-    for (i, pane) in RightPane::ALL.into_iter().enumerate() {
+    // Only the first ten panes get a digit (Alt 1..9 then Alt 0) — an
+    // eleventh pane is reachable by tab strip and palette, and `resolve`
+    // below already stops rather than wrapping (issue #69 added the 11th).
+    for (i, pane) in RightPane::ALL.into_iter().enumerate().take(PANE_KEYS.len()) {
         out.push(Binding {
             keys: PANE_KEYS[i],
             what: PANE_WHAT[i],
@@ -92,8 +95,8 @@ const PANE_WHAT: [&str; 10] = [
     "doctor pane",
     "history pane",
     "blobs pane",
+    "media pane",
     "admin pane",
-    "connect pane",
 ];
 const PANE_MESSAGES: [fn() -> Message; 10] = [
     || Message::PaneSelected(RightPane::Echo),
@@ -104,8 +107,8 @@ const PANE_MESSAGES: [fn() -> Message; 10] = [
     || Message::PaneSelected(RightPane::Doctor),
     || Message::PaneSelected(RightPane::History),
     || Message::PaneSelected(RightPane::Blob),
+    || Message::PaneSelected(RightPane::Media),
     || Message::PaneSelected(RightPane::Admin),
-    || Message::PaneSelected(RightPane::Connect),
 ];
 
 /// A key press → the message it should send, if any.
@@ -207,10 +210,14 @@ mod tests {
     /// come with a key rather than silently falling off the end.
     #[test]
     fn the_pane_bindings_cover_every_pane() {
-        assert_eq!(PANE_KEYS.len(), RightPane::ALL.len());
-        assert_eq!(PANE_WHAT.len(), RightPane::ALL.len());
-        assert_eq!(PANE_MESSAGES.len(), RightPane::ALL.len());
-        for (i, pane) in RightPane::ALL.into_iter().enumerate() {
+        // Ten digits, eleven panes since #69: the arrays stay in positional
+        // step with ALL for the digit-covered prefix, and the overflow is a
+        // deliberate, counted fact — not a wrap.
+        assert_eq!(PANE_KEYS.len(), 10);
+        assert_eq!(PANE_WHAT.len(), PANE_KEYS.len());
+        assert_eq!(PANE_MESSAGES.len(), PANE_KEYS.len());
+        assert!(RightPane::ALL.len() >= PANE_KEYS.len());
+        for (i, pane) in RightPane::ALL.into_iter().take(PANE_KEYS.len()).enumerate() {
             assert_eq!(
                 format!("{:?}", PANE_MESSAGES[i]()),
                 format!("{:?}", Message::PaneSelected(pane))
@@ -263,15 +270,16 @@ mod tests {
     fn alt_digits_cover_the_panes_and_stop() {
         assert!(matches!(
             press("9", Modifiers::ALT),
-            Some(Message::PaneSelected(RightPane::Admin))
+            Some(Message::PaneSelected(RightPane::Media))
         ));
         assert!(matches!(
             press("0", Modifiers::ALT),
-            Some(Message::PaneSelected(RightPane::Connect))
+            Some(Message::PaneSelected(RightPane::Admin))
         ));
-        // Every pane is reachable by *some* digit — the property that matters,
-        // stated rather than spot-checked.
-        for pane in RightPane::ALL {
+        // The first ten panes are each reachable by a digit; the eleventh
+        // (Connect) deliberately is not — tab strip and palette reach it,
+        // and resolve() stops rather than wrapping.
+        for pane in RightPane::ALL.into_iter().take(PANE_KEYS.len()) {
             assert!(
                 PANE_MESSAGES
                     .iter()
@@ -279,5 +287,10 @@ mod tests {
                 "{pane:?} has no binding"
             );
         }
+        assert!(
+            !PANE_MESSAGES.iter().any(|m| format!("{:?}", m())
+                == format!("{:?}", Message::PaneSelected(RightPane::Connect))),
+            "the overflow pane is a stated fact, not an accident"
+        );
     }
 }

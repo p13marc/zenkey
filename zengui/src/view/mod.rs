@@ -13,6 +13,7 @@ pub mod doctor;
 pub mod echo;
 pub mod history;
 pub mod kit;
+pub mod media;
 pub mod nodes;
 pub mod palette;
 pub mod publish;

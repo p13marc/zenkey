@@ -117,6 +117,10 @@ pub struct Zengui {
     blob: crate::blob::BlobState,
     /// The admin & storage panel's state (#70) — swept on demand.
     admin: crate::admin::AdminState,
+    /// The media viewer's state (#69) — subscribes only on an explicit
+    /// view, never for opening the pane (the RFC 07 §1 plane deserves the
+    /// laziest posture in the app).
+    media: view::media::MediaState,
 
     call_form: view::call::CallForm,
     publish_form: view::publish::PublishForm,
@@ -231,6 +235,7 @@ impl Zengui {
             doctor: crate::doctor::DoctorState::default(),
             blob: crate::blob::BlobState::default(),
             admin: crate::admin::AdminState::default(),
+            media: view::media::MediaState::default(),
             call_form: view::call::CallForm::default(),
             publish_form: view::publish::PublishForm::default(),
             publication: None,
@@ -573,6 +578,7 @@ impl Zengui {
             Message::Nodes(msg) => self.update_nodes(msg),
             Message::Doctor(msg) => self.update_doctor(msg),
             Message::Blob(msg) => self.update_blob(msg),
+            Message::Media(msg) => self.update_media(msg),
             Message::Admin(msg) => self.update_admin(msg),
             Message::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
                 self.series_leaf = Some(path);
@@ -1695,6 +1701,106 @@ impl Zengui {
         ));
     }
 
+    /// The media viewer (issue #69): subscribe on view, release on stop,
+    /// and the key is built in exactly one place — `scope::media_key`,
+    /// which refuses wildcards and unfilled placeholders (RFC 07 §1).
+    fn update_media(&mut self, msg: view::media::MediaMsg) -> Task<Message> {
+        use view::media::MediaMsg as M;
+        match msg {
+            M::OriginChanged(s) => {
+                self.media.origin = s;
+                Task::none()
+            }
+            M::ProducerChanged(s) => {
+                self.media.producer = s;
+                Task::none()
+            }
+            M::SubpathChanged(s) => {
+                self.media.subpath = s;
+                Task::none()
+            }
+            M::DeclPicked { producer, path } => {
+                self.media.producer = producer;
+                self.media.subpath = path;
+                // A convenience, not a guess: if exactly one origin is on
+                // the roster, prefill it; otherwise the operator names one.
+                if self.media.origin.is_empty() {
+                    let hosts: Vec<&String> = self
+                        .roster
+                        .iter()
+                        .map(|(origin, _)| origin)
+                        .filter(|o| o.starts_with("h-"))
+                        .collect();
+                    if let [only] = hosts.as_slice() {
+                        self.media.origin = (*only).clone();
+                    }
+                }
+                Task::none()
+            }
+            M::View => {
+                let Some(monitor) = self.monitor.clone() else {
+                    self.media.error = Some("no session — connect first".into());
+                    return Task::none();
+                };
+                let key = match crate::scope::media_key(
+                    &self.settings.base,
+                    self.media.origin.trim(),
+                    self.media.producer.trim(),
+                    self.media.subpath.trim(),
+                ) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        self.media.error = Some(e);
+                        return Task::none();
+                    }
+                };
+                self.media.error = None;
+                // One stream at a time: release the previous watch first.
+                let release = self.stop_media_watch();
+                self.media.viewing = Some(view::media::Viewing::new(key.clone()));
+                let declare = Task::perform(
+                    async move { monitor.watch(&key).await.map_err(|e| e.to_string()) },
+                    |r| Message::Media(M::Watched(r)),
+                );
+                Task::batch([release, declare])
+            }
+            M::Watched(Ok(id)) => {
+                if let Some(v) = &mut self.media.viewing {
+                    v.watch = Some(id);
+                }
+                Task::none()
+            }
+            M::Watched(Err(e)) => {
+                self.media.error = Some(e);
+                self.media.viewing = None;
+                Task::none()
+            }
+            M::Stop => {
+                let release = self.stop_media_watch();
+                self.media.viewing = None;
+                release
+            }
+            M::Stopped => Task::none(),
+        }
+    }
+
+    /// Release the media watch, if one is declared — the "unviewed streams
+    /// cost zero subscriptions" half of #69's contract.
+    fn stop_media_watch(&mut self) -> Task<Message> {
+        let (Some(monitor), Some(id)) = (
+            self.monitor.clone(),
+            self.media.viewing.as_ref().and_then(|v| v.watch),
+        ) else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                let _ = monitor.unwatch(id).await;
+            },
+            |()| Message::Media(view::media::MediaMsg::Stopped),
+        )
+    }
+
     fn update_blob(&mut self, msg: view::blob::BlobMsg) -> Task<Message> {
         use view::blob::BlobMsg;
         match msg {
@@ -2347,6 +2453,13 @@ impl Zengui {
             if let Some(rec) = self.history.as_mut() {
                 rec.observe(sample);
             }
+            // The media viewer's frames arrive on the exact key it watches
+            // (issue #69) — same pipeline, no extra subscription.
+            if let Some(v) = self.media.viewing.as_mut()
+                && v.key == sample.key
+            {
+                v.on_frame(sample);
+            }
         }
         for (key, _up) in &tick.nodes {
             self.ensure_facts(key);
@@ -2547,6 +2660,7 @@ impl Zengui {
                 }),
                 RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
                 RightPane::Blob => view::blob::pane(&self.blob, self.slices.is_some()),
+                RightPane::Media => view::media::pane(&self.media, self.slices.as_deref()),
                 RightPane::Admin => view::admin::pane(&self.admin),
                 RightPane::History => view::history::pane(view::history::HistoryData {
                     key: self.selected.as_deref(),

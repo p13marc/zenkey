@@ -195,6 +195,55 @@ pub fn validate_selector(sel: &str) -> Result<()> {
     Ok(())
 }
 
+/// Compose the exact `@media` frame key a viewer subscribes to (issue #69).
+///
+/// RFC 07 §1 is absolute: **no wildcard ever reaches `@media`** — not on
+/// the tier ("the subscription *is* the quality choice"), and above all not
+/// on the origin (a fleet of streams decoded onto one tile is the
+/// amplification §2 forbids, on the plane with the most bytes per second).
+/// This is the single place a media key is built, and it refuses rather
+/// than trusts: a `*`/`$`/`{var}` anywhere in the parts is an error naming
+/// the rule, so the pin is structural for every caller.
+pub fn media_key(
+    base: &str,
+    origin: &str,
+    producer: &str,
+    subpath: &str,
+) -> Result<String, String> {
+    for (what, value) in [
+        ("origin", origin),
+        ("producer", producer),
+        ("stream path", subpath),
+    ] {
+        if value.trim().is_empty() {
+            return Err(format!(
+                "{what} is empty — a viewer subscribes to one exact stream"
+            ));
+        }
+        if value.contains('*') || value.contains('$') {
+            return Err(format!(
+                "{what} {value:?} contains a wildcard — no selector containing a \
+                 wildcard ever reaches @media (RFC 07 §1): a viewer subscribes to \
+                 exactly one tier of exactly one origin's stream"
+            ));
+        }
+        if value.contains('{') || value.contains('}') {
+            return Err(format!(
+                "{what} {value:?} still carries a {{var}} placeholder — fill it \
+                 with the concrete value (the registry declares the shape; the \
+                 catalogue or the operator names the instance)"
+            ));
+        }
+    }
+    Ok(with_base(
+        base,
+        format!(
+            "v1/{origin}/@media/{producer}/{}",
+            subpath.trim_matches('/')
+        ),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,5 +405,33 @@ mod tests {
             subtree_selector("v1/@catalog/state"),
             "v1/@catalog/state/**"
         );
+    }
+
+    /// The RFC 07 §1 pin (issue #69): no wildcard — and no unfilled
+    /// placeholder — ever reaches @media, structurally.
+    #[test]
+    fn media_keys_refuse_wildcards_and_placeholders() {
+        let ok = media_key("acme", "h-3fa9c2d41b7e", "parallax", "cam0/preview/png").unwrap();
+        assert_eq!(
+            ok,
+            "acme/v1/h-3fa9c2d41b7e/@media/parallax/cam0/preview/png"
+        );
+        // The empty base is the identity, like everywhere else.
+        let ok = media_key("", "h-3fa9c2d41b7e", "parallax", "cam0/preview/png").unwrap();
+        assert_eq!(ok, "v1/h-3fa9c2d41b7e/@media/parallax/cam0/preview/png");
+
+        for (o, p, sp) in [
+            ("*", "parallax", "cam0/preview/png"),
+            ("h-3fa9c2d41b7e", "parallax", "cam0/video/h264/*"),
+            ("h-3fa9c2d41b7e", "par*", "cam0/preview/png"),
+            ("h-3fa9c2d41b7e", "parallax", "cam0/$x/png"),
+        ] {
+            let err = media_key("", o, p, sp).unwrap_err();
+            assert!(err.contains("RFC 07 §1"), "{err}");
+        }
+        let err = media_key("", "h-3fa9c2d41b7e", "parallax", "{stream}/preview/png").unwrap_err();
+        assert!(err.contains("placeholder"), "{err}");
+        let err = media_key("", "h-3fa9c2d41b7e", "parallax", " ").unwrap_err();
+        assert!(err.contains("empty"), "{err}");
     }
 }
