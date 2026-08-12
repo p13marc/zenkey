@@ -31,3 +31,9 @@ application repos.)
 - `common = "health|errors|sensor|alert|evidence_self|evidence_device|evidence_names|entity|alias|pdns"`
   marks a state subject as one of the RFC framework set; the lint checks the
   pattern's variable names against the CommonState variant fields.
+- **`registry.lock` is the RFC 08 §3.1 compatibility snapshot** (default
+  `compat = "backward"` per file): an existing subject's class/type or a
+  procedure's kind/request/reply may never change in place — retire through
+  `[[deprecated]]` and add a suffixed sibling. Additive edits need
+  `zenctl registry lock <dir>` regenerated and committed; `compat = "none"`
+  opts a file out, loudly (build warning). Never hand-edit the lock.

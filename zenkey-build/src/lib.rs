@@ -165,6 +165,21 @@ pub(crate) struct RegistryFile {
     pub media: Vec<MediaEntry>,
     pub blob: Vec<BlobEntry>,
     pub deprecated: Vec<String>,
+    /// The file's compatibility level (RFC 08 §3.1): `backward` (default)
+    /// pins its entries in `registry.lock`; `none` opts out, loudly.
+    pub compat: Compat,
+}
+
+/// A registry file's declared compatibility level (RFC 08 §3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Compat {
+    /// Existing subject paths keep their class and type, existing
+    /// procedures their kind and request/reply shapes; additive evolution
+    /// is free; retirement goes through `[[deprecated]]`. The default.
+    Backward,
+    /// Unchecked — the loud escape hatch for a registry still finding its
+    /// shape. The build prints a warning per file.
+    None,
 }
 
 /// The RFC-defined framework state subjects a `common = "..."` field may name
@@ -191,6 +206,9 @@ pub struct Config {
     out_file: Option<PathBuf>,
     zenkey_path: String,
     ledger: Option<PathBuf>,
+    /// The RFC 08 §3.1 compatibility lock
+    /// (default `<registry_dir>/registry.lock`).
+    compat_lock: Option<PathBuf>,
     emit_rerun_if_changed: bool,
 }
 
@@ -207,6 +225,7 @@ impl Config {
             out_file: None,
             zenkey_path: "::zenkey".to_string(),
             ledger: None,
+            compat_lock: None,
             emit_rerun_if_changed: true,
         }
     }
@@ -237,6 +256,14 @@ impl Config {
     /// ledger).
     pub fn ledger(mut self, f: impl AsRef<Path>) -> Self {
         self.ledger = Some(f.as_ref().to_path_buf());
+        self
+    }
+
+    /// The compatibility lock (RFC 08 §3.1; default
+    /// `<registry_dir>/registry.lock` — a missing file is an empty snapshot
+    /// and fails as stale until regenerated).
+    pub fn compat_lock(mut self, f: impl AsRef<Path>) -> Self {
+        self.compat_lock = Some(f.as_ref().to_path_buf());
         self
     }
 
@@ -294,7 +321,70 @@ impl Config {
             .unwrap_or_else(|| self.registry_dir.join("deprecated.lock"));
         check_deprecation_ledger(&ledger, &files)?;
         check_type_table(&self.registry_dir, &files)?;
+        // The compatibility lock (RFC 08 §3.1): opting out is legal and loud.
+        for f in files.iter().filter(|f| f.compat == Compat::None) {
+            if self.emit_rerun_if_changed {
+                println!(
+                    "cargo::warning={} declares compat = \"none\" — its entries are \
+                     unpinned and incompatible edits pass unchecked (RFC 08 §3.1)",
+                    f.name
+                );
+            }
+        }
+        check_compat_lock(&self.compat_lock_path(), &files)?;
         Ok(files)
+    }
+
+    fn compat_lock_path(&self) -> PathBuf {
+        self.compat_lock
+            .clone()
+            .unwrap_or_else(|| self.registry_dir.join("registry.lock"))
+    }
+
+    /// Write (or update) the RFC 08 §3.1 compatibility lock — the
+    /// regeneration half of the check [`generate`](Self::generate) and
+    /// [`lint`](Self::lint) enforce. Additive and retirement drift writes
+    /// cleanly; an **incompatible** rewrite is refused unless `force`, and a
+    /// forced write reports every broken pin so the caller can print them —
+    /// the escape hatch is legal, silent it is not.
+    pub fn write_compat_lock(&self, force: bool) -> Result<CompatLockUpdate, Error> {
+        let files = load_registry(&self.registry_dir)?;
+        let path = self.compat_lock_path();
+        let created = !path.exists();
+        let check = check_compat_lock(&path, &files);
+        let mut forced = Vec::new();
+        match check {
+            Ok(()) => {}
+            Err(e) => {
+                let msg = e.to_string();
+                let incompatible =
+                    msg.contains("incompatible registry edit") || msg.contains("vanished");
+                if incompatible && !force {
+                    return Err(e);
+                }
+                if incompatible {
+                    forced.push(msg);
+                }
+            }
+        }
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        let old: std::collections::BTreeSet<&str> = existing
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .collect();
+        let new_lines = compat_lock_lines(&files);
+        let new: std::collections::BTreeSet<&str> = new_lines.iter().map(String::as_str).collect();
+        let added = new.difference(&old).count();
+        let retired = old.difference(&new).count();
+        std::fs::write(&path, compat_lock_content(&files))
+            .map_err(|e| Error::Io(path.clone(), e))?;
+        Ok(CompatLockUpdate {
+            path,
+            created,
+            added,
+            retired,
+            forced,
+        })
     }
 }
 
@@ -428,6 +518,19 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 "[registry] convention must be 1 for this crate",
             ));
         }
+        let compat = match header.get("compat").and_then(|v| v.as_str()) {
+            None | Some("backward") => Compat::Backward,
+            Some("none") => Compat::None,
+            Some(other) => {
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "[registry] compat must be \"backward\" (default) or \"none\" \
+                         (RFC 08 §3.1), got {other:?}"
+                    ),
+                ));
+            }
+        };
 
         let (name, service_origin) = if let Some(svc) = doc.get("service") {
             let name = svc
@@ -1044,6 +1147,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             media: media_entries,
             blob: blob_entries,
             deprecated,
+            compat,
         });
     }
 
@@ -1187,6 +1291,169 @@ fn check_type_table(dir: &Path, files: &[RegistryFile]) -> Result<(), Error> {
     }
 }
 
+/// One `registry.lock` line per pinned entry, sorted for determinism.
+/// Files declaring `compat = "none"` contribute nothing — their entries are
+/// deliberately unpinned (RFC 08 §3.1).
+fn compat_lock_lines(files: &[RegistryFile]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for f in files.iter().filter(|f| f.compat == Compat::Backward) {
+        for s in &f.subjects {
+            lines.push(format!(
+                "subject\t{}\t{}\t{}\t{}",
+                f.name, s.path, s.class, s.payload_type
+            ));
+        }
+        for p in &f.procedures {
+            lines.push(format!(
+                "procedure\t{}\t{}\t{}\t{}\t{}",
+                f.name,
+                p.path,
+                p.kind,
+                p.request.as_deref().unwrap_or("-"),
+                p.reply.as_deref().unwrap_or("-"),
+            ));
+        }
+    }
+    lines.sort();
+    lines
+}
+
+/// The full `registry.lock` file content for the current registry.
+fn compat_lock_content(files: &[RegistryFile]) -> String {
+    let mut out = String::from(
+        "# registry.lock — the RFC 08 §3.1 compatibility snapshot.\n\
+         # Regenerate with `zenctl registry lock <dir>` after additive edits;\n\
+         # an incompatible edit (changed type/class/kind/shape on an existing\n\
+         # path) is refused — retire through [[deprecated]] and add a sibling\n\
+         # instead (RFC 08 §3).\n",
+    );
+    for l in compat_lock_lines(files) {
+        out.push_str(&l);
+        out.push('\n');
+    }
+    out
+}
+
+/// Check the compatibility lock (RFC 08 §3.1): every pinned entry must still
+/// exist with identical shape, unless its subject was retired through
+/// `[[deprecated]]`. Additive drift (entries the lock has not pinned yet, or
+/// retired lines lingering) is stale, not incompatible — the error says to
+/// regenerate. A missing lock is an empty snapshot: everything current reads
+/// as unpinned, and the same regeneration message bootstraps it.
+fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Error> {
+    use std::collections::BTreeMap;
+    let fname = "registry.lock";
+    let existing = std::fs::read_to_string(lock_path).unwrap_or_default();
+    // (kind, producer, path) → the full pinned line.
+    let index = |lines: &[String]| -> Result<BTreeMap<(String, String, String), String>, Error> {
+        let mut m = BTreeMap::new();
+        for l in lines {
+            let mut it = l.splitn(4, '\t');
+            let (Some(kind), Some(producer), Some(path)) = (it.next(), it.next(), it.next()) else {
+                return Err(lint(fname, format!("bad lock line {l:?}")));
+            };
+            m.insert(
+                (kind.to_string(), producer.to_string(), path.to_string()),
+                l.clone(),
+            );
+        }
+        Ok(m)
+    };
+    let old_lines: Vec<String> = existing
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .map(str::to_string)
+        .collect();
+    let old = index(&old_lines)?;
+    let desired = index(&compat_lock_lines(files))?;
+
+    let mut stale = Vec::new();
+    for (key, line) in &old {
+        match desired.get(key) {
+            Some(new_line) if new_line == line => {}
+            Some(new_line) => {
+                // Same path, different shape — the exact edit §3 forbids.
+                return Err(lint(
+                    fname,
+                    format!(
+                        "incompatible registry edit (RFC 08 §3.1, compat = \"backward\"):\n  \
+                         pinned:  {line}\n  now:     {new_line}\n\
+                         an existing path never changes shape — retire it through \
+                         [[deprecated]] and add a sibling (`sockets` → `sockets2`, RFC 08 §3)"
+                    ),
+                ));
+            }
+            None => {
+                let (kind, producer, path) = key;
+                let retired = kind == "subject"
+                    && files
+                        .iter()
+                        .any(|f| &f.name == producer && f.deprecated.iter().any(|d| d == path));
+                let compat_off = files
+                    .iter()
+                    .any(|f| &f.name == producer && f.compat == Compat::None);
+                if retired || compat_off {
+                    // The sanctioned exits: [[deprecated]] (whose own ledger
+                    // is append-only), or the file opting out loudly.
+                    stale.push(line.clone());
+                } else {
+                    return Err(lint(
+                        fname,
+                        format!(
+                            "pinned entry vanished without retirement (RFC 08 §3.1):\n  {line}\n\
+                             a {kind} is removed by deprecating it ([[deprecated]] + the \
+                             deprecated.lock ledger), never by deletion — or the file \
+                             declares compat = \"none\" and says so out loud"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    let missing: Vec<&String> = desired
+        .iter()
+        .filter(|(k, _)| !old.contains_key(*k))
+        .map(|(_, v)| v)
+        .collect();
+    if !missing.is_empty() || !stale.is_empty() {
+        let mut sample: Vec<String> = missing.iter().take(10).map(|s| (*s).clone()).collect();
+        if missing.len() > 10 {
+            sample.push(format!("… and {} more", missing.len() - 10));
+        }
+        return Err(lint(
+            fname,
+            format!(
+                "stale lock: {} unpinned entr(y/ies), {} retired line(s) lingering — \
+                 additive evolution is free but the snapshot must follow; run \
+                 `zenctl registry lock <dir>` (RFC 08 §3.1){}{}",
+                missing.len(),
+                stale.len(),
+                if sample.is_empty() { "" } else { "\n  " },
+                sample.join("\n  ")
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// What [`Config::write_compat_lock`] did.
+#[derive(Debug, Clone)]
+pub struct CompatLockUpdate {
+    /// Where the lock was written.
+    pub path: PathBuf,
+    /// No lock existed before.
+    pub created: bool,
+    /// Entries newly pinned.
+    pub added: usize,
+    /// Previously pinned lines released (retired through `[[deprecated]]`
+    /// or the file went `compat = "none"`).
+    pub retired: usize,
+    /// Pinned lines rewritten or dropped **incompatibly** — populated only
+    /// under `force`, and the caller prints every one: a forced break is
+    /// loud by contract (RFC 08 §3.1).
+    pub forced: Vec<String>,
+}
+
 fn check_deprecation_ledger(ledger_path: &Path, files: &[RegistryFile]) -> Result<(), Error> {
     let ledger = std::fs::read_to_string(ledger_path).unwrap_or_default();
     let mut ledger_entries: Vec<(&str, &str)> = Vec::new();
@@ -1246,6 +1513,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("t.toml"), content).unwrap();
+        // Bootstrap the §3.1 lock so lint tests exercise *their* lint, not
+        // the missing-snapshot bootstrap (which has its own tests below). An
+        // unloadable registry fails identically with or without this.
+        let _ = Config::new().registry_dir(&dir).write_compat_lock(false);
         let out = Config::new().registry_dir(&dir).generate_string();
         let _ = std::fs::remove_dir_all(&dir);
         out
@@ -1297,6 +1568,10 @@ mod tests {
             "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"health\"\nclass = \"state\"\ntype = \"HealthSnapshot\"\nttl_s = 60\nsince = \"1.0\"\ndescription = \"d\"\n"
         );
         std::fs::write(dir.join("t.toml"), &reg).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
         // No types.toml: lint inactive.
         Config::new().registry_dir(&dir).generate_string().unwrap();
         // types.toml missing the referenced name: build fails.
@@ -1536,5 +1811,178 @@ mod tests {
         let err =
             blob_registry("blobdupfile", &[("a.toml", "netring", &[tree, tree])]).unwrap_err();
         assert!(err.to_string().contains("twice in one file"), "{err}");
+    }
+
+    /// H3 (#78): a fresh directory in a named temp home, for the lock tests
+    /// — each builds its own registry and drives the lock explicitly.
+    fn lock_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "zenkey-build-lock-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    const SUBJECT_V1: &str = "[[subject]]\npath = \"health\"\nclass = \"state\"\ntype = \"Health\"\ncommon = \"health\"\nttl_s = 900\nsince = \"1.0\"\ndescription = \"d\"\n";
+
+    /// The acceptance case verbatim: changing a subject's `type` without
+    /// touching the lock fails the build, citing the RFC subsection.
+    #[test]
+    fn a_changed_type_without_lock_churn_fails() {
+        let dir = lock_dir("changed-type");
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .is_ok()
+        );
+
+        std::fs::write(
+            dir.join("t.toml"),
+            base.replace("type = \"Health\"", "type = \"Health2\""),
+        )
+        .unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("RFC 08 §3.1"), "{err}");
+        assert!(err.contains("incompatible"), "{err}");
+        // …and the regeneration tool refuses the same edit without force.
+        let err = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("incompatible"), "{err}");
+        // Forced, it writes — and reports the break, loudly.
+        let update = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(true)
+            .unwrap();
+        assert!(!update.forced.is_empty(), "a forced break is never silent");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Additive evolution is free: a new subject passes after regeneration,
+    /// and a stale lock says "regenerate", never "incompatible".
+    #[test]
+    fn additive_changes_pass_with_regeneration_only() {
+        let dir = lock_dir("additive");
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+
+        let added = format!(
+            "{base}\n[[subject]]\npath = \"errors\"\nclass = \"state\"\ntype = \"Errors\"\ncommon = \"errors\"\nttl_s = 900\nsince = \"1.1\"\ndescription = \"d\"\n"
+        );
+        std::fs::write(dir.join("t.toml"), &added).unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("stale lock"), "{err}");
+        assert!(!err.contains("incompatible"), "{err}");
+
+        let update = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+        assert_eq!(update.added, 1);
+        assert!(update.forced.is_empty());
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .is_ok()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Retirement through `[[deprecated]]` is the sanctioned exit: the pin is
+    /// released on regeneration and nothing calls it incompatible.
+    #[test]
+    fn deprecation_releases_the_pin() {
+        let dir = lock_dir("retire");
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+
+        let retired = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[deprecated]]\npath = \"health\"\ngone = \"1.1\"\n"
+        );
+        std::fs::write(dir.join("t.toml"), &retired).unwrap();
+        std::fs::write(dir.join("deprecated.lock"), "t\thealth\n").unwrap();
+        let update = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+        assert_eq!(update.retired, 1);
+        assert!(update.forced.is_empty(), "retirement is not a break");
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .is_ok()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `compat = "none"` unpins the file — the loud escape hatch: the same
+    /// type change that fails under backward passes, and contributes no
+    /// lock lines at all.
+    #[test]
+    fn compat_none_opts_out() {
+        let dir = lock_dir("none");
+        let header_none =
+            "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\ncompat = \"none\"\n";
+        let base = format!("{header_none}[producer]\nname = \"t\"\n\n{SUBJECT_V1}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+        std::fs::write(
+            dir.join("t.toml"),
+            base.replace("type = \"Health\"", "type = \"Health2\""),
+        )
+        .unwrap();
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .is_ok()
+        );
+
+        let err = lint_one(
+            "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\ncompat = \"sometimes\"\n[producer]\nname = \"t\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("compat"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

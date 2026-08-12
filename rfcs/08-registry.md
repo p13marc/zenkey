@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.5, v1.8 and v1.10 — see [00-index.md](00-index.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.5, v1.8, v1.10 and v1.15 — see [00-index.md](00-index.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -427,6 +427,50 @@ registry version to coordinate.
   *grammar* breaks; payload-schema evolution is diagnosable from the data
   (contrast rmw_zenoh's silent type-hash isolation,
   [03-grammar.md §6.4](03-grammar.md)).
+
+### 3.1 Compatibility levels and the lock (v1.15)
+
+*Added in v1.15 — the v1.5 slate's H3, held for review and then never
+filed. The rules above were already normative; what was missing is the
+mechanism that catches an edit violating them: the `deprecated.lock`
+ledger catches silent retirement, but a changed type on an existing
+subject, a re-shaped procedure, or a deleted entry sailed through CI.*
+
+Every registry file declares a **compatibility level** in its header:
+
+| `compat =` | Meaning |
+|---|---|
+| `"backward"` *(default)* | Existing subject paths keep their **class and payload type**; existing procedures keep their **kind and request/reply shapes**. Additive evolution (new subjects, new procedures, new optional metadata) is free. Removal happens **only** through `[[deprecated]]` — §3's deprecate-never-reuse, now checked. |
+| `"none"` | Unchecked — the escape hatch for a registry still finding its shape. Legal, and **loud**: the build warns per file, every build, and the file's entries are unpinned. |
+
+The mechanism is **`registry.lock`**, a generated snapshot beside
+`deprecated.lock`: one line per pinned subject
+(`subject <producer> <path> <class> <type>`) and procedure
+(`procedure <producer> <path> <kind> <request> <reply>`), sorted,
+tab-separated. `zenkey-build` verifies it on every build and
+`zenctl registry lint` says exactly what the build would; the two never
+disagree because they run the same check.
+
+- An **incompatible** edit — a pinned path whose shape changed, or a
+  pinned entry that vanished without a `[[deprecated]]` entry — **fails
+  the build**, naming the pin and the sanctioned move (retire it and add
+  a suffixed sibling, §3).
+- An **additive** edit fails only as *stale*, with a different message:
+  regenerate the snapshot (`zenctl registry lock <dir>`) and commit it.
+  Regeneration refuses to paper over an incompatible edit; `--force`
+  overrides and prints every broken pin — the escape is legal, silent it
+  is not.
+- A **missing** lock is an empty snapshot: everything reads as unpinned
+  and the same regeneration message bootstraps it. Adopting the check on
+  an existing registry is one command and one committed file.
+
+**Deliberately not adopted from the original H3 sketch** (recorded per
+the changelog discipline): no `forward`/`full` levels — this convention's
+consumers tolerate additive change by construction (self-describing
+encodings, §3), so `backward` is the only level with teeth here; no
+cross-file or global lock — files version independently (§3) and lock
+independently; no payload-*schema* hashing — served-schema drift is §7's
+job and is diagnosed from the wire, not from TOML.
 
 ## 4. Naming rules
 
