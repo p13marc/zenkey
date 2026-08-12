@@ -20,6 +20,7 @@ pub mod discover;
 pub mod facts;
 pub mod ingest;
 pub mod query;
+pub mod record;
 pub mod registry;
 pub mod report;
 pub mod roster;
@@ -69,6 +70,10 @@ pub use query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
     StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,
     fleet_get_at, fleet_registry, state_snapshot,
+};
+pub use record::{
+    RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplayTarget, ZREC_VERSION, ZrecHeader,
+    ZrecItem, ZrecReader, ZrecWriter, record, replay,
 };
 pub use registry::SliceSet;
 pub use roster::{Freshness, NodeInfo, ProducerInfo, node_info, roster};
