@@ -28,6 +28,7 @@ pub mod link;
 pub mod message;
 pub mod nodes;
 pub mod prefs;
+pub mod replay;
 pub mod scope;
 pub mod series;
 pub mod shortcuts;

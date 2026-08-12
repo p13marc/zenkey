@@ -116,6 +116,9 @@ pub enum Message {
     Key(iced::keyboard::Key, iced::keyboard::Modifiers),
     /// Command-palette / overlay interactions (issue #75).
     Palette(crate::view::palette::PaletteMsg),
+    /// Replay-mode interactions (issue #74): open/scrub/play a `.zrec`,
+    /// record the current watches to one.
+    Replay(crate::view::replay::ReplayMsg),
     /// A persisted-preference change (issue #73). Each one saves.
     Prefs(PrefsMsg),
     /// The window was resized — remembered for the next launch (issue #73).
