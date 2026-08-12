@@ -870,3 +870,62 @@ mod tests {
         );
     }
 }
+
+/// The RFC 09 §6 cutover-acceptance verdict (issue #59). Three states, not
+/// two: "the old family is quiet on a fleet that is provably speaking" and
+/// "everything is quiet" are different facts, and only the first is
+/// evidence a migration finished.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CutoverVerdict {
+    /// Old root silent, new plane carrying traffic — both halves held.
+    Pass,
+    /// The retired family still speaks — the migration is not done.
+    OldStillSpeaks,
+    /// The old root was silent but so was the new plane: a non-verdict
+    /// (RFC 05 §3.1) — a dead fleet passes the silence half for free.
+    Unproven,
+}
+
+/// The `zenctl cutover` report (issue #59; RFC 09 §6 half one).
+#[derive(Debug, Clone, Serialize)]
+pub struct CutoverReport {
+    pub old_root: String,
+    /// The stated meaning of "new plane": keys under this prefix. Stated,
+    /// not inferred — the version chunk is plain, so key algebra cannot
+    /// separate old from new (RFC 09 §6's note).
+    pub new_prefix: String,
+    pub window_s: u64,
+    /// Samples heard on the old root — every one is a failure fact.
+    pub old_samples: u64,
+    pub old_keys_seen: usize,
+    /// Up to a cap of offending keys, with per-key counts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub old_examples: Vec<String>,
+    /// Samples on the new plane over the window.
+    pub new_samples: u64,
+    /// Samples that were neither: outside `<base>/v1/` and not the old
+    /// root. Leaks by this check's stated definition.
+    pub leak_samples: u64,
+    pub leaked_keys_seen: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub leak_examples: Vec<String>,
+    /// Samples the bounded observer missed (O6): non-zero weakens the
+    /// silence claim and the report says so.
+    pub dropped: u64,
+    pub verdict: CutoverVerdict,
+}
+
+/// The `zenctl probe` report (issue #59; RFC 09 §6 half two): how the
+/// identity resolved, and what the origin-scoped concrete-key call said.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProbeReport {
+    /// What the operator typed (an origin id or a human label).
+    pub input: String,
+    /// The origin actually called.
+    pub origin: String,
+    /// `direct`, or `bridge:<key>` naming the self-certifying health
+    /// document that resolved it (RFC 06 §6.2).
+    pub via: String,
+    pub call: CallReport,
+}

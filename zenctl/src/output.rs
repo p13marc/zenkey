@@ -1037,3 +1037,83 @@ pub fn replay(report: &zenkey_fleet::ReplayReport, format: Format) {
         }
     }
 }
+
+/// `zenctl cutover`'s report (issue #59): both halves of RFC 09 §6, and a
+/// three-state verdict — quiet-everywhere is a non-verdict, not a pass.
+pub fn cutover(report: &zenkey_fleet::report::CutoverReport, format: Format) {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => json_line(report),
+        _ => {
+            println!(
+                "old root {}: {} sample(s) on {} key(s) over {}s",
+                report.old_root, report.old_samples, report.old_keys_seen, report.window_s
+            );
+            for k in &report.old_examples {
+                println!("  ✗ {k}");
+            }
+            println!(
+                "new plane {}**: {} sample(s)",
+                report.new_prefix, report.new_samples
+            );
+            if report.leak_samples > 0 {
+                println!(
+                    "leaks (outside {} and not the old root): {} sample(s) on {} key(s)",
+                    report.new_prefix, report.leak_samples, report.leaked_keys_seen
+                );
+                for k in &report.leak_examples {
+                    println!("  ! {k}");
+                }
+            }
+            if report.dropped > 0 {
+                println!(
+                    "{} sample(s) dropped while behind (O6) — the silence claim \
+                     covers only what was seen",
+                    report.dropped
+                );
+            }
+            match report.verdict {
+                zenkey_fleet::report::CutoverVerdict::Pass => println!(
+                    "PASS — the retired family is silent while the new plane \
+                     carries traffic (RFC 09 §6, both halves)"
+                ),
+                zenkey_fleet::report::CutoverVerdict::OldStillSpeaks => println!(
+                    "FAIL — the retired family still speaks; a migration you can \
+                     assert the absence of is a migration you can finish (RFC 09 §6)"
+                ),
+                zenkey_fleet::report::CutoverVerdict::Unproven => println!(
+                    "UNPROVEN — the old root was silent but so was the new plane: \
+                     a dead fleet passes the silence half for free (RFC 05 §3.1); \
+                     bring the fleet up and run it again"
+                ),
+            }
+        }
+    }
+}
+
+/// `zenctl probe`'s report (issue #59): the resolution provenance, then the
+/// call rendered like any `service call`.
+pub fn probe(report: &zenkey_fleet::report::ProbeReport, format: Format) {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => json_line(report),
+        _ => {
+            println!(
+                "probe {} → origin {} (via {})",
+                report.input, report.origin, report.via
+            );
+            call(&report.call, Format::Table, |a| match (&a.value, &a.text) {
+                (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
+                (None, Some(t)) => t.clone(),
+                _ => String::new(),
+            });
+            if report.call.answers.is_empty() {
+                println!(
+                    "the origin resolved but did not answer — the probe reached a \
+                     name, not a responder; absence of replies and absence of \
+                     callers must not look alike (RFC 09 §6)"
+                );
+            }
+        }
+    }
+}
