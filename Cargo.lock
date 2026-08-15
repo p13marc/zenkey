@@ -7622,9 +7622,9 @@ dependencies = [
 
 [[package]]
 name = "zblob"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19c452dba4cfdf346a719c90ed8a598db57f13b16ff5ade31c15d5c5f6214ec1"
+checksum = "8ccb97dfe8de42299a32fc31a61df623298d4624e0868852ad2a2f780c39a946"
 dependencies = [
  "bao-tree",
  "blake3",
@@ -7634,6 +7634,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "zenoh",
 ]
 
@@ -7782,7 +7783,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fleet"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "arc-swap",

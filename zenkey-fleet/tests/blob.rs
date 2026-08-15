@@ -92,7 +92,10 @@ async fn serve(
     origin: &str,
     data: Vec<u8>,
 ) -> (zblob::ServerHandle, zblob::Manifest) {
-    let server = BlobServer::new(Arc::new(session.clone()), prefix_at(origin));
+    let server = BlobServer::new(
+        session,
+        zblob::ServePrefix::new(prefix_at(origin)).expect("concrete prefix"),
+    );
     let manifest = server
         .register_source(
             BlobSpec::new(ID).filename("demo-bundle.bin"),
@@ -113,7 +116,7 @@ async fn a_probe_names_every_holder_and_a_fetch_names_one() {
     let (a, manifest) = serve(&serving, "h-aaaaaaaaaaaa", data.clone()).await;
     let (b, _) = serve(&serving, "h-bbbbbbbbbbbb", data.clone()).await;
     for origin in ["h-aaaaaaaaaaaa", "h-bbbbbbbbbbbb"] {
-        wait_routable(&asking, &zblob::manifest_key(&prefix_at(origin), ID)).await;
+        wait_routable(&asking, &zblob::keys::manifest_key(&prefix_at(origin), ID)).await;
     }
 
     let report = blob_probe(&asking, BASE, &target(), &[], TIMEOUT)
@@ -201,7 +204,7 @@ async fn a_disagreeing_root_is_named_not_averaged() {
     let (a, manifest) = serve(&serving, "h-aaaaaaaaaaaa", honest.clone()).await;
     let (c, rogue_manifest) = serve(&serving, "h-cccccccccccc", rogue).await;
     for origin in ["h-aaaaaaaaaaaa", "h-cccccccccccc"] {
-        wait_routable(&asking, &zblob::manifest_key(&prefix_at(origin), ID)).await;
+        wait_routable(&asking, &zblob::keys::manifest_key(&prefix_at(origin), ID)).await;
     }
     assert_ne!(
         manifest.root, rogue_manifest.root,
@@ -265,13 +268,14 @@ async fn every_blob_get_rides_at_data_low() {
     // A manifest for a blob nobody serves: enough for the client to move on to
     // slice queries, which is the second GET shape we want to observe.
     let manifest = zblob::Manifest {
-        version: 2,
-        id: ID.to_string(),
+        version: zblob::wire::WIRE_VERSION,
+        id: zblob::BlobId::new(ID).expect("valid id"),
         filename: None,
         total_len: 65_536 * 4,
         chunk_size: 65_536,
         root: zblob::Hash::of(b"not the content"),
         created_ms: 0,
+        ext: zblob::wire::Ext::default(),
     };
     let manifest_bytes = zblob::wire::encode(&manifest).unwrap();
 
@@ -279,7 +283,7 @@ async fn every_blob_get_rides_at_data_low() {
     // Replies go on the responder's own **concrete** key, exactly as a real
     // blob server does — which is what makes attribution-by-reply-key work
     // under a `*`-origin probe.
-    let manifest_key = zblob::manifest_key(&prefix, ID);
+    let manifest_key = zblob::keys::manifest_key(&prefix, ID);
 
     let cancel = zblob::CancelToken::new();
     let recorder = {
@@ -298,7 +302,7 @@ async fn every_blob_get_rides_at_data_low() {
                     tokio::spawn(async move {
                         let _ = query
                             .reply(key, bytes)
-                            .encoding(zblob::wire::ENC_MANIFEST)
+                            .encoding(&zblob::wire::ENC_MANIFEST)
                             .await;
                     });
                 } else {

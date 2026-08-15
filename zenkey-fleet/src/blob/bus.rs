@@ -4,7 +4,6 @@
 //! client ([`zblob`]).
 
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -98,8 +97,8 @@ pub async fn blob_probe(
     // prefix is zenkey's probe type; the endpoint tails come from the reference
     // client, which is where RFC 07 §2.2's table is spelled out in code.
     let prefix = target.probe_prefix();
-    let have = grammar::with_base(base, zblob::availability_key(prefix.as_str(), id));
-    let manifest = grammar::with_base(base, zblob::manifest_key(prefix.as_str(), id));
+    let have = grammar::with_base(base, zblob::keys::availability_key(prefix.as_str(), id));
+    let manifest = grammar::with_base(base, zblob::keys::manifest_key(prefix.as_str(), id));
     let asked = vec![have.clone(), manifest.clone()];
 
     let mut holders: Vec<BlobHolder> = Vec::new();
@@ -167,11 +166,11 @@ fn fold(holders: &mut Vec<BlobHolder>, base: &str, kind: Endpoint, answer: Fleet
             let bytes = payload.to_bytes();
             let (want, decoded) = match kind {
                 Endpoint::Have => (
-                    zblob::wire::ENC_AVAIL,
+                    &zblob::wire::ENC_AVAIL,
                     decode_have(&bytes).map(|a| holder.availability = Some(a)),
                 ),
                 Endpoint::Manifest => (
-                    zblob::wire::ENC_MANIFEST,
+                    &zblob::wire::ENC_MANIFEST,
                     decode_manifest(&bytes).map(|m| holder.manifest = Some(m)),
                 ),
             };
@@ -221,22 +220,21 @@ fn decode_have(bytes: &[u8]) -> Result<BlobAvailability, String> {
 fn decode_manifest(bytes: &[u8]) -> Result<BlobManifest, String> {
     let m: zblob::Manifest =
         zblob::wire::decode(bytes).map_err(|e| format!("undecodable manifest: {e}"))?;
+    // The chunk count is the reference client's own arithmetic now (v3);
+    // a manifest whose sizing does not divide is recorded as unreadable
+    // rather than rendered with a made-up count (RFC 09 §5.1 O4).
+    let chunk_count = m
+        .chunk_count()
+        .map_err(|e| format!("manifest with impossible sizing: {e}"))?;
     Ok(BlobManifest {
-        chunk_count: chunk_count(m.total_len, m.chunk_size),
-        id: m.id,
+        chunk_count,
+        id: m.id.to_string(),
         filename: m.filename,
         total_len: m.total_len,
         chunk_size: m.chunk_size,
         root: m.root.to_string(),
         created_ms: m.created_ms,
     })
-}
-
-fn chunk_count(total_len: u64, chunk_size: u32) -> u32 {
-    if chunk_size == 0 {
-        return 0;
-    }
-    total_len.div_ceil(chunk_size as u64) as u32
 }
 
 /// Fetch from **one** origin's concrete key, at data-low, verifying every reply
@@ -279,7 +277,13 @@ pub async fn blob_fetch(
             .as_str(),
     );
 
-    let client = zblob::BlobClient::builder(Arc::new(session.clone()), prefix)
+    let prefix = zblob::QueryPrefix::new(prefix).map_err(|e| {
+        anyhow!(
+            "`{origin_chunk}`'s artifact prefix is not queryable: {e}",
+            origin_chunk = origin.chunk()
+        )
+    })?;
+    let client = zblob::BlobClient::builder(session, prefix)
         // Priority is deliberately not set: the reference client already
         // defaults to DataLow, which is how RFC 07 §2.6 says a conformant
         // caller behaves without touching the setting. Setting it again here
@@ -305,7 +309,9 @@ pub async fn blob_fetch(
 
     let sink = move |p: zblob::Progress| on_progress(translate(p));
     let stats = client
-        .download_to(&request, dest, &sink, &spec.cancel)
+        .download_to(&request, dest)
+        .progress(&sink)
+        .cancel(&spec.cancel)
         .await
         // The origin is named here, once, so every failure this fetch can
         // produce — a hash mismatch above all — says which origin produced it.
@@ -421,15 +427,6 @@ mod tests {
         // The report's sentence and the wire's behaviour come from one
         // constant; this pins the rendering of it.
         assert_eq!(priority_name(FETCH_PRIORITY), "data-low");
-    }
-
-    #[test]
-    fn chunk_counts_round_up() {
-        assert_eq!(chunk_count(0, 65536), 0);
-        assert_eq!(chunk_count(1, 65536), 1);
-        assert_eq!(chunk_count(65536, 65536), 1);
-        assert_eq!(chunk_count(65537, 65536), 2);
-        assert_eq!(chunk_count(10, 0), 0);
     }
 
     #[test]

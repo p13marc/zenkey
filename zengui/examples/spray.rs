@@ -481,8 +481,9 @@ async fn main() -> anyhow::Result<()> {
     );
     let blob_data = artifact_bytes(1 << 20, 42);
     let blob_server = zenkey_fleet::zblob::BlobServer::new(
-        std::sync::Arc::new(session.clone()),
-        blob_prefix.clone(),
+        &session,
+        zenkey_fleet::zblob::ServePrefix::new(blob_prefix.clone())
+            .map_err(|e| anyhow::anyhow!("blob prefix: {e}"))?,
     );
     let manifest = blob_server
         .register_source(
@@ -514,40 +515,44 @@ async fn main() -> anyhow::Result<()> {
         .as_str(),
     );
     let rogue_manifest = zenkey_fleet::zblob::Manifest {
-        version: 2,
-        id: BLOB_ID.to_string(),
+        version: zenkey_fleet::zblob::wire::WIRE_VERSION,
+        id: zenkey_fleet::zblob::BlobId::new(BLOB_ID)
+            .map_err(|e| anyhow::anyhow!("rogue id: {e}"))?,
         filename: Some("demo-bundle.bin".into()),
         total_len: manifest.total_len,
         chunk_size: manifest.chunk_size,
         root: zenkey_fleet::zblob::Hash::of(b"a different artifact entirely"),
         created_ms: 0,
+        ext: zenkey_fleet::zblob::wire::Ext::default(),
     };
     println!(
         "serving: {rogue_prefix}/{BLOB_ID}/**  root {}  (the disagreeing holder)",
         rogue_manifest.root
     );
     let chunk_count = manifest.total_len.div_ceil(manifest.chunk_size as u64) as u32;
-    let rogue_replies: std::collections::HashMap<String, (Vec<u8>, &'static str)> =
-        std::collections::HashMap::from([
+    let rogue_replies: std::collections::HashMap<
+        String,
+        (Vec<u8>, &'static zenkey_fleet::zblob::wire::WireTag),
+    > = std::collections::HashMap::from([
+        (
+            zenkey_fleet::zblob::keys::manifest_key(&rogue_prefix, BLOB_ID),
             (
-                zenkey_fleet::zblob::manifest_key(&rogue_prefix, BLOB_ID),
-                (
-                    zenkey_fleet::zblob::wire::encode(&rogue_manifest)
-                        .map_err(|e| anyhow::anyhow!("encode rogue manifest: {e}"))?,
-                    zenkey_fleet::zblob::wire::ENC_MANIFEST,
-                ),
+                zenkey_fleet::zblob::wire::encode(&rogue_manifest)
+                    .map_err(|e| anyhow::anyhow!("encode rogue manifest: {e}"))?,
+                &zenkey_fleet::zblob::wire::ENC_MANIFEST,
             ),
+        ),
+        (
+            zenkey_fleet::zblob::keys::availability_key(&rogue_prefix, BLOB_ID),
             (
-                zenkey_fleet::zblob::availability_key(&rogue_prefix, BLOB_ID),
-                (
-                    zenkey_fleet::zblob::wire::encode(
-                        &zenkey_fleet::zblob::wire::Availability::full(chunk_count),
-                    )
-                    .map_err(|e| anyhow::anyhow!("encode rogue availability: {e}"))?,
-                    zenkey_fleet::zblob::wire::ENC_AVAIL,
-                ),
+                zenkey_fleet::zblob::wire::encode(&zenkey_fleet::zblob::wire::Availability::full(
+                    chunk_count,
+                ))
+                .map_err(|e| anyhow::anyhow!("encode rogue availability: {e}"))?,
+                &zenkey_fleet::zblob::wire::ENC_AVAIL,
             ),
-        ]);
+        ),
+    ]);
     let _rogue = session
         .declare_queryable(format!("{rogue_prefix}/**"))
         .callback(move |query| {
