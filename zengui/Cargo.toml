@@ -1,6 +1,6 @@
 [package]
 name = "zengui"
-version = "0.1.0"
+version = "0.2.0"
 # Publication policy (docs/redesign-2026-07.md §15): binaries are never
 # published to crates.io. zengui ships through the Forgejo release lane
 # (`release.yml`) / `cargo install --git`, exactly as zenctl does.
