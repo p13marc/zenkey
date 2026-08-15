@@ -265,7 +265,7 @@ blob entry declares *which tiers and endpoints this origin serves*:
 ```toml
 [[blob]]
 tier        = "artifact"
-endpoints   = ["manifest", "slice", "have", "fanout"]
+endpoints   = ["manifest", "slice", "have"]
 reference   = "ArtifactDelivery"
 encoding    = "application/vnd.tcpdump.pcap"
 since       = "1.8"
@@ -281,7 +281,7 @@ description = "content-addressed chunks backing the tree tier"
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `tier` | enum `artifact \| tree \| store` | yes | the reserved tier token after `@blob` ([07 §2](07-bulk-planes.md)). It is a **tier token, not a producer chunk** — content-addressed data has no owning component — so a blob entry generates no producer position, unlike every other entry kind |
-| `endpoints` | list of reserved names | `artifact` only (yes) | which of [07 §2.2](07-bulk-planes.md)'s endpoints this origin serves: `manifest`, `slice`, `have`, `push`, `fanout`. `tree` and `store` have none — the key *is* the endpoint — and naming any on them is an error |
+| `endpoints` | list of reserved names | `artifact` only (yes) | which of [07 §2.2](07-bulk-planes.md)'s endpoints this origin serves: `manifest`, `slice`, `have`, `push` — plus `fanout`, which stays a *legal* token but declares the experimental endpoint of [07 Appendix A](07-bulk-planes.md) (demoted in v1.17), not a normative one. `tree` and `store` have none — the key *is* the endpoint — and naming any on them is an error |
 | `algo` | hash-algorithm name | `store` only (yes) | the `<algo>` chunk ([07 §2.4](07-bulk-planes.md)). A deployment SHOULD carry one value fleet-wide; a second entry exists only while a migration runs both |
 | `reference` | type-table name | no (RECOMMENDED on `artifact`) | the payload type that conveys this blob's reference to consumers — i.e. the type that MUST carry the content root under [07 §2.1](07-bulk-planes.md). **CI-resolved against the shared type table** ([§5](#5-ownership-and-process)), exactly like a `[[subject]]` `type` |
 | `encoding` | MIME-ish string | no | the encoding of the blob *content* (`application/vnd.tcpdump.pcap`), so a consumer can choose a viewer without fetching. Never the chunk framing — that is self-describing on the wire ([07 §2.4](07-bulk-planes.md)) |

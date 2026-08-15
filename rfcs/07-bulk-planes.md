@@ -154,7 +154,10 @@ load-bearing (below):
 | `<id>/have` | same | queryable | availability: which chunks this origin can serve |
 | `<id>/push/offer` | same | queryable (write) | upload offer (see below) |
 | `<id>/push/slice/<i>` | same | queryable (write) | one uploaded slice |
-| `<id>/fanout` | — | **publication** | one-to-many rollout of the same blob |
+
+*(A sixth endpoint, `<id>/fanout`, was normative here from v1.7 to v1.16.
+It is demoted to [Appendix A](#appendix-a--fanout-experimental) in v1.17 —
+kept on record, experimental, no longer promised by this table.)*
 
 **Why the second column exists (normative).** Zenoh delivers a reply only
 if its key intersects the query's key expression, and the check runs on the
@@ -170,19 +173,23 @@ this convention works hardest to design out elsewhere. The same
 request/reply split recurs on Tier 2's batched fetch (§2.4), which is
 additionally the one sanctioned exception to the intersection rule itself.
 
-Two corrections to v1.2 follow from this table. First, `@blob` is no longer
-uniformly "queryables": `fanout` is a *publication* — the one-to-many case
-where N consumers each pulling the same bytes is precisely the amplification
-this plane exists to avoid, so the producer publishes once and late joiners
-recover from the publisher's cache. It is a declared publisher on the
-producer's concrete origin like any other (§3), at the bulk QoS of §2.6.
-Second, `push/**` is a **write path expressed as a query** (the payload
-rides the GET): the uploader offers a manifest, the origin answers with the
-chunk ranges it still wants, and each pushed slice is verified against the
-offered root before it is retained. This is not an exemption from the
-declared-publisher rule ([04-planes.md §3](04-planes.md)) because nothing is
-published — but it *is* a write, so it MUST be gated by an authorization
-hook on the receiving origin and MUST NOT be enabled by default.
+One correction to v1.2 stands unchanged: `push/**` is a **write path
+expressed as a query** (the payload rides the GET): the uploader offers a
+manifest, the origin answers with the chunk ranges it still wants, and each
+pushed slice is verified against the offered root before it is retained.
+This is not an exemption from the declared-publisher rule
+([04-planes.md §3](04-planes.md)) because nothing is published — but it
+*is* a write, so it MUST be gated by an authorization hook on the receiving
+origin and MUST NOT be enabled by default.
+
+**`push` remains normative**, and v1.17 says so explicitly so that the
+demotion of `fanout` beside it is not read as applying to it. The two are
+not in the same position: `push` is the plane's *only* write path, its
+authorization gate is a designed-in property rather than an afterthought,
+and a foreseeable first consumer exists (a support-bundle upload). An
+endpoint being unconsumed today is an argument about tables describing
+what is served — it is not, by itself, an argument for removing the one
+write affordance the plane has.
 
 Resume is a persisted **chunk bitfield**: the client re-requests exactly the
 holes it is missing, as a chunk-range selector on the same wildcard GET. A
@@ -289,10 +296,6 @@ unchanged from v1.2 and it is easy to forget, so the reference client now
 discharges it **by default** rather than documenting it: a client that never
 touches the setting is already conformant, and raising the priority is the
 deliberate act.
-
-The `fanout` publication (§2.2) carries the same obligation on the publish
-side, plus blocking congestion control: shedding slices under local
-backpressure would trade a bounded delay for an unbounded recovery.
 
 ### 2.7 Registry modelling (added in v1.8)
 
@@ -405,3 +408,38 @@ payload type — fails all three constraints these planes exist for:
   pull/resume/verify. Neither is pub/sub state or telemetry; forcing them
   into data classes would corrupt the class semantics that everything else
   relies on.
+
+## Appendix A — `fanout` (experimental)
+
+*Demoted from §2.2's normative endpoint table in v1.17. The design is kept
+on record; the endpoint is experimental: an implementation MAY offer it
+behind a feature gate, a registry MAY accept its declaration
+([08 §2](08-registry.md)), and no conformant consumer is required to speak
+it.*
+
+The demotion is an observation, not a redesign. After a full release cycle
+of v1.7's table, adoption was zero: no producer declared `fanout`, no
+consumer enabled the reference client's feature (every registry entry that
+declares a blob tier excludes it, with the reason written in the TOML), and
+the one genuinely one-to-many stream in the deployed fleet chose `@media`
+instead. A normative endpoint table should describe what is served;
+keeping an endpoint every declaring producer excludes makes the table
+aspirational, and aspirational normative text is how a second implementer
+ends up building something nobody will speak to. Demotion costs nothing to
+reverse: if a real one-to-many customer appears — firmware rollout is the
+plausible one — promotion back into §2.2 is a one-line amendment.
+
+The design, unchanged from v1.7: `<id>/fanout` is a *publication* — the
+one-to-many case where N consumers each pulling the same bytes is
+precisely the amplification this plane exists to avoid, so the producer
+publishes once and late joiners recover from the publisher's cache. It is
+a declared publisher on the producer's concrete origin like any other
+(§3), at the bulk QoS of §2.6, and it carries §2.6's obligation on the
+publish side plus blocking congestion control: shedding slices under local
+backpressure would trade a bounded delay for an unbounded recovery.
+
+An implementation that does offer it MUST follow the same framing
+discipline as every queryable reply in the plane — version-first structs,
+a declared encoding tag, and tag-checked-before-decode — rather than
+relying on decode failure to reject foreign samples. (The reference
+client's wire v3 brings its `fanout` frames up to exactly this rule.)
