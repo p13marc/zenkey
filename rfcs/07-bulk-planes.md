@@ -228,11 +228,47 @@ A consumer therefore resolves a snapshot in two hops: read the name from
 `state` to obtain a root, then fetch `tree/<root>`. The second hop is
 self-anchoring (§2.1) — the key it asked for is the identity it must get.
 
-The transfer itself is unchanged in spirit: the client GETs the index, diffs
-the hashes it needs against its local content store, fetches only the
-missing chunks (re-hashing each on receipt), reconstructs, and verifies the
-root. Resume *is* "which hashes I already have" — it survives reconnect and
-restart with no session state.
+**The index is content-addressed data (amended in v1.17).** `tree/<root>`
+keeps its key and its identity rule but changes what the key *serves*: a
+small **index descriptor** — the index's root, the list of store addresses
+holding the serialized index bytes, and summary statistics (entry and file
+counts, total size) — rather than the whole index in one reply. The index
+bytes themselves are ordinary content in the store, fetched through the
+chunk path like any other chunk. A small tree's index stays a single
+chunk, so the common case does not get slower; a large index arrives in
+batched rounds (§2.4), dedups between snapshots exactly as file content
+does (two snapshots of a mostly-unchanged tree share index chunks instead
+of re-transferring the whole index), and resumes hole-by-hole with no new
+machinery. The v1.7 shape — a monolithic index reply under a size cap —
+made a sufficiently large tree simply unservable; this one has no cliff.
+
+Four things did **not** move, stated here because they look like they did:
+
+- **Identity.** `<root>` remains the digest over the canonical, versioned,
+  mtime-free projection of the tree. A tree's name is still its own
+  content hash; `tree/nightly` still has no spelling.
+- **Self-anchoring (§2.1).** The descriptor is **untrusted**: each index
+  chunk verifies against its own address, and the reassembled index
+  verifies against the `<root>` the consumer asked for. Fetching a
+  descriptor places no new trust anywhere.
+- **The objects/refs split** above, and the two-hop resolution through
+  `state`, are untouched.
+- **Framing (§2.4).** Index chunks are chunks: the container rules apply
+  to them exactly as to file chunks, including the ban on encrypted
+  containers under a fleet-reachable `store` key.
+
+The `stats` exist for explorers: a consumer can render a tree's summary
+from the descriptor alone, which makes *inspecting* a huge tree cheap —
+browsing a tree and downloading one are now different costs, and that
+difference is what lets a bus explorer show a snapshot without owning a
+content store.
+
+The transfer is then as before, one level deeper: obtain the descriptor,
+assemble and verify the index, diff the hashes it needs against the local
+content store, fetch only the missing chunks — batched, falling back
+per-chunk (§2.4) — re-hashing each on receipt, reconstruct, and verify the
+root. Resume *is* "which hashes I already have" — it survives reconnect
+and restart with no session state.
 
 ### 2.4 Chunk values are framed; the hash addresses the content (normative)
 
@@ -309,8 +345,13 @@ so a storage's last-writer-wins reconciliation is genuinely a no-op.
 A publisher MUST NOT treat a resolved PUT as durability: it signals hand-off
 to the transport, not retention by a storage, and index and chunks may land
 on different storages with no ordering between them. A producer that intends
-to exit MUST confirm retention by reading back what it published (the index
-and a sample of chunks) before considering the snapshot available.
+to exit MUST confirm retention by reading back what it published — the
+index descriptor, the index chunks it references, and a sample of content
+chunks — before considering the snapshot available. The middle item is a
+real tightening from v1.17 (§2.3): index chunks are chunks, so the
+read-back rule now covers strictly more keys than it did when the index was
+one reply, and a producer that reads back only the descriptor has verified
+a pointer, not a snapshot.
 
 **Probing is a named endpoint, not a wildcard convention — on every tier
 (amended in v1.17).** A consumer that cannot name the origin holding an
