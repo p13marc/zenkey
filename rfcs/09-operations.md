@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.13 (proposed)** · informative chapter, but §5.1 is normative for tools · *amended in v1.2, v1.9 and v1.13 — see [00-index.md](00-index.md)*
+**Status: v1.18 (ratified)** · informative chapter, but §5.1 is normative for tools · *amended in v1.2, v1.9, v1.13 and v1.18 — see [00-index.md](00-index.md)*
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links,
@@ -506,7 +506,7 @@ that can drift from it.
   blind to the common case. `zenctl base list` implements this sweep and
   reports the empty base as `(empty)`, selected with `--base ""`.
 
-### 5.1 Observer obligations (v1.9)
+### 5.1 Observer obligations (v1.9; reviewed and amended at ratification, v1.18)
 
 *Added in v1.9. The convention told tools how to read a conformant key and
 said nothing about the other three cases an explorer actually meets: a key
@@ -566,10 +566,27 @@ alongside it, or state that they are excluded.
 **O6 — A bounded observer reports what it dropped.** Any long-running observer
 bounds something — a buffer, a scrollback, a key table — and an unbounded one
 is merely a leak with better manners. Whatever the bound, the tool **MUST**
-report what it cost: samples missed while it was behind, and keys or lines
-retired to stay within the bound, counted separately, because "we could not
-keep up" and "we chose to forget" are different facts about the same window. A
-view that silently shrinks is indistinguishable from a bus that went quiet.
+report what it cost, and MUST NOT fold the kinds into one number, because
+they are different facts about the same window: samples missed while it was
+behind ("we could not keep up"), keys or lines retired to stay within the
+bound ("we chose to forget"), and — where the tool folds a burst into one
+rendered update — samples **coalesced** ("we kept the newest and summarized
+the rest"; amended at ratification, v1.18). Coalescing is neither of the
+first two: nothing the view promised to show was lost, but a consumer that
+assumes it saw every sample individually is wrong. A view that silently
+shrinks is indistinguishable from a bus that went quiet.
+
+*Informative — frugality (added at ratification, v1.18).* The obligations
+above are about honesty, not thrift, but one habit keeps both cheap: an
+observer SHOULD retrieve only what its user asked to see. Rendering what is
+already in hand — registry slices, a seeded roster — is ambient and free;
+anything that costs the data plane (a probe, a fetch, a subscription) is
+asked for explicitly, once per ask. Guidance rather than obligation, because
+cost is a design budget rather than a truth condition — recorded because the
+reference explorers hold to it (data movement costs exactly one deliberate
+action; zenkey #84/#85), and because a tool that ignores it tends to violate
+O5 by accident: a pane that quietly fans out to keep itself fresh is
+claiming coverage nobody asked it to have.
 
 > **Where this came from.** Every rule above is a mistake that was made and
 > caught while building `zengui` against this convention, not a hypothetical.
@@ -577,7 +594,10 @@ view that silently shrinks is indistinguishable from a bus that went quiet.
 > loaded" as "unregistered". O3 replaced a base guess. O5 replaced a design
 > that had defended against `@media` frames arriving through a `**` scope —
 > which cannot happen — while missing that the same scope silently hid
-> `@catalog`.
+> `@catalog`. O6's third kind arrived the same way, at ratification: the
+> reference GUI's link layer batches bursts under a cap and counts the
+> overflow (`coalesced`) beside its broadcast lag (`lagged`) — an honest
+> number the two-counter wording could only misfile.
 
 ### 5.2 Capture and replay — `.zrec` etiquette (v1.13)
 

@@ -1,9 +1,37 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.17 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
-tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
-enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
-branch).
+**Status: v1.18 — RATIFIED** (2026-08-15, the §5.1 review pass below; v1.0
+2026-07-12; adopted for ZenSight, migration tracked in
+[#453](https://github.com/p13marc/zensight/issues/453) with the enforcement
+crate `zenkey`).
+
+> **v1.18 (2026-08-15, ratification — the observer-obligations review pass)**
+> — the set graduates from proposed to **ratified**, through the review gate
+> zenkey #76 set for it rather than by fiat: 09 §5.1's O1–O6 now bind every
+> tool the Explorer Suite built, so they were re-read against what actually
+> shipped before being promoted. Two of the three review questions closed
+> "as written"; one produced an amendment — which is the outcome the gate
+> existed to allow.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **R1** | [09 §5.1](09-operations.md) O6 | **The bound's cost has three kinds, not two.** "Could not keep up" and "chose to forget" now stand beside **coalesced** — a burst folded into one rendered update, newest kept, overflow counted. The reference GUI's link layer had implemented exactly this (`coalesced` beside `lagged`), and the two-counter wording could only misfile an honest number. The MUST is sharpened to forbid folding the kinds together. |
+> | **R2** | [09 §5.1](09-operations.md) | **Frugality guidance, informative.** An observer SHOULD retrieve only what its user asked to see: ambient metadata renders free, data-plane cost is one deliberate ask (zenkey #84/#85). Deliberately guidance rather than obligation — cost is a design budget, not a truth condition — and deliberately recorded, because ignoring it tends to violate O5 by accident. |
+> | **R3** | headers | **Status flips.** 00-index to v1.18 — RATIFIED; [07](07-bulk-planes.md) to v1.17 (ratified) — its v1.17 gate (the marcpardo/zblob#48 reply-key verification #144 required before ratification) was confirmed before the amendment landed; [09](09-operations.md) to v1.18 (ratified). |
+>
+> **What did *not* change.** O1–O5 are promoted word for word: O5's
+> obligation shape ("name the verbatim planes alongside, or state they are
+> excluded") was reviewed against its twelve explicit uses in the reference
+> tools and kept. No key, wire, or registry change of any kind — R1 tightens
+> what a tool must *say*, not what it may do, and R2 is informative. The
+> deliberate refusals stand unrevisited: 12 §8.2's twice-re-affirmed
+> rejection is untouched, and no chapter's normative text moves except O6's
+> sentence.
+>
+> **Provenance.** zenkey #76 (epic #33 phase 4), including its scope-addition
+> comment (frugality, motivated by #84/#85). The v1.9-era title ratified a
+> set that kept moving; what graduates is everything proposed through v1.17
+> plus this pass's own R1/R2.
 
 > **v1.17 (2026-08-15, the `@blob` wire-v3 amendment)** — **chunk addresses
 > do not change: existing stores and router storages stay warm across this
