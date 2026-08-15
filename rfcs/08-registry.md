@@ -281,7 +281,7 @@ description = "content-addressed chunks backing the tree tier"
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `tier` | enum `artifact \| tree \| store` | yes | the reserved tier token after `@blob` ([07 §2](07-bulk-planes.md)). It is a **tier token, not a producer chunk** — content-addressed data has no owning component — so a blob entry generates no producer position, unlike every other entry kind |
-| `endpoints` | list of reserved names | `artifact` only (yes) | which of [07 §2.2](07-bulk-planes.md)'s endpoints this origin serves: `manifest`, `slice`, `have`, `push` — plus `fanout`, which stays a *legal* token but declares the experimental endpoint of [07 Appendix A](07-bulk-planes.md) (demoted in v1.17), not a normative one. `tree` and `store` have none — the key *is* the endpoint — and naming any on them is an error |
+| `endpoints` | list of reserved names | `artifact` only (yes) | which of [07 §2.2](07-bulk-planes.md)'s endpoints this origin serves: `manifest`, `slice`, `have`, `push` — plus `fanout`, which stays a *legal* token but declares the experimental endpoint of [07 Appendix A](07-bulk-planes.md) (demoted in v1.17), not a normative one. `tree` and `store` have none a producer may declare — their `batch`/`have` tokens ([07 §2.4](07-bulk-planes.md)) are **structural**, see below — and naming any on them is an error |
 | `algo` | hash-algorithm name | `store` only (yes) | the `<algo>` chunk ([07 §2.4](07-bulk-planes.md)). A deployment SHOULD carry one value fleet-wide; a second entry exists only while a migration runs both |
 | `reference` | type-table name | no (RECOMMENDED on `artifact`) | the payload type that conveys this blob's reference to consumers — i.e. the type that MUST carry the content root under [07 §2.1](07-bulk-planes.md). **CI-resolved against the shared type table** ([§5](#5-ownership-and-process)), exactly like a `[[subject]]` `type` |
 | `encoding` | MIME-ish string | no | the encoding of the blob *content* (`application/vnd.tcpdump.pcap`), so a consumer can choose a viewer without fetching. Never the chunk framing — that is self-describing on the wire ([07 §2.4](07-bulk-planes.md)) |
@@ -312,6 +312,19 @@ load-bearing:
   these are data-class concepts, and `@blob` QoS is fixed by
   [07 §2.6](07-bulk-planes.md) as a *client* obligation discharged by default
   in the reference client. It is not a per-entry knob.
+
+**Tier-2 endpoints are structural, not declared (decided in v1.17).** When
+wire v3 gave Tier 2 its first endpoint tokens (`batch`/`have`,
+[07 §2.4](07-bulk-planes.md)), the `endpoints` field faced a real choice:
+open to `tree`/`store` with a restricted enum, or keep the field
+`artifact`-only and treat the new tokens as always-present. Structural won,
+for a reason and not by inertia: Tier-2 endpoints are not per-producer
+capabilities the way `push` and `fanout` are — every holder of a store can
+answer a probe about what it holds, and a batch is just several chunk GETs
+in one round — so a declaration would state nothing an entry does not
+already state by declaring the tier. Keeping the field `artifact`-only also
+preserves the property the dedup rule above rests on: blob keys carry no
+producer chunk, and neither does anything a blob entry declares.
 
 Declaring `push` in `endpoints` states a **capability, not a policy**:
 [07 §2.2](07-bulk-planes.md) requires the receiving origin to gate `push/**`

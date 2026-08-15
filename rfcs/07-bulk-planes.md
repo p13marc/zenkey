@@ -256,6 +256,45 @@ every other holder an object it can neither verify nor use.
 fleet-wide (dedup is per-algorithm: the same bytes under two algorithms are
 two objects); the segment exists so a migration can run both side by side.
 
+**Reserved Tier-2 endpoint tokens (added in v1.17).** Tier 1 reserves its
+endpoints by name (§2.2); until v1.17 Tier 2 reserved none — the key *was*
+the endpoint, and [08 §2](08-registry.md) leaned on that sentence. Wire v3
+introduces two tokens, and the moment Tier 2 has any endpoint at all, what
+kept the keyspace unambiguous must be stated as a rule rather than left as
+an accident:
+
+| Request key | Reply key(s) | Purpose |
+|---|---|---|
+| `store/<algo>/batch` | `store/<algo>/<hash>`, one per delivered chunk | batched chunk fetch: the request carries a want-list of content addresses |
+| `store/<algo>/have` | same | Tier-2 store probe (§2.5) |
+| `tree/<root>/have` | same | Tier-2 tree probe (§2.5) |
+
+- **A reserved Tier-2 token MUST NOT be a valid content address under any
+  registered `<algo>`.** Today that holds by accident — content addresses
+  are hex, `batch` and `have` are not — and this rule is what keeps it
+  holding when the next algorithm or the next token arrives.
+- **Tier-2 keys resolve positionally.** The chunk after the tier token is
+  `<algo>` (or `<root>`); the chunk after *that* is either a content
+  address or a reserved token, distinguished by the rule above. An
+  implementation MUST NOT resolve these keys by string-prefix matching
+  against configured prefixes — Tier 1 already resolves `<id>`
+  positionally, and Tier 2 now does the same.
+- **`batch` replies arrive on each chunk's ordinary store key, and that is
+  a requirement, not an implementation detail.** It keeps every delivered
+  chunk individually verifiable against its own address and individually
+  cacheable, and it lets a router storage (§2.5) serve as singles what it
+  cached from a batch. Because those reply keys do not intersect the
+  request key, `batch` is the **one sanctioned exception** to §2.2's
+  reply-key-intersection rule: a `batch` GET MUST declare that it accepts
+  non-matching replies, and a holder MUST NOT batch-reply to a query that
+  did not so declare.
+- **A router storage never answers `batch`.** It serves by key, and no
+  `…/batch` key exists in it, so it stays silent — which is safe, and has
+  a consequence a client MUST implement: fall back to per-chunk GETs for
+  every hash a batch round leaves unanswered. The fallback is not a
+  nicety; it is what keeps the router-store tier (§2.5) usable by a
+  batching client at all.
+
 ### 2.5 Fleet-wide caching and the router store
 
 **Chunks and trees are immutable ⇒ cacheable fleet-wide.** Replies are valid
