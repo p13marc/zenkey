@@ -395,12 +395,25 @@ fn tier_two_builders_take_a_content_hash_not_a_name() {
 
     // The store algo comes from the registry, never the caller: dedup is
     // per-algorithm, so a caller-supplied algo is a way to address the same
-    // bytes twice by accident.
-    assert_eq!(blob::Tier::Store.algo(), Some("blake3"));
-    let hash = ContentHash::parse("ab12cd34ef56").unwrap();
+    // bytes twice by accident. Since v1.17 the fixture runs the RFC 07 §2.4
+    // dual-algo migration window, so there are two address spaces — one
+    // builder and one address type each, unmixable: `store_key_blake3`
+    // does not accept a `Sha256Addr`, which is the whole point.
+    assert_eq!(blob::Tier::Store.algos(), &["blake3", "sha256"]);
+    let addr = blob::Blake3Addr::parse("ab12cd34ef56").unwrap();
     assert_eq!(
-        blob::store_key(&local(), &hash),
+        blob::store_key_blake3(&local(), &addr),
         "v1/h-3fa9c2d41b7e/@blob/store/blake3/ab12cd34ef56"
+    );
+    let legacy = blob::Sha256Addr::new(ContentHash::parse("ab12cd34ef56").unwrap());
+    assert_eq!(
+        blob::store_key_sha256(&local(), &legacy),
+        "v1/h-3fa9c2d41b7e/@blob/store/sha256/ab12cd34ef56"
+    );
+    // Same digest, two algos: two distinct objects by key, per §2.4.
+    assert_ne!(
+        blob::store_key_blake3(&local(), &addr),
+        blob::store_key_sha256(&local(), &legacy)
     );
 }
 
@@ -421,6 +434,22 @@ fn the_probe_form_is_not_a_key() {
     // decorative. Nothing here can assert a *missing* impl, so this documents
     // the invariant next to the thing that depends on it.
     assert!(!probe.as_str().contains("h-3fa9c2d41b7e"));
+
+    // RFC 07 §2.4/§2.5 (v1.17): the Tier-2 endpoint-shaped probes — same
+    // type, same non-convertibility, per-algo where the address space is.
+    assert_eq!(
+        blob::store_have_probe_blake3().as_str(),
+        "v1/*/@blob/store/blake3/have"
+    );
+    assert_eq!(
+        blob::store_have_probe_sha256().as_str(),
+        "v1/*/@blob/store/sha256/have"
+    );
+    let root = zenkey::grammar::ContentHash::parse(&"cd".repeat(32)).unwrap();
+    assert_eq!(
+        blob::tree_have_probe(&root).as_str(),
+        format!("v1/*/@blob/tree/{root}/have")
+    );
 }
 
 #[test]

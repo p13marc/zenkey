@@ -1221,6 +1221,23 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
 /// producer chunk: the position after `@blob` is a reserved tier token, since
 /// content-addressed data has no owning component. Nesting these builders
 /// inside a producer module would have implied a chunk that is not there.
+/// The distinct `store` algos across a tier's declarations, first-appearance
+/// order, each with the first entry declaring it (canonical for prose). More
+/// than one exactly while the RFC 07 §2.4 dual-algo migration window is open.
+fn distinct_algos<'a>(
+    declarers: &[(&'a str, &'a crate::BlobEntry)],
+) -> Vec<(&'a str, &'a crate::BlobEntry)> {
+    let mut out: Vec<(&'a str, &'a crate::BlobEntry)> = Vec::new();
+    for (_, b) in declarers {
+        if let Some(a) = b.algo.as_deref()
+            && !out.iter().any(|(seen, _)| *seen == a)
+        {
+            out.push((a, b));
+        }
+    }
+    out
+}
+
 fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
     // One group per distinct tier, in first-appearance order (files are read
     // in sorted path order, so declarer lists are alphabetical by file).
@@ -1244,7 +1261,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
 
     let _ = writeln!(
         out,
-        "/// The `@blob` tiers this build serves (RFC 07 §2, RFC 08 §2).\n///\n/// App-level rather than per-producer: a blob key carries **no producer\n/// chunk** — the position after `@blob` is a reserved tier token, because\n/// content-addressed data has no owning component.\npub mod blob {{\n    #[allow(unused_imports)]\n    use {zk}::grammar::{{BlobTier, ContentHash}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key}};\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::context::BlobProbePrefix;\n"
+        "/// The `@blob` tiers this build serves (RFC 07 §2, RFC 08 §2).\n///\n/// App-level rather than per-producer: a blob key carries **no producer\n/// chunk** — the position after `@blob` is a reserved tier token, because\n/// content-addressed data has no owning component.\npub mod blob {{\n    #[allow(unused_imports)]\n    use {zk}::grammar::{{BlobTier, ContentHash, KeyError}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key}};\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::context::BlobProbePrefix;\n"
     );
 
     // The tier-prefix helper every builder routes through, so the one place a
@@ -1296,9 +1313,9 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
             "The producers whose registry files declare this tier — every\n        /// declarer serves the same app-level key family (blob keys carry no\n        /// producer chunk, RFC 07 §2). Alphabetical by registry file.",
         ),
         (
-            "algo",
-            "Option<&'static str>",
-            "The `<algo>` chunk for the store tier (RFC 07 §2.4); `None` elsewhere.",
+            "algos",
+            "&'static [&'static str]",
+            "The declared `<algo>` chunks for the store tier (RFC 07 §2.4),\n        /// in registry order — more than one exactly while a dual-algo hash\n        /// migration runs both address spaces (v1.17); empty elsewhere.",
         ),
         (
             "reference_type",
@@ -1332,7 +1349,14 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
-                "algo" => opt(&b.algo),
+                "algos" => format!(
+                    "&[{}]",
+                    distinct_algos(declarers)
+                        .iter()
+                        .map(|(a, _)| format!("{a:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
                 "reference_type" => opt(&b.reference),
                 _ => opt(&b.encoding),
             };
@@ -1343,7 +1367,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
 
     let _ = writeln!(
         out,
-        "        /// The RFC 07 §2.2 endpoints served under `artifact/<id>/`; empty for\n        /// the Tier-2 tiers, whose key *is* the endpoint.\n        ///\n        /// Listing `push` states a **capability, not a policy**: RFC 07 §2.2\n        /// still requires the receiving origin to gate `push/**` behind an\n        /// authorization hook and to leave it off by default, and nothing a\n        /// registry says can discharge that.\n        pub fn endpoints(self) -> &'static [&'static str] {{\n            match self {{"
+        "        /// The RFC 07 §2.2 endpoints served under `artifact/<id>/`; empty for\n        /// the Tier-2 tiers, whose `batch`/`have` endpoint tokens are\n        /// **structural** (RFC 07 §2.4, v1.17) — always present, never\n        /// declared — so they are spelled by the generated probe builders\n        /// rather than listed here.\n        ///\n        /// Listing `push` states a **capability, not a policy**: RFC 07 §2.2\n        /// still requires the receiving origin to gate `push/**` behind an\n        /// authorization hook and to leave it off by default, and nothing a\n        /// registry says can discharge that.\n        pub fn endpoints(self) -> &'static [&'static str] {{\n            match self {{"
     );
     for (b, _) in &groups {
         let list = b
@@ -1376,13 +1400,13 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
     );
     let _ = writeln!(
         out,
-        "        /// The `*`-origin **probe** prefix (RFC 07 §2.5).\n        ///\n        /// Returns a [`BlobProbePrefix`], deliberately not a [`Key`] and\n        /// deliberately not convertible into one: probing across origins with\n        /// tiny replies is sanctioned, a wildcard-origin *bulk fetch* is not\n        /// (RFC 07 §3) — and as strings the two prefixes are\n        /// interchangeable, which is exactly how the first silently becomes\n        /// the second. Probe, pick an origin, then fetch from that origin's\n        /// [`Tier::prefix_at`].\n        pub fn probe(self) -> BlobProbePrefix {{\n            BlobProbePrefix::new(self.blob_tier())\n        }}\n    }}\n"
+        "        /// The `*`-origin **probe** prefix (RFC 07 §2.5).\n        ///\n        /// Returns a [`BlobProbePrefix`], deliberately not a [`Key`] and\n        /// deliberately not convertible into one: probing across origins with\n        /// tiny replies is sanctioned, a wildcard-origin *bulk fetch* is not\n        /// (RFC 07 §3) — and as strings the two prefixes are\n        /// interchangeable, which is exactly how the first silently becomes\n        /// the second. Probe, pick an origin, then fetch from that origin's\n        /// [`Tier::prefix_at`]. This is the bare tier prefix; the Tier-2\n        /// endpoint-shaped probes (RFC 07 §2.4/§2.5, v1.17) are spelled by\n        /// the generated `store_have_probe_<algo>` / `tree_have_probe`\n        /// builders, where those tiers are declared.\n        pub fn probe(self) -> BlobProbePrefix {{\n            BlobProbePrefix::new(self.blob_tier())\n        }}\n    }}\n"
     );
 
     // Per-tier key builders. Every one is infallible: ids are slugged at the
     // boundary (RFC 08 §1.2) and content addresses arrive already validated,
     // so a well-formed argument cannot fail to build a key.
-    for (b, _) in &groups {
+    for (b, declarers) in &groups {
         match b.tier.as_str() {
             "artifact" => {
                 let _ = writeln!(
@@ -1406,7 +1430,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
                         "fanout" => {
                             let _ = writeln!(
                                 out,
-                                "    /// One-to-many rollout of the same blob (RFC 07 §2.2).\n    ///\n    /// The one `@blob` endpoint that is a **publication** rather than a\n    /// queryable — N consumers each pulling the same bytes is precisely the\n    /// amplification this plane exists to avoid. Publish at the bulk QoS of\n    /// §2.6, with blocking congestion control.\n    pub fn artifact_fanout_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/fanout\");\n        Key::from_canonical(k)\n    }}\n"
+                                "    /// One-to-many rollout of the same blob (**experimental** —\n    /// RFC 07 Appendix A, demoted from §2.2 in v1.17).\n    ///\n    /// The one `@blob` endpoint that is a **publication** rather than a\n    /// queryable — N consumers each pulling the same bytes is precisely the\n    /// amplification this plane exists to avoid. Declaring it is legal and\n    /// states an experimental capability no conformant consumer is required\n    /// to speak. Publish at the bulk QoS of §2.6, with blocking congestion\n    /// control, using version-first tagged framing (Appendix A).\n    pub fn artifact_fanout_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/fanout\");\n        Key::from_canonical(k)\n    }}\n"
                             );
                         }
                         other => {
@@ -1426,18 +1450,18 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
             "tree" => {
                 let _ = writeln!(
                     out,
-                    "    /// Tier-2 tree index at one host: `…/@blob/tree/<root>` (RFC 07 §2.3).\n    ///\n    /// `root` is a validated [`ContentHash`], so the caller-chosen snapshot\n    /// name §2.3 revoked (`tree/nightly`) has **no spelling here** — the rule\n    /// is structural rather than something to remember. A mutable snapshot\n    /// *name* is durable state and belongs on `state`, carrying this root.\n    pub fn tree_key(o: &impl HostOrigin, root: &ContentHash) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"tree\");\n        k.push('/');\n        k.push_str(root.as_str());\n        Key::from_canonical(k)\n    }}\n"
+                    "    /// Tier-2 tree index at one host: `…/@blob/tree/<root>` (RFC 07 §2.3).\n    ///\n    /// `root` is a validated [`ContentHash`], so the caller-chosen snapshot\n    /// name §2.3 revoked (`tree/nightly`) has **no spelling here** — the rule\n    /// is structural rather than something to remember. A mutable snapshot\n    /// *name* is durable state and belongs on `state`, carrying this root.\n    pub fn tree_key(o: &impl HostOrigin, root: &ContentHash) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"tree\");\n        k.push('/');\n        k.push_str(root.as_str());\n        Key::from_canonical(k)\n    }}\n\n    /// The `*`-origin **tree probe** (RFC 07 §2.4/§2.5, v1.17):\n    /// `v1/*/@blob/tree/<root>/have`. Each holder answers has-index plus\n    /// chunks present / total — O(question), never the object — which is\n    /// what legitimises the wildcard origin. Probe, pick a holder, then\n    /// fetch from that origin's concrete [`tree_key`].\n    pub fn tree_have_probe(root: &ContentHash) -> BlobProbePrefix {{\n        BlobProbePrefix::tree_have(root)\n    }}\n"
                 );
             }
             _ => {
-                let algo = b
-                    .algo
-                    .as_deref()
-                    .expect("store entries carry algo — linted at parse time");
-                let _ = writeln!(
-                    out,
-                    "    /// Tier-2 chunk at one host: `…/@blob/store/{algo}/<hash>` (RFC 07 §2.4).\n    ///\n    /// The `<algo>` chunk comes from the registry, not from the caller, so one\n    /// build cannot address the same bytes under two algorithms by accident\n    /// (dedup is per-algorithm). `hash` addresses the chunk's *content*; the\n    /// value carried under the key is a self-describing container.\n    pub fn store_key(o: &impl HostOrigin, hash: &ContentHash) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"store\");\n        k.push_str(\"/{algo}/\");\n        k.push_str(hash.as_str());\n        Key::from_canonical(k)\n    }}\n"
-                );
+                for (algo, entry) in distinct_algos(declarers) {
+                    let ty = format!("{}Addr", camel(&[algo]));
+                    let desc = entry.description.as_deref().unwrap_or("(no description)");
+                    let _ = writeln!(
+                        out,
+                        "    /// A validated content address in the **`{algo}`** address space\n    /// (RFC 07 §2.4, v1.17): {desc}\n    ///\n    /// Per-algo by design — dedup is per-algorithm, and during a dual-algo\n    /// migration window the two address spaces must not mix. An address of\n    /// another algorithm has **no spelling** under this type, the same move\n    /// that keeps `tree/nightly` unspellable.\n    #[derive(Debug, Clone, PartialEq, Eq, Hash)]\n    pub struct {ty}(ContentHash);\n\n    impl {ty} {{\n        /// Adopt a validated hash as a `{algo}`-space address.\n        pub fn new(hash: ContentHash) -> Self {{\n            Self(hash)\n        }}\n\n        /// Parse a hex digest as a `{algo}`-space address.\n        pub fn parse(s: &str) -> Result<Self, KeyError> {{\n            ContentHash::parse(s).map(Self)\n        }}\n\n        /// The digest as it appears in the key.\n        pub fn as_str(&self) -> &str {{\n            self.0.as_str()\n        }}\n\n        /// The underlying content hash.\n        pub fn hash(&self) -> &ContentHash {{\n            &self.0\n        }}\n    }}\n\n    /// Tier-2 chunk at one host: `…/@blob/store/{algo}/<hash>` (RFC 07 §2.4).\n    ///\n    /// The `<algo>` chunk comes from the registry, not from the caller, and\n    /// the address is typed to this algo's address space, so one build cannot\n    /// address the same bytes under two algorithms by accident even while a\n    /// migration runs both (v1.17). `addr` addresses the chunk's *content*;\n    /// the value carried under the key is a self-describing container.\n    pub fn store_key_{algo}(o: &impl HostOrigin, addr: &{ty}) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"store\");\n        k.push_str(\"/{algo}/\");\n        k.push_str(addr.as_str());\n        Key::from_canonical(k)\n    }}\n\n    /// The `*`-origin **store probe** for the `{algo}` address space\n    /// (RFC 07 §2.4/§2.5, v1.17): `v1/*/@blob/store/{algo}/have`. The\n    /// request carries a hash list; each holder answers a bitfield over\n    /// exactly that list — O(question) by construction. Probe, pick a\n    /// holder, then fetch from that origin's concrete keys.\n    pub fn store_have_probe_{algo}() -> BlobProbePrefix {{\n        BlobProbePrefix::store_have({algo:?})\n    }}\n"
+                    );
+                }
             }
         }
     }

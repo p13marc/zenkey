@@ -7742,7 +7742,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "base64",
  "ciborium",
@@ -7763,7 +7763,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-build"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
@@ -7772,7 +7772,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fixture-tests"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "serde_json",
