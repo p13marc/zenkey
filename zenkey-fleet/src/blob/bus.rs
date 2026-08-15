@@ -93,9 +93,18 @@ pub async fn blob_probe(
     let manifest = grammar::with_base(base, zblob::keys::manifest_key(prefix.as_str(), id));
     let asked = vec![have.clone(), manifest.clone()];
 
+    // Two independent questions to the same fleet, asked concurrently: a
+    // probe costs one timeout window, not two. Folding stays sequential and
+    // ordered (have, then manifest), so the merge is deterministic.
+    let (have_answers, manifest_answers) = tokio::join!(
+        fleet_get_at(session, base, &have, None, timeout, FETCH_PRIORITY),
+        fleet_get_at(session, base, &manifest, None, timeout, FETCH_PRIORITY),
+    );
     let mut holders: Vec<BlobHolder> = Vec::new();
-    for (key, kind) in [(&have, Endpoint::Have), (&manifest, Endpoint::Manifest)] {
-        let answers = fleet_get_at(session, base, key, None, timeout, FETCH_PRIORITY).await?;
+    for (answers, kind) in [
+        (have_answers?, Endpoint::Have),
+        (manifest_answers?, Endpoint::Manifest),
+    ] {
         for answer in answers {
             fold(&mut holders, base, kind, answer);
         }
