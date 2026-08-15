@@ -312,18 +312,42 @@ on different storages with no ordering between them. A producer that intends
 to exit MUST confirm retention by reading back what it published (the index
 and a sample of chunks) before considering the snapshot available.
 
-**Probing is a named endpoint, not a wildcard convention.** A consumer that
-cannot name the origin holding a blob probes with a *tiny* reply — `have`
-(availability) or `manifest` (§2.2) — across origins, then fetches from one
-chosen origin's concrete key. This supersedes v1.2's advice to use "manifest
-/existence checks with tiny replies": the probe now has a purpose-built
-endpoint whose reply is a bitfield, and a client can use it to choose the
-best-stocked holder rather than merely the first to answer. The prohibition
-itself is unchanged and is stated once, normatively, in §3: a wildcard-origin
-*bulk fetch* remains forbidden as a default path, because every matching
-holder ships the full payload and Zenoh cannot cancel remote replies in
-flight — N holders cost N× the bytes, amplification on exactly the links
-this plane promises to spare.
+**Probing is a named endpoint, not a wildcard convention — on every tier
+(amended in v1.17).** A consumer that cannot name the origin holding an
+object probes with a *tiny* reply across origins, then fetches from one
+chosen origin's concrete key:
+
+- **Tier 1**: `have` (availability bitfield) or `manifest` (§2.2).
+- **Tier 2, store**: `store/<algo>/have` (§2.4) — the request carries a
+  list of content addresses; the reply is a bitfield over exactly that
+  list.
+- **Tier 2, tree**: `tree/<root>/have` (§2.4) — whether this holder has
+  the index, and how many of the tree's chunks it holds (present / total).
+
+Until v1.17 only the first existed, and the gap was reasoned rather than
+an oversight: a Tier-2 key carries the object itself, so a `*`-origin GET
+on one *is* the bulk fan-out this section forbids — there was no small
+thing to ask for. Every clause of that argument is true; the conclusion it
+licenses is *define a small thing to ask for*, not "Tier 2 cannot be
+probed". The Tier-2 probes are built so that §3's **cost gate is satisfied
+by construction**: their reply size is a function of the *request* (a
+bitfield over the hashes the consumer supplied; a flag and two counters),
+never of the object, so the reply cannot be bulk no matter how large what
+it describes. Worth naming, because it is the reply shape — not the plane,
+not the tier — that decides whether a wildcard origin is legitimate:
+§3's two gates stay distinct, and a probe passes the second one by shape.
+
+Probe-then-fetch is thereby total across all three tiers, and a probe now
+also answers *which holder to fetch from* — the piece that makes the
+router-store exemption above usable by an explorer choosing a source, not
+only by a storage. A client can pick the best-stocked holder rather than
+merely the first to answer. The prohibition itself is unchanged and is
+stated once, normatively, in §3: a wildcard-origin *bulk fetch* remains
+forbidden as a default path, because every matching holder ships the full
+payload and Zenoh cannot cancel remote replies in flight — N holders cost
+N× the bytes, amplification on exactly the links this plane promises to
+spare. Probe = O(question); fetch = O(object); the wildcard is for the
+first only ([12 §8.2](12-open-questions.md)).
 
 ### 2.6 QoS: bulk yields — a client obligation
 
@@ -350,7 +374,11 @@ Two rules of this section become *structural* there rather than advisory.
 Generated `tree`/`store` builders take a validated content-hash type, so
 §2.3's revoked caller-chosen name has no spelling in the generated surface;
 and the §2.5 probe form returns a distinct probe-prefix type, so a probe
-prefix cannot be passed where the §3 prohibition forbids one. Declaring
+prefix cannot be passed where the §3 prohibition forbids one — since
+v1.17 that probe type spells every tier's probe form (`have`/`manifest`
+on an artifact, `store/<algo>/have`, `tree/<root>/have`), so
+probe-then-fetch is expressible from the registry on all three tiers.
+Declaring
 `push` in an entry remains a statement of capability — the authorization gate
 and the off-by-default posture of §2.2 are unaffected by anything a registry
 says.

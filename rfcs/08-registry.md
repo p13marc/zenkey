@@ -342,11 +342,15 @@ stylistic:
   forbidden-fanout writes. A rule the codegen can refuse to spell does not
   need to be remembered.
 - **The probe form is a distinct type.** [07 §2.5](07-bulk-planes.md) permits
-  a `*`-origin probe (`have`/`manifest`, tiny replies) and forbids a
-  `*`-origin bulk fetch. The generated probe builder therefore returns a
-  *probe prefix*, not a key, so a probe prefix cannot be passed where a
-  fetch prefix is expected. Probe-then-fetch becomes expressible from the
-  registry rather than being prose a caller must obey.
+  a `*`-origin probe (tiny replies) and forbids a `*`-origin bulk fetch. The
+  generated probe builder therefore returns a *probe prefix*, not a key, so
+  a probe prefix cannot be passed where a fetch prefix is expected.
+  Probe-then-fetch becomes expressible from the registry rather than being
+  prose a caller must obey. Since v1.17 the probe type covers all three
+  tiers — `have`/`manifest` on an artifact, and the structural Tier-2
+  forms `store/<algo>/have` and `tree/<root>/have`
+  ([07 §2.4](07-bulk-planes.md)) — so the one-tier asymmetry v1.8 froze in
+  ("probe is Tier-1-only because only Tier 1 has a tiny endpoint") is gone.
 
 One asymmetry was created here and recorded rather than hidden: blob entries
 appeared in the **runtime introspect slice** (§6) while `[[media]]` entries —
