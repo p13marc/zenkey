@@ -706,7 +706,7 @@ pub fn blob_probe(report: &BlobProbeReport, format: Format) -> Result<()> {
 /// `blob fetch tree/<root>` — the validated index summary (RFC 07 §2.3,
 /// v1.17). Inspection, not download: no destination file, no content store,
 /// and the pin is the key itself.
-pub fn blob_tree(report: &zenkey_fleet::report::BlobTreeIndexReport, format: Format) -> Result<()> {
+pub fn blob_tree(report: &BlobTreeIndexReport, format: Format) -> Result<()> {
     match format.resolved() {
         Format::Json | Format::Ndjson => {
             json_doc(report);
