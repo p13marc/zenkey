@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.5, v1.8, v1.10, v1.15 and v1.16 — see [00-index.md](00-index.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.5, v1.8, v1.10, v1.15, v1.16 and v1.17 — see [00-index.md](00-index.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,

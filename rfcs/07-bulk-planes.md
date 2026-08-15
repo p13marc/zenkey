@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.7 (proposed)** · normative chapter · *amended in v1.2, v1.7, v1.8, v1.11 and v1.16 — see [00-index.md](00-index.md)*
+**Status: v1.17 (proposed)** · normative chapter · *amended in v1.2, v1.7, v1.8, v1.11, v1.16 and v1.17 — see [00-index.md](00-index.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -88,7 +88,12 @@ Rules:
 protocol. The plane's placement, position count and Tier-1 shape are
 unchanged; what changed is that Tier-2 keys are now genuinely
 content-addressed, the per-artifact endpoints are named, and integrity is
-anchored rather than assumed.*
+anchored rather than assumed. Amended again in v1.17 against the reference
+client's wire v3: §2.2 separates request keys from reply keys, Tier 2
+gains reserved endpoint tokens, a batched fetch and probes (§§2.4–2.5),
+the tree index becomes content-addressed data (§2.3), and `fanout` is
+demoted to Appendix A. Chunk addresses did not change — existing stores
+stay warm across the v3 cut.*
 
 ```
 <base>/v1/<origin>/@blob/artifact/<id>/**             Tier-1: one named blob, verified streaming
