@@ -429,15 +429,7 @@ pub async fn blob_fetch(
 ) -> Result<BlobFetchReport> {
     let origin = parse_origin(origin)?;
     let Some(id) = target.artifact_id() else {
-        bail!(
-            "`{}` cannot be fetched by this build: the reference client exposes no single-chunk fetch for the content-addressed tiers, so `{}` under {} is reachable only by a client that speaks tier 2 directly (RFC 07 §2.3/§2.4)",
-            target.spelling(),
-            target
-                .key_at(&origin)
-                .map(|k| grammar::with_base(base, k.as_str()))
-                .unwrap_or_else(|_| target.spelling()),
-            origin.chunk()
-        );
+        return fetch_tier2(session, base, &origin, target, dest, spec).await;
     };
 
     let prefix = grammar::with_base(base, target.prefix_at(&origin).as_str());
@@ -506,6 +498,134 @@ pub async fn blob_fetch(
             .map(|r| r.to_string())
             .unwrap_or_default(),
         root_pinned,
+        priority: priority_name(FETCH_PRIORITY).to_string(),
+    })
+}
+
+/// The Tier-2 half of [`blob_fetch`] (RFC 07 §2.4, v1.17): one verified,
+/// content-addressed chunk from one origin. The address *is* the pin — a
+/// reply that unframes to anything else is rejected naming the origin, so
+/// trust-on-first-use is unspellable on this path by construction.
+async fn fetch_tier2(
+    session: &Session,
+    base: &str,
+    origin: &Origin,
+    target: &BlobTarget,
+    dest: &Path,
+    spec: &BlobFetchSpec,
+) -> Result<BlobFetchReport> {
+    let started = std::time::Instant::now();
+    match target {
+        BlobTarget::Store { algo, hash } => {
+            if algo != zblob::Hash::ALGO {
+                bail!(
+                    "`{}` cannot be fetched by this build: the reference client speaks `{}` only (RFC 07 §2.4 — addressing is per-algorithm)",
+                    target.spelling(),
+                    zblob::Hash::ALGO
+                );
+            }
+            let parsed: zblob::Hash = hash.as_str().parse().map_err(|e| {
+                anyhow!("`{hash}` is not a content address the reference client accepts: {e}")
+            })?;
+            let prefix_str = grammar::with_base(
+                base,
+                grammar::blob_tier_prefix(origin, grammar::BlobTier::Store).as_str(),
+            );
+            let prefix = zblob::QueryPrefix::new(prefix_str.clone())
+                .map_err(|e| anyhow!("`{prefix_str}` is not a queryable prefix: {e}"))?;
+            let key = zblob::keys::store_key(prefix.as_str(), zblob::HashAlgo::Blake3, &parsed);
+            let client = zblob::StoreClient::builder(session, prefix)
+                .query_timeout(spec.timeout)
+                .priority(FETCH_PRIORITY)
+                .build();
+            let bytes = client
+                .fetch_chunk(&parsed)
+                // The origin is named here for the same reason blob_fetch
+                // names it: a verification failure that does not say which
+                // origin produced it is unactionable.
+                .await
+                .map_err(|e| anyhow!("{}: {e}", origin.chunk()))?;
+            if dest.exists() && !spec.overwrite {
+                bail!(
+                    "`{}` already exists — pass overwrite to replace it",
+                    dest.display()
+                );
+            }
+            std::fs::write(dest, &bytes).with_context(|| format!("writing {}", dest.display()))?;
+            Ok(BlobFetchReport {
+                origin: origin.chunk().to_string(),
+                key,
+                dest: dest.display().to_string(),
+                bytes: bytes.len() as u64,
+                chunks: 1,
+                chunks_resumed: 0,
+                rejected: 0,
+                retries: 0,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                root: hash.to_string(),
+                // The key is the root (RFC 07 §2.1): a store fetch cannot be
+                // trust-on-first-use, so this is true by construction.
+                root_pinned: true,
+                priority: priority_name(FETCH_PRIORITY).to_string(),
+            })
+        }
+        BlobTarget::Tree { .. } => bail!(
+            "`{}` is inspected, not downloaded, by this explorer: a validated index summary needs no content store (RFC 07 §2.3, v1.17) — the frontends route tree targets to the tree-index report; materializing a tree is the reference client's `download_tree`, which needs a store this build deliberately does not keep",
+            target.spelling()
+        ),
+        BlobTarget::Artifact { .. } => {
+            bail!("tier-1 target reached the tier-2 fetch path — a bug in blob_fetch")
+        }
+    }
+}
+
+/// Fetch and fully validate one origin's index for `tree/<root>`, returning
+/// the summary an explorer renders (RFC 07 §2.3, v1.17) — **no content store
+/// involved**: the stats make inspecting a huge tree cheap, which is the
+/// difference between browsing a snapshot and downloading one.
+pub async fn blob_tree_index(
+    session: &Session,
+    base: &str,
+    origin: &str,
+    root: &ContentHash,
+    timeout: Duration,
+) -> Result<crate::report::BlobTreeIndexReport> {
+    let started = std::time::Instant::now();
+    let origin = parse_origin(origin)?;
+    let tree_str = grammar::with_base(
+        base,
+        grammar::blob_tier_prefix(&origin, grammar::BlobTier::Tree).as_str(),
+    );
+    let store_str = grammar::with_base(
+        base,
+        grammar::blob_tier_prefix(&origin, grammar::BlobTier::Store).as_str(),
+    );
+    let tree_prefix = zblob::QueryPrefix::new(tree_str.clone())
+        .map_err(|e| anyhow!("`{tree_str}` is not a queryable prefix: {e}"))?;
+    let store_prefix = zblob::QueryPrefix::new(store_str.clone())
+        .map_err(|e| anyhow!("`{store_str}` is not a queryable prefix: {e}"))?;
+    let parsed: zblob::Hash = root.as_str().parse().map_err(|e| {
+        anyhow!("`{root}` is not a content address the reference client accepts: {e}")
+    })?;
+    let key = zblob::keys::tree_key(tree_prefix.as_str(), root.as_str());
+    // No priority setter: the reference client defaults to data-low, which is
+    // FETCH_PRIORITY — the §2.6 conformant untouched default.
+    let client = zblob::TreeClient::builder(session, store_prefix, tree_prefix)
+        .query_timeout(timeout)
+        .build();
+    let index = client
+        .fetch_index_by_root(&parsed)
+        .await
+        .map_err(|e| anyhow!("{}: {e}", origin.chunk()))?;
+    Ok(crate::report::BlobTreeIndexReport {
+        origin: origin.chunk().to_string(),
+        key,
+        root: root.to_string(),
+        entries: index.entries().len(),
+        files: index.file_count(),
+        total_size: index.total_size(),
+        chunks: index.needed_chunk_refs().len(),
+        elapsed_ms: started.elapsed().as_millis() as u64,
         priority: priority_name(FETCH_PRIORITY).to_string(),
     })
 }

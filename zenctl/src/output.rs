@@ -703,6 +703,39 @@ pub fn blob_probe(report: &BlobProbeReport, format: Format) -> Result<()> {
 }
 
 /// `blob fetch` — what one transfer cost and proved.
+/// `blob fetch tree/<root>` — the validated index summary (RFC 07 §2.3,
+/// v1.17). Inspection, not download: no destination file, no content store,
+/// and the pin is the key itself.
+pub fn blob_tree(report: &zenkey_fleet::report::BlobTreeIndexReport, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json | Format::Ndjson => {
+            json_doc(report);
+            Ok(())
+        }
+        _ => {
+            println!("tree/{}", report.root);
+            println!("  from      {} ({})", report.origin, report.key);
+            println!(
+                "  index     {} entr{}, {} file(s)",
+                report.entries,
+                if report.entries == 1 { "y" } else { "ies" },
+                report.files
+            );
+            println!(
+                "  content   {} bytes in {} distinct chunk(s) — not fetched; \
+                 the summary needs no content store (RFC 07 §2.3)",
+                report.total_size, report.chunks
+            );
+            println!("  priority  {} (RFC 07 §2.6)", report.priority);
+            println!(
+                "  root      {} (pinned by construction — the key is the identity)",
+                report.root
+            );
+            Ok(())
+        }
+    }
+}
+
 pub fn blob_fetch(report: &BlobFetchReport, format: Format) -> Result<()> {
     match format.resolved() {
         Format::Json | Format::Ndjson => json_doc(report),

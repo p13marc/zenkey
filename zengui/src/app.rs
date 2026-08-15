@@ -1890,6 +1890,33 @@ impl Zengui {
                 let Some(origin) = self.blob.selected().map(|h| h.origin.clone()) else {
                     return Task::none();
                 };
+
+                // A tree target is inspected, not downloaded (RFC 07 §2.3,
+                // v1.17): fetch the descriptor and index chunks, validate
+                // against the root — which the key already is — and render
+                // the summary. No file, no progress stream, no cancel token.
+                if let zenkey_fleet::BlobTarget::Tree { root } = &target {
+                    let root = root.clone();
+                    self.blob.fetch = crate::blob::Fetch::InFlight {
+                        received: 0,
+                        total: 0,
+                        bytes: 0,
+                    };
+                    let base = self.settings.base.clone();
+                    let timeout = self.settings.timeout();
+                    return Task::perform(
+                        async move {
+                            let out = zenkey_fleet::blob_tree_index(
+                                &session, &base, &origin, &root, timeout,
+                            )
+                            .await
+                            .map(Arc::new)
+                            .map_err(|e| e.to_string());
+                            (base, out)
+                        },
+                        |(ran, out)| Message::Blob(BlobMsg::InspectDone(ran, out)),
+                    );
+                }
                 let root = match self.blob.root_input.trim() {
                     "" => None,
                     hex => match zenkey::ContentHash::parse(hex) {
@@ -1989,6 +2016,11 @@ impl Zengui {
             BlobMsg::FetchDone(ran_against, outcome) => {
                 self.blob
                     .fetch_finished(outcome, &ran_against, &self.settings.base);
+                Task::none()
+            }
+            BlobMsg::InspectDone(ran_against, outcome) => {
+                self.blob
+                    .inspect_finished(outcome, &ran_against, &self.settings.base);
                 Task::none()
             }
             BlobMsg::Cancel => {

@@ -82,6 +82,23 @@ pub async fn fetch(
 ) -> Result<()> {
     let target = BlobTarget::parse(target)?;
 
+    // `tree/<root>` is inspected, not downloaded (RFC 07 §2.3, v1.17): the
+    // summary is validated against the root — which the key already is — and
+    // needs no content store, no destination file, and no pinning flags.
+    if let BlobTarget::Tree { root } = &target {
+        let session = args.session().await?;
+        if !quiet {
+            eprintln!(
+                "fetching {} index from {from} at data-low (RFC 07 §2.6)",
+                target.spelling()
+            );
+        }
+        let report =
+            zenkey_fleet::blob_tree_index(&session, args.base(), from, root, args.timeout())
+                .await?;
+        return output::blob_tree(&report, args.format);
+    }
+
     // RFC 07 §2.1: every reference handed to a consumer MUST carry the identity
     // of the bytes it names. An operator typing an id on a command line has no
     // reference, so trust-on-first-use has to be *asked for* — and the report

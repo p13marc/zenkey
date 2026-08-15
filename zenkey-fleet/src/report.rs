@@ -750,6 +750,32 @@ pub struct BlobFetchReport {
     pub priority: String,
 }
 
+/// A validated tree-index summary from one origin (RFC 07 §2.3, v1.17):
+/// inspection **without a content store**. The reply chain is untrusted at
+/// every step — index chunks verify against their own addresses and the
+/// reassembled index verifies against the root the caller asked for — so this
+/// is pinned by construction, and browsing a tree costs its index, never its
+/// content.
+#[derive(Debug, Clone, Serialize)]
+pub struct BlobTreeIndexReport {
+    pub origin: String,
+    /// The one concrete key asked.
+    pub key: String,
+    /// The identity fetched — also the pin.
+    pub root: String,
+    /// Directory entries of every kind.
+    pub entries: usize,
+    /// Files among them.
+    pub files: usize,
+    /// Total content bytes the snapshot references.
+    pub total_size: u64,
+    /// Distinct content chunks the snapshot references.
+    pub chunks: usize,
+    pub elapsed_ms: u64,
+    /// See [`BlobFetchReport::priority`].
+    pub priority: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -36,6 +36,9 @@ pub enum Fetch {
         bytes: u64,
     },
     Done(Arc<BlobFetchReport>),
+    /// A `tree/<root>` target: inspected, not downloaded (RFC 07 §2.3,
+    /// v1.17) — the validated index summary, no content store involved.
+    Inspected(Arc<zenkey_fleet::report::BlobTreeIndexReport>),
     Failed(String),
 }
 
@@ -113,7 +116,10 @@ impl BlobState {
         if self.selected().is_none() {
             return Err("choose one holder — a fetch names exactly one origin (RFC 07 §2.5)");
         }
-        if self.dest_input.trim().is_empty() {
+        // A tree target is inspected, not downloaded (RFC 07 §2.3, v1.17):
+        // the summary writes nothing, so it needs no destination.
+        let tree = matches!(self.target, Some(Ok(BlobTarget::Tree { .. })));
+        if !tree && self.dest_input.trim().is_empty() {
             return Err("choose where to write it");
         }
         if matches!(self.fetch, Fetch::InFlight { .. }) {
@@ -168,6 +174,24 @@ impl BlobState {
         self.cancel = None;
         self.fetch = match outcome {
             Ok(report) => Fetch::Done(report),
+            Err(e) => Fetch::Failed(e),
+        };
+    }
+
+    /// A tree inspection finished — [`Self::fetch_finished`]'s judgment, for
+    /// the summary a `tree/<root>` target produces instead of a file.
+    pub fn inspect_finished(
+        &mut self,
+        outcome: Result<Arc<zenkey_fleet::report::BlobTreeIndexReport>, String>,
+        ran_against: &str,
+        base: &str,
+    ) {
+        if ran_against != base {
+            return;
+        }
+        self.cancel = None;
+        self.fetch = match outcome {
+            Ok(report) => Fetch::Inspected(report),
             Err(e) => Fetch::Failed(e),
         };
     }
