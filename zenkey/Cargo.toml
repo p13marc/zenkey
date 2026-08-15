@@ -52,7 +52,7 @@ dirs = { workspace = true }
 tracing = { workspace = true }
 # Runtime, not just build-time: `introspect` replies with a registry slice, so a
 # consumer needs the TOML parser to read one (RFC 08 §6, issue #469).
-toml = "0.8"
+toml = "1"
 
 [dev-dependencies]
 criterion = { workspace = true }

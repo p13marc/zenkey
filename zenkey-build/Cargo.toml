@@ -16,4 +16,4 @@ authors.workspace = true
 # zenoh stack — a consumer's build-dependencies stay light.
 zenkey = { version = "0.6.0", path = "../zenkey", default-features = false }
 thiserror = { workspace = true }
-toml = "0.8"
+toml = "1"

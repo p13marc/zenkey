@@ -3,7 +3,8 @@
 //! Same contract as `zenkey/benches/keys.rs`: recorded before the 0.3 codegen
 //! rewrite; numbers in `docs/bench-baseline.md`.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use zenkey::grammar::Class;
 use zenkey::origin::{HostId, LocalOrigin};
 use zenkey_fixture_tests::registry::{self, netring};

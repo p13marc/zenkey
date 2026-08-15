@@ -3,7 +3,8 @@
 //! Recorded BEFORE the 0.3 core rewrite so the redesign's perf claims are
 //! measured, not asserted. Numbers live in `docs/bench-baseline.md`.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use zenkey::grammar::{self, Class, Origin, Producer};
 use zenkey::origin::HostId;
 use zenkey::slug::chunk_slug;

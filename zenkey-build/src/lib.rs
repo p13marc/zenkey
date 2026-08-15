@@ -1226,9 +1226,10 @@ fn check_type_table(dir: &Path, files: &[RegistryFile]) -> Result<(), Error> {
         return Ok(());
     };
     let fname = "types.toml";
-    let doc: toml::Value = src
-        .parse()
-        .map_err(|e| lint(fname, format!("does not parse: {e}")))?;
+    // `toml::from_str`, not `str::parse`: since toml 0.9, `Value: FromStr`
+    // parses a single TOML *value*, and only `from_str` parses a document.
+    let doc: toml::Value =
+        toml::from_str(&src).map_err(|e| lint(fname, format!("does not parse: {e}")))?;
     let table = doc
         .get("types")
         .and_then(|v| v.as_table())
