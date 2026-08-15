@@ -142,16 +142,33 @@ not published state.
 > case-insensitively, so the lowercasing is lossless and the payload MAY
 > carry the canonical uppercase form.
 
-The endpoints under `artifact/<id>/` are reserved and normative:
+The endpoints under `artifact/<id>/` are reserved and normative. The table
+separates the key a consumer **asks on** from the key a reply **arrives
+on**, because the two are not always the same key and the difference is
+load-bearing (below):
 
-| Key | Kind | Purpose |
-|---|---|---|
-| `<id>/manifest` | queryable | sizing + chunking + the content root |
-| `<id>/slice/<i>` | queryable | a verified slice of transfer chunk `i` |
-| `<id>/have` | queryable | availability: which chunks this origin can serve |
-| `<id>/push/offer` | queryable | upload offer (see below) |
-| `<id>/push/slice/<i>` | queryable | one uploaded slice |
-| `<id>/fanout` | **publication** | one-to-many rollout of the same blob |
+| Request key | Reply key(s) | Kind | Purpose |
+|---|---|---|---|
+| `<id>/manifest` | same | queryable | sizing + chunking + the content root |
+| `<id>/**` + chunk-range selector | `<id>/slice/<i>` | queryable | verified slices of the requested transfer chunks |
+| `<id>/have` | same | queryable | availability: which chunks this origin can serve |
+| `<id>/push/offer` | same | queryable (write) | upload offer (see below) |
+| `<id>/push/slice/<i>` | same | queryable (write) | one uploaded slice |
+| `<id>/fanout` | — | **publication** | one-to-many rollout of the same blob |
+
+**Why the second column exists (normative).** Zenoh delivers a reply only
+if its key intersects the query's key expression, and the check runs on the
+*serving* side — a mismatched reply fails at the holder, and the consumer
+observes silence rather than an error. An endpoint whose replies are
+per-chunk therefore cannot be asked for on the reply key: a slice is
+requested as a **chunk-range selector on `<id>/**`**, and each slice
+arrives on its own `<id>/slice/<i>`. That makes `slice/<i>` a key a
+consumer *receives*, never one it GETs — an implementer reading a
+one-column table as "GET `<id>/slice/<i>`" builds a client that asks on
+keys no holder serves and receives nothing, the exact silent failure mode
+this convention works hardest to design out elsewhere. The same
+request/reply split recurs on Tier 2's batched fetch (§2.4), which is
+additionally the one sanctioned exception to the intersection rule itself.
 
 Two corrections to v1.2 follow from this table. First, `@blob` is no longer
 uniformly "queryables": `fanout` is a *publication* — the one-to-many case
