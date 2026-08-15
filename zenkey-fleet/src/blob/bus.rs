@@ -300,20 +300,39 @@ fn fold_tier2(
     holders
 }
 
-/// Verified bytes land whole or not at all: written to a hidden sibling and
-/// renamed into place, on the async runtime's I/O pool rather than blocking
-/// the executor. A crash mid-write leaves a temp file, never a `dest` that
-/// looks fetched and is not — the same failure direction the reference
-/// client's own resume sidecar chooses.
+/// Verified bytes land whole or not at all: written and synced to a hidden
+/// sibling, then renamed into place, on the async runtime's I/O pool rather
+/// than blocking the executor. A crash mid-write leaves a temp file, never a
+/// `dest` that looks fetched and is not — the same failure direction the
+/// reference client chooses, sync included. The temp name carries pid and a
+/// sequence number so concurrent fetches to one destination cannot collide
+/// on it; the final rename keeps the same narrow overwrite race the
+/// reference client's `Overwrite` docs accept.
 async fn write_atomically(dest: &Path, bytes: &[u8]) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
     let name = dest
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or_else(|| anyhow!("`{}` names no file to write", dest.display()))?;
-    let tmp = dest.with_file_name(format!(".{name}.zenkey-tmp"));
-    tokio::fs::write(&tmp, bytes)
-        .await
-        .with_context(|| format!("writing {}", tmp.display()))?;
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dest.with_file_name(format!(".{name}.{}.{seq}.zenkey-tmp", std::process::id()));
+    let write = async {
+        let mut f = tokio::fs::File::create(&tmp).await?;
+        f.write_all(bytes).await?;
+        f.sync_all().await
+    };
+    if let Err(e) = write.await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(e).with_context(|| format!("writing {}", tmp.display()));
+    }
     if let Err(e) = tokio::fs::rename(&tmp, dest).await {
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(e).with_context(|| format!("moving into place at {}", dest.display()));
@@ -450,7 +469,7 @@ pub async fn blob_fetch(
 ) -> Result<BlobFetchReport> {
     let origin = parse_origin(origin)?;
     let Some(id) = target.artifact_id() else {
-        return fetch_tier2(session, base, &origin, target, dest, spec).await;
+        return fetch_tier2(session, base, &origin, target, dest, spec, on_progress).await;
     };
 
     let prefix = grammar::with_base(base, target.prefix_at(&origin).as_str());
@@ -534,6 +553,7 @@ async fn fetch_tier2(
     target: &BlobTarget,
     dest: &Path,
     spec: &BlobFetchSpec,
+    on_progress: &(dyn Fn(BlobProgress) + Send + Sync),
 ) -> Result<BlobFetchReport> {
     let started = std::time::Instant::now();
     match target {
@@ -543,6 +563,16 @@ async fn fetch_tier2(
                     "`{}` cannot be fetched by this build: the reference client speaks `{}` only (RFC 07 §2.4 — addressing is per-algorithm)",
                     target.spelling(),
                     zblob::Hash::ALGO
+                );
+            }
+            // The key *is* the pin (RFC 07 §2.1), so a caller-supplied root
+            // is either redundant or a contradiction — and a contradiction
+            // must refuse, not be silently out-voted by the address.
+            if let Some(pin) = &spec.root
+                && pin != hash
+            {
+                bail!(
+                    "the pinned root {pin} contradicts the content address {hash}: a store fetch is pinned by its key (RFC 07 §2.1) — drop the pin, or fetch the address you mean"
                 );
             }
             let parsed: zblob::Hash = hash.as_str().parse().map_err(|e| {
@@ -568,14 +598,36 @@ async fn fetch_tier2(
                 .query_timeout(spec.timeout)
                 .priority(FETCH_PRIORITY)
                 .build();
-            let bytes = client
-                .fetch_chunk(&parsed)
-                // The origin is named here for the same reason blob_fetch
-                // names it: a verification failure that does not say which
-                // origin produced it is unactionable.
+            // The reference client's chunk fetch takes no token, so the
+            // cancellation the spec promises is honoured here, with the
+            // client's own combinator: a cancelled transfer writes nothing.
+            let bytes = match spec
+                .cancel
+                .until_cancelled(client.fetch_chunk(&parsed))
                 .await
-                .map_err(|e| anyhow!("{}: {e}", origin.chunk()))?;
+            {
+                None => {
+                    on_progress(BlobProgress::Cancelled {
+                        received: 0,
+                        total: 1,
+                    });
+                    bail!("{}: cancelled", origin.chunk());
+                }
+                // The origin is named for the same reason blob_fetch names
+                // it: a verification failure that does not say which origin
+                // produced it is unactionable.
+                Some(fetched) => fetched.map_err(|e| anyhow!("{}: {e}", origin.chunk()))?,
+            };
+            on_progress(BlobProgress::Chunk {
+                index: 0,
+                received: 1,
+                total: 1,
+                bytes_received: bytes.len() as u64,
+            });
             write_atomically(dest, &bytes).await?;
+            on_progress(BlobProgress::Completed {
+                path: dest.display().to_string(),
+            });
             Ok(BlobFetchReport {
                 origin: origin.chunk().to_string(),
                 key,

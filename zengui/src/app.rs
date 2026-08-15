@@ -1897,11 +1897,7 @@ impl Zengui {
                 // the summary. No file, no progress stream, no cancel token.
                 if let zenkey_fleet::BlobTarget::Tree { root } = &target {
                     let root = root.clone();
-                    self.blob.fetch = crate::blob::Fetch::InFlight {
-                        received: 0,
-                        total: 0,
-                        bytes: 0,
-                    };
+                    self.blob.fetch = crate::blob::Fetch::Inspecting;
                     let base = self.settings.base.clone();
                     let timeout = self.settings.timeout();
                     return Task::perform(

@@ -414,6 +414,14 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
                     }),
             );
         }
+        Fetch::Inspecting => {
+            // No chunk counts and no stop button: an inspection has neither.
+            // It is bounded by the query timeout rather than cancellable.
+            col = col.push(kit::muted(
+                "inspecting — fetching and validating the index against its root \
+                 (bounded by the query timeout)",
+            ));
+        }
         Fetch::Inspected(r) => {
             // RFC 07 §2.3 (v1.17): the summary an explorer renders from the
             // validated index — browsing a tree and downloading one are

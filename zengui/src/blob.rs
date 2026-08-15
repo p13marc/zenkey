@@ -35,6 +35,10 @@ pub enum Fetch {
         total: u32,
         bytes: u64,
     },
+    /// A `tree/<root>` inspection is running. Its own state, not a zeroed
+    /// [`Fetch::InFlight`]: an inspection has no chunk counts to fake and no
+    /// cancel token to offer, so the view must not render either.
+    Inspecting,
     Done(Arc<BlobFetchReport>),
     /// A `tree/<root>` target: inspected, not downloaded (RFC 07 §2.3,
     /// v1.17) — the validated index summary, no content store involved.
@@ -125,6 +129,9 @@ impl BlobState {
         if matches!(self.fetch, Fetch::InFlight { .. }) {
             return Err("a fetch is already running");
         }
+        if matches!(self.fetch, Fetch::Inspecting) {
+            return Err("an inspection is already running");
+        }
         // RFC 07 §2.1: an anchor, or an explicit decision to go without one.
         let tier_one = matches!(self.target, Some(Ok(BlobTarget::Artifact { .. })));
         if tier_one && self.root_input.trim().is_empty() && !self.allow_unpinned {
@@ -179,17 +186,20 @@ impl BlobState {
     }
 
     /// A tree inspection finished — [`Self::fetch_finished`]'s judgment, for
-    /// the summary a `tree/<root>` target produces instead of a file.
+    /// the summary a `tree/<root>` target produces instead of a file, plus a
+    /// state guard the base alone cannot give: an inspection is not
+    /// cancellable, so a stale completion may arrive after the user has moved
+    /// on to a *fetch* — it must neither overwrite that fetch's progress nor
+    /// touch its cancel token (which an inspection never owns).
     pub fn inspect_finished(
         &mut self,
         outcome: Result<Arc<zenkey_fleet::report::BlobTreeIndexReport>, String>,
         ran_against: &str,
         base: &str,
     ) {
-        if ran_against != base {
+        if ran_against != base || !matches!(self.fetch, Fetch::Inspecting) {
             return;
         }
-        self.cancel = None;
         self.fetch = match outcome {
             Ok(report) => Fetch::Inspected(report),
             Err(e) => Fetch::Failed(e),
