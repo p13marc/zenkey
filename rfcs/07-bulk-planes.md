@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.7 (proposed)** · normative chapter · *amended in v1.2, v1.7, v1.8, v1.11 and v1.16 — see [00-index.md](00-index.md)*
+**Status: v1.17 (proposed)** · normative chapter · *amended in v1.2, v1.7, v1.8, v1.11, v1.16 and v1.17 — see [00-index.md](00-index.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -88,7 +88,12 @@ Rules:
 protocol. The plane's placement, position count and Tier-1 shape are
 unchanged; what changed is that Tier-2 keys are now genuinely
 content-addressed, the per-artifact endpoints are named, and integrity is
-anchored rather than assumed.*
+anchored rather than assumed. Amended again in v1.17 against the reference
+client's wire v3: §2.2 separates request keys from reply keys, Tier 2
+gains reserved endpoint tokens, a batched fetch and probes (§§2.4–2.5),
+the tree index becomes content-addressed data (§2.3), and `fanout` is
+demoted to Appendix A. Chunk addresses did not change — existing stores
+stay warm across the v3 cut.*
 
 ```
 <base>/v1/<origin>/@blob/artifact/<id>/**             Tier-1: one named blob, verified streaming
@@ -142,30 +147,54 @@ not published state.
 > case-insensitively, so the lowercasing is lossless and the payload MAY
 > carry the canonical uppercase form.
 
-The endpoints under `artifact/<id>/` are reserved and normative:
+The endpoints under `artifact/<id>/` are reserved and normative. The table
+separates the key a consumer **asks on** from the key a reply **arrives
+on**, because the two are not always the same key and the difference is
+load-bearing (below):
 
-| Key | Kind | Purpose |
-|---|---|---|
-| `<id>/manifest` | queryable | sizing + chunking + the content root |
-| `<id>/slice/<i>` | queryable | a verified slice of transfer chunk `i` |
-| `<id>/have` | queryable | availability: which chunks this origin can serve |
-| `<id>/push/offer` | queryable | upload offer (see below) |
-| `<id>/push/slice/<i>` | queryable | one uploaded slice |
-| `<id>/fanout` | **publication** | one-to-many rollout of the same blob |
+| Request key | Reply key(s) | Kind | Purpose |
+|---|---|---|---|
+| `<id>/manifest` | same | queryable | sizing + chunking + the content root |
+| `<id>/**` + chunk-range selector | `<id>/slice/<i>` | queryable | verified slices of the requested transfer chunks |
+| `<id>/have` | same | queryable | availability: which chunks this origin can serve |
+| `<id>/push/offer` | same | queryable (write) | upload offer (see below) |
+| `<id>/push/slice/<i>` | same | queryable (write) | one uploaded slice |
 
-Two corrections to v1.2 follow from this table. First, `@blob` is no longer
-uniformly "queryables": `fanout` is a *publication* — the one-to-many case
-where N consumers each pulling the same bytes is precisely the amplification
-this plane exists to avoid, so the producer publishes once and late joiners
-recover from the publisher's cache. It is a declared publisher on the
-producer's concrete origin like any other (§3), at the bulk QoS of §2.6.
-Second, `push/**` is a **write path expressed as a query** (the payload
-rides the GET): the uploader offers a manifest, the origin answers with the
-chunk ranges it still wants, and each pushed slice is verified against the
-offered root before it is retained. This is not an exemption from the
-declared-publisher rule ([04-planes.md §3](04-planes.md)) because nothing is
-published — but it *is* a write, so it MUST be gated by an authorization
-hook on the receiving origin and MUST NOT be enabled by default.
+*(A sixth endpoint, `<id>/fanout`, was normative here from v1.7 to v1.16.
+It is demoted to [Appendix A](#appendix-a--fanout-experimental) in v1.17 —
+kept on record, experimental, no longer promised by this table.)*
+
+**Why the second column exists (normative).** Zenoh delivers a reply only
+if its key intersects the query's key expression, and the check runs on the
+*serving* side — a mismatched reply fails at the holder, and the consumer
+observes silence rather than an error. An endpoint whose replies are
+per-chunk therefore cannot be asked for on the reply key: a slice is
+requested as a **chunk-range selector on `<id>/**`**, and each slice
+arrives on its own `<id>/slice/<i>`. That makes `slice/<i>` a key a
+consumer *receives*, never one it GETs — an implementer reading a
+one-column table as "GET `<id>/slice/<i>`" builds a client that asks on
+keys no holder serves and receives nothing, the exact silent failure mode
+this convention works hardest to design out elsewhere. The same
+request/reply split recurs on Tier 2's batched fetch (§2.4), which is
+additionally the one sanctioned exception to the intersection rule itself.
+
+One correction to v1.2 stands unchanged: `push/**` is a **write path
+expressed as a query** (the payload rides the GET): the uploader offers a
+manifest, the origin answers with the chunk ranges it still wants, and each
+pushed slice is verified against the offered root before it is retained.
+This is not an exemption from the declared-publisher rule
+([04-planes.md §3](04-planes.md)) because nothing is published — but it
+*is* a write, so it MUST be gated by an authorization hook on the receiving
+origin and MUST NOT be enabled by default.
+
+**`push` remains normative**, and v1.17 says so explicitly so that the
+demotion of `fanout` beside it is not read as applying to it. The two are
+not in the same position: `push` is the plane's *only* write path, its
+authorization gate is a designed-in property rather than an afterthought,
+and a foreseeable first consumer exists (a support-bundle upload). An
+endpoint being unconsumed today is an argument about tables describing
+what is served — it is not, by itself, an argument for removing the one
+write affordance the plane has.
 
 Resume is a persisted **chunk bitfield**: the client re-requests exactly the
 holes it is missing, as a chunk-range selector on the same wildcard GET. A
@@ -204,11 +233,47 @@ A consumer therefore resolves a snapshot in two hops: read the name from
 `state` to obtain a root, then fetch `tree/<root>`. The second hop is
 self-anchoring (§2.1) — the key it asked for is the identity it must get.
 
-The transfer itself is unchanged in spirit: the client GETs the index, diffs
-the hashes it needs against its local content store, fetches only the
-missing chunks (re-hashing each on receipt), reconstructs, and verifies the
-root. Resume *is* "which hashes I already have" — it survives reconnect and
-restart with no session state.
+**The index is content-addressed data (amended in v1.17).** `tree/<root>`
+keeps its key and its identity rule but changes what the key *serves*: a
+small **index descriptor** — the index's root, the list of store addresses
+holding the serialized index bytes, and summary statistics (entry and file
+counts, total size) — rather than the whole index in one reply. The index
+bytes themselves are ordinary content in the store, fetched through the
+chunk path like any other chunk. A small tree's index stays a single
+chunk, so the common case does not get slower; a large index arrives in
+batched rounds (§2.4), dedups between snapshots exactly as file content
+does (two snapshots of a mostly-unchanged tree share index chunks instead
+of re-transferring the whole index), and resumes hole-by-hole with no new
+machinery. The v1.7 shape — a monolithic index reply under a size cap —
+made a sufficiently large tree simply unservable; this one has no cliff.
+
+Four things did **not** move, stated here because they look like they did:
+
+- **Identity.** `<root>` remains the digest over the canonical, versioned,
+  mtime-free projection of the tree. A tree's name is still its own
+  content hash; `tree/nightly` still has no spelling.
+- **Self-anchoring (§2.1).** The descriptor is **untrusted**: each index
+  chunk verifies against its own address, and the reassembled index
+  verifies against the `<root>` the consumer asked for. Fetching a
+  descriptor places no new trust anywhere.
+- **The objects/refs split** above, and the two-hop resolution through
+  `state`, are untouched.
+- **Framing (§2.4).** Index chunks are chunks: the container rules apply
+  to them exactly as to file chunks, including the ban on encrypted
+  containers under a fleet-reachable `store` key.
+
+The `stats` exist for explorers: a consumer can render a tree's summary
+from the descriptor alone, which makes *inspecting* a huge tree cheap —
+browsing a tree and downloading one are now different costs, and that
+difference is what lets a bus explorer show a snapshot without owning a
+content store.
+
+The transfer is then as before, one level deeper: obtain the descriptor,
+assemble and verify the index, diff the hashes it needs against the local
+content store, fetch only the missing chunks — batched, falling back
+per-chunk (§2.4) — re-hashing each on receipt, reconstruct, and verify the
+root. Resume *is* "which hashes I already have" — it survives reconnect
+and restart with no session state.
 
 ### 2.4 Chunk values are framed; the hash addresses the content (normative)
 
@@ -232,6 +297,68 @@ every other holder an object it can neither verify nor use.
 fleet-wide (dedup is per-algorithm: the same bytes under two algorithms are
 two objects); the segment exists so a migration can run both side by side.
 
+**The dual-algo migration procedure (added in v1.17).** The segment above
+was machinery without a procedure — and it cost a fleet once: the
+reference client's sha256→blake3 change was all-or-nothing in practice
+because no producer could declare two algorithms, so every cached chunk
+went cold on a flag day. With per-algo declarations
+([08 §2/§5](08-registry.md)) a hash migration is a rollout:
+
+1. **Open the window.** Add a second `[[blob]] tier = "store"` entry with
+   the new `algo` beside the old one. Producers publish new snapshots
+   under the new algorithm; both address spaces serve concurrently, and
+   existing caches stay warm under the old one.
+2. **Drain by attrition.** Consumers fetch whatever address a reference
+   names; nothing re-keys existing content. Republish only what must
+   survive the window longer than its natural churn.
+3. **Retire.** When nothing live references the old address space, mark
+   the old entry `gone` (§3 lifecycle in [08](08-registry.md)). The old
+   builders disappear from the generated surface; cached chunks under the
+   old algorithm are garbage, not corruption.
+
+The window's invariant is the per-algo address type: an address cannot
+migrate silently, because it has no spelling under the other algorithm's
+builder.
+
+**Reserved Tier-2 endpoint tokens (added in v1.17).** Tier 1 reserves its
+endpoints by name (§2.2); until v1.17 Tier 2 reserved none — the key *was*
+the endpoint, and [08 §2](08-registry.md) leaned on that sentence. Wire v3
+introduces two tokens, and the moment Tier 2 has any endpoint at all, what
+kept the keyspace unambiguous must be stated as a rule rather than left as
+an accident:
+
+| Request key | Reply key(s) | Purpose |
+|---|---|---|
+| `store/<algo>/batch` | `store/<algo>/<hash>`, one per delivered chunk | batched chunk fetch: the request carries a want-list of content addresses |
+| `store/<algo>/have` | same | Tier-2 store probe (§2.5) |
+| `tree/<root>/have` | same | Tier-2 tree probe (§2.5) |
+
+- **A reserved Tier-2 token MUST NOT be a valid content address under any
+  registered `<algo>`.** Today that holds by accident — content addresses
+  are hex, `batch` and `have` are not — and this rule is what keeps it
+  holding when the next algorithm or the next token arrives.
+- **Tier-2 keys resolve positionally.** The chunk after the tier token is
+  `<algo>` (or `<root>`); the chunk after *that* is either a content
+  address or a reserved token, distinguished by the rule above. An
+  implementation MUST NOT resolve these keys by string-prefix matching
+  against configured prefixes — Tier 1 already resolves `<id>`
+  positionally, and Tier 2 now does the same.
+- **`batch` replies arrive on each chunk's ordinary store key, and that is
+  a requirement, not an implementation detail.** It keeps every delivered
+  chunk individually verifiable against its own address and individually
+  cacheable, and it lets a router storage (§2.5) serve as singles what it
+  cached from a batch. Because those reply keys do not intersect the
+  request key, `batch` is the **one sanctioned exception** to §2.2's
+  reply-key-intersection rule: a `batch` GET MUST declare that it accepts
+  non-matching replies, and a holder MUST NOT batch-reply to a query that
+  did not so declare.
+- **A router storage never answers `batch`.** It serves by key, and no
+  `…/batch` key exists in it, so it stays silent — which is safe, and has
+  a consequence a client MUST implement: fall back to per-chunk GETs for
+  every hash a batch round leaves unanswered. The fallback is not a
+  nicety; it is what keeps the router-store tier (§2.5) usable by a
+  batching client at all.
+
 ### 2.5 Fleet-wide caching and the router store
 
 **Chunks and trees are immutable ⇒ cacheable fleet-wide.** Replies are valid
@@ -246,21 +373,50 @@ so a storage's last-writer-wins reconciliation is genuinely a no-op.
 A publisher MUST NOT treat a resolved PUT as durability: it signals hand-off
 to the transport, not retention by a storage, and index and chunks may land
 on different storages with no ordering between them. A producer that intends
-to exit MUST confirm retention by reading back what it published (the index
-and a sample of chunks) before considering the snapshot available.
+to exit MUST confirm retention by reading back what it published — the
+index descriptor, the index chunks it references, and a sample of content
+chunks — before considering the snapshot available. The middle item is a
+real tightening from v1.17 (§2.3): index chunks are chunks, so the
+read-back rule now covers strictly more keys than it did when the index was
+one reply, and a producer that reads back only the descriptor has verified
+a pointer, not a snapshot.
 
-**Probing is a named endpoint, not a wildcard convention.** A consumer that
-cannot name the origin holding a blob probes with a *tiny* reply — `have`
-(availability) or `manifest` (§2.2) — across origins, then fetches from one
-chosen origin's concrete key. This supersedes v1.2's advice to use "manifest
-/existence checks with tiny replies": the probe now has a purpose-built
-endpoint whose reply is a bitfield, and a client can use it to choose the
-best-stocked holder rather than merely the first to answer. The prohibition
-itself is unchanged and is stated once, normatively, in §3: a wildcard-origin
-*bulk fetch* remains forbidden as a default path, because every matching
-holder ships the full payload and Zenoh cannot cancel remote replies in
-flight — N holders cost N× the bytes, amplification on exactly the links
-this plane promises to spare.
+**Probing is a named endpoint, not a wildcard convention — on every tier
+(amended in v1.17).** A consumer that cannot name the origin holding an
+object probes with a *tiny* reply across origins, then fetches from one
+chosen origin's concrete key:
+
+- **Tier 1**: `have` (availability bitfield) or `manifest` (§2.2).
+- **Tier 2, store**: `store/<algo>/have` (§2.4) — the request carries a
+  list of content addresses; the reply is a bitfield over exactly that
+  list.
+- **Tier 2, tree**: `tree/<root>/have` (§2.4) — whether this holder has
+  the index, and how many of the tree's chunks it holds (present / total).
+
+Until v1.17 only the first existed, and the gap was reasoned rather than
+an oversight: a Tier-2 key carries the object itself, so a `*`-origin GET
+on one *is* the bulk fan-out this section forbids — there was no small
+thing to ask for. Every clause of that argument is true; the conclusion it
+licenses is *define a small thing to ask for*, not "Tier 2 cannot be
+probed". The Tier-2 probes are built so that §3's **cost gate is satisfied
+by construction**: their reply size is a function of the *request* (a
+bitfield over the hashes the consumer supplied; a flag and two counters),
+never of the object, so the reply cannot be bulk no matter how large what
+it describes. Worth naming, because it is the reply shape — not the plane,
+not the tier — that decides whether a wildcard origin is legitimate:
+§3's two gates stay distinct, and a probe passes the second one by shape.
+
+Probe-then-fetch is thereby total across all three tiers, and a probe now
+also answers *which holder to fetch from* — the piece that makes the
+router-store exemption above usable by an explorer choosing a source, not
+only by a storage. A client can pick the best-stocked holder rather than
+merely the first to answer. The prohibition itself is unchanged and is
+stated once, normatively, in §3: a wildcard-origin *bulk fetch* remains
+forbidden as a default path, because every matching holder ships the full
+payload and Zenoh cannot cancel remote replies in flight — N holders cost
+N× the bytes, amplification on exactly the links this plane promises to
+spare. Probe = O(question); fetch = O(object); the wildcard is for the
+first only ([12 §8.2](12-open-questions.md)).
 
 ### 2.6 QoS: bulk yields — a client obligation
 
@@ -272,10 +428,6 @@ unchanged from v1.2 and it is easy to forget, so the reference client now
 discharges it **by default** rather than documenting it: a client that never
 touches the setting is already conformant, and raising the priority is the
 deliberate act.
-
-The `fanout` publication (§2.2) carries the same obligation on the publish
-side, plus blocking congestion control: shedding slices under local
-backpressure would trade a bounded delay for an unbounded recovery.
 
 ### 2.7 Registry modelling (added in v1.8)
 
@@ -291,7 +443,11 @@ Two rules of this section become *structural* there rather than advisory.
 Generated `tree`/`store` builders take a validated content-hash type, so
 §2.3's revoked caller-chosen name has no spelling in the generated surface;
 and the §2.5 probe form returns a distinct probe-prefix type, so a probe
-prefix cannot be passed where the §3 prohibition forbids one. Declaring
+prefix cannot be passed where the §3 prohibition forbids one — since
+v1.17 that probe type spells every tier's probe form (`have`/`manifest`
+on an artifact, `store/<algo>/have`, `tree/<root>/have`), so
+probe-then-fetch is expressible from the registry on all three tiers.
+Declaring
 `push` in an entry remains a statement of capability — the authorization gate
 and the off-by-default posture of §2.2 are unaffected by anything a registry
 says.
@@ -388,3 +544,38 @@ payload type — fails all three constraints these planes exist for:
   pull/resume/verify. Neither is pub/sub state or telemetry; forcing them
   into data classes would corrupt the class semantics that everything else
   relies on.
+
+## Appendix A — `fanout` (experimental)
+
+*Demoted from §2.2's normative endpoint table in v1.17. The design is kept
+on record; the endpoint is experimental: an implementation MAY offer it
+behind a feature gate, a registry MAY accept its declaration
+([08 §2](08-registry.md)), and no conformant consumer is required to speak
+it.*
+
+The demotion is an observation, not a redesign. After a full release cycle
+of v1.7's table, adoption was zero: no producer declared `fanout`, no
+consumer enabled the reference client's feature (every registry entry that
+declares a blob tier excludes it, with the reason written in the TOML), and
+the one genuinely one-to-many stream in the deployed fleet chose `@media`
+instead. A normative endpoint table should describe what is served;
+keeping an endpoint every declaring producer excludes makes the table
+aspirational, and aspirational normative text is how a second implementer
+ends up building something nobody will speak to. Demotion costs nothing to
+reverse: if a real one-to-many customer appears — firmware rollout is the
+plausible one — promotion back into §2.2 is a one-line amendment.
+
+The design, unchanged from v1.7: `<id>/fanout` is a *publication* — the
+one-to-many case where N consumers each pulling the same bytes is
+precisely the amplification this plane exists to avoid, so the producer
+publishes once and late joiners recover from the publisher's cache. It is
+a declared publisher on the producer's concrete origin like any other
+(§3), at the bulk QoS of §2.6, and it carries §2.6's obligation on the
+publish side plus blocking congestion control: shedding slices under local
+backpressure would trade a bounded delay for an unbounded recovery.
+
+An implementation that does offer it MUST follow the same framing
+discipline as every queryable reply in the plane — version-first structs,
+a declared encoding tag, and tag-checked-before-decode — rather than
+relying on decode failure to reject foreign samples. (The reference
+client's wire v3 brings its `fanout` frames up to exactly this rule.)

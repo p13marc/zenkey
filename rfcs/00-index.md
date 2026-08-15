@@ -1,9 +1,53 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.16 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
+**Status: v1.17 — PROPOSED** (v1.0 2026-07-12; adopted for ZenSight, migration
 tracked in [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`; v1.5 ratifies on merge of the 0.3 redesign
 branch).
+
+> **v1.17 (2026-08-15, the `@blob` wire-v3 amendment)** — **chunk addresses
+> do not change: existing stores and router storages stay warm across this
+> cut.** That is said first because the last wire break (sha256→blake3)
+> orphaned every cached chunk downstream, and this one does not — content
+> is still addressed by BLAKE3 of the uncompressed bytes and the
+> [07 §2.4](07-bulk-planes.md) container framing is untouched. What changes
+> is what Tier 2 can be *asked*: the reference client's wire v3
+> (zblob 0.3.0) closes the three structural limits v2 could not fix
+> additively — one GET per chunk, no Tier-2 probe, a monolithic tree
+> index — and 07 §2 is amended to match. Epic: zenkey #141 (#142–#147;
+> filed as "v1.9", landed as v1.17 — the set had reached v1.16 first).
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **D1** | [07 §2.2](07-bulk-planes.md) | **Request keys and reply keys are distinguished** (#142). The old table read as "GET `<id>/slice/<i>`", which does not and cannot work: Zenoh enforces reply-key intersection on the *serving* side, so a client built from that reading receives silence. Slices are requested as a chunk-range selector on `<id>/**` and arrive on `slice/<i>`; the constraint is stated once in prose as the reason the shapes differ. Latent since v1.7, independent of v3 — the amendment worth landing first. |
+> | **D2** | [07 §2.4](07-bulk-planes.md) | **Tier 2 gains reserved endpoint tokens** (`batch`, `have`; #144), with the rules that keep the keyspace sound: a reserved token MUST NOT be a valid content address under any registered algo; Tier-2 keys resolve positionally; `batch` replies land on each chunk's ordinary store key (a requirement — individually verifiable, individually cacheable, router-storage-servable) and are the one sanctioned exception to D1's intersection rule; a router storage never answers `batch`, so per-chunk fallback is mandatory. Reply-key behaviour verified upstream (marcpardo/zblob#48) before ratification, per the issue's own gate. |
+> | **D3** | [07 §2.5](07-bulk-planes.md) | **Tier 2 gains probes; probe-then-fetch is total across tiers** (#143). `store/<algo>/have` answers a bitfield over exactly the caller-supplied hash list; `tree/<root>/have` answers has-index + chunks present/total. Reply size is O(request), so §3's cost gate is satisfied *by construction* — it is the reply shape, not the tier, that legitimises a wildcard origin. The v1.7 reasoning ("no small thing to ask for") was correct in every clause; its conclusion was "define the small thing", not "Tier 2 cannot be probed". |
+> | **D4** | [07 §2.3](07-bulk-planes.md) | **The tree index becomes content-addressed data** (#145): `tree/<root>` serves a small index descriptor (root, index-chunk addresses, stats); the index bytes are ordinary store content — batched, deduped between snapshots, resumable hole-by-hole, no size cliff. Identity, self-anchoring (the descriptor is untrusted), the objects/refs split and §2.4 framing are unchanged. §2.5's read-back rule tightens to cover index chunks; the stats let an explorer summarize a tree without a content store. |
+> | **D5** | [07 §2.2 / Appendix A](07-bulk-planes.md) | **`fanout` is demoted to an experimental appendix** (#146, decision recorded on the issue). Zero adoption after a full release cycle: no declarer, no enabled feature, and the one genuinely one-to-many stream chose `@media`. The design is kept on record and the appendix requires v3's framing discipline of any implementation; promotion back is a one-line amendment. **`push` is explicitly reaffirmed normative** — the plane's only write path, authorization-gated by design. The `fanout` token stays *legal* in [08 §2](08-registry.md)'s `endpoints`, declaring the experimental endpoint, so no existing registry breaks. One editorial touch outside 07: [03 §2](03-grammar.md)'s plane table reverts to "queryables", undoing v1.7's `(+ fanout pub)` annotation. |
+> | **D6** | [08 §2/§5](08-registry.md), [07 §2.4](07-bulk-planes.md) | **Per-algo `store` declarations become legal** (#147): `algo` is a discriminator in the shape-agreement rule, codegen emits one builder and one *address type* per declared algo (a cross-algo address does not typecheck), and 07 §2.4 gains the dual-algo migration procedure — open the window, drain by attrition, retire via `gone`. Closes v1.8 C3's "build diagnostic until codegen learns per-algo builders". Tier-2 endpoints are **structural**, not declared: `endpoints` stays `artifact`-only (decision recorded in 08 §2). |
+> | **D7** | [12 §8.2](12-open-questions.md) | **The revisit trigger fired a second time and is recorded.** v1.17 rewrites 07 §2, meeting §8.2's stated condition again. Re-read rather than recalled: D3 closes the one honest gap the rejection had ("Tier 2 has no small thing to ask for") by defining the small thing, not by permitting the fan-out. Wildcard-origin *fetch* stays rejected; the probe/fetch distinction is now load-bearing on all three tiers. |
+>
+> **What did *not* change.** The three key shapes and the reserved tier
+> tokens ([07 §2.1](07-bulk-planes.md)); §2.3's objects/refs split; §3's
+> wildcard rule **and its cost gate** (an argument about Zenoh reply
+> semantics that nothing in a wire redesign touches); §2.5's router-store
+> PUT exemption and read-back-before-exit rule (tightened, not moved);
+> §2.6's QoS obligations — re-checked against v3: the reference client
+> still discharges bulk QoS by default, and resume is still a persisted
+> chunk bitfield; RFC 09 §3's ACL profiles. No grammar change: position
+> counts, tier tokens and design properties D1–D6 are untouched.
+>
+> **Migration.** Wire-breaking by construction — every v3 control struct
+> and encoding tag is re-spelled, so v2 and v3 peers fail closed rather
+> than corrupting — but *address-preserving*: no store drains, no
+> republish, and the cut can proceed per-peer so long as no peer speaks v2
+> to a v3 peer. One migration, not two: these amendments and the reference
+> client's v3 wire (zblob 0.3.0, `docs/MIGRATION-v3.md`) land as one cut,
+> exactly as v1.7 and wire v2 did.
+>
+> **Provenance.** zblob's pre-release analysis (`docs/analysis-2026-08.md`)
+> and epic marcpardo/zblob#41; RFC side zenkey #141. Explorer consequence:
+> zenkey #111's tier-2 arms unblock on this amendment plus the 0.3 API.
 
 > **v1.16 (2026-08-12, the media-introspection amendment)** — the asymmetry
 > v1.8 recorded rather than hid is closed: `[[media]]` entries — a field
@@ -280,7 +324,7 @@ branch).
 > |---|---|---|
 > | **C1** | [08 §2](08-registry.md) *(new table)* | **`[[blob]]` is an entry kind.** An origin declares which **tier** it serves (`artifact` \| `tree` \| `store`) and, for `artifact`, which of [07 §2.2](07-bulk-planes.md)'s reserved endpoints (`manifest`, `slice`, `have`, `push`, `fanout`); plus `algo` on `store`, an optional `reference` type (the payload that must carry the content root, [07 §2.1](07-bulk-planes.md)), and an optional content `encoding`. Each producer file declares the tiers *that producer* serves, and several files MAY declare one tier — the introspect slice is per-producer truth — with all declarations of a tier agreeing in shape, deduped by codegen into one app-level surface that records every declarer. Deliberately **no `path`** — alone among the kinds, blob key shapes are fixed by chapter 07 and their variable chunks are content addresses, not registry vocabulary — and **no `cardinality`**, since [03 §3](03-grammar.md) already carves blob ids and tree roots out of the budget as sanctioned unbounded families. Asking for a number would have invited a fiction and then budget-reviewed it. |
 > | **C2** | [08 §2](08-registry.md) | **Two chapter-07 rules become structural in the generated surface**, the move H1 made for forbidden-fanout writes. `tree`/`store` builders take a validated content-hash type, so [07 §2.3](07-bulk-planes.md)'s revoked caller-chosen name (`tree/nightly`) has *no spelling* in generated code; and the [§2.5](07-bulk-planes.md) probe form returns a distinct probe-prefix type, so a probe prefix cannot be passed where §3's prohibition forbids one. A rule the codegen refuses to spell is a rule nobody has to remember. |
-> | **C3** | [08 §5](08-registry.md), [§7](08-registry.md) | **Build-time enforcement and describe totality.** The blob vocabularies are closed, so all of it is decidable: `tier` in range; `endpoints` present exactly on `artifact` and drawn from the reserved set; `algo` present exactly on `store`; `since`/`description` present; all declarations of one tier agree in shape (`endpoints` as a set, `reference`, `encoding`) across the registry set, with the same `(tier, algo)` at most once per *file*; a second concurrent `store` algo is a build diagnostic until codegen learns per-algo builders; `reference` resolves in the shared type table. §7's totality clause now names `reference`, so a declared blob type must be covered by `describe`. |
+> | **C3** | [08 §5](08-registry.md), [§7](08-registry.md) | **Build-time enforcement and describe totality.** The blob vocabularies are closed, so all of it is decidable: `tier` in range; `endpoints` present exactly on `artifact` and drawn from the reserved set; `algo` present exactly on `store`; `since`/`description` present; all declarations of one tier agree in shape (`endpoints` as a set, `reference`, `encoding`) across the registry set, with the same `(tier, algo)` at most once per *file*; a second concurrent `store` algo is a build diagnostic until codegen learns per-algo builders *(closed by v1.17 D6: per-algo builders exist and the diagnostic is gone)*; `reference` resolves in the shared type table. §7's totality clause now names `reference`, so a declared blob type must be covered by `describe`. |
 > | **C4** | [07 §2.7](07-bulk-planes.md) *(new)*, [08 §6](08-registry.md) | **Blob tiers reach runtime introspection** — the stated point of the exercise: an explorer can see which origins serve blobs, and of which tier. This exposes a **pre-existing** gap rather than creating one, and §6 is corrected instead of quietly widened: through v1.7 it claimed the introspect slice carried "media shapes", and it never has. Retrofitting `[[media]]` into the slice is separate work and is not bundled here. |
 > | **C5** | [12 §8.2](12-open-questions.md) | **A revisit trigger fired and is recorded.** §8.2's condition — "a rejected amendment reopens only if the chapter it was rejected against changes" — was met by v1.7's rewrite of chapter 07. Re-read rather than recalled (§8.1's own lesson): the rewrite *strengthened* the rejection, and C2 now enforces it in the type system. The amendment stays rejected. An unexamined trigger that silently never fires is indistinguishable from one whose condition was met and ignored. |
 >

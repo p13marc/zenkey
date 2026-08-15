@@ -275,6 +275,22 @@ builder returns a probe-prefix type that a bulk-fetch call will not accept
 ([08 §2](08-registry.md)). The amendment stays rejected, and it is now
 rejected by the type system as well as by the prose.
 
+**Trigger fired again (v1.17, 2026-08-15) — rejection re-affirmed,
+strengthened again.** v1.17 rewrote 07 §2 a second time (the reference
+client's wire v3), so the condition was met a second time. Re-read rather
+than recalled, again: the rewrite closes the one honest gap the rejection
+still had. Through v1.16, Tier 2 genuinely had no small thing to ask for —
+a `tree` or `store` key carries the object itself — so the strongest case
+*for* a wildcard-origin fetch was "there is no other way to ask Tier 2
+anything". [07 §2.5](07-bulk-planes.md) now defines Tier-2 probes whose
+replies are bitfields over the caller-supplied hash list — O(question), not
+O(object) — so that case is answered by defining the small thing rather
+than by permitting the fan-out. Wildcard-origin *probe* is now legitimate
+on every tier precisely because its reply shape cannot be bulk;
+wildcard-origin *fetch* remains forbidden because its reply shape is the
+object. The amendment stays rejected, and the distinction it kept trying
+to blur is now load-bearing on all three tiers.
+
 *Recording this is the point of the trigger.* An unexamined trigger that
 silently never fires is indistinguishable from one whose condition was met and
 ignored — which is the failure mode §8.1 is about, one level up.
@@ -293,8 +309,9 @@ failure mode does not spare the people who wrote the spec.
 
 **Revisit trigger.** None standing. A rejected amendment reopens only if the
 chapter it was rejected against changes — and when that happens the outcome is
-recorded in place, whichever way it goes (see §8.2, where v1.7's rewrite of
-chapter 07 fired the trigger and the rejection was re-affirmed).
+recorded in place, whichever way it goes (see §8.2, where the trigger has now
+fired twice — v1.7 and v1.17, both rewrites of chapter 07 — and the rejection
+was re-affirmed both times, strengthened both times).
 
 ## 9. Matching-status introspection — DEFERRED (v1.5); adoption recorded (v1.14)
 
