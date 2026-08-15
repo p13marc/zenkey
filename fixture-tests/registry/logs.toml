@@ -381,3 +381,13 @@ tier = "store"
 algo = "blake3"
 since = "1.8"
 description = "content-addressed chunks backing the tree tier"
+
+# The RFC 07 §2.4 dual-algo migration window (v1.17): a second store algo is
+# a discriminated sibling family, not a conflict. Exercises the per-algo
+# builders and address types — `Sha256Addr` has no spelling under
+# `store_key_blake3` and vice versa.
+[[blob]]
+tier = "store"
+algo = "sha256"
+since = "1.9"
+description = "legacy-algo chunks served through the dual-algo migration window"

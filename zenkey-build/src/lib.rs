@@ -1159,18 +1159,22 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
     // blobs?" must be answerable per producer — but the family has one
     // shape, so the declarations must agree on it: endpoints (as a set),
     // reference, encoding. `since` and `description` are per-declaration
-    // prose and free to differ.
+    // prose and free to differ. Agreement is keyed per `(tier, algo)`
+    // (RFC 08 §2, v1.17): `algo` is the store tier's migration
+    // discriminator, so `store`/`blake3` and `store`/`sha256` are two
+    // address families that agree internally, not a conflict.
     {
         fn sorted(v: &[String]) -> Vec<&str> {
             let mut s: Vec<&str> = v.iter().map(String::as_str).collect();
             s.sort_unstable();
             s
         }
-        let mut canon: BTreeMap<&str, (&BlobEntry, &str)> = BTreeMap::new();
+        let mut canon: BTreeMap<(&str, Option<&str>), (&BlobEntry, &str)> = BTreeMap::new();
         for f in &files {
             for b in &f.blob {
-                let Some(&(first, first_file)) = canon.get(b.tier.as_str()) else {
-                    canon.insert(b.tier.as_str(), (b, f.name.as_str()));
+                let family = (b.tier.as_str(), b.algo.as_deref());
+                let Some(&(first, first_file)) = canon.get(&family) else {
+                    canon.insert(family, (b, f.name.as_str()));
                     continue;
                 };
                 let field = if sorted(&first.endpoints) != sorted(&b.endpoints) {
@@ -1197,29 +1201,12 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             }
         }
         // `algo` is deliberately not part of the shape: it is the store
-        // tier's migration axis (RFC 08 §2 sanctions a second algo while a
-        // hash migration runs both). But the generated builders bake a single
-        // algo into `store_key`, so until codegen learns per-algo builders a
-        // second algo must be a diagnostic rather than uncompilable output.
-        let mut algos: BTreeSet<&str> = BTreeSet::new();
-        for f in &files {
-            for b in &f.blob {
-                if let Some(a) = b.algo.as_deref() {
-                    algos.insert(a);
-                }
-            }
-        }
-        if algos.len() > 1 {
-            let list = algos.into_iter().collect::<Vec<_>>().join(", ");
-            return Err(lint(
-                "registry",
-                format!(
-                    "blob tier \"store\" declares two algos ({list}); RFC 08 §2 permits both \
-                     during a hash migration, but codegen does not yet emit per-algo store \
-                     builders — declare one algo"
-                ),
-            ));
-        }
+        // tier's **migration discriminator** (RFC 08 §2/§5, v1.17). A second
+        // concurrent algo is the sanctioned dual-algo window of RFC 07 §2.4,
+        // and codegen emits one builder and one address type per declared
+        // algo, so both address spaces are spellable — and unmixable — at
+        // once. (From v1.8 to v1.16 this was a build diagnostic instead,
+        // which is how one downstream hash migration became a flag day.)
     }
     Ok(files)
 }
@@ -1770,37 +1757,56 @@ mod tests {
         assert!(err.to_string().contains("encoding"), "{err}");
     }
 
-    /// RFC 08 §2 sanctions a second store algo while a hash migration runs
-    /// both, but the generated builders bake a single algo into `store_key` —
-    /// so until codegen learns per-algo builders, a second algo must be a
-    /// diagnostic rather than uncompilable generated code.
+    /// RFC 08 §2/§5 (v1.17): a second concurrent store algo is the
+    /// sanctioned dual-algo migration window of RFC 07 §2.4 — codegen emits
+    /// one builder and one address type per declared algo, so both address
+    /// spaces are spellable, and unmixable by type.
     #[test]
-    fn two_store_algos_are_rejected_until_codegen_learns_them() {
+    fn two_store_algos_emit_per_algo_builders() {
         let blake3 = "tier = \"store\"\nalgo = \"blake3\"\nsince = \"1.8\"\n\
                       description = \"chunks\"\n";
         let sha256 = "tier = \"store\"\nalgo = \"sha256\"\nsince = \"1.8\"\n\
                       description = \"chunks\"\n";
-        let err = blob_registry(
+        let out = blob_registry(
             "blobalgo",
             &[
                 ("a.toml", "netring", &[blake3]),
                 ("b.toml", "logs", &[sha256]),
             ],
         )
-        .unwrap_err();
-        assert!(err.to_string().contains("declare one algo"), "{err}");
-
-        // The same algo everywhere is the intended steady state.
-        assert!(
-            blob_registry(
-                "blobalgook",
-                &[
-                    ("a.toml", "netring", &[blake3]),
-                    ("b.toml", "logs", &[blake3]),
-                ],
-            )
-            .is_ok()
+        .unwrap();
+        assert_eq!(
+            out.matches("        Store,").count(),
+            1,
+            "one tier variant however many algos — the algo is a key chunk, \
+             not a tier"
         );
+        for needle in [
+            "pub struct Blake3Addr(ContentHash)",
+            "pub struct Sha256Addr(ContentHash)",
+            "pub fn store_key_blake3(o: &impl HostOrigin, addr: &Blake3Addr)",
+            "pub fn store_key_sha256(o: &impl HostOrigin, addr: &Sha256Addr)",
+            "pub fn store_have_probe_blake3()",
+            "pub fn store_have_probe_sha256()",
+        ] {
+            assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+        }
+        assert!(
+            out.contains("&[\"blake3\", \"sha256\"]"),
+            "algos() lists both address spaces in registry order"
+        );
+
+        // One algo everywhere is the steady state: one builder, one type.
+        let out = blob_registry(
+            "blobalgook",
+            &[
+                ("a.toml", "netring", &[blake3]),
+                ("b.toml", "logs", &[blake3]),
+            ],
+        )
+        .unwrap();
+        assert!(out.contains("pub fn store_key_blake3"));
+        assert!(!out.contains("sha256"));
     }
 
     /// Cross-file repetition is a producer declaring what it serves; the same

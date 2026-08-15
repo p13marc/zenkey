@@ -229,6 +229,38 @@ impl BlobProbePrefix {
         ))
     }
 
+    /// The Tier-2 **store** probe: `v1/*/@blob/store/<algo>/have`
+    /// (RFC 07 §2.4/§2.5, v1.17).
+    ///
+    /// The request carries a list of content addresses; each holder answers
+    /// a bitfield over exactly that list, so the reply is O(request) and
+    /// §3's cost gate is satisfied by construction — which is what makes
+    /// the wildcard origin legitimate here. `have` is a reserved Tier-2
+    /// token and never a valid content address (§2.4). `algo` is slugged at
+    /// the boundary like every generated variable.
+    pub fn store_have(algo: impl AsRef<str>) -> Self {
+        let mut p = Self::new(grammar::BlobTier::Store).0;
+        p.push('/');
+        p.push_str(crate::key::Chunk::slug(algo).as_str());
+        p.push_str("/have");
+        BlobProbePrefix(p)
+    }
+
+    /// The Tier-2 **tree** probe: `v1/*/@blob/tree/<root>/have`
+    /// (RFC 07 §2.4/§2.5, v1.17).
+    ///
+    /// Each holder answers has-index plus chunks present / total — a flag
+    /// and two counters, O(request) whatever the tree's size. The `<root>`
+    /// is a validated [`grammar::ContentHash`], so the revoked
+    /// caller-chosen name (§2.3) has no spelling here either.
+    pub fn tree_have(root: &grammar::ContentHash) -> Self {
+        let mut p = Self::new(grammar::BlobTier::Tree).0;
+        p.push('/');
+        p.push_str(root.as_str());
+        p.push_str("/have");
+        BlobProbePrefix(p)
+    }
+
     /// The prefix as a selector string, for handing to a probing client.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -325,6 +357,27 @@ mod tests {
             BlobProbePrefix::new(grammar::BlobTier::Store).as_str(),
             concrete.as_str()
         );
+    }
+
+    /// RFC 07 §2.4/§2.5 (v1.17): the Tier-2 probe forms. `have` is a
+    /// reserved Tier-2 token — and, deliberately, not a valid content
+    /// address, which is what keeps `store/<algo>/<chunk>` parseable
+    /// positionally.
+    #[test]
+    fn blob_probe_prefix_spells_the_tier2_have_forms() {
+        assert_eq!(
+            BlobProbePrefix::store_have("blake3").as_str(),
+            "v1/*/@blob/store/blake3/have"
+        );
+        let root = grammar::ContentHash::parse("a1b2c3d4e5f60718").unwrap();
+        assert_eq!(
+            BlobProbePrefix::tree_have(&root).as_str(),
+            "v1/*/@blob/tree/a1b2c3d4e5f60718/have"
+        );
+        // The reserved token itself can never be a content address (§2.4):
+        // `have` and `batch` contain non-hex bytes by construction.
+        assert!(grammar::ContentHash::parse("have").is_err());
+        assert!(grammar::ContentHash::parse("batch").is_err());
     }
 
     /// The base composes back on for the parties that genuinely see the wire:
