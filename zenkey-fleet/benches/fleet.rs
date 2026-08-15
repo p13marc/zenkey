@@ -28,7 +28,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use zenkey_fleet::stats::StatsTable;
 use zenkey_fleet::{KeyFacts, KeyTreeSnapshot, SliceSet};
 
