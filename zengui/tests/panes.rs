@@ -1455,18 +1455,20 @@ mod blob {
         );
     }
 
-    /// The content-addressed tiers have no probe endpoint. Saying so is the
-    /// whole point: an unasked probe must not render as an empty holder list.
+    /// An unasked probe must not render as an empty holder list. Since RFC 07
+    /// v1.17 every tier has a probe endpoint, so the case left for this render
+    /// path is a store algorithm the reference client does not speak — the
+    /// fixture models that one.
     #[test]
     fn a_tier_two_probe_says_it_was_not_run() {
         let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let mut state = BlobState::default();
-        state.set_target(format!("store/blake3/{hash}"));
+        state.set_target(format!("store/sha256/{hash}"));
         state.probe = Probe::Done(Arc::new(BlobProbeReport {
-            target: format!("store/blake3/{hash}"),
+            target: format!("store/sha256/{hash}"),
             tier: "store".into(),
             asked: vec![],
-            not_probed: Some("the `store` tier has no probe endpoint".into()),
+            not_probed: Some("the reference client speaks `blake3` only".into()),
             holders: vec![],
             answered: 0,
             roots: vec![],

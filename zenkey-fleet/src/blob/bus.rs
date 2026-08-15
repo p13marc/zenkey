@@ -59,14 +59,18 @@ impl Default for BlobFetchSpec {
 ///
 /// The selector comes from [`zenkey::BlobProbePrefix`], which is not
 /// convertible to a `Key` — so this function is the only shape a `*`-origin
-/// `@blob` GET can take in this crate, and it can only ever ask for the two
-/// tiny endpoints. Both GETs ride at [`FETCH_PRIORITY`].
+/// `@blob` GET can take in this crate, and it can only ever ask for the tiny
+/// endpoints. Every probe GET rides at [`FETCH_PRIORITY`].
 ///
-/// **Tier 2 has no probe endpoint, and that is not an oversight.** A `tree` or
-/// `store` key carries the object itself, so a `*`-origin GET on one *is* the
-/// bulk fan-out §2.5 forbids — there is no small thing to ask for. Such a
-/// target comes back with `not_probed` set and `declared_by` filled from the
-/// slices: a capability claim, honestly labelled, never a possession verdict.
+/// **Tier 2 is probed through its v1.17 endpoints** (RFC 07 §2.4/§2.5):
+/// `store/<algo>/have` answers a bitfield over exactly the asked addresses,
+/// `tree/<root>/have` answers has-index plus chunks present/total — replies
+/// that are O(question) by construction, which is what makes the wildcard
+/// origin as legitimate there as it always was on Tier 1, and what turns the
+/// old `not_probed` apology into a **possession verdict**. The one honest
+/// refusal left is a store algorithm the reference client does not speak;
+/// that still comes back as `not_probed`, with `declared_by` filled from the
+/// slices.
 pub async fn blob_probe(
     session: &Session,
     base: &str,
@@ -78,19 +82,7 @@ pub async fn blob_probe(
     let declared = declared_by(slices, tier);
 
     let Some(id) = target.artifact_id() else {
-        return Ok(BlobProbeReport {
-            target: target.spelling(),
-            tier: tier.chunk().to_string(),
-            asked: Vec::new(),
-            not_probed: Some(format!(
-                "the `{}` tier has no probe endpoint: its key carries the object itself, so a *-origin GET would be the wildcard bulk fetch RFC 07 §2.5 forbids. Fetch it from one origin's concrete key, or probe the tier-1 artifact that references it.",
-                tier.chunk()
-            )),
-            holders: Vec::new(),
-            answered: 0,
-            roots: Vec::new(),
-            declared_by: declared,
-        });
+        return probe_tier2(session, base, target, declared, timeout).await;
     };
 
     // The wide form: `<base>/v1/*/@blob/artifact/<id>/{have,manifest}`. The
@@ -127,6 +119,154 @@ pub async fn blob_probe(
         roots,
         declared_by: declared,
     })
+}
+
+/// The Tier-2 half of [`blob_probe`] (RFC 07 §2.4/§2.5, v1.17): ask the tiny
+/// endpoint whose reply size is a function of the question, and report what
+/// each holder *has* — a possession verdict, attributed by the reply's own
+/// key exactly as the Tier-1 probe attributes its holders.
+async fn probe_tier2(
+    session: &Session,
+    base: &str,
+    target: &BlobTarget,
+    declared: Vec<String>,
+    timeout: Duration,
+) -> Result<BlobProbeReport> {
+    let tier = target.tier();
+    let probe_prefix = grammar::with_base(base, target.probe_prefix().as_str());
+    let report = |asked: Vec<String>, not_probed: Option<String>, holders: Vec<BlobHolder>| {
+        BlobProbeReport {
+            target: target.spelling(),
+            tier: tier.chunk().to_string(),
+            asked,
+            not_probed,
+            answered: holders.len(),
+            holders,
+            roots: Vec::new(),
+            declared_by: declared.clone(),
+        }
+    };
+
+    match target {
+        BlobTarget::Store { algo, hash } => {
+            // Probing is per-algorithm like everything else on this tier
+            // (RFC 07 §2.4). The reference client speaks one; a foreign algo
+            // is the one honest `not_probed` left, and it must say so rather
+            // than answer "no holders" for a question it never asked.
+            if algo != zblob::Hash::ALGO {
+                return Ok(report(
+                    Vec::new(),
+                    Some(format!(
+                        "the reference client speaks `{}` only, so a `{algo}` chunk cannot be probed by this build (RFC 07 §2.4 — dedup and probing are per-algorithm)",
+                        zblob::Hash::ALGO
+                    )),
+                    Vec::new(),
+                ));
+            }
+            let parsed: zblob::Hash = hash.as_str().parse().map_err(|e| {
+                anyhow!("`{hash}` is not a content address the reference client accepts: {e}")
+            })?;
+            let prefix = zblob::QueryPrefix::new(probe_prefix.clone())
+                .map_err(|e| anyhow!("`{probe_prefix}` is not a queryable prefix: {e}"))?;
+            let asked = vec![zblob::keys::store_have_key(
+                prefix.as_str(),
+                zblob::HashAlgo::Blake3,
+            )];
+            let client = zblob::StoreClient::builder(session, prefix)
+                .query_timeout(timeout)
+                .priority(FETCH_PRIORITY)
+                .build();
+            let mut holders: Vec<BlobHolder> = client
+                .probe(std::slice::from_ref(&parsed))
+                .await
+                .map_err(|e| anyhow!("store probe: {e}"))?
+                .into_iter()
+                .map(|p| {
+                    let held = p.held.contains(&parsed);
+                    BlobHolder {
+                        origin: origin_of_prefix(base, p.origin.as_str()),
+                        key: zblob::keys::store_key(
+                            p.origin.as_str(),
+                            zblob::HashAlgo::Blake3,
+                            &parsed,
+                        ),
+                        availability: Some(BlobAvailability {
+                            chunk_count: 1,
+                            have: u32::from(held),
+                            complete: held,
+                        }),
+                        manifest: None,
+                        unreadable: None,
+                        error: None,
+                    }
+                })
+                .collect();
+            holders.sort_by(|a, b| a.origin.cmp(&b.origin));
+            Ok(report(asked, None, holders))
+        }
+        BlobTarget::Tree { root } => {
+            let tree_prefix = zblob::QueryPrefix::new(probe_prefix.clone())
+                .map_err(|e| anyhow!("`{probe_prefix}` is not a queryable prefix: {e}"))?;
+            // The tree client pairs a store prefix with the tree prefix; the
+            // probe never touches the store half, but the type carries it —
+            // spell the sibling wildcard the same way.
+            let store_wide = grammar::with_base(
+                base,
+                zenkey::BlobProbePrefix::new(grammar::BlobTier::Store).as_str(),
+            );
+            let store_prefix = zblob::QueryPrefix::new(store_wide.clone())
+                .map_err(|e| anyhow!("`{store_wide}` is not a queryable prefix: {e}"))?;
+            let asked = vec![zblob::keys::tree_have_key(
+                tree_prefix.as_str(),
+                root.as_str(),
+            )];
+            // No priority setter here: the reference client's default is
+            // data-low, which is FETCH_PRIORITY — RFC 07 §2.6's conformant
+            // untouched default.
+            let client = zblob::TreeClient::builder(session, store_prefix, tree_prefix)
+                .query_timeout(timeout)
+                .build();
+            let mut holders: Vec<BlobHolder> = client
+                .probe_snapshot(root.as_str())
+                .await
+                .map_err(|e| anyhow!("tree probe: {e}"))?
+                .into_iter()
+                .map(|(origin_prefix, probe)| BlobHolder {
+                    origin: origin_of_prefix(base, origin_prefix.as_str()),
+                    key: zblob::keys::tree_key(origin_prefix.as_str(), root.as_str()),
+                    availability: Some(BlobAvailability {
+                        chunk_count: probe.chunks_total,
+                        have: probe.chunks_present,
+                        complete: probe.have_index && probe.chunks_present == probe.chunks_total,
+                    }),
+                    manifest: None,
+                    unreadable: None,
+                    error: None,
+                })
+                .collect();
+            holders.sort_by(|a, b| a.origin.cmp(&b.origin));
+            Ok(report(asked, None, holders))
+        }
+        BlobTarget::Artifact { .. } => {
+            bail!("tier-1 target reached the tier-2 probe path — a bug in blob_probe")
+        }
+    }
+}
+
+/// Position 1 of a holder's own prefix — the origin chunk, which is what a
+/// probe exists to report (RFC 09 §5.1 O1). Same fallback shape as
+/// [`attribute`], for prefixes rather than reply keys.
+fn origin_of_prefix(base: &str, prefix: &str) -> String {
+    let stripped = prefix
+        .strip_prefix(base)
+        .map(|s| s.trim_start_matches('/'))
+        .unwrap_or(prefix);
+    stripped
+        .split('/')
+        .nth(1)
+        .filter(|c| !c.is_empty())
+        .unwrap_or("?")
+        .to_string()
 }
 
 #[derive(Clone, Copy)]

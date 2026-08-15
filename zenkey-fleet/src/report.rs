@@ -660,9 +660,10 @@ pub struct BlobProbeReport {
     /// The selectors actually asked. A probe's coverage claim is exactly this
     /// list and no wider (RFC 09 §5.1 O5).
     pub asked: Vec<String>,
-    /// Why nothing was asked, when nothing was — a tier with no probe
-    /// endpoint, chiefly. Renders instead of a holder list; an unasked probe
-    /// must never read as "no holders".
+    /// Why nothing was asked, when nothing was — a store algorithm the
+    /// reference client does not speak, chiefly, now that every tier has a
+    /// probe endpoint (RFC 07 §2.5, v1.17). Renders instead of a holder
+    /// list; an unasked probe must never read as "no holders".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not_probed: Option<String>,
     pub holders: Vec<BlobHolder>,
