@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.17 (proposed)** · normative chapter · *amended in v1.2, v1.7, v1.8, v1.11, v1.16 and v1.17 — see [00-index.md](00-index.md)*
+**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.7, v1.8, v1.11, v1.16 and v1.17 — see [00-index.md](00-index.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
