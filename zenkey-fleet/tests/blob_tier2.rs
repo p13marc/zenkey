@@ -182,6 +182,24 @@ async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
         "the bytes on disk verify against the address"
     );
 
+    // Overwrite::Refuse semantics, tier-2 edition: an existing destination is
+    // refused before a byte is fetched, and saying so is the report's job.
+    let err = blob_fetch(
+        &asking,
+        BASE,
+        ORIGIN,
+        &target,
+        &dest,
+        &BlobFetchSpec {
+            timeout: TIMEOUT,
+            ..Default::default()
+        },
+        &|_| {},
+    )
+    .await
+    .expect_err("an existing destination is refused without overwrite");
+    assert!(err.to_string().contains("already exists"), "{err}");
+
     // The tree summary: validated against the root, no content store, and
     // the numbers are the index's own.
     let root = zenkey::ContentHash::parse(&root_hex).unwrap();

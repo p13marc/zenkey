@@ -300,6 +300,27 @@ fn fold_tier2(
     holders
 }
 
+/// Verified bytes land whole or not at all: written to a hidden sibling and
+/// renamed into place, on the async runtime's I/O pool rather than blocking
+/// the executor. A crash mid-write leaves a temp file, never a `dest` that
+/// looks fetched and is not — the same failure direction the reference
+/// client's own resume sidecar chooses.
+async fn write_atomically(dest: &Path, bytes: &[u8]) -> Result<()> {
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| anyhow!("`{}` names no file to write", dest.display()))?;
+    let tmp = dest.with_file_name(format!(".{name}.zenkey-tmp"));
+    tokio::fs::write(&tmp, bytes)
+        .await
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    if let Err(e) = tokio::fs::rename(&tmp, dest).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(e).with_context(|| format!("moving into place at {}", dest.display()));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum Endpoint {
     Have,
@@ -534,6 +555,15 @@ async fn fetch_tier2(
             let prefix = zblob::QueryPrefix::new(prefix_str.clone())
                 .map_err(|e| anyhow!("`{prefix_str}` is not a queryable prefix: {e}"))?;
             let key = zblob::keys::store_key(prefix.as_str(), zblob::HashAlgo::Blake3, &parsed);
+            // Refuse *before* fetching — 0.3's own `Overwrite::Refuse`
+            // semantics: a destination that will be refused is not worth a
+            // byte of transfer.
+            if !spec.overwrite && tokio::fs::try_exists(dest).await.unwrap_or(false) {
+                bail!(
+                    "`{}` already exists — pass overwrite to replace it",
+                    dest.display()
+                );
+            }
             let client = zblob::StoreClient::builder(session, prefix)
                 .query_timeout(spec.timeout)
                 .priority(FETCH_PRIORITY)
@@ -545,13 +575,7 @@ async fn fetch_tier2(
                 // origin produced it is unactionable.
                 .await
                 .map_err(|e| anyhow!("{}: {e}", origin.chunk()))?;
-            if dest.exists() && !spec.overwrite {
-                bail!(
-                    "`{}` already exists — pass overwrite to replace it",
-                    dest.display()
-                );
-            }
-            std::fs::write(dest, &bytes).with_context(|| format!("writing {}", dest.display()))?;
+            write_atomically(dest, &bytes).await?;
             Ok(BlobFetchReport {
                 origin: origin.chunk().to_string(),
                 key,
