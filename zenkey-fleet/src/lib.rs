@@ -61,7 +61,7 @@ pub use admin::{
 };
 pub use bench::{BenchSpec, bench_rpc};
 #[cfg(feature = "blob")]
-pub use blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe};
+pub use blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
 pub use blob::{BlobTarget, blob_list, declared_by};
 pub use context_store::{StoredContext, active_name, cache_dir};
 pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};

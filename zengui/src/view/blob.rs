@@ -49,6 +49,12 @@ pub enum BlobMsg {
         String,
         Result<std::sync::Arc<zenkey_fleet::report::BlobFetchReport>, String>,
     ),
+    /// A `tree/<root>` target's outcome: the validated index summary
+    /// (RFC 07 §2.3, v1.17) — inspection, not download.
+    InspectDone(
+        String,
+        Result<std::sync::Arc<zenkey_fleet::report::BlobTreeIndexReport>, String>,
+    ),
     Cancel,
 }
 
@@ -406,6 +412,37 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
                     .style(|theme: &iced::Theme| text::Style {
                         color: Some(colors(theme).danger()),
                     }),
+            );
+        }
+        Fetch::Inspecting => {
+            // No chunk counts and no stop button: an inspection has neither.
+            // It is bounded by the query timeout rather than cancellable.
+            col = col.push(kit::muted(
+                "inspecting — fetching and validating the index against its root \
+                 (bounded by the query timeout)",
+            ));
+        }
+        Fetch::Inspected(r) => {
+            // RFC 07 §2.3 (v1.17): the summary an explorer renders from the
+            // validated index — browsing a tree and downloading one are
+            // different costs, and this pane only ever pays the first.
+            col = col.push(
+                column![
+                    kit::mono(format!("tree/{}", short(&r.root))),
+                    kit::muted(format!(
+                        "{} entries · {} files — {} in {} across the fleet's store",
+                        r.entries,
+                        r.files,
+                        kit::human_bytes(r.total_size),
+                        kit::plural(r.chunks, "distinct chunk"),
+                    )),
+                    kit::muted(format!(
+                        "validated index from {} · priority {} · no content fetched \
+                         (RFC 07 §2.3)",
+                        r.origin, r.priority
+                    )),
+                ]
+                .spacing(2),
             );
         }
         Fetch::Done(r) => {

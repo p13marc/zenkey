@@ -1382,11 +1382,10 @@ async fn main() -> Result<()> {
             quiet,
             bus,
         }) => {
-            let dest = out.unwrap_or_else(|| cmd::blob::default_dest(&target));
             cmd::blob::fetch(
                 &target,
                 &from,
-                &dest,
+                out.as_deref(),
                 root.as_deref(),
                 allow_unpinned,
                 overwrite,

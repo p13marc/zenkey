@@ -269,7 +269,7 @@ pub fn declared_by(slices: &[RegistrySlice], tier: BlobTier) -> Vec<String> {
 #[cfg(feature = "blob")]
 mod bus;
 #[cfg(feature = "blob")]
-pub use bus::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe};
+pub use bus::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
 
 #[cfg(test)]
 mod tests {

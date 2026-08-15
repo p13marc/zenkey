@@ -73,14 +73,66 @@ pub async fn probe(target: &str, args: &BusArgs) -> Result<()> {
 pub async fn fetch(
     target: &str,
     from: &str,
-    out: &Path,
+    out: Option<&Path>,
     root: Option<&str>,
     allow_unpinned: bool,
     overwrite: bool,
     quiet: bool,
     args: &BusArgs,
 ) -> Result<()> {
+    let spec = target;
     let target = BlobTarget::parse(target)?;
+
+    // `tree/<root>` is inspected, not downloaded (RFC 07 §2.3, v1.17): the
+    // summary is validated against the root — which the key already is — and
+    // needs no content store, no destination file, and no pinning flags. A
+    // flag that would do nothing is refused rather than swallowed: an ignored
+    // `-o` is a script reading a file that was never written.
+    if let BlobTarget::Tree { root: tree_root } = &target {
+        if let Some(out) = out {
+            bail!(
+                "`{}` is inspected, not downloaded: the validated index summary writes no \
+                 file, so `-o {}` would be silently ignored — drop it (materializing a tree \
+                 is the reference client's `download_tree`, which needs a content store this \
+                 explorer deliberately does not keep)",
+                target.spelling(),
+                out.display()
+            );
+        }
+        if overwrite {
+            bail!(
+                "`--overwrite` does nothing for `{}`: a tree inspection writes no file",
+                target.spelling()
+            );
+        }
+        if let Some(hex) = root {
+            let pin = zenkey::ContentHash::parse(hex).map_err(|e| {
+                anyhow::anyhow!("--root {hex}: {e} (RFC 07 §2.1 — the anchor is the content root)")
+            })?;
+            if &pin != tree_root {
+                bail!(
+                    "--root {pin} contradicts the target root {tree_root}: a tree is pinned \
+                     by its own key (RFC 07 §2.3) — drop the flag, or fetch the root you mean"
+                );
+            }
+        }
+        let session = args.session().await?;
+        if !quiet {
+            eprintln!(
+                "fetching {} index from {from} at data-low (RFC 07 §2.6)",
+                target.spelling()
+            );
+        }
+        let report =
+            zenkey_fleet::blob_tree_index(&session, args.base(), from, tree_root, args.timeout())
+                .await?;
+        return output::blob_tree(&report, args.format);
+    }
+
+    let dest = out
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| default_dest(spec));
+    let out = dest.as_path();
 
     // RFC 07 §2.1: every reference handed to a consumer MUST carry the identity
     // of the bytes it names. An operator typing an id on a command line has no
