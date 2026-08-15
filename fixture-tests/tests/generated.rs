@@ -405,6 +405,10 @@ fn tier_two_builders_take_a_content_hash_not_a_name() {
         blob::store_key_blake3(&local(), &addr),
         "v1/h-3fa9c2d41b7e/@blob/store/blake3/ab12cd34ef56"
     );
+    // The address types are full value types: Display round-trips through
+    // FromStr, so an address survives a log line or a report field.
+    let round: blob::Blake3Addr = addr.to_string().parse().unwrap();
+    assert_eq!(round, addr);
     let legacy = blob::Sha256Addr::new(ContentHash::parse("ab12cd34ef56").unwrap());
     assert_eq!(
         blob::store_key_sha256(&local(), &legacy),
