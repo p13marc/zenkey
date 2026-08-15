@@ -1301,6 +1301,7 @@ mod blob {
                 have: 4,
                 complete: true,
             }),
+            note: None,
             manifest: Some(BlobManifest {
                 id: ID.into(),
                 filename: Some("demo-bundle.bin".into()),
