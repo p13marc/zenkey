@@ -4,7 +4,6 @@
 //! client ([`zblob`]).
 
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -60,14 +59,18 @@ impl Default for BlobFetchSpec {
 ///
 /// The selector comes from [`zenkey::BlobProbePrefix`], which is not
 /// convertible to a `Key` — so this function is the only shape a `*`-origin
-/// `@blob` GET can take in this crate, and it can only ever ask for the two
-/// tiny endpoints. Both GETs ride at [`FETCH_PRIORITY`].
+/// `@blob` GET can take in this crate, and it can only ever ask for the tiny
+/// endpoints. Every probe GET rides at [`FETCH_PRIORITY`].
 ///
-/// **Tier 2 has no probe endpoint, and that is not an oversight.** A `tree` or
-/// `store` key carries the object itself, so a `*`-origin GET on one *is* the
-/// bulk fan-out §2.5 forbids — there is no small thing to ask for. Such a
-/// target comes back with `not_probed` set and `declared_by` filled from the
-/// slices: a capability claim, honestly labelled, never a possession verdict.
+/// **Tier 2 is probed through its v1.17 endpoints** (RFC 07 §2.4/§2.5):
+/// `store/<algo>/have` answers a bitfield over exactly the asked addresses,
+/// `tree/<root>/have` answers has-index plus chunks present/total — replies
+/// that are O(question) by construction, which is what makes the wildcard
+/// origin as legitimate there as it always was on Tier 1, and what turns the
+/// old `not_probed` apology into a **possession verdict**. The one honest
+/// refusal left is a store algorithm the reference client does not speak;
+/// that still comes back as `not_probed`, with `declared_by` filled from the
+/// slices.
 pub async fn blob_probe(
     session: &Session,
     base: &str,
@@ -79,32 +82,29 @@ pub async fn blob_probe(
     let declared = declared_by(slices, tier);
 
     let Some(id) = target.artifact_id() else {
-        return Ok(BlobProbeReport {
-            target: target.spelling(),
-            tier: tier.chunk().to_string(),
-            asked: Vec::new(),
-            not_probed: Some(format!(
-                "the `{}` tier has no probe endpoint: its key carries the object itself, so a *-origin GET would be the wildcard bulk fetch RFC 07 §2.5 forbids. Fetch it from one origin's concrete key, or probe the tier-1 artifact that references it.",
-                tier.chunk()
-            )),
-            holders: Vec::new(),
-            answered: 0,
-            roots: Vec::new(),
-            declared_by: declared,
-        });
+        return probe_tier2(session, base, target, declared, timeout).await;
     };
 
     // The wide form: `<base>/v1/*/@blob/artifact/<id>/{have,manifest}`. The
     // prefix is zenkey's probe type; the endpoint tails come from the reference
     // client, which is where RFC 07 §2.2's table is spelled out in code.
     let prefix = target.probe_prefix();
-    let have = grammar::with_base(base, zblob::availability_key(prefix.as_str(), id));
-    let manifest = grammar::with_base(base, zblob::manifest_key(prefix.as_str(), id));
+    let have = grammar::with_base(base, zblob::keys::availability_key(prefix.as_str(), id));
+    let manifest = grammar::with_base(base, zblob::keys::manifest_key(prefix.as_str(), id));
     let asked = vec![have.clone(), manifest.clone()];
 
+    // Two independent questions to the same fleet, asked concurrently: a
+    // probe costs one timeout window, not two. Folding stays sequential and
+    // ordered (have, then manifest), so the merge is deterministic.
+    let (have_answers, manifest_answers) = tokio::join!(
+        fleet_get_at(session, base, &have, None, timeout, FETCH_PRIORITY),
+        fleet_get_at(session, base, &manifest, None, timeout, FETCH_PRIORITY),
+    );
     let mut holders: Vec<BlobHolder> = Vec::new();
-    for (key, kind) in [(&have, Endpoint::Have), (&manifest, Endpoint::Manifest)] {
-        let answers = fleet_get_at(session, base, key, None, timeout, FETCH_PRIORITY).await?;
+    for (answers, kind) in [
+        (have_answers?, Endpoint::Have),
+        (manifest_answers?, Endpoint::Manifest),
+    ] {
         for answer in answers {
             fold(&mut holders, base, kind, answer);
         }
@@ -130,6 +130,176 @@ pub async fn blob_probe(
     })
 }
 
+/// The Tier-2 half of [`blob_probe`] (RFC 07 §2.4/§2.5, v1.17): ask the tiny
+/// endpoint whose reply size is a function of the question, and report what
+/// each holder *has* — a possession verdict, attributed by the reply's own
+/// key exactly as the Tier-1 probe attributes its holders.
+async fn probe_tier2(
+    session: &Session,
+    base: &str,
+    target: &BlobTarget,
+    declared: Vec<String>,
+    timeout: Duration,
+) -> Result<BlobProbeReport> {
+    let tier = target.tier();
+    let probe_prefix = grammar::with_base(base, target.probe_prefix().as_str());
+    let report = |asked: Vec<String>, not_probed: Option<String>, holders: Vec<BlobHolder>| {
+        BlobProbeReport {
+            target: target.spelling(),
+            tier: tier.chunk().to_string(),
+            asked,
+            not_probed,
+            answered: holders.len(),
+            holders,
+            roots: Vec::new(),
+            declared_by: declared.clone(),
+        }
+    };
+
+    // Both tier-2 probes ride the same fleet chokepoint as tier 1 (RFC 05
+    // §2.1: consolidation None, attribution by each reply's own key), and
+    // fold with the same posture: an errored or undecodable holder is
+    // *recorded*, never dropped — answered-but-unreadable is an observation
+    // about an origin, not silence (RFC 09 §5.1 O4). The reference client's
+    // own probe helpers skip such replies, which is right for a transfer
+    // client choosing a source and wrong for an explorer reporting a fleet.
+    match target {
+        BlobTarget::Store { algo, hash } => {
+            // Probing is per-algorithm like everything else on this tier
+            // (RFC 07 §2.4). The reference client speaks one; a foreign algo
+            // is the one honest `not_probed` left, and it must say so rather
+            // than answer "no holders" for a question it never asked.
+            if algo != zblob::Hash::ALGO {
+                return Ok(report(
+                    Vec::new(),
+                    Some(format!(
+                        "the reference client speaks `{}` only, so a `{algo}` chunk cannot be probed by this build (RFC 07 §2.4 — dedup and probing are per-algorithm)",
+                        zblob::Hash::ALGO
+                    )),
+                    Vec::new(),
+                ));
+            }
+            let parsed: zblob::Hash = hash.as_str().parse().map_err(|e| {
+                anyhow!("`{hash}` is not a content address the reference client accepts: {e}")
+            })?;
+            let have_key = zblob::keys::store_have_key(&probe_prefix, zblob::HashAlgo::Blake3);
+            let want = zblob::wire::encode(&zblob::wire::WantList::new(vec![parsed]))
+                .map_err(|e| anyhow!("encoding the want-list: {e}"))?;
+            let answers = fleet_get_at(
+                session,
+                base,
+                &have_key,
+                Some(want),
+                timeout,
+                FETCH_PRIORITY,
+            )
+            .await?;
+            let holders = fold_tier2(base, answers, |bytes| {
+                let bits: zblob::wire::HaveBits = zblob::wire::decode(bytes)
+                    .map_err(|e| format!("undecodable have bitfield: {e}"))?;
+                bits.validate(1)
+                    .map_err(|e| format!("invalid have bitfield: {e}"))?;
+                let held = bits.is_set(0);
+                Ok((
+                    BlobAvailability {
+                        chunk_count: 1,
+                        have: u32::from(held),
+                        complete: held,
+                    },
+                    None,
+                ))
+            });
+            Ok(report(vec![have_key], None, holders))
+        }
+        BlobTarget::Tree { root } => {
+            // The probe key must be an address the reference client could
+            // serve: `ContentHash` admits any even-length hex, `zblob::Hash`
+            // exactly one digest size — validating here keeps the probe and
+            // the fetch agreeing about what is askable, instead of the probe
+            // returning an honest-looking "nobody holds it" for a root no
+            // holder could ever have.
+            let parsed: zblob::Hash = root.as_str().parse().map_err(|e| {
+                anyhow!("`{root}` is not a content address the reference client accepts: {e}")
+            })?;
+            let have_key = zblob::keys::tree_have_key(&probe_prefix, &parsed.to_string());
+            let answers =
+                fleet_get_at(session, base, &have_key, None, timeout, FETCH_PRIORITY).await?;
+            let holders = fold_tier2(base, answers, |bytes| {
+                let probe: zblob::wire::TreeProbe = zblob::wire::decode(bytes)
+                    .map_err(|e| format!("undecodable tree probe: {e}"))?;
+                probe
+                    .validate()
+                    .map_err(|e| format!("invalid tree probe: {e}"))?;
+                // A full-looking chunk count with no index is the one verdict
+                // the counters cannot express, and it predicts exactly how a
+                // fetch from this holder fails — say it.
+                let note = (!probe.have_index && probe.chunks_present > 0).then(|| {
+                    "holds chunks but not the index — an index fetch from this origin will fail"
+                        .to_string()
+                });
+                Ok((
+                    BlobAvailability {
+                        chunk_count: probe.chunks_total,
+                        have: probe.chunks_present,
+                        complete: probe.have_index && probe.chunks_present == probe.chunks_total,
+                    },
+                    note,
+                ))
+            });
+            Ok(report(vec![have_key], None, holders))
+        }
+        BlobTarget::Artifact { .. } => {
+            bail!("tier-1 target reached the tier-2 probe path — a bug in blob_probe")
+        }
+    }
+}
+
+/// One tier-2 reply becomes one holder, with [`fold`]'s O4 posture: errors
+/// and unreadable payloads are recorded against the origin that produced
+/// them. The holder's `key` is the reply's own key — the same attribution
+/// evidence tier 1 keeps — and duplicate replies from one origin keep the
+/// first, exactly as the tier-1 merge does.
+fn fold_tier2(
+    base: &str,
+    answers: Vec<FleetAnswer>,
+    decode: impl Fn(&[u8]) -> Result<(BlobAvailability, Option<String>), String>,
+) -> Vec<BlobHolder> {
+    let mut holders: Vec<BlobHolder> = Vec::new();
+    for answer in answers {
+        let origin = attribute(base, &answer);
+        if holders.iter().any(|h| h.origin == origin) {
+            continue;
+        }
+        let mut holder = BlobHolder {
+            origin,
+            key: answer.key.clone(),
+            availability: None,
+            manifest: None,
+            note: None,
+            unreadable: None,
+            error: None,
+        };
+        match answer.answer {
+            Answer::Error { name, message } => {
+                holder.error = Some(CallError { name, message });
+            }
+            Answer::Value(payload) => match decode(&payload.to_bytes()) {
+                Ok((availability, note)) => {
+                    holder.availability = Some(availability);
+                    holder.note = note;
+                }
+                Err(why) => {
+                    let declared = answer.encoding.as_deref().unwrap_or("(none)");
+                    holder.unreadable = Some(format!("{why} (encoding `{declared}`)"));
+                }
+            },
+        }
+        holders.push(holder);
+    }
+    holders.sort_by(|a, b| a.origin.cmp(&b.origin));
+    holders
+}
+
 #[derive(Clone, Copy)]
 enum Endpoint {
     Have,
@@ -148,6 +318,7 @@ fn fold(holders: &mut Vec<BlobHolder>, base: &str, kind: Endpoint, answer: Fleet
                 key: answer.key.clone(),
                 availability: None,
                 manifest: None,
+                note: None,
                 unreadable: None,
                 error: None,
             });
@@ -167,11 +338,11 @@ fn fold(holders: &mut Vec<BlobHolder>, base: &str, kind: Endpoint, answer: Fleet
             let bytes = payload.to_bytes();
             let (want, decoded) = match kind {
                 Endpoint::Have => (
-                    zblob::wire::ENC_AVAIL,
+                    &zblob::wire::ENC_AVAIL,
                     decode_have(&bytes).map(|a| holder.availability = Some(a)),
                 ),
                 Endpoint::Manifest => (
-                    zblob::wire::ENC_MANIFEST,
+                    &zblob::wire::ENC_MANIFEST,
                     decode_manifest(&bytes).map(|m| holder.manifest = Some(m)),
                 ),
             };
@@ -221,22 +392,21 @@ fn decode_have(bytes: &[u8]) -> Result<BlobAvailability, String> {
 fn decode_manifest(bytes: &[u8]) -> Result<BlobManifest, String> {
     let m: zblob::Manifest =
         zblob::wire::decode(bytes).map_err(|e| format!("undecodable manifest: {e}"))?;
+    // The chunk count is the reference client's own arithmetic now (v3) —
+    // but a manifest whose sizing does not divide still *names a root*, and
+    // the root is what the §2.1 disagreement check feeds on. So the manifest
+    // is kept and the count degrades to zero: a 0-chunk row renders oddly, a
+    // discarded root renders as *agreement*, and only one of those is a lie.
+    let chunk_count = m.chunk_count().unwrap_or(0);
     Ok(BlobManifest {
-        chunk_count: chunk_count(m.total_len, m.chunk_size),
-        id: m.id,
+        chunk_count,
+        id: m.id.to_string(),
         filename: m.filename,
         total_len: m.total_len,
         chunk_size: m.chunk_size,
         root: m.root.to_string(),
         created_ms: m.created_ms,
     })
-}
-
-fn chunk_count(total_len: u64, chunk_size: u32) -> u32 {
-    if chunk_size == 0 {
-        return 0;
-    }
-    total_len.div_ceil(chunk_size as u64) as u32
 }
 
 /// Fetch from **one** origin's concrete key, at data-low, verifying every reply
@@ -279,7 +449,13 @@ pub async fn blob_fetch(
             .as_str(),
     );
 
-    let client = zblob::BlobClient::builder(Arc::new(session.clone()), prefix)
+    let prefix = zblob::QueryPrefix::new(prefix).map_err(|e| {
+        anyhow!(
+            "`{origin_chunk}`'s artifact prefix is not queryable: {e}",
+            origin_chunk = origin.chunk()
+        )
+    })?;
+    let client = zblob::BlobClient::builder(session, prefix)
         // Priority is deliberately not set: the reference client already
         // defaults to DataLow, which is how RFC 07 §2.6 says a conformant
         // caller behaves without touching the setting. Setting it again here
@@ -305,7 +481,9 @@ pub async fn blob_fetch(
 
     let sink = move |p: zblob::Progress| on_progress(translate(p));
     let stats = client
-        .download_to(&request, dest, &sink, &spec.cancel)
+        .download_to(&request, dest)
+        .progress(&sink)
+        .cancel(&spec.cancel)
         .await
         // The origin is named here, once, so every failure this fetch can
         // produce — a hash mismatch above all — says which origin produced it.
@@ -421,15 +599,6 @@ mod tests {
         // The report's sentence and the wire's behaviour come from one
         // constant; this pins the rendering of it.
         assert_eq!(priority_name(FETCH_PRIORITY), "data-low");
-    }
-
-    #[test]
-    fn chunk_counts_round_up() {
-        assert_eq!(chunk_count(0, 65536), 0);
-        assert_eq!(chunk_count(1, 65536), 1);
-        assert_eq!(chunk_count(65536, 65536), 1);
-        assert_eq!(chunk_count(65537, 65536), 2);
-        assert_eq!(chunk_count(10, 0), 0);
     }
 
     #[test]

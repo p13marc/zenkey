@@ -67,9 +67,9 @@ async-stream = "0.3"
 # fetched blobs any other way would be a second implementation of one integrity
 # anchor. Not a zenkey dependency in either direction otherwise — zblob knows
 # nothing about this convention, and the keys are spelled on our side.
-zblob = "0.2"
+zblob = "0.3"
 
 # Internal
 zenkey = { version = "0.6.0", path = "zenkey" }
 zenkey-build = { version = "0.6.0", path = "zenkey-build" }
-zenkey-fleet = { version = "0.8.0", path = "zenkey-fleet" }
+zenkey-fleet = { version = "0.9.0", path = "zenkey-fleet" }

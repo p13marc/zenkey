@@ -642,6 +642,11 @@ pub struct BlobHolder {
     pub availability: Option<BlobAvailability>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manifest: Option<BlobManifest>,
+    /// A per-holder observation the counters cannot carry — e.g. a tree
+    /// holder with every chunk but no index (v1.17), which an index fetch
+    /// will fail against despite a full-looking count. Rendered verbatim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     /// It answered, and we could not read it: the encoding it declared and
     /// why. Answering unreadably is not not answering (RFC 09 §5.1 O4).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -660,9 +665,10 @@ pub struct BlobProbeReport {
     /// The selectors actually asked. A probe's coverage claim is exactly this
     /// list and no wider (RFC 09 §5.1 O5).
     pub asked: Vec<String>,
-    /// Why nothing was asked, when nothing was — a tier with no probe
-    /// endpoint, chiefly. Renders instead of a holder list; an unasked probe
-    /// must never read as "no holders".
+    /// Why nothing was asked, when nothing was — a store algorithm the
+    /// reference client does not speak, chiefly, now that every tier has a
+    /// probe endpoint (RFC 07 §2.5, v1.17). Renders instead of a holder
+    /// list; an unasked probe must never read as "no holders".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not_probed: Option<String>,
     pub holders: Vec<BlobHolder>,

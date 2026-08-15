@@ -92,7 +92,10 @@ async fn serve(
     origin: &str,
     data: Vec<u8>,
 ) -> (zblob::ServerHandle, zblob::Manifest) {
-    let server = BlobServer::new(Arc::new(session.clone()), prefix_at(origin));
+    let server = BlobServer::new(
+        session,
+        zblob::ServePrefix::new(prefix_at(origin)).expect("concrete prefix"),
+    );
     let manifest = server
         .register_source(
             BlobSpec::new(ID).filename("demo-bundle.bin"),
@@ -113,7 +116,7 @@ async fn a_probe_names_every_holder_and_a_fetch_names_one() {
     let (a, manifest) = serve(&serving, "h-aaaaaaaaaaaa", data.clone()).await;
     let (b, _) = serve(&serving, "h-bbbbbbbbbbbb", data.clone()).await;
     for origin in ["h-aaaaaaaaaaaa", "h-bbbbbbbbbbbb"] {
-        wait_routable(&asking, &zblob::manifest_key(&prefix_at(origin), ID)).await;
+        wait_routable(&asking, &zblob::keys::manifest_key(&prefix_at(origin), ID)).await;
     }
 
     let report = blob_probe(&asking, BASE, &target(), &[], TIMEOUT)
@@ -201,7 +204,7 @@ async fn a_disagreeing_root_is_named_not_averaged() {
     let (a, manifest) = serve(&serving, "h-aaaaaaaaaaaa", honest.clone()).await;
     let (c, rogue_manifest) = serve(&serving, "h-cccccccccccc", rogue).await;
     for origin in ["h-aaaaaaaaaaaa", "h-cccccccccccc"] {
-        wait_routable(&asking, &zblob::manifest_key(&prefix_at(origin), ID)).await;
+        wait_routable(&asking, &zblob::keys::manifest_key(&prefix_at(origin), ID)).await;
     }
     assert_ne!(
         manifest.root, rogue_manifest.root,
@@ -265,13 +268,14 @@ async fn every_blob_get_rides_at_data_low() {
     // A manifest for a blob nobody serves: enough for the client to move on to
     // slice queries, which is the second GET shape we want to observe.
     let manifest = zblob::Manifest {
-        version: 2,
-        id: ID.to_string(),
+        version: zblob::wire::WIRE_VERSION,
+        id: zblob::BlobId::new(ID).expect("valid id"),
         filename: None,
         total_len: 65_536 * 4,
         chunk_size: 65_536,
         root: zblob::Hash::of(b"not the content"),
         created_ms: 0,
+        ext: zblob::wire::Ext::default(),
     };
     let manifest_bytes = zblob::wire::encode(&manifest).unwrap();
 
@@ -279,7 +283,7 @@ async fn every_blob_get_rides_at_data_low() {
     // Replies go on the responder's own **concrete** key, exactly as a real
     // blob server does — which is what makes attribution-by-reply-key work
     // under a `*`-origin probe.
-    let manifest_key = zblob::manifest_key(&prefix, ID);
+    let manifest_key = zblob::keys::manifest_key(&prefix, ID);
 
     let cancel = zblob::CancelToken::new();
     let recorder = {
@@ -298,7 +302,7 @@ async fn every_blob_get_rides_at_data_low() {
                     tokio::spawn(async move {
                         let _ = query
                             .reply(key, bytes)
-                            .encoding(zblob::wire::ENC_MANIFEST)
+                            .encoding(&zblob::wire::ENC_MANIFEST)
                             .await;
                     });
                 } else {
@@ -359,22 +363,43 @@ async fn every_blob_get_rides_at_data_low() {
     recorder.undeclare().await.unwrap();
 }
 
-/// The content-addressed tiers have no tiny-reply endpoint to probe: their key
-/// *is* the object. Asking anyway must say so, not report zero holders.
+/// RFC 07 §2.4/§2.5 (v1.17): the content-addressed tiers have a probe now —
+/// `store/<algo>/have` — so a store target is *asked*, and an empty bus is
+/// honestly "asked, nobody answered", not "not probed". The one refusal left
+/// is an algorithm this build's reference client does not speak, and that one
+/// must still say so rather than report zero holders.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tier_two_says_it_was_not_probed() {
+async fn tier_two_is_probed_and_a_foreign_algo_says_why_not() {
     let (_serving, asking) = peer_pair(7512).await;
     let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    let target = BlobTarget::parse(&format!("store/blake3/{hash}")).unwrap();
 
+    // blake3 is speakable: the probe asks the §2.4 have endpoint. Nobody
+    // serves it on this bus, so the verdict is an honest empty holder list —
+    // with the asked selector recorded, per O5.
+    let target = BlobTarget::parse(&format!("store/blake3/{hash}")).unwrap();
     let report = blob_probe(&asking, BASE, &target, &[], Duration::from_secs(1))
         .await
         .expect("probe");
+    assert!(
+        report.not_probed.is_none(),
+        "blake3 must be probed: {report:?}"
+    );
+    assert_eq!(
+        report.asked,
+        vec!["v1/*/@blob/store/blake3/have".to_string()],
+        "the §2.4 probe key under the empty base, and no wider"
+    );
+    assert!(report.holders.is_empty());
 
+    // A foreign algo cannot be asked by this build, and must say so — O4:
+    // "not asked" must never be readable as "nobody holds it".
+    let target = BlobTarget::parse(&format!("store/sha256/{hash}")).unwrap();
+    let report = blob_probe(&asking, BASE, &target, &[], Duration::from_secs(1))
+        .await
+        .expect("probe");
     assert!(report.asked.is_empty(), "nothing was asked");
     assert!(report.holders.is_empty());
     let why = report.not_probed.expect("an unasked probe must say why");
-    assert!(why.contains("2.5"), "{why}");
-    // O4: this is "not asked", and must not be readable as "nobody holds it".
-    assert!(why.contains("no probe endpoint"), "{why}");
+    assert!(why.contains("blake3"), "{why}");
+    assert!(why.contains("2.4"), "{why}");
 }

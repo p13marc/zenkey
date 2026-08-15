@@ -646,6 +646,9 @@ pub fn blob_probe(report: &BlobProbeReport, format: Format) -> Result<()> {
             }
 
             println!("\nholders:\n");
+            // Only tier 1 has a manifest endpoint, so "no manifest reply" is
+            // a verdict there and a category error on the tier-2 rows.
+            let tier1 = report.tier == "artifact";
             for h in &report.holders {
                 print!("  {:<16}", h.origin);
                 match (&h.availability, &h.manifest) {
@@ -656,9 +659,10 @@ pub fn blob_probe(report: &BlobProbeReport, format: Format) -> Result<()> {
                         m.total_len,
                         short(&m.root)
                     ),
-                    (Some(a), None) => {
+                    (Some(a), None) if tier1 => {
                         print!("  {}/{} chunks · no manifest reply", a.have, a.chunk_count)
                     }
+                    (Some(a), None) => print!("  {}/{} chunks", a.have, a.chunk_count),
                     (None, Some(m)) => print!(
                         "  {} bytes · root {} · no have reply",
                         m.total_len,
@@ -667,6 +671,9 @@ pub fn blob_probe(report: &BlobProbeReport, format: Format) -> Result<()> {
                     (None, None) => print!("  answered, said nothing readable"),
                 }
                 println!();
+                if let Some(n) = &h.note {
+                    println!("      note: {n}");
+                }
                 if let Some(u) = &h.unreadable {
                     println!("      unreadable: {u}");
                 }

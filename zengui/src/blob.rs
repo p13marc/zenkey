@@ -192,6 +192,7 @@ mod tests {
             origin: origin.into(),
             key: format!("v1/{origin}/@blob/artifact/01jqz3demo0001"),
             availability: None,
+            note: None,
             manifest: Some(BlobManifest {
                 id: "01jqz3demo0001".into(),
                 filename: None,

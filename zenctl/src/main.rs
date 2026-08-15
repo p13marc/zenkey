@@ -542,12 +542,12 @@ enum BlobCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
-    /// Ask every origin who holds an artifact, with a *tiny* reply
-    /// (RFC 07 §2.5): `have` and `manifest`, at data-low, never the bytes.
+    /// Ask every origin who holds an object, with a *tiny* reply
+    /// (RFC 07 §2.5, total across tiers since v1.17): `have`/`manifest` for
+    /// an artifact, `store/<algo>/have` for a chunk, `tree/<root>/have` for
+    /// a snapshot — at data-low, never the bytes.
     ///
-    /// There is no `--origin`: fanning out is what a probe *is*. The
-    /// content-addressed tiers have no probe endpoint — their key carries the
-    /// object — and say so rather than reporting zero holders.
+    /// There is no `--origin`: fanning out is what a probe *is*.
     Probe {
         /// `<id>`, `artifact/<id>`, `tree/<hex>` or `store/<algo>/<hex>`.
         target: String,

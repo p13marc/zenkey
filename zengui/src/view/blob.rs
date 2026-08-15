@@ -256,15 +256,18 @@ fn holders(state: &BlobState) -> Element<'_, Message> {
                 ));
             }
 
+            // Only tier 1 has a manifest endpoint, so "no manifest reply" is
+            // a verdict there and a category error on the tier-2 rows.
+            let tier1 = report.tier == "artifact";
             for (i, h) in report.holders.iter().enumerate() {
-                col = col.push(holder_row(h, i, state.holder == Some(i)));
+                col = col.push(holder_row(h, i, state.holder == Some(i), tier1));
             }
             col.into()
         }
     }
 }
 
-fn holder_row(h: &BlobHolder, index: usize, selected: bool) -> Element<'_, Message> {
+fn holder_row(h: &BlobHolder, index: usize, selected: bool, tier1: bool) -> Element<'_, Message> {
     let summary = match (&h.availability, &h.manifest) {
         (Some(a), Some(m)) => format!(
             "{}/{} chunks · {} · root {}",
@@ -273,7 +276,10 @@ fn holder_row(h: &BlobHolder, index: usize, selected: bool) -> Element<'_, Messa
             kit::human_bytes(m.total_len),
             short(&m.root)
         ),
-        (Some(a), None) => format!("{}/{} chunks · no manifest reply", a.have, a.chunk_count),
+        (Some(a), None) if tier1 => {
+            format!("{}/{} chunks · no manifest reply", a.have, a.chunk_count)
+        }
+        (Some(a), None) => format!("{}/{} chunks", a.have, a.chunk_count),
         (None, Some(m)) => format!(
             "{} · root {} · no have reply",
             kit::human_bytes(m.total_len),
@@ -303,6 +309,9 @@ fn holder_row(h: &BlobHolder, index: usize, selected: bool) -> Element<'_, Messa
     ]
     .spacing(2);
 
+    if let Some(n) = &h.note {
+        body = body.push(kit::badge_severity(SeverityTone::Warning, n.clone()));
+    }
     if let Some(u) = &h.unreadable {
         body = body.push(kit::badge_severity(
             SeverityTone::Warning,
