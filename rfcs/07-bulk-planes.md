@@ -292,6 +292,29 @@ every other holder an object it can neither verify nor use.
 fleet-wide (dedup is per-algorithm: the same bytes under two algorithms are
 two objects); the segment exists so a migration can run both side by side.
 
+**The dual-algo migration procedure (added in v1.17).** The segment above
+was machinery without a procedure — and it cost a fleet once: the
+reference client's sha256→blake3 change was all-or-nothing in practice
+because no producer could declare two algorithms, so every cached chunk
+went cold on a flag day. With per-algo declarations
+([08 §2/§5](08-registry.md)) a hash migration is a rollout:
+
+1. **Open the window.** Add a second `[[blob]] tier = "store"` entry with
+   the new `algo` beside the old one. Producers publish new snapshots
+   under the new algorithm; both address spaces serve concurrently, and
+   existing caches stay warm under the old one.
+2. **Drain by attrition.** Consumers fetch whatever address a reference
+   names; nothing re-keys existing content. Republish only what must
+   survive the window longer than its natural churn.
+3. **Retire.** When nothing live references the old address space, mark
+   the old entry `gone` (§3 lifecycle in [08](08-registry.md)). The old
+   builders disappear from the generated surface; cached chunks under the
+   old algorithm are garbage, not corruption.
+
+The window's invariant is the per-algo address type: an address cannot
+migrate silently, because it has no spelling under the other algorithm's
+builder.
+
 **Reserved Tier-2 endpoint tokens (added in v1.17).** Tier 1 reserves its
 endpoints by name (§2.2); until v1.17 Tier 2 reserved none — the key *was*
 the endpoint, and [08 §2](08-registry.md) leaned on that sentence. Wire v3

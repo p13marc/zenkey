@@ -292,9 +292,13 @@ description = "content-addressed chunks backing the tree tier"
 Several producer files MAY each declare one tier — a producer declares the
 tiers *it* serves, and the introspect slice (§6) is per-producer truth. All
 declarations of a tier MUST agree in shape (`endpoints` as a set,
-`reference`, `encoding`); `since`/`description` are per-declaration. Codegen
-dedups the declarations into one app-level surface recording every declarer,
-because the underlying key family is one family: blob keys carry no producer
+`reference`, `encoding`); `since`/`description` are per-declaration. For
+`store`, `algo` is a **discriminator**, not a field that must match (since
+v1.17): declarations agree in shape *per algo*, so a producer — or two —
+may declare `store` under two algorithms at once, which is exactly the
+[07 §2.4](07-bulk-planes.md) migration form. Codegen dedups the
+declarations into one app-level surface recording every declarer, because
+the underlying key family is one family: blob keys carry no producer
 chunk ([§5](#5-ownership-and-process)).
 
 The negative space is larger here than for any other kind, and each absence is
@@ -340,7 +344,10 @@ stylistic:
   spelling that [07 §2.3](07-bulk-planes.md) revoked (`tree/nightly`) has no
   expression in the generated surface — the same move H1 made for
   forbidden-fanout writes. A rule the codegen can refuse to spell does not
-  need to be remembered.
+  need to be remembered. Since v1.17 the `store` address type is per-algo:
+  a hash is validated *as that algorithm's* address, so a cross-algo
+  address does not typecheck — the property that made `tree/nightly`
+  unspellable, extended to the dual-algo migration window (§5).
 - **The probe form is a distinct type.** [07 §2.5](07-bulk-planes.md) permits
   a `*`-origin probe (tiny replies) and forbids a `*`-origin bulk fetch. The
   generated probe builder therefore returns a *probe prefix*, not a key, so
@@ -572,10 +579,18 @@ job and is diagnosed from the wire, not from TOML.
   - the same `(tier, algo)` MUST NOT appear twice in **one** file — within
     a file, repetition is a copy-paste error, not a second serving
     producer;
-  - the reference codegen currently rejects two concurrent `store` algos:
-    the §2 migration form is accepted by the registry *format*, but the
-    generated builders bake a single algo into `store_key`, so a second
-    algo is a build diagnostic until per-algo builders exist;
+  - two concurrent `store` algos are **legal** (since v1.17): `algo` is a
+    *discriminator* in the shape-agreement rule — declarations of
+    `store` agree in shape per algo, and `store`/`blake3` beside
+    `store`/`sha256` is the [07 §2.4](07-bulk-planes.md) migration form,
+    not a conflict. Codegen emits one builder **per declared algo**, and
+    each takes a content-address type *of that algo*, so an address minted
+    under one algorithm has no spelling under another's builder — the
+    dual-algo window cannot silently mix address spaces. (From v1.8 to
+    v1.16 a second algo was a build diagnostic — the migration affordance
+    existed in the key grammar and nowhere else, which is how one
+    downstream hash migration became a flag day; v1.17 closes that
+    ledger entry.);
   - `reference`, where present, resolves in the shared type table, exactly
     as a `[[subject]]` `type` does.
 - CI MUST enforce (v1.5, H4): in a **service** registry, a subject pattern
