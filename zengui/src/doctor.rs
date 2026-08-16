@@ -59,6 +59,9 @@ pub struct DoctorRun {
 pub struct DoctorState {
     pub in_flight: bool,
     pub deep: bool,
+    /// The `--listen` window in seconds, as typed (#161). Empty = the
+    /// passive phase does not run; parsed leniently at run time.
+    pub listen: String,
     pub current: Option<Arc<DoctorReport>>,
     /// The last *successful* run before `current` — a failed run keeps the
     /// baseline (deltas against nothing would misreport everything as new).
@@ -102,8 +105,22 @@ impl DoctorState {
     pub fn clear(&mut self) {
         *self = DoctorState {
             deep: self.deep,
+            listen: std::mem::take(&mut self.listen),
             ..DoctorState::default()
         };
+    }
+
+    /// The listen window the run button will use: empty = off, otherwise
+    /// parsed seconds floored at 1 (a 0-second listen would claim an
+    /// observation that never happened).
+    pub fn listen_window(&self) -> Option<std::time::Duration> {
+        let t = self.listen.trim();
+        if t.is_empty() {
+            return None;
+        }
+        Some(std::time::Duration::from_secs_f64(
+            t.parse::<f64>().unwrap_or(10.0).max(1.0),
+        ))
     }
 }
 
@@ -163,7 +180,31 @@ mod tests {
             routers: 0,
             router_version: None,
             deep: false,
+            observation: None,
         }
+    }
+
+    /// #161: empty = off; garbage falls back to 10s; sub-second asks floor
+    /// at 1s (a 0s listen would claim an observation that never happened).
+    #[test]
+    fn the_listen_window_parses_leniently() {
+        let mut state = DoctorState::default();
+        assert_eq!(state.listen_window(), None);
+        state.listen = "10".into();
+        assert_eq!(
+            state.listen_window(),
+            Some(std::time::Duration::from_secs(10))
+        );
+        state.listen = "0".into();
+        assert_eq!(
+            state.listen_window(),
+            Some(std::time::Duration::from_secs(1))
+        );
+        state.listen = "nonsense".into();
+        assert_eq!(
+            state.listen_window(),
+            Some(std::time::Duration::from_secs(10))
+        );
     }
 
     #[test]

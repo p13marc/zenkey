@@ -723,6 +723,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
         routers: 0,
         router_version: None,
         deep: false,
+        observation: None,
     };
     let mut state = DoctorState::default();
     state.finish(
@@ -775,6 +776,54 @@ fn the_doctor_pane_never_invents_a_verdict() {
     assert!(
         ui.find("fixed since last run").is_ok(),
         "fixed findings stay visible, dimmed"
+    );
+}
+
+/// #161: the listen phase's observation section renders its scope statement
+/// — window, scopes, drops, synthetic count — and a report without one shows
+/// nothing (absent, never zeroed).
+#[test]
+fn the_doctor_pane_states_what_the_listen_phase_observed() {
+    use std::sync::Arc;
+    use zengui::doctor::DoctorState;
+    use zengui::view::doctor::pane;
+    use zenkey_fleet::report::{DoctorReport, ObservationSummary};
+
+    let report = DoctorReport {
+        findings: vec![],
+        synced: vec![],
+        introspect_answered: 1,
+        live_producers: 1,
+        describe_served: 0,
+        describe_missing: 1,
+        routers: 0,
+        router_version: None,
+        deep: false,
+        observation: Some(ObservationSummary {
+            window_s: 10.0,
+            scopes: vec!["v1/*/state/**".into(), "v1/*/telemetry/**".into()],
+            samples: 42,
+            keys_seen: 7,
+            dropped: 3,
+            synthetic_marked: 2,
+        }),
+    };
+    let mut state = DoctorState::default();
+    state.finish(
+        Ok(zengui::doctor::DoctorRun {
+            report: Arc::new(report),
+            base: String::new(),
+        }),
+        "",
+    );
+    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    assert!(
+        ui.find(
+            "listened 10s over 2 scopes: 42 samples on 7 keys, 3 dropped \
+                 (findings cover only what was seen — O6) · 2 synthetic-marked"
+        )
+        .is_ok(),
+        "the observation section states window, scope, drops, and synthetic count"
     );
 }
 

@@ -520,6 +520,29 @@ pub struct DoctorReport {
     pub router_version: Option<String>,
     /// Whether the `--deep` freshness/storage checks ran.
     pub deep: bool,
+    /// The passive listening phase (`--listen`, #161) — absent when it did
+    /// not run, so pre-#161 JSON consumers see an unchanged document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation: Option<ObservationSummary>,
+}
+
+/// What `doctor --listen` observed (#161) — the scope statement that keeps
+/// its findings honest (O5: `**` never crosses an `@`-chunk, so this section
+/// names exactly which selectors were watched), and the drop count that
+/// taints them (O6).
+#[derive(Debug, Clone, Serialize)]
+pub struct ObservationSummary {
+    pub window_s: f64,
+    /// The selectors actually watched — coverage is a statement, not a vibe.
+    pub scopes: Vec<String>,
+    pub samples: u64,
+    pub keys_seen: usize,
+    /// Samples the bounded observer missed; non-zero weakens every
+    /// listen-phase finding and the report says so.
+    pub dropped: u64,
+    /// Samples carrying the synthetic-traffic marker (RFC 09 §5.2, #162) —
+    /// generated traffic judged as real would be a self-inflicted finding.
+    pub synthetic_marked: u64,
 }
 
 impl DoctorReport {
@@ -878,6 +901,7 @@ mod tests {
             routers: 1,
             router_version: Some("1.9.0".into()),
             deep: false,
+            observation: None,
         };
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(
@@ -898,6 +922,31 @@ mod tests {
                 "routers": 1,
                 "router_version": "1.9.0",
                 "deep": false,
+            }),
+            "without --listen the document is byte-identical to pre-#161"
+        );
+        // With the listen phase, the observation section pins too.
+        let report = DoctorReport {
+            observation: Some(ObservationSummary {
+                window_s: 10.0,
+                scopes: vec!["v1/*/state/**".into()],
+                samples: 42,
+                keys_seen: 7,
+                dropped: 0,
+                synthetic_marked: 3,
+            }),
+            ..report
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json["observation"],
+            serde_json::json!({
+                "window_s": 10.0,
+                "scopes": ["v1/*/state/**"],
+                "samples": 42,
+                "keys_seen": 7,
+                "dropped": 0,
+                "synthetic_marked": 3,
             })
         );
     }

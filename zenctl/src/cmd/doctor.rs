@@ -15,6 +15,7 @@ use crate::{BusArgs, FailOn, offline, output};
 pub async fn run(
     deep: bool,
     sample: Option<usize>,
+    listen: Option<f64>,
     fail_on: Option<FailOn>,
     args: &BusArgs,
 ) -> Result<()> {
@@ -39,6 +40,7 @@ pub async fn run(
             deep,
             sample,
             timeout: args.timeout(),
+            listen: listen.map(std::time::Duration::from_secs_f64),
         },
     )
     .await?;

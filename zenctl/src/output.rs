@@ -965,6 +965,32 @@ pub fn doctor(report: &DoctorReport, format: Format) -> Result<()> {
                     f.check, f.subject, f.evidence
                 );
             }
+            // The listen phase's scope statement (#161): what was watched,
+            // for how long, and what the bounded observer missed (O5/O6).
+            if let Some(obs) = &report.observation {
+                println!(
+                    "\nlistened {:.0}s over {} scope(s): {} sample(s) on {} key(s), \
+                     {} dropped{}{}",
+                    obs.window_s,
+                    obs.scopes.len(),
+                    obs.samples,
+                    obs.keys_seen,
+                    obs.dropped,
+                    if obs.dropped > 0 {
+                        " (findings cover only what was seen — O6)"
+                    } else {
+                        ""
+                    },
+                    if obs.synthetic_marked > 0 {
+                        format!(
+                            "; {} sample(s) carried the synthetic marker",
+                            obs.synthetic_marked
+                        )
+                    } else {
+                        String::new()
+                    },
+                );
+            }
             println!(
                 "\n{} introspect repl(y|ies) from {} live producer(s); {} producer(s) \
                  serve describe, {} do not; {} router(s){}.",

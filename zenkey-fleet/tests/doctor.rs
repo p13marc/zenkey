@@ -51,6 +51,7 @@ fn spec() -> DoctorSpec {
         deep: false,
         sample: None,
         timeout: Duration::from_secs(2),
+        listen: None,
     }
 }
 

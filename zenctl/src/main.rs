@@ -378,6 +378,13 @@ enum Command {
         /// the sweep's cost, not just its output.
         #[arg(long, value_name = "N", requires = "deep")]
         sample: Option<usize>,
+        /// Listen passively to the data planes for this many seconds after
+        /// the GET fan-in and judge what rides (#161): undecodable/invalid
+        /// payloads, declared-vs-observed QoS, unregistered traffic,
+        /// over-rate events. The report states the window, its scopes, and
+        /// what the bounded observer dropped (O5/O6).
+        #[arg(long, value_name = "SECS")]
+        listen: Option<f64>,
         /// Exit 1 when a finding at (or above) this severity exists.
         /// Default: always exit 0 — findings are output, not verdicts.
         #[arg(long, value_enum, value_name = "SEVERITY")]
@@ -1666,9 +1673,10 @@ async fn main() -> Result<()> {
         Command::Doctor {
             deep,
             sample,
+            listen,
             fail_on,
             bus,
-        } => cmd::doctor::run(deep, sample, fail_on, &bus).await,
+        } => cmd::doctor::run(deep, sample, listen, fail_on, &bus).await,
         Command::Serve {
             keyexpr,
             reply,

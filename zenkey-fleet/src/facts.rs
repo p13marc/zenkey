@@ -121,6 +121,9 @@ pub struct SubjectFacts {
     pub qos: Option<String>,
     pub encoding: Option<String>,
     pub ttl_s: Option<i64>,
+    /// The declared events rate class (`rare` | `low` | `burst(n/h)`,
+    /// RFC 04 §1.3) — carried so observers can judge over-rate (#161).
+    pub rate: Option<String>,
 }
 
 impl SubjectFacts {
@@ -213,6 +216,7 @@ impl KeyFacts {
                 qos: decl.qos.clone(),
                 encoding: decl.encoding.clone(),
                 ttl_s: decl.ttl_s,
+                rate: decl.rate.clone(),
             })),
             None => Registration::Unregistered,
         };
@@ -698,6 +702,7 @@ mod tests {
             qos: qos.map(str::to_string),
             encoding: None,
             ttl_s: None,
+            rate: None,
         };
         assert_eq!(
             facts(Some("transition")).declared_qos(),

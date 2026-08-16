@@ -1590,6 +1590,10 @@ impl Zengui {
                 self.doctor.deep = deep;
                 Task::none()
             }
+            DoctorMsg::ListenChanged(t) => {
+                self.doctor.listen = t;
+                Task::none()
+            }
             DoctorMsg::ReaskSchemas => {
                 // Local and immediate: the store simply forgets, and the next
                 // decode that needs a schema asks the bus. Nothing is fetched
@@ -1614,6 +1618,7 @@ impl Zengui {
                 let base = self.settings.base.clone();
                 let timeout = self.settings.timeout();
                 let deep = self.doctor.deep;
+                let listen = self.doctor.listen_window();
                 // Locals come from the registry DIRS only — never the union
                 // set, which would diff the bus against itself.
                 let dirs = self.settings.registry.clone();
@@ -1631,6 +1636,7 @@ impl Zengui {
                                 deep,
                                 sample: None,
                                 timeout,
+                                listen,
                             },
                         )
                         .await
