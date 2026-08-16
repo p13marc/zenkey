@@ -185,6 +185,66 @@ enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Generate registry-driven test traffic (#162): every declared subject
+    /// of a producer, schema-synthesized payloads, declared QoS,
+    /// class-conscious rates — a mock producer for testing consumers.
+    ///
+    /// The full plan prints BEFORE anything is published; every sample
+    /// carries the RFC 09 §5.3 synthetic marker
+    /// ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen window
+    /// or a capture can tell this traffic from real. Events stay inside
+    /// their declared rate budget on write-once keys. A run wider than 10
+    /// subjects needs --i-know.
+    Gen {
+        /// Only this producer's subjects.
+        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+        producer: Option<String>,
+        /// Only subjects whose declared path contains this.
+        #[arg(long)]
+        subject: Option<String>,
+        /// Value for a `{var}` in a declared path (repeatable, k=v).
+        /// Unnamed vars get deterministic synthetic values, stated in the
+        /// plan.
+        #[arg(long = "var", value_name = "K=V")]
+        vars: Vec<String>,
+        /// Origin the generated keys claim (h-<12 hex>). Default: derived
+        /// from this session's zid — printed either way, and stamped into
+        /// the marker.
+        #[arg(long)]
+        origin: Option<String>,
+        /// Override every entry's rate (Hz). Default: registry-driven —
+        /// telemetry 1 Hz, state refreshes at ttl/2, events inside their
+        /// declared budget.
+        #[arg(long, value_name = "HZ")]
+        rate: Option<f64>,
+        /// Send-timing shape (all deterministic under --seed).
+        #[arg(long, value_enum, default_value = "steady")]
+        pattern: cmd::generate::Pattern,
+        /// Run length, seconds.
+        #[arg(long, default_value_t = 10.0)]
+        duration: f64,
+        /// Synthesis/jitter seed — same seed, same run.
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// SchemaSet JSON document (RFC 08 §7) for payload shapes when the
+        /// bus serves no describe (the registry carries type names, not
+        /// shapes).
+        #[arg(long, value_name = "FILE")]
+        schema_set: Option<PathBuf>,
+        /// Also answer introspect (and describe, with --schema-set) for the
+        /// impersonated producers — a complete mock producer, not just a
+        /// firehose.
+        #[arg(long)]
+        serve_describe: bool,
+        /// Print the plan and publish nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Acknowledge a run wider than 10 subjects.
+        #[arg(long = "i-know")]
+        i_know: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Await an expectation on the bus, exit-coded for CI (#160).
     ///
     /// The subscriber is declared BEFORE the window opens (not-asked is not
@@ -1711,6 +1771,38 @@ async fn main() -> Result<()> {
             window,
             bus,
         } => cmd::cutover::run(&old_root, window, &bus).await,
+        Command::Gen {
+            producer,
+            subject,
+            vars,
+            origin,
+            rate,
+            pattern,
+            duration,
+            seed,
+            schema_set,
+            serve_describe,
+            dry_run,
+            i_know,
+            bus,
+        } => {
+            cmd::generate::run(
+                producer.as_deref(),
+                subject.as_deref(),
+                &vars,
+                origin.as_deref(),
+                rate,
+                pattern,
+                duration,
+                seed,
+                schema_set.as_deref(),
+                serve_describe,
+                dry_run,
+                i_know,
+                &bus,
+            )
+            .await
+        }
         Command::Expect {
             selector,
             within,

@@ -14,7 +14,9 @@ authors.workspace = true
 [features]
 default = ["decode"]
 decode = ["zenkey/decode"]
-decode-protobuf = ["zenkey/decode-protobuf"]
+# The direct prost-reflect dep is for gen's descriptor-driven synthesis
+# (#162); the codec itself lives in zenkey.
+decode-protobuf = ["zenkey/decode-protobuf", "dep:prost-reflect"]
 decode-cdr = ["zenkey/decode-cdr"]
 # Real JSON Schema validation behind decode verdicts (#159) — forwarded so
 # both explorers judge payloads, while a bare library consumer pays nothing.
@@ -28,6 +30,7 @@ blob = ["dep:zblob"]
 [dependencies]
 zenkey = { workspace = true, features = ["schema"] }
 zblob = { workspace = true, optional = true }
+prost-reflect = { workspace = true, optional = true }
 zenoh = { workspace = true }
 zenoh-ext = { workspace = true }
 tokio = { workspace = true }
