@@ -217,8 +217,10 @@ async fn decoded(
             zenkey_fleet::decode::Rendering::Structural(zenkey_fleet::decode::structural(bytes)),
         )
     } else {
-        zenkey_fleet::decode::decode_sample(store, session, slices, base, key, encoding, bytes)
-            .await
+        let d =
+            zenkey_fleet::decode::decode_sample(store, session, slices, base, key, encoding, bytes)
+                .await;
+        (d.type_name, d.rendering)
     }
 }
 

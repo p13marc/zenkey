@@ -447,7 +447,7 @@ impl Zengui {
                             // first miss) — a Task, never the render path.
                             Task::perform(
                                 async move {
-                                    let (ty, rendering) = zenkey_fleet::decode::decode_sample(
+                                    let d = zenkey_fleet::decode::decode_sample(
                                         &store,
                                         &session,
                                         &slices,
@@ -457,7 +457,9 @@ impl Zengui {
                                         &bytes.to_bytes(),
                                     )
                                     .await;
-                                    (fkey, ty, Arc::new(rendering))
+                                    // The verdict rides the sample (#159); the
+                                    // detail pane learns to render it in #164.
+                                    (fkey, d.type_name, Arc::new(d.rendering))
                                 },
                                 |(k, t, r)| Message::ValueDecoded(k, t, r),
                             )

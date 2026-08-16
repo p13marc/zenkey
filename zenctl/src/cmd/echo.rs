@@ -178,7 +178,7 @@ pub async fn run(
         } else if hex_payload {
             // --hex: the decode pipeline still names the type, the payload
             // shows as bytes.
-            let (type_name, _) = zenkey_fleet::decode::decode_sample(
+            let type_name = zenkey_fleet::decode::decode_sample(
                 &store,
                 &session,
                 &slices,
@@ -187,7 +187,8 @@ pub async fn run(
                 Some(encoding),
                 &bytes,
             )
-            .await;
+            .await
+            .type_name;
             // The tag names the registered type; the payload is shown as
             // bytes at the user's request, which is not a failed decode —
             // so no `?`.
@@ -197,15 +198,18 @@ pub async fn run(
                 println!("  attachment: {}", hex(&a.to_bytes()));
             }
         } else {
-            let (type_name, rendering) = if no_decode {
+            // `--no-decode` never asks, so it has no verdict to misreport.
+            let (type_name, rendering, verdict, decode_error) = if no_decode {
                 (
                     None,
                     zenkey_fleet::decode::Rendering::Structural(zenkey_fleet::decode::structural(
                         &bytes,
                     )),
+                    None,
+                    None,
                 )
             } else {
-                zenkey_fleet::decode::decode_sample(
+                let d = zenkey_fleet::decode::decode_sample(
                     &store,
                     &session,
                     &slices,
@@ -214,7 +218,8 @@ pub async fn run(
                     Some(encoding),
                     &bytes,
                 )
-                .await
+                .await;
+                (d.type_name, d.rendering, Some(d.verdict), d.decode_error)
             };
             let (value, typed, notes) = match &rendering {
                 zenkey_fleet::decode::Rendering::Typed(d) => (
@@ -254,6 +259,24 @@ pub async fn run(
                     obj["attachment"] = attachment_json(a);
                     obj["attachment_bytes"] = a.len().into();
                 }
+                // #159: present only when the pipeline was asked (--no-decode
+                // never asks) — and then always, so "valid" and "not checked"
+                // cannot be confused by their shared absence.
+                if let Some(v) = &verdict {
+                    obj["verdict"] = match v {
+                        zenkey_fleet::Verdict::Valid => "valid".into(),
+                        zenkey_fleet::Verdict::Invalid(errors) => {
+                            obj["violations"] = serde_json::json!(errors);
+                            "invalid".into()
+                        }
+                        zenkey_fleet::Verdict::NotValidated(r) => {
+                            serde_json::Value::String(format!("not-validated: {r}"))
+                        }
+                    };
+                    if let Some(e) = &decode_error {
+                        obj["decode_error"] = e.clone().into();
+                    }
+                }
                 println!("{obj}");
             } else if let Some(fmt) = fmt {
                 println!(
@@ -281,6 +304,16 @@ pub async fn run(
                 }
                 for note in notes {
                     eprintln!("  note: {note}");
+                }
+                // #159: a checked failure says so; Valid and NotValidated
+                // stay quiet here (the tag already carries typed/structural).
+                if let Some(zenkey_fleet::Verdict::Invalid(errors)) = &verdict {
+                    for e in errors {
+                        eprintln!("  invalid: {e}");
+                    }
+                }
+                if let Some(e) = &decode_error {
+                    eprintln!("  undecodable: {e}");
                 }
             }
         }

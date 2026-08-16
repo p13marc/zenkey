@@ -96,14 +96,18 @@ enum Command {
     /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
-    /// Dump a producer's served payload schemas (`@rpc/<producer>/describe`).
+    /// Dump a producer's served payload schemas (`@rpc/<producer>/describe`),
+    /// or check a payload against one (`schema check`, #159).
     ///
     /// RFC 08 §7: the shapes are served data. A producer that serves no
     /// `describe` degrades honestly — it is not an error.
+    #[command(args_conflicts_with_subcommands = true)]
     Schema {
+        #[command(subcommand)]
+        cmd: Option<SchemaCmd>,
         /// Producer name, e.g. `sysinfo`.
         #[arg(add = ArgValueCandidates::new(completion::producers))]
-        producer: String,
+        producer: Option<String>,
         /// Show only this type (implies the full document).
         #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
         type_name: Option<String>,
@@ -430,6 +434,36 @@ enum BenchCmd {
         /// Bench a procedure the registry does not declare idempotent.
         #[arg(long = "i-know")]
         i_know: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum SchemaCmd {
+    /// Validate one payload against its schema — no bus write, exit-coded
+    /// for CI (#159): 0 = valid, 1 = does not conform, 2 = could not check.
+    ///
+    /// The schema comes from a live `describe` (give --producer) or an
+    /// offline SchemaSet JSON document (--schema-set; the registry TOMLs
+    /// carry type *names*, not shapes, so a directory alone cannot check).
+    Check {
+        /// Type name to validate against.
+        #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
+        type_name: String,
+        /// Payload: inline text, `@file`, or `-` for stdin.
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        from: String,
+        /// Producer whose served `describe` carries the schema (live mode).
+        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+        producer: Option<String>,
+        /// SchemaSet JSON document (RFC 08 §7) — offline mode, no session.
+        #[arg(long, value_name = "FILE")]
+        schema_set: Option<std::path::PathBuf>,
+        /// Wire encoding of the payload. Defaults to the schema kind's own
+        /// (json-schema → JSON, protobuf → protobuf, cdr → XCDR1).
+        #[arg(long)]
+        encoding: Option<String>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -1476,11 +1510,41 @@ async fn main() -> Result<()> {
             output::interface_show(&report, bus.format)
         }
         Command::Schema {
-            producer,
+            cmd:
+                Some(SchemaCmd::Check {
+                    type_name,
+                    from,
+                    producer,
+                    schema_set,
+                    encoding,
+                    bus,
+                }),
+            ..
+        } => {
+            cmd::schema::check(
+                &type_name,
+                &from,
+                producer.as_deref(),
+                schema_set.as_deref(),
+                encoding.as_deref(),
+                &bus,
+            )
+            .await
+        }
+        Command::Schema {
+            cmd: None,
+            producer: Some(producer),
             type_name,
             full,
             bus,
         } => cmd::schema::dump(&producer, type_name.as_deref(), full, &bus).await,
+        Command::Schema {
+            cmd: None,
+            producer: None,
+            ..
+        } => Err(anyhow::anyhow!(
+            "schema needs a <PRODUCER> to dump, or the `check` subcommand"
+        )),
         Command::Registry(RegistryCmd::Export {
             target,
             producer,

@@ -24,7 +24,7 @@ zenkey = { workspace = true }
 # Same feature set as zenctl (#97, #98, #58) — the two explorers must not
 # disagree about which payloads they can read, nor about which planes they
 # can reach.
-zenkey-fleet = { workspace = true, features = ["blob", "decode-protobuf", "decode-cdr"] }
+zenkey-fleet = { workspace = true, features = ["blob", "decode-protobuf", "decode-cdr", "validate-json"] }
 
 zenoh = { workspace = true }
 iced = { workspace = true }
