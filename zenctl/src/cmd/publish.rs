@@ -19,11 +19,63 @@ pub fn mode(raw: bool, no_validate: bool) -> PrepareMode {
     }
 }
 
+/// Parse an explicit `--qos` flag; the error names the closed vocabulary.
+fn parse_qos(name: &str) -> Result<zenkey::qos::QosProfile> {
+    zenkey::qos::QosProfile::from_name(name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unknown QoS profile {name:?} — sampled|refreshed|transition|alert|frame (RFC 04 §3)"
+        )
+    })
+}
+
+/// The subject's declared profile, when the key refines to one (#158).
+/// Returns the profile and the declared path for the source note.
+fn declared_qos(
+    base: &str,
+    key: &str,
+    slices: Option<&zenkey_fleet::SliceSet>,
+) -> Option<(zenkey::qos::QosProfile, String)> {
+    match zenkey_fleet::describe_key(base, key, slices)
+        .facts
+        .registration
+    {
+        zenkey_fleet::facts::Registration::Registered(s) => {
+            s.declared_qos().map(|q| (q, s.path.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// #158's resolution ladder: an explicit flag wins, the declared profile is
+/// the default, `sampled` is the stated last resort. The choice and its
+/// source are printed either way — a publisher that picked its own QoS
+/// silently would be the write-side O4 mistake.
+fn resolve_qos(
+    explicit: Option<zenkey::qos::QosProfile>,
+    base: &str,
+    key: &str,
+    slices: Option<&zenkey_fleet::SliceSet>,
+) -> zenkey::qos::QosProfile {
+    if let Some(q) = explicit {
+        return q;
+    }
+    match declared_qos(base, key, slices) {
+        Some((q, path)) => {
+            eprintln!("qos: {} (declared for {path})", q.name());
+            q
+        }
+        None => {
+            eprintln!("qos: sampled (default — no declared profile for this key)");
+            zenkey::qos::QosProfile::Sampled
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     key: &str,
     body: &str,
-    qos: &str,
+    qos: Option<&str>,
     encoding: Option<&str>,
     repeat: usize,
     interval: f64,
@@ -32,11 +84,8 @@ pub async fn run(
     attachment: Option<&str>,
     args: &BusArgs,
 ) -> Result<()> {
-    let qos = zenkey::qos::QosProfile::from_name(qos).ok_or_else(|| {
-        anyhow::anyhow!(
-            "unknown QoS profile {qos:?} — sampled|refreshed|transition|alert|frame (RFC 04 §3)"
-        )
-    })?;
+    // An explicit --qos fails fast, before the body or the bus.
+    let explicit_qos = qos.map(parse_qos).transpose()?;
     let typed = match body {
         "-" => {
             use std::io::Read as _;
@@ -94,6 +143,7 @@ pub async fn run(
             prepared.encoding.as_deref().unwrap_or("(no encoding set)")
         );
     }
+    let qos = resolve_qos(explicit_qos, args.base(), key, slices.as_ref());
 
     let publication =
         zenkey_fleet::declare_publication(&session, key, qos, prepared.encoding.as_deref()).await?;
@@ -127,11 +177,7 @@ pub async fn run(
 
 /// `topic retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
 pub async fn retire(key: &str, qos: &str, i_know: bool, args: &BusArgs) -> Result<()> {
-    let qos = zenkey::qos::QosProfile::from_name(qos).ok_or_else(|| {
-        anyhow::anyhow!(
-            "unknown QoS profile {qos:?} — sampled|refreshed|transition|alert|frame (RFC 04 §3)"
-        )
-    })?;
+    let qos = parse_qos(qos)?;
     // Slices are best-effort, like pub: the guard is honest about a missing
     // registry (a state key still passes — the class is in the key).
     let slices = args.slice_set().await.ok();
@@ -186,6 +232,66 @@ mod tests {
         assert_eq!(mode(true, false), PrepareMode::Raw);
         assert_eq!(mode(true, true), PrepareMode::Raw);
     }
+
+    /// #158: flag > declared > sampled, and each rung is reachable.
+    #[test]
+    fn qos_resolves_flag_then_declared_then_sampled() {
+        use zenkey::qos::QosProfile;
+        use zenkey::slice::{RegistrySlice, SubjectDecl};
+        let slice = RegistrySlice {
+            version: "1.0".into(),
+            app: "test".into(),
+            convention: 1,
+            name: "sysinfo".into(),
+            service_origin: None,
+            description: None,
+            subjects: vec![SubjectDecl {
+                path: "health".into(),
+                class: "state".into(),
+                type_name: "Health".into(),
+                common: None,
+                since: None,
+                description: None,
+                qos: Some("transition".into()),
+                ttl_s: None,
+                unit: None,
+                rate: None,
+                cardinality: None,
+                encoding: None,
+            }],
+            procedures: vec![],
+            blob: vec![],
+            media: vec![],
+            deprecated: vec![],
+        };
+        let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
+        let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+
+        // The declared profile is found, with its path for the note.
+        assert_eq!(
+            declared_qos("", key, Some(&slices)),
+            Some((QosProfile::Transition, "health".to_string()))
+        );
+        // An explicit flag wins over it.
+        assert_eq!(
+            resolve_qos(Some(QosProfile::Alert), "", key, Some(&slices)),
+            QosProfile::Alert
+        );
+        // No flag: the declared profile drives.
+        assert_eq!(
+            resolve_qos(None, "", key, Some(&slices)),
+            QosProfile::Transition
+        );
+        // Unregistered key, no flag: the stated last resort.
+        let unregistered = "v1/h-3fa9c2d41b7e/state/sysinfo/other";
+        assert_eq!(
+            resolve_qos(None, "", unregistered, Some(&slices)),
+            QosProfile::Sampled
+        );
+        // No registry at all: not asked is not "declared nothing" — but the
+        // publisher still needs a profile, and sampled is the stated one.
+        assert_eq!(resolve_qos(None, "", key, None), QosProfile::Sampled);
+    }
 }
 
 /// Where `topic pub` reads from, besides its arguments.
@@ -201,13 +307,16 @@ pub enum PubSource {
 /// facade, never ad-hoc puts — and counts what it could not publish
 /// instead of silently skipping it.
 pub async fn run_from_ndjson(
-    default_qos: &str,
+    default_qos: Option<&str>,
     interval: f64,
     i_know: bool,
     args: &BusArgs,
 ) -> Result<()> {
     use std::io::BufRead as _;
 
+    // An explicit --qos fails fast; otherwise each key falls back to its
+    // declared profile, then sampled — the same ladder as `topic pub` (#158).
+    let explicit_qos = default_qos.map(parse_qos).transpose()?;
     let session = args.session().await?;
     let slices = args.slice_set().await.ok();
     let base = args.base().to_string();
@@ -252,14 +361,24 @@ pub async fn run_from_ndjson(
         let publication = match publications.entry(row.key.clone()) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => {
-                let qos_name = row.qos.as_deref().unwrap_or(default_qos);
-                let Some(qos) = zenkey::qos::QosProfile::from_name(qos_name) else {
-                    record_err(
-                        line_no,
-                        format!("unknown QoS profile {qos_name:?}"),
-                        &mut malformed,
-                    );
-                    continue;
+                // Row > flag > declared > sampled. Only the row's own name can
+                // be malformed; the declared fallback resolves silently per
+                // key (a per-row note would drown the pipe's real output).
+                let qos = match row.qos.as_deref() {
+                    Some(name) => match zenkey::qos::QosProfile::from_name(name) {
+                        Some(q) => q,
+                        None => {
+                            record_err(
+                                line_no,
+                                format!("unknown QoS profile {name:?}"),
+                                &mut malformed,
+                            );
+                            continue;
+                        }
+                    },
+                    None => explicit_qos
+                        .or_else(|| declared_qos(&base, &row.key, slices.as_ref()).map(|(q, _)| q))
+                        .unwrap_or(zenkey::qos::QosProfile::Sampled),
                 };
                 let publication = zenkey_fleet::declare_publication(
                     &session,

@@ -744,8 +744,11 @@ enum TopicCmd {
         #[arg(long = "i-know")]
         i_know: bool,
         /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
-        #[arg(long, default_value = "sampled", add = ArgValueCandidates::new(completion::qos_profiles))]
-        qos: String,
+        /// Defaults to the subject's declared profile when the key refines
+        /// against a loaded registry, else `sampled` — either way the choice
+        /// and its source are printed (#158).
+        #[arg(long, add = ArgValueCandidates::new(completion::qos_profiles))]
+        qos: Option<String>,
         /// Wire encoding to declare (e.g. application/json). Defaults to the
         /// registry's declared encoding when the key refines, else none.
         #[arg(long)]
@@ -1250,7 +1253,7 @@ async fn main() -> Result<()> {
             bus,
         }) => match (from, key, body) {
             (Some(cmd::publish::PubSource::Ndjson), None, None) => {
-                cmd::publish::run_from_ndjson(&qos, interval, i_know, &bus).await
+                cmd::publish::run_from_ndjson(qos.as_deref(), interval, i_know, &bus).await
             }
             (Some(_), _, _) => Err(anyhow::anyhow!(
                 "--from ndjson reads keys and payloads from stdin rows — drop the                  key/body arguments"
@@ -1259,7 +1262,7 @@ async fn main() -> Result<()> {
                 cmd::publish::run(
                     &key,
                     &body,
-                    &qos,
+                    qos.as_deref(),
                     encoding.as_deref(),
                     repeat,
                     interval,
