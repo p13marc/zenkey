@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use zenkey::schema::decode::{DecodeError, DecodedPayload, DecoderRegistry};
+use zenkey::schema::validate::{NotValidated, Verdict};
 use zenkey::schema::{SchemaSet, TypeSchema, WireEncoding};
 use zenoh::Session;
 
@@ -619,9 +620,36 @@ fn is_scalar(v: &ciborium::Value) -> bool {
     !matches!(v, ciborium::Value::Map(_) | ciborium::Value::Array(_))
 }
 
+/// One sample, fully decoded — the pipeline's answer plus its honesty (#159).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedSample {
+    /// The registered type name, when the key refined to one.
+    pub type_name: Option<String>,
+    /// What to show: typed fields, or the structural fallback.
+    pub rendering: Rendering,
+    /// Conformance of the payload to its declared schema — three states,
+    /// never a boolean ([`zenkey::schema::validate::Verdict`]).
+    pub verdict: Verdict,
+    /// The decode failure under a *present* schema, verbatim — the evidence
+    /// behind `NotValidated(Undecodable)`. `None` everywhere else; before
+    /// #159 this error was swallowed into the structural fallback.
+    pub decode_error: Option<String>,
+}
+
+impl DecodedSample {
+    fn structural(type_name: Option<String>, reason: NotValidated, bytes: &[u8]) -> DecodedSample {
+        DecodedSample {
+            type_name,
+            rendering: Rendering::Structural(structural(bytes)),
+            verdict: Verdict::NotValidated(reason),
+            decode_error: None,
+        }
+    }
+}
+
 /// The whole decode pipeline for one sample: refine the key against the
 /// slices, resolve the schema through the store, decode — or fall back
-/// structurally, tagged with whatever we did learn.
+/// structurally, tagged with whatever we did learn and why it was not more.
 pub async fn decode_sample(
     store: &SchemaStore,
     session: &Session,
@@ -630,7 +658,7 @@ pub async fn decode_sample(
     wire_key: &str,
     sample_encoding: Option<&str>,
     bytes: &[u8],
-) -> (Option<String>, Rendering) {
+) -> DecodedSample {
     use zenkey::grammar::ClassOrPlane;
     let refined = zenkey::grammar::parse_full(base, wire_key).and_then(|parsed| {
         let producer = match (&parsed.producer, &parsed.origin) {
@@ -651,17 +679,33 @@ pub async fn decode_sample(
         ))
     });
     let Some((producer, type_name, registry_encoding)) = refined else {
-        return (None, Rendering::Structural(structural(bytes)));
+        // No registered type — there is no schema to conform to (O4: this is
+        // "no contract", not "checked and passed").
+        return DecodedSample::structural(None, NotValidated::NoSchema, bytes);
     };
     let encoding = resolve_encoding(sample_encoding, registry_encoding.as_deref(), bytes);
     match store.schema_for(session, &producer, &type_name).await {
         Some(schema) => match store.decode(&schema, &encoding, bytes) {
-            Ok(decoded) => (Some(type_name), Rendering::Typed(decoded)),
+            Ok(decoded) => {
+                let verdict = decoded.verdict.clone();
+                DecodedSample {
+                    type_name: Some(type_name),
+                    rendering: Rendering::Typed(decoded),
+                    verdict,
+                    decode_error: None,
+                }
+            }
             // Wrong schema/encoding is a finding for the *user*, not a crash:
-            // fall back to structure, keep the type tag.
-            Err(_) => (Some(type_name), Rendering::Structural(structural(bytes))),
+            // fall back to structure, keep the type tag — and keep the error,
+            // which is exactly the payload-undecodable evidence (#161).
+            Err(e) => DecodedSample {
+                type_name: Some(type_name),
+                rendering: Rendering::Structural(structural(bytes)),
+                verdict: Verdict::NotValidated(NotValidated::Undecodable),
+                decode_error: Some(e.to_string()),
+            },
         },
-        None => (Some(type_name), Rendering::Structural(structural(bytes))),
+        None => DecodedSample::structural(Some(type_name), NotValidated::NoSchema, bytes),
     }
 }
 

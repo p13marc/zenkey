@@ -34,6 +34,125 @@ pub async fn dump(
     output::schema_dump(&report, args.format)
 }
 
+/// `zenctl schema check` (#159): one payload against one schema, exit-coded
+/// for CI. 0 = valid; 1 = the payload does not conform (schema violations,
+/// or bytes that do not decode as the kind at all); 2 = could not check
+/// (no schema found, unknown kind) — "could not check" must never exit like
+/// either verdict, for the same reason `cutover` reserves its 2.
+///
+/// This checks; it never publishes and never encodes.
+pub async fn check(
+    type_name: &str,
+    from: &str,
+    producer: Option<&str>,
+    schema_set: Option<&std::path::Path>,
+    encoding: Option<&str>,
+    args: &BusArgs,
+) -> Result<()> {
+    use zenkey::schema::WireEncoding;
+    use zenkey_fleet::Verdict;
+
+    let bytes = match from {
+        "-" => {
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            std::io::stdin().read_to_end(&mut buf)?;
+            buf
+        }
+        b => match b.strip_prefix('@') {
+            Some(path) => std::fs::read(path)?,
+            None => b.as_bytes().to_vec(),
+        },
+    };
+
+    // Offline (--schema-set) needs no session at all — that is the whole
+    // point: an app repo checks its golden payloads in CI with no bus.
+    let schema = match (schema_set, producer) {
+        (Some(path), _) => {
+            let text = std::fs::read_to_string(path)?;
+            let set = zenkey::schema::SchemaSet::parse(&text).map_err(|e| {
+                anyhow::anyhow!("{}: not a SchemaSet document: {e}", path.display())
+            })?;
+            match set.get(type_name) {
+                Some(s) => s.clone(),
+                None => not_checked(&format!("{} carries no type {type_name:?}", path.display())),
+            }
+        }
+        (None, Some(p)) => {
+            let session = args.session().await?;
+            let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+            match store.schema_for(&session, p, type_name).await {
+                Some(s) => s,
+                None => not_checked(&format!(
+                    "{p} serves no schema for {type_name:?} (RFC 08 §7 is a SHOULD — \
+                     this is silence about the type, not a claim about the payload)"
+                )),
+            }
+        }
+        (None, None) => anyhow::bail!(
+            "give --producer (live describe) or --schema-set FILE — the registry \
+             TOMLs carry type names, not shapes (RFC 08 §7)"
+        ),
+    };
+
+    let wire = match encoding
+        .map(str::to_string)
+        .or_else(|| zenkey_fleet::encode_encoding(None, None, Some(&schema)))
+    {
+        Some(name) => WireEncoding::from_encoding_str(&name),
+        None => not_checked(&format!(
+            "schema kind {:?} has no known framing — pass --encoding",
+            schema.kind().as_str()
+        )),
+    };
+
+    // A session-less store still decodes (it only needs one for fetching).
+    let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+    let (verdict, detail): (&str, Vec<String>) = match store.decode(&schema, &wire, &bytes) {
+        Ok(decoded) => match decoded.verdict {
+            Verdict::Valid => ("valid", decoded.notes),
+            Verdict::Invalid(errors) => ("invalid", errors),
+            Verdict::NotValidated(reason) => not_checked(&reason.to_string()),
+        },
+        Err(e) => match &e {
+            zenkey::schema::decode::DecodeError::Malformed(..)
+            | zenkey::schema::decode::DecodeError::WrongEncoding(_) => {
+                ("undecodable", vec![e.to_string()])
+            }
+            _ => not_checked(&e.to_string()),
+        },
+    };
+
+    if matches!(
+        args.format.resolved(),
+        crate::output::Format::Json | crate::output::Format::Ndjson
+    ) {
+        let obj = serde_json::json!({
+            "type": type_name,
+            "kind": schema.kind().as_str(),
+            "verdict": verdict,
+            "detail": detail,
+        });
+        println!("{obj}");
+    } else {
+        println!("{type_name} ({}): {verdict}", schema.kind().as_str());
+        for line in &detail {
+            println!("  {line}");
+        }
+    }
+    if verdict != "valid" {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Exit 2: the check never happened — reserved so CI can tell "nonconformant"
+/// from "unobservable", the same split `cutover` and `probe` guard.
+fn not_checked(reason: &str) -> ! {
+    eprintln!("not checked: {reason}");
+    std::process::exit(2);
+}
+
 /// The producers that carry a type name, from the loaded slices — who to ask
 /// for its schema. A type carried nowhere is asked of nobody, which is why
 /// `interface show` refuses an unknown name before this runs.

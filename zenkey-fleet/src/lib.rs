@@ -41,15 +41,24 @@ pub mod decode;
 #[cfg(feature = "decode")]
 pub mod doctor;
 #[cfg(feature = "decode")]
+pub mod expect;
+#[cfg(feature = "decode")]
 pub use body::{
     BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
 };
 #[cfg(feature = "decode")]
 pub use decode::{
-    SchemaDrift, TotalityGap, schema_drift, schema_dump, schemas_for_type, totality_gaps,
+    DecodedSample, SchemaDrift, TotalityGap, schema_drift, schema_dump, schemas_for_type,
+    totality_gaps,
 };
 #[cfg(feature = "decode")]
 pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
+#[cfg(feature = "decode")]
+pub use expect::{ExpectSpec, QosCheck, run_expect};
+/// The #159 conformance verdict, re-exported so frontends never reach around
+/// the engine for it.
+#[cfg(feature = "decode")]
+pub use zenkey::schema::validate::{NotValidated, Verdict};
 
 pub use admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,

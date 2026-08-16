@@ -96,14 +96,18 @@ enum Command {
     /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
-    /// Dump a producer's served payload schemas (`@rpc/<producer>/describe`).
+    /// Dump a producer's served payload schemas (`@rpc/<producer>/describe`),
+    /// or check a payload against one (`schema check`, #159).
     ///
     /// RFC 08 §7: the shapes are served data. A producer that serves no
     /// `describe` degrades honestly — it is not an error.
+    #[command(args_conflicts_with_subcommands = true)]
     Schema {
+        #[command(subcommand)]
+        cmd: Option<SchemaCmd>,
         /// Producer name, e.g. `sysinfo`.
         #[arg(add = ArgValueCandidates::new(completion::producers))]
-        producer: String,
+        producer: Option<String>,
         /// Show only this type (implies the full document).
         #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
         type_name: Option<String>,
@@ -178,6 +182,47 @@ enum Command {
         /// Listening window, seconds.
         #[arg(long, default_value_t = 30)]
         window: u64,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// Await an expectation on the bus, exit-coded for CI (#160).
+    ///
+    /// The subscriber is declared BEFORE the window opens (not-asked is not
+    /// "no", RFC 09 §5.1 O4). Exit 0 = met; 1 = not met on a clean
+    /// observation; 2 = the observation cannot carry the claim (drops under
+    /// a completeness claim, session failure) — the cutover/probe exit
+    /// discipline. `--absent` is legitimate ONLY because of that 2.
+    ///
+    /// CI recipes should run isolated per RFC 09 §0: multicast scouting
+    /// off, gossip on, explicit endpoints — a test that scouts is not
+    /// isolated, and the contamination flows both ways.
+    Expect {
+        /// Selector to watch (full wire form — this session is
+        /// un-namespaced, RFC 09 §5).
+        selector: String,
+        /// Observation window, seconds.
+        #[arg(long, default_value_t = 30.0)]
+        within: f64,
+        /// Require at least N samples (default 1 unless --absent).
+        #[arg(long)]
+        count: Option<u64>,
+        /// Samples/second floor, measured over the full window.
+        #[arg(long, value_name = "HZ")]
+        rate_min: Option<f64>,
+        /// Samples/second ceiling, measured over the full window.
+        #[arg(long, value_name = "HZ")]
+        rate_max: Option<f64>,
+        /// Require every observed payload to validate against its served
+        /// schema (#159). "Unknowable" fails the assertion, with the reason.
+        #[arg(long)]
+        valid_payload: bool,
+        /// Require observed wire QoS to match: `declared` (each subject's
+        /// registry profile) or one profile name for everything.
+        #[arg(long, value_name = "declared|PROFILE")]
+        qos: Option<String>,
+        /// Assert silence: no sample may match within the window.
+        #[arg(long, conflicts_with_all = ["count", "rate_min", "rate_max", "valid_payload", "qos"])]
+        absent: bool,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -430,6 +475,36 @@ enum BenchCmd {
         /// Bench a procedure the registry does not declare idempotent.
         #[arg(long = "i-know")]
         i_know: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum SchemaCmd {
+    /// Validate one payload against its schema — no bus write, exit-coded
+    /// for CI (#159): 0 = valid, 1 = does not conform, 2 = could not check.
+    ///
+    /// The schema comes from a live `describe` (give --producer) or an
+    /// offline SchemaSet JSON document (--schema-set; the registry TOMLs
+    /// carry type *names*, not shapes, so a directory alone cannot check).
+    Check {
+        /// Type name to validate against.
+        #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
+        type_name: String,
+        /// Payload: inline text, `@file`, or `-` for stdin.
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        from: String,
+        /// Producer whose served `describe` carries the schema (live mode).
+        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+        producer: Option<String>,
+        /// SchemaSet JSON document (RFC 08 §7) — offline mode, no session.
+        #[arg(long, value_name = "FILE")]
+        schema_set: Option<std::path::PathBuf>,
+        /// Wire encoding of the payload. Defaults to the schema kind's own
+        /// (json-schema → JSON, protobuf → protobuf, cdr → XCDR1).
+        #[arg(long)]
+        encoding: Option<String>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -744,8 +819,11 @@ enum TopicCmd {
         #[arg(long = "i-know")]
         i_know: bool,
         /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
-        #[arg(long, default_value = "sampled", add = ArgValueCandidates::new(completion::qos_profiles))]
-        qos: String,
+        /// Defaults to the subject's declared profile when the key refines
+        /// against a loaded registry, else `sampled` — either way the choice
+        /// and its source are printed (#158).
+        #[arg(long, add = ArgValueCandidates::new(completion::qos_profiles))]
+        qos: Option<String>,
         /// Wire encoding to declare (e.g. application/json). Defaults to the
         /// registry's declared encoding when the key refines, else none.
         #[arg(long)]
@@ -1250,7 +1328,7 @@ async fn main() -> Result<()> {
             bus,
         }) => match (from, key, body) {
             (Some(cmd::publish::PubSource::Ndjson), None, None) => {
-                cmd::publish::run_from_ndjson(&qos, interval, i_know, &bus).await
+                cmd::publish::run_from_ndjson(qos.as_deref(), interval, i_know, &bus).await
             }
             (Some(_), _, _) => Err(anyhow::anyhow!(
                 "--from ndjson reads keys and payloads from stdin rows — drop the                  key/body arguments"
@@ -1259,7 +1337,7 @@ async fn main() -> Result<()> {
                 cmd::publish::run(
                     &key,
                     &body,
-                    &qos,
+                    qos.as_deref(),
                     encoding.as_deref(),
                     repeat,
                     interval,
@@ -1473,11 +1551,41 @@ async fn main() -> Result<()> {
             output::interface_show(&report, bus.format)
         }
         Command::Schema {
-            producer,
+            cmd:
+                Some(SchemaCmd::Check {
+                    type_name,
+                    from,
+                    producer,
+                    schema_set,
+                    encoding,
+                    bus,
+                }),
+            ..
+        } => {
+            cmd::schema::check(
+                &type_name,
+                &from,
+                producer.as_deref(),
+                schema_set.as_deref(),
+                encoding.as_deref(),
+                &bus,
+            )
+            .await
+        }
+        Command::Schema {
+            cmd: None,
+            producer: Some(producer),
             type_name,
             full,
             bus,
         } => cmd::schema::dump(&producer, type_name.as_deref(), full, &bus).await,
+        Command::Schema {
+            cmd: None,
+            producer: None,
+            ..
+        } => Err(anyhow::anyhow!(
+            "schema needs a <PRODUCER> to dump, or the `check` subcommand"
+        )),
         Command::Registry(RegistryCmd::Export {
             target,
             producer,
@@ -1595,6 +1703,30 @@ async fn main() -> Result<()> {
             window,
             bus,
         } => cmd::cutover::run(&old_root, window, &bus).await,
+        Command::Expect {
+            selector,
+            within,
+            count,
+            rate_min,
+            rate_max,
+            valid_payload,
+            qos,
+            absent,
+            bus,
+        } => {
+            cmd::expect::run(
+                &selector,
+                within,
+                count,
+                rate_min,
+                rate_max,
+                valid_payload,
+                qos.as_deref(),
+                absent,
+                &bus,
+            )
+            .await
+        }
         Command::Probe {
             target,
             producer,

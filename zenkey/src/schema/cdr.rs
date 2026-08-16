@@ -540,7 +540,19 @@ impl PayloadDecoder for CdrDecoder {
                 reader.body.len() - reader.pos
             ));
         }
-        Ok(DecodedPayload { value, notes })
+        // A whole-message positional decode is structural conformance to the
+        // served field list — the thinner Valid (#159; see `validate`'s doc).
+        // Trailing bytes already degrade below, so the verdict follows them.
+        let verdict = if notes.is_empty() {
+            super::validate::Verdict::Valid
+        } else {
+            super::validate::Verdict::Invalid(notes.clone())
+        };
+        Ok(DecodedPayload {
+            value,
+            notes,
+            verdict,
+        })
     }
 
     fn encode(

@@ -266,7 +266,7 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
     );
 
     // The other direction, through the same store: named fields back out.
-    let (type_name, rendering) = zenkey_fleet::decode::decode_sample(
+    let d = zenkey_fleet::decode::decode_sample(
         &store,
         &b,
         &slices,
@@ -276,8 +276,10 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
         &sample.payload().to_bytes(),
     )
     .await;
-    assert_eq!(type_name.as_deref(), Some("Blob"));
-    let zenkey_fleet::decode::Rendering::Typed(decoded) = rendering else {
+    assert_eq!(d.type_name.as_deref(), Some("Blob"));
+    // #159: a successful dynamic decode is (structural) conformance.
+    assert_eq!(d.verdict, zenkey_fleet::Verdict::Valid);
+    let zenkey_fleet::decode::Rendering::Typed(decoded) = d.rendering else {
         panic!("a served protobuf schema must decode, not fall back to structure");
     };
     assert_eq!(decoded.value.get("x"), Some(&serde_json::json!(42)));
@@ -417,7 +419,7 @@ async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
     assert_eq!(prepared.bytes.len(), 4 + 6 * 8);
     assert_eq!(&prepared.bytes[..4], &[0x00, 0x01, 0x00, 0x00]);
 
-    let (type_name, rendering) = zenkey_fleet::decode::decode_sample(
+    let d = zenkey_fleet::decode::decode_sample(
         &store,
         &b,
         &slices,
@@ -427,8 +429,9 @@ async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
         &prepared.bytes,
     )
     .await;
-    assert_eq!(type_name.as_deref(), Some("Twist"));
-    let zenkey_fleet::decode::Rendering::Typed(decoded) = rendering else {
+    assert_eq!(d.type_name.as_deref(), Some("Twist"));
+    assert_eq!(d.verdict, zenkey_fleet::Verdict::Valid);
+    let zenkey_fleet::decode::Rendering::Typed(decoded) = d.rendering else {
         panic!("a served cdr schema must decode, not fall back to structure");
     };
     assert_eq!(

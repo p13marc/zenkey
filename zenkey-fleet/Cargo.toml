@@ -16,6 +16,9 @@ default = ["decode"]
 decode = ["zenkey/decode"]
 decode-protobuf = ["zenkey/decode-protobuf"]
 decode-cdr = ["zenkey/decode-cdr"]
+# Real JSON Schema validation behind decode verdicts (#159) — forwarded so
+# both explorers judge payloads, while a bare library consumer pays nothing.
+validate-json = ["zenkey/validate-json"]
 # The `@blob` transport (RFC 07 §2.5's probe and fetch), which pulls in the
 # reference client and its hashing stack. Off by default: the registry
 # projection and the report shapes are unconditional, so a library consumer
@@ -55,7 +58,7 @@ prost-reflect = { workspace = true }
 # protobuf decoder on for *this crate's tests* without touching what the
 # library ships. `cargo test -p zenkey-fleet` then covers `tests/codec.rs`
 # on its own, instead of only when a frontend happens to unify the feature in.
-zenkey = { workspace = true, features = ["decode-protobuf", "decode-cdr"] }
+zenkey = { workspace = true, features = ["decode-protobuf", "decode-cdr", "validate-json"] }
 # `tests/blob.rs` fetches to a real path, because "verified before disk" is
 # only checkable against a disk.
 tempfile = { workspace = true }

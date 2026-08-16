@@ -447,7 +447,7 @@ impl Zengui {
                             // first miss) — a Task, never the render path.
                             Task::perform(
                                 async move {
-                                    let (ty, rendering) = zenkey_fleet::decode::decode_sample(
+                                    let d = zenkey_fleet::decode::decode_sample(
                                         &store,
                                         &session,
                                         &slices,
@@ -457,7 +457,9 @@ impl Zengui {
                                         &bytes.to_bytes(),
                                     )
                                     .await;
-                                    (fkey, ty, Arc::new(rendering))
+                                    // The verdict rides the sample (#159); the
+                                    // detail pane learns to render it in #164.
+                                    (fkey, d.type_name, Arc::new(d.rendering))
                                 },
                                 |(k, t, r)| Message::ValueDecoded(k, t, r),
                             )
@@ -917,6 +919,14 @@ impl Zengui {
                     zenkey_fleet::describe_key(&self.settings.base, &k, self.slices.as_deref())
                         .facts
                 });
+                // #158: the declared profile drives the picker until the user
+                // takes it over — and stops driving it the moment they do.
+                if !self.publish_form.qos_touched {
+                    let declared = view::publish::declared_qos(self.publish_form.facts.as_ref());
+                    self.publish_form.qos = view::publish::QosChoice(
+                        declared.unwrap_or(zenkey::qos::QosProfile::Sampled),
+                    );
+                }
                 self.publish_form.key = k;
                 Task::none()
             }
@@ -926,6 +936,7 @@ impl Zengui {
             }
             PublishMsg::QosPicked(q) => {
                 self.publish_form.qos = q;
+                self.publish_form.qos_touched = true;
                 Task::none()
             }
             PublishMsg::EncodingChanged(e) => {

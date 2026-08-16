@@ -14,8 +14,9 @@
 
 use serde_json::Value;
 
-#[cfg(feature = "decode-protobuf")]
+#[cfg(any(feature = "decode-protobuf", feature = "validate-json"))]
 use super::compiled::CompiledCache;
+use super::validate::{NotValidated, Verdict};
 use super::{SchemaKind, TypeSchema, WireEncoding};
 
 /// A decoded payload: named-field JSON plus honesty notes (fields the
@@ -25,6 +26,10 @@ pub struct DecodedPayload {
     pub value: Value,
     /// Non-fatal observations a tool should surface (never silently drop).
     pub notes: Vec<String>,
+    /// Did the payload conform to its declared schema (#159)? Three states —
+    /// a decode that was never validated must not render like one that
+    /// passed. See [`super::validate`] for what "valid" claims per kind.
+    pub verdict: Verdict,
 }
 
 /// A decode/encode failure.
@@ -67,9 +72,43 @@ pub trait PayloadDecoder: Send + Sync {
 }
 
 /// The `json-schema` codec: JSON and CBOR framings of the serde data model.
-pub struct JsonSchemaDecoder;
+///
+/// With feature `validate-json` it also holds compiled draft 2020-12
+/// validators, cached by schema hash exactly like the protobuf descriptor
+/// pools (#100) — a schema compile must not sit on every echo line.
+#[derive(Default)]
+pub struct JsonSchemaDecoder {
+    #[cfg(feature = "validate-json")]
+    validators: CompiledCache<jsonschema::Validator>,
+}
 
 impl JsonSchemaDecoder {
+    pub fn new() -> JsonSchemaDecoder {
+        JsonSchemaDecoder::default()
+    }
+
+    /// The #159 verdict for a decoded value. Never a boolean: a schema that
+    /// does not compile, or a build without the validator, is
+    /// [`Verdict::NotValidated`] with its reason — not either answer.
+    #[cfg(feature = "validate-json")]
+    fn verdict(&self, schema: &TypeSchema, value: &Value) -> Verdict {
+        let compiled = self.validators.get_or_compile(schema, |schema| {
+            let doc = schema
+                .json_document()
+                .ok_or_else(|| DecodeError::BadSchema("missing json document".into()))?;
+            jsonschema::validator_for(doc).map_err(|e| DecodeError::BadSchema(e.to_string()))
+        });
+        match compiled {
+            Ok(validator) => super::validate::validate_json(&validator, value),
+            Err(_) => Verdict::NotValidated(NotValidated::BadSchema),
+        }
+    }
+
+    #[cfg(not(feature = "validate-json"))]
+    fn verdict(&self, _schema: &TypeSchema, _value: &Value) -> Verdict {
+        Verdict::NotValidated(NotValidated::FeatureOff)
+    }
+
     /// Note top-level fields the schema does not declare (additive-evolution
     /// visibility — never an error, RFC 08 §3).
     fn undeclared_fields(schema: &TypeSchema, value: &Value) -> Vec<String> {
@@ -112,15 +151,31 @@ impl PayloadDecoder for JsonSchemaDecoder {
             other => return Err(DecodeError::WrongEncoding(format!("{other:?}"))),
         };
         let notes = Self::undeclared_fields(schema, &value);
-        Ok(DecodedPayload { value, notes })
+        let verdict = self.verdict(schema, &value);
+        Ok(DecodedPayload {
+            value,
+            notes,
+            verdict,
+        })
     }
 
     fn encode(
         &self,
-        _schema: &TypeSchema,
+        schema: &TypeSchema,
         value: &Value,
         target: &WireEncoding,
     ) -> Result<Vec<u8>, DecodeError> {
+        // #159: a value that violates the served schema is refused before it
+        // is framed — this is what gives PrepareMode::Encode its teeth for
+        // the json-schema kind. A schema that does not compile (or a build
+        // without the validator) cannot judge the value and lets it pass;
+        // refusing on our own failure would punish the payload for the tool.
+        if let Verdict::Invalid(errors) = self.verdict(schema, value) {
+            return Err(DecodeError::Encode(format!(
+                "value violates the served schema: {}",
+                errors.join("; ")
+            )));
+        }
         match target {
             WireEncoding::Json => {
                 serde_json::to_vec(value).map_err(|e| DecodeError::Encode(e.to_string()))
@@ -208,6 +263,9 @@ impl PayloadDecoder for ProtobufDecoder {
         Ok(DecodedPayload {
             value,
             notes: Vec::new(),
+            // A successful dynamic decode is structural conformance to the
+            // served descriptor — the thinner Valid (see `validate`'s doc).
+            verdict: Verdict::Valid,
         })
     }
 
@@ -248,7 +306,7 @@ impl DecoderRegistry {
     /// the `decode-protobuf` feature is on; `cdr` when `decode-cdr` is).
     pub fn new() -> Self {
         #[allow(unused_mut)]
-        let mut decoders: Vec<Box<dyn PayloadDecoder>> = vec![Box::new(JsonSchemaDecoder)];
+        let mut decoders: Vec<Box<dyn PayloadDecoder>> = vec![Box::new(JsonSchemaDecoder::new())];
         #[cfg(feature = "decode-protobuf")]
         decoders.push(Box::new(ProtobufDecoder::new()));
         #[cfg(feature = "decode-cdr")]
@@ -428,6 +486,71 @@ mod tests {
             .unwrap();
         assert_eq!(out.value.get("x"), Some(&json!(42)));
         assert_eq!(out.value.get("name"), Some(&json!("hi")));
+    }
+}
+
+#[cfg(all(test, feature = "validate-json"))]
+mod validate_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn strict_schema() -> TypeSchema {
+        TypeSchema::json_schema(json!({
+            "type": "object",
+            "required": ["x"],
+            "properties": { "x": { "type": "integer" } },
+        }))
+    }
+
+    /// #159: the decode verdict is the schema's judgement, not the parser's.
+    #[test]
+    fn decode_verdicts_follow_the_schema() {
+        let registry = DecoderRegistry::new();
+        let s = strict_schema();
+        let ok = serde_json::to_vec(&json!({"x": 1})).unwrap();
+        let out = registry.decode(&s, &WireEncoding::Json, &ok).unwrap();
+        assert_eq!(out.verdict, Verdict::Valid);
+
+        let bad = serde_json::to_vec(&json!({"x": "seven"})).unwrap();
+        let out = registry.decode(&s, &WireEncoding::Json, &bad).unwrap();
+        match out.verdict {
+            Verdict::Invalid(errors) => {
+                assert_eq!(errors.len(), 1, "{errors:?}");
+                assert!(errors[0].contains("/x"), "{errors:?}");
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    /// #159: PrepareMode::Encode's teeth — a nonconformant value is refused
+    /// before framing, and the refusal names the violations.
+    #[test]
+    fn encode_refuses_a_nonconformant_value() {
+        let registry = DecoderRegistry::new();
+        let s = strict_schema();
+        let err = registry
+            .encode(&s, &json!({"x": "seven"}), &WireEncoding::Json)
+            .unwrap_err();
+        assert!(matches!(err, DecodeError::Encode(_)), "{err:?}");
+        assert!(err.to_string().contains("violates"), "{err}");
+        assert!(
+            registry
+                .encode(&s, &json!({"x": 1}), &WireEncoding::Json)
+                .is_ok()
+        );
+    }
+
+    /// The compiled validator is cached by schema hash, like the protobuf
+    /// descriptor pools (#100).
+    #[test]
+    fn the_validator_compiles_once_across_many_samples() {
+        let codec = JsonSchemaDecoder::new();
+        let s = strict_schema();
+        let bytes = serde_json::to_vec(&json!({"x": 1})).unwrap();
+        for _ in 0..20 {
+            codec.decode(&s, &WireEncoding::Json, &bytes).unwrap();
+        }
+        assert_eq!(codec.validators.compilations(), 1);
     }
 }
 

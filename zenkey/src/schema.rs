@@ -21,6 +21,8 @@ pub mod cdr;
 pub mod compiled;
 #[cfg(feature = "decode")]
 pub mod decode;
+#[cfg(feature = "decode")]
+pub mod validate;
 
 use std::collections::BTreeMap;
 use std::fmt;

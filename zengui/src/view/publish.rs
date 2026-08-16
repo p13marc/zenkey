@@ -63,12 +63,25 @@ pub fn qos_choices() -> Vec<QosChoice> {
     QosProfile::ALL.into_iter().map(QosChoice).collect()
 }
 
+/// The declared profile behind a classified key, when there is one (#158).
+/// Drives the picker default until the user takes the picker over.
+pub fn declared_qos(facts: Option<&KeyFacts>) -> Option<QosProfile> {
+    use zenkey_fleet::facts::Registration;
+    match facts.map(|f| &f.registration) {
+        Some(Registration::Registered(s)) => s.declared_qos(),
+        _ => None,
+    }
+}
+
 /// The pane's editable state (owned by the app).
 #[derive(Debug, Clone)]
 pub struct PublishForm {
     pub key: String,
     pub body: String,
     pub qos: QosChoice,
+    /// The user picked a profile by hand — stop following the declared one
+    /// (#158). A default that fought the operator would be worse than none.
+    pub qos_touched: bool,
     /// Optional `Encoding` override; empty means "let the registry and the
     /// schema kind decide" (the engine's ladder).
     pub encoding: String,
@@ -115,6 +128,7 @@ impl Default for PublishForm {
             key: String::new(),
             body: String::new(),
             qos: QosChoice(QosProfile::Sampled),
+            qos_touched: false,
             encoding: String::new(),
             raw: false,
             attachment: String::new(),
@@ -229,6 +243,11 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
     })
     .placeholder("qos")
     .text_size(font::CAPTION);
+    // #158: say when the picker is following the registry, so a declared
+    // default never reads as the operator's choice.
+    let qos_source: Option<Element<'a, Message>> = (!form.qos_touched
+        && declared_qos(form.facts.as_ref()) == Some(form.qos.0))
+    .then(|| kit::muted(format!("qos {} (declared)", form.qos.0.name())));
 
     let encoding = text_input("encoding override (optional)", &form.encoding)
         .on_input(|t| msg(PublishMsg::EncodingChanged(t)))
@@ -301,13 +320,18 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
         facts_col,
         body,
         row![qos, encoding].spacing(space::SM),
-        attachment,
+    ]
+    .spacing(space::SM);
+    if let Some(line) = qos_source {
+        col = col.push(line);
+    }
+    col = col.push(attachment);
+    col = col.push(
         row![raw, repeat, interval]
             .spacing(space::SM)
             .align_y(iced::Alignment::Center),
-        controls,
-    ]
-    .spacing(space::SM);
+    );
+    col = col.push(controls);
     if let Some(row) = i_know_row {
         col = col.push(row);
     }
@@ -434,6 +458,51 @@ mod tests {
         assert!(retire_needs_i_know(Some(&foreign)));
         // Not classified at all is not "state" (O4).
         assert!(retire_needs_i_know(None));
+    }
+
+    /// #158: the declared profile is read off the classification the pane
+    /// already holds — and only the `Registered` rung ever yields one.
+    #[test]
+    fn declared_qos_reads_only_the_registered_rung() {
+        use zenkey::slice::{RegistrySlice, SubjectDecl};
+        let slice = RegistrySlice {
+            version: "1.0".into(),
+            app: "test".into(),
+            convention: 1,
+            name: "sysinfo".into(),
+            service_origin: None,
+            description: None,
+            subjects: vec![SubjectDecl {
+                path: "health".into(),
+                class: "state".into(),
+                type_name: "Health".into(),
+                common: None,
+                since: None,
+                description: None,
+                qos: Some("transition".into()),
+                ttl_s: None,
+                unit: None,
+                rate: None,
+                cardinality: None,
+                encoding: None,
+            }],
+            procedures: vec![],
+            blob: vec![],
+            media: vec![],
+            deprecated: vec![],
+        };
+        let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
+        let facts = |key: &str| zenkey_fleet::describe_key("", key, Some(&slices)).facts;
+        let registered = facts("v1/h-3fa9c2d41b7e/state/sysinfo/health");
+        assert_eq!(
+            declared_qos(Some(&registered)),
+            Some(QosProfile::Transition)
+        );
+        let unregistered = facts("v1/h-3fa9c2d41b7e/state/sysinfo/other");
+        assert_eq!(declared_qos(Some(&unregistered)), None);
+        // Not asked is not "declared nothing" — but there is no profile to
+        // follow either way.
+        assert_eq!(declared_qos(None), None);
     }
 
     /// The picker is the enum, not a copy of it.

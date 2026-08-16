@@ -123,6 +123,20 @@ pub struct SubjectFacts {
     pub ttl_s: Option<i64>,
 }
 
+impl SubjectFacts {
+    /// The declared QoS profile, parsed into the closed RFC 04 §3 vocabulary.
+    ///
+    /// `None` means the registry declares no profile for this subject — or
+    /// names one outside the vocabulary, which the RFC 08 §5 lints reject at
+    /// the producer's build; a live slice can still carry anything, and an
+    /// unparseable name must not be mistaken for a parsed one (#158).
+    pub fn declared_qos(&self) -> Option<zenkey::qos::QosProfile> {
+        self.qos
+            .as_deref()
+            .and_then(zenkey::qos::QosProfile::from_name)
+    }
+}
+
 impl KeyFacts {
     /// Project a full wire key against the active base. Infallible by design.
     ///
@@ -670,6 +684,27 @@ mod tests {
             Registration::Registered(s) => assert_eq!(s.path, "flow/{q}"),
             other => panic!("expected Registered, got {other:?}"),
         }
+    }
+
+    /// #158: the declared profile parses into the closed vocabulary, and an
+    /// out-of-vocabulary name degrades to `None` instead of a wrong profile.
+    #[test]
+    fn declared_qos_parses_the_closed_vocabulary_only() {
+        let facts = |qos: Option<&str>| SubjectFacts {
+            path: "cpu/usage".into(),
+            type_name: "Point".into(),
+            vars: vec![],
+            unit: None,
+            qos: qos.map(str::to_string),
+            encoding: None,
+            ttl_s: None,
+        };
+        assert_eq!(
+            facts(Some("transition")).declared_qos(),
+            Some(zenkey::qos::QosProfile::Transition)
+        );
+        assert_eq!(facts(None).declared_qos(), None);
+        assert_eq!(facts(Some("best-effort-ish")).declared_qos(), None);
     }
 
     /// O1: a key that does not parse still gets a full description.

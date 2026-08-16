@@ -27,7 +27,7 @@ zenkey = { workspace = true }
 # could not be published to at all. `cdr` joins it for DDS / ROS 2 traffic.
 # `blob` is the same posture for the @blob transport (#58): the library stays
 # free of the hashing stack, and the explorer that has to fetch bytes pays.
-zenkey-fleet = { workspace = true, features = ["blob", "decode-protobuf", "decode-cdr"] }
+zenkey-fleet = { workspace = true, features = ["blob", "decode-protobuf", "decode-cdr", "validate-json"] }
 # A *runtime* dependency on the codegen crate, on purpose (issue #50):
 # `registry lint` must run the same RFC 08 §5 lints a consumer's build.rs runs,
 # and re-implementing them here would be a second set that could disagree with

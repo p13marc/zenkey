@@ -33,6 +33,10 @@ decode-protobuf = ["decode", "dep:prost-reflect", "dep:prost"]
 # XCDR1 (DDS / ROS 2) decode+encode against a served `cdr` field list. Pure
 # Rust, no extra dependency — the schema document is JSON like every other.
 decode-cdr = ["decode"]
+# Real JSON Schema validation (draft 2020-12) for the json-schema kind:
+# decode verdicts and encode refusal (#159). Without it, json-schema decode
+# reports Verdict::NotValidated(FeatureOff) — never a fake "valid".
+validate-json = ["decode", "dep:jsonschema"]
 
 [dependencies]
 zenoh = { workspace = true, optional = true }
@@ -46,6 +50,7 @@ base64 = { workspace = true, optional = true }
 ciborium = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
 prost-reflect = { workspace = true, optional = true }
+jsonschema = { workspace = true, optional = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 dirs = { workspace = true }

@@ -901,6 +901,54 @@ mod tests {
             })
         );
     }
+
+    /// Same contract as the doctor pin: `zenctl expect --format json` is
+    /// consumed by CI scripts, so the shape changes only deliberately (#160).
+    #[test]
+    fn expect_report_json_shape_is_pinned() {
+        let report = ExpectReport {
+            selector: "v1/*/state/sysinfo/health".into(),
+            window_s: 2.5,
+            ended_early: true,
+            samples: 3,
+            keys_seen: 2,
+            dropped: 0,
+            rate_hz: None,
+            violations: vec![],
+            violations_total: 0,
+            unmet: vec![],
+            verdict: ExpectVerdict::Met,
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "selector": "v1/*/state/sysinfo/health",
+                "window_s": 2.5,
+                "ended_early": true,
+                "samples": 3,
+                "keys_seen": 2,
+                "dropped": 0,
+                "violations_total": 0,
+                "verdict": "met",
+            })
+        );
+        // The optional fields appear when they carry facts — and `unmet`
+        // spells out every failed requirement.
+        let report = ExpectReport {
+            rate_hz: Some(0.5),
+            violations: vec!["k: invalid — /x: 3 is not a string".into()],
+            violations_total: 1,
+            unmet: vec!["1 sample(s) violated a per-sample requirement".into()],
+            verdict: ExpectVerdict::NotMet,
+            ended_early: false,
+            ..report
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["rate_hz"], 0.5);
+        assert_eq!(json["verdict"], "not_met");
+        assert_eq!(json["violations"][0], "k: invalid — /x: 3 is not a string");
+    }
 }
 
 /// The RFC 09 §6 cutover-acceptance verdict (issue #59). Three states, not
@@ -946,6 +994,51 @@ pub struct CutoverReport {
     /// silence claim and the report says so.
     pub dropped: u64,
     pub verdict: CutoverVerdict,
+}
+
+/// The `zenctl expect` verdict (#160). Three states, exit-coded 0/1/2: a CI
+/// assertion that cannot tell "condition not met" from "I could not observe
+/// properly" violates O4/O6 exactly where nobody reads logs carefully.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpectVerdict {
+    /// The expectation held within the window.
+    Met,
+    /// It did not, on a clean observation: conclusive positive evidence, or
+    /// a shortfall counted with zero drops.
+    NotMet,
+    /// The observation cannot carry the claim (drops under a completeness
+    /// claim, or a shortfall the dropped samples could have filled).
+    Impaired,
+}
+
+/// The `zenctl expect` report (#160) — the window, what rode through it,
+/// and the judgement with its reasons spelled out.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExpectReport {
+    pub selector: String,
+    /// The window actually observed (shorter than requested on early
+    /// success).
+    pub window_s: f64,
+    pub ended_early: bool,
+    pub samples: u64,
+    pub keys_seen: usize,
+    /// Samples the bounded observer missed (O6) — the reason `Impaired`
+    /// exists.
+    pub dropped: u64,
+    /// Present only when a rate bound was requested; measured over the full
+    /// requested window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_hz: Option<f64>,
+    /// Up to a cap of per-sample failures, verbatim.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub violations: Vec<String>,
+    /// The exact total behind the capped examples.
+    pub violations_total: u64,
+    /// Why the verdict is not `Met`, one sentence per failed requirement.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unmet: Vec<String>,
+    pub verdict: ExpectVerdict,
 }
 
 /// The `zenctl probe` report (issue #59; RFC 09 §6 half two): how the
