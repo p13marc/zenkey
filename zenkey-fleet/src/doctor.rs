@@ -20,7 +20,7 @@ use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// Every check id `run_doctor` can emit — the stable vocabulary, never
 /// renamed (see the module doc).
-pub const CHECK_IDS: [&str; 11] = [
+pub const CHECK_IDS: [&str; 16] = [
     "slice-parse",
     "slice-sync",
     "introspect-coverage",
@@ -32,6 +32,12 @@ pub const CHECK_IDS: [&str; 11] = [
     "stale-state",
     "unstamped-state",
     "storage-coverage",
+    // The `--listen` passive phase (#161) — traffic judged as it rides.
+    "payload-undecodable",
+    "payload-invalid",
+    "qos-observed-mismatch",
+    "unregistered-traffic",
+    "rate-over-declared",
 ];
 
 /// What a doctor run should cost.
@@ -46,6 +52,12 @@ pub struct DoctorSpec {
     pub sample: Option<usize>,
     /// Per-query timeout.
     pub timeout: Duration,
+    /// Listen passively to the data planes for this long after the GET
+    /// fan-in (`--listen`, #161) and judge what rides: decode/validity,
+    /// declared-vs-observed QoS, unregistered traffic, over-rate events.
+    /// `None` = the phase does not run and the report carries no
+    /// observation section.
+    pub listen: Option<Duration>,
 }
 
 fn finding(
@@ -350,6 +362,18 @@ pub async fn run_doctor(
         }
     }
 
+    // --- listen: judge what actually rides (#161) --------------------
+    let observation = match spec.listen {
+        Some(window) => {
+            let store = crate::decode::SchemaStore::new(base, spec.timeout);
+            let (listen_findings, summary) =
+                observe_traffic(session, base, &slice_set, &store, window).await?;
+            findings.extend(listen_findings);
+            Some(summary)
+        }
+        None => None,
+    };
+
     Ok(DoctorReport {
         findings,
         synced,
@@ -360,7 +384,290 @@ pub async fn run_doctor(
         routers: routers.len(),
         router_version,
         deep: spec.deep,
+        observation,
     })
+}
+
+/// How many decode attempts each key gets during the listen window — the
+/// budget that keeps a hot bus from turning the doctor into a load test.
+const DECODE_BUDGET: u8 = 2;
+
+/// How many per-key findings each listen check emits before summarising.
+const FINDING_CAP: usize = 20;
+
+/// The declared events rate class as an hourly cap (RFC 04 §1.3):
+/// `rare` ≤ 1/h, `low` ≤ 1/min, `burst(n/h)` a declared cap.
+fn rate_cap_per_hour(rate: &str) -> Option<u64> {
+    match rate {
+        "rare" => Some(1),
+        "low" => Some(60),
+        other => other
+            .strip_prefix("burst(")?
+            .strip_suffix("/h)")?
+            .parse()
+            .ok(),
+    }
+}
+
+/// Does an attachment carry the RFC 09 §5.2 synthetic-traffic marker
+/// (`{"synthetic": true, …}`, #162)? Generated traffic judged as real would
+/// be a self-inflicted finding, so the observation counts it separately.
+fn is_synthetic_marker(attachment: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(attachment)
+        .ok()
+        .and_then(|v| v.get("synthetic").and_then(serde_json::Value::as_bool))
+        .unwrap_or(false)
+}
+
+/// The passive listening phase: watch the data planes for `window`, judge
+/// each sample through the ladders that already exist — the Registration
+/// ladder, `qos_matches`, `decode_sample` — and aggregate per key so a hot
+/// key is one finding with a count, not a finding per sample.
+async fn observe_traffic(
+    session: &Session,
+    base: &str,
+    slices: &crate::registry::SliceSet,
+    store: &crate::decode::SchemaStore,
+    window: Duration,
+) -> Result<(Vec<DoctorFinding>, crate::report::ObservationSummary)> {
+    use std::collections::BTreeMap;
+
+    // Scope statement (O5): the three data classes for host origins, plus
+    // each declared service origin's three — `*` never matches an `@` chunk
+    // (D4), so the service planes must be named to be seen.
+    let mut scopes = Vec::new();
+    for class in ["telemetry", "state", "events"] {
+        scopes.push(with_base(base, format!("v1/*/{class}/**")));
+    }
+    for slice in slices.slices() {
+        if let Some(origin) = &slice.service_origin {
+            for class in ["telemetry", "state", "events"] {
+                scopes.push(with_base(base, format!("v1/{origin}/{class}/**")));
+            }
+        }
+    }
+
+    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+    let mut events = monitor.events();
+    for scope in &scopes {
+        monitor.watch(scope).await?;
+    }
+    let deadline = tokio::time::Instant::now() + window;
+
+    let mut samples: u64 = 0;
+    let mut dropped: u64 = 0;
+    let mut synthetic: u64 = 0;
+    let mut facts_cache: BTreeMap<String, crate::facts::KeyFacts> = BTreeMap::new();
+    let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
+    // Per-key aggregates: key → count (+ what was wrong, first occurrence).
+    let mut unregistered: BTreeMap<String, u64> = BTreeMap::new();
+    let mut qos_bad: BTreeMap<String, (String, u64, u64)> = BTreeMap::new();
+    let mut undecodable: BTreeMap<String, (String, u64)> = BTreeMap::new();
+    let mut invalid: BTreeMap<String, (String, u64)> = BTreeMap::new();
+    // Per-family event counts: (family subject, declared rate) → count.
+    let mut event_counts: BTreeMap<(String, String), u64> = BTreeMap::new();
+
+    loop {
+        let item = tokio::select! {
+            item = events.recv() => item,
+            _ = tokio::time::sleep_until(deadline) => break,
+        };
+        match item {
+            Some(crate::StreamItem::Event(crate::FleetEvent::Sample(s))) => {
+                samples += 1;
+                if let Some(att) = &s.attachment
+                    && is_synthetic_marker(&att.to_bytes())
+                {
+                    synthetic += 1;
+                }
+                let facts = facts_cache.entry(s.key.clone()).or_insert_with(|| {
+                    let mut f = crate::facts::KeyFacts::project(base, &s.key);
+                    f.resolve(slices);
+                    f
+                });
+                match &facts.registration {
+                    crate::facts::Registration::Unregistered => {
+                        *unregistered.entry(s.key.clone()).or_default() += 1;
+                    }
+                    crate::facts::Registration::Registered(sf) => {
+                        if let (Some(profile), Some(declared)) = (sf.declared_qos(), &sf.qos) {
+                            let entry = qos_bad
+                                .entry(s.key.clone())
+                                .or_insert_with(|| (declared.clone(), 0, 0));
+                            entry.2 += 1;
+                            if !s.qos_matches(profile) {
+                                entry.1 += 1;
+                            }
+                        }
+                        if let (Some(rate), crate::facts::KeyShape::V1(v)) =
+                            (&sf.rate, &facts.shape)
+                            && v.class == "events"
+                        {
+                            let family = match &v.producer {
+                                Some(p) => format!("{p}/{}", sf.path),
+                                None => format!("{}/{}", v.origin, sf.path),
+                            };
+                            *event_counts.entry((family, rate.clone())).or_default() += 1;
+                        }
+                        let budget = decode_budget.entry(s.key.clone()).or_default();
+                        if *budget < DECODE_BUDGET {
+                            *budget += 1;
+                            let d = crate::decode::decode_sample(
+                                store,
+                                session,
+                                slices,
+                                base,
+                                &s.key,
+                                Some(&s.encoding),
+                                &s.payload.to_bytes(),
+                            )
+                            .await;
+                            match d.verdict {
+                                crate::Verdict::NotValidated(
+                                    zenkey::schema::validate::NotValidated::Undecodable,
+                                ) => {
+                                    let e = undecodable.entry(s.key.clone()).or_insert_with(|| {
+                                        (
+                                            d.decode_error
+                                                .unwrap_or_else(|| "does not decode".into()),
+                                            0,
+                                        )
+                                    });
+                                    e.1 += 1;
+                                }
+                                crate::Verdict::Invalid(errors) => {
+                                    let e = invalid
+                                        .entry(s.key.clone())
+                                        .or_insert_with(|| (errors.join("; "), 0));
+                                    e.1 += 1;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some(crate::StreamItem::Dropped(n)) => dropped += n,
+            Some(_) => continue,
+            None => break,
+        }
+    }
+    let keys_seen = facts_cache.len();
+    monitor.stop();
+
+    let window_s = window.as_secs_f64();
+    let mut findings = Vec::new();
+    let capped = |findings: &mut Vec<DoctorFinding>, check: &str, total: usize, shown: usize| {
+        if total > shown {
+            findings.push(finding(
+                DoctorSeverity::Info,
+                check,
+                "fleet",
+                format!("… and {} more key(s) with the same finding", total - shown),
+                None,
+            ));
+        }
+    };
+
+    for (key, (error, n)) in undecodable.iter().take(FINDING_CAP) {
+        findings.push(finding(
+            DoctorSeverity::Error,
+            "payload-undecodable",
+            key.clone(),
+            format!("payload does not decode as its declared type: {error} ({n} sample(s) tried)"),
+            Some("RFC 08 §7"),
+        ));
+    }
+    capped(
+        &mut findings,
+        "payload-undecodable",
+        undecodable.len(),
+        FINDING_CAP,
+    );
+    for (key, (violations, n)) in invalid.iter().take(FINDING_CAP) {
+        findings.push(finding(
+            DoctorSeverity::Error,
+            "payload-invalid",
+            key.clone(),
+            format!("payload violates the served schema: {violations} ({n} sample(s) tried)"),
+            Some("RFC 08 §7"),
+        ));
+    }
+    capped(&mut findings, "payload-invalid", invalid.len(), FINDING_CAP);
+    for (key, (declared, bad, total)) in qos_bad.iter().take(FINDING_CAP) {
+        if *bad > 0 {
+            findings.push(finding(
+                DoctorSeverity::Warning,
+                "qos-observed-mismatch",
+                key.clone(),
+                format!(
+                    "{bad} of {total} sample(s) did not ride the declared {declared} — this \
+                     is what actually rode: an interceptor MAY rewrite QoS, so it is a \
+                     deviation, not proof of the publisher"
+                ),
+                Some("RFC 04 §3"),
+            ));
+        }
+    }
+    capped(
+        &mut findings,
+        "qos-observed-mismatch",
+        qos_bad.values().filter(|(_, bad, _)| *bad > 0).count(),
+        FINDING_CAP.min(qos_bad.len()),
+    );
+    for (key, n) in unregistered.iter().take(FINDING_CAP) {
+        findings.push(finding(
+            DoctorSeverity::Warning,
+            "unregistered-traffic",
+            key.clone(),
+            format!(
+                "{n} sample(s) on a subject the producer's slice does not declare — \
+                 for a conforming producer, a subject that is not registered does not exist"
+            ),
+            Some("RFC 08 §2"),
+        ));
+    }
+    capped(
+        &mut findings,
+        "unregistered-traffic",
+        unregistered.len(),
+        FINDING_CAP,
+    );
+    // Over-rate only, and only when provable: within any window no longer
+    // than an hour, exceeding the hourly cap is conclusive. Absence or
+    // under-rate in a bounded window is never a finding (O1/O4).
+    if window <= Duration::from_secs(3600) {
+        for ((family, rate), count) in &event_counts {
+            let Some(cap) = rate_cap_per_hour(rate) else {
+                continue;
+            };
+            if *count > cap {
+                findings.push(finding(
+                    DoctorSeverity::Warning,
+                    "rate-over-declared",
+                    family.clone(),
+                    format!(
+                        "{count} event(s) in {window_s:.0}s exceeds the declared \
+                         `{rate}` cap ({cap}/h)"
+                    ),
+                    Some("RFC 04 §1.3"),
+                ));
+            }
+        }
+    }
+
+    Ok((
+        findings,
+        crate::report::ObservationSummary {
+            window_s,
+            scopes,
+            samples,
+            keys_seen,
+            dropped,
+            synthetic_marked: synthetic,
+        },
+    ))
 }
 
 /// Judge one state family's samples against its declared ttl — pure, so the
@@ -421,8 +728,37 @@ mod tests {
                 "stale-state",
                 "unstamped-state",
                 "storage-coverage",
+                "payload-undecodable",
+                "payload-invalid",
+                "qos-observed-mismatch",
+                "unregistered-traffic",
+                "rate-over-declared",
             ]
         );
+    }
+
+    /// RFC 04 §1.3's closed vocabulary, as hourly caps — and everything
+    /// else says "cannot judge", never a guessed budget.
+    #[test]
+    fn rate_caps_follow_the_declared_classes() {
+        assert_eq!(rate_cap_per_hour("rare"), Some(1));
+        assert_eq!(rate_cap_per_hour("low"), Some(60));
+        assert_eq!(rate_cap_per_hour("burst(100/h)"), Some(100));
+        assert_eq!(rate_cap_per_hour("burst(100)"), None);
+        assert_eq!(rate_cap_per_hour("often"), None);
+    }
+
+    /// #162's marker as #161 reads it: a JSON object with `"synthetic": true`.
+    /// Anything else — other attachments, non-JSON bytes — is real traffic.
+    #[test]
+    fn the_synthetic_marker_is_recognised_and_nothing_else_is() {
+        assert!(is_synthetic_marker(
+            br#"{"synthetic":true,"tool":"zenctl gen"}"#
+        ));
+        assert!(!is_synthetic_marker(br#"{"synthetic":false}"#));
+        assert!(!is_synthetic_marker(br#"{"tool":"zenctl gen"}"#));
+        assert!(!is_synthetic_marker(b"meta"));
+        assert!(!is_synthetic_marker(b""));
     }
 
     #[test]

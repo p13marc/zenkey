@@ -21,6 +21,8 @@ pub enum DoctorMsg {
     /// The run button — the only way a sweep starts.
     Run,
     DeepToggled(bool),
+    /// The `--listen` window in seconds (#161); empty = off.
+    ListenChanged(String),
     /// A run finished.
     Done(Result<crate::doctor::DoctorRun, String>),
     /// A finding row was clicked — navigate to its subject.
@@ -55,6 +57,12 @@ pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
         .size(font::CAPTION)
         .text_size(font::CAPTION)
         .on_toggle(|b| Message::Doctor(DoctorMsg::DeepToggled(b)));
+    // The listen window (#161): off by default — a passive phase still holds
+    // subscribers open, and ambient cost is the thing this panel refuses.
+    let listen = iced::widget::text_input("listen (s, empty = off)", &state.listen)
+        .on_input(|t| Message::Doctor(DoctorMsg::ListenChanged(t)))
+        .size(font::CAPTION)
+        .width(Length::Fixed(140.0));
 
     // The schema cache's escape hatch lives here because it is the same kind
     // of thing as the run button: an explicit, costed re-ask, never ambient.
@@ -64,7 +72,7 @@ pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
 
     let mut col = column![
         kit::section_header("doctor", None),
-        row![run, deep]
+        row![run, deep, listen]
             .spacing(space::MD)
             .align_y(iced::Alignment::Center),
         row![
@@ -122,6 +130,29 @@ pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
             d.new.len(),
             d.fixed.len(),
             d.unchanged
+        )));
+    }
+
+    // The listen phase's scope statement (#161): what was watched, for how
+    // long, and what the bounded observer dropped (O5/O6).
+    if let Some(obs) = &report.observation {
+        col = col.push(kit::muted(format!(
+            "listened {:.0}s over {}: {} on {}, {} dropped{}{}",
+            obs.window_s,
+            kit::plural(obs.scopes.len(), "scope"),
+            kit::plural(obs.samples as usize, "sample"),
+            kit::plural(obs.keys_seen, "key"),
+            obs.dropped,
+            if obs.dropped > 0 {
+                " (findings cover only what was seen — O6)"
+            } else {
+                ""
+            },
+            if obs.synthetic_marked > 0 {
+                format!(" · {} synthetic-marked", obs.synthetic_marked)
+            } else {
+                String::new()
+            },
         )));
     }
 
