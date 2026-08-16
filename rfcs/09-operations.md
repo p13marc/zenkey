@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.18 (ratified)** · informative chapter, but §5.1 is normative for tools · *amended in v1.2, v1.9, v1.13 and v1.18 — see [00-index.md](00-index.md)*
+**Status: v1.19 (ratified)** · informative chapter, but §5.1 is normative for tools and §5.3 for the synthetic marker · *amended in v1.2, v1.9, v1.13, v1.18 and v1.19 — see [00-index.md](00-index.md)*
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links,
@@ -671,6 +671,38 @@ overwrite current state with last Tuesday.
   observer's arrival offsets (`"t"`) and the publishers' HLCs — and a
   consumer plotting a time axis says which one it plotted. The reference
   scrubber plots `"t"`.
+
+### 5.3 Synthetic traffic — the generator's etiquette (v1.19)
+
+*Added in v1.19, alongside `zenctl gen` (zenkey #162). Replay got its
+etiquette in §5.2 because replay is publishing; a **generator** is
+publishing with one fewer excuse — the bytes never even happened. This
+section is normative for the marker; the generator's own behavior
+(guards, plan preview) is tool documentation.*
+
+Synthetic traffic is any sample published to exercise or test a consumer
+rather than to report a fact about the world: generated payloads, fault
+injections, load patterns. The keyspace cannot distinguish it — that is
+the point of generating conforming traffic — so the **attachment** must:
+
+- A tool that publishes synthetic traffic MUST attach, to every synthetic
+  sample, a JSON object attachment carrying at least
+  `{"synthetic": true, "tool": "<name>", "origin": "<generating origin>"}`.
+  A fault injector additionally carries `"fault": "<kind>"`
+  ([#163]). Attachments are otherwise free-form (RFC 05 §6 v1.14 keeps
+  them out of the registry's vocabulary); this is the one reserved shape.
+- An observer that judges traffic (a doctor listen window, an `expect`
+  verdict, a capture reader) SHOULD count marked samples separately and
+  say so — generated traffic judged as real is a self-inflicted finding.
+- A `.zrec` capture records the marker like any attachment (the row
+  dialect already round-trips attachments verbatim), so a **replay of
+  synthetic traffic stays marked** with no extra rule.
+- Deliberately **not** changed: replayed-but-originally-real traffic is
+  not marked — replay provenance stays in the capture header and §5.2's
+  re-stamping rules; inventing a marker for it would rewrite recorded
+  bytes. The `spray` demo is likewise unmarked: it exists to be a
+  self-contained adversarial bus, runs against no fleet but its own, and
+  marking it would defeat the negative cases it stages.
 
 ## 6. Cutover acceptance
 

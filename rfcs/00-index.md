@@ -1,9 +1,31 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.18 — RATIFIED** (2026-08-15, the §5.1 review pass below; v1.0
-2026-07-12; adopted for ZenSight, migration tracked in
+**Status: v1.19 — RATIFIED** (2026-08-16, the synthetic-traffic amendment
+below; ratified since v1.18; v1.0 2026-07-12; adopted for ZenSight,
+migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the enforcement
 crate `zenkey`).
+
+> **v1.19 (2026-08-16, the synthetic-traffic etiquette)** — replay got an
+> etiquette in v1.13 because replay is publishing; a **generator** is
+> publishing with one fewer excuse. New [09 §5.3](09-operations.md): a tool
+> that publishes synthetic traffic (generated payloads, fault injection —
+> `zenctl gen`, zenkey #162/#163) MUST mark every synthetic sample with a
+> JSON attachment `{"synthetic": true, "tool": …, "origin": …}`
+> (+ `"fault": kind` for injections), and judging observers SHOULD count
+> marked samples apart (the doctor listen phase and `expect` reports do,
+> zenkey #161).
+>
+> **What did *not* change.** Replayed-but-originally-real traffic stays
+> unmarked — provenance lives in the capture header and §5.2's re-stamping
+> rules, and rewriting recorded bytes to add a marker would falsify the
+> capture. The `spray` demo stays unmarked, deliberately: it is a
+> self-contained adversarial bus whose negative cases marking would defeat.
+> Attachments stay out of the registry's vocabulary (the v1.14 posture);
+> the marker is the one reserved shape, not the start of a schema. No key,
+> wire, or registry change.
+>
+> **Provenance.** zenkey #157 (the testing-suite epic), #162.
 
 > **v1.18 (2026-08-15, ratification — the observer-obligations review pass)**
 > — the set graduates from proposed to **ratified**, through the review gate
