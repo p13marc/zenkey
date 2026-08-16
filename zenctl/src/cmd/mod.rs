@@ -12,6 +12,7 @@ pub mod call;
 pub mod cutover;
 pub mod doctor;
 pub mod echo;
+pub mod expect;
 pub mod get;
 pub mod key;
 pub mod node;

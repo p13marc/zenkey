@@ -41,6 +41,8 @@ pub mod decode;
 #[cfg(feature = "decode")]
 pub mod doctor;
 #[cfg(feature = "decode")]
+pub mod expect;
+#[cfg(feature = "decode")]
 pub use body::{
     BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
 };
@@ -51,6 +53,8 @@ pub use decode::{
 };
 #[cfg(feature = "decode")]
 pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
+#[cfg(feature = "decode")]
+pub use expect::{ExpectSpec, QosCheck, run_expect};
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]

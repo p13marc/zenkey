@@ -185,6 +185,47 @@ enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Await an expectation on the bus, exit-coded for CI (#160).
+    ///
+    /// The subscriber is declared BEFORE the window opens (not-asked is not
+    /// "no", RFC 09 §5.1 O4). Exit 0 = met; 1 = not met on a clean
+    /// observation; 2 = the observation cannot carry the claim (drops under
+    /// a completeness claim, session failure) — the cutover/probe exit
+    /// discipline. `--absent` is legitimate ONLY because of that 2.
+    ///
+    /// CI recipes should run isolated per RFC 09 §0: multicast scouting
+    /// off, gossip on, explicit endpoints — a test that scouts is not
+    /// isolated, and the contamination flows both ways.
+    Expect {
+        /// Selector to watch (full wire form — this session is
+        /// un-namespaced, RFC 09 §5).
+        selector: String,
+        /// Observation window, seconds.
+        #[arg(long, default_value_t = 30.0)]
+        within: f64,
+        /// Require at least N samples (default 1 unless --absent).
+        #[arg(long)]
+        count: Option<u64>,
+        /// Samples/second floor, measured over the full window.
+        #[arg(long, value_name = "HZ")]
+        rate_min: Option<f64>,
+        /// Samples/second ceiling, measured over the full window.
+        #[arg(long, value_name = "HZ")]
+        rate_max: Option<f64>,
+        /// Require every observed payload to validate against its served
+        /// schema (#159). "Unknowable" fails the assertion, with the reason.
+        #[arg(long)]
+        valid_payload: bool,
+        /// Require observed wire QoS to match: `declared` (each subject's
+        /// registry profile) or one profile name for everything.
+        #[arg(long, value_name = "declared|PROFILE")]
+        qos: Option<String>,
+        /// Assert silence: no sample may match within the window.
+        #[arg(long, conflicts_with_all = ["count", "rate_min", "rate_max", "valid_payload", "qos"])]
+        absent: bool,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Cutover acceptance, half two (RFC 09 §6): a consumer-shaped,
     /// CONCRETE-KEY probe.
     ///
@@ -1662,6 +1703,30 @@ async fn main() -> Result<()> {
             window,
             bus,
         } => cmd::cutover::run(&old_root, window, &bus).await,
+        Command::Expect {
+            selector,
+            within,
+            count,
+            rate_min,
+            rate_max,
+            valid_payload,
+            qos,
+            absent,
+            bus,
+        } => {
+            cmd::expect::run(
+                &selector,
+                within,
+                count,
+                rate_min,
+                rate_max,
+                valid_payload,
+                qos.as_deref(),
+                absent,
+                &bus,
+            )
+            .await
+        }
         Command::Probe {
             target,
             producer,

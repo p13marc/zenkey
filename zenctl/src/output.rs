@@ -1131,6 +1131,67 @@ pub fn cutover(report: &zenkey_fleet::report::CutoverReport, format: Format) {
     }
 }
 
+/// `zenctl expect`'s report (#160): the window's facts, then the verdict
+/// with every failed requirement spelled out.
+pub fn expect(report: &zenkey_fleet::report::ExpectReport, format: Format) {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => json_line(report),
+        _ => {
+            println!(
+                "{}: {} sample(s) on {} key(s) over {:.1}s{}{}",
+                report.selector,
+                report.samples,
+                report.keys_seen,
+                report.window_s,
+                if report.ended_early {
+                    " (met early)"
+                } else {
+                    ""
+                },
+                match report.rate_hz {
+                    Some(r) => format!(", {r:.2} Hz over the full window"),
+                    None => String::new(),
+                }
+            );
+            if report.dropped > 0 {
+                println!(
+                    "{} sample(s) dropped while behind (O6) — counted into the verdict",
+                    report.dropped
+                );
+            }
+            if !report.violations.is_empty() {
+                println!(
+                    "violations ({} shown of {}):",
+                    report.violations.len(),
+                    report.violations_total
+                );
+                for v in &report.violations {
+                    println!("  ✗ {v}");
+                }
+            }
+            match report.verdict {
+                zenkey_fleet::report::ExpectVerdict::Met => println!("MET"),
+                zenkey_fleet::report::ExpectVerdict::NotMet => {
+                    println!("NOT MET — on a clean observation:");
+                    for u in &report.unmet {
+                        println!("  ✗ {u}");
+                    }
+                }
+                zenkey_fleet::report::ExpectVerdict::Impaired => {
+                    println!(
+                        "IMPAIRED — the observation cannot carry the claim \
+                         (RFC 09 §5.1 O6); this is not a verdict either way:"
+                    );
+                    for u in &report.unmet {
+                        println!("  ! {u}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// `zenctl probe`'s report (issue #59): the resolution provenance, then the
 /// call rendered like any `service call`.
 pub fn probe(report: &zenkey_fleet::report::ProbeReport, format: Format) {
