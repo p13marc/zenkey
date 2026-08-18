@@ -397,7 +397,7 @@ const FINDING_CAP: usize = 20;
 
 /// The declared events rate class as an hourly cap (RFC 04 §1.3):
 /// `rare` ≤ 1/h, `low` ≤ 1/min, `burst(n/h)` a declared cap.
-fn rate_cap_per_hour(rate: &str) -> Option<u64> {
+pub(crate) fn rate_cap_per_hour(rate: &str) -> Option<u64> {
     match rate {
         "rare" => Some(1),
         "low" => Some(60),

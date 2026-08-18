@@ -43,6 +43,10 @@ pub mod doctor;
 #[cfg(feature = "decode")]
 pub mod expect;
 #[cfg(feature = "decode")]
+pub mod generate;
+#[cfg(feature = "decode")]
+pub mod synth;
+#[cfg(feature = "decode")]
 pub use body::{
     BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
 };

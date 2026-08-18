@@ -669,6 +669,98 @@ unserved entry is dead code rather than a lie.
 An entry for a surface that is merely *planned* is not a registry entry.
 It is a diff, and it lands the day the code does.
 
+#### Checking the two halves (v1.20)
+
+*Added after the reference implementation shipped the procedure half and
+found the subject half is not the same problem.*
+
+The MUST binds subjects and procedures alike, but "is it served?" is an
+observable question for one and not the other, so a conforming
+implementation is expected to check them in different places.
+
+**Procedures — at run time, before `alive`.** A procedure is served by a
+declaration the process makes once, unconditionally, at startup. That is
+an event on a known key, so an implementation SHOULD compare its declared
+set against its own slice at the moment it begins serving `introspect`,
+and MUST NOT report `alive` while the comparison fails ([04-planes.md
+§5](04-planes.md): alive ⇒ callable). Implementations that declare
+queryables from concurrently-spawned tasks MUST allow a bounded grace for
+those declarations rather than sampling the set once — a check that passes
+only because of scheduler luck is not a check.
+
+**Subjects — at build or test time.** A subject has no such event.
+Publishers are typically declared lazily, on the first publication for a
+key, so at `introspect` time a healthy producer has declared almost
+nothing. Worse, the declared set stays legitimately incomplete for the
+life of a host: it is the intersection of *"this build can emit it"* with
+*"this host has that hardware, traffic and permission"*. A machine with no
+WireGuard interface never publishes a `wireguard/*` subject, and is
+correct not to. A runtime check therefore cannot distinguish a registry
+that lies from a host that is merely idle, and any threshold it picks
+generates false positives. For subjects, "served" MUST be read as **the
+build contains code that can publish it**, and SHOULD be checked against
+the producer's own mappers at build or test time.
+
+A producer whose telemetry tree is device-defined — a rest-var family such
+as `{device}/{metric...}`, where the set of subjects is whatever the
+polled equipment exposes — is **exempt**: there is no finite set to compare
+against, and a check that passes such a producer silently is asserting
+something it has not verified. An implementation SHOULD say so rather than
+report coverage it does not have.
+
+#### Conditional surfaces (v1.20, normative)
+
+The registry has no way to say *"this surface exists only in builds with
+feature X, or only when the operator enables Y"*. That gap is the single
+largest source of §6.1 violations in practice: the reference
+implementation found conditional surfaces in **six** producers, gated
+variously by a compile-time feature, a config flag, and a host capability
+the process could not obtain.
+
+Until the schema carries a conditionality field, such a surface has
+exactly two honest spellings, and **silence is not one of them**:
+
+> A **procedure** whose implementation is conditional MUST still be
+> declared by every build that registers it, and MUST answer with a
+> namespaced error ([05-control-rpc.md §3](05-control-rpc.md)) when it
+> cannot do its work: `error/unsupported` when the capability is absent
+> from the build, `error/gated` when it is present but disabled.
+>
+> A **subject** whose emission is conditional MUST be recorded, with the
+> condition that gates it, in a ledger the build-time check reads.
+
+The asymmetry is forced, not stylistic. A procedure that cannot answer can
+still *reply* — "unavailable" is a value on the wire. A gauge that has no
+reading cannot publish anything: a sentinel value corrupts every consumer
+downstream, and publishing nothing is indistinguishable from a host that
+is simply quiet. There is no honest wire representation of "this subject
+does not exist in this build", which is precisely why the subject case
+needs an out-of-band ledger and the procedure case does not.
+
+Note also what an error reply buys that a missing declaration does not. A
+caller distinguishes four outcomes, and the middle two are the actionable
+ones:
+
+| Observation | Meaning |
+|---|---|
+| no reply at all | no such producer on the bus |
+| `error/unsupported` | producer present, capability not in this build → rebuild |
+| `error/gated` | capability built in, disabled here → reconfigure |
+| an empty value reply | capability live, nothing to report |
+
+Skipping the declaration collapses the middle two into the first; replying
+with an empty value collapses them into the fourth. Both discard the only
+information the caller actually needed.
+
+A ledger is a weaker instrument than a schema field and MUST be checked in
+both directions to stay honest: an entry the build now emits, and an entry
+the registry no longer declares, are both errors. Without that, the ledger
+decays into a standing excuse for whatever happened to be unimplemented on
+the day it was written. A future `feature`/`when` field on the subject and
+procedure declarations would let the slice carry this itself, and is the
+right eventual answer; it is deliberately deferred here rather than
+designed in the abstract.
+
 ## 7. Payload self-description (v1.5)
 
 *The gap this closes: the registry binds one payload **type name** per
