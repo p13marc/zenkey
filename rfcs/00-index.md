@@ -1,10 +1,51 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.19 — RATIFIED** (2026-08-16, the synthetic-traffic amendment
+**Status: v1.20 — RATIFIED** (2026-08-18, the conditional-surface amendment
 below; ratified since v1.18; v1.0 2026-07-12; adopted for ZenSight,
 migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the enforcement
 crate `zenkey`).
+
+> **v1.20 (2026-08-18, conditional surfaces)** — §6.1 has said since v1.2
+> that every **subject and procedure** MUST be served by the build that
+> ships it. The reference implementation built the procedure half, turned it
+> on, and discovered two things the MUST had not accounted for.
+>
+> First, the halves are not checkable in the same place. A procedure is
+> served by a declaration made once, unconditionally, at startup — an
+> observable event. A subject is not: publishers are declared lazily on
+> first publication, so at `introspect` time a healthy producer has declared
+> almost nothing, and long afterwards its declared set is *still* the
+> intersection of "this build can emit it" with "this host has that hardware
+> and permission". No WireGuard interface, no `wireguard/*` — and correctly
+> so. A runtime subject check cannot separate a lying registry from an idle
+> host. [08 §6.1](08-registry.md) now says procedures are checked at run
+> time before `alive` (with a bounded grace, because sampling once races a
+> producer's own spawned declarations), subjects at build or test time
+> against the producer's mappers, and device-defined rest-var families are
+> exempt and must say so rather than pass silently.
+>
+> Second, and the larger gap: **the registry cannot express conditionality**
+> — "only in builds with feature X", "only when the operator enables Y".
+> That turned out to be the dominant source of §6.1 violations, found in six
+> producers gated by compile-time features, config flags, and a host
+> capability the process could not obtain. Until a schema field carries it,
+> §6.1 now requires one of two spellings and forbids the third: a
+> conditional **procedure** MUST still be declared and MUST answer
+> `error/unsupported` (absent from the build) or `error/gated` (present,
+> disabled); a conditional **subject** MUST be recorded in a ledger the
+> build-time check reads. Silence is not an option. The asymmetry is forced,
+> not stylistic — a procedure that cannot answer can still *reply*, whereas
+> a gauge with no reading cannot publish anything, since a sentinel corrupts
+> every consumer downstream and publishing nothing is indistinguishable from
+> a quiet host.
+>
+> **What did *not* change.** The MUST itself, its wording, and its scope. A
+> `feature`/`when` field on the subject and procedure declarations is named
+> as the eventual right answer and deliberately **not** designed here —
+> designing a conditionality language in the abstract, before more than one
+> adopter has expressed conditions, is how a schema acquires a field nobody
+> can use. Nothing else in the convention moves.
 
 > **v1.19 (2026-08-16, the synthetic-traffic etiquette)** — replay got an
 > etiquette in v1.13 because replay is publishing; a **generator** is
