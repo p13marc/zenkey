@@ -151,3 +151,5 @@ features:
         cargo check -p zenkey-fleet --no-default-features --features "$f" --locked; \
     done
     cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+    cargo check -p zenkey-build --locked
+    cargo test -p zenkey-build --features export --locked

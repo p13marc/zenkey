@@ -33,7 +33,9 @@ zenkey-fleet = { workspace = true, features = ["blob", "decode-protobuf", "decod
 # and re-implementing them here would be a second set that could disagree with
 # the first. It brings no zenoh stack — zenkey-build depends on zenkey with
 # default features off.
-zenkey-build = { workspace = true }
+# `export` adds the AsyncAPI document exporter (#208), which moved here from
+# this crate — registry in, document out is codegen's shape, not a CLI's.
+zenkey-build = { workspace = true, features = ["export"] }
 
 zenoh = { workspace = true }
 tokio = { workspace = true }

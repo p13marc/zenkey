@@ -92,6 +92,11 @@ jobs:
       - run: cargo check -p zenkey-fleet --no-default-features --features decode-cdr --locked
       - run: cargo check -p zenkey-fleet --no-default-features --features validate-json --locked
       - run: cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+      # zenkey-build runs in consumers' build scripts, and its manifest
+      # promises the dependency graph stays light — so the exporters (#208)
+      # are behind a feature, and both sides of it have to build.
+      - run: cargo check -p zenkey-build --locked
+      - run: cargo test -p zenkey-build --features export --locked
 
   msrv:
     runs-on: ubuntu-24.04

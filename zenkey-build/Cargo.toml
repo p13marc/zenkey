@@ -11,9 +11,16 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+# Registry-as-document exporters (#208). Off by default: this crate runs in
+# consumers' build scripts, and the promise below about a light dependency
+# graph is the reason `serde_json` is not unconditional.
+export = ["dep:serde_json"]
+
 [dependencies]
 # default-features = false: codegen needs only the chunk rules, never the
 # zenoh stack — a consumer's build-dependencies stay light.
 zenkey = { version = "0.6.0", path = "../zenkey", default-features = false }
 thiserror = { workspace = true }
+serde_json = { workspace = true, optional = true }
 toml = "1"
