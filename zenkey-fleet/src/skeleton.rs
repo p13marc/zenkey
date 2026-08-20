@@ -626,8 +626,9 @@ mod tests {
             None,
             now,
             None,
+            None,
         );
-        stats.record("demo/foreign", 4, None, now, None);
+        stats.record("demo/foreign", 4, None, now, None, None);
         let observed = KeyTreeSnapshot::build(&stats);
 
         let watched = vec!["v1/h-3fa9c2d41b7e/telemetry/**".to_string()];

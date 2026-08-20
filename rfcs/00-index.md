@@ -1,10 +1,52 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.20 — RATIFIED** (2026-08-18, the conditional-surface amendment
-below; ratified since v1.18; v1.0 2026-07-12; adopted for ZenSight,
-migration tracked in
+**Status: v1.21** (2026-08-20, the stamper amendment below; ratified at v1.20,
+2026-08-18; v1.0 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the enforcement
 crate `zenkey`).
+
+> **v1.21 (2026-08-20, a timestamp names who stamped it)** — [09
+> §5.1](09-operations.md) gains **O7**, and it is the first observer
+> obligation written because the reference *engine* broke one rather than the
+> GUI.
+>
+> `zenkey-fleet` has documented its HLC field as "the publisher's clock" since
+> it existed, and the pub→sub latency measurement built on it subtracts that
+> HLC from the observer's arrival time. But zenoh timestamps at the **first
+> node with timestamping enabled** — `timestamping.enabled` is mode-dependent
+> and specified as "whether data messages should be timestamped *if not
+> already*" — so on a fleet configured `{ router: true }`, which is the
+> ordinary shape for a storage-backed deployment, that number is
+> router→observer wearing a publisher→observer label. Every rendering of it
+> inherited the mislabel, in both explorers.
+>
+> The fix needed nothing new on the wire, which is the point worth recording:
+> the stamping node's id has ridden on every stamped sample all along, and a
+> `Timestamp`'s id and a `ZenohId` are the same type underneath, so the
+> comparison against `SourceInfo` is exact rather than heuristic. O7 therefore
+> asks only that a tool *look*: name the stamper, and keep self-stamped,
+> stamped-elsewhere and unattributable apart — three populations measured from
+> different clocks, which a combined median describes none of.
+>
+> Building it moved the third case from a corner to the common one, and the
+> amendment records that rather than hiding it: **zenoh 1.9 delivers no
+> `SourceInfo` to a subscriber**, from a plain publisher or an
+> AdvancedPublisher alike, so the comparison is usually unavailable and
+> "unattributable" is the ordinary verdict. The reference engine's integration
+> test proves the classifier is *conservative* rather than wrong — it checks
+> independently that the stamper really was the publisher, while the verdict
+> stays "cannot establish". That is O4 applied to a clock: unknown is not
+> foreign, and it is certainly not "the publisher's".
+>
+> **What did *not* change.** No key, wire, registry or QoS change; no new
+> field, header or attachment. The HLC-vs-arrival distinction that O6's
+> neighbours rest on is untouched, and "clocks are never mixed" still stands —
+> O7 sharpens *which* clock, not whether they may be added together. The
+> `unstamped` count stays a separate observation: no latency is still not zero
+> latency. Foreign matching status remains deferred ([12 §9](12-open-questions.md)).
+>
+> **Provenance.** zenkey #213, under the Explorer Suite 2.0 epic #174.
+
 
 > **v1.20 (2026-08-18, conditional surfaces)** — §6.1 has said since v1.2
 > that every **subject and procedure** MUST be served by the build that

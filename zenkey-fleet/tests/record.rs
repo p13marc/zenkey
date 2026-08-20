@@ -185,6 +185,7 @@ async fn a_lossy_capture_says_so_at_both_ends() {
                 encoding: String::new(),
                 kind: zenoh::sample::SampleKind::Put,
                 timestamp: None,
+                stamped_by: None,
                 attachment: None,
                 priority: zenoh::qos::Priority::Data,
                 congestion_control: zenoh::qos::CongestionControl::Drop,

@@ -32,6 +32,98 @@ pub struct LatencySummary {
     pub samples: usize,
 }
 
+/// Which clock stamped a latency observation — the storage form of
+/// [`crate::sub::StampProvenance`], without the stamper's identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StampClass {
+    SelfStamped,
+    Foreign,
+    Unattributable,
+}
+
+/// One key's observed latency, kept apart by **who stamped it** (issue #213).
+///
+/// Three populations, never folded into one median. A publisher-stamped sample
+/// measures publisher → observer; a router-stamped one measures that router →
+/// observer, which is a different quantity on the same axis. Averaging them
+/// produces a number that describes neither, and a fleet where some producers
+/// timestamp and some do not would report it without a word.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct LatencyReport {
+    /// Samples the publishing session stamped itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub self_stamped: Option<LatencySummary>,
+    /// Samples stamped by another node — commonly a router.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foreign: Option<LatencySummary>,
+    /// Stamped, but with no `SourceInfo` to compare against: unknown, not
+    /// foreign (RFC 09 §5.1 O4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unattributable: Option<LatencySummary>,
+    /// The distinct stamping nodes seen on this key, rendered. Empty when
+    /// every sample was self-stamped — there is no third party to name.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub stampers: Vec<String>,
+    /// Stampers beyond the retained bound that were dropped (O6: a bound
+    /// reports what it cost).
+    #[serde(skip_serializing_if = "is_zero", default)]
+    pub stampers_dropped: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+impl LatencyReport {
+    /// Whether anything was observed at all.
+    pub fn is_empty(&self) -> bool {
+        self.self_stamped.is_none() && self.foreign.is_none() && self.unattributable.is_none()
+    }
+
+    /// The populations present, each with the label that says what it
+    /// measures. Ordered self → foreign → unattributable.
+    pub fn populations(&self) -> Vec<(&'static str, LatencySummary)> {
+        [
+            ("publisher-stamped", self.self_stamped),
+            ("router-stamped", self.foreign),
+            ("stamper unknown", self.unattributable),
+        ]
+        .into_iter()
+        .filter_map(|(label, s)| s.map(|s| (label, s)))
+        .collect()
+    }
+
+    /// The caveat that has to travel with every rendering of these numbers.
+    ///
+    /// One sentence, in the engine, so the CLI and the GUI cannot drift into
+    /// describing the same measurement differently (RFC 09 §5.1 O7).
+    pub fn caveat(&self) -> String {
+        let clock = match (self.self_stamped.is_some(), self.foreign.is_some()) {
+            (true, false) => "the publisher's own HLC",
+            (false, true) => "an HLC stamped in transit, not the publisher's",
+            (true, true) => "two different clocks, kept apart below",
+            (false, false) => "an HLC whose stamper did not identify itself",
+        };
+        let mut note = format!(
+            "arrival wall-clock − {clock}: observed *skewed* latency — it contains \
+             clock skew, and negative values are the skew evidence, not an error \
+             (RFC 09 §5.1)"
+        );
+        if !self.stampers.is_empty() {
+            note.push_str(&format!("\nstamped by: {}", self.stampers.join(", ")));
+            if self.stampers_dropped > 0 {
+                note.push_str(&format!(" (+{} more not retained)", self.stampers_dropped));
+            }
+        }
+        note
+    }
+}
+
+/// How many distinct stampers one key retains. A key sees its publisher and,
+/// at most, the routers on its path; more than this is a fleet-shaped
+/// question for `doctor`, not a per-key one.
+const MAX_STAMPERS: usize = 4;
+
 /// One key's running statistics.
 #[derive(Debug, Clone)]
 pub struct KeyStats {
@@ -48,28 +140,75 @@ pub struct KeyStats {
     /// is not the same as zero latency (#119).
     pub unstamped: u64,
     last_sn: Option<u32>,
-    /// Bounded window of observed skewed latencies, µs.
-    lat: VecDeque<i64>,
+    /// Bounded window of observed skewed latencies, µs, each tagged with who
+    /// stamped it — the tag is what keeps the three populations apart (#213).
+    lat: VecDeque<(i64, StampClass)>,
+    /// Distinct third-party stampers seen, bounded by [`MAX_STAMPERS`].
+    stampers: std::collections::BTreeSet<zenoh::time::TimestampId>,
+    /// Stampers the bound refused (O6).
+    stampers_dropped: u64,
 }
 
 impl KeyStats {
-    /// The window's distribution, or `None` before any stamped sample.
+    /// The window's distributions, split by who stamped them (#213).
     ///
-    pub fn latency(&self) -> Option<LatencySummary> {
+    /// `None` before any stamped sample — which is not zero latency, and is
+    /// why [`KeyStats::unstamped`] is counted beside this rather than folded
+    /// into it.
+    pub fn latency(&self) -> Option<LatencyReport> {
         if self.lat.is_empty() {
             return None;
         }
-        let mut sorted: Vec<i64> = self.lat.iter().copied().collect();
-        sorted.sort_unstable();
-        let at = |q: f64| sorted[((sorted.len() - 1) as f64 * q) as usize];
-        Some(LatencySummary {
-            min_us: sorted[0],
-            median_us: at(0.5),
-            p95_us: at(0.95),
-            max_us: *sorted.last().expect("non-empty"),
-            samples: sorted.len(),
+        let of = |class: StampClass| {
+            summarise(
+                self.lat
+                    .iter()
+                    .filter(|(_, c)| *c == class)
+                    .map(|(us, _)| *us),
+            )
+        };
+        Some(LatencyReport {
+            self_stamped: of(StampClass::SelfStamped),
+            foreign: of(StampClass::Foreign),
+            unattributable: of(StampClass::Unattributable),
+            stampers: self.stampers.iter().map(|id| id.to_string()).collect(),
+            stampers_dropped: self.stampers_dropped,
         })
     }
+}
+
+/// Retain a third-party stamper, or count the bound that refused it (O6).
+fn note_stamper(
+    set: &mut std::collections::BTreeSet<zenoh::time::TimestampId>,
+    dropped: &mut u64,
+    stamper: Option<zenoh::time::TimestampId>,
+) {
+    let Some(id) = stamper else { return };
+    if set.contains(&id) {
+        return;
+    }
+    if set.len() >= MAX_STAMPERS {
+        *dropped += 1;
+        return;
+    }
+    set.insert(id);
+}
+
+/// The distribution of one population, or `None` when it is empty.
+fn summarise(values: impl Iterator<Item = i64>) -> Option<LatencySummary> {
+    let mut sorted: Vec<i64> = values.collect();
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted.sort_unstable();
+    let at = |q: f64| sorted[((sorted.len() - 1) as f64 * q) as usize];
+    Some(LatencySummary {
+        min_us: sorted[0],
+        median_us: at(0.5),
+        p95_us: at(0.95),
+        max_us: *sorted.last().expect("non-empty"),
+        samples: sorted.len(),
+    })
 }
 
 /// The table. Feed it samples; read it per key or in aggregate.
@@ -203,15 +342,18 @@ impl StatsTable {
     }
 
     /// Record one sample. `now` is injected for deterministic tests;
-    /// `latency_us` is the pre-computed skewed latency (#119) — `None` for
-    /// an unstamped sample, which is counted, not defaulted.
+    /// `latency` is the pre-computed skewed latency (#119) with the class of
+    /// clock that produced it (#213) — `None` for an unstamped sample, which
+    /// is counted, not defaulted. `stamper` names a third-party stamping node
+    /// when there was one.
     pub fn record(
         &mut self,
         key: &str,
         payload_len: usize,
         sn: Option<u32>,
         now: Instant,
-        latency_us: Option<i64>,
+        latency: Option<(i64, StampClass)>,
+        stamper: Option<zenoh::time::TimestampId>,
     ) {
         if let Some(s) = self.keys.get_mut(key) {
             let dt = now.saturating_duration_since(s.last_seen).as_secs_f64();
@@ -229,15 +371,16 @@ impl StatsTable {
                 s.sn_gaps += u64::from(cur - prev - 1);
             }
             s.last_sn = sn;
-            match latency_us {
-                Some(us) => {
+            match latency {
+                Some(observed) => {
                     if s.lat.len() >= LAT_WINDOW {
                         s.lat.pop_front();
                     }
-                    s.lat.push_back(us);
+                    s.lat.push_back(observed);
                 }
                 None => s.unstamped += 1,
             }
+            note_stamper(&mut s.stampers, &mut s.stampers_dropped, stamper);
         } else {
             if self.keys.len() >= self.max_keys {
                 self.evict();
@@ -250,9 +393,16 @@ impl StatsTable {
                     rate_hz: 0.0,
                     last_seen: now,
                     sn_gaps: 0,
-                    unstamped: u64::from(latency_us.is_none()),
+                    unstamped: u64::from(latency.is_none()),
                     last_sn: sn,
-                    lat: latency_us.into_iter().collect(),
+                    lat: latency.into_iter().collect(),
+                    stampers: {
+                        let mut set = std::collections::BTreeSet::new();
+                        let mut dropped = 0;
+                        note_stamper(&mut set, &mut dropped, stamper);
+                        set
+                    },
+                    stampers_dropped: 0,
                 },
             );
         }
@@ -293,7 +443,7 @@ mod tests {
         let mut t = StatsTable::with_capacity(100);
         let now = Instant::now();
         for i in 0..1000 {
-            t.record(&format!("demo/k{i}"), 4, None, now, None);
+            t.record(&format!("demo/k{i}"), 4, None, now, None, None);
         }
         assert!(t.len() <= 100, "len {} exceeds the bound", t.len());
         assert!(t.evicted() > 0);
@@ -316,11 +466,12 @@ mod tests {
                 None,
                 t0 + Duration::from_millis(i),
                 None,
+                None,
             );
         }
         // One of them keeps publishing, much later.
         let fresh = t0 + Duration::from_secs(60);
-        t.record("old/k0", 4, None, fresh, None);
+        t.record("old/k0", 4, None, fresh, None, None);
 
         // Now push new keys in, forcing eviction. Each is strictly newer than
         // `old/k0`'s refresh, so there is no tie for "oldest" to break.
@@ -330,6 +481,7 @@ mod tests {
                 4,
                 None,
                 fresh + Duration::from_millis(i),
+                None,
                 None,
             );
         }
@@ -352,19 +504,24 @@ mod tests {
         let mut t = StatsTable::new();
         let now = Instant::now();
         for us in [1000, -200, 5000, 3000] {
-            t.record("k", 4, None, now, Some(us));
+            t.record("k", 4, None, now, Some((us, StampClass::SelfStamped)), None);
         }
-        t.record("k", 4, None, now, None);
+        t.record("k", 4, None, now, None, None);
         let s = t.get("k").unwrap();
         assert_eq!(s.unstamped, 1);
         let lat = s.latency().unwrap();
-        assert_eq!(lat.min_us, -200, "negative skew is shown, not clamped");
-        assert_eq!(lat.max_us, 5000);
-        assert_eq!(lat.samples, 4);
-        assert!(lat.median_us >= -200 && lat.median_us <= 5000);
+        let own = lat
+            .self_stamped
+            .expect("the publisher stamped these itself");
+        assert_eq!(own.min_us, -200, "negative skew is shown, not clamped");
+        assert_eq!(own.max_us, 5000);
+        assert_eq!(own.samples, 4);
+        assert!(own.median_us >= -200 && own.median_us <= 5000);
+        assert!(lat.foreign.is_none(), "nothing else stamped anything");
+        assert!(lat.stampers.is_empty(), "no third party to name");
 
         // Never stamped: no summary, rather than an invented zero.
-        t.record("quiet", 4, None, now, None);
+        t.record("quiet", 4, None, now, None, None);
         assert!(t.get("quiet").unwrap().latency().is_none());
         assert_eq!(t.get("quiet").unwrap().unstamped, 1);
     }
@@ -376,7 +533,14 @@ mod tests {
         let mut t = StatsTable::with_capacity(4);
         let t0 = Instant::now();
         for i in 0..1000 {
-            t.record("demo/one", 4, None, t0 + Duration::from_millis(i), None);
+            t.record(
+                "demo/one",
+                4,
+                None,
+                t0 + Duration::from_millis(i),
+                None,
+                None,
+            );
         }
         assert_eq!(t.len(), 1);
         assert_eq!(t.evicted(), 0);
@@ -388,8 +552,8 @@ mod tests {
     fn a_capacity_of_one_still_works() {
         let mut t = StatsTable::with_capacity(1);
         let now = Instant::now();
-        t.record("a", 1, None, now, None);
-        t.record("b", 1, None, now, None);
+        t.record("a", 1, None, now, None, None);
+        t.record("b", 1, None, now, None, None);
         assert_eq!(t.len(), 1);
         assert_eq!(t.evicted(), 1);
         // Zero is clamped rather than accepted.
@@ -408,6 +572,7 @@ mod tests {
                 Some(i),
                 t0 + Duration::from_millis(100 * u64::from(i)),
                 None,
+                None,
             );
         }
         let s = t.get("v1/h-a/telemetry/x/m").unwrap();
@@ -423,6 +588,7 @@ mod tests {
             Some(105),
             t0 + Duration::from_millis(10_100),
             None,
+            None,
         );
         assert_eq!(t.get("v1/h-a/telemetry/x/m").unwrap().sn_gaps, 5);
     }
@@ -431,8 +597,8 @@ mod tests {
     fn totals_aggregate() {
         let mut t = StatsTable::new();
         let now = Instant::now();
-        t.record("a", 10, None, now, None);
-        t.record("b", 20, None, now, None);
+        t.record("a", 10, None, now, None, None);
+        t.record("b", 20, None, now, None, None);
         let (count, bytes, _) = t.totals();
         assert_eq!((count, bytes), (2, 30));
         assert_eq!(t.len(), 2);
@@ -444,9 +610,9 @@ mod tests {
     fn retire_unwatched_respects_remaining_coverage() {
         let mut t = StatsTable::new();
         let now = Instant::now();
-        t.record("v1/h-a/telemetry/x/m1", 4, None, now, None);
-        t.record("v1/h-a/state/x/health", 4, None, now, None);
-        t.record("v1/h-b/telemetry/y/m2", 4, None, now, None);
+        t.record("v1/h-a/telemetry/x/m1", 4, None, now, None, None);
+        t.record("v1/h-a/state/x/health", 4, None, now, None, None);
+        t.record("v1/h-b/telemetry/y/m2", 4, None, now, None, None);
 
         // Release the telemetry watch, but keep watching h-a entirely.
         let retired = t.retire_unwatched("v1/*/telemetry/**", &["v1/h-a/**".to_string()]);
@@ -470,8 +636,133 @@ mod tests {
     #[test]
     fn retire_unwatched_tolerates_bad_selectors() {
         let mut t = StatsTable::new();
-        t.record("a/b", 1, None, Instant::now(), None);
+        t.record("a/b", 1, None, Instant::now(), None, None);
         assert_eq!(t.retire_unwatched("", &[]), 0);
         assert_eq!(t.len(), 1);
+    }
+
+    /// #213: a publisher-stamped sample and a router-stamped one measure from
+    /// different clocks. Averaging them yields a number that describes
+    /// neither, so the summary keeps them apart — and names the third party.
+    #[test]
+    fn two_stampers_are_never_folded_into_one_median() {
+        let mut t = StatsTable::new();
+        let now = Instant::now();
+        let router = zenoh::time::TimestampId::rand();
+
+        // The publisher stamps its own: tight, sub-millisecond.
+        for us in [100, 120, 140, 160] {
+            t.record("k", 4, None, now, Some((us, StampClass::SelfStamped)), None);
+        }
+        // A router stamps the rest, much further from us.
+        for us in [9000, 9500, 10_000] {
+            t.record(
+                "k",
+                4,
+                None,
+                now,
+                Some((us, StampClass::Foreign)),
+                Some(router),
+            );
+        }
+
+        let lat = t
+            .get("k")
+            .unwrap()
+            .latency()
+            .expect("something was stamped");
+        let own = lat.self_stamped.expect("the publisher-stamped population");
+        let far = lat.foreign.expect("the router-stamped population");
+        assert_eq!(own.samples, 4);
+        assert_eq!(far.samples, 3);
+        assert_eq!(own.max_us, 160);
+        assert_eq!(far.min_us, 9000);
+        assert!(
+            own.median_us < far.median_us,
+            "two populations, two medians: {} vs {}",
+            own.median_us,
+            far.median_us
+        );
+        assert_eq!(
+            lat.stampers,
+            vec![router.to_string()],
+            "the third-party stamper is named, not averaged away"
+        );
+        assert!(lat.unattributable.is_none());
+
+        // A sample with no SourceInfo is *unknown*, never "foreign" (O4).
+        let orphan = zenoh::time::TimestampId::rand();
+        t.record(
+            "u",
+            4,
+            None,
+            now,
+            Some((7, StampClass::Unattributable)),
+            Some(orphan),
+        );
+        let u = t.get("u").unwrap().latency().unwrap();
+        assert!(u.unattributable.is_some());
+        assert!(u.foreign.is_none(), "unknown is not foreign");
+    }
+
+    /// The stamper set is bounded like everything else an hours-long observer
+    /// accumulates, and it reports what the bound cost (O6).
+    #[test]
+    fn the_stamper_set_is_bounded_and_says_what_it_dropped() {
+        let mut t = StatsTable::new();
+        let now = Instant::now();
+        for _ in 0..(MAX_STAMPERS + 3) {
+            t.record(
+                "k",
+                4,
+                None,
+                now,
+                Some((10, StampClass::Foreign)),
+                Some(zenoh::time::TimestampId::rand()),
+            );
+        }
+        let lat = t.get("k").unwrap().latency().unwrap();
+        assert_eq!(lat.stampers.len(), MAX_STAMPERS);
+        assert_eq!(lat.stampers_dropped, 3, "the bound reports its cost");
+    }
+
+    /// The caveat travels with the numbers and names which clock produced
+    /// them — the mislabel #213 exists to fix.
+    #[test]
+    fn the_caveat_names_the_clock_it_measured_from() {
+        let self_only = LatencyReport {
+            self_stamped: Some(LatencySummary {
+                min_us: 1,
+                median_us: 2,
+                p95_us: 3,
+                max_us: 4,
+                samples: 4,
+            }),
+            ..LatencyReport::default()
+        };
+        assert!(
+            self_only.caveat().contains("the publisher's own HLC"),
+            "{}",
+            self_only.caveat()
+        );
+
+        let router_only = LatencyReport {
+            foreign: self_only.self_stamped,
+            stampers: vec!["abcd".into()],
+            ..LatencyReport::default()
+        };
+        let note = router_only.caveat();
+        assert!(
+            note.contains("stamped in transit, not the publisher's"),
+            "{note}"
+        );
+        assert!(note.contains("abcd"), "the stamper is named: {note}");
+
+        let both = LatencyReport {
+            self_stamped: self_only.self_stamped,
+            foreign: self_only.self_stamped,
+            ..LatencyReport::default()
+        };
+        assert!(both.caveat().contains("kept apart"), "{}", both.caveat());
     }
 }

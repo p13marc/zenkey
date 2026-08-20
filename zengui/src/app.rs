@@ -108,7 +108,7 @@ pub struct Zengui {
     /// The selected key's observed skewed-latency summary, refreshed on the
     /// bus tick (#119) — never computed on the render path, and cleared
     /// with the selection.
-    selected_latency: Option<(zenkey_fleet::LatencySummary, u64)>,
+    selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
     /// Its one-shot `node_info` detail — the pane's only data-plane cost.
     node_detail: view::nodes::DetailState,
     /// The doctor panel's run state (#71) — run-on-demand only.
@@ -142,6 +142,9 @@ pub struct Zengui {
     /// Persisted UI preferences (issue #73) — theme, zoom, geometry, and the
     /// scope/context the window was last on.
     prefs: crate::prefs::Prefs,
+    /// Geometry changed and has not been written yet (issue #189). Drives the
+    /// settle timer, so a drag writes the file once rather than per pixel.
+    window_dirty: bool,
     /// Why the defaults are in force, when a prefs file could not be read.
     /// Rendered once in the status strip; never a reason to refuse to open.
     prefs_note: Option<String>,
@@ -247,6 +250,7 @@ impl Zengui {
             slice_source: SliceSource::None,
             prefs,
             prefs_note,
+            window_dirty: false,
             bases: Vec::new(),
             keys: 0,
             keys_evicted: 0,
@@ -751,10 +755,19 @@ impl Zengui {
                 Task::none()
             }
             Message::WindowResized(w, h) => {
-                // Geometry is remembered, but not on every pixel of a drag:
-                // the prefs file would be rewritten hundreds of times per
-                // resize. Recorded here, written on the next real change.
+                // Not on every pixel of a drag — the prefs file would be
+                // rewritten hundreds of times per resize. Recorded here and
+                // marked dirty; a settle timer writes it once the drag stops
+                // (issue #189). "Written on the next real change" meant a
+                // resize-then-quit lost the geometry entirely.
                 self.prefs.window = Some((w, h));
+                self.window_dirty = true;
+                Task::none()
+            }
+            Message::WindowSettled => {
+                if self.window_dirty {
+                    self.remember();
+                }
                 Task::none()
             }
             Message::Key(key, modifiers) => self.update_key(&key, modifiers),
@@ -1309,6 +1322,14 @@ impl Zengui {
                 self.context_form.zenoh_config = p;
                 Task::none()
             }
+            ContextMsg::RegistryChanged(v) => {
+                self.context_form.registry = v;
+                Task::none()
+            }
+            ContextMsg::TimeoutChanged(v) => {
+                self.context_form.timeout = v;
+                Task::none()
+            }
             ContextMsg::ScoutingToggled(b) => {
                 self.context_form.scouting = b;
                 Task::none()
@@ -1357,12 +1378,24 @@ impl Zengui {
             ContextMsg::Selected(name) => {
                 self.context_form.active = Some(name.clone());
                 match zenkey_fleet::context_store::load() {
-                    Ok(config) => match config.contexts.get(&name) {
+                    Ok(mut config) => match config.contexts.get(&name).cloned() {
                         Some(stored) => {
-                            self.context_form.load_from(&name, stored);
-                            self.apply_context(stored.clone());
+                            self.context_form.load_from(&name, &stored);
+                            self.apply_context(stored);
                             self.prefs.context = Some(name.clone());
-                            self.prefs.save();
+                            self.remember();
+                            // Move the store's own pointer too, not just this
+                            // window's memory of it: the store is shared, and
+                            // picking a context here left `zenctl context show`
+                            // still naming the old one (issue #189).
+                            config.current = Some(name.clone());
+                            if let Err(e) = zenkey_fleet::context_store::save(&config) {
+                                self.context_form.status = Some(Err(format!(
+                                    "switched to {name}, but the shared `current` \
+                                     pointer could not be written: {e}"
+                                )));
+                                return self.reopen_session();
+                            }
                             self.context_form.status = Some(Ok(format!("switched to {name}")));
                             return self.reopen_session();
                         }
@@ -1379,14 +1412,17 @@ impl Zengui {
     }
 
     /// Write the editor to the shared config. Returns whether it landed.
+    ///
+    /// Through `upsert`, not `insert`: the store is shared with zenctl, and
+    /// replacing the whole entry deleted every field this form has no widget
+    /// for (issue #194). The form now covers all of them, so this is the guard
+    /// for the next field somebody adds to `StoredContext`.
     fn save_context(&mut self, select: bool) -> bool {
-        let stored = match self.context_form.to_stored() {
-            Ok(s) => s,
-            Err(e) => {
-                self.context_form.status = Some(Err(e));
-                return false;
-            }
-        };
+        // Validate before touching the store, so a rejected form leaves it be.
+        if let Err(e) = self.context_form.to_stored() {
+            self.context_form.status = Some(Err(e));
+            return false;
+        }
         let name = self.context_form.name.trim().to_string();
         let mut config = match zenkey_fleet::context_store::load() {
             Ok(c) => c,
@@ -1395,7 +1431,13 @@ impl Zengui {
                 return false;
             }
         };
-        config.contexts.insert(name.clone(), stored);
+        let form = self.context_form.clone();
+        let mut applied = Ok(());
+        zenkey_fleet::context_store::upsert(&mut config, &name, |c| applied = form.apply_to(c));
+        if let Err(e) = applied {
+            self.context_form.status = Some(Err(e));
+            return false;
+        }
         if select {
             config.current = Some(name.clone());
         }
@@ -1449,7 +1491,7 @@ impl Zengui {
         };
         self.apply_context(stored);
         self.prefs.context = Some(self.context_form.name.trim().to_string());
-        self.prefs.save();
+        self.remember();
         self.reopen_session()
     }
 
@@ -2091,14 +2133,16 @@ impl Zengui {
                             .await
                             .map_err(|e| e.to_string())?;
                         let (coverage, coverage_note) = match slices.as_deref() {
-                            Some(set) => (
-                                zenkey_fleet::state_coverage(set, &base, &storages),
-                                None,
-                            ),
+                            Some(set) => {
+                                (zenkey_fleet::state_coverage(set, &base, &storages), None)
+                            }
                             None => (
                                 Vec::new(),
                                 Some(
-                                    "no registry slices resolved, so the declared state                                      families are unknown — this is \"not asked\", not                                      \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, or                                      wait for the bus registry (RFC 08 §6)."
+                                    "no registry slices resolved, so the declared state \
+                                     families are unknown — this is \"not asked\", not \
+                                     \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, \
+                                     or wait for the bus registry (RFC 08 §6)."
                                         .to_string(),
                                 ),
                             ),
@@ -2274,6 +2318,12 @@ impl Zengui {
     /// whatever the user was actually doing.
     fn remember(&mut self) {
         self.prefs.scope = self.settings.scope;
+        self.prefs.context = self
+            .context_form
+            .active
+            .clone()
+            .or(self.prefs.context.take());
+        self.window_dirty = false;
         self.prefs.save();
     }
 
@@ -2650,6 +2700,15 @@ impl Zengui {
             iced::window::resize_events()
                 .map(|(_, size)| Message::WindowResized(size.width, size.height)),
         );
+        // …and the settle timer that actually writes it, which exists only
+        // while a resize is outstanding (issue #189). One file write per drag
+        // rather than per pixel, and none at all while the window is still.
+        if self.window_dirty {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(700))
+                    .map(|_| Message::WindowSettled),
+            );
+        }
         // Keyboard shortcuts (issues #73, #75). `listen` only sees events no
         // widget consumed, so a shortcut can never steal a keystroke from the
         // text box the user is typing in.
@@ -2679,7 +2738,7 @@ impl Zengui {
                 self.tree_scroll.0,
                 self.tree_scroll.1,
             ))
-            .width(Length::FillPortion(1))
+            .width(Length::FillPortion(self.prefs.split_portions().0))
             .height(Length::Fill),
             iced::widget::container(match self.right_pane {
                 RightPane::Echo => view::echo::pane(
@@ -2702,7 +2761,7 @@ impl Zengui {
                     series: self.series_data(),
                     history_entries: self.history.as_ref().map(|r| r.ring.len()),
                     observed: self.history.as_ref().and_then(|r| r.ring.newest()),
-                    latency: self.selected_latency,
+                    latency: self.selected_latency.clone(),
                 }),
                 RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
                     roster: &self.roster,
@@ -2724,7 +2783,7 @@ impl Zengui {
                 RightPane::Connect =>
                     view::contexts::pane(&self.context_form, self.settings.is_unreachable(),),
             })
-            .width(Length::FillPortion(1))
+            .width(Length::FillPortion(self.prefs.split_portions().1))
             .height(Length::Fill),
         ]
         .spacing(space::MD);

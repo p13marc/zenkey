@@ -125,6 +125,9 @@ pub enum Message {
     Prefs(PrefsMsg),
     /// The window was resized — remembered for the next launch (issue #73).
     WindowResized(f32, f32),
+    /// The resize settled: write the geometry once, rather than per pixel
+    /// (issue #189).
+    WindowSettled,
 }
 
 /// What a user can change about the window itself.

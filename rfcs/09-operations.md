@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.19 (ratified)** · informative chapter, but §5.1 is normative for tools and §5.3 for the synthetic marker · *amended in v1.2, v1.9, v1.13, v1.18 and v1.19 — see [00-index.md](00-index.md)*
+**Status: v1.21** · informative chapter, but §5.1 is normative for tools and §5.3 for the synthetic marker · *amended in v1.2, v1.9, v1.13, v1.18, v1.19 and v1.21 — see [00-index.md](00-index.md)*
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links,
@@ -576,6 +576,33 @@ first two: nothing the view promised to show was lost, but a consumer that
 assumes it saw every sample individually is wrong. A view that silently
 shrinks is indistinguishable from a bus that went quiet.
 
+**O7 — A tool that reports a timestamp names who stamped it.** An observer
+that surfaces a sample's HLC — as a time, as an age, or as a latency —
+**MUST NOT** describe it as the publisher's clock unless it established that
+the publisher stamped it. Zenoh timestamps at the **first node with
+timestamping enabled**, which on a deployment configured
+`timestamping: { enabled: { router: true } }` is a router rather than the
+producer; the stamping node's identity rides on every stamped sample, and can
+be compared against the publisher's whenever `SourceInfo` is present. Three
+cases, and they are three: **self-stamped** (the HLC is the publisher's
+clock), **stamped elsewhere** (it is that node's clock, and a latency computed
+from it measures stamper → observer), and **unattributable** (stamped, but
+nothing said by whom — O4 applies: unknown, not foreign). An observer
+**MUST NOT** pool measurements taken from different stampers into one
+distribution: they measure from different clocks, and a combined median
+describes neither. Naming the stamper is the whole obligation — this rule
+asks for nothing new on the wire.
+
+*Practical note (measured against zenoh 1.9).* A subscriber is not currently
+delivered `SourceInfo` — not from a plain publisher and not from an
+AdvancedPublisher — so the id-to-id comparison is usually **unavailable**, and
+**unattributable** is the ordinary answer rather than the exceptional one. That
+is not a reason to guess. An observer that names the stamping node and says it
+cannot attribute it has told the truth; one that calls the same number "the
+publisher's HLC" has not, whatever the deployment happens to be doing. The rule
+is written against what the wire carries, not against what one release
+propagates, so it needs no revision if that changes.
+
 *Informative — frugality (added at ratification, v1.18).* The obligations
 above are about honesty, not thrift, but one habit keeps both cheap: an
 observer SHOULD retrieve only what its user asked to see. Rendering what is
@@ -597,7 +624,11 @@ claiming coverage nobody asked it to have.
 > `@catalog`. O6's third kind arrived the same way, at ratification: the
 > reference GUI's link layer batches bursts under a cap and counts the
 > overflow (`coalesced`) beside its broadcast lag (`lagged`) — an honest
-> number the two-counter wording could only misfile.
+> number the two-counter wording could only misfile. O7 is the first that came
+> from the *engine* rather than the GUI: `zenkey-fleet` documented its HLC as
+> "the publisher's clock" and computed a latency from it for as long as the
+> measurement had shipped, while never once reading the stamper id that rode
+> beside it (zenkey #213).
 
 ### 5.2 Capture and replay — `.zrec` etiquette (v1.13)
 

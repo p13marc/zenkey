@@ -37,7 +37,7 @@ fn contexts_round_trip_between_the_two_explorers() {
             base: Some("acme".into()),
             connect: vec!["tcp/127.0.0.1:7449".into()],
             listen: vec![],
-            registry: vec![],
+            registry: vec!["/abs/registry".into()],
             scouting: Some(false),
             timeout: Some(9),
             zenoh_config: None,
@@ -70,12 +70,43 @@ fn contexts_round_trip_between_the_two_explorers() {
     assert_eq!(form.base, "acme");
     assert_eq!(form.connect, "tcp/127.0.0.1:7449");
     assert!(!form.scouting);
+    // The two fields the pane had no widget for and therefore used to destroy
+    // (issue #194) are now loaded like the rest.
+    assert_eq!(form.timeout, "9", "the timeout reaches the editor");
+    assert_eq!(
+        form.registry, "/abs/registry",
+        "and so do the registry dirs"
+    );
 
     // …and what the pane would write re-reads as the same thing.
     let round = form.to_stored().expect("valid");
     assert_eq!(round.base.as_deref(), Some("acme"));
     assert_eq!(round.connect, ["tcp/127.0.0.1:7449"]);
     assert_eq!(round.scouting, Some(false));
+    assert_eq!(round.timeout, Some(9), "a zenctl-authored timeout survives");
+    assert_eq!(round.registry, [std::path::PathBuf::from("/abs/registry")]);
+
+    // The structural guard, for the *next* field added to the store: an edit
+    // merges over what is there rather than replacing it. Simulated by a form
+    // that has not loaded the field at all.
+    let mut cfg = zenkey_fleet::context_store::load().expect("reload");
+    let bare = ContextForm {
+        name: "lab".into(),
+        connect: "tcp/127.0.0.1:7450".into(),
+        ..ContextForm::default()
+    };
+    zenkey_fleet::context_store::upsert(&mut cfg, "lab", |c| {
+        // A form that renders only endpoints writes only endpoints.
+        c.connect = zengui::view::contexts::endpoints(&bare.connect);
+    });
+    let merged = cfg.contexts.get("lab").expect("lab");
+    assert_eq!(merged.connect, ["tcp/127.0.0.1:7450"], "the edit landed");
+    assert_eq!(
+        merged.timeout,
+        Some(9),
+        "an edit must keep what it did not render"
+    );
+    assert_eq!(merged.registry, [std::path::PathBuf::from("/abs/registry")]);
 
     // The empty base survives as an empty base, not as "unset" — a context
     // that pins the bus root must override a differently-based default rather

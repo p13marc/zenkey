@@ -431,9 +431,11 @@ pub struct RateRow {
     /// SourceInfo" — an observation, not proof of losslessness).
     pub sn_gaps: u64,
     /// Observed **skewed** latency over the window (#119) — absent when no
-    /// sample was HLC-stamped, which is not zero latency.
+    /// sample was HLC-stamped, which is not zero latency. Split by who
+    /// stamped it (#213): the three populations measure from different
+    /// clocks and are never folded into one median.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency: Option<crate::stats::LatencySummary>,
+    pub latency: Option<crate::stats::LatencyReport>,
     /// Samples that carried no HLC — the other half of the observation.
     pub unstamped: u64,
 }

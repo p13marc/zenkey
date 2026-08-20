@@ -178,6 +178,17 @@ impl Prefs {
         std::fs::write(path, text)
     }
 
+    /// The left/right split as iced fill portions.
+    ///
+    /// `split` was stored, clamped and round-trip tested from the start and
+    /// then read by nothing — the layout was hardcoded to an even split
+    /// (issue #189). Reading it here means a value edited in the file takes
+    /// effect; a *draggable* splitter is the workspace's job (issue #180).
+    pub fn split_portions(&self) -> (u16, u16) {
+        let left = (self.split * 100.0).round().clamp(1.0, 99.0) as u16;
+        (left, 100 - left)
+    }
+
     pub fn zoom_in(&mut self) {
         self.zoom = (self.zoom + ZOOM_STEP).min(MAX_ZOOM);
     }
@@ -294,5 +305,30 @@ mod tests {
         for t in ThemeChoice::ALL {
             assert_eq!(t.toggled().toggled(), t);
         }
+    }
+
+    /// The stored ratio has to actually reach the layout: it was clamped and
+    /// round-tripped from the start, and read by nothing (issue #189).
+    #[test]
+    fn the_stored_split_reaches_the_layout() {
+        let even = Prefs::default();
+        assert_eq!(even.split_portions(), (50, 50));
+
+        let wide_tree = Prefs {
+            split: 0.7,
+            ..Prefs::default()
+        };
+        let (left, right) = wide_tree.split_portions();
+        assert_eq!((left, right), (70, 30));
+        assert_eq!(left + right, 100, "the two halves are the whole window");
+
+        // The clamp on load already bounds this; the portions stay legal even
+        // if it ever does not, because a zero portion renders nothing at all.
+        let silly = Prefs {
+            split: 0.0,
+            ..Prefs::default()
+        };
+        let (l, r) = silly.split_portions();
+        assert!(l >= 1 && r >= 1, "neither pane can vanish: {l}/{r}");
     }
 }

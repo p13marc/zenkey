@@ -10,7 +10,7 @@ use anyhow::Result;
 use zenkey_fleet::DoctorSpec;
 
 use crate::report::DoctorSeverity;
-use crate::{BusArgs, FailOn, offline, output};
+use crate::{BusArgs, FailOn, output};
 
 pub async fn run(
     deep: bool,
@@ -30,7 +30,7 @@ pub async fn run(
              roster-vs-introspect check runs."
         );
     }
-    let locals = offline::load_slices(&dirs)?;
+    let locals = zenkey_fleet::SliceSet::from_dirs(&dirs)?.slices().to_vec();
 
     let report = zenkey_fleet::run_doctor(
         &session,

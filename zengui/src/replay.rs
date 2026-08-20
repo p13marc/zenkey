@@ -119,8 +119,10 @@ impl ReplayState {
                             },
                             // The capture-time HLC is informative text in the
                             // file; it is deliberately NOT resurrected as a
-                            // live timestamp — the scrubber's axis is `t`.
+                            // live timestamp — the scrubber's axis is `t`. No
+                            // timestamp, therefore no stamper (#213).
                             timestamp: None,
+                            stamped_by: None,
                             attachment: row.attachment.map(zenoh::bytes::ZBytes::from),
                             priority,
                             congestion_control,

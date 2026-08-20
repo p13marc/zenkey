@@ -1,237 +1,242 @@
-//! The slice-driven half: everything answerable from a set of registry slices.
+//! Everything answerable from a set of registry slices, without a bus.
 //!
 //! A slice is a slice regardless of where it was read — each producer's served
-//! `introspect` reply off the live bus (`zenkey_fleet::fleet_registry`), or a
-//! local `registry/*.toml` file (`--registry <dir>`, [`load_slices`]). Every
-//! renderer here takes `&[RegistrySlice]` and is source-agnostic; nothing
-//! app-specific is compiled in.
-
-use std::path::PathBuf;
+//! `introspect` reply off the live bus ([`crate::fleet_registry`]) or a local
+//! `registry/*.toml` file ([`SliceSet::from_dirs`]). These projections take a
+//! [`SliceSet`] and are source-agnostic; nothing app-specific is compiled in.
+//!
+//! They lived in `zenctl` until issue #205. The analogous `blob_list`
+//! projection was already here, and `schema_dump` too, so the split was
+//! arbitrary — and it cost: zengui could render a `TopicList` but had no way
+//! to build one, which is why it never showed a topic list at all. Nothing in
+//! any of these functions needs a session, a terminal or an exit code, which
+//! is the whole test for whether it belongs in the engine.
 
 use anyhow::{Result, anyhow};
-use zenkey::RegistrySlice;
-#[cfg(test)]
-use zenkey::parse_slice;
 
+use crate::SliceSet;
 use crate::report::{
     CarrierRow, InterfaceList, InterfaceShow, InterfaceTypeRow, ServiceList, ServiceRow, TopicInfo,
     TopicList, TopicRow,
 };
 
-/// Load registry slices from local `registry/*.toml` dirs — the offline
-/// source. What a checked-out application *declares*, as opposed to what a
-/// live fleet *serves*.
-pub fn load_slices(dirs: &[PathBuf]) -> Result<Vec<RegistrySlice>> {
-    // Delegates to the fleet engine (issue #15): one loader for CLI and GUI.
-    Ok(zenkey_fleet::SliceSet::from_dirs(dirs)?.slices().to_vec())
-}
-
-/// `topic list` — every registered subject in the given slices.
-///
-/// **Declared, not observed.** A pattern with a trailing rest-variable
-/// (`{path...}`) stands for a whole family whose real members only exist on the
-/// wire: proxy producers register `{device}/{path...}` by design, because
-/// their metric tree belongs to the polled device, not to us. For those, this
-/// command can only tell you the shape. `zenctl topic echo` is what tells you
-/// the members.
-pub fn topic_list(
-    slices: &[RegistrySlice],
-    producer: Option<&str>,
-    class: Option<&str>,
-    type_name: Option<&str>,
-    deprecated: bool,
-) -> Result<TopicList> {
-    if let Some(c) = class
-        && !["telemetry", "state", "events"].contains(&c)
-    {
-        return Err(anyhow!(
-            "unknown class {c:?} — the classes are telemetry, state, events (RFC 04 §1)"
-        ));
-    }
-    let mut subjects = Vec::new();
-    for slice in slices {
-        if producer.is_some_and(|p| p != slice.name) {
-            continue;
-        }
-        for s in slice
-            .subjects
-            .iter()
-            .filter(|s| class.is_none_or(|c| c == s.class))
-            .filter(|s| type_name.is_none_or(|t| t == s.type_name))
+impl SliceSet {
+    /// `topic list` — every registered subject in the given slices.
+    ///
+    /// **Declared, not observed.** A pattern with a trailing rest-variable
+    /// (`{path...}`) stands for a whole family whose real members only exist on the
+    /// wire: proxy producers register `{device}/{path...}` by design, because
+    /// their metric tree belongs to the polled device, not to us. For those, this
+    /// command can only tell you the shape. `zenctl topic echo` is what tells you
+    /// the members.
+    pub fn topic_list(
+        &self,
+        producer: Option<&str>,
+        class: Option<&str>,
+        type_name: Option<&str>,
+        deprecated: bool,
+    ) -> Result<TopicList> {
+        let slices = self.slices();
+        if let Some(c) = class
+            && !["telemetry", "state", "events"].contains(&c)
         {
-            subjects.push(TopicRow {
-                producer: slice.name.clone(),
-                registry_version: slice.version.clone(),
-                class: s.class.clone(),
-                path: s.path.clone(),
-                type_name: s.type_name.clone(),
-                open_ended: s.path.contains("..."),
-                since: s.since.clone(),
-                deprecated: false,
-                deprecated_since: None,
-                replaced_by: None,
-            });
+            return Err(anyhow!(
+                "unknown class {c:?} — the classes are telemetry, state, events (RFC 04 §1)"
+            ));
         }
-        // --deprecated: the ledger-backed retirements this build still
-        // serves — RFC 08 §6 names "which hosts still serve a deprecated
-        // subject" as a headline buy of introspection. A ledger entry has no
-        // class or type, so the narrowing filters exclude these rows.
-        if deprecated && type_name.is_none() && class.is_none() {
-            for d in &slice.deprecated {
+        let mut subjects = Vec::new();
+        for slice in slices {
+            if producer.is_some_and(|p| p != slice.name) {
+                continue;
+            }
+            for s in slice
+                .subjects
+                .iter()
+                .filter(|s| class.is_none_or(|c| c == s.class))
+                .filter(|s| type_name.is_none_or(|t| t == s.type_name))
+            {
                 subjects.push(TopicRow {
                     producer: slice.name.clone(),
                     registry_version: slice.version.clone(),
-                    class: "-".into(),
-                    path: d.path.clone(),
-                    type_name: String::new(),
-                    open_ended: false,
-                    since: None,
-                    deprecated: true,
-                    deprecated_since: d.since.clone(),
-                    replaced_by: d.replaced_by.clone(),
-                });
-            }
-        }
-    }
-    Ok(TopicList { subjects })
-}
-
-/// `topic info` — refine one concrete wire key against the registry slices.
-///
-/// This is the slice-level parse direction (RFC 08 §1): the key is parsed
-/// **structurally** (grammar only), then its subject tail is matched against
-/// the producer's slice, binding variables by name — which is why the output
-/// can say `mount=root` rather than `parts[6]`.
-pub fn topic_info(base: &str, key: &str, slices: &[RegistrySlice]) -> TopicInfo {
-    // Infallible since issue #34: the engine's describe_key implements the
-    // RFC 09 §5.1 O1/O2 ladder (a non-conformant key is a fact, not an
-    // error) with SliceSet::refine's most-literal-first precedence — the old
-    // local matcher scanned in declaration order and could disagree with
-    // generated consumers.
-    let set = zenkey_fleet::SliceSet::from_slices(slices.to_vec());
-    TopicInfo::from_description(&zenkey_fleet::describe_key(base, key, Some(&set)))
-}
-
-pub fn service_list(slices: &[RegistrySlice], producer: Option<&str>) -> Result<ServiceList> {
-    let mut procedures = Vec::new();
-    for slice in slices {
-        if producer.is_some_and(|p| p != slice.name) {
-            continue;
-        }
-        for p in &slice.procedures {
-            procedures.push(ServiceRow {
-                producer: slice.name.clone(),
-                registry_version: slice.version.clone(),
-                kind: p.kind.clone(),
-                path: p.path.clone(),
-                request: p.request.clone(),
-                reply: p.reply.clone(),
-            });
-        }
-    }
-    Ok(ServiceList { procedures })
-}
-
-/// `interface list` — every payload type the slices declare, with carrier
-/// counts. Field-level schema is deliberately absent: type definitions stay
-/// with the owning application (RFC 08 §5), so this maps the vocabulary, not
-/// the shapes.
-pub fn interface_list(slices: &[RegistrySlice]) -> Result<InterfaceList> {
-    use std::collections::BTreeMap;
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for slice in slices {
-        for s in &slice.subjects {
-            if !s.type_name.is_empty() {
-                *counts.entry(s.type_name.as_str()).or_default() += 1;
-            }
-        }
-        for p in &slice.procedures {
-            if let Some(r) = &p.reply {
-                *counts.entry(r.as_str()).or_default() += 1;
-            }
-        }
-        // Blob reference types (RFC 08 §2, v1.8) are carried types like any
-        // other — the payload that must convey a blob's content root.
-        for b in &slice.blob {
-            if let Some(r) = &b.reference {
-                *counts.entry(r.as_str()).or_default() += 1;
-            }
-        }
-    }
-    Ok(InterfaceList {
-        types: counts
-            .into_iter()
-            .map(|(name, carriers)| InterfaceTypeRow {
-                name: name.to_string(),
-                carriers,
-            })
-            .collect(),
-    })
-}
-
-/// `interface show` — one payload type, and every subject/procedure that
-/// carries it (the reverse of the registry's binding).
-pub fn interface_show(slices: &[RegistrySlice], type_name: &str) -> Result<InterfaceShow> {
-    let mut carriers: Vec<CarrierRow> = Vec::new();
-    for slice in slices {
-        for s in &slice.subjects {
-            if s.type_name == type_name {
-                carriers.push(CarrierRow {
-                    producer: slice.name.clone(),
                     class: s.class.clone(),
                     path: s.path.clone(),
+                    type_name: s.type_name.clone(),
+                    open_ended: s.path.contains("..."),
+                    since: s.since.clone(),
+                    deprecated: false,
+                    deprecated_since: None,
+                    replaced_by: None,
                 });
             }
-        }
-        // A blob entry has no path (RFC 08 §2), so the tier token stands in —
-        // it is the chunk that identifies the family, exactly as a procedure
-        // path does on `@rpc`.
-        for b in &slice.blob {
-            if b.reference.as_deref() == Some(type_name) {
-                carriers.push(CarrierRow {
-                    producer: slice.name.clone(),
-                    class: "@blob".to_string(),
-                    path: b.tier.clone(),
-                });
+            // --deprecated: the ledger-backed retirements this build still
+            // serves — RFC 08 §6 names "which hosts still serve a deprecated
+            // subject" as a headline buy of introspection. A ledger entry has no
+            // class or type, so the narrowing filters exclude these rows.
+            if deprecated && type_name.is_none() && class.is_none() {
+                for d in &slice.deprecated {
+                    subjects.push(TopicRow {
+                        producer: slice.name.clone(),
+                        registry_version: slice.version.clone(),
+                        class: "-".into(),
+                        path: d.path.clone(),
+                        type_name: String::new(),
+                        open_ended: false,
+                        since: None,
+                        deprecated: true,
+                        deprecated_since: d.since.clone(),
+                        replaced_by: d.replaced_by.clone(),
+                    });
+                }
             }
         }
-        for p in &slice.procedures {
-            if p.reply.as_deref() == Some(type_name) {
-                carriers.push(CarrierRow {
+        Ok(TopicList { subjects })
+    }
+
+    /// `topic info` — refine one concrete wire key against the registry slices.
+    ///
+    /// This is the slice-level parse direction (RFC 08 §1): the key is parsed
+    /// **structurally** (grammar only), then its subject tail is matched against
+    /// the producer's slice, binding variables by name — which is why the output
+    /// can say `mount=root` rather than `parts[6]`.
+    pub fn topic_info(&self, base: &str, key: &str) -> TopicInfo {
+        // Infallible since issue #34: the engine's describe_key implements the
+        // RFC 09 §5.1 O1/O2 ladder (a non-conformant key is a fact, not an
+        // error) with SliceSet::refine's most-literal-first precedence — the old
+        // local matcher scanned in declaration order and could disagree with
+        // generated consumers.
+        TopicInfo::from_description(&crate::describe_key(base, key, Some(self)))
+    }
+
+    pub fn service_list(&self, producer: Option<&str>) -> ServiceList {
+        let slices = self.slices();
+        let mut procedures = Vec::new();
+        for slice in slices {
+            if producer.is_some_and(|p| p != slice.name) {
+                continue;
+            }
+            for p in &slice.procedures {
+                procedures.push(ServiceRow {
                     producer: slice.name.clone(),
-                    class: "@rpc".to_string(),
+                    registry_version: slice.version.clone(),
+                    kind: p.kind.clone(),
                     path: p.path.clone(),
+                    request: p.request.clone(),
+                    reply: p.reply.clone(),
                 });
             }
         }
+        ServiceList { procedures }
     }
 
-    if carriers.is_empty() {
-        let mut known: Vec<&str> = slices
-            .iter()
-            .flat_map(|s| s.subjects.iter().map(|s| s.type_name.as_str()))
-            .filter(|t| !t.is_empty())
-            .collect();
-        known.sort();
-        known.dedup();
-        return Err(anyhow!(
-            "no registered subject carries {type_name:?}.\nknown types: {}",
-            known.join(", ")
-        ));
+    /// `interface list` — every payload type the slices declare, with carrier
+    /// counts. Field-level schema is deliberately absent: type definitions stay
+    /// with the owning application (RFC 08 §5), so this maps the vocabulary, not
+    /// the shapes.
+    pub fn interface_list(&self) -> InterfaceList {
+        let slices = self.slices();
+        use std::collections::BTreeMap;
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for slice in slices {
+            for s in &slice.subjects {
+                if !s.type_name.is_empty() {
+                    *counts.entry(s.type_name.as_str()).or_default() += 1;
+                }
+            }
+            for p in &slice.procedures {
+                if let Some(r) = &p.reply {
+                    *counts.entry(r.as_str()).or_default() += 1;
+                }
+            }
+            // Blob reference types (RFC 08 §2, v1.8) are carried types like any
+            // other — the payload that must convey a blob's content root.
+            for b in &slice.blob {
+                if let Some(r) = &b.reference {
+                    *counts.entry(r.as_str()).or_default() += 1;
+                }
+            }
+        }
+        InterfaceList {
+            types: counts
+                .into_iter()
+                .map(|(name, carriers)| InterfaceTypeRow {
+                    name: name.to_string(),
+                    carriers,
+                })
+                .collect(),
+        }
     }
 
-    Ok(InterfaceShow {
-        type_name: type_name.to_string(),
-        carriers,
-        // Offline by construction: schemas come from the bus, and the caller
-        // fills them in only when `--schema` asked for them.
-        schemas: Vec::new(),
-    })
+    /// `interface show` — one payload type, and every subject/procedure that
+    /// carries it (the reverse of the registry's binding).
+    pub fn interface_show(&self, type_name: &str) -> Result<InterfaceShow> {
+        let slices = self.slices();
+        let mut carriers: Vec<CarrierRow> = Vec::new();
+        for slice in slices {
+            for s in &slice.subjects {
+                if s.type_name == type_name {
+                    carriers.push(CarrierRow {
+                        producer: slice.name.clone(),
+                        class: s.class.clone(),
+                        path: s.path.clone(),
+                    });
+                }
+            }
+            // A blob entry has no path (RFC 08 §2), so the tier token stands in —
+            // it is the chunk that identifies the family, exactly as a procedure
+            // path does on `@rpc`.
+            for b in &slice.blob {
+                if b.reference.as_deref() == Some(type_name) {
+                    carriers.push(CarrierRow {
+                        producer: slice.name.clone(),
+                        class: "@blob".to_string(),
+                        path: b.tier.clone(),
+                    });
+                }
+            }
+            for p in &slice.procedures {
+                if p.reply.as_deref() == Some(type_name) {
+                    carriers.push(CarrierRow {
+                        producer: slice.name.clone(),
+                        class: "@rpc".to_string(),
+                        path: p.path.clone(),
+                    });
+                }
+            }
+        }
+
+        if carriers.is_empty() {
+            let mut known: Vec<&str> = slices
+                .iter()
+                .flat_map(|s| s.subjects.iter().map(|s| s.type_name.as_str()))
+                .filter(|t| !t.is_empty())
+                .collect();
+            known.sort();
+            known.dedup();
+            return Err(anyhow!(
+                "no registered subject carries {type_name:?}.\nknown types: {}",
+                known.join(", ")
+            ));
+        }
+
+        Ok(InterfaceShow {
+            type_name: type_name.to_string(),
+            carriers,
+            // Offline by construction: schemas come from the bus, and the caller
+            // fills them in only when `--schema` asked for them.
+            schemas: Vec::new(),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zenkey::{RegistrySlice, parse_slice};
+
+    /// The projections are methods on a set; the fixtures are slice lists.
+    fn set(slices: &[zenkey::RegistrySlice]) -> SliceSet {
+        SliceSet::from_slices(slices.to_vec())
+    }
 
     /// A tcgui-style registry slice — a *foreign* app, read as if off the wire —
     /// must parse and render without any of tcgui compiled in. This is the whole
@@ -290,14 +295,16 @@ mod tests {
     fn type_and_deprecated_filters() {
         let slices = tcgui_slices();
 
-        let by_type = topic_list(&slices, None, None, Some("NetworkInterface"), false).unwrap();
+        let by_type = set(&slices)
+            .topic_list(None, None, Some("NetworkInterface"), false)
+            .unwrap();
         assert_eq!(by_type.subjects.len(), 1);
         assert_eq!(by_type.subjects[0].path, "iface/{iface}/state");
 
-        let without = topic_list(&slices, None, None, None, false).unwrap();
+        let without = set(&slices).topic_list(None, None, None, false).unwrap();
         assert!(without.subjects.iter().all(|s| !s.deprecated));
 
-        let with = topic_list(&slices, None, None, None, true).unwrap();
+        let with = set(&slices).topic_list(None, None, None, true).unwrap();
         let retired: Vec<_> = with.subjects.iter().filter(|s| s.deprecated).collect();
         assert_eq!(retired.len(), 1);
         assert_eq!(retired[0].path, "iface/{iface}/status");
@@ -328,19 +335,18 @@ mod tests {
 
         // The shared renderers accept a bus-sourced slice with nothing
         // compiled in — same code path as any `--base` drives.
-        topic_list(&slices, None, None, None, false).unwrap();
-        topic_list(&slices, Some("tc"), Some("state"), None, false).unwrap();
-        service_list(&slices, Some("tc")).unwrap();
-        interface_list(&slices).unwrap();
-        interface_show(&slices, "NetworkInterface").unwrap();
+        set(&slices).topic_list(None, None, None, false).unwrap();
+        set(&slices)
+            .topic_list(Some("tc"), Some("state"), None, false)
+            .unwrap();
+        set(&slices).service_list(Some("tc"));
+        set(&slices).interface_list();
+        set(&slices).interface_show("NetworkInterface").unwrap();
 
         // A concrete foreign key refines against the served slice, binding the
         // `{iface}` variable.
-        let info = topic_info(
-            "tcgui",
-            "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
-            &slices,
-        );
+        let info =
+            set(&slices).topic_info("tcgui", "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state");
         assert_eq!(info.verdict, crate::report::TopicVerdict::Registered);
     }
 
@@ -396,9 +402,9 @@ mod tests {
         // A blob `reference` is a carried type like any other, so it shows up
         // in the type vocabulary with an `@blob` carrier.
         let slices = vec![slice];
-        let types = interface_list(&slices).unwrap();
+        let types = set(&slices).interface_list();
         assert!(types.types.iter().any(|t| t.name == "Delivery"));
-        let show = interface_show(&slices, "Delivery").unwrap();
+        let show = set(&slices).interface_show("Delivery").unwrap();
         assert!(
             show.carriers
                 .iter()
@@ -409,11 +415,7 @@ mod tests {
 
         // And the loop this test's own comment opened, now closed: the
         // projection a `zenctl blob list` renders (issue #58).
-        let list = zenkey_fleet::blob_list(
-            &slices,
-            None,
-            zenkey_fleet::report::BlobListSource::RegistryDirs,
-        );
+        let list = crate::blob_list(&slices, None, crate::report::BlobListSource::RegistryDirs);
         assert_eq!(list.tiers.len(), 2);
         assert_eq!(list.slices_considered, 1);
         assert_eq!(list.slices_without_blob, 0);
@@ -426,11 +428,7 @@ mod tests {
         // was *read* and declared nothing, which is not the same as unread.
         let bare = parse_slice(TCGUI_SLICE).unwrap();
         assert!(bare.blob.is_empty());
-        let none = zenkey_fleet::blob_list(
-            &[bare],
-            None,
-            zenkey_fleet::report::BlobListSource::RegistryDirs,
-        );
+        let none = crate::blob_list(&[bare], None, crate::report::BlobListSource::RegistryDirs);
         assert!(none.tiers.is_empty());
         assert_eq!(none.slices_considered, 1);
         assert_eq!(none.slices_without_blob, 1);
@@ -442,25 +440,24 @@ mod tests {
     #[test]
     fn reports_serialize_to_stable_json() {
         let slices = tcgui_slices();
-        let list = topic_list(&slices, Some("tc"), Some("state"), None, false).unwrap();
+        let list = set(&slices)
+            .topic_list(Some("tc"), Some("state"), None, false)
+            .unwrap();
         let json = serde_json::to_value(&list).unwrap();
         assert_eq!(json["subjects"][0]["producer"], "tc");
         assert_eq!(json["subjects"][0]["path"], "iface/{iface}/state");
         assert_eq!(json["subjects"][0]["type_name"], "NetworkInterface");
         assert_eq!(json["subjects"][0]["open_ended"], false);
 
-        let info = topic_info(
-            "tcgui",
-            "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
-            &slices,
-        );
+        let info =
+            set(&slices).topic_info("tcgui", "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state");
         let json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["verdict"], "registered");
         assert_eq!(json["variables"]["iface"], "eth0");
         assert_eq!(json["payload_type"], "NetworkInterface");
         assert_eq!(json["ttl_s"], 30);
 
-        let services = service_list(&slices, None).unwrap();
+        let services = set(&slices).service_list(None);
         let json = serde_json::to_value(&services).unwrap();
         assert_eq!(json["procedures"][0]["kind"], "write");
         assert_eq!(json["procedures"][0]["reply"], "Ack");
@@ -471,7 +468,7 @@ mod tests {
     #[test]
     fn topic_info_describes_a_non_v1_key_instead_of_rejecting_it() {
         use crate::report::TopicVerdict;
-        let info = topic_info("tcgui", "tcgui/tc/eth0/state", &tcgui_slices());
+        let info = set(&tcgui_slices()).topic_info("tcgui", "tcgui/tc/eth0/state");
         assert_eq!(info.verdict, TopicVerdict::NotV1);
         assert!(info.note.contains("fact, not an error"), "{}", info.note);
         assert!(
@@ -485,10 +482,9 @@ mod tests {
     #[test]
     fn topic_info_reports_unregistered_subjects() {
         use crate::report::TopicVerdict;
-        let info = topic_info(
+        let info = set(&tcgui_slices()).topic_info(
             "tcgui",
             "tcgui/v1/h-3fa9c2d41b7e/state/tc/not_a_real_subject",
-            &tcgui_slices(),
         );
         assert_eq!(info.verdict, TopicVerdict::Unregistered);
         assert_eq!(info.producer.as_deref(), Some("tc"));
@@ -497,13 +493,17 @@ mod tests {
 
     #[test]
     fn unknown_class_is_rejected() {
-        let err = topic_list(&tcgui_slices(), None, Some("alerts"), None, false).unwrap_err();
+        let err = set(&tcgui_slices())
+            .topic_list(None, Some("alerts"), None, false)
+            .unwrap_err();
         assert!(err.to_string().contains("unknown class"), "got: {err}");
     }
 
     #[test]
     fn unknown_type_lists_the_known_ones() {
-        let err = interface_show(&tcgui_slices(), "StreamDoc").unwrap_err();
+        let err = set(&tcgui_slices())
+            .interface_show("StreamDoc")
+            .unwrap_err();
         assert!(err.to_string().contains("NetworkInterface"), "got: {err}");
     }
 
@@ -527,11 +527,8 @@ mod tests {
             "#,
         )
         .unwrap();
-        let info = topic_info(
-            "acme",
-            "acme/v1/@catalog/state/entity/h-3fa9c2d41b7e",
-            &[catalog],
-        );
+        let info =
+            set(&[catalog]).topic_info("acme", "acme/v1/@catalog/state/entity/h-3fa9c2d41b7e");
         assert_eq!(info.verdict, crate::report::TopicVerdict::Registered);
         assert_eq!(info.subject.as_deref(), Some("entity/{entity_id}"));
     }

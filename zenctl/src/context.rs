@@ -51,9 +51,41 @@ pub fn edit() -> Result<()> {
 }
 
 /// `zenctl context <verb>` handlers.
-pub fn create(name: &str, stored: StoredContext, select: bool) -> Result<()> {
+///
+/// On an existing name this **updates** — and says so — which means it must
+/// not clobber the fields the invocation did not mention. `create lab
+/// --connect tcp/…` used to replace the whole entry, so it silently dropped
+/// the base, registry dirs and timeout an earlier `create` had set (the CLI
+/// half of issue #194). An unset flag means "leave it alone" here exactly as
+/// it does everywhere else in this tool; clearing a field is `context edit`.
+pub fn create(name: &str, flags: StoredContext, select: bool) -> Result<()> {
     let mut config = load()?;
-    let existed = config.contexts.insert(name.to_string(), stored).is_some();
+    let existed = config.contexts.contains_key(name);
+    zenkey_fleet::context_store::upsert(&mut config, name, |c| {
+        if flags.base.is_some() {
+            c.base = flags.base;
+        }
+        if !flags.connect.is_empty() {
+            c.connect = flags.connect;
+        }
+        if !flags.listen.is_empty() {
+            c.listen = flags.listen;
+        }
+        if !flags.registry.is_empty() {
+            c.registry = flags.registry;
+        }
+        // `--scouting` is a presence flag, so it arrives as `Some(true)` or
+        // nothing — it has never been able to store an explicit `false`.
+        if flags.scouting.is_some() {
+            c.scouting = flags.scouting;
+        }
+        if flags.timeout.is_some() {
+            c.timeout = flags.timeout;
+        }
+        if flags.zenoh_config.is_some() {
+            c.zenoh_config = flags.zenoh_config;
+        }
+    });
     if select || config.current.is_none() {
         config.current = Some(name.to_string());
     }
@@ -180,6 +212,41 @@ mod tests {
         };
         create("bare", empty.clone(), true).unwrap();
         assert_eq!(active(None).unwrap(), Some(empty));
+
+        // `create` on an existing name updates, and an update must not drop
+        // what the invocation did not mention (#194). This is the CLI half of
+        // the same hazard the GUI's connect pane had.
+        let full = StoredContext {
+            base: Some("acme".into()),
+            connect: vec!["tcp/127.0.0.1:7447".into()],
+            registry: vec!["/abs/registry".into()],
+            timeout: Some(10),
+            ..Default::default()
+        };
+        create("keep", full, false).unwrap();
+        // …now the same shape a `--connect`-only invocation produces.
+        create(
+            "keep",
+            StoredContext {
+                connect: vec!["tcp/10.0.0.1:7447".into()],
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let kept = active(Some("keep")).unwrap().expect("keep");
+        assert_eq!(
+            kept.connect,
+            ["tcp/10.0.0.1:7447"],
+            "the flag that was given wins"
+        );
+        assert_eq!(
+            kept.registry,
+            [std::path::PathBuf::from("/abs/registry")],
+            "a flag that was not given must not clear the field"
+        );
+        assert_eq!(kept.timeout, Some(10), "nor the timeout");
+        assert_eq!(kept.base.as_deref(), Some("acme"), "nor the base");
 
         unsafe { std::env::remove_var("ZENCTL_CONFIG_DIR") };
         let _ = std::fs::remove_dir_all(&dir);

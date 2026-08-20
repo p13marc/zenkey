@@ -341,6 +341,7 @@ mod tests {
                     zenoh::sample::SampleKind::Put
                 },
                 timestamp: None,
+                stamped_by: None,
                 attachment: None,
                 priority: zenoh::qos::Priority::DEFAULT,
                 congestion_control: zenoh::qos::CongestionControl::DEFAULT,

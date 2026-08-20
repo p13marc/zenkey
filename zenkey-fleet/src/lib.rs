@@ -15,10 +15,12 @@ pub mod admin;
 pub mod bench;
 pub mod blob;
 pub mod context_store;
+pub mod cutover;
 pub mod diff;
 pub mod discover;
 pub mod facts;
 pub mod ingest;
+pub mod project;
 pub mod query;
 pub mod record;
 pub mod registry;
@@ -77,6 +79,7 @@ pub use bench::{BenchSpec, bench_rpc};
 pub use blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
 pub use blob::{BlobTarget, blob_list, declared_by};
 pub use context_store::{StoredContext, active_name, cache_dir};
+pub use cutover::run_cutover;
 pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
@@ -97,12 +100,12 @@ pub use roster::{
 pub use scout::{HelloView, ScoutStream, scout};
 pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use serve::{MockResponder, ServedQuery, declare_responder};
-pub use session::{open, open_with_config};
+pub use session::{OpenFailure, open, open_reporting, open_with_config};
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
-pub use stats::LatencySummary;
+pub use stats::{LatencyReport, LatencySummary, StampClass};
 pub use sub::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
-    StreamItem, WatchId,
+    StampProvenance, StreamItem, WatchId,
 };
 pub use tree::KeyTreeSnapshot;
 pub use write::{

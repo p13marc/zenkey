@@ -107,10 +107,14 @@ test:
 # Everything CI runs (.forgejo/workflows/ci.yml), in the same order.
 ci:
     cargo fmt --all --check
+    # The gutter gate (#195): a dropped `\` in a multi-line string prints the
+    # source indentation to the user. Cheap, and it runs before the compiler.
+    python3 scripts/check-prose.py zenctl/src zenkey-fleet/src zengui/src zenkey/src
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo build --workspace --all-targets --locked
     cargo test --workspace --locked
     cargo bench --workspace --no-run --locked
+    just features
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 
 # The criterion baselines behind docs/bench-baseline.md. Slow: tree/build_50k
@@ -129,3 +133,12 @@ fmt:
 # Remove the demo's scratch directory.
 clean-run:
     rm -rf {{rundir}}
+
+# `--all-features` cannot see a feature that silently depends on another one.
+# Each published axis of zenkey-fleet, on its own (#204).
+features:
+    cargo check -p zenkey-fleet --no-default-features --locked
+    for f in blob decode decode-protobuf decode-cdr validate-json; do \
+        cargo check -p zenkey-fleet --no-default-features --features "$f" --locked; \
+    done
+    cargo bench -p zenkey-fleet --no-default-features --no-run --locked

@@ -847,11 +847,19 @@ pub fn storage_list(report: &StorageList, format: Format) -> Result<()> {
 /// every mode.
 pub fn rate(report: &RateReport, format: Format, bandwidth: bool, loss: bool, latency: bool) {
     if latency {
-        // The caveat is part of the measurement (#119): both clocks named,
-        // never a verdict on the transport.
-        eprintln!(
-            "latency = arrival wall-clock − publisher HLC: observed *skewed*              latency — it contains clock skew, and negative values are the              skew evidence, not an error (RFC 09 §5.1)"
-        );
+        // The caveat is part of the measurement (#119) and names *which*
+        // clock (#213), because "the publisher's HLC" was only ever true on a
+        // fleet where publishers do the timestamping. Worded by the engine so
+        // the GUI cannot describe the same number differently (RFC 09 §5.1 O7).
+        let sample = report.rows.iter().find_map(|r| r.latency.as_ref());
+        match sample {
+            Some(l) => eprintln!("latency = {}", l.caveat()),
+            None => eprintln!(
+                "latency = arrival wall-clock − the sample's HLC, which is stamped by \
+                 the first node with timestamping enabled — not necessarily the \
+                 publisher (RFC 09 §5.1 O7)"
+            ),
+        }
     }
     match format.resolved() {
         Format::Json => json_doc(report),
@@ -882,15 +890,23 @@ pub fn rate(report: &RateReport, format: Format, bandwidth: bool, loss: bool, la
                     }
                     if latency {
                         match &row.latency {
-                            Some(l) => print!(
-                                "  lat med {} p95 {} (min {} max {}, {} stamped, {} unstamped)",
-                                human_us(l.median_us),
-                                human_us(l.p95_us),
-                                human_us(l.min_us),
-                                human_us(l.max_us),
-                                l.samples,
-                                row.unstamped,
-                            ),
+                            // One clause per population, never one median
+                            // across them: a publisher-stamped sample and a
+                            // router-stamped one measure from different
+                            // clocks (#213).
+                            Some(l) => {
+                                for (label, s) in l.populations() {
+                                    print!(
+                                        "  lat[{label}] med {} p95 {} (min {} max {}, {})",
+                                        human_us(s.median_us),
+                                        human_us(s.p95_us),
+                                        human_us(s.min_us),
+                                        human_us(s.max_us),
+                                        s.samples,
+                                    );
+                                }
+                                print!("  ({} unstamped)", row.unstamped);
+                            }
                             None => print!(
                                 "  lat — ({} unstamped: no HLC, no latency — not zero)",
                                 row.unstamped

@@ -60,12 +60,53 @@ pub fn registration(shell: clap_complete::Shell) -> Result<()> {
     Ok(())
 }
 
+/// The `--context` already typed on the line being completed.
+///
+/// The cache is keyed by context name, so a completion that ignores `--context`
+/// reads a *different* directory from the one the same command line wrote
+/// (issue #197): `zenctl --context lab topic list` fills `…/cache/lab/slices`,
+/// and completing `zenctl --context lab topic <TAB>` used to read
+/// `…/cache/<current>/slices` — often empty, with no way for the user to tell.
+///
+/// The value has to come from here because the completion engine does not
+/// offer it: `ValueCandidates::candidates(&self)` takes no arguments. What it
+/// does offer is that the completer runs as a subprocess whose own argv *is*
+/// the command line being completed, after a `--` sentinel
+/// (`CompleteEnv::complete` reads `std::env::args_os()`).
+fn context_on_line() -> Option<String> {
+    context_in(std::env::args_os().filter_map(|a| a.into_string().ok()))
+}
+
+/// The pure half, so the parse is testable without a real command line.
+fn context_in(args: impl IntoIterator<Item = String>) -> Option<String> {
+    let words: Vec<String> = args.into_iter().collect();
+    // Everything before the last `--` is the completer's own invocation.
+    let start = words
+        .iter()
+        .rposition(|w| w == "--")
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let mut rest = words[start..].iter();
+    while let Some(word) = rest.next() {
+        let value = match word.strip_prefix("--context=") {
+            Some(v) => Some(v.to_string()),
+            None if word == "--context" => rest.next().cloned(),
+            None => continue,
+        };
+        // `--context <TAB>` leaves an empty word: the user has not named a
+        // context yet, so fall through to the ambient one rather than keying
+        // the cache on "".
+        return value.filter(|v| !v.is_empty());
+    }
+    None
+}
+
 /// The cached slices for the context this invocation would use.
 ///
 /// Deliberately infallible: completion has no error channel that a user would
 /// want to read mid-keystroke.
 fn cached() -> SliceSet {
-    let name = zenkey_fleet::active_name(None);
+    let name = zenkey_fleet::active_name(context_on_line().as_deref());
     SliceSet::read_cache(&zenkey_fleet::cache_dir(name.as_deref()))
 }
 
@@ -260,6 +301,52 @@ mod tests {
         assert!(
             keys.iter().any(|k| k.starts_with("v1/@catalog/state/")),
             "a service origin is verbatim and known: {keys:?}"
+        );
+    }
+
+    /// The cache is keyed by context, so the completion must read the key the
+    /// same command line *wrote* (#197). The completer sees the line as its
+    /// own argv, after a `--` sentinel.
+    #[test]
+    fn the_completion_reads_the_context_the_command_line_names() {
+        let line = |w: &[&str]| {
+            let mut v = vec!["zenctl".to_string(), "--".to_string()];
+            v.extend(w.iter().map(|s| s.to_string()));
+            v
+        };
+
+        // Both spellings, wherever they sit on the line.
+        assert_eq!(
+            context_in(line(&["zenctl", "--context", "lab", "topic", ""])),
+            Some("lab".into())
+        );
+        assert_eq!(
+            context_in(line(&["zenctl", "--context=lab", "topic", ""])),
+            Some("lab".into())
+        );
+        assert_eq!(
+            context_in(line(&["zenctl", "topic", "list", "--context", "prod", ""])),
+            Some("prod".into())
+        );
+
+        // No context named: the ambient one (env, then the `current` pointer)
+        // still applies, which is what `active_name(None)` resolves.
+        assert_eq!(context_in(line(&["zenctl", "topic", ""])), None);
+        // `--context <TAB>`: nothing named yet. Keying the cache on "" would
+        // read a directory nothing ever writes.
+        assert_eq!(context_in(line(&["zenctl", "--context", ""])), None);
+        // The completer's own argv before the sentinel is not the user's line.
+        assert_eq!(
+            context_in(vec![
+                "/usr/bin/zenctl".to_string(),
+                "--context".to_string(),
+                "notmine".to_string(),
+                "--".to_string(),
+                "zenctl".to_string(),
+                "topic".to_string(),
+                String::new(),
+            ]),
+            None
         );
     }
 }

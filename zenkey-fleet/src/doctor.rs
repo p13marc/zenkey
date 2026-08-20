@@ -20,7 +20,7 @@ use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// Every check id `run_doctor` can emit — the stable vocabulary, never
 /// renamed (see the module doc).
-pub const CHECK_IDS: [&str; 16] = [
+pub const CHECK_IDS: [&str; 17] = [
     "slice-parse",
     "slice-sync",
     "introspect-coverage",
@@ -38,6 +38,7 @@ pub const CHECK_IDS: [&str; 16] = [
     "qos-observed-mismatch",
     "unregistered-traffic",
     "rate-over-declared",
+    "timestamp-stamped-elsewhere",
 ];
 
 /// What a doctor run should cost.
@@ -466,6 +467,8 @@ async fn observe_traffic(
     let mut invalid: BTreeMap<String, (String, u64)> = BTreeMap::new();
     // Per-family event counts: (family subject, declared rate) → count.
     let mut event_counts: BTreeMap<(String, String), u64> = BTreeMap::new();
+    // Stamping nodes that are not the publisher (#213): zid → samples.
+    let mut foreign_stampers: BTreeMap<String, u64> = BTreeMap::new();
 
     loop {
         let item = tokio::select! {
@@ -479,6 +482,13 @@ async fn observe_traffic(
                     && is_synthetic_marker(&att.to_bytes())
                 {
                     synthetic += 1;
+                }
+                // Who stamped it (#213). A router doing the timestamping is
+                // not a fault — it is a deployment choice — but it silently
+                // changes what every latency in this suite measures, so it is
+                // worth saying out loud once.
+                if let Some(crate::StampProvenance::Foreign { stamper }) = s.stamped_by {
+                    *foreign_stampers.entry(stamper.to_string()).or_default() += 1;
                 }
                 let facts = facts_cache.entry(s.key.clone()).or_insert_with(|| {
                     let mut f = crate::facts::KeyFacts::project(base, &s.key);
@@ -616,6 +626,27 @@ async fn observe_traffic(
         qos_bad.values().filter(|(_, bad, _)| *bad > 0).count(),
         FINDING_CAP.min(qos_bad.len()),
     );
+    if !foreign_stampers.is_empty() {
+        let mut named: Vec<String> = foreign_stampers
+            .iter()
+            .map(|(zid, n)| format!("{zid} ({n} sample(s))"))
+            .collect();
+        named.sort();
+        findings.push(finding(
+            DoctorSeverity::Info,
+            "timestamp-stamped-elsewhere",
+            "fleet".to_string(),
+            format!(
+                "HLCs on this bus are stamped by {} node(s) that are not the publishing \
+                 session — a deployment with router-side timestamping, which is legal and \
+                 common. Latency measured from these stamps is stamper→observer, not \
+                 publisher→observer: {}",
+                foreign_stampers.len(),
+                named.join(", ")
+            ),
+            Some("RFC 09 §5.1 O7"),
+        ));
+    }
     for (key, n) in unregistered.iter().take(FINDING_CAP) {
         findings.push(finding(
             DoctorSeverity::Warning,
@@ -733,6 +764,8 @@ mod tests {
                 "qos-observed-mismatch",
                 "unregistered-traffic",
                 "rate-over-declared",
+                // #213: appended, as the rule above requires.
+                "timestamp-stamped-elsewhere",
             ]
         );
     }

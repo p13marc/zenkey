@@ -43,6 +43,14 @@ pub struct ContextForm {
     /// Path to a zenoh JSON5 config file; empty = none (#122). The file is
     /// the UI for everything past the three knobs — no TLS form grows here.
     pub zenoh_config: String,
+    /// Registry directories, comma- or space-separated; empty = none.
+    ///
+    /// Rendered because `zenctl context create --registry …` writes it and
+    /// this pane used to save over it (issue #194). A form that edits a
+    /// document it cannot see all of will eventually delete part of it.
+    pub registry: String,
+    /// Query timeout in seconds; empty = the 5s default.
+    pub timeout: String,
     /// The last action's outcome, rendered verbatim.
     pub status: Option<Result<String, String>>,
 }
@@ -57,6 +65,8 @@ pub enum ContextMsg {
     BaseChanged(String),
     ScoutingToggled(bool),
     ZenohConfigChanged(String),
+    RegistryChanged(String),
+    TimeoutChanged(String),
     /// Load the named context's values into the editor.
     Load,
     /// Write the editor's values to the shared config.
@@ -72,14 +82,19 @@ fn msg(m: ContextMsg) -> Message {
     Message::Context(m)
 }
 
-/// Split a user-typed endpoint list. Commas, spaces and newlines all work —
-/// this is a text box, not a parser exercise.
-pub fn endpoints(text: &str) -> Vec<String> {
+/// Split a user-typed list. Commas, spaces and newlines all work — these are
+/// text boxes, not a parser exercise.
+pub fn words(text: &str) -> Vec<String> {
     text.split([',', ' ', '\n', '\t'])
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// Split a user-typed endpoint list.
+pub fn endpoints(text: &str) -> Vec<String> {
+    words(text)
 }
 
 /// Catch the one endpoint mistake worth catching in a text box: a bare
@@ -103,8 +118,19 @@ pub fn validate_endpoints(list: &[String]) -> Result<(), String> {
 }
 
 impl ContextForm {
-    /// The editor's values as a storable context.
-    pub fn to_stored(&self) -> Result<StoredContext, String> {
+    /// Write the editor's values over a stored context, keeping anything this
+    /// form does not render.
+    ///
+    /// The merge is the point (issue #194). Both explorers share one store,
+    /// and a form that builds a whole [`StoredContext`] deletes every field it
+    /// has no widget for — which is how a context created with
+    /// `--registry ../registry --timeout 10` lost both the first time anyone
+    /// opened this pane. The form now covers every field, so the guard is for
+    /// the *next* one somebody adds to the store.
+    ///
+    /// Everything is validated before anything is written, so a rejected form
+    /// never half-writes the context it was handed.
+    pub fn apply_to(&self, ctx: &mut StoredContext) -> Result<(), String> {
         let connect = endpoints(&self.connect);
         let listen = endpoints(&self.listen);
         validate_endpoints(&connect)?;
@@ -112,21 +138,36 @@ impl ContextForm {
         if self.name.trim().is_empty() {
             return Err("a context needs a name".into());
         }
-        Ok(StoredContext {
-            // An explicitly empty base is a real deployment (the bus root,
-            // RFC v1.6) — stored as `Some("")` rather than dropped, so it
-            // overrides a different default rather than falling through it.
-            base: Some(self.base.clone()),
-            connect,
-            listen,
-            registry: Vec::new(),
-            scouting: Some(self.scouting),
-            timeout: None,
-            zenoh_config: {
-                let path = self.zenoh_config.trim();
-                (!path.is_empty()).then(|| std::path::PathBuf::from(path))
-            },
-        })
+        let timeout = match self.timeout.trim() {
+            "" => None,
+            t => Some(
+                t.parse::<u64>()
+                    .map_err(|_| format!("timeout {t:?} is not a whole number of seconds"))?,
+            ),
+        };
+
+        // An explicitly empty base is a real deployment (the bus root,
+        // RFC v1.6) — stored as `Some("")` rather than dropped, so it
+        // overrides a different default rather than falling through it.
+        ctx.base = Some(self.base.clone());
+        ctx.connect = connect;
+        ctx.listen = listen;
+        ctx.registry = words(&self.registry).into_iter().map(Into::into).collect();
+        ctx.scouting = Some(self.scouting);
+        ctx.timeout = timeout;
+        ctx.zenoh_config = {
+            let path = self.zenoh_config.trim();
+            (!path.is_empty()).then(|| std::path::PathBuf::from(path))
+        };
+        Ok(())
+    }
+
+    /// The editor's values as a *new* context — the brand-new-name case.
+    /// Editing an existing one goes through [`ContextForm::apply_to`].
+    pub fn to_stored(&self) -> Result<StoredContext, String> {
+        let mut ctx = StoredContext::default();
+        self.apply_to(&mut ctx)?;
+        Ok(ctx)
     }
 
     /// Fill the editor from a stored context.
@@ -141,6 +182,13 @@ impl ContextForm {
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
+        self.registry = stored
+            .registry
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.timeout = stored.timeout.map(|t| t.to_string()).unwrap_or_default();
     }
 }
 
@@ -212,6 +260,19 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         )
         .on_input(|t| msg(ContextMsg::ZenohConfigChanged(t)))
         .size(font::CAPTION),
+    );
+    col = col.push(
+        text_input(
+            "registry dirs (registry/*.toml), space-separated — offline slices, RFC 08 §6",
+            &form.registry,
+        )
+        .on_input(|t| msg(ContextMsg::RegistryChanged(t)))
+        .size(font::CAPTION),
+    );
+    col = col.push(
+        text_input("query timeout in seconds (empty = 5)", &form.timeout)
+            .on_input(|t| msg(ContextMsg::TimeoutChanged(t)))
+            .size(font::CAPTION),
     );
     col = col.push(
         checkbox(form.scouting)
