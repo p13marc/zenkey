@@ -58,6 +58,30 @@ jobs:
       # exercises the criterion harness link, which --all-targets does not.
       - run: cargo bench --workspace --no-run --locked
 
+  # zenkey-fleet is published to crates.io advertising five feature axes, and
+  # nothing built it without them: `clippy`/`msrv` use --all-features and
+  # `test` uses the defaults. The `[[bench]] required-features = ["decode"]`
+  # line exists precisely so --no-default-features *skips* that target, and
+  # that path had never been executed (#204).
+  features:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://github.com/dtolnay/rust-toolchain@stable
+      - uses: https://github.com/Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
+      - run: cargo check -p zenkey-fleet --no-default-features --locked
+      # Each axis alone, not just the union: a `#[cfg(feature = "blob")]` item
+      # that silently needs `decode` compiles under --all-features and breaks
+      # for the consumer who asked for one of them.
+      - run: cargo check -p zenkey-fleet --no-default-features --features blob --locked
+      - run: cargo check -p zenkey-fleet --no-default-features --features decode --locked
+      - run: cargo check -p zenkey-fleet --no-default-features --features decode-protobuf --locked
+      - run: cargo check -p zenkey-fleet --no-default-features --features decode-cdr --locked
+      - run: cargo check -p zenkey-fleet --no-default-features --features validate-json --locked
+      - run: cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+
   msrv:
     runs-on: ubuntu-24.04
     steps:
