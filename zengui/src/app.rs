@@ -2091,14 +2091,16 @@ impl Zengui {
                             .await
                             .map_err(|e| e.to_string())?;
                         let (coverage, coverage_note) = match slices.as_deref() {
-                            Some(set) => (
-                                zenkey_fleet::state_coverage(set, &base, &storages),
-                                None,
-                            ),
+                            Some(set) => {
+                                (zenkey_fleet::state_coverage(set, &base, &storages), None)
+                            }
                             None => (
                                 Vec::new(),
                                 Some(
-                                    "no registry slices resolved, so the declared state                                      families are unknown — this is \"not asked\", not                                      \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, or                                      wait for the bus registry (RFC 08 §6)."
+                                    "no registry slices resolved, so the declared state \
+                                     families are unknown — this is \"not asked\", not \
+                                     \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, \
+                                     or wait for the bus registry (RFC 08 §6)."
                                         .to_string(),
                                 ),
                             ),

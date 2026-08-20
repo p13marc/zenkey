@@ -850,7 +850,9 @@ pub fn rate(report: &RateReport, format: Format, bandwidth: bool, loss: bool, la
         // The caveat is part of the measurement (#119): both clocks named,
         // never a verdict on the transport.
         eprintln!(
-            "latency = arrival wall-clock − publisher HLC: observed *skewed*              latency — it contains clock skew, and negative values are the              skew evidence, not an error (RFC 09 §5.1)"
+            "latency = arrival wall-clock − publisher HLC: observed *skewed* \
+             latency — it contains clock skew, and negative values are the \
+             skew evidence, not an error (RFC 09 §5.1)"
         );
     }
     match format.resolved() {

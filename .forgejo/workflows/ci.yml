@@ -24,6 +24,10 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all --check
+      # The gutter gate (#195): a multi-line string that lost its trailing `\`
+      # keeps the source indentation *in the string*, so the user reads a
+      # sentence with a hole in it. Seven shipped before anything looked.
+      - run: python3 scripts/check-prose.py zenctl/src zenkey-fleet/src zengui/src zenkey/src
 
   clippy:
     runs-on: ubuntu-24.04

@@ -147,7 +147,8 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
                     }
                     Some(false) => {
                         col = col.push(kit::muted(
-                            "⚠ observed axes differ from the declared profile — the wire                              is the fact, the registry is the claim (RFC 04 §3)",
+                            "⚠ observed axes differ from the declared profile — the wire \
+                             is the fact, the registry is the claim (RFC 04 §3)",
                         ));
                     }
                     None => {}
@@ -208,7 +209,8 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
             unstamped,
         )));
         col = col.push(kit::muted(
-            "arrival wall-clock − publisher HLC: contains clock skew; negative is the              skew evidence, an observation, not a transport verdict (RFC 09 §5.1)",
+            "arrival wall-clock − publisher HLC: contains clock skew; negative is the \
+             skew evidence, an observation, not a transport verdict (RFC 09 §5.1)",
         ));
     }
 
@@ -262,7 +264,8 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
                 if let Some(att) = &v.attachment {
                     let abytes = att.to_bytes();
                     col = col.push(kit::muted(format!(
-                        "attachment: {} bytes — rendered structurally; the registry                          does not describe attachments",
+                        "attachment: {} bytes — rendered structurally; the registry \
+                         does not describe attachments",
                         abytes.len()
                     )));
                     col = col.push(

@@ -1251,7 +1251,8 @@ impl BusArgs {
                 zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
             for d in &out.disagreements {
                 eprintln!(
-                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{}                      (served wins; `zenctl doctor --registry <dir>` details the drift)",
+                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{} \
+                     (served wins; `zenctl doctor --registry <dir>` details the drift)",
                     d.producer,
                     d.bus_version,
                     d.dirs_version,
@@ -1398,7 +1399,8 @@ async fn main() -> Result<()> {
                 cmd::publish::run_from_ndjson(qos.as_deref(), interval, i_know, &bus).await
             }
             (Some(_), _, _) => Err(anyhow::anyhow!(
-                "--from ndjson reads keys and payloads from stdin rows — drop the                  key/body arguments"
+                "--from ndjson reads keys and payloads from stdin rows — drop the \
+                 key/body arguments"
             )),
             (None, Some(key), Some(body)) => {
                 cmd::publish::run(
