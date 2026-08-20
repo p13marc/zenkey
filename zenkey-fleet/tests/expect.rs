@@ -3,7 +3,7 @@
 //! Event-driven settles: the publisher's matching badge proves the expect
 //! window's subscriber is routable before anything is sent — a fixture that
 //! publishes into the void tests the void.
-//! Ports 7532-7534 (disjoint from every other test binary).
+//! Ports 7532-7533 and 7535-7536 (disjoint from every other test binary).
 
 use std::time::Duration;
 
@@ -139,7 +139,6 @@ async fn absence_is_scoped_clean_and_conclusively_breakable() {
 /// anything else is a named violation (#159's read-side sibling).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn declared_qos_is_checked_per_sample() {
-    let (a, b) = peer_pair(7534).await;
     let slice = zenkey::parse_slice(
         r#"
 [registry]
@@ -158,37 +157,52 @@ qos = "transition"
     .expect("fixture slice parses");
     let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
 
-    let run_with = |qos_profile: QosProfile, slices: zenkey_fleet::SliceSet| {
-        let (a, b) = (a.clone(), b.clone());
-        async move {
-            let publication = declare_publication(&a, KEY, qos_profile, None)
+    // A pair per run, not one pair for both (#231). The settle below waits for
+    // the publisher's matching listener, which proves *a* subscriber is
+    // routable — it cannot prove it is *this* run's. Sharing the sessions let
+    // the second run match the first run's subscriber, whose undeclare had not
+    // yet propagated, and send into the gap before its own window subscribed.
+    // Under load that lost the sample ~22% of the time, and the test then
+    // failed on an empty violation list rather than on the QoS it checks.
+    let run_with = |port: u16, qos_profile: QosProfile, slices: zenkey_fleet::SliceSet| async move {
+        let (a, b) = peer_pair(port).await;
+        let publication = declare_publication(&a, KEY, qos_profile, None)
+            .await
+            .expect("declare");
+        let matching = publication.matching_events().await.expect("events");
+        let spec = ExpectSpec {
+            qos: Some(QosCheck::Declared),
+            ..spec(KEY, 5.0)
+        };
+        let expect = tokio::spawn({
+            let b = b.clone();
+            async move { run_expect(&b, "", &slices, &store_of(), &spec).await }
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), matching.recv())
                 .await
-                .expect("declare");
-            let matching = publication.matching_events().await.expect("events");
-            let spec = ExpectSpec {
-                qos: Some(QosCheck::Declared),
-                ..spec(KEY, 5.0)
-            };
-            let expect = tokio::spawn({
-                let b = b.clone();
-                async move { run_expect(&b, "", &slices, &store_of(), &spec).await }
-            });
-            assert!(
-                tokio::time::timeout(Duration::from_secs(5), matching.recv())
-                    .await
-                    .expect("matching within 5s")
-                    .expect("listener alive")
-            );
-            publication.send(b"{}".to_vec(), None).await.expect("send");
-            expect.await.expect("join").expect("run")
-        }
+                .expect("matching within 5s")
+                .expect("listener alive")
+        );
+        publication.send(b"{}".to_vec(), None).await.expect("send");
+        expect.await.expect("join").expect("run")
     };
 
-    let report = run_with(QosProfile::Transition, slices.clone()).await;
+    let report = run_with(7535, QosProfile::Transition, slices.clone()).await;
     assert_eq!(report.verdict, ExpectVerdict::Met, "{:?}", report.unmet);
 
-    let report = run_with(QosProfile::Sampled, slices).await;
+    let report = run_with(7536, QosProfile::Sampled, slices).await;
     assert_eq!(report.verdict, ExpectVerdict::NotMet);
+    // Named, not indexed: an empty list here means the window saw no samples
+    // at all — a presence failure, not the QoS failure under test — and
+    // `violations[0]` threw that diagnosis away behind an index panic (#231).
+    assert_eq!(
+        report.violations.len(),
+        1,
+        "expected one QoS violation; an empty list means the window observed \
+         no samples, which is a different failure: unmet={:?}",
+        report.unmet
+    );
     assert!(
         report.violations[0].contains("did not ride transition"),
         "{:?}",
