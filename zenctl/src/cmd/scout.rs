@@ -5,6 +5,7 @@
 //! "is anything out there at all" and "is multicast scouting working on this
 //! segment". The two are independent signals; neither replaces the other.
 
+use crate::cli::ScoutWhat;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -14,13 +15,6 @@ use zenoh::config::WhatAmIMatcher;
 use crate::output::Format;
 
 /// The kinds of node a scout listens for.
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum ScoutWhat {
-    Router,
-    Peer,
-    Client,
-}
-
 /// Fold the repeated `--what` flags into zenoh's matcher; no flags = all.
 fn matcher(what: &[ScoutWhat]) -> WhatAmIMatcher {
     if what.is_empty() {

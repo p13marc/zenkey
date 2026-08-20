@@ -21,10 +21,10 @@
 //! instead, which exercise the same code with no process and no network.
 //!
 //! #201 also asks for a *mechanical* floor — every leaf verb named by at least
-//! one case, checked rather than remembered. That test walks the clap tree, so
-//! it needs the tree to be importable, and it lands with the library target in
-//! the next commit. Until then the list was built by walking `--help` by hand:
-//! 51 leaves, 14 group nodes, and the root.
+//! one case, checked rather than remembered. `the_corpus_names_every_leaf_verb`
+//! is that check, and being able to write it is the whole reason `zenctl`
+//! grew a library target: it walks the real clap tree rather than a list
+//! somebody has to remember to update.
 //!
 //! ## Exit 2 is overloaded, and the corpus says so out loud
 //!
@@ -109,4 +109,60 @@ fn the_corpus_refuses_an_environment_it_does_not_control() {
 #[test]
 fn the_offline_surface_prints_what_it_has_always_printed() {
     cases().case("tests/cmd/*.trycmd");
+}
+
+/// Walk the tree the binary actually builds, and collect the leaves.
+fn leaves(cmd: &clap::Command, path: &mut Vec<String>, out: &mut Vec<String>) {
+    let subs: Vec<&clap::Command> = cmd
+        .get_subcommands()
+        .filter(|c| c.get_name() != "help")
+        .collect();
+    if subs.is_empty() {
+        out.push(path.join(" "));
+        return;
+    }
+    for sub in subs {
+        path.push(sub.get_name().to_string());
+        leaves(sub, path, out);
+        path.pop();
+    }
+}
+
+/// Every leaf verb is named by at least one case, so the tree cannot grow in
+/// silence.
+///
+/// A list of verbs kept by hand is a list that goes stale the first time
+/// somebody is in a hurry. This walks `Cli::command()` — the same tree the
+/// binary parses with — which is what the library target bought.
+#[test]
+fn the_corpus_names_every_leaf_verb() {
+    use clap::CommandFactory as _;
+
+    let cmd = zenctl::cli::Cli::command();
+    let mut found = Vec::new();
+    leaves(&cmd, &mut Vec::new(), &mut found);
+
+    let corpus: String = std::fs::read_dir("tests/cmd")
+        .expect("the corpus directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "trycmd"))
+        .map(|e| std::fs::read_to_string(e.path()).expect("a case file"))
+        .collect();
+
+    let missing: Vec<&String> = found
+        .iter()
+        .filter(|verb| !corpus.contains(&format!("$ zenctl {verb} ")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "{} leaf verb(s) appear in no case: {missing:?}\n\
+         Every verb owes the corpus at least its `--help`; that alone would \
+         have caught the runs of spaces in #195.",
+        missing.len()
+    );
+    assert!(
+        found.len() >= 50,
+        "the walk found only {} leaves — it stopped short somewhere",
+        found.len()
+    );
 }

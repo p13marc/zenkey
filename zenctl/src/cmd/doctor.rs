@@ -9,8 +9,9 @@
 use anyhow::Result;
 use zenkey_fleet::DoctorSpec;
 
+use crate::cli::{BusArgs, FailOn};
+use crate::output;
 use crate::report::DoctorSeverity;
-use crate::{BusArgs, FailOn, output};
 
 pub async fn run(
     deep: bool,

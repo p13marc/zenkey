@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 
-use super::render::{attachment_display, attachment_json, format_sample, hex, type_tag};
+use super::sample::{attachment_display, attachment_json, format_sample, hex, type_tag};
 use crate::{BusArgs, output};
 use zenkey_fleet::{Answer, FleetAnswer};
 

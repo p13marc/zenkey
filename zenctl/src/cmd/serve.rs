@@ -107,7 +107,7 @@ pub async fn run(
                 obj["encoding"] = serde_json::Value::String(e.clone());
             }
             if let Some(a) = &view.attachment {
-                obj["attachment"] = super::render::attachment_json(a);
+                obj["attachment"] = super::sample::attachment_json(a);
                 obj["attachment_bytes"] = a.len().into();
             }
             println!("{obj}");

@@ -6,6 +6,7 @@
 //! precedent), refuse a wide run without `--i-know`, and stamp the RFC 09
 //! §5.3 synthetic marker via the engine.
 
+use crate::cli::Pattern;
 use anyhow::Result;
 use zenkey_fleet::generate::{GenPattern, GenSpec};
 
@@ -16,14 +17,6 @@ use crate::output::Format;
 /// registry is a fleet-wide impersonation, and that is a decision, not a
 /// default.
 const WIDE_ENTRIES: usize = 10;
-
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Pattern {
-    Steady,
-    Jitter,
-    Burst,
-    Ramp,
-}
 
 impl From<Pattern> for GenPattern {
     fn from(p: Pattern) -> GenPattern {

@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::render::{
+use super::sample::{
     attachment_display, attachment_json, format_sample, hex, qos_summary, source_summary, type_tag,
 };
 use crate::{BusArgs, output};

@@ -4,7 +4,7 @@
 //! [`SampleRow`] is the only writer and [`parse_row`] the only reader, which
 //! is what makes the pipe symmetric. It was not, until #235: the claim lived
 //! in this doc comment while three hand-built writers — `.zrec`
-//! ([`crate::record`]), `zenctl topic echo --format ndjson`, and zengui's
+//! ([`mod@crate::record`]), `zenctl topic echo --format ndjson`, and zengui's
 //! echo export — each assembled the object with `serde_json::json!` and two
 //! of them disagreed with this reader. `echo` wrote the zenoh *wire axes*
 //! under `"qos"`, where [`parse_row`] resolves a profile *name*, so every

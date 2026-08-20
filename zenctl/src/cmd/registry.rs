@@ -11,6 +11,7 @@
 //! lint that reported more than the build does would be a different tool
 //! wearing the same name.
 
+use crate::cli::ExportAs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
@@ -19,18 +20,6 @@ use zenkey::RegistrySlice;
 use crate::{BusArgs, output};
 
 /// What `registry export` emits.
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum ExportAs {
-    /// Registry TOML — round-trippable through `SliceSet::from_dirs`.
-    Toml,
-    /// A JSON Schema bundle built from the producers' served `describe`
-    /// replies (RFC 08 §7).
-    Jsonschema,
-    /// An AsyncAPI 3.0 document: channels from subjects, operations from
-    /// procedures.
-    Asyncapi,
-}
-
 pub async fn export(target: ExportAs, producer: Option<&str>, args: &BusArgs) -> Result<()> {
     let slices = args.slice_set().await?;
     let selected: Vec<&RegistrySlice> = slices
