@@ -196,6 +196,72 @@ pub fn service_list(report: &ServiceList, format: Format) -> Result<()> {
     Ok(())
 }
 
+/// `service info` (issue #211).
+pub fn service_info(report: &ServiceInfo, format: Format) -> Result<()> {
+    match format.resolved() {
+        Format::Json => json_doc(report),
+        Format::Ndjson => report.procedures.iter().for_each(json_line),
+        _ => {
+            println!(
+                "producer  {}  (registry {})",
+                report.producer, report.registry_version
+            );
+            if let Some(origin) = &report.service_origin {
+                println!(
+                    "origin    {origin}  (a service origin — its keys carry no producer chunk)"
+                );
+            }
+            if let Some(d) = &report.description {
+                println!("about     {d}");
+            }
+            if report.procedures.is_empty() {
+                println!(
+                    "\nno procedures declared. That is what the registry says, not what \
+                     the producer is capable of."
+                );
+                return Ok(());
+            }
+            println!("\n{} procedure(s):\n", report.procedures.len());
+            for p in &report.procedures {
+                println!("  {:<8} {}", p.kind, p.path);
+                println!("           {}", p.key);
+                let types = match (&p.request, &p.reply) {
+                    (Some(rq), Some(rp)) => format!("{rq} → {rp}"),
+                    (None, Some(rp)) => format!("→ {rp}"),
+                    (Some(rq), None) => format!("{rq} →"),
+                    (None, None) => String::new(),
+                };
+                if !types.is_empty() {
+                    println!("           {types}");
+                }
+                // Fan-out is worth seeing *before* reaching for `*`: a
+                // forbidden one has no fleet spelling at all (RFC 08 §1.1 G2).
+                if let Some(f) = &p.fanout {
+                    println!(
+                        "           fanout {f}{}",
+                        if f == "forbidden" {
+                            " — no fleet spelling exists; call one origin"
+                        } else {
+                            ""
+                        }
+                    );
+                }
+                if let Some(i) = p.idempotent {
+                    println!("           idempotent {i}");
+                }
+                if let Some(d) = &p.description {
+                    println!("           {d}");
+                }
+            }
+            println!(
+                "\ncall one with: zenctl service call <origin|*> {} <procedure>",
+                report.producer
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn interface_list(report: &InterfaceList, format: Format) -> Result<()> {
     match format.resolved() {
         Format::Json => json_doc(report),

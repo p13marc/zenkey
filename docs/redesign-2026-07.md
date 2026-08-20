@@ -522,9 +522,23 @@ zenctl doctor [--sample N] [--deep]   # + freshness-vs-ttl, storage coverage,
                                       #   admin reachability, schema conformance  [T→D]
 zenctl bench rpc <origin|*> <producer> [proc=introspect] [--count]
                  [--concurrency N] [--i-know]  # per-reply latency   [T]
-zenctl bench pub|sub …                                               [L]
+~~zenctl bench pub|sub …~~   # declined, #211 — see the note below     [✗]
 zenctl record <SEL> -o f.zrec | replay f.zrec [--speed] [--dry-run]  [L]
 ```
+
+`bench pub|sub` is **declined** (issue #211), not merely unfinished, and the
+distinction is worth recording. `bench rpc` measures a *round trip*: a latency
+the fleet actually owes you, attributable to a named origin, which is why its
+report is per-origin. `bench pub` measures a local publisher against a bus you
+do not control — the resulting number describes the publisher, the transport,
+the routers and whatever else was sharing the link, and can be attributed to
+none of them. "Never print an unattributable number" is the discipline that
+produces the `--latency` skew caveat and the RFC 09 §5.1 O7 stamper split; a
+benchmark verb that violated it would be the loudest possible exception to it.
+Measuring the *observer* side of a real fleet is what `topic hz`/`bw` already
+do, honestly.
+
+`service info` landed with #211; the `list|info` line above is now complete.
 
 echo v2 notes: `--origin/--class/--producer` compose **server-side** into the
 selector (never client-filter what the grammar can express positionally);
