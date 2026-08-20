@@ -73,9 +73,10 @@ pub struct Cli {
     #[arg(long, value_name = "FILE", env = "ZENGUI_ZENOH_CONFIG")]
     pub zenoh_config: Option<PathBuf>,
 
-    /// What to watch.
-    #[arg(long, value_enum, default_value_t = ScopePreset::Everything)]
-    pub scope: ScopePreset,
+    /// What to watch. Defaults to the scope this window had last time, then
+    /// to `everything` — a flag, when given, always wins (issue #189).
+    #[arg(long, value_enum)]
+    pub scope: Option<ScopePreset>,
 
     /// A key expression to watch, repeatable. Implies `--scope custom`.
     #[arg(long, value_name = "KEYEXPR")]
@@ -134,23 +135,42 @@ pub struct Settings {
 
 impl Cli {
     /// Resolve into settings, or explain why not: loads the active shared
-    /// context (issue #35) and layers flags over it.
-    pub fn settings(self) -> anyhow::Result<Settings> {
-        let context = zenkey_fleet::context_store::active(self.context.as_deref())?;
-        self.settings_with(context)
+    /// context (issue #35) and layers flags over it, with `prefs` supplying
+    /// what the window remembered (issue #189).
+    pub fn settings(self, prefs: &crate::prefs::Prefs) -> anyhow::Result<Settings> {
+        let named = self.context.clone().or_else(|| prefs.context.clone());
+        let context = match zenkey_fleet::context_store::active(named.as_deref()) {
+            Ok(c) => c,
+            // A name the user *typed* and that is missing is an error. A
+            // remembered one that has since been deleted is a stale
+            // preference, and refusing to start over it would be the worst
+            // kind of persistence.
+            Err(e) if self.context.is_some() => return Err(e),
+            Err(_) => zenkey_fleet::context_store::active(None)?,
+        };
+        self.settings_with(context, prefs)
     }
 
-    /// The pure half: `context` supplies defaults, flags override. Split from
-    /// [`Cli::settings`] so tests never touch the user's real config file.
+    /// The pure half: `context` and `prefs` supply defaults, flags override.
+    /// Split from [`Cli::settings`] so tests never touch the user's real
+    /// config file.
     pub fn settings_with(
         self,
         context: Option<zenkey_fleet::StoredContext>,
+        prefs: &crate::prefs::Prefs,
     ) -> anyhow::Result<Settings> {
         let context = context.unwrap_or_default();
-        let scope = if self.selector.is_empty() {
-            self.scope
-        } else {
+        // A `--selector` implies custom whatever else was asked for; then the
+        // flag; then what the window had last time. A *remembered* `custom` is
+        // dropped rather than restored, because the selectors that made it
+        // meaningful are session state and are not persisted — restoring it
+        // alone would refuse to start (issue #189).
+        let scope = if !self.selector.is_empty() {
             ScopePreset::Custom
+        } else {
+            self.scope
+                .or_else(|| Some(prefs.scope).filter(|s| *s != ScopePreset::Custom))
+                .unwrap_or(ScopePreset::Everything)
         };
         if scope == ScopePreset::Custom && self.selector.is_empty() {
             anyhow::bail!("--scope custom needs at least one --selector");
@@ -240,12 +260,19 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prefs::Prefs;
 
     fn parse(args: &[&str]) -> anyhow::Result<Settings> {
         // settings_with(None), not settings(): tests must never read the
         // user's real config file.
         Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied()))?
-            .settings_with(None)
+            .settings_with(None, &crate::prefs::Prefs::default())
+    }
+
+    /// The same, over a remembered set of preferences.
+    fn parse_remembering(args: &[&str], prefs: &crate::prefs::Prefs) -> anyhow::Result<Settings> {
+        Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied()))?
+            .settings_with(None, prefs)
     }
 
     #[test]
@@ -343,7 +370,9 @@ mod tests {
             Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied())).unwrap()
         };
         // No flags: the context wins everywhere.
-        let s = cli(&[]).settings_with(Some(ctx.clone())).unwrap();
+        let s = cli(&[])
+            .settings_with(Some(ctx.clone()), &Prefs::default())
+            .unwrap();
         assert_eq!(s.base, "zensight");
         assert_eq!(s.connect, ["tcp/10.0.0.1:7447"]);
         assert_eq!(s.scouting, Some(true));
@@ -354,7 +383,9 @@ mod tests {
         // endpoints of its own).
         let mut with_file = ctx.clone();
         with_file.zenoh_config = Some(PathBuf::from("/etc/zenoh/ctx.json5"));
-        let mut s = cli(&[]).settings_with(Some(with_file)).unwrap();
+        let mut s = cli(&[])
+            .settings_with(Some(with_file), &Prefs::default())
+            .unwrap();
         assert_eq!(
             s.zenoh_config.as_deref(),
             Some(std::path::Path::new("/etc/zenoh/ctx.json5"))
@@ -362,7 +393,7 @@ mod tests {
         s.connect.clear();
         assert!(!s.is_unreachable(), "a config file may reach on its own");
         let s = cli(&["--zenoh-config", "/tmp/flag.json5"])
-            .settings_with(Some(ctx.clone()))
+            .settings_with(Some(ctx.clone()), &Prefs::default())
             .unwrap();
         assert_eq!(
             s.zenoh_config.as_deref(),
@@ -370,10 +401,56 @@ mod tests {
         );
         // Flags override field-by-field, including an explicit empty base.
         let s = cli(&["--base", "", "-c", "tcp/127.0.0.1:7447", "--timeout", "2"])
-            .settings_with(Some(ctx))
+            .settings_with(Some(ctx), &Prefs::default())
             .unwrap();
         assert_eq!(s.base, "");
         assert_eq!(s.connect, ["tcp/127.0.0.1:7447"]);
         assert_eq!(s.timeout_secs, 2);
+    }
+
+    /// What the window remembered fills in the defaults, and a flag always
+    /// beats it — the precedence `prefs.rs`'s module doc has always promised
+    /// and nothing implemented (issue #189).
+    #[test]
+    fn a_remembered_scope_is_a_default_and_a_flag_still_wins() {
+        let remembered = Prefs {
+            scope: ScopePreset::State,
+            ..Prefs::default()
+        };
+        assert_eq!(
+            parse_remembering(&[], &remembered).unwrap().scope,
+            ScopePreset::State,
+            "the scope the window was last on comes back"
+        );
+        assert_eq!(
+            parse_remembering(&["--scope", "telemetry"], &remembered)
+                .unwrap()
+                .scope,
+            ScopePreset::Telemetry,
+            "a typed flag beats a remembered value"
+        );
+        assert_eq!(
+            parse(&[]).unwrap().scope,
+            ScopePreset::Everything,
+            "with nothing remembered, the documented default"
+        );
+    }
+
+    /// A remembered `custom` is dropped rather than restored: the selectors
+    /// that gave it meaning are session state and are not persisted, so
+    /// restoring it alone would refuse to start (issue #189).
+    #[test]
+    fn a_remembered_custom_scope_does_not_strand_the_next_launch() {
+        let stranded = Prefs {
+            scope: ScopePreset::Custom,
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &stranded).expect("must still start");
+        assert_eq!(s.scope, ScopePreset::Everything);
+        assert!(s.selectors.is_empty());
+
+        // …while a selector on the command line still implies custom.
+        let s = parse_remembering(&["--selector", "demo/**"], &stranded).unwrap();
+        assert_eq!(s.scope, ScopePreset::Custom);
     }
 }

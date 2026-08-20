@@ -15,21 +15,24 @@ fn main() -> iced::Result {
         )
         .init();
 
-    let settings = match Cli::parse().settings() {
+    // Preferences are read once, here, so the app can be constructed from an
+    // injected set in tests (issue #73). A note about an unreadable file rides
+    // into the window rather than to a terminal nobody is watching.
+    //
+    // Before the settings, not after: the remembered context is one of the
+    // defaults `settings()` resolves over, so it has to exist first (#189).
+    let (prefs, prefs_note) = Prefs::load();
+    if let Some(note) = &prefs_note {
+        tracing::warn!("{note}");
+    }
+
+    let settings = match Cli::parse().settings(&prefs) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("zengui: {e:#}");
             std::process::exit(2);
         }
     };
-
-    // Preferences are read once, here, so the app can be constructed from an
-    // injected set in tests (issue #73). A note about an unreadable file rides
-    // into the window rather than to a terminal nobody is watching.
-    let (prefs, prefs_note) = Prefs::load();
-    if let Some(note) = &prefs_note {
-        tracing::warn!("{note}");
-    }
     let window = iced::window::Settings {
         size: prefs
             .window
