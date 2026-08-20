@@ -29,7 +29,7 @@ fn snapshot(keys: &[&str]) -> zenkey_fleet::skeleton::MergedNode {
     let mut stats = StatsTable::new();
     let now = Instant::now();
     for k in keys {
-        stats.record(k, 8, None, now, None);
+        stats.record(k, 8, None, now, None, None);
     }
     let observed = KeyTreeSnapshot::build(&stats);
     // Pane tests watch everything: rows read Observed, as the bootstrap did.
@@ -1004,6 +1004,7 @@ fn recording(key: &str, max_entries: usize, samples: &[(&[u8], bool)]) -> Histor
                 zenoh::sample::SampleKind::Put
             },
             timestamp: None,
+            stamped_by: None,
             attachment: None,
             priority: zenoh::qos::Priority::DEFAULT,
             congestion_control: zenoh::qos::CongestionControl::DEFAULT,
@@ -2081,6 +2082,7 @@ fn a_media_viewing_reports_what_it_cannot_render() {
         encoding: "video/h264".into(),
         kind: zenoh::sample::SampleKind::Put,
         timestamp: None,
+        stamped_by: None,
         attachment: Some(zenoh::bytes::ZBytes::from(
             br#"{"seq":7,"keyframe":true}"#.to_vec(),
         )),

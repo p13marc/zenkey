@@ -108,7 +108,7 @@ pub struct Zengui {
     /// The selected key's observed skewed-latency summary, refreshed on the
     /// bus tick (#119) — never computed on the render path, and cleared
     /// with the selection.
-    selected_latency: Option<(zenkey_fleet::LatencySummary, u64)>,
+    selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
     /// Its one-shot `node_info` detail — the pane's only data-plane cost.
     node_detail: view::nodes::DetailState,
     /// The doctor panel's run state (#71) — run-on-demand only.
@@ -2761,7 +2761,7 @@ impl Zengui {
                     series: self.series_data(),
                     history_entries: self.history.as_ref().map(|r| r.ring.len()),
                     observed: self.history.as_ref().and_then(|r| r.ring.newest()),
-                    latency: self.selected_latency,
+                    latency: self.selected_latency.clone(),
                 }),
                 RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
                     roster: &self.roster,

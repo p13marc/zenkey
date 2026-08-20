@@ -37,6 +37,56 @@ pub struct SampleSource {
     pub sn: u32,
 }
 
+/// Who stamped a sample's HLC (issue #213, RFC 09 §5.1 **O7**).
+///
+/// zenoh stamps at the **first node with timestamping enabled**, not
+/// necessarily at the publisher: `timestamping.enabled` is mode-dependent and
+/// documented as "whether data messages should be timestamped *if not
+/// already*", so on a fleet configured `{ router: true }` an unstamped sample
+/// picks up a **router's** clock on the way past. A tool that calls that
+/// "the publisher's HLC" is reporting a different measurement than the one it
+/// names, and every latency built on it inherits the mislabel.
+///
+/// The comparison is exact rather than heuristic: a `Timestamp`'s id *is* a
+/// [`zenoh::time::TimestampId`] (= `uhlc::ID`), a `ZenohId` is a transparent
+/// newtype over the same type, and zenoh provides the conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StampProvenance {
+    /// The publishing session stamped it: this is the publisher's own clock.
+    SelfStamped,
+    /// Another node stamped it — commonly a router with timestamping enabled.
+    /// The HLC is *that* node's clock, and a latency computed from it measures
+    /// stamper → observer, not publisher → observer.
+    Foreign { stamper: zenoh::time::TimestampId },
+    /// Stamped, but the sample carried no `SourceInfo`, so there is nothing to
+    /// compare the stamper against. Not "foreign" — unknown (O4).
+    Unattributable { stamper: zenoh::time::TimestampId },
+}
+
+impl StampProvenance {
+    /// The stamping node, when the sample said who it was.
+    pub fn stamper(self) -> Option<zenoh::time::TimestampId> {
+        match self {
+            StampProvenance::SelfStamped => None,
+            StampProvenance::Foreign { stamper } | StampProvenance::Unattributable { stamper } => {
+                Some(stamper)
+            }
+        }
+    }
+
+    /// Judge one sample's stamp against the publisher it claims to come from.
+    fn of(timestamp: &zenoh::time::Timestamp, source: Option<SampleSource>) -> StampProvenance {
+        let stamper = *timestamp.get_id();
+        match source {
+            Some(src) if stamper == zenoh::time::TimestampId::from(src.zid) => {
+                StampProvenance::SelfStamped
+            }
+            Some(_) => StampProvenance::Foreign { stamper },
+            None => StampProvenance::Unattributable { stamper },
+        }
+    }
+}
+
 /// One observed sample, cheap to clone (the payload is zenoh's refcounted
 /// buffer, not a copy — report §14's zero-copy discipline).
 #[derive(Debug, Clone)]
@@ -47,14 +97,20 @@ pub struct SampleView {
     /// The sample's declared encoding, verbatim.
     pub encoding: String,
     pub kind: SampleKind,
-    /// HLC timestamp when the publisher's session stamps one.
+    /// HLC timestamp, when the sample carried one.
     ///
-    /// Absent is common — a publisher whose session is not timestamping stamps
-    /// nothing — and absence must never be defaulted to an arrival time. This
-    /// is the *publisher's* clock; [`SampleView::received`] is ours, and the
-    /// two are never mixed (a consumer plotting a time axis states which one
-    /// it plotted).
+    /// Absent is common — nothing on the path had timestamping enabled — and
+    /// absence must never be defaulted to an arrival time. This is *not*
+    /// necessarily the publisher's clock: see [`SampleView::stamped_by`] for
+    /// whose it is. [`SampleView::received`] is ours, and the two are never
+    /// mixed (a consumer plotting a time axis states which one it plotted).
     pub timestamp: Option<zenoh::time::Timestamp>,
+    /// Who stamped [`SampleView::timestamp`] — `None` exactly when it is.
+    ///
+    /// The stamper's identity rode on every sample all along and was thrown
+    /// away, which is how "the publisher's HLC" survived as a description of
+    /// a number that is often a router's (issue #213).
+    pub stamped_by: Option<StampProvenance>,
     /// The sample's attachment, when it carried one — zenoh's refcounted
     /// buffer, like the payload, so retaining it is a refcount bump and the
     /// per-sample allocation floor stands (`docs/zero-copy.md` §4).
@@ -89,6 +145,40 @@ pub struct SampleView {
 }
 
 impl SampleView {
+    /// Build a view from a received sample.
+    ///
+    /// The one place this conversion lives. It was written out by hand twice —
+    /// here and on the seed/GET-reply path — and the second copy is exactly
+    /// the kind of site that silently misses a new field: adding stamp
+    /// provenance to only one of them would have left seeded samples
+    /// unattributed for no stated reason (issue #213).
+    pub fn of(sample: &zenoh::sample::Sample) -> SampleView {
+        let source = sample.source_info().map(|si| SampleSource {
+            zid: si.source_id().zid(),
+            eid: si.source_id().eid(),
+            sn: si.source_sn(),
+        });
+        let timestamp = sample.timestamp().copied();
+        SampleView {
+            key: sample.key_expr().as_str().to_string(),
+            payload: sample.payload().clone(),
+            encoding: sample.encoding().to_string(),
+            kind: sample.kind(),
+            stamped_by: timestamp.as_ref().map(|t| StampProvenance::of(t, source)),
+            timestamp,
+            attachment: sample.attachment().cloned(),
+            priority: sample.priority(),
+            congestion_control: sample.congestion_control(),
+            reliability: sample.reliability(),
+            express: sample.express(),
+            source,
+            // Arrival, not production: a sample is *received* now, however old
+            // the value it carries is. The HLC above is the only thing that
+            // speaks for when it was produced, and it is often absent.
+            received: Instant::now(),
+        }
+    }
+
     /// Whether the wire's actual axes match a declared profile (RFC 04 §3)
     /// — the declared-vs-observed comparison nobody else in the field can
     /// render, because nobody else holds a registry that declares QoS.
@@ -201,26 +291,39 @@ impl MonitorCore {
     pub fn ingest(&self, view: SampleView, sn: Option<u32>) {
         {
             // Observed *skewed* latency (#119): our wall clock minus the
-            // publisher's HLC — both halves this crate deliberately never
-            // mixes elsewhere, subtracted here on purpose and labeled as
-            // containing clock skew. Unstamped samples pass None and are
-            // counted, not defaulted (no latency ≠ zero latency).
-            let latency_us = view.timestamp.map(|t| {
-                let published = t.get_time().to_system_time();
-                match std::time::SystemTime::now().duration_since(published) {
+            // sample's HLC — both halves this crate deliberately never mixes
+            // elsewhere, subtracted here on purpose and labeled as containing
+            // clock skew. Unstamped samples pass None and are counted, not
+            // defaulted (no latency ≠ zero latency).
+            //
+            // The class rides with the number (#213), because the HLC is not
+            // always the publisher's: whichever node stamped it is the one
+            // this measures from, and three populations that mean different
+            // things must not land in one median.
+            let latency = view.timestamp.as_ref().map(|t| {
+                let stamped = t.get_time().to_system_time();
+                let us = match std::time::SystemTime::now().duration_since(stamped) {
                     Ok(d) => i64::try_from(d.as_micros()).unwrap_or(i64::MAX),
-                    // The publisher's clock is ahead of ours: negative, and
-                    // shown as such — that *is* the skew evidence.
+                    // The stamping node's clock is ahead of ours: negative,
+                    // and shown as such — that *is* the skew evidence.
                     Err(e) => -i64::try_from(e.duration().as_micros()).unwrap_or(i64::MAX),
-                }
+                };
+                let class = match view.stamped_by {
+                    Some(StampProvenance::SelfStamped) => crate::stats::StampClass::SelfStamped,
+                    Some(StampProvenance::Foreign { .. }) => crate::stats::StampClass::Foreign,
+                    _ => crate::stats::StampClass::Unattributable,
+                };
+                (us, class)
             });
+            let stamper = view.stamped_by.and_then(StampProvenance::stamper);
             let mut stats = self.stats.lock().expect("stats lock");
             stats.record(
                 &view.key,
                 view.payload.len(),
                 sn,
                 Instant::now(),
-                latency_us,
+                latency,
+                stamper,
             );
         }
         // Send errors mean "no receiver right now" — not a failure.
@@ -417,28 +520,9 @@ impl Monitor {
             .session
             .declare_subscriber(selector)
             .callback(move |sample| {
-                let source = sample.source_info().map(|si| SampleSource {
-                    zid: si.source_id().zid(),
-                    eid: si.source_id().eid(),
-                    sn: si.source_sn(),
-                });
-                core.ingest(
-                    SampleView {
-                        key: sample.key_expr().as_str().to_string(),
-                        payload: sample.payload().clone(),
-                        encoding: sample.encoding().to_string(),
-                        kind: sample.kind(),
-                        timestamp: sample.timestamp().copied(),
-                        attachment: sample.attachment().cloned(),
-                        priority: sample.priority(),
-                        congestion_control: sample.congestion_control(),
-                        reliability: sample.reliability(),
-                        express: sample.express(),
-                        source,
-                        received: Instant::now(),
-                    },
-                    source.map(|s| s.sn),
-                );
+                let view = SampleView::of(&sample);
+                let sn = view.source.map(|s| s.sn);
+                core.ingest(view, sn);
             })
             .await
             .map_err(|e| anyhow!("subscribe {selector}: {e}"))?;
@@ -656,6 +740,7 @@ mod tests {
             encoding: "zenoh/bytes".to_string(),
             kind: SampleKind::Put,
             timestamp: None,
+            stamped_by: None,
             attachment: None,
             priority: zenoh::qos::Priority::DEFAULT,
             congestion_control: zenoh::qos::CongestionControl::DEFAULT,

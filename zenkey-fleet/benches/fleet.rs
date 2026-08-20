@@ -48,7 +48,7 @@ fn table_of(n: usize) -> StatsTable {
     let mut stats = StatsTable::new();
     let now = Instant::now();
     for i in 0..n {
-        stats.record(&synth_key(i), 64, None, now, None);
+        stats.record(&synth_key(i), 64, None, now, None, None);
     }
     stats
 }
@@ -69,8 +69,17 @@ fn bench_stats(c: &mut Criterion) {
     // free by design (`stats.rs` header), so this is the floor.
     c.bench_function("stats/record_hit", |b| {
         let mut stats = StatsTable::new();
-        stats.record(&key, 64, None, now, None);
-        b.iter(|| stats.record(black_box(&key), black_box(64), black_box(None), now, None))
+        stats.record(&key, 64, None, now, None, None);
+        b.iter(|| {
+            stats.record(
+                black_box(&key),
+                black_box(64),
+                black_box(None),
+                now,
+                None,
+                None,
+            )
+        })
     });
 
     // The insert branch: one `key.to_string()` and a possible map grow.
@@ -79,7 +88,14 @@ fn bench_stats(c: &mut Criterion) {
         let mut i = 0usize;
         b.iter(|| {
             i += 1;
-            stats.record(black_box(&synth_key(i)), black_box(64), None, now, None)
+            stats.record(
+                black_box(&synth_key(i)),
+                black_box(64),
+                None,
+                now,
+                None,
+                None,
+            )
         })
     });
 
@@ -95,6 +111,7 @@ fn bench_stats(c: &mut Criterion) {
                 black_box(64),
                 None,
                 Instant::now(),
+                None,
                 None,
             )
         })
@@ -256,6 +273,7 @@ fn bench_monitor(c: &mut Criterion) {
             encoding: "application/json".to_string(),
             kind: zenoh::sample::SampleKind::Put,
             timestamp: None,
+            stamped_by: None,
             attachment: None,
             priority: zenoh::qos::Priority::DEFAULT,
             congestion_control: zenoh::qos::CongestionControl::DEFAULT,
@@ -281,7 +299,7 @@ fn bench_monitor(c: &mut Criterion) {
     let now = Instant::now();
     loaded.with_stats_mut(|s| {
         for i in 0..10_000 {
-            s.record(&synth_key(i), 64, None, now, None);
+            s.record(&synth_key(i), 64, None, now, None, None);
         }
     });
     c.bench_function("monitor/tick_10k", |b| b.iter(|| black_box(&loaded).tick()));

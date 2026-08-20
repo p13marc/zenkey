@@ -60,7 +60,7 @@ pub struct DetailData<'a> {
     /// The key's observed skewed-latency summary and unstamped count,
     /// refreshed per bus tick (#119). Absent = nothing stamped, which is
     /// not zero latency.
-    pub latency: Option<(zenkey_fleet::LatencySummary, u64)>,
+    pub latency: Option<(zenkey_fleet::LatencyReport, u64)>,
 }
 
 /// Microseconds humanised with the sign kept — a negative latency is the
@@ -199,19 +199,23 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
         col = col.push(qos);
     }
     if let Some((lat, unstamped)) = &data.latency {
-        col = col.push(kit::mono(format!(
-            "observed skewed latency: med {} · p95 {} (min {} · max {}, {} stamped, {} unstamped)",
-            human_us(lat.median_us),
-            human_us(lat.p95_us),
-            human_us(lat.min_us),
-            human_us(lat.max_us),
-            lat.samples,
-            unstamped,
-        )));
-        col = col.push(kit::muted(
-            "arrival wall-clock − publisher HLC: contains clock skew; negative is the \
-             skew evidence, an observation, not a transport verdict (RFC 09 §5.1)",
-        ));
+        // One row per population. Folding a publisher-stamped sample and a
+        // router-stamped one into a single median produces a number that
+        // describes neither (#213).
+        for (label, s) in lat.populations() {
+            col = col.push(kit::mono(format!(
+                "observed skewed latency [{label}]: med {} · p95 {} (min {} · max {}, {})",
+                human_us(s.median_us),
+                human_us(s.p95_us),
+                human_us(s.min_us),
+                human_us(s.max_us),
+                s.samples,
+            )));
+        }
+        col = col.push(kit::mono(format!("{unstamped} unstamped")));
+        // The caveat comes from the engine, so this pane and `zenctl hz
+        // --latency` cannot describe the same measurement differently.
+        col = col.push(kit::muted(lat.caveat()));
     }
 
     // — Value: the fetch outcome + hex-beside-decoded.

@@ -266,6 +266,7 @@ mod tests {
             encoding: "zenoh/bytes".to_string(),
             kind,
             timestamp: None,
+            stamped_by: None,
             attachment: None,
             priority: zenoh::qos::Priority::DEFAULT,
             congestion_control: zenoh::qos::CongestionControl::DEFAULT,
