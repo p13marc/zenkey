@@ -20,7 +20,6 @@
 mod cmd;
 mod completion;
 mod context;
-mod offline;
 mod output;
 mod report;
 
@@ -1397,13 +1396,11 @@ async fn main() -> Result<()> {
             if let Some(secs) = watch {
                 return cmd::watch::topic_list(secs, &filter, &bus).await;
             }
-            let slices = bus.slices().await?;
-            let report = filter.apply(&slices)?;
+            let report = filter.apply(&bus.slice_set().await?)?;
             output::topic_list(&report, bus.format)
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
-            let slices = bus.slices().await?;
-            let report = offline::topic_info(bus.base(), &key, &slices);
+            let report = bus.slice_set().await?.topic_info(bus.base(), &key);
             output::topic_info(&report, bus.format)
         }
         Command::Topic(TopicCmd::Echo {
@@ -1621,8 +1618,7 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Service(ServiceCmd::List { producer, bus }) => {
-            let slices = bus.slices().await?;
-            let report = offline::service_list(&slices, producer.as_deref())?;
+            let report = bus.slice_set().await?.service_list(producer.as_deref());
             output::service_list(&report, bus.format)
         }
         Command::Service(ServiceCmd::Call {
@@ -1650,8 +1646,7 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Interface(InterfaceCmd::List { bus }) => {
-            let slices = bus.slices().await?;
-            let report = offline::interface_list(&slices)?;
+            let report = bus.slice_set().await?.interface_list();
             output::interface_list(&report, bus.format)
         }
         Command::Interface(InterfaceCmd::Show {
@@ -1661,7 +1656,8 @@ async fn main() -> Result<()> {
             bus,
         }) => {
             let slices = bus.slices().await?;
-            let mut report = offline::interface_show(&slices, &type_name)?;
+            let mut report =
+                zenkey_fleet::SliceSet::from_slices(slices.clone()).interface_show(&type_name)?;
             if schema {
                 // Only the producers that carry the type are asked — the
                 // registry already says who, so this is never a fleet fan-out.

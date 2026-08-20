@@ -179,9 +179,8 @@ pub struct TopicFilter {
 }
 
 impl TopicFilter {
-    pub fn apply(&self, slices: &[zenkey::RegistrySlice]) -> Result<crate::report::TopicList> {
-        crate::offline::topic_list(
-            slices,
+    pub fn apply(&self, slices: &zenkey_fleet::SliceSet) -> Result<crate::report::TopicList> {
+        slices.topic_list(
             self.producer.as_deref(),
             self.class.as_deref(),
             self.type_name.as_deref(),
@@ -207,7 +206,7 @@ pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::BusArgs) 
                 .into_iter()
                 .map(|(s, _)| s)
                 .collect();
-            filter.apply(&slices)
+            filter.apply(&zenkey_fleet::SliceSet::from_slices(slices))
         };
         poll_loop(interval, args.format, fetch, topic_rows).await?;
         repeating.undeclare().await
@@ -215,7 +214,7 @@ pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::BusArgs) 
         // Dirs given: the union set (bus wins, dirs fill) per cycle, same
         // sourcing as the one-shot command.
         let fetch = async || {
-            let slices = args.slices().await?;
+            let slices = args.slice_set().await?;
             filter.apply(&slices)
         };
         poll_loop(interval, args.format, fetch, topic_rows).await

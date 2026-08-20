@@ -20,6 +20,7 @@ pub mod diff;
 pub mod discover;
 pub mod facts;
 pub mod ingest;
+pub mod project;
 pub mod query;
 pub mod record;
 pub mod registry;
