@@ -1290,8 +1290,11 @@ impl BusArgs {
         if set.slices().is_empty() {
             return;
         }
+        // Through the accessor, not `self.context` directly: the reader
+        // (`completion::cached`) and `zenctl cache` both resolve the name the
+        // same way, and three spellings of one rule is how they drifted (#197).
         let dir =
-            zenkey_fleet::cache_dir(zenkey_fleet::active_name(self.context.as_deref()).as_deref());
+            zenkey_fleet::cache_dir(zenkey_fleet::active_name(self.context_name()).as_deref());
         // Nothing is logged on failure: this runs on every command, and a
         // warning about a cache the user did not ask for would be noise on
         // the output they did.
