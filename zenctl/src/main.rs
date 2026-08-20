@@ -1205,6 +1205,33 @@ impl BusArgs {
             .or_else(|| stored.and_then(|c| c.zenoh_config.clone()));
         bus::open_with_config(file.as_deref(), &connect, &listen, scouting).await
     }
+
+    /// The same, saying which half failed — so a caller holding `--registry`
+    /// dirs can tell "the transport would not come up" (answerable from disk)
+    /// from "the config file you named does not parse" (yours to fix, #196).
+    async fn session_reporting(&self) -> Result<zenoh::Session, zenkey_fleet::OpenFailure> {
+        let stored = self.stored();
+        let connect = if self.connect.is_empty() {
+            stored.map(|c| c.connect.clone()).unwrap_or_default()
+        } else {
+            self.connect.clone()
+        };
+        let listen = if self.listen.is_empty() {
+            stored.map(|c| c.listen.clone()).unwrap_or_default()
+        } else {
+            self.listen.clone()
+        };
+        let scouting = if self.scouting {
+            Some(true)
+        } else {
+            stored.and_then(|c| c.scouting)
+        };
+        let file = self
+            .zenoh_config
+            .clone()
+            .or_else(|| stored.and_then(|c| c.zenoh_config.clone()));
+        zenkey_fleet::open_reporting(file.as_deref(), &connect, &listen, scouting).await
+    }
     /// The `--context` name this invocation was given, if any.
     fn context_name(&self) -> Option<&str> {
         self.context.as_deref()
@@ -1240,9 +1267,33 @@ impl BusArgs {
     /// The same, as the fleet engine's indexed set (echo's decode path).
     async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
         let dirs = self.registry_dirs();
-        let session = self.session().await?;
         let base = self.base();
         if !dirs.is_empty() {
+            // The README promises this works when the fleet is down, and it
+            // mostly did: zenoh opens a session against an unreachable
+            // endpoint, so the union simply falls back to the dirs. What it
+            // could not survive was a transport that would not come up at all
+            // — a taken listener port, say — which failed a question the dirs
+            // could answer on their own (#196).
+            let session = match self.session_reporting().await {
+                Ok(s) => s,
+                Err(zenkey_fleet::OpenFailure::Config(e)) => return Err(e),
+                Err(zenkey_fleet::OpenFailure::Transport(e)) => {
+                    let set = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
+                    eprintln!(
+                        "no session ({e}); answering from --registry only: {}.\n\
+                         That is what this checkout declares, not what the fleet \
+                         serves — `zenctl doctor --registry <dir>` compares them \
+                         when the bus is reachable (RFC 05 §3.1).",
+                        dirs.iter()
+                            .map(|d| d.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    self.cache(&set);
+                    return Ok(set);
+                }
+            };
             // §6.1's decision, delivered by issue #43: --registry and the bus
             // stop being exclusive. Union: served wins per producer, dirs
             // fill the gaps, disagreement is reported — never silently
@@ -1266,6 +1317,7 @@ impl BusArgs {
             self.cache(&out.set);
             return Ok(out.set);
         }
+        let session = self.session().await?;
         let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
         if set.slices().is_empty() {
             eprintln!(

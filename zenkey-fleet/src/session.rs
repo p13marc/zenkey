@@ -38,10 +38,48 @@ pub async fn open_with_config(
     listen: &[String],
     scouting: Option<bool>,
 ) -> Result<Session> {
-    zenoh::open(build_config(file, connect, listen, scouting)?)
+    open_reporting(file, connect, listen, scouting)
+        .await
+        .map_err(OpenFailure::into_error)
+}
+
+/// Why a session could not be opened.
+///
+/// The two halves are not interchangeable, and a caller that can answer from
+/// something other than the bus needs to tell them apart (issue #196). A
+/// transport that will not come up — a listener whose port is taken, an
+/// endpoint that cannot be built — leaves whatever is already on disk
+/// perfectly answerable. A config file the user *named* and that does not
+/// parse is their own error, and answering anyway would hide it.
+#[derive(Debug)]
+pub enum OpenFailure {
+    /// The config could not be built: a bad file, or a refused namespace.
+    Config(anyhow::Error),
+    /// The config was fine; the session could not be brought up.
+    Transport(anyhow::Error),
+}
+
+impl OpenFailure {
+    pub fn into_error(self) -> anyhow::Error {
+        match self {
+            OpenFailure::Config(e) | OpenFailure::Transport(e) => e,
+        }
+    }
+}
+
+/// [`open_with_config`], but saying which half failed.
+pub async fn open_reporting(
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<Session, OpenFailure> {
+    let config = build_config(file, connect, listen, scouting).map_err(OpenFailure::Config)?;
+    zenoh::open(config)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))
         .context("failed to open Zenoh session")
+        .map_err(OpenFailure::Transport)
 }
 
 /// The explorer config in one place: un-namespaced, explicit endpoints,

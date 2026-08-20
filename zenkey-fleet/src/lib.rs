@@ -97,7 +97,7 @@ pub use roster::{
 pub use scout::{HelloView, ScoutStream, scout};
 pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use serve::{MockResponder, ServedQuery, declare_responder};
-pub use session::{open, open_with_config};
+pub use session::{OpenFailure, open, open_reporting, open_with_config};
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use stats::LatencySummary;
 pub use sub::{
