@@ -67,7 +67,7 @@ pub fn judge(op: &str, a: &str, b: &str) -> Verdict {
         Err(e) => {
             return Verdict::Invalid {
                 which: "first",
-                error: e.to_string(),
+                error: crate::errors::without_source_locations(&e.to_string()),
             };
         }
     };
@@ -76,7 +76,7 @@ pub fn judge(op: &str, a: &str, b: &str) -> Verdict {
         Err(e) => {
             return Verdict::Invalid {
                 which: "second",
-                error: e.to_string(),
+                error: crate::errors::without_source_locations(&e.to_string()),
             };
         }
     };
@@ -164,7 +164,10 @@ pub fn canon(expr: &str, format: Format) -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            eprintln!("does not parse: {e}");
+            eprintln!(
+                "does not parse: {}",
+                crate::errors::without_source_locations(&e.to_string())
+            );
             std::process::exit(2);
         }
     }

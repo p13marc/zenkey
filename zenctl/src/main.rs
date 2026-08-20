@@ -20,6 +20,7 @@
 mod cmd;
 mod completion;
 mod context;
+mod errors;
 mod output;
 mod report;
 
@@ -1377,7 +1378,21 @@ impl BusArgs {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
+    match run().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        // Rendered here rather than returned, because `anyhow`'s own
+        // `Termination` formatting happens after `main` hands the error back
+        // and there is nothing left to filter by then. The shape is the same;
+        // the build machine's cargo-registry paths are not in it (#240).
+        Err(e) => {
+            eprintln!("{}", errors::render(&e));
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> Result<()> {
     // Behave like a Unix filter under `zenctl … | head`: Rust masks SIGPIPE,
     // turning a closed pipe into a mid-write panic; restore the default
     // disposition so the process exits quietly (141) instead.
