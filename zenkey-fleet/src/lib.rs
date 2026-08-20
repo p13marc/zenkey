@@ -84,7 +84,7 @@ pub use cutover::run_cutover;
 pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
-pub use ingest::{IngestRow, parse_row};
+pub use ingest::{IngestRow, SampleRow, parse_row};
 pub use query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
     StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,

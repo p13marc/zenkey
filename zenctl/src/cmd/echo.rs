@@ -146,21 +146,16 @@ pub async fn run(
             // A tombstone is not an empty put (#115): render the retirement,
             // decode nothing — there is nothing to decode.
             if ndjson {
-                let parsed = zenkey::grammar::parse_full(&base, key);
-                let mut obj = serde_json::json!({
-                    "key": key,
-                    "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
-                    "subject": parsed.as_ref().map(|p| p.subject.join("/")),
-                    "encoding": encoding,
-                    "timestamp": timestamp,
-                    "delete": true,
-                    "value": serde_json::Value::Null,
-                });
+                // No `value` and no `payload_bytes`: a tombstone has no
+                // payload, and "0 bytes" would read as an empty put, which
+                // is the one thing RFC 04 §1.2 says it is not.
+                let mut row = zenkey_fleet::SampleRow::of_key(key, &base).with_wire(&sample);
+                row.qos_axes = Some(qos.clone());
                 if let Some(a) = &sample.attachment {
-                    obj["attachment"] = attachment_json(a);
-                    obj["attachment_bytes"] = a.len().into();
+                    row.attachment = Some(attachment_json(a));
+                    row.attachment_bytes = Some(a.len());
                 }
-                println!("{obj}");
+                println!("{}", row.to_line());
             } else {
                 println!(
                     "{key}\n  <tombstone — authoritative retirement (RFC 04 §1.2), \
@@ -232,52 +227,45 @@ pub async fn run(
                 }
             };
             if ndjson {
-                let parsed = zenkey::grammar::parse_full(&base, key);
-                let mut obj = serde_json::json!({
-                    "key": key,
-                    "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
-                    "subject": parsed.as_ref().map(|p| p.subject.join("/")),
-                    "type": type_name,
-                    "typed": typed,
-                    "encoding": encoding,
-                    "timestamp": timestamp,
-                    "qos": qos,
-                    "delete": false,
-                    "value": serde_json::from_str::<serde_json::Value>(&value)
+                let mut row = zenkey_fleet::SampleRow::of_key(key, &base).with_wire(&sample);
+                // The wire axes are a fact worth carrying, but not under
+                // `qos`: that key is resolved as an RFC 04 §3 profile *name*
+                // by the reader on the other end of this pipe (#235).
+                row.qos_axes = Some(qos.clone());
+                // `--no-decode` never asks, so it has nothing to report —
+                // absent, not null-when-unknown (RFC 09 §5.1 O4). The same
+                // rule the verdict below has always followed.
+                row.type_name = type_name.clone();
+                row.typed = Some(typed);
+                row.payload_bytes = Some(bytes.len());
+                row.value = Some(
+                    serde_json::from_str::<serde_json::Value>(&value)
                         .unwrap_or(serde_json::Value::String(value.clone())),
-                });
+                );
                 // Present only when the publisher attached SourceInfo —
                 // absent, never null-when-unknown (#120).
-                if let Some(s) = &sample.source {
-                    obj["source"] = serde_json::json!({
-                        "zid": s.zid.to_string(), "eid": s.eid, "sn": s.sn,
-                    });
-                }
+                row.source = sample.source.as_ref().map(source_summary);
                 // Present only when the wire carried one — absent, never
                 // null-when-unknown (#117).
                 if let Some(a) = &sample.attachment {
-                    obj["attachment"] = attachment_json(a);
-                    obj["attachment_bytes"] = a.len().into();
+                    row.attachment = Some(attachment_json(a));
+                    row.attachment_bytes = Some(a.len());
                 }
                 // #159: present only when the pipeline was asked (--no-decode
                 // never asks) — and then always, so "valid" and "not checked"
                 // cannot be confused by their shared absence.
                 if let Some(v) = &verdict {
-                    obj["verdict"] = match v {
-                        zenkey_fleet::Verdict::Valid => "valid".into(),
+                    row.verdict = Some(match v {
+                        zenkey_fleet::Verdict::Valid => "valid".to_string(),
                         zenkey_fleet::Verdict::Invalid(errors) => {
-                            obj["violations"] = serde_json::json!(errors);
-                            "invalid".into()
+                            row.violations = Some(errors.clone());
+                            "invalid".to_string()
                         }
-                        zenkey_fleet::Verdict::NotValidated(r) => {
-                            serde_json::Value::String(format!("not-validated: {r}"))
-                        }
-                    };
-                    if let Some(e) = &decode_error {
-                        obj["decode_error"] = e.clone().into();
-                    }
+                        zenkey_fleet::Verdict::NotValidated(r) => format!("not-validated: {r}"),
+                    });
+                    row.decode_error = decode_error.clone();
                 }
-                println!("{obj}");
+                println!("{}", row.to_line());
             } else if let Some(fmt) = fmt {
                 println!(
                     "{}",
