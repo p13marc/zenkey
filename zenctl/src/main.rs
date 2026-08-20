@@ -1041,6 +1041,21 @@ enum ServiceCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// One producer's `@rpc` surface, with the key shape a call would use.
+    ///
+    /// `service list` says what exists across the fleet; this says what one
+    /// producer offers and how to reach it — the question left over, and the
+    /// one you have immediately before `service call`.
+    Info {
+        /// Producer name.
+        #[arg(add = ArgValueCandidates::new(completion::producers))]
+        producer: String,
+        /// Only this procedure path, e.g. `introspect`.
+        #[arg(add = ArgValueCandidates::new(completion::procedures))]
+        procedure: Option<String>,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Call a procedure (on-bus).
     Call {
         /// Origin to target: a host id (`h-3fa9c2d41b7e`), `*` for the whole
@@ -1620,6 +1635,17 @@ async fn main() -> Result<()> {
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let report = bus.slice_set().await?.service_list(producer.as_deref());
             output::service_list(&report, bus.format)
+        }
+        Command::Service(ServiceCmd::Info {
+            producer,
+            procedure,
+            bus,
+        }) => {
+            let report = bus
+                .slice_set()
+                .await?
+                .service_info(&producer, procedure.as_deref())?;
+            output::service_info(&report, bus.format)
         }
         Command::Service(ServiceCmd::Call {
             origin,

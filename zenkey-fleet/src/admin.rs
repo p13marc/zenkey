@@ -413,6 +413,129 @@ pub async fn declared_entities(
     Ok(Some(DeclaredEntities { entities }))
 }
 
+/// One link of the mesh, seen as undirected.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MeshLink {
+    /// The lower zid of the pair — the ordering is arbitrary but stable, so a
+    /// renderer can group without re-sorting.
+    pub a: String,
+    pub b: String,
+    /// Both ends reported this link. Reciprocal reports are corroboration,
+    /// not duplication, and the distinction is worth keeping: a link only one
+    /// end mentions is weaker evidence than one both do.
+    pub corroborated: bool,
+    /// Endpoints as the **first** reporter described them. A second report's
+    /// links are not merged: the two ends name the same link from opposite
+    /// sides, and concatenating them would read as twice the links.
+    pub links: Vec<String>,
+}
+
+/// Collapse the per-reporter edges into undirected links.
+///
+/// [`TopologyEdge`]'s own doc has anticipated this since it was written — "a
+/// renderer that wants an undirected mesh dedups by unordered zid pair" — and
+/// two renderers now want it, which is why it stopped being a private helper
+/// in the CLI (issue #207).
+pub fn mesh_links(report: &TopologyReport) -> Vec<MeshLink> {
+    let mut out: Vec<MeshLink> = Vec::new();
+    for e in &report.edges {
+        let (a, b) = if e.reporter <= e.peer {
+            (e.reporter.clone(), e.peer.clone())
+        } else {
+            (e.peer.clone(), e.reporter.clone())
+        };
+        match out.iter_mut().find(|l| l.a == a && l.b == b) {
+            Some(link) => link.corroborated = true,
+            None => out.push(MeshLink {
+                a,
+                b,
+                corroborated: false,
+                links: e.links.clone(),
+            }),
+        }
+    }
+    out
+}
+
+/// Graphviz, self-contained: routers as boxes, peers/clients as ellipses,
+/// heard-of nodes dashed, our own session bold.
+pub fn render_dot(report: &TopologyReport, attachments: &[OriginAttachment]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from("graph zenoh_mesh {\n");
+    for n in &report.nodes {
+        let shape = if n.whatami == "router" {
+            "box"
+        } else {
+            "ellipse"
+        };
+        let mut style = Vec::new();
+        if !n.answered {
+            style.push("dashed");
+        }
+        if n.zid == report.self_zid {
+            style.push("bold");
+        }
+        let label = match (&n.answered, &n.version) {
+            (false, _) => format!("{}\\n{} (heard of)", n.zid, n.whatami),
+            (true, Some(v)) => format!("{}\\n{} {v}", n.zid, n.whatami),
+            (true, None) => format!("{}\\n{}", n.zid, n.whatami),
+        };
+        let _ = writeln!(
+            out,
+            "  \"{}\" [shape={shape}, label=\"{label}\"{}];",
+            n.zid,
+            if style.is_empty() {
+                String::new()
+            } else {
+                format!(", style=\"{}\"", style.join(","))
+            }
+        );
+    }
+    for link in mesh_links(report) {
+        let proto = link
+            .links
+            .first()
+            .and_then(|l| l.split('/').next())
+            .unwrap_or("");
+        let _ = writeln!(
+            out,
+            "  \"{}\" -- \"{}\"{};",
+            link.a,
+            link.b,
+            if proto.is_empty() {
+                String::new()
+            } else {
+                format!(" [label=\"{proto}\"]")
+            }
+        );
+    }
+    // Origins as their own small nodes (#131): attached by a solid edge to
+    // the session the admin sources named, or by a dotted one to the mere
+    // reporter — the picture keeps the evidence distinction the join made.
+    for (i, a) in attachments.iter().enumerate() {
+        let id = format!("origin_{i}");
+        let _ = writeln!(
+            out,
+            "  \"{id}\" [shape=hexagon, label=\"{}\", fontsize=10];",
+            a.origin
+        );
+        match &a.session_zid {
+            Some(z) => {
+                let _ = writeln!(out, "  \"{id}\" -- \"{z}\";");
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "  \"{id}\" -- \"{}\" [style=dotted, label=\"reported\"];",
+                    a.reporter_zid
+                );
+            }
+        }
+    }
+    out.push('}');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,6 +719,96 @@ mod tests {
         assert!(declared_from_admin_entry("@/z/router/config/x", &v).is_none());
         assert!(declared_from_admin_entry("@/z/router/subscriber", &v).is_none());
         assert!(declared_from_admin_entry("not/admin/at/all", &v).is_none());
+    }
+
+    fn report() -> TopologyReport {
+        TopologyReport {
+            nodes: vec![
+                TopologyNode {
+                    zid: "aaa".into(),
+                    whatami: "router".into(),
+                    version: Some("1.9.0".into()),
+                    locators: vec!["tcp/10.0.0.1:7447".into()],
+                    answered: true,
+                },
+                TopologyNode {
+                    zid: "bbb".into(),
+                    whatami: "peer".into(),
+                    version: None,
+                    locators: vec![],
+                    answered: false,
+                },
+            ],
+            edges: vec![
+                TopologyEdge {
+                    reporter: "aaa".into(),
+                    peer: "bbb".into(),
+                    whatami: "peer".into(),
+                    links: vec!["tcp/10.0.0.1:7447 -> tcp/10.0.0.2:53210".into()],
+                },
+                TopologyEdge {
+                    reporter: "bbb".into(),
+                    peer: "aaa".into(),
+                    whatami: "router".into(),
+                    links: vec![],
+                },
+            ],
+            asked: "@/*/*".into(),
+            answered: 1,
+            self_zid: "bbb".into(),
+        }
+    }
+
+    /// Reciprocal reports collapse to one undirected edge, marked as
+    /// corroborated — not drawn twice, not silently merged.
+    #[test]
+    fn reciprocal_reports_corroborate_one_edge() {
+        let edges = mesh_links(&report());
+        assert_eq!(edges.len(), 1);
+        let link = &edges[0];
+        assert_eq!((link.a.as_str(), link.b.as_str()), ("aaa", "bbb"));
+        assert!(link.corroborated, "both ends reported it");
+    }
+
+    /// The DOT form: routers boxed, heard-of nodes dashed, our session
+    /// bold, edges labeled by protocol — pipeable to `dot -Tsvg` as-is.
+    #[test]
+    fn the_dot_form_marks_what_the_join_knows() {
+        let dot = render_dot(&report(), &[]);
+        assert!(dot.starts_with("graph zenoh_mesh {"), "{dot}");
+        assert!(dot.contains("\"aaa\" [shape=box"), "{dot}");
+        assert!(dot.contains("heard of"), "{dot}");
+        assert!(dot.contains("style=\"dashed,bold\""), "{dot}");
+        assert!(dot.contains("\"aaa\" -- \"bbb\" [label=\"tcp\"]"), "{dot}");
+        assert!(dot.ends_with('}'), "{dot}");
+    }
+
+    /// The origin overlay (#131): a sources-named attachment is a solid
+    /// edge; a reporter-only one is dotted and says "reported" — the DOT
+    /// keeps the evidence distinction the join made.
+    #[test]
+    fn the_dot_form_keeps_the_attachment_evidence_distinction() {
+        let attachments = vec![
+            OriginAttachment {
+                origin: "h-cccccccccccc".into(),
+                session_zid: Some("bbb".into()),
+                reporter_zid: "aaa".into(),
+                token_key: "v1/h-cccccccccccc/state/demo/alive".into(),
+            },
+            OriginAttachment {
+                origin: "h-dddddddddddd".into(),
+                session_zid: None,
+                reporter_zid: "aaa".into(),
+                token_key: "v1/h-dddddddddddd/state/demo/alive".into(),
+            },
+        ];
+        let dot = render_dot(&report(), &attachments);
+        assert!(dot.contains("label=\"h-cccccccccccc\""), "{dot}");
+        assert!(dot.contains("\"origin_0\" -- \"bbb\";"), "{dot}");
+        assert!(
+            dot.contains("\"origin_1\" -- \"aaa\" [style=dotted, label=\"reported\"]"),
+            "{dot}"
+        );
     }
 }
 

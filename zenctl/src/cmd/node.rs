@@ -2,12 +2,10 @@
 //! producer against its served introspect slice.
 //! `node info <origin>` — the per-node capability inventory (issue #49).
 
-use std::time::Duration;
-
 use anyhow::{Result, anyhow};
 use zenkey_fleet as bus;
 
-use crate::{BusArgs, output, report};
+use crate::{BusArgs, output};
 
 pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
     // The identity bridge, enforced: an origin id or nothing (RFC 06 §6).
@@ -109,7 +107,7 @@ pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
     } else {
         None
     };
-    output::node_list(&node_rows(&roster, slices.as_ref()), args.format)
+    output::node_list(&bus::node_rows(&roster, slices.as_ref()), args.format)
 }
 
 /// `node list --watch` — event-driven, not polled: the liveliness roster is
@@ -123,40 +121,23 @@ pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
 
     validate_format(args.format)?;
     let session = args.session().await?;
-    let base = args.base().to_string();
-    let liveliness = vec![
-        args.wire(zenkey::selector::all_liveliness(
-            zenkey::selector::Scope::fleet(),
-        ))?,
-        args.wire(zenkey::selector::service_alive(
-            &zenkey::ServiceOrigin::catalog(),
-        ))?,
-    ];
-    // Liveliness only — zero data-plane subscribers (the lazy contract).
-    let monitor = bus::Monitor::start(
-        &session,
-        bus::MonitorSpec {
-            selectors: vec![],
-            liveliness,
-            ..Default::default()
-        },
-    )
-    .await?;
-    let mut events = monitor.events();
+    // The roster is pushed by the bus, so this does not poll. The subscribe/
+    // seed/coalesce loop lives in the engine (#207) — both explorers were
+    // running their own copy of it, and zenctl's had drifted into a second
+    // copy of the polling driver's cycle body besides.
+    let mut watch = bus::RosterWatch::start(&session, args.base(), args.timeout()).await?;
 
     let mut slices = if verbose {
         Some(args.slice_set().await?)
     } else {
         None
     };
-    // Seeded below by the one-shot liveliness GET (see the comment there).
-    let mut roster: BTreeMap<String, Vec<String>>;
     let mut prev: Option<BTreeSet<String>> = None;
 
     let render = |roster: &BTreeMap<String, Vec<String>>,
                   slices: Option<&zenkey_fleet::SliceSet>,
                   prev: &mut Option<BTreeSet<String>>| {
-        let report = node_rows(roster, slices);
+        let report = bus::node_rows(roster, slices);
         let rows: Vec<(String, String)> = report
             .nodes
             .iter()
@@ -189,118 +170,23 @@ pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
         *prev = Some(cur);
     };
 
-    let apply = |roster: &mut BTreeMap<String, Vec<String>>, key: &str, up: bool| {
-        let Some(parsed) = zenkey::grammar::parse_full(&base, key) else {
-            return false;
-        };
-        let origin = parsed.origin.chunk().to_string();
-        let producer = parsed
-            .producer
-            .as_ref()
-            .map(|p| p.chunk())
-            .unwrap_or_else(|| origin.trim_start_matches('@').to_string());
-        if up {
-            let entry = roster.entry(origin).or_default();
-            if entry.contains(&producer) {
-                return false;
-            }
-            entry.push(producer);
-            entry.sort();
-            true
-        } else {
-            let Some(entry) = roster.get_mut(&origin) else {
-                return false;
-            };
-            let before = entry.len();
-            entry.retain(|p| p != &producer);
-            let changed = entry.len() != before;
-            if entry.is_empty() {
-                roster.remove(&origin);
-            }
-            changed
-        }
-    };
-
-    // Seed the initial roster with the one-shot liveliness GET: the
-    // monitor's history-backed events can land in the broadcast before this
-    // task subscribes to it, so history alone would race. Duplicates from a
-    // late history event are absorbed by `apply`'s dedup.
-    roster = bus::roster(&session, args.base(), args.timeout()).await?;
-    // First frame, even when empty: "0 producers" is a statement, not
-    // silence (RFC 05 §3.1).
-    render(&roster, slices.as_ref(), &mut prev);
+    // First frame, even when empty: "0 producers" is a statement, not silence
+    // (RFC 05 §3.1).
+    render(watch.roster(), slices.as_ref(), &mut prev);
 
     loop {
-        let item = tokio::select! {
+        let change = tokio::select! {
             _ = tokio::signal::ctrl_c() => break,
-            item = events.recv() => item,
+            change = watch.next_change() => change,
         };
-        let mut changed = false;
-        let mut refreshed_join = false;
-        let mut pending = item;
-        // Coalesce a burst of events into one render.
-        loop {
-            match pending {
-                None => return Ok(()),
-                Some(bus::StreamItem::Dropped(_)) => {}
-                Some(bus::StreamItem::Event(ev)) => match ev {
-                    bus::FleetEvent::NodeUp(key) => {
-                        if apply(&mut roster, &key, true) {
-                            changed = true;
-                            // A new producer may serve a new slice; refresh
-                            // the join on NodeUp only (never per render).
-                            if verbose && !refreshed_join {
-                                slices = Some(args.slice_set().await?);
-                                refreshed_join = true;
-                            }
-                        }
-                    }
-                    bus::FleetEvent::NodeDown(key) => {
-                        changed |= apply(&mut roster, &key, false);
-                    }
-                    _ => {}
-                },
-            }
-            match tokio::time::timeout(Duration::from_millis(50), events.recv()).await {
-                Ok(next) => pending = next,
-                Err(_) => break,
-            }
+        let Some(change) = change else { break };
+        // A new producer may serve a slice nothing has read yet — refreshed on
+        // the way up only, and once per coalesced burst rather than per event.
+        if verbose && change.node_up {
+            slices = Some(args.slice_set().await?);
         }
-        if !changed {
-            continue;
-        }
-        render(&roster, slices.as_ref(), &mut prev);
+        render(watch.roster(), slices.as_ref(), &mut prev);
     }
-    monitor.stop();
+    watch.stop().await;
     Ok(())
-}
-
-/// Roster → typed rows, joining the slice facts when given (`--verbose`).
-/// Absent slice = `None` fields, never a default (O4).
-pub fn node_rows(
-    roster: &std::collections::BTreeMap<String, Vec<String>>,
-    slices: Option<&zenkey_fleet::SliceSet>,
-) -> report::NodeList {
-    let mut nodes = Vec::new();
-    for (origin, producers) in roster {
-        for producer in producers {
-            let joined = slices.and_then(|s| {
-                // Instance suffixes share the base slice (RFC 03 §1.5).
-                let base_name = zenkey::grammar::Producer::parse_chunk(producer)
-                    .map(|pr| pr.name().to_string())
-                    .unwrap_or_else(|_| producer.clone());
-                s.get(&base_name)
-            });
-            nodes.push(report::NodeRow {
-                origin: origin.clone(),
-                producer: producer.clone(),
-                app: joined.map(|s| s.app.clone()),
-                registry_version: joined.map(|s| s.version.clone()),
-            });
-        }
-    }
-    report::NodeList {
-        nodes,
-        slices_joined: slices.is_some(),
-    }
 }

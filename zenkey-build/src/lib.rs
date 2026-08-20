@@ -35,6 +35,8 @@
 //! typed subject with named variables instead of positional `split('/')`.
 
 mod emit;
+#[cfg(feature = "export")]
+pub mod export;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

@@ -52,6 +52,15 @@ port := "7449"
 registry := "fixture-tests/registry"
 rundir := ".run"
 
+# zengui's pane tests build a real iced renderer per test, which probes wgpu
+# across every backend and every Vulkan ICD on the box. Left unconstrained on
+# a headless host that segfaults under concurrency — measured at 12/128 runs
+# of 8 concurrent test binaries, against 0/224 with *any* constraint applied
+# (`gl`, `vulkan`, a single ICD, or --test-threads=1). The fault is upstream
+# in wgpu/mesa adapter enumeration, not here; naming one backend is the
+# mitigation, and it is a mitigation rather than a repair (zenkey #229).
+export WGPU_BACKEND := "gl"
+
 default:
     @just --list
 
@@ -142,3 +151,5 @@ features:
         cargo check -p zenkey-fleet --no-default-features --features "$f" --locked; \
     done
     cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+    cargo check -p zenkey-build --locked
+    cargo test -p zenkey-build --features export --locked

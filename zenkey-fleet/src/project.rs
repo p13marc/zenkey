@@ -16,8 +16,8 @@ use anyhow::{Result, anyhow};
 
 use crate::SliceSet;
 use crate::report::{
-    CarrierRow, InterfaceList, InterfaceShow, InterfaceTypeRow, ServiceList, ServiceRow, TopicInfo,
-    TopicList, TopicRow,
+    CarrierRow, InterfaceList, InterfaceShow, InterfaceTypeRow, ServiceInfo, ServiceList,
+    ServiceProcedure, ServiceRow, TopicInfo, TopicList, TopicRow,
 };
 
 impl SliceSet {
@@ -126,6 +126,62 @@ impl SliceSet {
             }
         }
         ServiceList { procedures }
+    }
+
+    /// `service info` — one producer's `@rpc` surface, with call keys.
+    ///
+    /// `Err` when nothing declares the producer, listing what does: a name
+    /// that answers nowhere is a typo far more often than a silent fleet, and
+    /// the alternative — an empty procedure list — reads as "this producer
+    /// offers nothing", which is a verdict this cannot support (O4).
+    pub fn service_info(&self, producer: &str, path: Option<&str>) -> Result<ServiceInfo> {
+        let Some(slice) = self.get(producer) else {
+            let mut known: Vec<&str> = self.slices().iter().map(|s| s.name.as_str()).collect();
+            known.sort_unstable();
+            return Err(anyhow!(
+                "no slice declares producer {producer:?}.\nknown producers: {}",
+                known.join(", ")
+            ));
+        };
+        let origin = slice.service_origin.as_deref().unwrap_or("{origin}");
+        let procedures = slice
+            .procedures
+            .iter()
+            .filter(|p| path.is_none_or(|want| want == p.path))
+            .map(|p| ServiceProcedure {
+                // A service origin has no producer chunk (RFC 06 §5).
+                key: match &slice.service_origin {
+                    Some(_) => format!("v1/{origin}/@rpc/{}", p.path),
+                    None => format!("v1/{origin}/@rpc/{}/{}", slice.name, p.path),
+                },
+                path: p.path.clone(),
+                kind: p.kind.clone(),
+                request: p.request.clone(),
+                reply: p.reply.clone(),
+                fanout: p.fanout.clone(),
+                idempotent: p.idempotent,
+                encoding: p.encoding.clone(),
+                since: p.since.clone(),
+                description: p.description.clone(),
+            })
+            .collect::<Vec<_>>();
+        if let Some(want) = path
+            && procedures.is_empty()
+        {
+            let mut known: Vec<&str> = slice.procedures.iter().map(|p| p.path.as_str()).collect();
+            known.sort_unstable();
+            return Err(anyhow!(
+                "{producer} declares no procedure {want:?}.\nit declares: {}",
+                known.join(", ")
+            ));
+        }
+        Ok(ServiceInfo {
+            producer: slice.name.clone(),
+            registry_version: slice.version.clone(),
+            service_origin: slice.service_origin.clone(),
+            description: slice.description.clone(),
+            procedures,
+        })
     }
 
     /// `interface list` — every payload type the slices declare, with carrier
@@ -531,5 +587,68 @@ mod tests {
             set(&[catalog]).topic_info("acme", "acme/v1/@catalog/state/entity/h-3fa9c2d41b7e");
         assert_eq!(info.verdict, crate::report::TopicVerdict::Registered);
         assert_eq!(info.subject.as_deref(), Some("entity/{entity_id}"));
+    }
+
+    /// #211: one producer's `@rpc` surface, with the key a caller would use —
+    /// which differs for a service origin, and is the thing a reader should
+    /// not have to reconstruct.
+    #[test]
+    fn service_info_spells_the_call_key_for_both_origin_shapes() {
+        let slices = tcgui_slices();
+        let info = set(&slices).service_info("tc", None).expect("tc declares");
+        assert_eq!(info.producer, "tc");
+        assert!(info.service_origin.is_none());
+        assert_eq!(info.procedures.len(), 1);
+        let p = &info.procedures[0];
+        assert_eq!(p.key, "v1/{origin}/@rpc/tc/iface/{iface}/set");
+        assert_eq!(p.reply.as_deref(), Some("Ack"));
+        assert_eq!(p.fanout.as_deref(), Some("one"));
+
+        // A service origin carries no producer chunk (RFC 06 §5).
+        let service = zenkey::parse_slice(
+            r#"
+            [registry]
+            version = "1.0"
+            app = "t"
+            convention = 1
+            [service]
+            name = "catalog"
+            origin = "@catalog"
+            [[procedure]]
+            path = "link"
+            kind = "write"
+            "#,
+        )
+        .unwrap();
+        let info = set(&[service]).service_info("catalog", None).unwrap();
+        assert_eq!(info.service_origin.as_deref(), Some("@catalog"));
+        assert_eq!(info.procedures[0].key, "v1/@catalog/@rpc/link");
+    }
+
+    /// A name nothing declares is a typo far more often than a silent fleet,
+    /// so it says what *is* declared rather than returning an empty list —
+    /// which would read as "this producer offers nothing" (O4).
+    #[test]
+    fn an_unknown_producer_or_procedure_lists_what_exists() {
+        let slices = tcgui_slices();
+        let err = set(&slices)
+            .service_info("nope", None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("known producers"), "{err}");
+        assert!(err.contains("tc"), "{err}");
+
+        let err = set(&slices)
+            .service_info("tc", Some("no/such/proc"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("it declares"), "{err}");
+        assert!(err.contains("iface/{iface}/set"), "{err}");
+
+        // A path that does exist filters to exactly it.
+        let one = set(&slices)
+            .service_info("tc", Some("iface/{iface}/set"))
+            .unwrap();
+        assert_eq!(one.procedures.len(), 1);
     }
 }

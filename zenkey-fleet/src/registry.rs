@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::report::{ProducerDiff, RegistryDiff};
 use anyhow::{Result, anyhow};
 use zenkey::{RegistrySlice, parse_slice};
 use zenoh::Session;
@@ -296,6 +297,66 @@ impl SliceSet {
     }
 }
 
+impl SliceSet {
+    /// Compare this set — what the fleet **serves** — against what a checkout
+    /// **declares**, per producer.
+    ///
+    /// Pure, so the comparison is testable without a bus, and engine-side so
+    /// both explorers can make it (issue #208). The per-producer comparison
+    /// is already `zenkey::slice::diff`; this is the set-level join that
+    /// decides what to do about a producer only one side knows.
+    pub fn diff(&self, local: &SliceSet) -> RegistryDiff {
+        let served = self;
+        let mut names: Vec<&str> = served
+            .slices()
+            .iter()
+            .chain(local.slices())
+            .map(|s| s.name.as_str())
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+
+        let mut producers = Vec::new();
+        for name in names {
+            let s = served.get(name);
+            let l = local.get(name);
+            producers.push(match (s, l) {
+                (Some(s), Some(l)) => ProducerDiff {
+                    producer: name.to_string(),
+                    served_version: Some(s.version.clone()),
+                    local_version: Some(l.version.clone()),
+                    findings: zenkey::slice::diff(s, l)
+                        .iter()
+                        .map(|f| f.summary())
+                        .collect(),
+                },
+                // Present on one side only. Neither is an error: a producer the
+                // bus serves and the checkout does not know may simply be newer,
+                // and one the checkout declares that nothing serves may simply be
+                // down (RFC 05 §3.1 — silence is not a verdict).
+                (Some(s), None) => ProducerDiff {
+                    producer: name.to_string(),
+                    served_version: Some(s.version.clone()),
+                    local_version: None,
+                    findings: vec!["served by the fleet, absent from the local registry".into()],
+                },
+                (None, Some(l)) => ProducerDiff {
+                    producer: name.to_string(),
+                    served_version: None,
+                    local_version: Some(l.version.clone()),
+                    findings: vec![
+                        "declared locally, not served by any origin — down, or not deployed \
+                         (silence is not a verdict, RFC 05 §3.1)"
+                            .into(),
+                    ],
+                },
+                (None, None) => unreachable!("name came from one of the two sets"),
+            });
+        }
+        RegistryDiff { producers }
+    }
+}
+
 #[cfg(test)]
 impl SliceSet {
     /// Test constructor from one slice TOML (crate-internal).
@@ -380,5 +441,74 @@ mod tests {
         assert!(!out.dirs_only.is_empty(), "dirs supplied the slices");
         assert!(out.disagreements.is_empty());
         assert_eq!(out.set.slices().len(), out.dirs_only.len());
+    }
+
+    fn set(toml: &str) -> SliceSet {
+        SliceSet::from_slices(vec![zenkey::parse_slice(toml).unwrap()])
+    }
+
+    const SERVED: &str = r#"
+[registry]
+version = "2.0"
+app = "t"
+convention = 1
+[producer]
+name = "netring"
+[[subject]]
+path = "flows"
+class = "telemetry"
+type = "TelemetryPoint"
+[[subject]]
+path = "brand/new"
+class = "telemetry"
+type = "TelemetryPoint"
+"#;
+
+    const LOCAL: &str = r#"
+[registry]
+version = "1.0"
+app = "t"
+convention = 1
+[producer]
+name = "netring"
+[[subject]]
+path = "flows"
+class = "telemetry"
+type = "TelemetryPoint"
+"#;
+
+    /// The diff reports exactly the edited subject, plus the version skew —
+    /// #50's acceptance, without a bus.
+    #[test]
+    fn the_diff_names_the_one_subject_that_moved() {
+        let report = set(SERVED).diff(&set(LOCAL));
+        assert_eq!(report.producers.len(), 1);
+        let p = &report.producers[0];
+        assert_eq!(p.served_version.as_deref(), Some("2.0"));
+        assert_eq!(p.local_version.as_deref(), Some("1.0"));
+        assert!(
+            p.findings.iter().any(|f| f.contains("brand/new")),
+            "{:?}",
+            p.findings
+        );
+        assert!(
+            p.findings.iter().any(|f| f.contains("2.0")),
+            "the version skew is a finding too: {:?}",
+            p.findings
+        );
+    }
+
+    /// One-sided presence is a fact with a reason, never an error — and the
+    /// two sides read differently.
+    #[test]
+    fn one_sided_producers_explain_themselves() {
+        let empty = SliceSet::from_slices(vec![]);
+        let served_only = set(SERVED).diff(&empty);
+        assert!(served_only.producers[0].findings[0].contains("absent from the local registry"));
+        assert!(served_only.producers[0].local_version.is_none());
+
+        let local_only = empty.diff(&set(LOCAL));
+        assert!(local_only.producers[0].findings[0].contains("silence is not a verdict"));
+        assert!(local_only.producers[0].served_version.is_none());
     }
 }
