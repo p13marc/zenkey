@@ -43,6 +43,17 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
+    # zengui's pane tests build a real iced renderer per test, which probes
+    # wgpu across every backend and every Vulkan ICD present. Unconstrained on
+    # a headless runner that segfaults under the concurrency of a workspace
+    # test run: measured at 12/128 runs of 8 concurrent copies of the panes
+    # binary, against 0/224 with any constraint applied — `gl`, `vulkan`, a
+    # single ICD, or --test-threads=1 all fixed it. The fault is upstream in
+    # wgpu/mesa adapter enumeration; naming one backend is a mitigation, not a
+    # repair, and the 42 pane tests stay enabled because they are how the
+    # honesty surfaces are pinned (zenkey #229).
+    env:
+      WGPU_BACKEND: gl
     steps:
       - uses: https://data.forgejo.org/actions/checkout@v7
       - uses: https://github.com/dtolnay/rust-toolchain@stable
