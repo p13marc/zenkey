@@ -72,7 +72,8 @@ pub use admin::{
 };
 pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
 pub use admin::{
-    OriginAttachment, TopologyEdge, TopologyNode, TopologyReport, origin_attachments, topology,
+    MeshLink, OriginAttachment, TopologyEdge, TopologyNode, TopologyReport, mesh_links,
+    origin_attachments, render_dot, topology,
 };
 pub use bench::{BenchSpec, bench_rpc};
 #[cfg(feature = "blob")]
@@ -95,7 +96,8 @@ pub use record::{
 };
 pub use registry::SliceSet;
 pub use roster::{
-    BridgeMatch, Freshness, NodeInfo, ProducerInfo, bridge_resolve, node_info, roster,
+    BridgeMatch, Freshness, NodeInfo, ProducerInfo, RosterChange, RosterWatch, apply_token,
+    bridge_resolve, node_info, node_rows, roster, token_identity,
 };
 pub use scout::{HelloView, ScoutStream, scout};
 pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
