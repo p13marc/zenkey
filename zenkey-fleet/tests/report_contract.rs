@@ -468,7 +468,7 @@ fn a_blob_probe_reports_what_it_asked_and_what_answered() {
     );
 }
 
-/// The listen phase is additive: a report from a run without `--listen` must
+/// The listen phase is additive: a report from a run without `--listen-for` must
 /// be byte-identical to one from before the phase existed, so a pre-#161
 /// consumer keeps parsing. `doctor_report_json_shape_is_pinned` covers the
 /// document; this covers the severity vocabulary its findings branch on.

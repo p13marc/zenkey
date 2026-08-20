@@ -32,7 +32,7 @@ pub const CHECK_IDS: [&str; 17] = [
     "stale-state",
     "unstamped-state",
     "storage-coverage",
-    // The `--listen` passive phase (#161) — traffic judged as it rides.
+    // The `--listen-for` passive phase (#161) — traffic judged as it rides.
     "payload-undecodable",
     "payload-invalid",
     "qos-observed-mismatch",
@@ -54,7 +54,7 @@ pub struct DoctorSpec {
     /// Per-query timeout.
     pub timeout: Duration,
     /// Listen passively to the data planes for this long after the GET
-    /// fan-in (`--listen`, #161) and judge what rides: decode/validity,
+    /// fan-in (`--listen-for`, #161) and judge what rides: decode/validity,
     /// declared-vs-observed QoS, unregistered traffic, over-rate events.
     /// `None` = the phase does not run and the report carries no
     /// observation section.

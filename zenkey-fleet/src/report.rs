@@ -569,13 +569,13 @@ pub struct DoctorReport {
     pub router_version: Option<String>,
     /// Whether the `--deep` freshness/storage checks ran.
     pub deep: bool,
-    /// The passive listening phase (`--listen`, #161) — absent when it did
+    /// The passive listening phase (`--listen-for`, #161) — absent when it did
     /// not run, so pre-#161 JSON consumers see an unchanged document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observation: Option<ObservationSummary>,
 }
 
-/// What `doctor --listen` observed (#161) — the scope statement that keeps
+/// What `doctor --listen-for` observed (#161) — the scope statement that keeps
 /// its findings honest (O5: `**` never crosses an `@`-chunk, so this section
 /// names exactly which selectors were watched), and the drop count that
 /// taints them (O6).
@@ -972,7 +972,7 @@ mod tests {
                 "router_version": "1.9.0",
                 "deep": false,
             }),
-            "without --listen the document is byte-identical to pre-#161"
+            "without --listen-for the document is byte-identical to pre-#161"
         );
         // With the listen phase, the observation section pins too.
         let report = DoctorReport {

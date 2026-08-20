@@ -442,7 +442,15 @@ enum Command {
         /// payloads, declared-vs-observed QoS, unregistered traffic,
         /// over-rate events. The report states the window, its scopes, and
         /// what the bounded observer dropped (O5/O6).
-        #[arg(long, value_name = "SECS")]
+        //
+        // `--listen-for`, not `--listen`, because `-l/--listen` is the
+        // endpoint flag on all 51 verbs (#239). Two arguments of one name
+        // made `doctor --help` panic in a debug build and swallowed `-l` in
+        // a release one, so `doctor` was the single verb that could not join
+        // a bus by listening. The `id` is spelled out too: clap derives it
+        // from the *field* name, so renaming only the long option leaves the
+        // ids equal and the assert still fires.
+        #[arg(id = "listen_for", long = "listen-for", value_name = "SECS")]
         listen: Option<f64>,
         /// Exit 1 when a finding at (or above) this severity exists.
         /// Default: always exit 0 — findings are output, not verdicts.
