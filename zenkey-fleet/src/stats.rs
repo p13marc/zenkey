@@ -64,7 +64,7 @@ pub struct LatencyReport {
     /// every sample was self-stamped — there is no third party to name.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub stampers: Vec<String>,
-    /// Stampers beyond [`MAX_STAMPERS`] that were not retained (O6: a bound
+    /// Stampers beyond the retained bound that were dropped (O6: a bound
     /// reports what it cost).
     #[serde(skip_serializing_if = "is_zero", default)]
     pub stampers_dropped: u64,
