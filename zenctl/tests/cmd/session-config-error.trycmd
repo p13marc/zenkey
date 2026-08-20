@@ -1,0 +1,14 @@
+The `OpenFailure::Config` half of #196: your error, not the bus's.
+
+A zenoh config file that sets a session namespace is refused **by name** —
+an explorer runs un-namespaced so it sees the wire as it really is, foreign
+traffic included, which is what lets it spot a leak (RFC 09 §5). This half
+touches no network at all: the file is rejected before a session is attempted,
+which is why it can be a test.
+
+```console
+$ zenctl topic list --zenoh-config tests/cmd/fixtures/namespaced.json5
+? 1
+Error: tests/cmd/fixtures/namespaced.json5 sets a session namespace ("zensight") — an explorer runs un-namespaced so it sees the wire as it really is (RFC 09 §5); remove the namespace from the file, or use --base to name the deployment
+
+```

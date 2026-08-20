@@ -1,0 +1,20 @@
+`registry lint` runs the RFC 08 §5 lints a consumer's `build.rs` runs, without
+the build — and prints the build's own wording, verbatim, because saying
+exactly what the build would say is the whole value of the command.
+
+No session: it goes straight to `zenkey_build::Config`.
+
+```console
+$ zenctl registry lint ../fixture-tests/registry
+../fixture-tests/registry: registry lints pass (RFC 08 §5).
+
+```
+
+A directory that is not a registry fails, naming what it looked for:
+
+```console
+$ zenctl registry lint ../fixture-tests/registry/nonexistent
+? 1
+Error: registry dir "../fixture-tests/registry/nonexistent": No such file or directory (os error 2)
+
+```

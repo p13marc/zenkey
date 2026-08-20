@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "app": "zensight",
+  "types": {
+    "Health": {
+      "kind": "json-schema",
+      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Health",
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["ok", "degraded", "down"] },
+          "detail": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

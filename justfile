@@ -136,6 +136,12 @@ bench:
 soak:
     cargo test --release -p zenkey-fleet --test ledger -- --ignored --nocapture
 
+# Re-capture every pinned CLI transcript and render snapshot after an
+# intentional change (#201). Review the diff: that review is the point of the
+# corpus rather than its cost.
+snapshots:
+    TRYCMD=overwrite SNAPSHOTS=overwrite cargo test -p zenctl
+
 fmt:
     cargo fmt --all
 

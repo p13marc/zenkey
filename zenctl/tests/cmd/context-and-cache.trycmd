@@ -1,0 +1,62 @@
+Contexts and the slice cache: the two families that touch a filesystem and no
+bus at all. They are the reason this corpus sets
+`ZENKEY_EXPLORER_CONFIG_DIR` — unset, these cases would read and write the
+developer's own `~/.config/zenctl/config.toml`.
+
+One file, run in order, because these commands are stateful and every other
+case in the corpus is not. Nothing else here writes config, so the shared home
+is safe.
+
+An empty config says so, and says what to type next — an empty set is not a
+verdict (RFC 05 §3.1), and here it is not even a mystery:
+
+```console
+$ zenctl context list
+no contexts. create one:
+  zenctl context create lab --base zensight -c tcp/127.0.0.1:7447
+
+```
+
+Creating one selects it, because a context nobody selected is a file nobody
+reads:
+
+```console
+$ zenctl context create lab --base zensight -c tcp/127.0.0.1:7447
+created context "lab" (selected)
+
+$ zenctl context list
+* lab  base=zensight  connect=["tcp/127.0.0.1:7447"]
+
+$ zenctl context show
+base = "zensight"
+connect = ["tcp/127.0.0.1:7447"]
+
+```
+
+The cache is keyed by context name, and says what it is *for* rather than only
+what is in it — nothing reads it except shell completion, and it is never a
+source of truth (#54). The path is wildcarded because it is this machine's, not
+the code's.
+
+```console
+$ zenctl cache show
+[..]/cache/lab/slices
+  empty — completion falls back to the static command tree. Any command that loads slices fills it (or `zenctl cache refresh`).
+
+$ zenctl cache clear
+[..]/cache/lab/slices does not exist — nothing to clear
+
+```
+
+Removing the only context returns the tool to the state it started in — and to
+the same sentence, which is what makes it a state rather than an error:
+
+```console
+$ zenctl context rm lab
+removed context "lab"
+
+$ zenctl context list
+no contexts. create one:
+  zenctl context create lab --base zensight -c tcp/127.0.0.1:7447
+
+```

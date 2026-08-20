@@ -1,0 +1,33 @@
+`schema check --schema-set` is the offline half of the RFC 08 §7 decode seam —
+"needs no session at all — that is the whole point" (`cmd/schema.rs`). It is
+also the clearest place in the tool where the 0/1/2 contract carries three
+*different* facts rather than degrees of one.
+
+**0 — it conforms.**
+
+```console
+$ zenctl schema check --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from '{"status":"ok"}'
+{"detail":[],"kind":"json-schema","type":"Health","verdict":"valid"}
+
+```
+
+**1 — it was checked, and it does not conform.** A finding, with the failing
+constraint named.
+
+```console
+$ zenctl schema check --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from '{"status":"melted"}'
+? 1
+{"detail":["/status: /"melted/" is not one of /"ok/", /"degraded/" or /"down/""],"kind":"json-schema","type":"Health","verdict":"invalid"}
+
+```
+
+**2 — the check never happened.** Reserved so CI can tell "nonconformant" from
+"unobservable" — the same split `cutover` and `probe` guard, and the reason
+silence is never a verdict (RFC 05 §3.1).
+
+```console
+$ zenctl schema check --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Nope --from '{}'
+? 2
+not checked: tests/cmd/fixtures/sysinfo.schemaset.json carries no type "Nope"
+
+```

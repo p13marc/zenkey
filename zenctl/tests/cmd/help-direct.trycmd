@@ -1,0 +1,713 @@
+The eleven verbs that hang directly off the root rather than off a family.
+
+`completions` is the only one here that answers without a bus; the rest need a
+fleet to say anything, so what is pinned is their interface, which is exactly
+the part a renderer refactor can break without noticing.
+
+`doctor` is here for a second reason: its `--listen-for <SECS>` and the global
+`-l, --listen <LISTEN>` are two arguments that used to be one name, and the
+help below is where that would show again (#239).
+
+```console
+$ zenctl get --help
+GET any selector with the fleet discipline (RFC 05 §2.1).
+
+Target All, consolidation None, every reply attributed by its own key; error envelopes render as errors (RFC 05 §3), and payloads ride the same rendering ladder as `topic echo` (served-schema decode → structural → text → hex). `@/**` browses the zenoh admin space. Exit codes: 0 values only, 1 an error reply, 2 silence.
+
+Usage: zenctl get [OPTIONS] <SELECTOR>
+
+Arguments:
+  <SELECTOR>
+          Any key expression, params included (`key?k=v`)
+
+Options:
+      --body <BODY>
+          Query body: inline text, `@file`, or `-` for stdin — rides the same encode ladder as `topic pub` when the selector's key part refines to a registered subject
+
+      --raw
+          Ship the body verbatim and print payloads as hex; no decode
+
+      --hex
+          Decode the type name, print the payload as hex
+
+      --fmt <TEMPLATE>
+          Per-reply line template — the `topic echo` % vocabulary (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c})
+
+      --no-decode
+          Skip schema decode; render structurally
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl serve --help
+Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121).
+
+The log doubles as a "who is querying this key" probe. Deliberately no reply scripting — static and file bodies cover the dev-loop case; the shell covers dynamic replies by restarting serve. (nuze and zsak own the embedded-language lane, at the cost of a Nushell dependency and a linked libpython respectively.)
+
+Usage: zenctl serve [OPTIONS] <KEYEXPR> <REPLY>
+
+Arguments:
+  <KEYEXPR>
+          Key expression to serve (full wire form; wildcards welcome)
+
+  <REPLY>
+          Reply body: inline text, `@file`, or `-` for stdin (read once) — through the same encode ladder as `topic pub`
+
+Options:
+      --encoding <ENCODING>
+          Wire encoding to declare on replies. Defaults to the registry's declared encoding when the keyexpr refines, else none
+
+      --no-validate
+          Do not refuse a body the served schema rejects
+
+      --raw
+          Reply the bytes verbatim: no schema lookup, no refusal
+
+      --complete
+          Declare the queryable complete — a claim this responder holds ALL the data the expression names. Say it only when you mean it
+
+      --count <COUNT>
+          Exit after N queries (0 = until ctrl-c)
+          
+          [default: 0]
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl cutover --help
+Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic.
+
+Three verdicts, three exits: 0 = old silent AND new speaking; 1 = the old family still speaks; 2 = everything was quiet — a non-verdict, because a dead fleet passes the silence half for free. The leak check's meaning is stated, not inferred: anything outside `<base>/v1/` that is not the old root.
+
+Usage: zenctl cutover [OPTIONS] --old-root <KEYEXPR>
+
+Options:
+      --old-root <KEYEXPR>
+          The retired key family (a full wire key expression)
+
+      --window <WINDOW>
+          Listening window, seconds
+          
+          [default: 30]
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl gen --help
+Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers.
+
+The full plan prints BEFORE anything is published; every sample carries the RFC 09 §5.3 synthetic marker ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen window or a capture can tell this traffic from real. Events stay inside their declared rate budget on write-once keys. A run wider than 10 subjects needs --i-know.
+
+Usage: zenctl gen [OPTIONS]
+
+Options:
+      --producer <PRODUCER>
+          Only this producer's subjects
+
+      --subject <SUBJECT>
+          Only subjects whose declared path contains this
+
+      --var <K=V>
+          Value for a `{var}` in a declared path (repeatable, k=v). Unnamed vars get deterministic synthetic values, stated in the plan
+
+      --origin <ORIGIN>
+          Origin the generated keys claim (h-<12 hex>). Default: derived from this session's zid — printed either way, and stamped into the marker
+
+      --rate <HZ>
+          Override every entry's rate (Hz). Default: registry-driven — telemetry 1 Hz, state refreshes at ttl/2, events inside their declared budget
+
+      --pattern <PATTERN>
+          Send-timing shape (all deterministic under --seed)
+          
+          [default: steady]
+          [possible values: steady, jitter, burst, ramp]
+
+      --duration <DURATION>
+          Run length, seconds
+          
+          [default: 10]
+
+      --seed <SEED>
+          Synthesis/jitter seed — same seed, same run
+          
+          [default: 42]
+
+      --schema-set <FILE>
+          SchemaSet JSON document (RFC 08 §7) for payload shapes when the bus serves no describe (the registry carries type names, not shapes)
+
+      --serve-describe
+          Also answer introspect (and describe, with --schema-set) for the impersonated producers — a complete mock producer, not just a firehose
+
+      --dry-run
+          Print the plan and publish nothing
+
+      --i-know
+          Acknowledge a run wider than 10 subjects
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl expect --help
+Await an expectation on the bus, exit-coded for CI (#160).
+
+The subscriber is declared BEFORE the window opens (not-asked is not "no", RFC 09 §5.1 O4). Exit 0 = met; 1 = not met on a clean observation; 2 = the observation cannot carry the claim (drops under a completeness claim, session failure) — the cutover/probe exit discipline. `--absent` is legitimate ONLY because of that 2.
+
+CI recipes should run isolated per RFC 09 §0: multicast scouting off, gossip on, explicit endpoints — a test that scouts is not isolated, and the contamination flows both ways.
+
+Usage: zenctl expect [OPTIONS] <SELECTOR>
+
+Arguments:
+  <SELECTOR>
+          Selector to watch (full wire form — this session is un-namespaced, RFC 09 §5)
+
+Options:
+      --within <WITHIN>
+          Observation window, seconds
+          
+          [default: 30]
+
+      --count <COUNT>
+          Require at least N samples (default 1 unless --absent)
+
+      --rate-min <HZ>
+          Samples/second floor, measured over the full window
+
+      --rate-max <HZ>
+          Samples/second ceiling, measured over the full window
+
+      --valid-payload
+          Require every observed payload to validate against its served schema (#159). "Unknowable" fails the assertion, with the reason
+
+      --qos <declared|PROFILE>
+          Require observed wire QoS to match: `declared` (each subject's registry profile) or one profile name for everything
+
+      --absent
+          Assert silence: no sample may match within the window
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl probe --help
+Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe.
+
+"A probe MUST build its keys the way the product builds them" — a `*`-origin probe cannot catch a broken origin path. An origin id is called directly; a hostname resolves through the RFC 06 §6 identity bridge first, and the probe FAILS if the bridge yields nothing.
+
+Usage: zenctl probe [OPTIONS] <TARGET> <PRODUCER> <PROCEDURE>
+
+Arguments:
+  <TARGET>
+          Origin id (`h-…`) or hostname (resolved via the bridge)
+
+  <PRODUCER>
+          Producer name
+
+  <PROCEDURE>
+          Procedure path, e.g. `introspect`
+
+Options:
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl record --help
+Capture a selector's traffic to a .zrec file (RFC 09 §5.2).
+
+Through the Monitor: a bus that outruns the disk surfaces as drop records *in the file*, where the gaps happened (RFC 09 §5.1 O6) — a capture is a bounded observer and says what it cost. Replay with `zenctl replay`; the file is ndjson (one row per line, payloads lossless as base64 `bytes`), so `jq` reads it too.
+
+Usage: zenctl record [OPTIONS] --out <FILE> [SELECTOR]
+
+Arguments:
+  [SELECTOR]
+          Full wire selector to capture. Defaults to all v1 data under the base: `<base>/v1/**` — which `**` being unable to cross `@`-chunks makes media-safe, and blind to the verbatim planes
+
+Options:
+      --origin <ORIGIN>
+          Only this origin (`h-…` or `@service`)
+
+      --class <CLASS>
+          Only this class: telemetry, state, or events
+
+      --producer <PRODUCER>
+          Only this producer
+
+  -o, --out <FILE>
+          Output file
+
+      --duration <SECS>
+          Stop after this many seconds
+
+      --count <COUNT>
+          Stop after this many samples (0 = until ctrl-c or --duration)
+          
+          [default: 0]
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl replay --help
+Replay a .zrec capture onto the bus — replay is PUBLISHING.
+
+Real puts through declared publishers, at the capture's own pacing (scaled by --speed), re-stamped with this session's HLC: re-stamped old data WINS last-writer-wins against a live fleet, which is why the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the capture header's base is a contract (`--force-base` to override).
+
+Usage: zenctl replay [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>
+          The .zrec file to replay
+
+Options:
+      --speed <SPEED>
+          Pacing scale: 2.0 replays twice as fast as captured
+          
+          [default: 1]
+
+      --dry-run
+          List every would-be put and publish nothing (no session is even opened). Preview pacing is not simulated
+
+      --force-base
+          Replay even though the resolved base differs from the capture header's
+
+      --i-know
+          Replay recorded deletes that fall off the state class — the same operator price as `topic retire` (RFC 04 §1.2, v1.12)
+
+      --qos <QOS>
+          QoS profile for rows that recorded none
+          
+          [default: refreshed]
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl scout --help
+Listen for raw scouting Hellos: zid, whatami, locators.
+
+The layer *below* `base list`: no session is opened, so this answers "is anything out there at all" and "is multicast working on this segment". It is also the one zenctl verb where multicast is ON by default — scouting is the point, and a scout only listens for Hellos and joins nothing.
+
+Usage: zenctl scout [OPTIONS]
+
+Options:
+      --what <WHAT>
+          Filter by advertised kind. Repeatable; default: all three
+          
+          [possible values: router, peer, client]
+
+      --timeout <TIMEOUT>
+          Seconds to listen (default 5; a context may override)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable — reaches gossip scouting where multicast is filtered
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --context <NAME>
+          Use a named context for endpoints/timeout defaults
+
+      --format <FORMAT>
+          table = census (deduped by zid); ndjson = arrival log, one Hello per line as heard
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl completions --help
+Generate shell completions (bash, zsh, fish, elvish, powershell).
+
+e.g. `zenctl completions bash > ~/.local/share/bash-completion/completions/zenctl`
+
+The default script is **dynamic** (issue #54): it calls back into `zenctl` so producer, subject, type and procedure names come from the cached registry of the active context. The cache is written by any command that loads slices; completion never touches the bus, so a `<TAB>` cannot hang on a fleet that is down. `--static` emits the old self-contained script instead.
+
+Usage: zenctl completions [OPTIONS] <SHELL>
+
+Arguments:
+  <SHELL>
+          [possible values: bash, elvish, fish, powershell, zsh]
+
+Options:
+      --static
+          Emit the self-contained script: no callbacks, no cached names
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl doctor --help
+Diff what the fleet *serves* against local registry files.
+
+RFC 08 §6: "A disagreement between introspection and the checked-in TOML is a finding, not an ambiguity." This prints the findings. The local truth comes from `--registry <dir>`; without it only the roster-vs-introspect check runs.
+
+Usage: zenctl doctor [OPTIONS]
+
+Options:
+      --deep
+          Additionally GET current state to check freshness against each subject's ttl (RFC 04 §1.2) and judge storage coverage — adds fleet query load
+
+      --sample <N>
+          With --deep: drain at most N state samples per family — bounds the sweep's cost, not just its output
+
+      --listen-for <SECS>
+          Listen passively to the data planes for this many seconds after the GET fan-in and judge what rides (#161): undecodable/invalid payloads, declared-vs-observed QoS, unregistered traffic, over-rate events. The report states the window, its scopes, and what the bounded observer dropped (O5/O6)
+
+      --fail-on <SEVERITY>
+          Exit 1 when a finding at (or above) this severity exists. Default: always exit 0 — findings are output, not verdicts
+
+          Possible values:
+          - error:   Fail on error-severity findings only
+          - warning: Fail on warnings or errors
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
