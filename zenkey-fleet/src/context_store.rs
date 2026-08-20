@@ -61,12 +61,39 @@ pub struct StoredContext {
 pub struct ConfigFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current: Option<String>,
+    /// The named contexts.
+    ///
+    /// Edit through [`upsert`] rather than inserting a whole [`StoredContext`]
+    /// built from a form: a frontend renders a *subset* of the fields, and
+    /// inserting wholesale silently deletes the rest (issue #194).
     #[serde(
         default,
         rename = "context",
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub contexts: BTreeMap<String, StoredContext>,
+}
+
+/// Edit one context in place, keeping every field the edit does not touch.
+///
+/// The store is shared by both explorers (issue #35), and they do not render
+/// the same fields: zengui's connect pane has widgets for base, endpoints,
+/// scouting and the zenoh config file, while `zenctl context create` also
+/// writes `registry` and `timeout`. Building a whole [`StoredContext`] from a
+/// form and inserting it therefore *deletes* whatever that form could not
+/// show — which is exactly what shipped, and how a context created with
+/// `--registry ../registry --timeout 10` lost both the first time anyone
+/// touched it in the GUI (issue #194).
+///
+/// So the edit receives the value that is already stored. Keeping a field is
+/// the default and costs nothing; losing one takes a deliberate assignment.
+/// A new context starts from [`StoredContext::default`].
+///
+/// Infallible on purpose: a frontend validates its form *before* it edits, so
+/// there is no half-written entry to reason about.
+pub fn upsert(config: &mut ConfigFile, name: &str, edit: impl FnOnce(&mut StoredContext)) {
+    let entry = config.contexts.entry(name.to_string()).or_default();
+    edit(entry);
 }
 
 /// The path writes go to (and reads prefer).

@@ -1309,6 +1309,14 @@ impl Zengui {
                 self.context_form.zenoh_config = p;
                 Task::none()
             }
+            ContextMsg::RegistryChanged(v) => {
+                self.context_form.registry = v;
+                Task::none()
+            }
+            ContextMsg::TimeoutChanged(v) => {
+                self.context_form.timeout = v;
+                Task::none()
+            }
             ContextMsg::ScoutingToggled(b) => {
                 self.context_form.scouting = b;
                 Task::none()
@@ -1379,14 +1387,17 @@ impl Zengui {
     }
 
     /// Write the editor to the shared config. Returns whether it landed.
+    ///
+    /// Through `upsert`, not `insert`: the store is shared with zenctl, and
+    /// replacing the whole entry deleted every field this form has no widget
+    /// for (issue #194). The form now covers all of them, so this is the guard
+    /// for the next field somebody adds to `StoredContext`.
     fn save_context(&mut self, select: bool) -> bool {
-        let stored = match self.context_form.to_stored() {
-            Ok(s) => s,
-            Err(e) => {
-                self.context_form.status = Some(Err(e));
-                return false;
-            }
-        };
+        // Validate before touching the store, so a rejected form leaves it be.
+        if let Err(e) = self.context_form.to_stored() {
+            self.context_form.status = Some(Err(e));
+            return false;
+        }
         let name = self.context_form.name.trim().to_string();
         let mut config = match zenkey_fleet::context_store::load() {
             Ok(c) => c,
@@ -1395,7 +1406,13 @@ impl Zengui {
                 return false;
             }
         };
-        config.contexts.insert(name.clone(), stored);
+        let form = self.context_form.clone();
+        let mut applied = Ok(());
+        zenkey_fleet::context_store::upsert(&mut config, &name, |c| applied = form.apply_to(c));
+        if let Err(e) = applied {
+            self.context_form.status = Some(Err(e));
+            return false;
+        }
         if select {
             config.current = Some(name.clone());
         }
