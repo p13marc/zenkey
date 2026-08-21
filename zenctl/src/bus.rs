@@ -132,14 +132,6 @@ impl Bus {
         zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting).await
     }
 
-    /// Registry slices from whichever source the flags select: local
-    /// `--registry` dirs when given (offline), otherwise the live bus
-    /// (RFC 08 §6 introspection). Both yield the same `Vec<RegistrySlice>`,
-    /// so every renderer is source-agnostic.
-    pub(crate) async fn slices(&self) -> Result<Vec<RegistrySlice>> {
-        Ok(self.slice_set().await?.slices().to_vec())
-    }
-
     /// Slices when they are available, `None` when they are not — for the
     /// verbs that slices only **enrich** (#210).
     ///
@@ -151,35 +143,58 @@ impl Bus {
     /// loaded registry does not declare X"* for an empty one, and only one of
     /// those is ever true. `facts.rs` states it as engine policy.
     ///
-    /// `Result`, not a bare `Option`, because there are two failure *sources*.
-    /// A fleet that will not answer is a degradation; a source **the user
-    /// named** — `--registry /typo` — is their error, and swallowing it would
-    /// turn `topic echo --registry /typo` from a refusal into a silent
-    /// structural echo. This is the same fork `slice_set` makes on #196's
-    /// `OpenFailure::{Config, Transport}`, one level out.
+    /// `Result`, not a bare `Option`, because there are two failure *sources*
+    /// and [`SliceFailure`] is what keeps them apart. A fleet that will not
+    /// answer is a degradation; a source **the user named** — `--registry
+    /// /typo`, a `--zenoh-config` that does not parse — is their error, and
+    /// swallowing it would turn `topic echo --registry /typo` from a refusal
+    /// into a silent structural echo.
     pub(crate) async fn slices_optional(&self) -> Result<Option<zenkey_fleet::SliceSet>> {
-        match resolve::slice_source(self.registry_dirs()) {
-            // Dirs given: `slice_set` has already degraded past an
-            // unreachable transport, so what is left is the user's own
-            // source failing. That is not a degradation.
-            resolve::SliceSource::Union(_) => Ok(Some(self.slice_set().await?)),
-            resolve::SliceSource::Bus => match self.slice_set().await {
-                Ok(set) => Ok(Some(set)),
-                Err(e) => {
-                    crate::degrade::announce(&e.to_string());
-                    Ok(None)
-                }
-            },
+        match self.load_slices().await {
+            Ok(set) => Ok(Some(set)),
+            Err(SliceFailure::Named(e)) => Err(e),
+            Err(SliceFailure::Unreachable(e)) => {
+                crate::degrade::announce(&format!("{e:#}"));
+                Ok(None)
+            }
         }
     }
 
+    /// Registry slices from whichever source the flags select: local
+    /// `--registry` dirs when given (offline), otherwise the live bus
+    /// (RFC 08 §6 introspection). Both yield the same `Vec<RegistrySlice>`,
+    /// so every renderer is source-agnostic.
+    pub(crate) async fn slices(&self) -> Result<Vec<RegistrySlice>> {
+        Ok(self.slice_set().await?.slices().to_vec())
+    }
+
     /// The same, as the fleet engine's indexed set (echo's decode path).
+    ///
+    /// For the verbs slices *determine*: every failure is a failure, whichever
+    /// source it came from.
     pub(crate) async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
+        self.load_slices().await.map_err(SliceFailure::into_error)
+    }
+
+    /// The load, with the two failure sources still distinguishable.
+    async fn load_slices(&self) -> Result<zenkey_fleet::SliceSet, SliceFailure> {
         let base = self.base();
         let dirs = match resolve::slice_source(self.registry_dirs()) {
             resolve::SliceSource::Bus => {
-                let session = self.session().await?;
-                let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
+                let session = match self.session_reporting().await {
+                    Ok(s) => s,
+                    // A config file the user named: theirs to fix, and
+                    // answering anyway would hide it (#196).
+                    Err(zenkey_fleet::OpenFailure::Config(e)) => {
+                        return Err(SliceFailure::Named(e));
+                    }
+                    Err(zenkey_fleet::OpenFailure::Transport(e)) => {
+                        return Err(SliceFailure::Unreachable(e));
+                    }
+                };
+                let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout())
+                    .await
+                    .map_err(SliceFailure::Unreachable)?;
                 if set.slices().is_empty() {
                     eprintln!("{}", resolve::notes::no_slices(base).to_line());
                 }
@@ -196,9 +211,9 @@ impl Bus {
         // on their own (#196).
         let session = match self.session_reporting().await {
             Ok(s) => s,
-            Err(zenkey_fleet::OpenFailure::Config(e)) => return Err(e),
+            Err(zenkey_fleet::OpenFailure::Config(e)) => return Err(SliceFailure::Named(e)),
             Err(zenkey_fleet::OpenFailure::Transport(e)) => {
-                let set = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
+                let set = zenkey_fleet::SliceSet::from_dirs(&dirs).map_err(SliceFailure::Named)?;
                 eprintln!(
                     "{}",
                     resolve::notes::registry_only(&e.to_string(), &dirs).to_line()
@@ -210,7 +225,11 @@ impl Bus {
         // §6.1's decision, delivered by issue #43: --registry and the bus stop
         // being exclusive. Union: served wins per producer, dirs fill the
         // gaps, disagreement is reported — never silently overwritten.
-        let out = zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
+        let out = zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout())
+            .await
+            // The dirs are half of this, and a directory the user named that
+            // will not read is not the bus being quiet.
+            .map_err(SliceFailure::Named)?;
         for d in &out.disagreements {
             eprintln!(
                 "{}",
@@ -249,6 +268,30 @@ impl Bus {
         // warning about a cache the user did not ask for would be noise on
         // the output they did.
         let _ = set.write_cache(&dir);
+    }
+}
+
+/// Why slices could not be loaded — and *whose* problem it is (#210).
+///
+/// The distinction is the whole reason `slices_optional` returns a `Result`
+/// rather than a bare `Option`. It is the same fork `zenkey_fleet::OpenFailure`
+/// draws for sessions (#196), one level out: an unreachable fleet leaves a
+/// question the caller may still answer without it; a source the user *named*
+/// must not be answered past.
+enum SliceFailure {
+    /// A `--registry` dir, or a `--zenoh-config` file, that the user named and
+    /// that did not work. Never degraded past — a silent structural echo in
+    /// place of a refusal is how a typo becomes a wrong answer.
+    Named(anyhow::Error),
+    /// The bus did not answer. A verb slices only enrich may continue.
+    Unreachable(anyhow::Error),
+}
+
+impl SliceFailure {
+    fn into_error(self) -> anyhow::Error {
+        match self {
+            SliceFailure::Named(e) | SliceFailure::Unreachable(e) => e,
+        }
     }
 }
 
