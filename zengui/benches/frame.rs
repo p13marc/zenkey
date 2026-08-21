@@ -36,6 +36,7 @@
 //! invalidated by exactly that mistake, and a 50k-key fixture would swamp the
 //! thing being measured far worse than a 1k one did.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -295,7 +296,10 @@ fn bench_tree(c: &mut Criterion) {
         })
     });
 
-    // Today's per-tick cost, and the before-number for the headline.
+    // The cold rebuild — today's per-tick cost, and after #177 the cost of a
+    // key-set change or an expand. The split moved work from the tick to the
+    // frame rather than removing it, so this number is deliberately unchanged;
+    // what changes is how often it is paid.
     group.bench_function("flatten_50k_expanded", |b| {
         b.iter(|| {
             black_box(zengui::view::tree::flatten(
@@ -338,6 +342,39 @@ fn bench_tree(c: &mut Criterion) {
             ))
         })
     });
+
+    // **The O(1)-in-rows evidence, and it needs both sizes.** One size proves
+    // nothing; two that agree prove the cost is independent of the tree.
+    // Criterion cannot count allocations, so this pair plus the
+    // `shape_reused`/`shape_rebuilt` unit tests are what stand in for #177's
+    // "allocation is O(1)" acceptance, which is not a thing a bench can say.
+    let (small_skel, small_observed) = inputs(1_000);
+    let small_merged = zenkey_fleet::skeleton::merge(&small_skel, &small_observed, &watched);
+    let small_expanded = expand_all(1_000);
+    let small_snapshot = Arc::new(small_observed);
+    let big_snapshot = Arc::new(observed);
+
+    for (label, m, e, snap) in [
+        ("1k", &small_merged, &small_expanded, &small_snapshot),
+        ("50k", &merged, &expanded, &big_snapshot),
+    ] {
+        group.bench_function(format!("retarget_{label}"), |b| {
+            let mut flat = zengui::view::tree::flatten(m, "", e, 60_000, now);
+            b.iter(|| black_box(flat.retarget(Arc::clone(black_box(snap)), now)))
+        });
+        // Materialising one screenful — the work that moved from the tick to
+        // the frame. Forty rows out of a thousand and forty out of fifty
+        // thousand must cost the same.
+        group.bench_function(format!("window_rows_40_of_{label}"), |b| {
+            let mut flat = zengui::view::tree::flatten(m, "", e, 60_000, now);
+            flat.retarget(Arc::clone(snap), now);
+            b.iter(|| {
+                for i in 0..40.min(flat.rows.len()) {
+                    black_box(flat.row(black_box(i)));
+                }
+            })
+        });
+    }
 
     // The pivot cold path — three full materialisations of the same data, and
     // the number that sizes the arena follow-up.

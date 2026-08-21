@@ -354,7 +354,14 @@ pub struct NodeStats {
 }
 
 impl NodeStats {
-    fn from_tree(node: &TreeNode) -> NodeStats {
+    /// Project one snapshot node's numbers.
+    ///
+    /// `pub` because a frontend that caches the tree's *shape* has to join the
+    /// numbers back on at draw time, and reimplementing this field-by-field in
+    /// the frontend is how the two would drift (zengui #177). The standing rule
+    /// applies — a missing type is a `zenkey-fleet` issue, not a frontend
+    /// workaround (`docs/redesign-2026-07.md` §15).
+    pub fn from_tree(node: &TreeNode) -> NodeStats {
         NodeStats {
             count: node.count,
             bytes: node.bytes,

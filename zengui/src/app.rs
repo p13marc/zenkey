@@ -2646,6 +2646,11 @@ impl Zengui {
                 now,
             ),
         };
+        // Wire shapes track the live snapshot from here on, so a tick that
+        // changes only the numbers can point them at the new one instead of
+        // walking the tree again (#177). Pivot shapes refuse, and say so.
+        self.flat
+            .retarget(std::sync::Arc::clone(&self.observed), now);
     }
 
     fn ensure_facts(&mut self, key: &str) {
