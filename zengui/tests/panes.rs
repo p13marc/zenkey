@@ -1210,6 +1210,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         value: Series::new(),
         rate: RateSampler::new().series().clone(),
         unit: None,
+        caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(pane(DetailData {
         key: FOREIGN,
@@ -1252,6 +1253,7 @@ fn the_detail_pane_labels_the_series_it_plots() {
         value,
         rate,
         unit: Some("percent".to_string()),
+        caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(pane(DetailData {
         key: REGISTERED,

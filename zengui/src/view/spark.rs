@@ -10,10 +10,16 @@
 //!   current, min and max — which is also the only part `iced_test` can see,
 //!   the canvas being opaque to a find-by-text simulator.
 //!
-//! No `Cache`, and deliberately no `frames()`/animation subscription: the
-//! canvas is rebuilt when the Elm loop rebuilds the view, i.e. on the 250 ms
-//! bus tick. A permanently animating explorer is the thing zensight learned
+//! Deliberately no `frames()`/animation subscription: nothing here moves on
+//! its own, and a permanently animating explorer is the thing zensight learned
 //! not to ship.
+//!
+//! There **is** a [`canvas::Cache`], and it lives in the caller's state rather
+//! than here — a cache inside a `Program` built per frame caches nothing. The
+//! file used to justify having none by the 250 ms tick, which is the rate the
+//! *data* changes at; a canvas redraws with the frame (#178). Its owner is
+//! `view::detail::SeriesData`, which is rebuilt exactly when the geometry
+//! stops being valid, so a fresh one is a cleared one.
 
 use iced::widget::canvas;
 use iced::{Element, Length, Point, Renderer, Theme, mouse};
@@ -37,19 +43,23 @@ const STROKE: f32 = 1.5;
 /// means "no measured rate" rather than "measured zero".
 pub fn chart<'a>(
     label: &str,
-    series: &Series,
+    series: &'a Series,
     tone: SeriesTone,
     unit: Option<&str>,
+    cache: &'a canvas::Cache,
 ) -> Element<'a, Message> {
     let caption = caption(label, series, tone, unit);
     let mut col = iced::widget::Column::new().spacing(2);
     col = col.push(kit::muted(caption));
     if series.has_data() {
         col = col.push(
+            // Borrowed, not `to_vec()`: up to 600 `Option<f64>` were copied
+            // per frame to hand the program a list it only reads (#178).
             canvas(Spark {
-                points: series.points().to_vec(),
+                points: series.points(),
                 bounds: series.bounds(),
                 tone,
+                cache,
             })
             .width(Length::Fill)
             .height(Length::Fixed(HEIGHT)),
@@ -104,13 +114,14 @@ fn trim(v: f64) -> String {
     }
 }
 
-struct Spark {
-    points: Vec<Option<f64>>,
+struct Spark<'a> {
+    points: &'a [Option<f64>],
     bounds: Option<(f64, f64)>,
     tone: SeriesTone,
+    cache: &'a canvas::Cache,
 }
 
-impl canvas::Program<Message> for Spark {
+impl canvas::Program<Message> for Spark<'_> {
     type State = ();
 
     fn draw(
@@ -121,79 +132,83 @@ impl canvas::Program<Message> for Spark {
         bounds: iced::Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let (w, h) = (bounds.width, bounds.height);
         let Some((lo, hi)) = self.bounds else {
-            return vec![frame.into_geometry()];
+            return vec![canvas::Frame::new(renderer, bounds.size()).into_geometry()];
         };
+        // The whole drawing goes through the cache: it re-runs when the size
+        // changes or when the cache is dropped with the `SeriesData` that
+        // owns it, and hands back the same geometry for every frame in
+        // between (#178).
+        let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+            let (w, h) = (bounds.width, bounds.height);
 
-        // A baseline, so a flat series is visibly *at* a level rather than
-        // floating in an unlabelled box.
-        let axis = canvas::Path::line(Point::new(0.0, h - 1.0), Point::new(w, h - 1.0));
-        frame.stroke(
-            &axis,
-            canvas::Stroke::default()
-                .with_width(1.0)
-                .with_color(colors(theme).axis()),
-        );
+            // A baseline, so a flat series is visibly *at* a level rather than
+            // floating in an unlabelled box.
+            let axis = canvas::Path::line(Point::new(0.0, h - 1.0), Point::new(w, h - 1.0));
+            frame.stroke(
+                &axis,
+                canvas::Stroke::default()
+                    .with_width(1.0)
+                    .with_color(colors(theme).axis()),
+            );
 
-        // A constant series would divide by zero; centre it instead.
-        let span = hi - lo;
-        let y_of = |v: f64| {
-            let t = if span.abs() < f64::EPSILON {
-                0.5
-            } else {
-                (v - lo) / span
+            // A constant series would divide by zero; centre it instead.
+            let span = hi - lo;
+            let y_of = |v: f64| {
+                let t = if span.abs() < f64::EPSILON {
+                    0.5
+                } else {
+                    (v - lo) / span
+                };
+                // Inset by the stroke so the extremes are not clipped.
+                let usable = (h - STROKE * 2.0).max(1.0);
+                (h - STROKE) - (t as f32) * usable
             };
-            // Inset by the stroke so the extremes are not clipped.
-            let usable = (h - STROKE * 2.0).max(1.0);
-            (h - STROKE) - (t as f32) * usable
-        };
-        let x_of = |i: usize| {
-            if self.points.len() <= 1 {
-                w / 2.0
-            } else {
-                (i as f32) * w / (self.points.len() - 1) as f32
-            }
-        };
+            let x_of = |i: usize| {
+                if self.points.len() <= 1 {
+                    w / 2.0
+                } else {
+                    (i as f32) * w / (self.points.len() - 1) as f32
+                }
+            };
 
-        let stroke = canvas::Stroke::default()
-            .with_width(STROKE)
-            .with_color(colors(theme).series(self.tone));
+            let stroke = canvas::Stroke::default()
+                .with_width(STROKE)
+                .with_color(colors(theme).series(self.tone));
 
-        // One path per contiguous run of measurements: the gaps between runs
-        // are drawn by *not* drawing.
-        let mut run: Vec<Point> = Vec::new();
-        let flush = |run: &mut Vec<Point>, frame: &mut canvas::Frame| {
-            match run.len() {
-                0 => {}
-                // A lone measurement between two gaps is a dot; a zero-length
-                // line would render as nothing and lose the sample.
-                1 => frame.fill(
-                    &canvas::Path::circle(run[0], STROKE),
-                    colors(theme).series(self.tone),
-                ),
-                _ => {
-                    let path = canvas::Path::new(|b| {
-                        b.move_to(run[0]);
-                        for p in &run[1..] {
-                            b.line_to(*p);
-                        }
-                    });
-                    frame.stroke(&path, stroke);
+            // One path per contiguous run of measurements: the gaps between runs
+            // are drawn by *not* drawing.
+            let mut run: Vec<Point> = Vec::new();
+            let flush = |run: &mut Vec<Point>, frame: &mut canvas::Frame| {
+                match run.len() {
+                    0 => {}
+                    // A lone measurement between two gaps is a dot; a zero-length
+                    // line would render as nothing and lose the sample.
+                    1 => frame.fill(
+                        &canvas::Path::circle(run[0], STROKE),
+                        colors(theme).series(self.tone),
+                    ),
+                    _ => {
+                        let path = canvas::Path::new(|b| {
+                            b.move_to(run[0]);
+                            for p in &run[1..] {
+                                b.line_to(*p);
+                            }
+                        });
+                        frame.stroke(&path, stroke);
+                    }
+                }
+                run.clear();
+            };
+            for (i, point) in self.points.iter().enumerate() {
+                match point {
+                    Some(v) => run.push(Point::new(x_of(i), y_of(*v))),
+                    None => flush(&mut run, frame),
                 }
             }
-            run.clear();
-        };
-        for (i, point) in self.points.iter().enumerate() {
-            match point {
-                Some(v) => run.push(Point::new(x_of(i), y_of(*v))),
-                None => flush(&mut run, &mut frame),
-            }
-        }
-        flush(&mut run, &mut frame);
-
-        vec![frame.into_geometry()]
+            flush(&mut run, frame);
+        });
+        vec![geometry]
     }
 }
 

@@ -3048,6 +3048,10 @@ impl Zengui {
             leaves,
             leaf,
             value,
+            // A fresh `SeriesData` is a cleared cache: this function is
+            // called exactly when the chart's inputs moved, which is exactly
+            // when the retained geometry stopped being valid (#178).
+            caches: view::detail::SeriesCaches::default(),
             rate: self.rate_series.series().clone(),
             unit,
         })

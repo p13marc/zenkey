@@ -179,6 +179,25 @@ pub struct SeriesData {
     pub rate: Series,
     /// The registry-declared unit, when the subject declares one.
     pub unit: Option<String>,
+    /// Retained geometry for the two charts (#178).
+    ///
+    /// A `canvas::Cache` has to outlive the frame to be worth anything, and
+    /// this struct is now the thing that does: it is rebuilt when the chart's
+    /// inputs move, which is exactly when the geometry stops being valid. A
+    /// fresh `SeriesData` therefore *is* a cleared cache, and there is no
+    /// second invalidation rule to keep in step with the first.
+    ///
+    /// `view/spark.rs` used to justify having no cache by the 250 ms tick —
+    /// but that is the rate the *data* changes at, and a canvas redraws with
+    /// the frame.
+    pub caches: SeriesCaches,
+}
+
+/// The retained geometry, one per chart.
+#[derive(Default)]
+pub struct SeriesCaches {
+    pub value: iced::widget::canvas::Cache,
+    pub rate: iced::widget::canvas::Cache,
 }
 
 pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
@@ -317,7 +336,7 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
 /// Returning `None` is the point: a payload that carries no number is an
 /// ordinary fact, and rendering an empty chart or an error for it would invent
 /// a problem (#64's second acceptance line).
-fn series_section<'a>(data: &SeriesData) -> Option<Element<'a, Message>> {
+fn series_section<'a>(data: &'a SeriesData) -> Option<Element<'a, Message>> {
     let plottable = !data.leaves.leaves.is_empty();
     if !plottable && !data.rate.has_data() {
         return None;
@@ -355,10 +374,17 @@ fn series_section<'a>(data: &SeriesData) -> Option<Element<'a, Message>> {
             &data.value,
             SeriesTone::Value,
             data.unit.as_deref(),
+            &data.caches.value,
         ));
     }
 
-    col = col.push(spark::chart("rate", &data.rate, SeriesTone::Rate, None));
+    col = col.push(spark::chart(
+        "rate",
+        &data.rate,
+        SeriesTone::Rate,
+        None,
+        &data.caches.rate,
+    ));
     Some(col.into())
 }
 
