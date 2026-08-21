@@ -158,3 +158,51 @@ overlay allocates nothing; an open jump-to overlay collects one `Vec<&str>`
 exactly one key. A note rather than a bench, deliberately: zengui has no
 criterion harness, and the change is structural (O(cache) → O(drawn)) — a
 number here would measure the allocator, not the design.
+
+## zengui frame paths (#178), 2026-08-21
+
+zengui has a criterion harness now — `zengui/benches/frame.rs` — which is what
+the note above said it lacked. It benches the **renderer-free** half only: the
+work a `view::*` function does before it builds a widget, plus the two per-tick
+joins that feed it. The widget-shaped half (`line_view`'s borrows, the toolbar
+pickers, the media `Handle`, the two `canvas::Cache`s) is held by
+`tests/panes.rs` and by the compiler, and is deliberately not represented here
+— a bench needing a GPU surface would not run in CI, and one through
+`iced_test` would measure the simulator.
+
+- Commit: chunk AK, branch `chunk-ak-frames`
+- Date: 2026-08-21
+- Machine: Linux 6.12.101+deb13-cloud-amd64 x86_64
+
+| Bench | Cadence | Time (point) |
+|---|---|---|
+| echo/admits_2k_unfiltered | frame | 7.97 µs |
+| echo/admits_2k_keyexpr | frame | 190 µs |
+| echo/admits_2k_substring | frame | 102 µs |
+| hex/dump_1k | frame | 3.86 µs |
+| roster/refresh_40p_8w | tick | 28.0 µs |
+| series/numeric_leaves | tick | 146 ns |
+| series/value_series_600 | tick | 10.2 µs |
+| expansion/collapse_1k_of_10k | click | 319 µs |
+
+**Before/after, back-to-back**, old code first per the methodology note above
+(so the new number is the penalised one and the deltas are conservative):
+
+| Bench | Before | After | Change |
+|---|---|---|---|
+| echo/admits_2k_keyexpr | 344 µs | 190 µs | **−46%** |
+| roster/refresh_40p_8w | 39.3 µs | 28.0 µs | **−29%** |
+
+`echo/admits_2k_keyexpr` is the one worth reading twice. It was parsing the
+*filter* and the *line's key* inside the per-line loop — 4,000 key-expression
+validations per frame over a full 2,000-line ring. The 46% that remains is the
+2,000 intersections themselves, which are the work the filter *is*; what went
+away was the parsing around them.
+
+Two things the table does not show, because a number would be dishonest about
+them. `series_data` moved from the frame to the tick — a ~240× reduction in how
+often `value_series_600` and `numeric_leaves` run, not a change in what they
+cost, so it appears here only as a cadence column. And `media`'s frame handle,
+`toolbar`'s pickers and `line_view`'s two `String`s became borrows, which the
+type system now enforces; the honest measurement of a removed allocation is
+that it is not there.

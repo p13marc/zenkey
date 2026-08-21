@@ -474,7 +474,7 @@ pub(crate) fn facts_section(f: &KeyFacts) -> Element<'_, Message> {
 /// Split out from the pane so the bytes-to-text half is testable — the old
 /// version's exact output is what the test pins, because a hand-rolled
 /// formatter is only an improvement if it agrees with `{:02x}`.
-fn hex_dump(bytes: &[u8]) -> String {
+pub fn hex_dump(bytes: &[u8]) -> String {
     /// Lowercase nibbles, indexed by the half-byte.
     const HEX: [u8; 16] = *b"0123456789abcdef";
 
