@@ -10,7 +10,7 @@
 //! patterns, bodies encode through [`SchemaStore::encode`] (the same
 //! validating ladder `topic pub` writes through), publications are declared
 //! (P7), and every sample carries the RFC 09 §5.3 synthetic marker (v1.19) —
-//! someone's `doctor --listen` must be able to tell this traffic from real.
+//! someone's `doctor --listen-for` must be able to tell this traffic from real.
 
 use std::time::Duration;
 

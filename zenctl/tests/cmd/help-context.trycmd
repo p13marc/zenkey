@@ -1,0 +1,90 @@
+Named contexts in `~/.config/zenctl/config.toml`. Filesystem only — no bus,
+and `ZENKEY_EXPLORER_CONFIG_DIR` is what keeps this corpus out of yours.
+
+```console
+$ zenctl context --help
+Manage named connection contexts (config file)
+
+Usage: zenctl context <COMMAND>
+
+Commands:
+  create  Create (or update) a named context
+  list    List contexts (the `*` marks the current one)
+  show    Show one context (default: the current one)
+  select  Select the current context
+  rm      Remove a context
+  edit    Open the whole config file in $VISUAL/$EDITOR, validating afterwards
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+$ zenctl context create --help
+Create (or update) a named context
+
+Usage: zenctl context create [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --base <BASE>          The deployment base this context pins
+  -c, --connect <CONNECT>    Endpoint to connect to, repeatable
+  -l, --listen <LISTEN>      Endpoint to listen on, repeatable
+      --registry <DIR>       Registry dir, repeatable (offline slice source)
+      --scouting             Enable multicast scouting for this context
+      --timeout <TIMEOUT>    Default reply timeout in seconds
+      --zenoh-config <FILE>  Zenoh JSON5 config file for this context (#122) — the passthrough that reaches a secured bus; explorer knobs apply on top (flag > env > context > file)
+      --select               Select it as the current context
+  -h, --help                 Print help
+
+$ zenctl context list --help
+List contexts (the `*` marks the current one)
+
+Usage: zenctl context list
+
+Options:
+  -h, --help  Print help
+
+$ zenctl context show --help
+Show one context (default: the current one)
+
+Usage: zenctl context show [NAME]
+
+Arguments:
+  [NAME]  
+
+Options:
+  -h, --help  Print help
+
+$ zenctl context select --help
+Select the current context
+
+Usage: zenctl context select <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+  -h, --help  Print help
+
+$ zenctl context rm --help
+Remove a context
+
+Usage: zenctl context rm <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+  -h, --help  Print help
+
+$ zenctl context edit --help
+Open the whole config file in $VISUAL/$EDITOR, validating afterwards
+
+Usage: zenctl context edit
+
+Options:
+  -h, --help  Print help
+
+```

@@ -119,6 +119,9 @@ ci:
     # The gutter gate (#195): a dropped `\` in a multi-line string prints the
     # source indentation to the user. Cheap, and it runs before the compiler.
     python3 scripts/check-prose.py zenctl/src zenkey-fleet/src zengui/src zenkey/src
+    # One report, three renderings, and exactly one place that decides which
+    # (#198).
+    ./scripts/check-render-seam.sh
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo build --workspace --all-targets --locked
     cargo test --workspace --locked
@@ -135,6 +138,12 @@ bench:
 # The ledger itself is an ordinary test and runs in `just ci`.
 soak:
     cargo test --release -p zenkey-fleet --test ledger -- --ignored --nocapture
+
+# Re-capture every pinned CLI transcript and render snapshot after an
+# intentional change (#201). Review the diff: that review is the point of the
+# corpus rather than its cost.
+snapshots:
+    TRYCMD=overwrite SNAPSHOTS=overwrite cargo test -p zenctl
 
 fmt:
     cargo fmt --all

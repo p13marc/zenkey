@@ -17,7 +17,7 @@
 
 use anyhow::Result;
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 /// `zenctl schema <producer> [--type X] [--full]`.
 pub async fn dump(
@@ -31,7 +31,7 @@ pub async fn dump(
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let report =
         zenkey_fleet::schema_dump(&store, &session, &slices, producer, type_filter, full).await;
-    output::schema_dump(&report, args.format)
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
 /// `zenctl schema check` (#159): one payload against one schema, exit-coded
@@ -123,23 +123,13 @@ pub async fn check(
         },
     };
 
-    if matches!(
-        args.format.resolved(),
-        crate::output::Format::Json | crate::output::Format::Ndjson
-    ) {
-        let obj = serde_json::json!({
-            "type": type_name,
-            "kind": schema.kind().as_str(),
-            "verdict": verdict,
-            "detail": detail,
-        });
-        println!("{obj}");
-    } else {
-        println!("{type_name} ({}): {verdict}", schema.kind().as_str());
-        for line in &detail {
-            println!("  {line}");
-        }
-    }
+    let report = crate::render::SchemaCheck {
+        type_name: type_name.to_string(),
+        kind: schema.kind().as_str().to_string(),
+        verdict: verdict.to_string(),
+        detail,
+    };
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     if verdict != "valid" {
         std::process::exit(1);
     }

@@ -1,0 +1,94 @@
+The root: the tree itself, the version, and what a bare invocation does.
+
+A bare `zenctl` exits **2**, and so does `zenctl key includes` with too few
+arguments — clap's usage error. `zenctl key includes 'v1/**a' 'v1/a'` also
+exits 2, for a completely different reason: the expression does not parse.
+Both live in this corpus so the overload is visible rather than discovered;
+see `key-algebra.trycmd` for the second kind.
+
+```console
+$ zenctl --help
+Explore a keyspace-v2 Zenoh bus (RFC 08 §6)
+
+Usage: zenctl <COMMAND>
+
+Commands:
+  topic        Subjects: what data exists, and what it means
+  get          GET any selector with the fleet discipline (RFC 05 §2.1)
+  key          Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed)
+  node         Producers: who is alive on the bus
+  base         Deployment bases discovered from the wire (needs no --base)
+  service      Procedures on the `@rpc` plane
+  interface    Payload types declared by the registry slices
+  schema       Dump a producer's served payload schemas (`@rpc/<producer>/describe`), or check a payload against one (`schema check`, #159)
+  registry     The registry as a document: export it, diff it, lint it
+  bench        Measure the fleet
+  admin        Zenoh admin space (`@/**`) — the middleware's own introspection
+  storage      Storages: what the mesh persists, joined against declared state
+  blob         The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2)
+  serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
+  cutover      Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic
+  gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
+  expect       Await an expectation on the bus, exit-coded for CI (#160)
+  probe        Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe
+  record       Capture a selector's traffic to a .zrec file (RFC 09 §5.2)
+  replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
+  scout        Listen for raw scouting Hellos: zid, whatami, locators
+  context      Manage named connection contexts (config file)
+  cache        Inspect or clear the slice cache that feeds shell completion
+  completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
+  doctor       Diff what the fleet *serves* against local registry files
+  help         Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+```
+
+```console
+$ zenctl --version
+zenctl [..]
+
+```
+
+```console
+$ zenctl
+? 2
+Explore a keyspace-v2 Zenoh bus (RFC 08 §6)
+
+Usage: zenctl <COMMAND>
+
+Commands:
+  topic        Subjects: what data exists, and what it means
+  get          GET any selector with the fleet discipline (RFC 05 §2.1)
+  key          Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed)
+  node         Producers: who is alive on the bus
+  base         Deployment bases discovered from the wire (needs no --base)
+  service      Procedures on the `@rpc` plane
+  interface    Payload types declared by the registry slices
+  schema       Dump a producer's served payload schemas (`@rpc/<producer>/describe`), or check a payload against one (`schema check`, #159)
+  registry     The registry as a document: export it, diff it, lint it
+  bench        Measure the fleet
+  admin        Zenoh admin space (`@/**`) — the middleware's own introspection
+  storage      Storages: what the mesh persists, joined against declared state
+  blob         The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2)
+  serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
+  cutover      Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic
+  gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
+  expect       Await an expectation on the bus, exit-coded for CI (#160)
+  probe        Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe
+  record       Capture a selector's traffic to a .zrec file (RFC 09 §5.2)
+  replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
+  scout        Listen for raw scouting Hellos: zid, whatami, locators
+  context      Manage named connection contexts (config file)
+  cache        Inspect or clear the slice cache that feeds shell completion
+  completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
+  doctor       Diff what the fleet *serves* against local registry files
+  help         Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+```

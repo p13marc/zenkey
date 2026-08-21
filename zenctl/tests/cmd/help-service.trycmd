@@ -1,0 +1,235 @@
+Procedures: what can be called, and calling it (RFC 05).
+
+```console
+$ zenctl service --help
+Procedures on the `@rpc` plane
+
+Usage: zenctl service <COMMAND>
+
+Commands:
+  list  List registered procedures (bus-served slices, or `--registry`)
+  info  One producer's `@rpc` surface, with the key shape a call would use
+  call  Call a procedure (on-bus)
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+$ zenctl service list --help
+List registered procedures (bus-served slices, or `--registry`)
+
+Usage: zenctl service list [OPTIONS]
+
+Options:
+      --producer <PRODUCER>
+          Only this producer
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl service info --help
+One producer's `@rpc` surface, with the key shape a call would use.
+
+`service list` says what exists across the fleet; this says what one producer offers and how to reach it — the question left over, and the one you have immediately before `service call`.
+
+Usage: zenctl service info [OPTIONS] <PRODUCER> [PROCEDURE]
+
+Arguments:
+  <PRODUCER>
+          Producer name
+
+  [PROCEDURE]
+          Only this procedure path, e.g. `introspect`
+
+Options:
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl service call --help
+Call a procedure (on-bus)
+
+Usage: zenctl service call [OPTIONS] <ORIGIN> <PRODUCER> <PROCEDURE>
+
+Arguments:
+  <ORIGIN>
+          Origin to target: a host id (`h-3fa9c2d41b7e`), `*` for the whole fleet, or `@catalog` for a service origin
+
+  <PRODUCER>
+          Producer name. Omit for a service origin, which has no producer chunk
+
+  <PROCEDURE>
+          Procedure path, e.g. `introspect` or `artifact/status`
+
+Options:
+      --param <K=V>
+          Selector parameters, repeatable: `--param state=established`
+
+      --body <BODY>
+          Request body: inline JSON, or `@path` to read a file
+
+      --attachment <ATTACHMENT>
+          Attachment riding beside the request, verbatim — never schema-encoded (#117's rule, on the call side: #126). Inline text, or `@path` to read a file
+
+      --no-validate
+          Skip the registry lookup (and with it the registry-layer forbidden-fanout refusal and any body validation)
+
+      --raw
+          Send the request body verbatim: no schema lookup, no encoding
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```

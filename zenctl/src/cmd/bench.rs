@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 /// A ceiling on `--count`, so a typo is a bounded mistake. Not a policy about
 /// how much load a fleet can take — the operator knows that and `--i-know`
@@ -48,7 +48,7 @@ pub async fn rpc(
     )
     .await
     .map_err(|e| anyhow!("{e}"))?;
-    output::bench(&report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // A benchmark that reached nobody is not a benchmark. Exit 2 matches
     // `service call`'s "zero replies" code — silence keeps its own meaning.
     if report.origins.is_empty() {

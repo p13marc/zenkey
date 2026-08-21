@@ -1,0 +1,124 @@
+Key-expression algebra. No session, no bus: the only family whose whole
+answer is a verdict plus an exit code, and the only one whose behaviour (not
+just its help) is pinned — see `key-algebra.trycmd`.
+
+```console
+$ zenctl key --help
+Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed)
+
+Usage: zenctl key <COMMAND>
+
+Commands:
+  includes    Does `a` include every key `b` can name? Exit 0 yes / 1 no / 2 invalid
+  intersects  Can `a` and `b` name a common key? Exit 0 yes / 1 no / 2 invalid
+  canon       Canonicalize an expression, or print its parse error verbatim
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+$ zenctl key includes --help
+Does `a` include every key `b` can name? Exit 0 yes / 1 no / 2 invalid
+
+Usage: zenctl key includes [OPTIONS] <A> <B>
+
+Arguments:
+  <A>
+          
+
+  <B>
+          
+
+Options:
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl key intersects --help
+Can `a` and `b` name a common key? Exit 0 yes / 1 no / 2 invalid.
+
+When a 'no' is the convention's doing — `**` never crosses an `@`-chunk (RFC 03 §4 D2), `*` never matches a verbatim service origin (D4) — the output says so, with the citation.
+
+Usage: zenctl key intersects [OPTIONS] <A> <B>
+
+Arguments:
+  <A>
+          
+
+  <B>
+          
+
+Options:
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl key canon --help
+Canonicalize an expression, or print its parse error verbatim
+
+Usage: zenctl key canon [OPTIONS] <EXPR>
+
+Arguments:
+  <EXPR>
+          
+
+Options:
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```

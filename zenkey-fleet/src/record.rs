@@ -25,21 +25,16 @@ use std::io::{BufRead, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use zenoh::Session;
 use zenoh::sample::SampleKind;
 
-use crate::ingest::{IngestRow, parse_row};
+use crate::ingest::{IngestRow, SampleRow, parse_row};
 use crate::registry::SliceSet;
 use crate::sub::{EventStream, FleetEvent, SampleView, StreamItem};
 
 /// The current `.zrec` format version, written into every header.
 pub const ZREC_VERSION: u32 = 1;
-
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
 
 /// RFC 3339 UTC "now", seconds precision — the header's provenance stamp.
 /// A hand-rolled civil-date conversion (Hinnant's days algorithm) beats a
@@ -126,7 +121,15 @@ impl<W: Write> ZrecWriter<W> {
     /// the publisher's HLC — when one rode the sample — is carried
     /// informatively (`"timestamp"`): replay re-stamps (RFC 09 §5.2). QoS
     /// is stored as a profile *name* only when the wire's actual axes match
-    /// one (RFC 04 §3); axes matching no profile are not approximated.
+    /// one (RFC 04 §3); axes matching no profile are not approximated —
+    /// a rule [`SampleRow::with_wire`] now enforces for every writer of the
+    /// dialect rather than for this one alone (#235).
+    ///
+    /// A capture carries **no** `origin`/`subject`: those are the observer's
+    /// reading of the key under a base it chose, and a file that outlives
+    /// the session must not freeze one deployment's interpretation into
+    /// somebody else's replay (RFC 09 §5.2 — keys are recorded whole and
+    /// never re-derived from the header's base).
     pub fn write_sample(&mut self, view: &SampleView) -> Result<()> {
         let t_us = u64::try_from(
             view.received
@@ -134,31 +137,23 @@ impl<W: Write> ZrecWriter<W> {
                 .as_micros(),
         )
         .unwrap_or(u64::MAX);
-        let mut obj = serde_json::json!({
-            "key": view.key,
-            "t": t_us,
-        });
-        if view.kind == SampleKind::Delete {
-            obj["delete"] = true.into();
-        } else {
-            obj["bytes"] = b64(&view.payload.to_bytes()).into();
+        let mut row = SampleRow {
+            key: view.key.clone(),
+            t: Some(t_us),
+            ..SampleRow::default()
         }
-        if !view.encoding.is_empty() {
-            obj["encoding"] = view.encoding.clone().into();
-        }
-        if let Some(t) = view.timestamp {
-            obj["timestamp"] = t.to_string().into();
-        }
-        if let Some(profile) = zenkey::qos::QosProfile::ALL
-            .into_iter()
-            .find(|p| view.qos_matches(*p))
-        {
-            obj["qos"] = profile.name().into();
+        .with_wire(view);
+        // A tombstone has no payload to store: `delete` is the whole fact
+        // (RFC 04 §1.2), and an empty `bytes` would read as an empty put.
+        if view.kind != SampleKind::Delete {
+            row = row.with_payload_bytes(&view.payload.to_bytes());
         }
         if let Some(a) = &view.attachment {
-            obj["attachment_b64"] = b64(&a.to_bytes()).into();
+            row.attachment_b64 = Some(crate::ingest::b64(&a.to_bytes()));
         }
-        serde_json::to_writer(&mut self.out, &obj).context("write .zrec row")?;
+        self.out
+            .write_all(row.to_line().as_bytes())
+            .context("write .zrec row")?;
         self.out.write_all(b"\n").context("write .zrec row")?;
         self.samples += 1;
         Ok(())

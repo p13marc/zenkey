@@ -99,10 +99,46 @@ zenctl context edit                     # the whole config file, in $EDITOR, val
 ```
 
 `--watch` re-renders on change (appeared rows mark `+` for one cycle,
-disappeared rows linger one cycle marked `-`); `--watch --format ndjson`
-streams one `{snapshot, appeared, disappeared}` object per cycle. `node list
---watch` is event-driven — a producer stopping shows within one liveliness
-event, not one poll interval.
+disappeared rows linger one cycle marked `-`, and a row whose *value* changed
+shows as both); `--watch --format ndjson` streams one envelope plus its rows
+per cycle, tagged with a monotonic `tick`. `node list --watch` is event-driven
+— a producer stopping shows within one liveliness event, not one poll interval.
+
+## What `--format` promises
+
+**`--format json` and `--format ndjson` are a stable contract. `--format table`
+explicitly is not.** The table is for a person to read, and it changes when a
+better rendering is found; anything a script depends on belongs in one of the
+other two.
+
+Both machine formats carry the same values, differently packaged:
+
+* **`json`** — one document: the report's own fields, its `rows` array, and a
+  `notes` array when the report has something to say about itself.
+* **`ndjson`** — one object per line. The **envelope leads**, carrying the
+  report-level facts and the notes; then one line per row, each tagged with the
+  kind of row it is:
+
+```console
+$ zenctl storage list --base acme --format ndjson
+{"report":"storage-list","notes":[…]}
+{"row":"storage","name":"main","zid":"…"}
+{"row":"coverage","producer":"sysinfo","path":"health","coverage":"covered"}
+```
+
+`jq -c 'select(.row)'` takes the rows, `select(.report)` the envelope. The
+envelope leads rather than trails so that a stream cut short — `| head`, a
+closed pipe — still carries what was asked and what the bounds cost, which is
+exactly the claim a truncated stream needs (RFC 09 §5.1 O5/O6).
+
+Streaming verbs (`topic echo`, `serve`, `replay`, `gen`) emit tagged rows with
+**no** envelope: their coverage is not known before the first row, and
+`topic echo`'s rows are an *input* format that `topic pub --from ndjson` and
+`.zrec` read back (RFC 09 §5.2), so nothing may precede them.
+
+A field that is absent is a question nobody asked; it is never `null`
+(RFC 09 §5.1 O4). In the table, that reads `—`, and an empty cell means the
+question was asked and the answer was nothing.
 
 `get` speaks the fleet discipline on any selector — target All,
 consolidation None, every reply attributed by its own key, RFC 05 §3 error

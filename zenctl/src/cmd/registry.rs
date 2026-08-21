@@ -11,26 +11,15 @@
 //! lint that reported more than the build does would be a different tool
 //! wearing the same name.
 
+use crate::cli::ExportAs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use zenkey::RegistrySlice;
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 /// What `registry export` emits.
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum ExportAs {
-    /// Registry TOML — round-trippable through `SliceSet::from_dirs`.
-    Toml,
-    /// A JSON Schema bundle built from the producers' served `describe`
-    /// replies (RFC 08 §7).
-    Jsonschema,
-    /// An AsyncAPI 3.0 document: channels from subjects, operations from
-    /// procedures.
-    Asyncapi,
-}
-
 pub async fn export(target: ExportAs, producer: Option<&str>, args: &BusArgs) -> Result<()> {
     let slices = args.slice_set().await?;
     let selected: Vec<&RegistrySlice> = slices
@@ -118,7 +107,7 @@ pub async fn diff(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let served = zenkey_fleet::SliceSet::from_bus(&session, args.base(), args.timeout()).await?;
     let report = served.diff(&local);
-    output::registry_diff(&report, args.format)
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
 /// `registry lint <dir>` — the consumer's build lints, without the build.

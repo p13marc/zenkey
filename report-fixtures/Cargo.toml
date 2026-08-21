@@ -1,0 +1,31 @@
+# The report values both corpora are written against (#201).
+#
+# `zenkey-fleet/tests/report_contract.rs` pins their *wire* shape; `zenctl`'s
+# render tests pin how those same values are *drawn*. One set of constructors
+# so a field added to a report breaks one place, and both corpora then re-run
+# against the same thing — which is the only way the two stay in agreement
+# about what a `TopicList` is.
+[package]
+name = "zenkey-report-fixtures"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# `default-features = false`, deliberately, and this is not tidiness.
+#
+# `.forgejo/workflows/ci.yml` runs `cargo bench -p zenkey-fleet
+# --no-default-features --no-run`, and **benches build dev-dependencies**. A
+# fixtures crate that requested any zenkey-fleet feature would feature-unify
+# into that build and silently defeat the #204 gate: `[[bench]]
+# required-features = ["decode"]` exists precisely so that build *skips* the
+# bench, and that skip path is the thing being exercised. Nothing here needs a
+# feature — `report.rs` has no `cfg(feature)` gates and `Coverage` lives in the
+# ungated `admin` module — so nothing here asks for one. Do not `cargo add`
+# your way out of this comment.
+# Not `workspace = true`: the workspace entry cannot be told to drop its
+# default features, and dropping them is the whole point of the paragraph
+# above.
+zenkey-fleet = { path = "../zenkey-fleet", default-features = false }
+serde_json = { workspace = true }

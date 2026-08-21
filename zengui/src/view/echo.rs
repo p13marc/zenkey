@@ -163,41 +163,48 @@ pub fn visible<'a>(
     (lines, matched)
 }
 
-/// One line in `zenctl topic echo --format ndjson`'s row shape (#72).
+/// One line in the explorers' row dialect (#72), written through the engine's
+/// [`zenkey_fleet::SampleRow`] so it cannot drift from the reader (#235).
 ///
-/// The **shared** fields are byte-for-byte the CLI's — `key`, `origin`,
-/// `subject`, `encoding`, `timestamp`, `delete`, `value` — so one `jq` script
-/// reads a GUI export and a CLI pipe alike (`delete` joined the shared set
-/// when the CLI learned tombstones, #115). The two differ in exactly the
-/// places the two tools differ, and neither difference is faked:
+/// This doc used to claim the shared fields were "byte-for-byte the CLI's".
+/// They were not: the row spelled a payload byte *count* as `bytes`, which
+/// [`zenkey_fleet::parse_row`] reads as base64 of the wire payload
+/// (RFC 09 §5.2) and rejects as malformed. Sharing the writer is what makes
+/// the claim true rather than restating it.
+///
+/// The two tools still differ, in exactly the places they differ, and
+/// neither difference is faked:
 ///
 /// - the CLI carries `type`/`typed` from its schema decode; that decode is
 ///   async and must never run on a render path, so it is **absent** here
 ///   rather than defaulted to `null`/`false`, which would claim the lookup
 ///   happened and found nothing;
-/// - this row carries `bytes`, which the ring knows and the CLI's row does
-///   not spell.
+/// - this row carries `payload_bytes`, which the ring knows and the CLI's
+///   row spells from the same field.
 pub fn ndjson_line(line: &EchoLine, base: &str) -> String {
-    let parsed = zenkey::grammar::parse_full(base, &line.key);
-    let mut obj = serde_json::json!({
-        "key": line.key,
-        "origin": parsed.as_ref().map(|p| p.origin.chunk().to_string()),
-        "subject": parsed.as_ref().map(|p| p.subject.join("/")),
-        "encoding": line.encoding,
-        "timestamp": line.timestamp,
-        "bytes": line.len,
-        "delete": line.is_delete,
-        "value": serde_json::from_str::<serde_json::Value>(&line.preview)
+    let mut row = zenkey_fleet::SampleRow::of_key(&line.key, base);
+    row.encoding = Some(line.encoding.clone()).filter(|e| !e.is_empty());
+    row.timestamp = line.timestamp.clone();
+    row.delete = line.is_delete;
+    // The payload *size*, under the key that means a size. `bytes` is the
+    // base64 wire payload in this dialect and has been since RFC 09 §5.2 —
+    // writing a count there made the export unreadable by the only reader
+    // it has, rather than merely lossy (#235).
+    row.payload_bytes = Some(line.len);
+    row.value = Some(
+        serde_json::from_str::<serde_json::Value>(&line.preview)
             .unwrap_or(serde_json::Value::String(line.preview.clone())),
-    });
+    );
     // Present only when the wire carried one — absent, never null (#117),
     // byte-for-byte the CLI row's convention.
     if let Some(att) = &line.attachment {
-        obj["attachment"] = serde_json::from_str::<serde_json::Value>(att)
-            .unwrap_or(serde_json::Value::String(att.clone()));
-        obj["attachment_bytes"] = line.attachment_len.into();
+        row.attachment = Some(
+            serde_json::from_str::<serde_json::Value>(att)
+                .unwrap_or(serde_json::Value::String(att.clone())),
+        );
+        row.attachment_bytes = line.attachment_len;
     }
-    obj.to_string()
+    row.to_line()
 }
 
 /// Every visible line as ndjson, newest first.
@@ -473,6 +480,35 @@ mod tests {
         assert!(view.paused_at.is_none());
     }
 
+    /// The export is not merely *shaped* like the pipe's rows — it is
+    /// readable by the only reader they have (#235). This is the assertion
+    /// the old test's name claimed and did not make: it compared fields by
+    /// hand, and `"bytes": <a byte count>` passed every one of those
+    /// comparisons while making the row unparseable.
+    #[test]
+    fn an_exported_row_reads_back_through_the_engines_reader() {
+        let mut l = line(
+            0,
+            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+            "{\"status\":\"ok\"}",
+        );
+        l.attachment = Some(r#"{"who":"me"}"#.to_string());
+        l.attachment_len = Some(12);
+        let row = zenkey_fleet::parse_row(&ndjson_line(&l, "")).expect("the export reads back");
+        assert_eq!(row.key, "v1/h-3fa9c2d41b7e/state/sysinfo/health");
+        assert_eq!(row.payload, br#"{"status":"ok"}"#);
+        assert_eq!(row.encoding.as_deref(), Some("application/json"));
+        assert_eq!(row.attachment.as_deref(), Some(&br#"{"who":"me"}"#[..]));
+        assert!(!row.delete);
+
+        // A tombstone reads back as a tombstone, not as an empty put
+        // (RFC 04 §1.2).
+        let mut dead = line(1, "v1/h-3fa9c2d41b7e/state/sysinfo/health", "");
+        dead.is_delete = true;
+        let row = zenkey_fleet::parse_row(&ndjson_line(&dead, "")).expect("a tombstone reads back");
+        assert!(row.delete);
+    }
+
     /// The exported row is the CLI's row: one `jq` script for both.
     #[test]
     fn the_export_matches_the_cli_row_shape() {
@@ -495,10 +531,13 @@ mod tests {
         let raw = line(1, "demo/text", "just words");
         let json: serde_json::Value = serde_json::from_str(&ndjson_line(&raw, "")).unwrap();
         assert_eq!(json["value"], "just words");
-        assert_eq!(
-            json["origin"],
-            serde_json::Value::Null,
-            "foreign key: no origin"
+        // Absent, not null: `json["origin"]` yields `Null` for a missing key
+        // too, so asserting on the value cannot tell the two apart — which
+        // is the whole reason the engine's corpus compares whole documents
+        // (RFC 09 §5.1 O4).
+        assert!(
+            !json.as_object().unwrap().contains_key("origin"),
+            "a foreign key carries no origin — absent, never null"
         );
 
         // The shared field set is exactly the CLI's; the schema-decode fields
@@ -506,9 +545,14 @@ mod tests {
         // decoded here" from "decoded as nothing".
         let json: serde_json::Value = serde_json::from_str(&ndjson_line(&l, "")).unwrap();
         let obj = json.as_object().unwrap();
-        for shared in ["key", "origin", "subject", "encoding", "timestamp", "value"] {
+        for shared in ["key", "origin", "subject", "encoding", "value"] {
             assert!(obj.contains_key(shared), "missing shared field {shared}");
         }
+        assert!(
+            !obj.contains_key("timestamp"),
+            "an unstamped sample omits the HLC rather than nulling it: nothing \
+             stamped it, which is not the same as it having been stamped null"
+        );
         for cli_only in ["type", "typed"] {
             assert!(
                 !obj.contains_key(cli_only),

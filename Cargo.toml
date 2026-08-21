@@ -5,6 +5,7 @@ members = [
     "zenkey-build",
     "zenkey-fleet",
     "fixture-tests",
+    "report-fixtures",
     "zenctl",
     "zengui",
 ]
@@ -49,6 +50,24 @@ prost-reflect = { version = "0.16", features = ["serde"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 tempfile = "3"
 
+# The CLI floor (#201). `trycmd` runs a corpus of `.trycmd` files — literate
+# transcripts that double as documentation — against the built binary, and
+# brings `snapbox` with it, which is where the render snapshots go. Both
+# accept new output with an env var (`TRYCMD=overwrite`, `SNAPSHOTS=overwrite`)
+# rather than a `cargo install`ed subcommand, which is what keeps `justfile`'s
+# "plain cargo remains the build system" true.
+trycmd = "1.2"
+snapbox = "1.2"
+
+# Colour (#200). Already in `Cargo.lock` via clap 4, so the dependency-tree
+# cost is zero. `anstream` is a **dev**-dependency only: its `AutoStream`
+# cannot wrap `emit`'s generic `impl Write`, and it is wanted here for exactly
+# one thing — `adapter::strip_str`, in the test that proves stripping every
+# escape is a no-op on meaning.
+anstyle = "1"
+anstyle-query = "1"
+anstream = "1"
+
 # GUI (zengui only). The `tokio` feature makes iced drive its subscriptions on a
 # tokio runtime, which is what lets the Zenoh link stream live inside an
 # `iced::Subscription`. Deliberately *not* `sipper`/`advanced`: the link is an
@@ -76,3 +95,4 @@ zblob = "0.3"
 zenkey = { version = "0.6.0", path = "zenkey" }
 zenkey-build = { version = "0.6.0", path = "zenkey-build" }
 zenkey-fleet = { version = "0.9.0", path = "zenkey-fleet" }
+zenkey-report-fixtures = { path = "report-fixtures" }

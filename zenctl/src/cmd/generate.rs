@@ -6,24 +6,16 @@
 //! precedent), refuse a wide run without `--i-know`, and stamp the RFC 09
 //! §5.3 synthetic marker via the engine.
 
+use crate::cli::Pattern;
 use anyhow::Result;
 use zenkey_fleet::generate::{GenPattern, GenSpec};
 
 use crate::BusArgs;
-use crate::output::Format;
 
 /// A run wider than this needs `--i-know` — a generator pointed at a full
 /// registry is a fleet-wide impersonation, and that is a decision, not a
 /// default.
 const WIDE_ENTRIES: usize = 10;
-
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Pattern {
-    Steady,
-    Jitter,
-    Burst,
-    Ramp,
-}
 
 impl From<Pattern> for GenPattern {
     fn from(p: Pattern) -> GenPattern {
@@ -126,38 +118,16 @@ pub async fn run(
     }
 
     // The plan, before anything is published (the replay dry-run precedent).
-    match args.format.resolved() {
-        Format::Json | Format::Ndjson => {
-            for e in &plan {
-                println!("{}", serde_json::to_string(e)?);
-            }
-        }
-        _ => {
-            eprintln!(
-                "plan: {} subject(s) as {origin}, {duration}s, marker {{\"synthetic\":true}} \
-                 on every sample (RFC 09 §5.3):",
-                plan.len()
-            );
-            for e in &plan {
-                eprintln!(
-                    "  {} [{}] {:.2} Hz, qos {} ({}), body {}{}{}",
-                    e.key,
-                    e.type_name,
-                    e.rate_hz,
-                    e.qos,
-                    e.qos_source,
-                    e.body_source,
-                    e.events_cap
-                        .map(|c| format!(", capped at {c} event(s)"))
-                        .unwrap_or_default(),
-                    e.note
-                        .as_deref()
-                        .map(|n| format!(" — {n}"))
-                        .unwrap_or_default(),
-                );
-            }
-        }
-    }
+    crate::render::emit_with(
+        &mut std::io::stdout(),
+        &crate::render::GenPlan {
+            origin: &origin,
+            duration_s: duration,
+            entries: &plan,
+        },
+        args.format(),
+        args.color(),
+    )?;
     if dry_run {
         eprintln!("--dry-run: nothing published");
         return Ok(());
@@ -194,19 +164,7 @@ pub async fn run(
     let report = zenkey_fleet::generate::run_gen(&session, &store, &plan, &spec).await?;
     drop(mock);
 
-    match args.format.resolved() {
-        Format::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        Format::Ndjson => println!("{}", serde_json::to_string(&report)?),
-        _ => {
-            eprintln!(
-                "sent {} sample(s) over {:.1}s across {} subject(s); {} refused by schema",
-                report.sent, report.duration_s, report.entries, report.refused
-            );
-            for e in &report.first_errors {
-                eprintln!("  ✗ {e}");
-            }
-        }
-    }
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     if report.refused > 0 {
         std::process::exit(1);
     }

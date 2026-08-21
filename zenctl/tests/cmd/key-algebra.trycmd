@@ -1,0 +1,79 @@
+The key-expression algebra: no session, no bus, and the only family whose whole
+answer is a verdict plus an exit code — 0 yes, 1 no, 2 the expression does not
+parse (`cmd/key.rs`).
+
+Every case here names `--format` explicitly, because the default is `auto` and
+`auto` resolves against the *stream*: a table on a tty, ndjson when piped. A
+corpus runs piped, so leaving it out would pin the machine form while reading
+like the human one.
+
+A plain yes, both ways round:
+
+```console
+$ zenctl key includes --format table 'v1/**' 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
+yes — v1/** includes every key v1/h-3fa9c2d41b7e/state/sysinfo/health names
+
+$ zenctl key includes --format ndjson 'v1/**' 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
+{"a":"v1/**","answer":true,"b":"v1/h-3fa9c2d41b7e/state/sysinfo/health","op":"includes","report":"key-relation"}
+
+```
+
+A "no" the convention explains rather than merely reports: `**` never crosses an
+`@`-chunk (RFC 03 §4 D2). That is the rule that puts the verbatim planes out of
+reach of a firehose scope — and the reason the roster has to name `@catalog`
+itself. The note rides in both formats, because a script deserves the reason
+too.
+
+```console
+$ zenctl key includes --format table 'v1/**' 'v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect'
+? 1
+no — v1/** does not include all of v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect
+note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.
+
+$ zenctl key includes --format ndjson 'v1/**' 'v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect'
+? 1
+{"a":"v1/**","answer":false,"b":"v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect","note":"note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.","op":"includes","report":"key-relation"}
+
+```
+
+`intersects` is the weaker question, and answers it separately:
+
+```console
+$ zenctl key intersects --format table 'v1/*/state/**' 'v1/**/health'
+yes — v1/*/state/** and v1/**/health can name a common key
+
+```
+
+Canonicalisation, both answers:
+
+```console
+$ zenctl key canon --format table 'v1/**/a/**'
+v1/**/a/** is already canonical
+
+$ zenctl key canon --format table 'v1/**/**/a'
+v1/**/a
+
+```
+
+**Exit 2 is overloaded, and here are both meanings side by side.** The first is
+this command's own verdict — the expression does not parse, and the message is
+zenoh's with its build-machine source location trimmed off (#240). The second
+never reaches the command at all: clap rejected the usage. A script branching on
+the code cannot tell them apart, and pinning them together is how that stays
+known rather than being rediscovered.
+
+```console
+$ zenctl key includes --format table 'v1/**a' 'v1/a'
+? 2
+the first expression does not parse: Invalid Key Expr `v1/**a`: `*` may only be preceded by `/` or `$`
+
+$ zenctl key includes 'v1/**'
+? 2
+error: the following required arguments were not provided:
+  <B>
+
+Usage: zenctl key includes <A> <B>
+
+For more information, try '--help'.
+
+```

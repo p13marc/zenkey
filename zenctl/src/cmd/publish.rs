@@ -220,87 +220,7 @@ pub async fn retire(key: &str, qos: &str, i_know: bool, args: &BusArgs) -> Resul
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `--raw` wins over everything: it is the escape hatch, not a preference.
-    #[test]
-    fn flag_pairs_map_onto_the_three_modes() {
-        assert_eq!(mode(false, false), PrepareMode::Encode);
-        assert_eq!(mode(false, true), PrepareMode::Lenient);
-        assert_eq!(mode(true, false), PrepareMode::Raw);
-        assert_eq!(mode(true, true), PrepareMode::Raw);
-    }
-
-    /// #158: flag > declared > sampled, and each rung is reachable.
-    #[test]
-    fn qos_resolves_flag_then_declared_then_sampled() {
-        use zenkey::qos::QosProfile;
-        use zenkey::slice::{RegistrySlice, SubjectDecl};
-        let slice = RegistrySlice {
-            version: "1.0".into(),
-            app: "test".into(),
-            convention: 1,
-            name: "sysinfo".into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![SubjectDecl {
-                path: "health".into(),
-                class: "state".into(),
-                type_name: "Health".into(),
-                common: None,
-                since: None,
-                description: None,
-                qos: Some("transition".into()),
-                ttl_s: None,
-                unit: None,
-                rate: None,
-                cardinality: None,
-                encoding: None,
-            }],
-            procedures: vec![],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        };
-        let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
-        let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
-
-        // The declared profile is found, with its path for the note.
-        assert_eq!(
-            declared_qos("", key, Some(&slices)),
-            Some((QosProfile::Transition, "health".to_string()))
-        );
-        // An explicit flag wins over it.
-        assert_eq!(
-            resolve_qos(Some(QosProfile::Alert), "", key, Some(&slices)),
-            QosProfile::Alert
-        );
-        // No flag: the declared profile drives.
-        assert_eq!(
-            resolve_qos(None, "", key, Some(&slices)),
-            QosProfile::Transition
-        );
-        // Unregistered key, no flag: the stated last resort.
-        let unregistered = "v1/h-3fa9c2d41b7e/state/sysinfo/other";
-        assert_eq!(
-            resolve_qos(None, "", unregistered, Some(&slices)),
-            QosProfile::Sampled
-        );
-        // No registry at all: not asked is not "declared nothing" — but the
-        // publisher still needs a profile, and sampled is the stated one.
-        assert_eq!(resolve_qos(None, "", key, None), QosProfile::Sampled);
-    }
-}
-
 /// Where `topic pub` reads from, besides its arguments.
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum PubSource {
-    /// The echo/export row shape, one JSON object per stdin line.
-    Ndjson,
-}
-
 /// `topic pub --from ndjson` (#125): the pipe made symmetric. Reads the
 /// exact row shape `topic echo --format ndjson` emits, publishes each row
 /// through a declared publisher — one per distinct key, reusing the write
@@ -425,4 +345,78 @@ pub async fn run_from_ndjson(
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `--raw` wins over everything: it is the escape hatch, not a preference.
+    #[test]
+    fn flag_pairs_map_onto_the_three_modes() {
+        assert_eq!(mode(false, false), PrepareMode::Encode);
+        assert_eq!(mode(false, true), PrepareMode::Lenient);
+        assert_eq!(mode(true, false), PrepareMode::Raw);
+        assert_eq!(mode(true, true), PrepareMode::Raw);
+    }
+
+    /// #158: flag > declared > sampled, and each rung is reachable.
+    #[test]
+    fn qos_resolves_flag_then_declared_then_sampled() {
+        use zenkey::qos::QosProfile;
+        use zenkey::slice::{RegistrySlice, SubjectDecl};
+        let slice = RegistrySlice {
+            version: "1.0".into(),
+            app: "test".into(),
+            convention: 1,
+            name: "sysinfo".into(),
+            service_origin: None,
+            description: None,
+            subjects: vec![SubjectDecl {
+                path: "health".into(),
+                class: "state".into(),
+                type_name: "Health".into(),
+                common: None,
+                since: None,
+                description: None,
+                qos: Some("transition".into()),
+                ttl_s: None,
+                unit: None,
+                rate: None,
+                cardinality: None,
+                encoding: None,
+            }],
+            procedures: vec![],
+            blob: vec![],
+            media: vec![],
+            deprecated: vec![],
+        };
+        let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
+        let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+
+        // The declared profile is found, with its path for the note.
+        assert_eq!(
+            declared_qos("", key, Some(&slices)),
+            Some((QosProfile::Transition, "health".to_string()))
+        );
+        // An explicit flag wins over it.
+        assert_eq!(
+            resolve_qos(Some(QosProfile::Alert), "", key, Some(&slices)),
+            QosProfile::Alert
+        );
+        // No flag: the declared profile drives.
+        assert_eq!(
+            resolve_qos(None, "", key, Some(&slices)),
+            QosProfile::Transition
+        );
+        // Unregistered key, no flag: the stated last resort.
+        let unregistered = "v1/h-3fa9c2d41b7e/state/sysinfo/other";
+        assert_eq!(
+            resolve_qos(None, "", unregistered, Some(&slices)),
+            QosProfile::Sampled
+        );
+        // No registry at all: not asked is not "declared nothing" — but the
+        // publisher still needs a profile, and sampled is the stated one.
+        assert_eq!(resolve_qos(None, "", key, None), QosProfile::Sampled);
+    }
 }

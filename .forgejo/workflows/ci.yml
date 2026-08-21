@@ -33,6 +33,9 @@ jobs:
       # keeps the source indentation *in the string*, so the user reads a
       # sentence with a hole in it. Seven shipped before anything looked.
       - run: python3 scripts/check-prose.py zenctl/src zenkey-fleet/src zengui/src zenkey/src
+      # One report, three renderings, and exactly one place that decides which
+      # (#198). Cheap, and it runs before the compiler like the gutter gate.
+      - run: ./scripts/check-render-seam.sh
 
   clippy:
     runs-on: ubuntu-24.04

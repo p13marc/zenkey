@@ -20,29 +20,25 @@ fn dir(args: &BusArgs) -> std::path::PathBuf {
 
 pub fn show(args: &BusArgs) -> Result<()> {
     let dir = dir(args);
-    println!("{}", dir.display());
     let set = zenkey_fleet::SliceSet::read_cache(&dir);
-    if set.slices().is_empty() {
-        println!(
-            "  empty — completion falls back to the static command tree. Any command that \
-             loads slices fills it (or `zenctl cache refresh`)."
-        );
-        return Ok(());
-    }
-    for slice in set.slices() {
-        println!(
-            "  {:<16} registry {:<8} {} subject(s), {} procedure(s)",
-            slice.name,
-            slice.version,
-            slice.subjects.len(),
-            slice.procedures.len()
-        );
-    }
-    println!(
-        "\n{} producer(s), from the last sighting — suggestions, not an inventory.",
-        set.slices().len()
-    );
-    Ok(())
+    // A report rather than four `println!`s, so `cache show --format json |
+    // jq -r .dir` works — the cache's whole justification is that a tool
+    // leaving files on a user's disk can be asked about them, and a script is
+    // a user too (#54, #198).
+    let report = crate::render::CacheReport {
+        dir: dir.display().to_string(),
+        slices: set
+            .slices()
+            .iter()
+            .map(|s| crate::render::CachedSlice {
+                producer: s.name.clone(),
+                registry_version: s.version.clone(),
+                subjects: s.subjects.len(),
+                procedures: s.procedures.len(),
+            })
+            .collect(),
+    };
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
 pub async fn refresh(args: &BusArgs) -> Result<()> {

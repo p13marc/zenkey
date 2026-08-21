@@ -22,8 +22,8 @@ pub mod publish;
 pub mod rate;
 pub mod record;
 pub mod registry;
-pub mod render;
 pub mod replay;
+pub mod sample;
 pub mod schema;
 pub mod scout;
 pub mod serve;
@@ -62,7 +62,6 @@ pub fn compose_selector(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::output;
 
     #[test]
     fn compose_selector_places_positions() {
@@ -75,7 +74,10 @@ mod tests {
             scouting: false,
             timeout: None,
             zenoh_config: None,
-            format: output::Format::Table,
+            out: crate::cli::OutputArgs {
+                format: crate::render::Format::Table,
+                color: crate::render::ColorChoice::Never,
+            },
         };
         assert_eq!(
             compose_selector(&args, None, None, None).unwrap(),

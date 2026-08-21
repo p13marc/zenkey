@@ -9,8 +9,8 @@
 use anyhow::Result;
 use zenkey_fleet::DoctorSpec;
 
+use crate::cli::{BusArgs, FailOn};
 use crate::report::DoctorSeverity;
-use crate::{BusArgs, FailOn, output};
 
 pub async fn run(
     deep: bool,
@@ -44,7 +44,7 @@ pub async fn run(
         },
     )
     .await?;
-    output::doctor(&report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
 
     let failed = match fail_on {
         Some(FailOn::Error) => report.count(DoctorSeverity::Error) > 0,

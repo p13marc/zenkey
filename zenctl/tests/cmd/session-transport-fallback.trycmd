@@ -1,0 +1,54 @@
+The `OpenFailure::Transport` half of #196: the bus's problem, and the command
+answers anyway.
+
+#196's premise was half wrong — offline `--registry` already worked, because
+zenoh opens a session against an unreachable endpoint and the union simply falls
+back to the files. What it could not survive was a transport that would not come
+up at all, which failed a question the files could answer on their own. Only
+that second case degrades, and it says so on stderr rather than silently.
+
+The fixture is **client** mode on purpose. Zenoh's client defaults are
+`connect.timeout_ms: 0` and `connect.exit_on_failure: true`, so the failure is
+immediate and without retry; peer mode is `-1` / `false` — retry forever — which
+is how a case like this becomes a timeout instead of a test.
+
+`topic info` on one key rather than `topic list`, so what is pinned is the
+degradation note and the fact that a full answer follows it — not four hundred
+lines of registry.
+
+```console
+$ zenctl topic info --format table --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
+no session (failed to open Zenoh session); answering from --registry only: ../fixture-tests/registry.
+That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
+key       v1/h-3fa9c2d41b7e/state/sysinfo/health
+verdict   registered
+origin    h-3fa9c2d41b7e
+producer  sysinfo
+class     state
+subject   health
+payload   HealthSnapshot
+  (`zenctl interface show HealthSnapshot --schema` for the served shape)
+ttl       120s  (refresh <= 60s; stale after 120s)
+
+```
+
+The same answer as ndjson, which is where the note's *placement* shows: it goes
+to stderr, so the document on stdout stays parseable.
+
+**Both things this case used to pin as-they-are are now fixed** (#232, #198),
+and this is where the corpus states it:
+
+* the ndjson was a **pretty, multi-line document** — not ndjson, because it
+  could not be read a line at a time. It is one line, with the family name on
+  it.
+* `verdict` read `Registered` in the table and `"registered"` in the document.
+  The table now takes the word from the serialization rather than from `{:?}`,
+  so the two cannot drift again.
+
+```console
+$ zenctl topic info --format ndjson --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
+no session (failed to open Zenoh session); answering from --registry only: ../fixture-tests/registry.
+That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
+{"class":"state","key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","note":"","origin":"h-3fa9c2d41b7e","payload_type":"HealthSnapshot","producer":"sysinfo","report":"topic-info","subject":"health","ttl_s":120,"verdict":"registered"}
+
+```

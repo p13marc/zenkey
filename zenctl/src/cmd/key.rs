@@ -11,7 +11,7 @@
 use anyhow::Result;
 use zenoh::key_expr::KeyExpr;
 
-use crate::output::Format;
+use crate::render::Format;
 
 /// The answer as an exit code: 0 yes, 1 no, 2 either expression invalid.
 pub enum Verdict {
@@ -67,7 +67,7 @@ pub fn judge(op: &str, a: &str, b: &str) -> Verdict {
         Err(e) => {
             return Verdict::Invalid {
                 which: "first",
-                error: e.to_string(),
+                error: crate::errors::without_source_locations(&e.to_string()),
             };
         }
     };
@@ -76,7 +76,7 @@ pub fn judge(op: &str, a: &str, b: &str) -> Verdict {
         Err(e) => {
             return Verdict::Invalid {
                 which: "second",
-                error: e.to_string(),
+                error: crate::errors::without_source_locations(&e.to_string()),
             };
         }
     };
@@ -94,49 +94,31 @@ pub fn judge(op: &str, a: &str, b: &str) -> Verdict {
 }
 
 /// `key includes <a> <b>` / `key intersects <a> <b>`.
-pub fn relate(op: &str, a: &str, b: &str, format: Format) -> Result<()> {
+pub fn relate(
+    op: &str,
+    a: &str,
+    b: &str,
+    format: Format,
+    color: crate::render::ColorChoice,
+) -> Result<()> {
     let verdict = judge(op, a, b);
-    let json = matches!(format.resolved(), Format::Json | Format::Ndjson);
     match &verdict {
-        Verdict::Yes => {
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({ "op": op, "a": a, "b": b, "answer": true })
-                );
-            } else {
-                println!(
-                    "yes — {a} {}",
-                    if op == "includes" {
-                        format!("includes every key {b} names")
-                    } else {
-                        format!("and {b} can name a common key")
-                    }
-                );
-            }
-        }
-        Verdict::No { note } => {
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({ "op": op, "a": a, "b": b, "answer": false, "note": note })
-                );
-            } else {
-                println!(
-                    "no — {a} {}",
-                    if op == "includes" {
-                        format!("does not include all of {b}")
-                    } else {
-                        format!("and {b} share no key")
-                    }
-                );
-                if let Some(n) = note {
-                    println!("{n}");
-                }
-            }
+        Verdict::Yes | Verdict::No { .. } => {
+            let report = crate::render::KeyRelation {
+                op: op.to_string(),
+                a: a.to_string(),
+                b: b.to_string(),
+                answer: matches!(verdict, Verdict::Yes),
+                note: match &verdict {
+                    Verdict::No { note } => note.clone(),
+                    _ => None,
+                },
+            };
+            crate::render::emit_with(&mut std::io::stdout(), &report, format, color)?;
         }
         Verdict::Invalid { which, error } => {
-            // The grammar's own message, verbatim (the keyfacts rule).
+            // The grammar's own message, verbatim (the keyfacts rule) — minus
+            // the build machine's source location (#240).
             eprintln!("the {which} expression does not parse: {error}");
         }
     }
@@ -148,23 +130,21 @@ pub fn relate(op: &str, a: &str, b: &str, format: Format) -> Result<()> {
 }
 
 /// `key canon <expr>` — canonical spelling, or the parse error verbatim.
-pub fn canon(expr: &str, format: Format) -> Result<()> {
+pub fn canon(expr: &str, format: Format, color: crate::render::ColorChoice) -> Result<()> {
     match KeyExpr::autocanonize(expr.to_string()) {
         Ok(k) => {
-            if matches!(format.resolved(), Format::Json | Format::Ndjson) {
-                println!(
-                    "{}",
-                    serde_json::json!({ "input": expr, "canon": k.as_str(), "changed": k.as_str() != expr })
-                );
-            } else if k.as_str() == expr {
-                println!("{expr} is already canonical");
-            } else {
-                println!("{}", k.as_str());
-            }
-            Ok(())
+            let report = crate::render::KeyCanon {
+                input: expr.to_string(),
+                canon: k.as_str().to_string(),
+                changed: k.as_str() != expr,
+            };
+            crate::render::emit_with(&mut std::io::stdout(), &report, format, color)
         }
         Err(e) => {
-            eprintln!("does not parse: {e}");
+            eprintln!(
+                "does not parse: {}",
+                crate::errors::without_source_locations(&e.to_string())
+            );
             std::process::exit(2);
         }
     }
