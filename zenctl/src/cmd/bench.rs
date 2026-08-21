@@ -28,7 +28,7 @@ pub async fn rpc(
     args: &Bus,
 ) -> Result<()> {
     let target = zenkey_fleet::CallTarget::parse(origin)?;
-    let slices = args.slice_set().await.ok();
+    let slices = args.slices_optional().await?;
     let session = args.session().await?;
     let count = count.unwrap_or(DEFAULT_COUNT);
 

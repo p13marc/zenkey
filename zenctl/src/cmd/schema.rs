@@ -23,7 +23,11 @@ use crate::input::Source;
 /// `zenctl schema <producer> [--type X] [--full]`.
 pub async fn dump(producer: &str, type_filter: Option<&str>, full: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
-    let slices = args.slice_set().await.unwrap_or_default();
+    // Slices enrich the dump — the *types* come from the producer's served
+    // `describe` (`zenkey_fleet::decode::schema_dump`); slices only compute
+    // which declared ones are missing. An empty set here is the honest
+    // degradation, and `slices_optional` is what says so out loud.
+    let slices = args.slices_optional().await?.unwrap_or_default();
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let report =
         zenkey_fleet::schema_dump(&store, &session, &slices, producer, type_filter, full).await;

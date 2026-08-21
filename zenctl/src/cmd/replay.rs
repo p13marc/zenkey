@@ -101,7 +101,7 @@ pub async fn run(
         .await?
     } else {
         let session = args.session().await?;
-        let slices = args.slice_set().await.ok();
+        let slices = args.slices_optional().await?;
         zenkey_fleet::replay(
             &mut reader,
             ReplayTarget::Bus {

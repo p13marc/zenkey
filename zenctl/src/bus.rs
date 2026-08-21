@@ -140,6 +140,39 @@ impl Bus {
         Ok(self.slice_set().await?.slices().to_vec())
     }
 
+    /// Slices when they are available, `None` when they are not — for the
+    /// verbs that slices only **enrich** (#210).
+    ///
+    /// Two wrappers, both load-bearing.
+    ///
+    /// `Option`, not an empty set, because the engine already distinguishes
+    /// them and builds sentences on the difference: `bench.rs` says *"no
+    /// registry loaded, so X's idempotence is unknown"* for `None` and *"the
+    /// loaded registry does not declare X"* for an empty one, and only one of
+    /// those is ever true. `facts.rs` states it as engine policy.
+    ///
+    /// `Result`, not a bare `Option`, because there are two failure *sources*.
+    /// A fleet that will not answer is a degradation; a source **the user
+    /// named** — `--registry /typo` — is their error, and swallowing it would
+    /// turn `topic echo --registry /typo` from a refusal into a silent
+    /// structural echo. This is the same fork `slice_set` makes on #196's
+    /// `OpenFailure::{Config, Transport}`, one level out.
+    pub(crate) async fn slices_optional(&self) -> Result<Option<zenkey_fleet::SliceSet>> {
+        match resolve::slice_source(self.registry_dirs()) {
+            // Dirs given: `slice_set` has already degraded past an
+            // unreachable transport, so what is left is the user's own
+            // source failing. That is not a degradation.
+            resolve::SliceSource::Union(_) => Ok(Some(self.slice_set().await?)),
+            resolve::SliceSource::Bus => match self.slice_set().await {
+                Ok(set) => Ok(Some(set)),
+                Err(e) => {
+                    crate::degrade::announce(&e.to_string());
+                    Ok(None)
+                }
+            },
+        }
+    }
+
     /// The same, as the fleet engine's indexed set (echo's decode path).
     pub(crate) async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
         let base = self.base();

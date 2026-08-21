@@ -18,6 +18,7 @@
 //! command that reports it.
 pub(crate) mod bus;
 pub mod cli;
+pub(crate) mod degrade;
 pub mod errors;
 pub mod input;
 pub mod render;

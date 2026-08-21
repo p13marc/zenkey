@@ -29,7 +29,7 @@ pub async fn run(
     let slices = if raw {
         None
     } else {
-        args.slice_set().await.ok()
+        args.slices_optional().await?
     };
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let key_part = keyexpr.split('?').next().unwrap_or(keyexpr);

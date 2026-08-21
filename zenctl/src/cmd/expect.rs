@@ -35,9 +35,9 @@ pub async fn run(
     }
 
     let session = args.session().await?;
-    // Best-effort registry: `--valid-payload` and `--qos declared` degrade
-    // to explained violations when nothing is loaded — the report says why.
-    let slices = args.slice_set().await.unwrap_or_default();
+    // Slices enrich: `--valid-payload` and `--qos declared` degrade to
+    // explained violations when nothing is loaded, and the report says why.
+    let slices = args.slices_optional().await?.unwrap_or_default();
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let spec = zenkey_fleet::ExpectSpec {
         selector: selector.to_string(),

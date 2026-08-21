@@ -24,10 +24,14 @@ pub async fn coverage(
     args: &Bus,
     storages: &[zenkey_fleet::StorageInfo],
 ) -> Vec<zenkey_fleet::CoverageRow> {
-    match args.slice_set().await {
-        Ok(slices) => zenkey_fleet::state_coverage(&slices, args.base(), storages),
+    match args.slices_optional().await {
+        Ok(Some(slices)) => zenkey_fleet::state_coverage(&slices, args.base(), storages),
+        // `slices_optional` has already said why, once.
+        Ok(None) => Vec::new(),
+        // A source the user named, failing: not this function's to swallow,
+        // but not worth losing the storages over either — they are the answer.
         Err(e) => {
-            eprintln!("note: no slices for the coverage join ({e})");
+            eprintln!("error: {e:#}");
             Vec::new()
         }
     }

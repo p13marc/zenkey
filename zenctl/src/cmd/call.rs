@@ -34,7 +34,7 @@ pub async fn run(
     let slices = if no_validate {
         None
     } else {
-        args.slice_set().await.ok()
+        args.slices_optional().await?
     };
 
     let session = args.session().await?;

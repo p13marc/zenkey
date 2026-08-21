@@ -103,7 +103,7 @@ pub async fn run(
     let slices = if raw {
         None
     } else {
-        args.slice_set().await.ok()
+        args.slices_optional().await?
     };
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let prepared = zenkey_fleet::prepare_publish(
@@ -181,9 +181,9 @@ async fn matching_note(
 /// `topic retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
 pub async fn retire(key: &str, qos: &str, i_know: bool, args: &Bus) -> Result<()> {
     let qos = parse_qos(qos)?;
-    // Slices are best-effort, like pub: the guard is honest about a missing
-    // registry (a state key still passes — the class is in the key).
-    let slices = args.slice_set().await.ok();
+    // Slices enrich the guard rather than deciding it — a state key still
+    // passes with none, because the class is in the key.
+    let slices = args.slices_optional().await?;
     let verdict = zenkey_fleet::check_retire(args.base(), key, slices.as_ref(), i_know)?;
     match &verdict {
         zenkey_fleet::RetireClass::State { registered, ttl_s } => match (registered, ttl_s) {
@@ -235,7 +235,7 @@ pub async fn run_from_ndjson(
     // declared profile, then sampled — the same ladder as `topic pub` (#158).
     let explicit_qos = default_qos.map(parse_qos).transpose()?;
     let session = args.session().await?;
-    let slices = args.slice_set().await.ok();
+    let slices = args.slices_optional().await?;
     let base = args.base().to_string();
 
     let mut publications: std::collections::HashMap<String, zenkey_fleet::Publication> =
