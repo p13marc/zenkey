@@ -178,6 +178,21 @@ impl Note {
         Note::new(NoteKind::Rendering, text)
     }
 
+    /// The note as one line of prose, citation appended.
+    ///
+    /// One spelling, because a note now reaches a reader from two places: a
+    /// report's, through [`Sink::note`], and a *resolution-time* one — the
+    /// sentence a verb says when it degraded before it had a report to hang
+    /// anything on (#210). Two spellings of one sentence is how the three
+    /// honesty paragraphs in `BusArgs::slice_set` came to differ from each
+    /// other in the first place.
+    pub fn to_line(&self) -> String {
+        match self.cite {
+            Some(c) => format!("{} ({c})", self.text),
+            None => self.text.clone(),
+        }
+    }
+
     fn as_json(&self) -> serde_json::Value {
         let mut o = serde_json::Map::new();
         o.insert("text".into(), self.text.clone().into());
@@ -413,10 +428,7 @@ impl<'a> Sink<'a> {
     /// Something true *about* the stream. Always to stderr, in every mode:
     /// stdout carries the data, stderr carries everything about it.
     pub fn note(&mut self, note: &Note) -> Result<()> {
-        match note.cite {
-            Some(c) => writeln!(self.err, "{} ({c})", note.text)?,
-            None => writeln!(self.err, "{}", note.text)?,
-        }
+        writeln!(self.err, "{}", note.to_line())?;
         Ok(())
     }
 
