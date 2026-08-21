@@ -122,6 +122,10 @@ ci:
     # One report, three renderings, and exactly one place that decides which
     # (#198).
     ./scripts/check-render-seam.sh
+    # The dispatch dispatches, and one door out of a missing registry
+    # (#209, #210).
+    ./scripts/check-dispatch.sh
+    ./scripts/check-degradation.sh
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo build --workspace --all-targets --locked
     cargo test --workspace --locked
