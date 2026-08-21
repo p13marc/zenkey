@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -94,19 +94,7 @@ pub async fn run(
     )
     .await?;
 
-    output::call(&report, args.format, |a| {
-        let mut out = match (&a.value, &a.text) {
-            (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
-            (None, Some(t)) => t.clone(),
-            _ => String::new(),
-        };
-        // A reply attachment is a wire fact, shown where the reply is (#126)
-        // — present only when the wire carried one.
-        if let (Some(att), Some(n)) = (&a.attachment, a.attachment_bytes) {
-            out.push_str(&format!("\n  attachment ({n} B): {att}"));
-        }
-        out
-    });
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
     // Exit-code discipline preserved: 1 = an error reply, 2 = zero replies
     // (silence stays a distinct non-verdict — RFC 05 §3.1).
     let code = report.exit_code();

@@ -15,7 +15,6 @@
 use anyhow::{Result, bail};
 
 use crate::BusArgs;
-use crate::output;
 
 pub async fn run(target: &str, producer: &str, procedure: &str, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
@@ -92,7 +91,7 @@ pub async fn run(target: &str, producer: &str, procedure: &str, args: &BusArgs) 
         via,
         call,
     };
-    output::probe(&report, args.format);
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
     // Distinct exits, distinct meanings (RFC 05 §3.1 / 09 §6): 1 = the
     // origin answered with an error; 2 = the origin resolved but did not
     // answer — the probe reached a *name*, not a *responder*, and that is

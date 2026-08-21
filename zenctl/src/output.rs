@@ -72,31 +72,6 @@ pub fn base_list(report: &BaseList, format: Format) -> Result<()> {
     crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
-pub fn call(report: &CallReport, format: Format, render_text: impl Fn(&CallAnswer) -> String) {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.answers.iter().for_each(json_line),
-        _ => {
-            eprintln!("GET {}", report.key);
-            for a in &report.answers {
-                if a.ok {
-                    println!("{}:\n{}", a.origin, render_text(a));
-                } else if let Some(e) = &a.error {
-                    println!("{}: ✗ {} — {}", a.origin, e.name, e.message);
-                }
-            }
-            match report.answers.len() {
-                0 => println!(
-                    "no replies. Silence is not a verdict (RFC 05 §3.1): the origin may be \
-                     down, the procedure unregistered, or the timeout too short — \
-                     `zenctl node list` says who is up."
-                ),
-                n => eprintln!("{n} repl{}", if n == 1 { "y" } else { "ies" }),
-            }
-        }
-    }
-}
-
 /// `blob list` — the registry's `[[blob]]` declarations (RFC 07 §2.7 / 08 §2).
 ///
 /// The footer is not decoration: a declaration is a *capability*, and the one
@@ -436,33 +411,6 @@ pub fn expect(report: &zenkey_fleet::report::ExpectReport, format: Format) {
                         println!("  ! {u}");
                     }
                 }
-            }
-        }
-    }
-}
-
-/// `zenctl probe`'s report (issue #59): the resolution provenance, then the
-/// call rendered like any `service call`.
-pub fn probe(report: &zenkey_fleet::report::ProbeReport, format: Format) {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => json_line(report),
-        _ => {
-            println!(
-                "probe {} → origin {} (via {})",
-                report.input, report.origin, report.via
-            );
-            call(&report.call, Format::Table, |a| match (&a.value, &a.text) {
-                (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
-                (None, Some(t)) => t.clone(),
-                _ => String::new(),
-            });
-            if report.call.answers.is_empty() {
-                println!(
-                    "the origin resolved but did not answer — the probe reached a \
-                     name, not a responder; absence of replies and absence of \
-                     callers must not look alike (RFC 09 §6)"
-                );
             }
         }
     }

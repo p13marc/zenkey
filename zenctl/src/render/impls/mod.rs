@@ -16,6 +16,7 @@
 
 mod bench;
 mod blobs;
+mod calls;
 mod documents;
 mod findings;
 mod listings;
