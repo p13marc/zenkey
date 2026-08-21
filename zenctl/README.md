@@ -140,6 +140,20 @@ A field that is absent is a question nobody asked; it is never `null`
 (RFC 09 §5.1 O4). In the table, that reads `—`, and an empty cell means the
 question was asked and the answer was nothing.
 
+**`topic pub` and `topic retire` put nothing on stdout, in any format.** Their
+answer is "it went out", which is not a document — and the empty stdout is what
+lets `topic echo --format ndjson | topic pub --from ndjson` compose. Everything
+they say goes to stderr.
+
+**`--as` and `--dot` are neither, because they are somebody else's schema.**
+`--format` selects among zenctl's own three renderings of a report; `registry
+export --as toml|jsonschema|asyncapi` and `admin graph --dot` emit a foreign
+document, and their stability is whatever the format's own specification says.
+The two are mutually exclusive: typing both is a usage error naming both flags,
+rather than a `--format` that is accepted and then ignored. An exported
+`ZENCTL_FORMAT` is a preference, not a request, and does not conflict with
+anything.
+
 `get` speaks the fleet discipline on any selector — target All,
 consolidation None, every reply attributed by its own key, RFC 05 §3 error
 envelopes rendered as errors, and exit codes scripts can branch on (0 values,

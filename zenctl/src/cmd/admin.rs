@@ -4,9 +4,9 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
 
-pub async fn routers(args: &BusArgs) -> Result<()> {
+pub async fn routers(args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let routers = zenkey_fleet::routers(&session, args.timeout()).await?;
     // `[]` on its own cannot tell a peer-only mesh from an admin space that is
@@ -22,7 +22,7 @@ pub async fn routers(args: &BusArgs) -> Result<()> {
 
 /// `admin graph` — the mesh as the admin space answered it (#118), as a
 /// table, `--dot` Graphviz for piping (`| dot -Tsvg`), or json/ndjson.
-pub async fn graph(dot: bool, origins: bool, args: &BusArgs) -> Result<()> {
+pub async fn graph(dot: bool, origins: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let report = zenkey_fleet::topology(&session, args.timeout()).await?;
     // The origin join is opt-in (#131): it costs one more admin sweep, and

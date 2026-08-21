@@ -179,3 +179,27 @@ fn a_row_less_family_emits_exactly_one_line() {
     assert_eq!(lines.len(), 1);
     assert!(lines[0].get("rows").is_none(), "and no empty rows array");
 }
+
+/// A citation renders the same way wherever a note is printed.
+///
+/// `Sink::note` and a resolution-time degradation now share `to_line`, and
+/// this is what keeps them sharing it: the two used to be separate `format!`s,
+/// which is how the three honesty paragraphs in `slice_set` drifted apart.
+#[test]
+fn a_note_renders_its_citation_the_same_way_everywhere() {
+    let cited = Note::silence("no replies");
+    assert_eq!(cited.to_line(), "no replies (RFC 05 §3.1)");
+
+    let bare = Note::summary("4 producer(s).");
+    assert_eq!(
+        bare.to_line(),
+        "4 producer(s).",
+        "no citation, no parentheses"
+    );
+
+    // And what a report prints through the sink is that same line.
+    let mut d = doc();
+    d.notes = vec![cited.clone()];
+    let (_, err) = to_string(&d, Format::Table, Width::Unbounded).unwrap();
+    assert_eq!(err.trim_end(), cited.to_line());
+}

@@ -4,9 +4,10 @@
 use anyhow::Result;
 
 use super::sample::{
-    attachment_display, attachment_json, format_sample, hex, qos_summary, source_summary, type_tag,
+    self, attachment_display, attachment_json, format_sample, hex, qos_summary, source_summary,
+    type_tag,
 };
-use crate::BusArgs;
+use crate::Bus;
 
 /// `topic echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
 /// GET-then-subscribe (it drops everything published in the gap).
@@ -23,7 +24,7 @@ pub async fn run(
     no_decode: bool,
     count: usize,
     seed: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let selector = match selector {
         Some(s) => s.to_string(),
@@ -34,10 +35,14 @@ pub async fn run(
     // Slices first (a single introspect fan-in), then subscribe: the slice
     // set names each subject's payload type; the schema store fetches
     // `describe` lazily on first decode miss.
+    // Slices enrich: they name each key's payload type, and without them the
+    // decode ladder falls to its structural rung — which is exactly what
+    // `--raw` asks for on purpose. A registry that will not answer must not
+    // cost the user the stream itself (#210).
     let slices = if raw {
         zenkey_fleet::SliceSet::default()
     } else {
-        args.slice_set().await?
+        args.slices_optional().await?.unwrap_or_default()
     };
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
 
@@ -196,39 +201,21 @@ pub async fn run(
                 println!("  attachment: {}", hex(&a.to_bytes()));
             }
         } else {
-            // `--no-decode` never asks, so it has no verdict to misreport.
-            let (type_name, rendering, verdict, decode_error) = if no_decode {
-                (
-                    None,
-                    zenkey_fleet::decode::Rendering::Structural(zenkey_fleet::decode::structural(
-                        &bytes,
-                    )),
-                    None,
-                    None,
-                )
-            } else {
-                let d = zenkey_fleet::decode::decode_sample(
-                    &store,
-                    &session,
-                    &slices,
-                    &base,
-                    key,
-                    Some(encoding),
-                    &bytes,
-                )
-                .await;
-                (d.type_name, d.rendering, Some(d.verdict), d.decode_error)
-            };
-            let (value, typed, notes) = match &rendering {
-                zenkey_fleet::decode::Rendering::Typed(d) => (
-                    serde_json::to_string(&d.value).unwrap_or_default(),
-                    true,
-                    d.notes.clone(),
-                ),
-                zenkey_fleet::decode::Rendering::Structural(text) => {
-                    (text.clone(), false, Vec::new())
-                }
-            };
+            // `--no-decode` never asks, so it has no verdict to misreport —
+            // `sample::decode` carries that rule now, for both verbs.
+            let d = sample::decode(
+                &store,
+                &session,
+                &slices,
+                &base,
+                key,
+                Some(encoding),
+                &bytes,
+                no_decode,
+            )
+            .await;
+            let type_name = d.type_name;
+            let v = sample::value_of(&d.rendering);
             if ndjson {
                 let mut row = zenkey_fleet::SampleRow::of_key(key, &base).with_wire(&sample);
                 // The wire axes are a fact worth carrying, but not under
@@ -239,11 +226,11 @@ pub async fn run(
                 // absent, not null-when-unknown (RFC 09 §5.1 O4). The same
                 // rule the verdict below has always followed.
                 row.type_name = type_name.clone();
-                row.typed = Some(typed);
+                row.typed = Some(v.typed);
                 row.payload_bytes = Some(bytes.len());
                 row.value = Some(
-                    serde_json::from_str::<serde_json::Value>(&value)
-                        .unwrap_or(serde_json::Value::String(value.clone())),
+                    serde_json::from_str::<serde_json::Value>(&v.text)
+                        .unwrap_or(serde_json::Value::String(v.text.clone())),
                 );
                 // Present only when the publisher attached SourceInfo —
                 // absent, never null-when-unknown (#120).
@@ -257,8 +244,8 @@ pub async fn run(
                 // #159: present only when the pipeline was asked (--no-decode
                 // never asks) — and then always, so "valid" and "not checked"
                 // cannot be confused by their shared absence.
-                if let Some(v) = &verdict {
-                    row.verdict = Some(match v {
+                if let Some(verdict) = &d.verdict {
+                    row.verdict = Some(match verdict {
                         zenkey_fleet::Verdict::Valid => "valid".to_string(),
                         zenkey_fleet::Verdict::Invalid(errors) => {
                             row.violations = Some(errors.clone());
@@ -266,7 +253,7 @@ pub async fn run(
                         }
                         zenkey_fleet::Verdict::NotValidated(r) => format!("not-validated: {r}"),
                     });
-                    row.decode_error = decode_error.clone();
+                    row.decode_error = d.decode_error.clone();
                 }
                 println!("{}", row.to_line());
             } else if let Some(fmt) = fmt {
@@ -281,29 +268,29 @@ pub async fn run(
                         encoding,
                         bytes.len(),
                         timestamp.as_deref(),
-                        &value,
+                        &v.text,
                         att.as_deref(),
                         Some(&qos),
                         source.as_deref(),
                     )
                 );
             } else {
-                let tag = type_tag(type_name.as_deref(), typed);
-                println!("{key}\n  {tag} {value}{rate_suffix}");
+                let tag = type_tag(type_name.as_deref(), v.typed);
+                println!("{key}\n  {tag} {}{rate_suffix}", v.text);
                 if let Some(a) = &att {
                     println!("  attachment: {a}");
                 }
-                for note in notes {
+                for note in v.notes {
                     eprintln!("  note: {note}");
                 }
                 // #159: a checked failure says so; Valid and NotValidated
                 // stay quiet here (the tag already carries typed/structural).
-                if let Some(zenkey_fleet::Verdict::Invalid(errors)) = &verdict {
+                if let Some(zenkey_fleet::Verdict::Invalid(errors)) = &d.verdict {
                     for e in errors {
                         eprintln!("  invalid: {e}");
                     }
                 }
-                if let Some(e) = &decode_error {
+                if let Some(e) = &d.decode_error {
                     eprintln!("  undecodable: {e}");
                 }
             }

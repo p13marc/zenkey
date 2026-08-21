@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
+use crate::input::Source;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -10,11 +11,11 @@ pub async fn run(
     producer: &str,
     procedure: &str,
     params: &[String],
-    body: Option<&str>,
-    attachment: Option<&str>,
+    body: Option<&Source>,
+    attachment: Option<&Source>,
     no_validate: bool,
     raw: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     // The typed target refuses a hostname outright (RFC 06 §6) and makes a
     // fleet call a deliberate variant; the engine's `call` composes the key
@@ -22,22 +23,10 @@ pub async fn run(
     // registry-layer fanout guard (issue #36).
     let target = zenkey_fleet::CallTarget::parse(origin)?;
 
-    let typed = match body {
-        Some(b) => Some(match b.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => b.as_bytes().to_vec(),
-        }),
-        None => None,
-    };
+    let typed = body.map(Source::read).transpose()?;
     // The attachment rides the query verbatim — never schema-encoded, same
     // rule as `topic pub --attachment` (#117, now on the call side: #126).
-    let attachment = match attachment {
-        Some(a) => Some(match a.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => a.as_bytes().to_vec(),
-        }),
-        None => None,
-    };
+    let attachment = attachment.map(Source::read).transpose()?;
 
     // The fanout guard needs slices; loading them costs one introspect
     // fan-in. --no-validate skips it (and with it the registry-layer refusal
@@ -45,7 +34,7 @@ pub async fn run(
     let slices = if no_validate {
         None
     } else {
-        args.slice_set().await.ok()
+        args.slices_optional().await?
     };
 
     let session = args.session().await?;

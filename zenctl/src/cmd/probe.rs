@@ -14,9 +14,9 @@
 
 use anyhow::{Result, bail};
 
-use crate::BusArgs;
+use crate::Bus;
 
-pub async fn run(target: &str, producer: &str, procedure: &str, args: &BusArgs) -> Result<()> {
+pub async fn run(target: &str, producer: &str, procedure: &str, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let base = args.base().to_string();
 
@@ -81,7 +81,14 @@ pub async fn run(target: &str, producer: &str, procedure: &str, args: &BusArgs) 
         None,
         None,
         args.timeout(),
-        args.slice_set().await.ok().as_ref(),
+        // Deliberately `None`, not a degraded fetch: the engine's `call`
+        // consults slices only for the registry-layer fanout guard, and that
+        // guard is gated on `CallTarget::Fleet` (`write.rs`). This target is
+        // always `Host`, so the slices could never be read — and buying them
+        // costs a full introspect fan-in, plus the union and its disagreement
+        // notes under `--registry`, on the one verb whose stated purpose is a
+        // cheap concrete-key probe (#245).
+        None,
     )
     .await?;
 

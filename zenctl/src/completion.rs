@@ -40,6 +40,28 @@ pub fn maybe_serve() {
         .complete();
 }
 
+/// `zenctl completions <shell>` — the dynamic registration snippet, or the
+/// static tree under `--static`.
+///
+/// Lived in the match arm until #209. The two forms are not alternatives so
+/// much as a fallback: the dynamic completer asks the running binary (and so
+/// can offer live keys, producers and types), the static one is a shell script
+/// that knows only the tree — which is what a machine without this binary on
+/// its `PATH` at completion time can use.
+pub fn emit(shell: clap_complete::Shell, static_only: bool) -> Result<()> {
+    use clap::CommandFactory as _;
+    if static_only {
+        clap_complete::aot::generate(
+            shell,
+            &mut crate::Cli::command(),
+            "zenctl",
+            &mut std::io::stdout(),
+        );
+        return Ok(());
+    }
+    registration(shell)
+}
+
 /// The shell snippet that registers the dynamic completer.
 pub fn registration(shell: clap_complete::Shell) -> Result<()> {
     let shells = clap_complete::env::Shells::builtins();

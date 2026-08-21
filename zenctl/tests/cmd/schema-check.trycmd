@@ -31,3 +31,18 @@ $ zenctl schema check --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --t
 not checked: tests/cmd/fixtures/sysinfo.schemaset.json carries no type "Nope"
 
 ```
+
+The payload that could not be read is the same fact, and used not to be: a
+missing `@file` came back through `?` as exit **1**, telling CI a typo'd path
+was a schema violation (#244). It is now what it always was — a check that
+never happened.
+
+The message names the flag and the interpretation, because the failure a user
+actually hits here is a literal `@` they did not mean as a path.
+
+```console
+$ zenctl schema check --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from @tests/cmd/fixtures/no-such-payload.json
+? 2
+not checked: --from: cannot read tests/cmd/fixtures/no-such-payload.json — a leading @ means "read this path": [..]
+
+```

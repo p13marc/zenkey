@@ -25,66 +25,208 @@ Create (or update) a named context
 Usage: zenctl context create [OPTIONS] <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>
+          
 
 Options:
-      --base <BASE>          The deployment base this context pins
-  -c, --connect <CONNECT>    Endpoint to connect to, repeatable
-  -l, --listen <LISTEN>      Endpoint to listen on, repeatable
-      --registry <DIR>       Registry dir, repeatable (offline slice source)
-      --scouting             Enable multicast scouting for this context
-      --timeout <TIMEOUT>    Default reply timeout in seconds
-      --zenoh-config <FILE>  Zenoh JSON5 config file for this context (#122) — the passthrough that reaches a secured bus; explorer knobs apply on top (flag > env > context > file)
-      --select               Select it as the current context
-  -h, --help                 Print help
+      --base <BASE>
+          The deployment base this context pins
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --registry <DIR>
+          Registry dir, repeatable (offline slice source)
+
+      --scouting
+          Enable multicast scouting for this context
+
+      --timeout <TIMEOUT>
+          Default reply timeout in seconds
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file for this context (#122) — the passthrough that reaches a secured bus; explorer knobs apply on top (flag > env > context > file)
+
+      --select
+          Select it as the current context
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl context list --help
 List contexts (the `*` marks the current one)
 
-Usage: zenctl context list
+Usage: zenctl context list [OPTIONS]
 
 Options:
-  -h, --help  Print help
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl context show --help
-Show one context (default: the current one)
+Show one context (default: the current one).
 
-Usage: zenctl context show [NAME]
+`--format json` is how a CI job asks which deployment a runner is pinned to: `zenctl context show --format json | jq -r .base`.
+
+Usage: zenctl context show [OPTIONS] [NAME]
 
 Arguments:
-  [NAME]  
+  [NAME]
+          
 
 Options:
-  -h, --help  Print help
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl context select --help
 Select the current context
 
-Usage: zenctl context select <NAME>
+Usage: zenctl context select [OPTIONS] <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>
+          
 
 Options:
-  -h, --help  Print help
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl context rm --help
 Remove a context
 
-Usage: zenctl context rm <NAME>
+Usage: zenctl context rm [OPTIONS] <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>
+          
 
 Options:
-  -h, --help  Print help
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl context edit --help
 Open the whole config file in $VISUAL/$EDITOR, validating afterwards
 
-Usage: zenctl context edit
+Usage: zenctl context edit [OPTIONS]
 
 Options:
-  -h, --help  Print help
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 ```

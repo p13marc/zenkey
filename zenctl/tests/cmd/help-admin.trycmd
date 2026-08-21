@@ -84,7 +84,9 @@ Usage: zenctl admin graph [OPTIONS]
 
 Options:
       --dot
-          Emit Graphviz instead of the table (pipe to `dot -Tsvg`)
+          Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
+          
+          A foreign schema, so `--format` has no say over it: passing both is a usage error, not a silent preference.
 
       --origins
           Also join liveliness origins to their sessions (#131) — one extra admin sweep; attachments come from the admin sources or they are shown as merely reported, never guessed
@@ -144,3 +146,29 @@ Options:
           Print help (see a summary with '-h')
 
 ```
+
+## `--dot` is somebody else's schema
+
+`--format` chooses among zenctl's own three renderings of a report. Graphviz is
+not one of them, and a flag that is accepted and then ignored is a flag that
+will eventually be trusted (#243).
+
+```console
+$ zenctl admin graph --dot --format json
+? 2
+error: the argument '--dot' cannot be used with '--format <FORMAT>'
+
+--dot emits a foreign document format — somebody else's schema — while --format chooses among zenctl's own three renderings of a report. Drop one.
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
+
+```
+
+Deliberately **not** a clap `conflicts_with`: `--format` carries `env =
+"ZENCTL_FORMAT"`, and clap counts an env-sourced value as present for conflict
+purposes — so a shell that exports a format preference could no longer run
+`admin graph --dot` at all, with no way to unset it for one invocation. An
+exported default is a preference; only what the user typed on this command line
+conflicts with what else they typed on it.

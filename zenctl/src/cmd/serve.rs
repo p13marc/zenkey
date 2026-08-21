@@ -6,31 +6,21 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
+use crate::input::Source;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     keyexpr: &str,
-    reply: &str,
+    reply: &Source,
     encoding: Option<&str>,
     no_validate: bool,
     raw: bool,
     complete: bool,
     count: usize,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
-    let typed = match reply {
-        "-" => {
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            std::io::stdin().read_to_end(&mut buf)?;
-            buf
-        }
-        b => match b.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => b.as_bytes().to_vec(),
-        },
-    };
+    let typed = reply.read()?;
 
     let session = args.session().await?;
     // The reply body rides the pub encode ladder: a concrete keyexpr that
@@ -39,7 +29,7 @@ pub async fn run(
     let slices = if raw {
         None
     } else {
-        args.slice_set().await.ok()
+        args.slices_optional().await?
     };
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let key_part = keyexpr.split('?').next().unwrap_or(keyexpr);

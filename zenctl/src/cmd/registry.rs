@@ -17,10 +17,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use zenkey::RegistrySlice;
 
-use crate::BusArgs;
+use crate::Bus;
 
 /// What `registry export` emits.
-pub async fn export(target: ExportAs, producer: Option<&str>, args: &BusArgs) -> Result<()> {
+pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Result<()> {
     let slices = args.slice_set().await?;
     let selected: Vec<&RegistrySlice> = slices
         .slices()
@@ -95,7 +95,7 @@ pub async fn export(target: ExportAs, producer: Option<&str>, args: &BusArgs) ->
 }
 
 /// `registry diff` — local dirs against the live bus, per producer.
-pub async fn diff(args: &BusArgs) -> Result<()> {
+pub async fn diff(args: &Bus) -> Result<()> {
     let dirs = args.registry_dirs();
     if dirs.is_empty() {
         return Err(anyhow!(
@@ -111,7 +111,7 @@ pub async fn diff(args: &BusArgs) -> Result<()> {
 }
 
 /// `registry lint <dir>` — the consumer's build lints, without the build.
-pub fn lint(dir: &Path, ledger: Option<&PathBuf>) -> Result<()> {
+pub fn lint(dir: &Path, ledger: Option<&PathBuf>, out: crate::cli::OutputArgs) -> Result<()> {
     let mut config = zenkey_build::Config::new()
         .registry_dir(dir)
         .no_rerun_if_changed();
@@ -119,10 +119,14 @@ pub fn lint(dir: &Path, ledger: Option<&PathBuf>) -> Result<()> {
         config = config.ledger(l);
     }
     match config.lint() {
-        Ok(()) => {
-            println!("{}: registry lints pass (RFC 08 §5).", dir.display());
-            Ok(())
-        }
+        Ok(()) => crate::render::emit_with(
+            &mut std::io::stdout(),
+            &crate::render::LintReport {
+                dir: dir.display().to_string(),
+            },
+            out.format,
+            out.color,
+        ),
         // The build's own wording, verbatim — the value of this command is
         // that it says exactly what the build would.
         Err(e) => Err(anyhow!("{e}")),
@@ -132,22 +136,22 @@ pub fn lint(dir: &Path, ledger: Option<&PathBuf>) -> Result<()> {
 /// `registry lock <dir>` — regenerate the RFC 08 §3.1 compatibility lock.
 /// Refuses an incompatible rewrite without `--force`; a forced break prints
 /// every broken pin (loud by contract).
-pub fn lock(dir: &Path, force: bool) -> Result<()> {
+pub fn lock(dir: &Path, force: bool, out: crate::cli::OutputArgs) -> Result<()> {
     let update = zenkey_build::Config::new()
         .registry_dir(dir)
         .no_rerun_if_changed()
         .write_compat_lock(force)
         .map_err(|e| anyhow!("{e}"))?;
-    println!(
-        "{}: {} ({} pinned entr{} added, {} released)",
-        update.path.display(),
-        if update.created { "created" } else { "updated" },
-        update.added,
-        if update.added == 1 { "y" } else { "ies" },
-        update.retired,
-    );
-    for broken in &update.forced {
-        eprintln!("FORCED BREAK (RFC 08 §3.1):\n{broken}");
-    }
-    Ok(())
+    crate::render::emit_with(
+        &mut std::io::stdout(),
+        &crate::render::LockReport {
+            path: update.path.display().to_string(),
+            created: update.created,
+            added: update.added,
+            retired: update.retired,
+            forced: update.forced.iter().map(ToString::to_string).collect(),
+        },
+        out.format,
+        out.color,
+    )
 }

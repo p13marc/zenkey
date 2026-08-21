@@ -36,6 +36,12 @@ jobs:
       # One report, three renderings, and exactly one place that decides which
       # (#198). Cheap, and it runs before the compiler like the gutter gate.
       - run: ./scripts/check-render-seam.sh
+      # The dispatch dispatches (#209): `lib.rs` names no engine, and `run()`
+      # stays under the 600 lines the issue drew the line at.
+      - run: ./scripts/check-dispatch.sh
+      # One door out of a missing registry (#210). Multiline-aware, because the
+      # single-line grep the issue proposed passes straight over `service info`.
+      - run: ./scripts/check-degradation.sh
 
   clippy:
     runs-on: ubuntu-24.04

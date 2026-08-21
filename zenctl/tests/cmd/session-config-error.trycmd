@@ -12,3 +12,23 @@ $ zenctl topic list --zenoh-config tests/cmd/fixtures/namespaced.json5
 Error: tests/cmd/fixtures/namespaced.json5 sets a session namespace ("zensight") — an explorer runs un-namespaced so it sees the wire as it really is (RFC 09 §5); remove the namespace from the file, or use --base to name the deployment
 
 ```
+
+The sibling failure, and it now exits the same way. A `--context` that names
+nothing is your input too — the file is right there and the name is not in it —
+so it is a **1**, not the 2 it used to be (#209).
+
+That the 2 was wrong is a claim about this tool's vocabulary rather than a
+preference: exit 2 here means *not proven* — `expect`, `cutover` and
+`schema check` all reserve it for a question that could not be asked. A
+misspelled context name is not an unanswerable question.
+
+It is also refused **before** the command starts, which is the other half of
+what changed: resolution used to happen at whichever accessor was reached
+first, so a bad name could surface after output had already been printed.
+
+```console
+$ zenctl topic list --context no-such-context
+? 1
+Error: context "no-such-context" not found in [..]config.toml — `zenctl context list`
+
+```

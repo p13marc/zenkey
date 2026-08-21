@@ -5,9 +5,9 @@
 use anyhow::{Result, anyhow};
 use zenkey_fleet as bus;
 
-use crate::BusArgs;
+use crate::Bus;
 
-pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
+pub async fn info(origin: &str, args: &Bus) -> Result<()> {
     // The identity bridge, enforced: an origin id or nothing (RFC 06 §6).
     if !zenkey::grammar::is_valid_host_origin(origin) && !origin.starts_with('@') {
         return Err(anyhow!(
@@ -21,7 +21,7 @@ pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
     crate::render::emit_with(&mut std::io::stdout(), &info, args.format(), args.color())
 }
 
-pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
+pub async fn list(verbose: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let roster = bus::roster(&session, args.base(), args.timeout()).await?;
 
@@ -32,8 +32,13 @@ pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
             zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet())
         );
     }
+    // `--verbose` joins the roster against served slices, and the report
+    // already renders the unjoined case honestly: `slices_joined: false` puts
+    // `—` in the detail column rather than "(no served slice)", so "not asked"
+    // and "asked and unanswered" stay two different cells (RFC 09 §5.1 O4).
+    // Which means a registry that will not answer must not cost the roster.
     let slices = if verbose {
-        Some(args.slice_set().await?)
+        args.slices_optional().await?
     } else {
         None
     };
@@ -49,7 +54,7 @@ pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
 /// pushed by the bus, so the monitor subscribes (history-backed tokens seed
 /// the initial view) and every NodeUp/NodeDown re-renders. A producer
 /// stopping is reflected within one liveliness event (#56 acceptance).
-pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
+pub async fn watch(verbose: bool, args: &Bus) -> Result<()> {
     use std::collections::BTreeMap;
 
     use crate::cmd::watch::{render_cycle, validate_format};
@@ -63,7 +68,7 @@ pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
     let mut watch = bus::RosterWatch::start(&session, args.base(), args.timeout()).await?;
 
     let mut slices = if verbose {
-        Some(args.slice_set().await?)
+        args.slices_optional().await?
     } else {
         None
     };
@@ -100,8 +105,15 @@ pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
         let Some(change) = change else { break };
         // A new producer may serve a slice nothing has read yet — refreshed on
         // the way up only, and once per coalesced burst rather than per event.
-        if verbose && change.node_up {
-            slices = Some(args.slice_set().await?);
+        // Only on success: a registry hiccup minutes into a watch used to
+        // end it, and must not now silently *downgrade* it either — stale
+        // slices say more than no slices, and the refresh already announced
+        // itself if it degraded.
+        if verbose
+            && change.node_up
+            && let Some(fresh) = args.slices_optional().await?
+        {
+            slices = Some(fresh);
         }
         render(watch.roster(), slices.as_ref(), &mut prev, &mut tick)?;
     }

@@ -124,6 +124,87 @@ pub fn format_sample(
     out
 }
 
+/// One sample, decoded — or deliberately not.
+///
+/// A named-field struct rather than a tuple because `get` and `topic echo`
+/// wanted different widths of the same thing and each grew its own: a 2-tuple
+/// here, a 4-tuple there, both spelling the identical ladder (#210). A caller
+/// that wants two of the four now says which two, instead of the return type
+/// deciding for it.
+pub struct Decoded {
+    /// The registered type name, when the key refined to one.
+    pub type_name: Option<String>,
+    /// What to show: typed fields, or the structural fallback.
+    pub rendering: zenkey_fleet::decode::Rendering,
+    /// The #159 conformance verdict — `None` under `--no-decode`, which never
+    /// asked and so has nothing to report (RFC 09 §5.1 O4). Not
+    /// `Verdict::NotValidated`: "we did not look" is not a finding.
+    pub verdict: Option<zenkey_fleet::Verdict>,
+    /// The decode failure under a *present* schema, verbatim.
+    pub decode_error: Option<String>,
+}
+
+/// The decode ladder, or the honest skip.
+///
+/// `--no-decode` is not a failed decode: it renders structurally, and reports
+/// no verdict at all rather than an unfavourable one.
+#[allow(clippy::too_many_arguments)]
+pub async fn decode(
+    store: &zenkey_fleet::decode::SchemaStore,
+    session: &zenoh::Session,
+    slices: &zenkey_fleet::SliceSet,
+    base: &str,
+    key: &str,
+    encoding: Option<&str>,
+    bytes: &[u8],
+    no_decode: bool,
+) -> Decoded {
+    if no_decode {
+        return Decoded {
+            type_name: None,
+            rendering: zenkey_fleet::decode::Rendering::Structural(
+                zenkey_fleet::decode::structural(bytes),
+            ),
+            verdict: None,
+            decode_error: None,
+        };
+    }
+    let d = zenkey_fleet::decode::decode_sample(store, session, slices, base, key, encoding, bytes)
+        .await;
+    Decoded {
+        type_name: d.type_name,
+        rendering: d.rendering,
+        verdict: Some(d.verdict),
+        decode_error: d.decode_error,
+    }
+}
+
+/// A rendering, flattened for printing: the text, whether a schema produced
+/// it, and the decode's own notes.
+pub struct Value {
+    pub text: String,
+    /// A schema decoded it — the difference between `<T>` and `<T?>`.
+    pub typed: bool,
+    pub notes: Vec<String>,
+}
+
+/// The rendering as printable text. One spelling for `get` and `topic echo`,
+/// which had two identical ones (#210).
+pub fn value_of(rendering: &zenkey_fleet::decode::Rendering) -> Value {
+    match rendering {
+        zenkey_fleet::decode::Rendering::Typed(d) => Value {
+            text: serde_json::to_string(&d.value).unwrap_or_default(),
+            typed: true,
+            notes: d.notes.clone(),
+        },
+        zenkey_fleet::decode::Rendering::Structural(text) => Value {
+            text: text.clone(),
+            typed: false,
+            notes: Vec::new(),
+        },
+    }
+}
+
 /// Space-separated lowercase hex — the byte-honest form.
 pub fn hex(bytes: &[u8]) -> String {
     bytes
@@ -326,6 +407,30 @@ mod tests {
             None,
         );
         assert_eq!(line, "data/drop/reliable|");
+    }
+
+    /// Both halves of the rendering fork, and the fact that only one of them
+    /// carries notes. `get` and `topic echo` spelled this match separately and
+    /// identically; only the *other* helper beside it had drifted (#210),
+    /// which is the argument for moving both rather than the one that broke.
+    #[test]
+    fn a_rendering_flattens_the_same_way_for_both_verbs() {
+        let typed =
+            zenkey_fleet::decode::Rendering::Typed(zenkey::schema::decode::DecodedPayload {
+                value: serde_json::json!({"status": "ok"}),
+                notes: vec!["a field the schema did not name".to_string()],
+                verdict: zenkey_fleet::Verdict::Valid,
+            });
+        let v = value_of(&typed);
+        assert_eq!(v.text, r#"{"status":"ok"}"#);
+        assert!(v.typed, "a schema produced it — the tag is <T>, not <T?>");
+        assert_eq!(v.notes.len(), 1, "decode notes are never silently dropped");
+
+        let structural = zenkey_fleet::decode::Rendering::Structural("42".to_string());
+        let v = value_of(&structural);
+        assert_eq!(v.text, "42");
+        assert!(!v.typed);
+        assert!(v.notes.is_empty(), "no schema, so no schema's notes");
     }
 
     /// The three-rung ladder every payload print shares.

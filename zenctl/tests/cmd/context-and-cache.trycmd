@@ -10,8 +10,13 @@ is safe.
 An empty config says so, and says what to type next — an empty set is not a
 verdict (RFC 05 §3.1), and here it is not even a mystery:
 
+Every case here names `--format` explicitly, for the reason the key algebra
+does: the default is `auto`, `auto` resolves against the stream, and a corpus
+runs piped — so an unnamed format would pin the machine form while reading like
+the human one.
+
 ```console
-$ zenctl context list
+$ zenctl context list --format table
 no contexts. create one:
   zenctl context create lab --base zensight -c tcp/127.0.0.1:7447
 
@@ -21,15 +26,46 @@ Creating one selects it, because a context nobody selected is a file nobody
 reads:
 
 ```console
-$ zenctl context create lab --base zensight -c tcp/127.0.0.1:7447
+$ zenctl context create lab --base zensight -c tcp/127.0.0.1:7447 --format table
 created context "lab" (selected)
 
-$ zenctl context list
+$ zenctl context list --format table
 * lab  base=zensight  connect=["tcp/127.0.0.1:7447"]
+1 context(s) in [..]config.toml
 
-$ zenctl context show
+$ zenctl context show --format table
 base = "zensight"
 connect = ["tcp/127.0.0.1:7447"]
+context "lab" (selected)
+
+```
+
+**`context show --format json` is what this family did not have** (#242): a CI
+job that needs to know which deployment a runner is pinned to asks
+`zenctl context show --format json | jq -r .base`, and until now there was no
+way to get it. `StoredContext`'s own fields ride the envelope **flat**, because
+`.context.base` would be a shape invented for no reader.
+
+```console
+$ zenctl context show --format json
+{
+  "base": "zensight",
+  "connect": [
+    "tcp/127.0.0.1:7447"
+  ],
+  "current": true,
+  "name": "lab",
+  "report": "context"
+}
+
+```
+
+The list is rows plus an envelope, like every other listing:
+
+```console
+$ zenctl context list --format ndjson
+{"contexts":1,"path":"[..]config.toml","report":"context-list"}
+{"base":"zensight","connect":["tcp/127.0.0.1:7447"],"current":true,"name":"lab","row":"context"}
 
 ```
 
@@ -44,8 +80,18 @@ $ zenctl cache show --format table
 [..]/cache/lab/slices
 empty — completion falls back to the static command tree. Any command that loads slices fills it (or `zenctl cache refresh`)
 
-$ zenctl cache clear
+$ zenctl cache clear --format table
 [..]/cache/lab/slices does not exist — nothing to clear
+
+```
+
+`clear` has two outcomes and they used to differ only in prose. A script can
+now branch on `existed` — removing a cache that was not there is the desired
+end state, not a failure, and not the same event either:
+
+```console
+$ zenctl cache clear --format ndjson
+{"action":"cleared","dir":"[..]/cache/lab/slices","existed":false,"report":"cache-action"}
 
 ```
 
@@ -53,10 +99,10 @@ Removing the only context returns the tool to the state it started in — and to
 the same sentence, which is what makes it a state rather than an error:
 
 ```console
-$ zenctl context rm lab
+$ zenctl context rm lab --format table
 removed context "lab"
 
-$ zenctl context list
+$ zenctl context list --format table
 no contexts. create one:
   zenctl context create lab --base zensight -c tcp/127.0.0.1:7447
 

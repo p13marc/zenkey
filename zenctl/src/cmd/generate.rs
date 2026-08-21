@@ -10,7 +10,7 @@ use crate::cli::Pattern;
 use anyhow::Result;
 use zenkey_fleet::generate::{GenPattern, GenSpec};
 
-use crate::BusArgs;
+use crate::Bus;
 
 /// A run wider than this needs `--i-know` — a generator pointed at a full
 /// registry is a fleet-wide impersonation, and that is a decision, not a
@@ -42,7 +42,7 @@ pub async fn run(
     serve_describe: bool,
     dry_run: bool,
     i_know: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let vars: Vec<(String, String)> = vars
         .iter()

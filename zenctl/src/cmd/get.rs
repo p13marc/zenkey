@@ -8,8 +8,9 @@
 
 use anyhow::Result;
 
-use super::sample::{attachment_display, attachment_json, format_sample, hex, type_tag};
-use crate::BusArgs;
+use super::sample::{self, attachment_display, attachment_json, format_sample, hex, type_tag};
+use crate::Bus;
+use crate::input::Source;
 use zenkey_fleet::{Answer, FleetAnswer};
 
 /// The reply discipline as an exit code: 0 = value replies only, 1 = at
@@ -31,18 +32,22 @@ fn exit_code(answers: &[FleetAnswer]) -> i32 {
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     selector: &str,
-    body: Option<&str>,
+    body: Option<&Source>,
     raw: bool,
     hex_payload: bool,
     fmt: Option<&str>,
     no_decode: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let base = args.base().to_string();
+    // Slices enrich: they name each key's payload type, and without them the
+    // decode ladder falls to its structural rung — which is exactly what
+    // `--raw` asks for on purpose. A registry that will not answer must not
+    // cost the user the samples themselves (#210).
     let slices = if raw {
         zenkey_fleet::SliceSet::default()
     } else {
-        args.slice_set().await?
+        args.slices_optional().await?.unwrap_or_default()
     };
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
     let session = args.session().await?;
@@ -53,18 +58,7 @@ pub async fn run(
     let payload = match body {
         None => None,
         Some(b) => {
-            let typed = match b {
-                "-" => {
-                    use std::io::Read as _;
-                    let mut buf = Vec::new();
-                    std::io::stdin().read_to_end(&mut buf)?;
-                    buf
-                }
-                b => match b.strip_prefix('@') {
-                    Some(path) => std::fs::read(path)?,
-                    None => b.as_bytes().to_vec(),
-                },
-            };
+            let typed = b.read()?;
             let key_part = selector.split('?').next().unwrap_or(selector);
             let prepared = zenkey_fleet::prepare_publish(
                 &session,
@@ -130,10 +124,11 @@ pub async fn run(
                             }
                             continue;
                         }
-                        let (type_name, rendering) = decoded(
+                        let d = sample::decode(
                             &store, &session, &slices, &base, &a.key, encoding, &bytes, no_decode,
                         )
                         .await;
+                        let type_name = d.type_name;
                         if hex_payload {
                             // The tag names the type; bytes at the user's
                             // request are not a failed decode — no `?`.
@@ -144,7 +139,7 @@ pub async fn run(
                             }
                             continue;
                         }
-                        let (value, typed, notes) = value_of(&rendering);
+                        let v = sample::value_of(&d.rendering);
                         if let Some(fmt) = fmt {
                             println!(
                                 "{}",
@@ -157,7 +152,7 @@ pub async fn run(
                                     encoding.unwrap_or(""),
                                     bytes.len(),
                                     None,
-                                    &value,
+                                    &v.text,
                                     a.attachment.as_ref().map(attachment_display).as_deref(),
                                     // A reply is not a subscribe-path sample:
                                     // FleetAnswer carries no QoS axes, and an
@@ -167,12 +162,12 @@ pub async fn run(
                                 )
                             );
                         } else {
-                            let tag = type_tag(type_name.as_deref(), typed);
-                            println!("{}\n  [{}] {tag} {value}", a.key, a.origin);
+                            let tag = type_tag(type_name.as_deref(), v.typed);
+                            println!("{}\n  [{}] {tag} {}", a.key, a.origin, v.text);
                             if let Some(att) = &a.attachment {
                                 println!("  attachment: {}", attachment_display(att));
                             }
-                            for note in notes {
+                            for note in v.notes {
                                 eprintln!("  note: {note}");
                             }
                         }
@@ -200,42 +195,6 @@ pub async fn run(
         std::process::exit(code);
     }
     Ok(())
-}
-
-/// Decode one value reply through the ladder, or skip it on `--no-decode`.
-#[allow(clippy::too_many_arguments)]
-async fn decoded(
-    store: &zenkey_fleet::decode::SchemaStore,
-    session: &zenoh::Session,
-    slices: &zenkey_fleet::SliceSet,
-    base: &str,
-    key: &str,
-    encoding: Option<&str>,
-    bytes: &[u8],
-    no_decode: bool,
-) -> (Option<String>, zenkey_fleet::decode::Rendering) {
-    if no_decode {
-        (
-            None,
-            zenkey_fleet::decode::Rendering::Structural(zenkey_fleet::decode::structural(bytes)),
-        )
-    } else {
-        let d =
-            zenkey_fleet::decode::decode_sample(store, session, slices, base, key, encoding, bytes)
-                .await;
-        (d.type_name, d.rendering)
-    }
-}
-
-fn value_of(rendering: &zenkey_fleet::decode::Rendering) -> (String, bool, Vec<String>) {
-    match rendering {
-        zenkey_fleet::decode::Rendering::Typed(d) => (
-            serde_json::to_string(&d.value).unwrap_or_default(),
-            true,
-            d.notes.clone(),
-        ),
-        zenkey_fleet::decode::Rendering::Structural(text) => (text.clone(), false, Vec::new()),
-    }
 }
 
 /// One reply as a JSON row — the ndjson line and the json array element.
@@ -268,7 +227,7 @@ async fn row(
                 }
                 return obj;
             }
-            let (type_name, rendering) = decoded(
+            let d = sample::decode(
                 store,
                 session,
                 slices,
@@ -279,15 +238,15 @@ async fn row(
                 no_decode,
             )
             .await;
-            let (value, typed, _) = value_of(&rendering);
+            let v = sample::value_of(&d.rendering);
             let mut obj = serde_json::json!({
                 "key": a.key,
                 "origin": a.origin,
-                "type": type_name,
-                "typed": typed,
+                "type": d.type_name,
+                "typed": v.typed,
                 "encoding": a.encoding,
-                "value": serde_json::from_str::<serde_json::Value>(&value)
-                    .unwrap_or(serde_json::Value::String(value)),
+                "value": serde_json::from_str::<serde_json::Value>(&v.text)
+                    .unwrap_or(serde_json::Value::String(v.text)),
             });
             // Present only when the wire carried one (#117).
             if let Some(att) = &a.attachment {

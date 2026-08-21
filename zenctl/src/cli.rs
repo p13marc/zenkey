@@ -24,15 +24,12 @@
 //! reviewable.
 
 use std::path::PathBuf;
-use std::time::Duration;
 
-use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use clap_complete::ArgValueCandidates;
-use zenkey::RegistrySlice;
-use zenkey_fleet as bus;
 
-use crate::{completion, context};
+use crate::completion;
+use crate::input::Source;
 
 // The four `ValueEnum`s below live here rather than beside the code that
 // consumes them (#239's neighbour): a `pub` clap tree referencing a type in a
@@ -126,8 +123,8 @@ pub(crate) enum Command {
         /// Query body: inline text, `@file`, or `-` for stdin — rides the
         /// same encode ladder as `topic pub` when the selector's key part
         /// refines to a registered subject.
-        #[arg(long)]
-        body: Option<String>,
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        body: Option<Source>,
         /// Ship the body verbatim and print payloads as hex; no decode.
         #[arg(long)]
         raw: bool,
@@ -209,7 +206,7 @@ pub(crate) enum Command {
         keyexpr: String,
         /// Reply body: inline text, `@file`, or `-` for stdin (read once) —
         /// through the same encode ladder as `topic pub`.
-        reply: String,
+        reply: Source,
         /// Wire encoding to declare on replies. Defaults to the registry's
         /// declared encoding when the keyexpr refines, else none.
         #[arg(long)]
@@ -632,7 +629,7 @@ pub(crate) enum SchemaCmd {
         type_name: String,
         /// Payload: inline text, `@file`, or `-` for stdin.
         #[arg(long, value_name = "TEXT|@FILE|-")]
-        from: String,
+        from: Source,
         /// Producer whose served `describe` carries the schema (live mode).
         #[arg(long, add = ArgValueCandidates::new(completion::producers))]
         producer: Option<String>,
@@ -656,7 +653,10 @@ pub(crate) enum RegistryCmd {
     /// bundles the producers' served `describe` schemas (RFC 08 §7);
     /// `--as asyncapi` maps subjects to channels and procedures to operations.
     Export {
-        /// Output document (note: `--format` stays the table/json switch).
+        /// Output document. A foreign schema, so `--format` has no say over
+        /// it: passing both is a usage error, not a silent preference.
+        // #243. Enforced in `refuse_foreign_format` rather than by
+        // `conflicts_with`, which would fire on `ZENCTL_FORMAT` too.
         #[arg(long = "as", value_enum, default_value = "toml")]
         target: ExportAs,
         /// Only this producer.
@@ -680,6 +680,8 @@ pub(crate) enum RegistryCmd {
         /// Deprecation ledger; defaults to `<dir>/deprecated.lock`.
         #[arg(long, value_name = "FILE")]
         ledger: Option<PathBuf>,
+        #[command(flatten)]
+        out: OutputArgs,
     },
     /// Write or update the RFC 08 §3.1 compatibility lock (registry.lock).
     ///
@@ -694,6 +696,8 @@ pub(crate) enum RegistryCmd {
         /// Rewrite pins over an incompatible edit — the loud break.
         #[arg(long)]
         force: bool,
+        #[command(flatten)]
+        out: OutputArgs,
     },
 }
 
@@ -716,6 +720,10 @@ pub(crate) enum AdminCmd {
     /// render "heard of, not queryable" — never omitted.
     Graph {
         /// Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
+        ///
+        /// A foreign schema, so `--format` has no say over it: passing both is
+        /// a usage error, not a silent preference.
+        // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
         #[arg(long)]
         dot: bool,
         /// Also join liveliness origins to their sessions (#131) — one
@@ -830,17 +838,40 @@ pub(crate) enum ContextCmd {
         /// Select it as the current context.
         #[arg(long)]
         select: bool,
+        #[command(flatten)]
+        out: OutputArgs,
     },
     /// List contexts (the `*` marks the current one).
-    List,
+    List {
+        #[command(flatten)]
+        out: OutputArgs,
+    },
     /// Show one context (default: the current one).
-    Show { name: Option<String> },
+    ///
+    /// `--format json` is how a CI job asks which deployment a runner is
+    /// pinned to: `zenctl context show --format json | jq -r .base`.
+    Show {
+        name: Option<String>,
+        #[command(flatten)]
+        out: OutputArgs,
+    },
     /// Select the current context.
-    Select { name: String },
+    Select {
+        name: String,
+        #[command(flatten)]
+        out: OutputArgs,
+    },
     /// Remove a context.
-    Rm { name: String },
+    Rm {
+        name: String,
+        #[command(flatten)]
+        out: OutputArgs,
+    },
     /// Open the whole config file in $VISUAL/$EDITOR, validating afterwards.
-    Edit,
+    Edit {
+        #[command(flatten)]
+        out: OutputArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -939,11 +970,20 @@ pub(crate) enum TopicCmd {
     },
     /// Publish to a key (issue #47) — a declared publisher, never an ad-hoc
     /// put (P7).
+    // The two shapes — `<KEY> <BODY>` or `--from ndjson` — are the parser's
+    // business, not the dispatch's (#209): exactly one source is required, and
+    // a key without a body is a usage error rather than an `anyhow` message
+    // four frames later. That moves the refusal's exit code from 1 to 2, which
+    // is what clap exits with for every other mis-shaped invocation here.
+    // Deliberately a `//` comment: it is an argument about the parser, not
+    // help text, and `///` would print it under `topic pub --help`.
+    #[command(group(clap::ArgGroup::new("source").required(true).args(["from", "key"])))]
     Pub {
         /// Full wire key to publish on (omit with --from ndjson).
+        #[arg(requires = "body")]
         key: Option<String>,
         /// Payload: inline text, `@file`, or `-` for stdin (omit with --from).
-        body: Option<String>,
+        body: Option<Source>,
         /// Read rows from stdin instead: `--from ndjson` accepts the exact
         /// row shape `topic echo --format ndjson` (and the zengui export)
         /// emits — key + value per row, optionally encoding/qos/delete/
@@ -980,11 +1020,11 @@ pub(crate) enum TopicCmd {
         /// The escape hatch for a subject this tool cannot type.
         #[arg(long)]
         raw: bool,
-        /// Attachment riding beside the payload: inline text or `@file`.
-        /// Never schema-encoded — the registry's vocabulary ends at the
-        /// payload (#117).
-        #[arg(long, value_name = "TEXT|@FILE")]
-        attachment: Option<String>,
+        /// Attachment riding beside the payload: inline text, `@file`, or
+        /// `-` for stdin. Never schema-encoded — the registry's vocabulary
+        /// ends at the payload (#117).
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        attachment: Option<Source>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -1142,14 +1182,14 @@ pub(crate) enum ServiceCmd {
         /// Selector parameters, repeatable: `--param state=established`.
         #[arg(long = "param", value_name = "K=V")]
         params: Vec<String>,
-        /// Request body: inline JSON, or `@path` to read a file.
-        #[arg(long)]
-        body: Option<String>,
+        /// Request body: inline JSON, `@file`, or `-` for stdin.
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        body: Option<Source>,
         /// Attachment riding beside the request, verbatim — never
         /// schema-encoded (#117's rule, on the call side: #126). Inline
-        /// text, or `@path` to read a file.
-        #[arg(long)]
-        attachment: Option<String>,
+        /// text, `@file`, or `-` for stdin.
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        attachment: Option<Source>,
         /// Skip the registry lookup (and with it the registry-layer
         /// forbidden-fanout refusal and any body validation).
         #[arg(long)]
@@ -1239,214 +1279,57 @@ pub(crate) struct BusArgs {
     pub(crate) out: OutputArgs,
 }
 
-impl BusArgs {
-    /// The chosen format. A field before `OutputArgs` existed, and kept as an
-    /// accessor so twenty call sites did not have to learn a new spelling.
-    pub(crate) fn format(&self) -> crate::render::Format {
-        self.out.format
-    }
+/// `--format` selects among **zenkey's own three renderings** of a report. A
+/// foreign document format — `--as toml|jsonschema|asyncapi`, `--dot` — is
+/// somebody else's schema, so the two are mutually exclusive (#243).
+///
+/// ## Why this is not `conflicts_with`
+///
+/// It was, for about ten minutes. `--format` carries `env = "ZENCTL_FORMAT"`,
+/// and clap counts an env-sourced value as *present* for conflict purposes —
+/// so a shell that exports a format preference could no longer run `admin
+/// graph --dot` at all, with no way to unset it for one invocation short of
+/// `env -u`. An exported default is a preference, not a request; only what the
+/// user typed on this command line can conflict with what else they typed on
+/// it.
+///
+/// Clap will not answer that from a derived struct, so this asks the
+/// `ArgMatches` directly, once, at the edge.
+pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
+    use clap::CommandFactory as _;
+    use clap::parser::ValueSource;
 
-    /// The chosen colour policy.
-    pub(crate) fn color(&self) -> crate::render::ColorChoice {
-        self.out.color
+    // Walk to the leaf: `admin graph` and `registry export` are both two deep,
+    // and the flags live on the leaf's own matches.
+    let mut m = matches;
+    while let Some((_, sub)) = m.subcommand() {
+        m = sub;
     }
-
-    /// The active stored context, loaded once per process (one BusArgs is
-    /// ever used per invocation). A bad --context/ZENCTL_CONTEXT is fatal.
-    pub(crate) fn stored(&self) -> Option<&'static context::StoredContext> {
-        static ACTIVE: std::sync::OnceLock<Option<context::StoredContext>> =
-            std::sync::OnceLock::new();
-        ACTIVE
-            .get_or_init(|| match context::active(self.context.as_deref()) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    std::process::exit(2);
-                }
-            })
-            .as_ref()
+    // `value_source` panics on an id this subcommand does not define, so ask
+    // whether it is defined here first — most leaves have neither flag.
+    let typed = |id: &str| {
+        m.ids().any(|i| i.as_str() == id) && m.value_source(id) == Some(ValueSource::CommandLine)
+    };
+    if !typed("format") {
+        return;
     }
-    /// The deployment base: flag > env > active context > empty (the
-    /// base-less bus-root deployment — the RFC v1.6 default).
-    pub(crate) fn base(&self) -> &str {
-        if let Some(b) = &self.base {
-            return b.as_str();
+    for (id, flag) in [("target", "--as"), ("dot", "--dot")] {
+        if typed(id) {
+            // A clap error, not an `anyhow` one: this is a usage error, and
+            // usage errors in this tool exit 2 and print a usage line. The
+            // only reason it is not a `conflicts_with` attribute is the env
+            // var, and that is no reason for it to look different.
+            Cli::command()
+                .error(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    format!(
+                        "the argument '{flag}' cannot be used with '--format <FORMAT>'\n\n\
+                         {flag} emits a foreign document format — somebody else's \
+                         schema — while --format chooses among zenctl's own three \
+                         renderings of a report. Drop one."
+                    ),
+                )
+                .exit();
         }
-        self.stored().and_then(|c| c.base.as_deref()).unwrap_or("")
-    }
-    pub(crate) async fn session(&self) -> Result<zenoh::Session> {
-        let (connect, listen);
-        let stored = self.stored();
-        connect = if self.connect.is_empty() {
-            stored.map(|c| c.connect.clone()).unwrap_or_default()
-        } else {
-            self.connect.clone()
-        };
-        listen = if self.listen.is_empty() {
-            stored.map(|c| c.listen.clone()).unwrap_or_default()
-        } else {
-            self.listen.clone()
-        };
-        // Not-given stays distinguishable from off: with a config file the
-        // file's scouting choice must survive an absent flag (#122).
-        let scouting = if self.scouting {
-            Some(true)
-        } else {
-            stored.and_then(|c| c.scouting)
-        };
-        let file = self
-            .zenoh_config
-            .clone()
-            .or_else(|| stored.and_then(|c| c.zenoh_config.clone()));
-        bus::open_with_config(file.as_deref(), &connect, &listen, scouting).await
-    }
-
-    /// The same, saying which half failed — so a caller holding `--registry`
-    /// dirs can tell "the transport would not come up" (answerable from disk)
-    /// from "the config file you named does not parse" (yours to fix, #196).
-    pub(crate) async fn session_reporting(
-        &self,
-    ) -> Result<zenoh::Session, zenkey_fleet::OpenFailure> {
-        let stored = self.stored();
-        let connect = if self.connect.is_empty() {
-            stored.map(|c| c.connect.clone()).unwrap_or_default()
-        } else {
-            self.connect.clone()
-        };
-        let listen = if self.listen.is_empty() {
-            stored.map(|c| c.listen.clone()).unwrap_or_default()
-        } else {
-            self.listen.clone()
-        };
-        let scouting = if self.scouting {
-            Some(true)
-        } else {
-            stored.and_then(|c| c.scouting)
-        };
-        let file = self
-            .zenoh_config
-            .clone()
-            .or_else(|| stored.and_then(|c| c.zenoh_config.clone()));
-        zenkey_fleet::open_reporting(file.as_deref(), &connect, &listen, scouting).await
-    }
-    /// The `--context` name this invocation was given, if any.
-    pub(crate) fn context_name(&self) -> Option<&str> {
-        self.context.as_deref()
-    }
-    pub(crate) fn timeout(&self) -> Duration {
-        Duration::from_secs(
-            self.timeout
-                .or_else(|| self.stored().and_then(|c| c.timeout))
-                .unwrap_or(5),
-        )
-    }
-    pub(crate) fn registry_dirs(&self) -> Vec<PathBuf> {
-        if !self.registry.is_empty() {
-            self.registry.clone()
-        } else {
-            self.stored()
-                .map(|c| c.registry.clone())
-                .unwrap_or_default()
-        }
-    }
-    /// Compose a base-relative key into the full wire key this un-namespaced
-    /// tool must actually use.
-    pub(crate) fn wire(&self, relative: impl AsRef<str>) -> Result<String> {
-        Ok(zenkey::grammar::with_base(self.base(), relative))
-    }
-    /// Registry slices from whichever source the flags select: local
-    /// `--registry` dirs when given (offline), otherwise the live bus
-    /// (RFC 08 §6 introspection). Both yield the same `Vec<RegistrySlice>`,
-    /// so every renderer is source-agnostic.
-    pub(crate) async fn slices(&self) -> Result<Vec<RegistrySlice>> {
-        Ok(self.slice_set().await?.slices().to_vec())
-    }
-    /// The same, as the fleet engine's indexed set (echo's decode path).
-    pub(crate) async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
-        let dirs = self.registry_dirs();
-        let base = self.base();
-        if !dirs.is_empty() {
-            // The README promises this works when the fleet is down, and it
-            // mostly did: zenoh opens a session against an unreachable
-            // endpoint, so the union simply falls back to the dirs. What it
-            // could not survive was a transport that would not come up at all
-            // — a taken listener port, say — which failed a question the dirs
-            // could answer on their own (#196).
-            let session = match self.session_reporting().await {
-                Ok(s) => s,
-                Err(zenkey_fleet::OpenFailure::Config(e)) => return Err(e),
-                Err(zenkey_fleet::OpenFailure::Transport(e)) => {
-                    let set = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
-                    eprintln!(
-                        "no session ({e}); answering from --registry only: {}.\n\
-                         That is what this checkout declares, not what the fleet \
-                         serves — `zenctl doctor --registry <dir>` compares them \
-                         when the bus is reachable (RFC 05 §3.1).",
-                        dirs.iter()
-                            .map(|d| d.display().to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                    self.cache(&set);
-                    return Ok(set);
-                }
-            };
-            // §6.1's decision, delivered by issue #43: --registry and the bus
-            // stop being exclusive. Union: served wins per producer, dirs
-            // fill the gaps, disagreement is reported — never silently
-            // overwritten.
-            let out =
-                zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
-            for d in &out.disagreements {
-                eprintln!(
-                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{} \
-                     (served wins; `zenctl doctor --registry <dir>` details the drift)",
-                    d.producer,
-                    d.bus_version,
-                    d.dirs_version,
-                    if d.shape_differs {
-                        ", shapes differ"
-                    } else {
-                        ""
-                    }
-                );
-            }
-            self.cache(&out.set);
-            return Ok(out.set);
-        }
-        let session = self.session().await?;
-        let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
-        if set.slices().is_empty() {
-            eprintln!(
-                "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
-                 `zenctl node list --base {base:?}` says who is actually up.\n\
-                 (offline alternative: --registry <dir> with the app's registry TOMLs)"
-            );
-        }
-        self.cache(&set);
-        Ok(set)
-    }
-
-    /// Persist the slice set for shell completion (issue #54).
-    ///
-    /// Best-effort by design: a cache that cannot be written must not fail the
-    /// command the user actually ran, and an unwritable cache dir is a
-    /// completion that stays static — not an outage. An *empty* set is never
-    /// written, because overwriting a good cache with a sweep that found
-    /// nothing would turn one bad moment on the bus into a permanently blank
-    /// completion.
-    pub(crate) fn cache(&self, set: &zenkey_fleet::SliceSet) {
-        if set.slices().is_empty() {
-            return;
-        }
-        // Through the accessor, not `self.context` directly: the reader
-        // (`completion::cached`) and `zenctl cache` both resolve the name the
-        // same way, and three spellings of one rule is how they drifted (#197).
-        let dir =
-            zenkey_fleet::cache_dir(zenkey_fleet::active_name(self.context_name()).as_deref());
-        // Nothing is logged on failure: this runs on every command, and a
-        // warning about a cache the user did not ask for would be noise on
-        // the output they did.
-        let _ = set.write_cache(&dir);
     }
 }

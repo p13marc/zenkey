@@ -1,13 +1,28 @@
 //! `topic pub` — publish through the write facade (issue #47): a declared
 //! publisher, never an ad-hoc put (P7); and since #97, a body that actually
 //! ships in the encoding the subject declares.
+//!
+//! ## An empty stdout is the contract (#242)
+//!
+//! Every sentence this module prints goes to **stderr**, and every one of the
+//! sixteen is deliberate. `pub` and `retire` have no document to emit: their
+//! answer is "it went out", and inventing a wire shape for that would be a
+//! shape with no reader. What the empty stdout buys is composition — `topic
+//! echo --format ndjson | topic pub --from ndjson` is the same row shape in
+//! both directions (#235, RFC 09 §5.2), and a report on pub's stdout would put
+//! something in the pipe that the next stage did not ask for.
+//!
+//! So `--format json` here is an empty stdout on purpose. It is not a verb
+//! that was missed when the renderer seam went in; it is the one place the
+//! seam's answer is "nothing".
 
 use std::time::Duration;
 
 use anyhow::Result;
 use zenkey_fleet::{BodySource, PrepareMode};
 
-use crate::BusArgs;
+use crate::Bus;
+use crate::input::Source;
 
 /// Which of the engine's three preparation modes the flags select. Shared
 /// with `service call` so both write paths read the same flags the same way.
@@ -74,39 +89,22 @@ fn resolve_qos(
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     key: &str,
-    body: &str,
+    body: &Source,
     qos: Option<&str>,
     encoding: Option<&str>,
     repeat: usize,
     interval: f64,
     no_validate: bool,
     raw: bool,
-    attachment: Option<&str>,
-    args: &BusArgs,
+    attachment: Option<&Source>,
+    args: &Bus,
 ) -> Result<()> {
     // An explicit --qos fails fast, before the body or the bus.
     let explicit_qos = qos.map(parse_qos).transpose()?;
-    let typed = match body {
-        "-" => {
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            std::io::stdin().read_to_end(&mut buf)?;
-            buf
-        }
-        b => match b.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => b.as_bytes().to_vec(),
-        },
-    };
+    let typed = body.read()?;
     // The attachment ships verbatim (#117): never schema-encoded, the
     // registry's vocabulary ends at the payload.
-    let attachment: Option<Vec<u8>> = match attachment {
-        None => None,
-        Some(a) => Some(match a.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => a.as_bytes().to_vec(),
-        }),
-    };
+    let attachment: Option<Vec<u8>> = attachment.map(Source::read).transpose()?;
 
     let session = args.session().await?;
     // Registry awareness: when the key refines to a registered subject, the
@@ -119,7 +117,7 @@ pub async fn run(
     let slices = if raw {
         None
     } else {
-        args.slice_set().await.ok()
+        args.slices_optional().await?
     };
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let prepared = zenkey_fleet::prepare_publish(
@@ -147,15 +145,8 @@ pub async fn run(
 
     let publication =
         zenkey_fleet::declare_publication(&session, key, qos, prepared.encoding.as_deref()).await?;
-    // Matching note (#38): a routing fact about THIS publisher — informative,
-    // never gating, and never a fleet verdict (RFC 05 §3.1).
-    match publication.matching_status().await {
-        Ok(true) => eprintln!("matching: a subscriber currently matches {key}"),
-        Ok(false) => eprintln!(
-            "matching: no subscriber currently matches {key} — a routing fact about \
-             this publisher, not a fleet verdict (RFC 05 §3.1)"
-        ),
-        Err(_) => {}
+    if let Some(note) = matching_note(&publication, key).await {
+        eprintln!("{}", note.to_line());
     }
     let times = repeat.max(1);
     for n in 0..times {
@@ -175,12 +166,38 @@ pub async fn run(
     Ok(())
 }
 
+/// The #38 matching note: a routing fact about **this** publisher.
+///
+/// Informative, never gating, and never a fleet verdict — a zero here means
+/// this session sees no matching subscriber, which is not the same claim as
+/// "nobody is listening" (RFC 05 §3.1). `None` when the status could not be
+/// read at all: an unanswerable question earns no sentence.
+///
+/// One spelling, because `pub` and `retire` print the same fact and the second
+/// site's comment said so — "the same routing fact pub prints" — beside a
+/// verbatim copy of it (#210).
+async fn matching_note(
+    publication: &zenkey_fleet::Publication,
+    key: &str,
+) -> Option<crate::render::Note> {
+    match publication.matching_status().await {
+        Ok(true) => Some(crate::render::Note::caveat(format!(
+            "matching: a subscriber currently matches {key}"
+        ))),
+        Ok(false) => Some(crate::render::Note::silence(format!(
+            "matching: no subscriber currently matches {key} — a routing fact \
+             about this publisher, not a fleet verdict"
+        ))),
+        Err(_) => None,
+    }
+}
+
 /// `topic retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
-pub async fn retire(key: &str, qos: &str, i_know: bool, args: &BusArgs) -> Result<()> {
+pub async fn retire(key: &str, qos: &str, i_know: bool, args: &Bus) -> Result<()> {
     let qos = parse_qos(qos)?;
-    // Slices are best-effort, like pub: the guard is honest about a missing
-    // registry (a state key still passes — the class is in the key).
-    let slices = args.slice_set().await.ok();
+    // Slices enrich the guard rather than deciding it — a state key still
+    // passes with none, because the class is in the key.
+    let slices = args.slices_optional().await?;
     let verdict = zenkey_fleet::check_retire(args.base(), key, slices.as_ref(), i_know)?;
     match &verdict {
         zenkey_fleet::RetireClass::State { registered, ttl_s } => match (registered, ttl_s) {
@@ -205,14 +222,8 @@ pub async fn retire(key: &str, qos: &str, i_know: bool, args: &BusArgs) -> Resul
 
     let session = args.session().await?;
     let publication = zenkey_fleet::declare_publication(&session, key, qos, None).await?;
-    // The same routing fact pub prints, with the same bounds (RFC 05 §3.1).
-    match publication.matching_status().await {
-        Ok(true) => eprintln!("matching: a subscriber currently matches {key}"),
-        Ok(false) => eprintln!(
-            "matching: no subscriber currently matches {key} — a routing fact about \
-             this publisher, not a fleet verdict (RFC 05 §3.1)"
-        ),
-        Err(_) => {}
+    if let Some(note) = matching_note(&publication, key).await {
+        eprintln!("{}", note.to_line());
     }
     publication.retire().await?;
     eprintln!("retired {key}");
@@ -230,7 +241,7 @@ pub async fn run_from_ndjson(
     default_qos: Option<&str>,
     interval: f64,
     i_know: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     use std::io::BufRead as _;
 
@@ -238,7 +249,7 @@ pub async fn run_from_ndjson(
     // declared profile, then sampled — the same ladder as `topic pub` (#158).
     let explicit_qos = default_qos.map(parse_qos).transpose()?;
     let session = args.session().await?;
-    let slices = args.slice_set().await.ok();
+    let slices = args.slices_optional().await?;
     let base = args.base().to_string();
 
     let mut publications: std::collections::HashMap<String, zenkey_fleet::Publication> =

@@ -26,7 +26,7 @@ Usage: zenctl registry export [OPTIONS]
 
 Options:
       --as <TARGET>
-          Output document (note: `--format` stays the table/json switch)
+          Output document. A foreign schema, so `--format` has no say over it: passing both is a usage error, not a silent preference
 
           Possible values:
           - toml:       Registry TOML — round-trippable through `SliceSet::from_dirs`
@@ -160,11 +160,34 @@ Run the RFC 08 §5 registry lints on a directory, as a build would
 Usage: zenctl registry lint [OPTIONS] <DIR>
 
 Arguments:
-  <DIR>  The registry directory (the one a build script points at)
+  <DIR>
+          The registry directory (the one a build script points at)
 
 Options:
-      --ledger <FILE>  Deprecation ledger; defaults to `<dir>/deprecated.lock`
-  -h, --help           Print help
+      --ledger <FILE>
+          Deprecation ledger; defaults to `<dir>/deprecated.lock`
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl registry lock --help
 Write or update the RFC 08 §3.1 compatibility lock (registry.lock).
@@ -181,7 +204,41 @@ Options:
       --force
           Rewrite pins over an incompatible edit — the loud break
 
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
   -h, --help
           Print help (see a summary with '-h')
+
+```
+
+## `--as` is the same rule (#243)
+
+```console
+$ zenctl registry export --as asyncapi --format ndjson
+? 2
+error: the argument '--as' cannot be used with '--format <FORMAT>'
+
+--as emits a foreign document format — somebody else's schema — while --format chooses among zenctl's own three renderings of a report. Drop one.
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
 
 ```

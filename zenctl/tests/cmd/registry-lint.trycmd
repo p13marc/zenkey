@@ -6,7 +6,7 @@ No session: it goes straight to `zenkey_build::Config`.
 
 ```console
 $ zenctl registry lint ../fixture-tests/registry
-../fixture-tests/registry: registry lints pass (RFC 08 §5).
+{"dir":"../fixture-tests/registry","passed":true,"report":"registry-lint"}
 
 ```
 

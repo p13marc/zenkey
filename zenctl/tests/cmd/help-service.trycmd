@@ -166,11 +166,11 @@ Options:
       --param <K=V>
           Selector parameters, repeatable: `--param state=established`
 
-      --body <BODY>
-          Request body: inline JSON, or `@path` to read a file
+      --body <TEXT|@FILE|->
+          Request body: inline JSON, `@file`, or `-` for stdin
 
-      --attachment <ATTACHMENT>
-          Attachment riding beside the request, verbatim — never schema-encoded (#117's rule, on the call side: #126). Inline text, or `@path` to read a file
+      --attachment <TEXT|@FILE|->
+          Attachment riding beside the request, verbatim — never schema-encoded (#117's rule, on the call side: #126). Inline text, `@file`, or `-` for stdin
 
       --no-validate
           Skip the registry lookup (and with it the registry-layer forbidden-fanout refusal and any body validation)
