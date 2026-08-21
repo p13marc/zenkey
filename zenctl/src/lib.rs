@@ -244,39 +244,14 @@ pub async fn run() -> Result<()> {
             if let Some(secs) = watch {
                 return cmd::watch::base_list(secs, &bus).await;
             }
-            // Deliberately never calls bus.base() — this is the command that
-            // answers "what would I even pass as --base?".
-            let session = bus.session().await?;
-            let bases = zenkey_fleet::discover_bases(&session, bus.timeout()).await?;
-            crate::render::emit_with(
-                &mut std::io::stdout(),
-                &report::BaseList { bases },
-                bus.format(),
-                bus.color(),
-            )
+            cmd::base::list(&bus).await
         }
         Command::Storage(StorageCmd::List { watch, bus }) => {
             let bus = Bus::resolve(&bus)?;
             if let Some(secs) = watch {
                 return cmd::watch::storage_list(secs, &bus).await;
             }
-            let session = bus.session().await?;
-            let storages = zenkey_fleet::storages(&session, bus.timeout()).await?;
-            // The coverage join needs slices; degrade to storages-only when
-            // none resolve (fleet down and no --registry).
-            let coverage = match bus.slice_set().await {
-                Ok(slices) => zenkey_fleet::state_coverage(&slices, bus.base(), &storages),
-                Err(e) => {
-                    eprintln!("note: no slices for the coverage join ({e})");
-                    Vec::new()
-                }
-            };
-            crate::render::emit_with(
-                &mut std::io::stdout(),
-                &report::StorageList { storages, coverage },
-                bus.format(),
-                bus.color(),
-            )
+            cmd::storage::list(&bus).await
         }
         Command::Blob(BlobCmd::List {
             producer,
@@ -386,8 +361,7 @@ pub async fn run() -> Result<()> {
         }
         Command::Interface(InterfaceCmd::List { bus }) => {
             let bus = Bus::resolve(&bus)?;
-            let report = bus.slice_set().await?.interface_list();
-            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
+            cmd::interface::list(&bus).await
         }
         Command::Interface(InterfaceCmd::Show {
             type_name,
@@ -396,20 +370,7 @@ pub async fn run() -> Result<()> {
             bus,
         }) => {
             let bus = Bus::resolve(&bus)?;
-            let slices = bus.slices().await?;
-            let mut report =
-                zenkey_fleet::SliceSet::from_slices(slices.clone()).interface_show(&type_name)?;
-            if schema {
-                // Only the producers that carry the type are asked — the
-                // registry already says who, so this is never a fleet fan-out.
-                let producers = cmd::schema::carriers_of(&slices, &type_name);
-                let session = bus.session().await?;
-                let store = zenkey_fleet::decode::SchemaStore::new(bus.base(), bus.timeout());
-                report.schemas =
-                    zenkey_fleet::schemas_for_type(&store, &session, &producers, &type_name, full)
-                        .await;
-            }
-            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
+            cmd::interface::show(&type_name, schema, full, &bus).await
         }
         Command::Schema {
             cmd:

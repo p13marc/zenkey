@@ -5,6 +5,7 @@
 //! (`report.rs`, shared with the engine) rendered by `output.rs`.
 
 pub mod admin;
+pub mod base;
 pub mod bench;
 pub mod blob;
 pub mod cache;
@@ -15,6 +16,7 @@ pub mod echo;
 pub mod expect;
 pub mod generate;
 pub mod get;
+pub mod interface;
 pub mod key;
 pub mod node;
 pub mod probe;
@@ -27,6 +29,7 @@ pub mod sample;
 pub mod schema;
 pub mod scout;
 pub mod serve;
+pub mod storage;
 pub mod watch;
 
 use anyhow::{Result, anyhow};

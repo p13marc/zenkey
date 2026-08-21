@@ -251,10 +251,7 @@ pub async fn storage_list(secs: f64, args: &crate::Bus) -> Result<()> {
     let session = args.session().await?;
     let fetch = async || {
         let storages = zenkey_fleet::storages(&session, args.timeout()).await?;
-        let coverage = match args.slice_set().await {
-            Ok(slices) => zenkey_fleet::state_coverage(&slices, args.base(), &storages),
-            Err(_) => Vec::new(),
-        };
+        let coverage = super::storage::coverage(args, &storages).await;
         Ok(crate::report::StorageList { storages, coverage })
     };
     poll_loop(interval, args.format(), args.color(), fetch).await
