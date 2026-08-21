@@ -103,6 +103,46 @@ pub struct Status<'a> {
     pub replaying: bool,
 }
 
+impl<'a> Status<'a> {
+    /// Read the strip's twenty facts off five of the six sub-states (#175).
+    ///
+    /// This looks like [`Ctx`](crate::update::Ctx) and is its opposite. `Ctx`
+    /// is an update-side type whose point is being *narrow* — what a handler
+    /// may consult but not move. Nothing here is narrow, and nothing should
+    /// be: a status strip that read fewer sub-states would be a status strip
+    /// that told the user less. That it names five of six is what a status
+    /// strip *is*.
+    pub(crate) fn of(
+        chrome: &'a crate::state::Chrome,
+        dep: &'a crate::state::Deployment,
+        obs: &'a crate::state::Observation,
+        sub: &'a crate::state::Subject,
+        work: &'a crate::state::Workspace,
+    ) -> Status<'a> {
+        Status {
+            link: &obs.link,
+            base_label: dep.base_label(),
+            scope_label: dep.settings.scope.short(),
+            keys: obs.keys,
+            keys_evicted: obs.keys_evicted,
+            keys_unwatched: obs.keys_unwatched,
+            facts_cached: dep.facts.len(),
+            facts_evicted: dep.facts.evicted(),
+            watched: &obs.watched,
+            skeleton: dep.skeleton.as_deref().map(|s| s.coverage),
+            fetched: sub.fetched.as_ref(),
+            totals: obs.totals,
+            slices: &dep.slice_source,
+            seeding: obs.seeding.len(),
+            seeded_watches: obs.seeded_watches,
+            seed_totals: obs.seed_totals,
+            unreachable: dep.settings.is_unreachable(),
+            prefs_note: chrome.prefs_note.as_deref(),
+            replaying: work.replay.replay.is_some(),
+        }
+    }
+}
+
 /// The key count, and — if the table has evicted — what that count omits.
 ///
 /// A bounded observer must report what its bound cost (RFC 09 §5.1 O6): a key

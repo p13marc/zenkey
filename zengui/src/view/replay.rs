@@ -17,6 +17,7 @@ use super::theme::colors;
 use super::tokens::{font, space};
 use crate::message::{Message, WorkspaceMsg};
 use crate::replay::ReplayState;
+use crate::state::workspace::ReplayMode;
 
 /// Replay-mode interactions.
 #[derive(Debug, Clone, PartialEq)]
@@ -164,4 +165,37 @@ pub fn open_row(path: &str) -> Element<'_, Message> {
     .spacing(space::SM)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+/// Everything replay mode puts between the toolbar and the panes (#74).
+///
+/// A `Vec` rather than one composed element: the shell stacks them into its
+/// own column, and each is independently absent. Returning an empty `Vec` is
+/// the ordinary case, and it allocates nothing.
+pub(crate) fn surfaces(replay: &ReplayMode) -> Vec<Element<'_, Message>> {
+    let mut out: Vec<Element<'_, Message>> = Vec::new();
+    if let Some(path) = &replay.replay_open {
+        out.push(open_row(path));
+        if let Some(note) = &replay.replay_note {
+            out.push(crate::view::kit::muted(format!("could not open: {note}")));
+        }
+    }
+    if let Some(state) = &replay.replay {
+        out.push(banner(state));
+    }
+    if let Some(rec) = &replay.recording {
+        out.push(crate::view::kit::muted(format!(
+            "● recording current watches to {} — toolbar 'stop recording' finishes the file",
+            rec.path
+        )));
+    }
+    if let Some(done) = &replay.recorded {
+        out.push(crate::view::kit::muted(match done {
+            Ok((samples, dropped, path)) => format!(
+                "recorded {samples} sample(s) to {path} ({dropped} dropped — in-file ledger)"
+            ),
+            Err(e) => format!("recording failed: {e}"),
+        }));
+    }
+    out
 }
