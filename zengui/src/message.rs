@@ -251,7 +251,12 @@ pub struct BusTick {
     /// request", the third O6 category.
     pub keys_unwatched: u64,
     /// The active watch selectors — the coverage statement (O5).
-    pub watched: Vec<String>,
+    ///
+    /// `Arc<[String]>` rather than `Vec<String>`: the list changes when a
+    /// watch is added or released, and it was being cloned on every tick and
+    /// then cloned *again* into `Zengui::watched` — twice a tick, four times a
+    /// second, for a list that is usually identical to the last one (#178).
+    pub watched: Arc<[String]>,
     /// Seed boundaries that fired during this tick (issue #92): each seeded
     /// watch's id and what its seed paths contributed.
     pub seeded: Vec<(WatchId, zenkey_fleet::SeedCoverage)>,

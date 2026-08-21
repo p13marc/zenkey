@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use zenkey_fleet::KeyTreeSnapshot;
+use zenoh::key_expr::keyexpr;
 
 /// One producer's presence on one origin.
 #[derive(Debug, Clone, Default)]
@@ -110,11 +111,29 @@ impl NodeRoster {
         watched: &[String],
         now: Instant,
     ) {
+        // Validated once per tick rather than once per (producer × watch)
+        // pair, and *borrowed*: `keyexpr::new(&str)` validates without
+        // allocating, where `KeyExpr::new(String)` builds an `OwnedKeyExpr`
+        // — an `Arc<str>` copy — per selector per producer per tick.
+        // `zenkey_fleet::skeleton::merge` was deliberately fixed this way
+        // (`docs/zero-copy.md`) and this site was missed (#178).
+        let watched: Vec<&keyexpr> = watched
+            .iter()
+            .filter_map(|w| keyexpr::new(w.as_str()).ok())
+            .collect();
+        // One reusable buffer for the subtree selector, instead of a fresh
+        // `String` per producer per tick.
+        let mut subtree = String::new();
         for (origin, producers) in &mut self.nodes {
             for (producer, presence) in producers.iter_mut() {
-                let subtree = state_subtree(base, origin, producer);
-                presence.watched = watched.iter().any(|w| intersects(w, &subtree));
+                write_state_subtree(&mut subtree, base, origin, producer);
+                presence.watched = keyexpr::new(subtree.as_str())
+                    .map(|s| watched.iter().any(|w| w.intersects(s)))
+                    .unwrap_or(false);
                 presence.last_state_age = if presence.watched {
+                    // Borrows `subtree`, so it cannot outlive the iteration —
+                    // and it is only built for the producers a watch actually
+                    // covers, which on a real fleet is a handful.
                     let chunks: Vec<&str> = subtree.split('/').take_while(|c| *c != "**").collect();
                     tree.node(&chunks)
                         .and_then(|n| n.subtree_last_seen)
@@ -191,27 +210,27 @@ impl NodeRoster {
     }
 }
 
-/// The display-path selector of one producer's state subtree — assembled
-/// from grammar constants like `scope::catalog_subtree`, never `format!` of
-/// user input (`origin`/`producer` come from parsed token keys).
-fn state_subtree(base: &str, origin: &str, producer: &str) -> String {
-    let tail = if origin.starts_with('@') {
+/// The display-path selector of one producer's state subtree, into a
+/// caller-owned buffer.
+///
+/// Assembled from grammar constants, never `format!` of user input —
+/// `origin` and `producer` come from parsed token keys — and the base is
+/// applied through `grammar::with_base`, which has one home.
+///
+/// Into a buffer because `refresh` calls this once per producer per tick, so
+/// the caller reuses one allocation rather than taking a fresh `String` each
+/// time (#178).
+fn write_state_subtree(out: &mut String, base: &str, origin: &str, producer: &str) {
+    use std::fmt::Write as _;
+    let mut tail = String::with_capacity(32);
+    if origin.starts_with('@') {
         // A service origin has no producer chunk under state.
-        format!("v1/{origin}/state/**")
+        let _ = write!(tail, "v1/{origin}/state/**");
     } else {
-        format!("v1/{origin}/state/{producer}/**")
-    };
-    zenkey::grammar::with_base(base, tail)
-}
-
-fn intersects(a: &str, b: &str) -> bool {
-    match (
-        zenoh::key_expr::KeyExpr::new(a),
-        zenoh::key_expr::KeyExpr::new(b),
-    ) {
-        (Ok(a), Ok(b)) => a.intersects(&b),
-        _ => false,
+        let _ = write!(tail, "v1/{origin}/state/{producer}/**");
     }
+    out.clear();
+    out.push_str(&zenkey::grammar::with_base(base, tail));
 }
 
 #[cfg(test)]

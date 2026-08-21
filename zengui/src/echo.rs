@@ -29,6 +29,19 @@ pub struct EchoLine {
     pub seq: u64,
     /// Full wire key, as received (this session is un-namespaced).
     pub key: String,
+    /// The same key, validated once (#178).
+    ///
+    /// The pane's key filter is a key-expression **intersection**, and it is
+    /// evaluated per line per *frame* — so parsing the line's key inside
+    /// `EchoView::admits` meant validating the whole 2,000-line ring sixty
+    /// times a second. Paid once, on arrival, off the UI thread, beside the
+    /// structural decode that is already happening here.
+    ///
+    /// `None` for a key that does not parse. That is not a wire case — the
+    /// sample carried it — but a replayed row or a hand-made test line can be
+    /// anything, and a line the filter cannot judge is one the filter does not
+    /// admit, which is what the unparseable arm already did.
+    pub key_expr: Option<zenoh::key_expr::OwnedKeyExpr>,
     /// A bounded, structural rendering of the payload. Never a decode failure:
     /// `structural` degrades JSON → CBOR-diagnostic → UTF-8 → `<N bytes>`.
     pub preview: String,
@@ -73,6 +86,7 @@ impl EchoLine {
         });
         EchoLine {
             seq,
+            key_expr: zenoh::key_expr::OwnedKeyExpr::new(view.key.clone()).ok(),
             key: view.key.clone(),
             preview,
             len,
@@ -87,7 +101,10 @@ impl EchoLine {
     /// What this line costs the ring's byte budget. The attachment preview
     /// counts too — a bound that ignores what it stores stops being a bound.
     fn weight(&self) -> usize {
-        self.key.len() + self.preview.len() + self.attachment.as_ref().map_or(0, String::len)
+        // The validated copy of the key counts too: a bound that ignores what
+        // it stores stops being a bound, and `key_expr` is a second owned copy
+        // of exactly `key`.
+        self.key.len() * 2 + self.preview.len() + self.attachment.as_ref().map_or(0, String::len)
     }
 }
 
@@ -217,6 +234,7 @@ mod tests {
     fn line(seq: u64, key: &str, preview_len: usize) -> EchoLine {
         EchoLine {
             seq,
+            key_expr: zenoh::key_expr::OwnedKeyExpr::new(key.to_string()).ok(),
             key: key.to_string(),
             preview: "x".repeat(preview_len),
             len: preview_len,

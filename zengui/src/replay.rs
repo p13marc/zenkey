@@ -42,6 +42,10 @@ pub struct ReplayState {
     pub path: String,
     /// The capture's own account of itself (selectors, base, when).
     pub header: ZrecHeader,
+    /// `header.selectors`, shared — every tick this file yields carries the
+    /// same coverage statement, so it is built once rather than per scrub
+    /// (#178).
+    watched: Arc<[String]>,
     /// Every publishable row, in file order (which is capture order).
     pub rows: Vec<ReplayRow>,
     /// Samples the *capture* missed (summed from its drop records) — shown
@@ -140,6 +144,7 @@ impl ReplayState {
         let span_us = rows.last().map_or(0, |r| r.t_us);
         Ok(ReplayState {
             path: path.to_string(),
+            watched: Arc::from(header.selectors.clone()),
             header,
             rows,
             capture_dropped,
@@ -220,7 +225,7 @@ impl ReplayState {
             keys_unwatched,
             // The coverage statement is the file's: what the capture asked
             // (O5) — not a claim about the live bus.
-            watched: self.header.selectors.clone(),
+            watched: Arc::clone(&self.watched),
             seeded: Vec::new(),
             totals,
         })

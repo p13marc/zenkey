@@ -53,7 +53,7 @@ pub struct Zengui {
     observed: Arc<KeyTreeSnapshot>,
     skeleton: Option<Arc<Skeleton>>,
     /// Active watch selectors, as the last tick reported them (coverage, O5).
-    watched: Vec<String>,
+    watched: std::sync::Arc<[String]>,
     /// This app's per-subtree watches: display path → watch id.
     my_watches: HashMap<String, WatchId>,
     /// The same key set, cached for the view (a borrowed pane cannot borrow
@@ -92,6 +92,15 @@ pub struct Zengui {
     /// Which numeric leaf the value sparkline plots; `None` follows the first
     /// leaf the payload offers.
     series_leaf: Option<String>,
+    /// The detail pane's chart data, rebuilt when its **inputs** change rather
+    /// than on every frame (#178).
+    ///
+    /// It was computed inside `view()`, which meant walking the history ring
+    /// twice and cloning the whole rate series ~60 times a second for a
+    /// picture that changes on the 250 ms tick. `refresh_series` is the one
+    /// rebuild point; everything that can change the chart calls it, and
+    /// nothing else may write this field.
+    series: Option<view::detail::SeriesData>,
     /// The last on-demand fetch: (key, outcome-or-error).
     fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
     /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
@@ -150,6 +159,11 @@ pub struct Zengui {
     prefs_note: Option<String>,
 
     bases: Vec<DiscoveredBase>,
+
+    /// The base picker's option list, rebuilt when `bases` changes rather
+    /// than on every frame (#178). The empty string leads: it is a
+    /// deployment — the bus root — not a "no selection" placeholder.
+    base_options: Vec<String>,
     keys: usize,
     keys_evicted: u64,
     keys_unwatched: u64,
@@ -209,7 +223,7 @@ impl Zengui {
             epoch: 0,
             observed: Arc::new(KeyTreeSnapshot::default()),
             skeleton: None,
-            watched: Vec::new(),
+            watched: std::sync::Arc::from([] as [String; 0]),
             my_watches: HashMap::new(),
             my_watch_paths: BTreeSet::new(),
             scope_watches: Vec::new(),
@@ -227,6 +241,7 @@ impl Zengui {
             history: None,
             rate_series: crate::series::RateSampler::new(),
             series_leaf: None,
+            series: None,
             fetched: None,
             echo_view: view::echo::EchoView::new(),
             context_form: view::contexts::ContextForm::default(),
@@ -252,6 +267,7 @@ impl Zengui {
             prefs_note,
             window_dirty: false,
             bases: Vec::new(),
+            base_options: vec![String::new()],
             keys: 0,
             keys_evicted: 0,
             keys_unwatched: 0,
@@ -342,6 +358,7 @@ impl Zengui {
             }
             Message::BasesDiscovered(Ok(bases)) => {
                 self.bases = bases;
+                self.rebuild_base_options();
                 Task::none()
             }
             Message::BasesDiscovered(Err(e)) => {
@@ -557,6 +574,7 @@ impl Zengui {
                 // they start empty, and stop being fed when it goes away.
                 self.rate_series = crate::series::RateSampler::new();
                 self.series_leaf = None;
+                self.refresh_series();
                 let (Some(session), Some(key)) = (self.session.clone(), key) else {
                     return Task::none();
                 };
@@ -589,6 +607,7 @@ impl Zengui {
             Message::Admin(msg) => self.update_admin(msg),
             Message::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
                 self.series_leaf = Some(path);
+                self.refresh_series();
                 Task::none()
             }
             Message::History(msg) => {
@@ -1159,6 +1178,7 @@ impl Zengui {
         self.slices = None;
         self.slice_source = view::status::SliceSource::None;
         self.bases.clear();
+        self.base_options = vec![String::new()];
         // #179: this was the one collection `forget_deployment` did not clear,
         // so switching base left expansion keyed to paths that no longer
         // exist — a leak, and a stale path re-expands a coincidentally
@@ -2377,6 +2397,7 @@ impl Zengui {
                         // its start — nothing live bleeds through.
                         self.echo.clear();
                         self.history = None;
+                        self.refresh_series();
                         let tick = state.scrub_to(0);
                         self.replay = Some(state);
                         self.apply_tick(&tick);
@@ -2528,7 +2549,7 @@ impl Zengui {
         self.keys_evicted = tick.keys_evicted;
         self.keys_unwatched = tick.keys_unwatched;
         self.totals = tick.totals;
-        self.watched = tick.watched.clone();
+        self.watched = std::sync::Arc::clone(&tick.watched);
         for (id, coverage) in &tick.seeded {
             if let Some(path) = self.seeding.remove(id) {
                 if let Some(path) = path {
@@ -2579,6 +2600,10 @@ impl Zengui {
             .apply_transitions(&self.settings.base, &tick.nodes, now);
         self.roster
             .refresh(&tick.tree, &self.settings.base, &tick.watched, now);
+        // The chart's inputs all advanced above — the history ring, the rate
+        // sampler, the facts behind the unit. Rebuilt once here rather than
+        // once per frame (#178).
+        self.refresh_series();
         self.reflatten();
     }
 
@@ -2765,7 +2790,7 @@ impl Zengui {
                         (Some(k.as_str()) == self.selected.as_deref()).then_some(o)
                     }),
                     decoded: self.decoded.as_ref(),
-                    series: self.series_data(),
+                    series: self.series.as_ref(),
                     history_entries: self.history.as_ref().map(|r| r.ring.len()),
                     observed: self.history.as_ref().and_then(|r| r.ring.newest()),
                     latency: self.selected_latency.clone(),
@@ -2866,28 +2891,41 @@ impl Zengui {
         }
     }
 
-    fn toolbar(&self) -> Element<'_, Message> {
-        let mut options: Vec<String> = vec![String::new()];
-        options.extend(self.bases.iter().map(|b| b.base.clone()));
-        options.dedup();
+    /// The base picker's options, after a discovery sweep landed.
+    fn rebuild_base_options(&mut self) {
+        self.base_options = vec![String::new()];
+        self.base_options
+            .extend(self.bases.iter().map(|b| b.base.clone()));
+        self.base_options.dedup();
+    }
 
+    fn toolbar(&self) -> Element<'_, Message> {
+        // Both pickers borrow (#178). `pick_list` takes `L: Borrow<[T]>`, so a
+        // slice is as good as a `Vec` — and the toolbar redraws at frame rate
+        // while its options change on a discovery sweep, which is minutes
+        // apart.
         let base_picker = pick_list(
-            options,
-            Some(self.settings.base.clone()),
+            &self.base_options[..],
+            Some(&self.settings.base),
             Message::BaseSelected,
         )
         .placeholder("base")
         .text_size(crate::view::tokens::font::CAPTION);
 
-        let scopes = vec![
+        /// The closed scope vocabulary, in menu order.
+        const SCOPES: [ScopePreset; 5] = [
             ScopePreset::Everything,
             ScopePreset::Deployment,
             ScopePreset::Telemetry,
             ScopePreset::State,
             ScopePreset::Events,
         ];
-        let scope_picker = pick_list(scopes, Some(self.settings.scope), Message::ScopeSelected)
-            .text_size(crate::view::tokens::font::CAPTION);
+        let scope_picker = pick_list(
+            &SCOPES[..],
+            Some(self.settings.scope),
+            Message::ScopeSelected,
+        )
+        .text_size(crate::view::tokens::font::CAPTION);
 
         // Observation is opt-in and labelled by its cost (issue #85).
         let observing = !self.scope_watches.is_empty();
@@ -2967,6 +3005,17 @@ impl Zengui {
     /// a cached series would be one more thing to invalidate on every eviction.
     /// The leaves come from the newest payload, so a producer that starts
     /// emitting a new field offers it without a restart.
+    /// Rebuild the detail pane's chart data.
+    ///
+    /// Called from every place that can change it — the selection, the leaf
+    /// picker, the bus tick — and from nowhere else. Anything that touches
+    /// `history`, `rate_series`, `series_leaf` or the selected key's facts
+    /// must call this; `series_data` is private so it cannot be called from
+    /// the render path again (#178).
+    fn refresh_series(&mut self) {
+        self.series = self.series_data();
+    }
+
     fn series_data(&self) -> Option<view::detail::SeriesData> {
         let rec = self.history.as_ref()?;
         // The most recent entry that *is* a document, not simply the most
@@ -3138,6 +3187,9 @@ mod tests {
             "history",
             "rate_series",
             "series_leaf",
+            // Derived from `history` and `rate_series`, both of which are
+            // kept: it follows the selection, not the deployment.
+            "series",
             "fetched",
             "decoded",
             "publication",
