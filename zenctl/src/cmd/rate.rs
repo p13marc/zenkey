@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::{BusArgs, output, report};
+use crate::{BusArgs, report};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -50,7 +50,13 @@ pub async fn run(
                     count: s.count,
                     bytes: s.bytes,
                     sn_gaps: s.sn_gaps,
-                    latency: s.latency(),
+                    // #238: only when asked. It used to be unconditional,
+                    // so `--format json` carried a latency distribution
+                    // nobody requested — and without the O7 caveat naming
+                    // which clock it came from, which printed only under
+                    // `--latency`. `sn_gaps` on the next line had it right
+                    // all along.
+                    latency: latency.then(|| s.latency()).flatten(),
                     unstamped: s.unstamped,
                 })
                 .collect::<Vec<_>>();
@@ -69,6 +75,13 @@ pub async fn run(
         }
     });
     monitor.stop();
-    output::rate(&rep, args.format, bandwidth, loss, latency);
+    crate::render::emit(
+        &mut std::io::stdout(),
+        &crate::render::RateView {
+            report: &rep,
+            bandwidth,
+        },
+        args.format,
+    )?;
     Ok(())
 }

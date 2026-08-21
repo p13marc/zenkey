@@ -47,6 +47,7 @@
 //! where they broke `| awk` for anyone who piped a table.
 
 mod impls;
+pub use impls::RateView;
 pub mod table;
 
 use std::io::Write;
