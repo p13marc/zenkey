@@ -80,7 +80,7 @@ pub struct Zengui {
     /// Scroll position + viewport height, driving the virtual window.
     tree_scroll: (f32, f32),
     echo: EchoRing,
-    expanded: BTreeSet<String>,
+    expanded: crate::expansion::Expansion,
     selected: Option<String>,
     /// The selected key's history recording (issue #63). Created on selection,
     /// dropped on the next one — which is what makes deselecting stop the
@@ -222,7 +222,7 @@ impl Zengui {
             tree_search: String::new(),
             tree_scroll: (0.0, 600.0),
             echo,
-            expanded: BTreeSet::new(),
+            expanded: crate::expansion::Expansion::new(),
             selected: None,
             history: None,
             rate_series: crate::series::RateSampler::new(),
@@ -534,9 +534,10 @@ impl Zengui {
                 Task::none()
             }
             Message::ToggleNode(path) => {
-                if !self.expanded.remove(&path) {
-                    self.expanded.insert(path);
-                }
+                // Collapsing takes the subtree with it (#179) — see
+                // `expansion.rs` for why that trade is the fix rather than a
+                // side effect of it.
+                self.expanded.toggle(&path);
                 self.reflatten();
                 Task::none()
             }
@@ -1158,6 +1159,12 @@ impl Zengui {
         self.slices = None;
         self.slice_source = view::status::SliceSource::None;
         self.bases.clear();
+        // #179: this was the one collection `forget_deployment` did not clear,
+        // so switching base left expansion keyed to paths that no longer
+        // exist — a leak, and a stale path re-expands a coincidentally
+        // matching new subtree. (`self.admin.clear()` above already resets
+        // `expanded_raw`, which the issue assumed it did not.)
+        self.expanded.clear();
     }
 
     /// One key press, in context.
@@ -1616,7 +1623,7 @@ impl Zengui {
                         prefix.push('/');
                     }
                     prefix.push_str(chunk);
-                    self.expanded.insert(prefix.clone());
+                    self.expanded.open(prefix.clone());
                 }
                 self.selected = Some(path);
                 self.reflatten();
@@ -1718,7 +1725,7 @@ impl Zengui {
                                 prefix.push('/');
                             }
                             prefix.push_str(chunk);
-                            self.expanded.insert(prefix.clone());
+                            self.expanded.open(prefix.clone());
                         }
                         self.reflatten();
                         self.update(Message::SelectKey(Some(key)))
@@ -3035,5 +3042,152 @@ mod tests {
     #[test]
     fn an_unparseable_selector_is_not_counted_as_coverage() {
         assert!(!key_is_watched(&["not a key/**/".to_string()], "a/b"));
+    }
+
+    fn app() -> Zengui {
+        Zengui::with_prefs(
+            Settings {
+                base: String::new(),
+                connect: vec![],
+                listen: vec![],
+                scouting: None,
+                zenoh_config: None,
+                registry: vec![],
+                timeout_secs: 5,
+                scope: crate::scope::ScopePreset::Everything,
+                selectors: vec![],
+                eager: false,
+                echo_lines: 100,
+                history_entries: 10,
+                max_keys: 1000,
+            },
+            crate::prefs::Prefs::default(),
+            None,
+        )
+        .0
+    }
+
+    /// #179's first acceptance, and the defect exactly: `forget_deployment`
+    /// cleared ten collections and not this one, so every node the user had
+    /// ever opened outlived the deployment it belonged to — keyed to paths
+    /// that no longer exist, where a stale one re-expands a coincidentally
+    /// matching new subtree.
+    #[test]
+    fn switching_base_forgets_every_node_that_was_open() {
+        let mut app = app();
+        for i in 0..10_000 {
+            app.expanded.open(format!("v1/h-{i:04}/state/sysinfo"));
+        }
+        assert_eq!(app.expanded.len(), 10_000);
+        app.forget_deployment();
+        assert!(app.expanded.is_empty());
+        assert!(
+            app.admin.expanded_raw.is_empty(),
+            "`AdminState::clear` is `*self = default()`, so this was already \
+             true — asserted here so it stays true if that changes"
+        );
+    }
+
+    /// The bug class, gated rather than fixed once.
+    ///
+    /// #179 and #194 are the same mistake at different sites: a field added to
+    /// a struct and not added to the routine that resets it. So this reads the
+    /// source, lists the fields `forget_deployment` does **not** touch, and
+    /// compares against a checklist — adding a field to `Zengui` is then a
+    /// decision recorded in a diff rather than an omission nobody sees.
+    ///
+    /// Modelled on `zenctl/tests/render.rs`'s family checklist, which exists
+    /// for the same reason.
+    #[test]
+    fn every_zengui_field_is_either_forgotten_or_deliberately_kept() {
+        /// Survives a deployment change, each for a stated reason.
+        const KEPT: &[&str] = &[
+            // The window and the process, not the deployment.
+            "settings",
+            "prefs",
+            "window_dirty",
+            "prefs_note",
+            "epoch",
+            "right_pane",
+            // The link is *re*built rather than forgotten — a base change
+            // restarts the monitor, and these are replaced on the way.
+            "session",
+            "monitor",
+            "link",
+            "observed",
+            "watched",
+            "schema_store",
+            "keys",
+            "keys_evicted",
+            "keys_unwatched",
+            "totals",
+            "flat",
+            // View state about *this window*, not about the fleet.
+            "pivot",
+            "tree_search",
+            "tree_scroll",
+            "echo",
+            "echo_view",
+            "context_form",
+            "palette",
+            "call_form",
+            "publish_form",
+            "media",
+            "selected",
+            "selected_latency",
+            "history",
+            "rate_series",
+            "series_leaf",
+            "fetched",
+            "decoded",
+            "publication",
+            // Replay is a mode, and a base change inside it is the user
+            // moving around the file they opened.
+            "replay",
+            "replay_open",
+            "replay_note",
+            "recording",
+            "recorded",
+        ];
+
+        let src = include_str!("app.rs");
+        let start = src
+            .find("pub struct Zengui {")
+            .expect("the struct is in this file");
+        let body = &src[start..start + src[start..].find("\n}\n").expect("its end")];
+        let fields: Vec<&str> = body
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim();
+                if l.starts_with("//") || l.starts_with('/') || !l.contains(':') {
+                    return None;
+                }
+                l.split(':').next().filter(|n| {
+                    !n.is_empty() && n.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+                })
+            })
+            .collect();
+        assert!(fields.len() > 40, "the field scan found only {fields:?}");
+
+        let fstart = src
+            .find("fn forget_deployment(&mut self) {")
+            .expect("the routine");
+        let forget = &src[fstart..fstart + src[fstart..].find("\n    }\n").expect("its end")];
+
+        let mut kept: Vec<&str> = fields
+            .into_iter()
+            .filter(|f| !forget.contains(&format!("self.{f}")))
+            .collect();
+        kept.sort_unstable();
+        kept.dedup();
+        let mut expected: Vec<&str> = KEPT.to_vec();
+        expected.sort_unstable();
+        assert_eq!(
+            kept, expected,
+            "a field of `Zengui` changed sides. Either `forget_deployment` \
+             should clear it — that is #179's defect, and #194 was the same \
+             mistake on the save path — or it genuinely outlives a deployment \
+             and belongs on this list, with the reason beside it."
+        );
     }
 }
