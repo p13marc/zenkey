@@ -25,10 +25,12 @@
 //!   bound (still reported when hit), not a display truncation.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::Instant;
 
 use iced::widget::{Column, button, column, row, text};
 use iced::{Element, Length};
+use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
 use crate::keyfacts::Registration;
@@ -108,7 +110,79 @@ impl std::fmt::Display for Pivot {
     }
 }
 
-/// One rendered line of the tree.
+/// The half of a row that changes only when the tree's *structure* does
+/// (#177).
+///
+/// ## Why these ten fields and not the other eight
+///
+/// The claim this whole cache rests on is that a row's **shape does not depend
+/// on any live number**, and it is checkable rather than plausible.
+/// `zenkey_fleet::skeleton::merge_nodes` computes `status` from *set
+/// membership* — does an observed node exist, is it covered by a watch — never
+/// from a magnitude; and the child-name set it walks is the union of the
+/// skeleton's names and the observed ones. Depth, chunk, path, target, role and
+/// the declared type all come from names.
+///
+/// [`TreeRow::is_leaf`] is the one that looks live and is not, and it earns its
+/// place here twice over. It is `count > 0`, but a `StatsTable` entry exists
+/// only once a sample has arrived and an interior node takes `count = 0` from
+/// `TreeNode::default()` — so a count going 0→1 *is* a new key, which moves
+/// `tick.keys`, which invalidates this cache. And `row_press` branches on it to
+/// choose select-versus-toggle: recomputing it per frame would change what a
+/// click means under the cursor.
+///
+/// The same argument covers `is_entry`, and therefore `shown_keys` and
+/// `total_keys`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowShape {
+    pub depth: usize,
+    /// Display chunk — a symbolic skeleton position renders as `{var}`.
+    pub chunk: String,
+    /// The display-path prefix this row stands for (pivot paths in pivot
+    /// mode — an expansion key, not necessarily a wire path).
+    pub path: String,
+    /// The *real* display path select/watch should act on. `None` on pivot
+    /// group rows, whose synthetic grouping has no contiguous wire subtree.
+    pub target: Option<String>,
+    pub has_children: bool,
+    pub expanded: bool,
+    /// The declared/observed state (issue #85's typed acceptance criterion).
+    pub status: NodeStatus,
+    /// Traffic landed on exactly this key. Structural despite being derived
+    /// from a count — see the type docs.
+    pub is_leaf: bool,
+    /// `None` for any chunk outside a recognised v1 subtree.
+    pub role: Option<Role>,
+    /// The registry-declared payload type, when the skeleton knows one.
+    pub decl_type: Option<String>,
+}
+
+/// Where a drawn row's numbers come from (#177).
+#[derive(Debug, Clone)]
+enum Numbers {
+    /// This tick's snapshot, held by `Arc` so the frame's read cannot be
+    /// swapped out from under it by the engine's `ArcSwap`. A drawn row looks
+    /// itself up by wire path — O(depth) for the ~40 rows in the window, and
+    /// nothing at all for the 49,960 nobody can see.
+    Live(Arc<KeyTreeSnapshot>),
+    /// Numbers taken when the shape was built, index-parallel to `rows`. What
+    /// a bare `flatten` returns, since it has no snapshot to point at.
+    Frozen(Vec<Option<NodeStats>>),
+}
+
+/// Whether [`RowShape::path`] is a wire path a snapshot can answer for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathKind {
+    Wire,
+    /// A pivot grouping. Its aggregates are over a synthetic set that is not a
+    /// contiguous wire subtree, so no snapshot can be asked about it — which is
+    /// why [`Flattened::retarget`] refuses these rather than showing last
+    /// tick's figures as if they were now.
+    Pivot,
+}
+
+/// One rendered line of the tree — a per-frame temporary of ~40 since #177,
+/// not a per-tick allocation of 50,000.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TreeRow {
     pub depth: usize,
@@ -143,9 +217,18 @@ pub struct TreeRow {
 }
 
 /// The flattened tree, plus what was left out.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Since #177 `rows` carries only the *shape*; the numbers come from
+/// [`Flattened::row`], joined at draw time against whichever source
+/// [`Flattened::retarget`] last pointed this set at.
+///
+/// No `PartialEq`: `KeyTreeSnapshot` has none, and nothing in the workspace
+/// compares two of these. A hand-written impl over `rows` and the four counters
+/// would have to explain why it ignores the numbers source, which is a sentence
+/// with no reader.
+#[derive(Debug, Clone)]
 pub struct Flattened {
-    pub rows: Vec<TreeRow>,
+    pub rows: Vec<RowShape>,
     /// Rows beyond the cap. Reported, never silently dropped.
     pub truncated: usize,
     /// Concrete entries surviving the filter (== `total_keys` unfiltered).
@@ -154,6 +237,13 @@ pub struct Flattened {
     pub total_keys: usize,
     /// Whether a find-in-tree filter is active.
     pub filtered: bool,
+    numbers: Numbers,
+    paths: PathKind,
+    /// What `age_s` is measured against. Refreshed by [`Self::retarget`], i.e.
+    /// once per tick — deliberately not per frame. Making the freshness dot
+    /// update at 60 Hz would be a behaviour change smuggled in under a
+    /// performance commit, and it would make the dot untestable.
+    now: Instant,
 }
 
 impl Flattened {
@@ -164,7 +254,62 @@ impl Flattened {
             shown_keys: 0,
             total_keys: 0,
             filtered: false,
+            numbers: Numbers::Frozen(Vec::new()),
+            paths: PathKind::Wire,
+            now: Instant::now(),
         }
+    }
+
+    /// One drawn row: shape joined to whatever numbers are current (#177).
+    ///
+    /// Panics on an out-of-range index, like the slice indexing it replaced.
+    pub fn row(&self, i: usize) -> TreeRow {
+        let shape = &self.rows[i];
+        let stats = match &self.numbers {
+            Numbers::Frozen(v) => v[i],
+            // A skeleton-only symbolic chunk keys as `{mount}` and can never
+            // match an observed child, so it reads `None` — which is exactly
+            // what the merge gave it.
+            Numbers::Live(tree) => {
+                let chunks: Vec<&str> = shape.path.split('/').collect();
+                tree.node(&chunks).map(NodeStats::from_tree)
+            }
+        };
+        TreeRow {
+            depth: shape.depth,
+            chunk: shape.chunk.clone(),
+            path: shape.path.clone(),
+            target: shape.target.clone(),
+            has_children: shape.has_children,
+            expanded: shape.expanded,
+            status: shape.status,
+            is_leaf: shape.is_leaf,
+            count: stats.map(|s| s.count).unwrap_or(0),
+            bytes: stats.map(|s| s.bytes).unwrap_or(0),
+            rate_hz: stats.map(|s| s.rate_hz).unwrap_or(0.0),
+            subtree_count: stats.map(|s| s.subtree_count).unwrap_or(0),
+            subtree_bytes: stats.map(|s| s.subtree_bytes).unwrap_or(0),
+            subtree_keys: stats.map(|s| s.subtree_keys).unwrap_or(0),
+            subtree_rate_hz: stats.map(|s| s.subtree_rate_hz).unwrap_or(0.0),
+            age_s: age_of(stats.as_ref(), self.now),
+            role: shape.role,
+            decl_type: shape.decl_type.clone(),
+        }
+    }
+
+    /// Point this shape at a new tick's numbers, in O(1) (#177).
+    ///
+    /// `false` when the rows carry pivot aggregates: no snapshot can answer for
+    /// a synthetic grouping, and showing last tick's figures as if they were now
+    /// would be the kind of quiet lie this codebase files as a defect. The
+    /// caller rebuilds instead.
+    pub fn retarget(&mut self, tree: Arc<KeyTreeSnapshot>, now: Instant) -> bool {
+        if self.paths == PathKind::Pivot {
+            return false;
+        }
+        self.numbers = Numbers::Live(tree);
+        self.now = now;
+        true
     }
 }
 
@@ -215,6 +360,7 @@ pub fn flatten(
     now: Instant,
 ) -> Flattened {
     let mut rows = Vec::new();
+    let mut stats = Vec::new();
     let mut truncated = 0;
     let mut total_keys = 0;
     walk(
@@ -223,9 +369,9 @@ pub fn flatten(
             expanded,
             max_rows,
             rows: &mut rows,
+            stats: &mut stats,
             truncated: &mut truncated,
             total_keys: &mut total_keys,
-            now,
         },
         String::new(),
         0,
@@ -237,6 +383,13 @@ pub fn flatten(
         shown_keys: total_keys,
         total_keys,
         filtered: false,
+        // Frozen, because a bare `flatten` has no snapshot to point at. The
+        // app calls `retarget` immediately afterwards, which flips wire shapes
+        // to live; a test that does not gets the numbers as of the walk, which
+        // is what it got before #177.
+        numbers: Numbers::Frozen(stats),
+        paths: PathKind::Wire,
+        now,
     }
 }
 
@@ -251,10 +404,12 @@ fn start_expect(base: &str) -> Expect {
 struct Ctx<'a> {
     expanded: &'a BTreeSet<String>,
     max_rows: usize,
-    rows: &'a mut Vec<TreeRow>,
+    rows: &'a mut Vec<RowShape>,
+    /// Index-parallel to `rows` — the numbers as of this walk, for a caller
+    /// that never retargets (#177).
+    stats: &'a mut Vec<Option<NodeStats>>,
     truncated: &'a mut usize,
     total_keys: &'a mut usize,
-    now: Instant,
 }
 
 /// What the *next* chunk down this branch is expected to be.
@@ -299,7 +454,7 @@ fn walk(node: &MergedNode, ctx: &mut Ctx<'_>, path: String, depth: usize, expect
         } else {
             let expanded = ctx.expanded.contains(&child_path);
             let stats = child.stats;
-            ctx.rows.push(TreeRow {
+            ctx.rows.push(RowShape {
                 depth,
                 chunk: chunk.clone(),
                 path: child_path.clone(),
@@ -308,17 +463,10 @@ fn walk(node: &MergedNode, ctx: &mut Ctx<'_>, path: String, depth: usize, expect
                 expanded,
                 status: child.status,
                 is_leaf: stats.map(|s| s.count > 0).unwrap_or(false),
-                count: stats.map(|s| s.count).unwrap_or(0),
-                bytes: stats.map(|s| s.bytes).unwrap_or(0),
-                rate_hz: stats.map(|s| s.rate_hz).unwrap_or(0.0),
-                subtree_count: stats.map(|s| s.subtree_count).unwrap_or(0),
-                subtree_bytes: stats.map(|s| s.subtree_bytes).unwrap_or(0),
-                subtree_keys: stats.map(|s| s.subtree_keys).unwrap_or(0),
-                subtree_rate_hz: stats.map(|s| s.subtree_rate_hz).unwrap_or(0.0),
-                age_s: age_of(stats.as_ref(), ctx.now),
                 role,
                 decl_type: child.decl.as_ref().map(|d| d.type_name.clone()),
             });
+            ctx.stats.push(stats);
             if expanded {
                 walk(child, ctx, child_path, depth + 1, next_expect);
                 continue;
@@ -399,103 +547,186 @@ pub fn search_flatten(
     max_rows: usize,
     now: Instant,
 ) -> Flattened {
-    let mut rows = Vec::new();
+    // Two passes, and the reason is #249: retention is decided *bottom-up* —
+    // a node renders because something beneath it matched — so at push time
+    // the first pass does not yet know whether a row counts against the cap.
+    // The old single pass resolved that by building every row and dropping
+    // most of them again, which on a 40k-key tree is ~160,000 `String`
+    // allocations per keystroke, and left the cap to a `truncate` afterwards,
+    // so the memory bound `app.rs` documents did not hold here at all.
+    //
+    // Pass one decides and allocates nothing but the verdicts: one reusable
+    // path buffer for the descent — the trick `skeleton::merge` already uses,
+    // and that `docs/zero-copy.md` §2 names — and one `bool` per node in
+    // pre-order. Pass two walks the identical order and builds only what it
+    // keeps, honouring the cap *during* the walk exactly as `flatten` does.
+    let mut keep: Vec<Mark> = Vec::new();
     let mut shown = 0usize;
     let mut total = 0usize;
-    search_walk(
+    let mut probe = String::new();
+    search_mark(
+        merged,
+        &mut probe,
+        start_expect(base),
+        query,
+        &mut keep,
+        &mut shown,
+        &mut total,
+    );
+
+    let mut rows = Vec::new();
+    let mut stats = Vec::new();
+    let mut truncated = 0usize;
+    let mut at = 0usize;
+    search_emit(
         merged,
         String::new(),
         0,
         start_expect(base),
-        query,
-        now,
-        &mut rows,
-        &mut shown,
-        &mut total,
+        &keep,
+        &mut at,
+        &mut Emit {
+            max_rows,
+            rows: &mut rows,
+            stats: &mut stats,
+            truncated: &mut truncated,
+        },
     );
-    let truncated = rows.len().saturating_sub(max_rows);
-    rows.truncate(max_rows);
     Flattened {
         rows,
         truncated,
         shown_keys: shown,
         total_keys: total,
-        filtered: true,
+        // Computed, not asserted. `search_flatten` used to hardcode `true`,
+        // and `filtered` feeds an empty-state sentence and a coverage line —
+        // an honesty field set by assumption is the thing this crate does not
+        // do (RFC 09 §5.1 O4).
+        filtered: !query.is_empty(),
+        numbers: Numbers::Frozen(stats),
+        paths: PathKind::Wire,
+        now,
     }
 }
 
-/// Returns whether this subtree contains any match (so ancestors render).
-#[allow(clippy::too_many_arguments)]
-fn search_walk(
+/// One node's verdict from pass one, in pre-order.
+#[derive(Debug, Clone, Copy, Default)]
+struct Mark {
+    /// This node or something beneath it matched, so it renders.
+    keep: bool,
+    /// Pre-order slots this node's subtree occupies. A dropped branch is
+    /// stepped over with this rather than re-walked — which on the common
+    /// no-match query is the whole tree.
+    slots: usize,
+}
+
+/// What pass two writes into. Deliberately *not* [`Ctx`]: that carries
+/// `expanded` and `total_keys`, which a search decides in pass one and must not
+/// be able to touch again here.
+struct Emit<'a> {
+    max_rows: usize,
+    rows: &'a mut Vec<RowShape>,
+    stats: &'a mut Vec<Option<NodeStats>>,
+    truncated: &'a mut usize,
+}
+
+/// Pass one: which nodes are retained, in pre-order, allocating nothing.
+///
+/// Returns whether this subtree contains any match, so ancestors render.
+/// `probe` is one buffer reused for the whole descent rather than a `String`
+/// per node — the path is needed for `fuzzy_match` and for nothing else here.
+fn search_mark(
     node: &MergedNode,
-    path: String,
-    depth: usize,
+    probe: &mut String,
     expect: Expect,
     query: &str,
-    now: Instant,
-    rows: &mut Vec<TreeRow>,
+    keep: &mut Vec<Mark>,
     shown: &mut usize,
     total: &mut usize,
 ) -> bool {
     let mut any = false;
     for (chunk, child) in &node.children {
+        let base_len = probe.len();
+        if base_len > 0 {
+            probe.push('/');
+        }
+        probe.push_str(chunk);
+        let (_, next_expect) = classify(chunk, expect);
+        let entry = is_entry(child);
+        if entry {
+            *total += 1;
+        }
+        let self_match = entry && fuzzy_match(probe, query);
+        if self_match {
+            *shown += 1;
+        }
+        // The verdict is not known until the recursion returns, so reserve
+        // this node's slot at its pre-order index and fill it after — along
+        // with how many slots its subtree took, so pass two can step over a
+        // dropped branch in O(1) instead of walking it to find out.
+        let at = keep.len();
+        keep.push(Mark::default());
+        let below = search_mark(child, probe, next_expect, query, keep, shown, total);
+        keep[at] = Mark {
+            keep: self_match || below,
+            slots: keep.len() - at - 1,
+        };
+        any |= keep[at].keep;
+        probe.truncate(base_len);
+    }
+    any
+}
+
+/// Pass two: build the retained rows, bounded by the cap during the walk.
+///
+/// Walks the identical pre-order as [`search_mark`] — `BTreeMap` iteration is
+/// deterministic — so one counter keeps the two in lockstep.
+fn search_emit(
+    node: &MergedNode,
+    path: String,
+    depth: usize,
+    expect: Expect,
+    keep: &[Mark],
+    at: &mut usize,
+    ctx: &mut Emit<'_>,
+) {
+    for (chunk, child) in &node.children {
+        let (role, next_expect) = classify(chunk, expect);
+        let mark = keep[*at];
+        *at += 1;
+        if !mark.keep {
+            // Nothing below a dropped node is kept, and pass one already
+            // counted how many slots to step over — so a dropped branch costs
+            // one addition rather than a walk to find its size. On the common
+            // no-match query that branch is the whole tree.
+            *at += mark.slots;
+            continue;
+        }
         let child_path = if path.is_empty() {
             chunk.clone()
         } else {
             format!("{path}/{chunk}")
         };
-        let (role, next_expect) = classify(chunk, expect);
-        let entry = is_entry(child);
-        if entry {
-            *total += 1;
-        }
-        let self_match = entry && fuzzy_match(&child_path, query);
-        if self_match {
-            *shown += 1;
-        }
-
-        // Tentatively emit the row, then recurse; drop it again if neither it
-        // nor anything below matched.
-        let at = rows.len();
-        let stats = child.stats;
-        rows.push(TreeRow {
-            depth,
-            chunk: chunk.clone(),
-            path: child_path.clone(),
-            target: Some(child_path.clone()),
-            has_children: !child.children.is_empty(),
-            expanded: true,
-            status: child.status,
-            is_leaf: stats.map(|s| s.count > 0).unwrap_or(false),
-            count: stats.map(|s| s.count).unwrap_or(0),
-            bytes: stats.map(|s| s.bytes).unwrap_or(0),
-            rate_hz: stats.map(|s| s.rate_hz).unwrap_or(0.0),
-            subtree_count: stats.map(|s| s.subtree_count).unwrap_or(0),
-            subtree_bytes: stats.map(|s| s.subtree_bytes).unwrap_or(0),
-            subtree_keys: stats.map(|s| s.subtree_keys).unwrap_or(0),
-            subtree_rate_hz: stats.map(|s| s.subtree_rate_hz).unwrap_or(0.0),
-            age_s: age_of(stats.as_ref(), now),
-            role,
-            decl_type: child.decl.as_ref().map(|d| d.type_name.clone()),
-        });
-        let below = search_walk(
-            child,
-            child_path,
-            depth + 1,
-            next_expect,
-            query,
-            now,
-            rows,
-            shown,
-            total,
-        );
-        if self_match || below {
-            any = true;
+        if ctx.rows.len() >= ctx.max_rows {
+            *ctx.truncated += 1;
         } else {
-            rows.truncate(at);
+            ctx.rows.push(RowShape {
+                depth,
+                chunk: chunk.clone(),
+                path: child_path.clone(),
+                target: Some(child_path.clone()),
+                has_children: !child.children.is_empty(),
+                // A search shows the chain to every match, so an ancestor of a
+                // match is open by definition.
+                expanded: true,
+                status: child.status,
+                is_leaf: child.stats.map(|s| s.count > 0).unwrap_or(false),
+                role,
+                decl_type: child.decl.as_ref().map(|d| d.type_name.clone()),
+            });
+            ctx.stats.push(child.stats);
         }
+        search_emit(child, child_path, depth + 1, next_expect, keep, at, ctx);
     }
-    any
 }
 
 // ---------------------------------------------------------------------------
@@ -606,7 +837,6 @@ fn fold_status(a: Option<NodeStatus>, b: NodeStatus) -> NodeStatus {
 /// Foreign keys group under `(foreign)` with their raw path below — present,
 /// unlabelled, never silently dropped. An optional `query` filters entries
 /// by real path (groups auto-expand while filtering).
-#[allow(clippy::too_many_arguments)]
 pub fn pivot_flatten(
     merged: &MergedNode,
     base: &str,
@@ -662,24 +892,33 @@ pub fn pivot_flatten(
     }
 
     let mut rows = Vec::new();
+    let mut stats = Vec::new();
+    let mut truncated = 0usize;
     flatten_pnode(
         &root,
         expanded,
         filtered,
-        now,
         pivot.key(),
         String::new(),
         0,
-        &mut rows,
+        &mut Emit {
+            max_rows,
+            rows: &mut rows,
+            stats: &mut stats,
+            truncated: &mut truncated,
+        },
     );
-    let truncated = rows.len().saturating_sub(max_rows);
-    rows.truncate(max_rows);
     Flattened {
         rows,
         truncated,
         shown_keys,
         total_keys,
         filtered,
+        numbers: Numbers::Frozen(stats),
+        // Always frozen: a pivot group's numbers are aggregates over a set the
+        // wire has no path for, so `retarget` refuses them (#177).
+        paths: PathKind::Pivot,
+        now,
     }
 }
 
@@ -785,16 +1024,23 @@ fn pivot_chunks(
         .collect()
 }
 
+/// The cap is enforced **during** the walk, as `flatten` does it (#249). It
+/// used to be a `truncate` afterwards, so `truncated` reported rows that had
+/// been built and dropped while the string beside it said "not built".
+///
+/// What this does *not* bound, and should not: `collect_entries` yields one
+/// entry per concrete key, and that population is bounded by the key table,
+/// which the status strip already reports as `keys_evicted`. Two bounds, two
+/// counters, two sentences.
 #[allow(clippy::too_many_arguments)]
 fn flatten_pnode(
     node: &PNode,
     expanded: &BTreeSet<String>,
     auto_expand: bool,
-    now: Instant,
     pivot_key: &str,
     path: String,
     depth: usize,
-    rows: &mut Vec<TreeRow>,
+    ctx: &mut Emit<'_>,
 ) {
     for (chunk, child) in &node.children {
         let child_path = if path.is_empty() {
@@ -804,7 +1050,24 @@ fn flatten_pnode(
         };
         let is_open = auto_expand || expanded.contains(&child_path);
         let own = child.leaf.as_ref().and_then(|(_, s, _)| *s);
-        rows.push(TreeRow {
+        if ctx.rows.len() >= ctx.max_rows {
+            *ctx.truncated += 1;
+            // Still descend: a collapsed count would understate the tree, and
+            // the rows below are counted the same way.
+            if is_open {
+                flatten_pnode(
+                    child,
+                    expanded,
+                    auto_expand,
+                    pivot_key,
+                    child_path,
+                    depth + 1,
+                    ctx,
+                );
+            }
+            continue;
+        }
+        ctx.rows.push(RowShape {
             depth,
             chunk: chunk.clone(),
             path: child_path.clone(),
@@ -821,32 +1084,34 @@ fn flatten_pnode(
                 .status
                 .unwrap_or(NodeStatus::DeclaredOnly(Default::default())),
             is_leaf: own.map(|s| s.count > 0).unwrap_or(false),
-            count: own.map(|s| s.count).unwrap_or(0),
-            bytes: own.map(|s| s.bytes).unwrap_or(0),
-            rate_hz: own.map(|s| s.rate_hz).unwrap_or(0.0),
-            subtree_count: child.agg_count,
-            subtree_bytes: child.agg_bytes,
-            subtree_keys: child.agg_keys,
-            subtree_rate_hz: child.agg_rate,
-            age_s: child
-                .agg_last
-                .map(|t| now.saturating_duration_since(t).as_secs_f32()),
             role: child.role,
             decl_type: child
                 .leaf
                 .as_ref()
                 .and_then(|(_, _, d)| d.as_ref().map(|d| d.type_name.clone())),
         });
+        // The row's own numbers are the group's *aggregates*, which is why
+        // these can never be retargeted: `agg_*` sums a synthetic membership,
+        // and no wire path names it.
+        ctx.stats.push(Some(NodeStats {
+            count: own.map(|s| s.count).unwrap_or(0),
+            bytes: own.map(|s| s.bytes).unwrap_or(0),
+            rate_hz: own.map(|s| s.rate_hz).unwrap_or(0.0),
+            subtree_count: child.agg_count,
+            subtree_bytes: child.agg_bytes,
+            subtree_rate_hz: child.agg_rate,
+            subtree_keys: child.agg_keys,
+            subtree_last_seen: child.agg_last,
+        }));
         if is_open {
             flatten_pnode(
                 child,
                 expanded,
                 auto_expand,
-                now,
                 pivot_key,
                 child_path,
                 depth + 1,
-                rows,
+                ctx,
             );
         }
     }
@@ -892,7 +1157,10 @@ pub type FactsIndex = zenkey_fleet::FactsCache;
 /// What clicking the row body does (issue #93): concrete entries select
 /// (detail fetch acts on `target`); groups toggle. Pure, so it is testable
 /// without a renderer.
-pub fn row_press(r: &TreeRow) -> Message {
+/// Takes the **shape**, not the row: what a click means must not depend on a
+/// number that moved this tick (#177). `is_leaf` is structural for exactly
+/// that reason — see [`RowShape`].
+pub fn row_press(r: &RowShape) -> Message {
     match (&r.target, r.is_leaf || !r.has_children) {
         (Some(t), true) => Message::SelectKey(Some(t.clone())),
         _ => Message::ToggleNode(r.path.clone()),
@@ -901,7 +1169,7 @@ pub fn row_press(r: &TreeRow) -> Message {
 
 /// What clicking the expand marker does — its own affordance, so a concrete
 /// key that is also a prefix of deeper keys stays selectable (issue #93).
-pub fn marker_press(r: &TreeRow) -> Option<Message> {
+pub fn marker_press(r: &RowShape) -> Option<Message> {
     r.has_children.then(|| Message::ToggleNode(r.path.clone()))
 }
 
@@ -924,7 +1192,6 @@ pub fn window(rows: usize, scroll_y: f32, viewport_h: f32) -> (usize, usize) {
 }
 
 /// Render the tree pane.
-#[allow(clippy::too_many_arguments)]
 pub fn tree_view<'a>(
     flat: &'a Flattened,
     facts: &'a FactsIndex,
@@ -954,10 +1221,22 @@ pub fn tree_view<'a>(
     if first > 0 {
         col = col.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * ROW_HEIGHT)));
     }
-    for r in &flat.rows[first..last] {
+    // The one place a `TreeRow` is built now: ~40 per frame, joined against
+    // this tick's numbers, rather than 50,000 per tick of which the window
+    // draws forty (#177).
+    for i in first..last {
+        let shape = &flat.rows[i];
+        let r = flat.row(i);
         col = col.push(
-            iced::widget::container(row_view(r, facts, selected, watched_paths, seeding_paths))
-                .height(Length::Fixed(ROW_HEIGHT)),
+            iced::widget::container(row_view(
+                shape,
+                &r,
+                facts,
+                selected,
+                watched_paths,
+                seeding_paths,
+            ))
+            .height(Length::Fixed(ROW_HEIGHT)),
         );
     }
     if last < flat.rows.len() {
@@ -980,8 +1259,19 @@ pub fn tree_view<'a>(
         .into()
 }
 
+/// Two halves of one row, and the split is the point (#177).
+///
+/// `shape` decides **interaction** — what a click means — and comes from the
+/// cache, so it cannot change under the cursor because a number moved. `r`
+/// carries the numbers, joined against this tick's snapshot.
+///
+/// Neither is borrowed by the returned `Element`: every use below is a clone or
+/// a `Copy` field, and the one that looks like a borrow (`facts.get`) borrows
+/// `facts`. That is what lets `tree_view` hand these in as per-frame
+/// temporaries.
 fn row_view<'a>(
-    r: &'a TreeRow,
+    shape: &RowShape,
+    r: &TreeRow,
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
     watched_paths: &'a BTreeSet<String>,
@@ -991,7 +1281,7 @@ fn row_view<'a>(
 
     // The expand marker is its own affordance (issue #93): a concrete key
     // that is also a prefix of deeper keys keeps body-click = select.
-    let marker: Element<'a, Message> = match marker_press(r) {
+    let marker: Element<'a, Message> = match marker_press(shape) {
         Some(msg) => button(text(if r.expanded { "▾" } else { "▸" }).size(font::CAPTION))
             .padding(2)
             .style(button::text)
@@ -1126,7 +1416,7 @@ fn row_view<'a>(
             text_color: colors(theme).text(),
             ..Default::default()
         })
-        .on_press(row_press(r));
+        .on_press(row_press(shape));
     row![watch, indent, marker, body]
         .spacing(space::XS)
         .align_y(iced::Alignment::Center)
@@ -1335,13 +1625,13 @@ mod tests {
             assert_eq!(r.role, None, "{} must not be labelled", r.path);
         }
         // …and it still carries its traffic.
-        let leaf = flat
+        let i = flat
             .rows
             .iter()
-            .find(|r| r.path == "demo/example/foo")
+            .position(|r| r.path == "demo/example/foo")
             .unwrap();
-        assert!(leaf.is_leaf);
-        assert_eq!(leaf.count, 1);
+        assert!(flat.rows[i].is_leaf);
+        assert_eq!(flat.row(i).count, 1);
     }
 
     /// A subtree whose version chunk is not `v1` must not be labelled by
@@ -1366,9 +1656,9 @@ mod tests {
             "v1/h-3fa9c2d41b7e/state/sysinfo/health",
         ]);
         let flat = flat_now(&snap, "", &BTreeSet::new(), 100);
-        let root = &flat.rows[0];
-        assert_eq!(root.chunk, "v1");
-        assert!(!root.expanded);
+        assert_eq!(flat.rows[0].chunk, "v1");
+        assert!(!flat.rows[0].expanded);
+        let root = flat.row(0);
         assert_eq!(root.subtree_count, 3);
         assert_eq!(root.subtree_keys, 3);
         assert_eq!(root.subtree_bytes, 24);
@@ -1453,6 +1743,102 @@ mod tests {
         assert_eq!((none.shown_keys, none.total_keys), (0, 3));
     }
 
+    /// #249: a search that matches nothing builds nothing.
+    ///
+    /// It used to build a complete row — four owned `String`s — for every node
+    /// in the tree and then drop them again, because retention is decided
+    /// bottom-up. On a 40k-key bus that was ~160,000 allocations per keystroke,
+    /// for a result of zero rows. The two-pass walk decides first.
+    #[test]
+    fn a_search_that_matches_nothing_builds_no_rows() {
+        let snap = snapshot(&[
+            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
+            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+        ]);
+        // A cap of zero: under the old code the walk built every row before
+        // the post-hoc truncate could look, so this could only pass by never
+        // building one.
+        let none = search_flatten(&snap, "", "zzzznope", 0, Instant::now());
+        assert!(none.rows.is_empty());
+        assert_eq!(
+            none.truncated, 0,
+            "nothing was retained, so nothing went unbuilt — a cap is not a \
+             filter and must not report one as the other"
+        );
+        assert_eq!((none.shown_keys, none.total_keys), (0, 3));
+    }
+
+    /// #249: the cap bounds a search that matches everything.
+    ///
+    /// This is the direction that was genuinely unbounded — `rows` grew to node
+    /// count and the cap was applied afterwards, so the memory bound
+    /// `app.rs`'s `MAX_ROWS` documents did not hold in this path at all.
+    #[test]
+    fn the_row_cap_bounds_a_search_that_matches_everything() {
+        let keys: Vec<String> = (0..200)
+            .map(|i| format!("v1/h-3fa9c2d41b7e/telemetry/sysinfo/k{i}"))
+            .collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let snap = snapshot(&refs);
+        let capped = search_flatten(&snap, "", "k", 10, Instant::now());
+        assert_eq!(capped.rows.len(), 10, "the cap is a bound during the walk");
+        assert!(
+            capped.truncated > 0,
+            "and what it cost is reported, never silently dropped"
+        );
+        // The denominator ignores the cap: it is a fact about the bus, not
+        // about how many rows this view chose to build.
+        assert_eq!(capped.total_keys, 200);
+        assert_eq!(capped.shown_keys, 200);
+
+        // Uncapped, the same query yields the same counts — so the cap changed
+        // what was *built*, not what was *counted*.
+        let full = search_flatten(&snap, "", "k", 10_000, Instant::now());
+        assert_eq!(
+            (full.shown_keys, full.total_keys),
+            (capped.shown_keys, capped.total_keys)
+        );
+        assert_eq!(full.truncated, 0);
+        assert_eq!(
+            full.rows[..10],
+            capped.rows[..],
+            "the cap takes a prefix of the same walk, not a different one"
+        );
+    }
+
+    /// #249: `filtered` is computed rather than asserted.
+    ///
+    /// `search_flatten` hardcoded `true`, and `filtered` decides which
+    /// empty-state sentence the pane shows and whether it prints a coverage
+    /// line — an honesty field set by assumption is the thing this crate does
+    /// not do.
+    #[test]
+    fn an_empty_query_is_not_a_filter() {
+        let snap = snapshot(&["v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
+        assert!(!search_flatten(&snap, "", "", 100, Instant::now()).filtered);
+        assert!(search_flatten(&snap, "", "cpu", 100, Instant::now()).filtered);
+    }
+
+    /// #249: a capped pivot reports the rows it did not build, and still
+    /// counts the entries beneath them.
+    #[test]
+    fn a_capped_pivot_reports_the_rows_it_did_not_build() {
+        let keys: Vec<String> = (0..50)
+            .map(|i| format!("v1/h-3fa9c2d41b7e/telemetry/p{i}/leaf"))
+            .collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let snap = snapshot(&refs);
+        let all = expand(&[]);
+        let capped = pivot_flatten(&snap, "", Pivot::Producer, &all, "", 5, Instant::now());
+        assert_eq!(capped.rows.len(), 5);
+        assert!(capped.truncated > 0);
+        assert_eq!(
+            capped.total_keys, 50,
+            "the denominator is the bus, not the cap"
+        );
+    }
+
     /// Pivot by producer: host keys group under the producer; a service
     /// origin (no producer chunk) groups under the `@…` origin, which is the
     /// service (RFC 03 §1.5); foreign keys under "(foreign)".
@@ -1481,7 +1867,8 @@ mod tests {
             .collect();
         assert_eq!(tops, ["(foreign)", "@catalog", "sysinfo"]);
         // The sysinfo group aggregates both origins' traffic.
-        let sysinfo = flat.rows.iter().find(|r| r.chunk == "sysinfo").unwrap();
+        let i = flat.rows.iter().position(|r| r.chunk == "sysinfo").unwrap();
+        let sysinfo = flat.row(i);
         assert_eq!(sysinfo.subtree_count, 2);
         assert_eq!(sysinfo.subtree_keys, 2);
         assert!(

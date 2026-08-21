@@ -20,8 +20,23 @@
 //! Two cadences, as in the engine:
 //!
 //! - **per frame** — `echo/admits_*`, `hex/dump_1k`. `view` runs at frame rate.
-//! - **per tick** — `roster/refresh_*`, `series/*`. Four times a second.
+//! - **per tick** — `roster/refresh_*`, `series/*`, `tree/*`. Four times a
+//!   second.
+//!
+//! ## The tree group had no numbers at all before #177
+//!
+//! `reflatten` is `skeleton::merge` **plus** a flatten, both unconditional at
+//! tick cadence, and neither had ever been measured from this side. The engine
+//! has `skeleton/merge_10k`, but `docs/bench-baseline.md` marks that row `~`:
+//! the same code read 19.5 ms and 74.8 ms on this machine. So #177's headline —
+//! "50,000 tree rows four times a second" — was a count, never a duration.
+//!
+//! Fixtures are built in `iter_batched`'s setup, never inside `b.iter`.
+//! `docs/bench-baseline.md` records `stats/retire_unwatched_1k` being
+//! invalidated by exactly that mistake, and a 50k-key fixture would swamp the
+//! thing being measured far worse than a 1k one did.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -208,12 +223,184 @@ fn bench_expansion(c: &mut Criterion) {
     });
 }
 
+/// The tree pipeline: what `reflatten` costs, and what the row cap does not
+/// bound (#177, #249).
+///
+/// `TREE_KEYS` mirrors `soak_flatten_50k_keys` (`view/tree.rs`) and
+/// `zenkey-fleet/benches/fleet.rs`'s `synth_key`: 100 keys per group, so the
+/// tree has realistic fan-out rather than one flat level.
+fn bench_tree(c: &mut Criterion) {
+    const TREE_KEYS: usize = 50_000;
+
+    fn keys(n: usize) -> Vec<String> {
+        (0..n)
+            .map(|i| format!("v1/{HOST}/telemetry/synth/g{}/k{i}", i / 100))
+            .collect()
+    }
+
+    /// The observed half, and the empty skeleton `reflatten` merges against
+    /// when no registry has answered — which is the common case on a foreign
+    /// bus, and the one `app.rs` rebuilds from scratch on every call.
+    fn inputs(n: usize) -> (zenkey_fleet::Skeleton, zenkey_fleet::KeyTreeSnapshot) {
+        let mut stats = zenkey_fleet::stats::StatsTable::new();
+        let now = Instant::now();
+        for k in keys(n) {
+            stats.record(&k, 64, None, now, None, None);
+        }
+        let observed = zenkey_fleet::KeyTreeSnapshot::build(&stats);
+        let skel = zenkey_fleet::Skeleton::build(
+            "",
+            &zenkey_fleet::SliceSet::default(),
+            &std::collections::BTreeMap::new(),
+            None,
+        );
+        (skel, observed)
+    }
+
+    /// Every prefix of every key — the worst case, and what the tree looks
+    /// like after `NodesMsg::ShowInTree` or a doctor finding walks it open.
+    fn expand_all(n: usize) -> std::collections::BTreeSet<String> {
+        let mut all = std::collections::BTreeSet::new();
+        for k in keys(n) {
+            let mut acc = String::new();
+            for chunk in k.split('/') {
+                if !acc.is_empty() {
+                    acc.push('/');
+                }
+                acc.push_str(chunk);
+                all.insert(acc.clone());
+            }
+        }
+        all
+    }
+
+    let watched = ["**".to_string()];
+    let (skel, observed) = inputs(TREE_KEYS);
+    let merged = zenkey_fleet::skeleton::merge(&skel, &observed, &watched);
+    let expanded = expand_all(TREE_KEYS);
+    let now = Instant::now();
+
+    let mut group = c.benchmark_group("tree");
+    // Criterion's default 100 samples would take minutes at this size.
+    group.sample_size(10);
+
+    // The dominant term #177 barely mentions: `reflatten` pays this *before*
+    // it flattens anything, on every one of its nine call sites.
+    group.bench_function("merge_50k", |b| {
+        b.iter(|| {
+            black_box(zenkey_fleet::skeleton::merge(
+                black_box(&skel),
+                black_box(&observed),
+                black_box(&watched),
+            ))
+        })
+    });
+
+    // The cold rebuild — today's per-tick cost, and after #177 the cost of a
+    // key-set change or an expand. The split moved work from the tick to the
+    // frame rather than removing it, so this number is deliberately unchanged;
+    // what changes is how often it is paid.
+    group.bench_function("flatten_50k_expanded", |b| {
+        b.iter(|| {
+            black_box(zengui::view::tree::flatten(
+                black_box(&merged),
+                "",
+                black_box(&expanded),
+                60_000,
+                now,
+            ))
+        })
+    });
+
+    // #249, half one: retention is decided bottom-up, so every node gets a
+    // full `TreeRow` — four owned `String`s — before the walk knows whether to
+    // keep it. A query matching nothing builds and discards all of them, per
+    // keystroke.
+    group.bench_function("search_50k_no_match", |b| {
+        b.iter(|| {
+            black_box(zengui::view::tree::search_flatten(
+                black_box(&merged),
+                "",
+                black_box("zzzznomatchzzzz"),
+                60_000,
+                now,
+            ))
+        })
+    });
+
+    // #249, half two: the opposite failure. `rows` grows to node count
+    // unchecked and the cap is applied afterwards, so the memory bound
+    // `app.rs` documents does not hold here at all.
+    group.bench_function("search_50k_all_match", |b| {
+        b.iter(|| {
+            black_box(zengui::view::tree::search_flatten(
+                black_box(&merged),
+                "",
+                black_box("k"),
+                1_000,
+                now,
+            ))
+        })
+    });
+
+    // **The O(1)-in-rows evidence, and it needs both sizes.** One size proves
+    // nothing; two that agree prove the cost is independent of the tree.
+    // Criterion cannot count allocations, so this pair plus the
+    // `shape_reused`/`shape_rebuilt` unit tests are what stand in for #177's
+    // "allocation is O(1)" acceptance, which is not a thing a bench can say.
+    let (small_skel, small_observed) = inputs(1_000);
+    let small_merged = zenkey_fleet::skeleton::merge(&small_skel, &small_observed, &watched);
+    let small_expanded = expand_all(1_000);
+    let small_snapshot = Arc::new(small_observed);
+    let big_snapshot = Arc::new(observed);
+
+    for (label, m, e, snap) in [
+        ("1k", &small_merged, &small_expanded, &small_snapshot),
+        ("50k", &merged, &expanded, &big_snapshot),
+    ] {
+        group.bench_function(format!("retarget_{label}"), |b| {
+            let mut flat = zengui::view::tree::flatten(m, "", e, 60_000, now);
+            b.iter(|| black_box(flat.retarget(Arc::clone(black_box(snap)), now)))
+        });
+        // Materialising one screenful — the work that moved from the tick to
+        // the frame. Forty rows out of a thousand and forty out of fifty
+        // thousand must cost the same.
+        group.bench_function(format!("window_rows_40_of_{label}"), |b| {
+            let mut flat = zengui::view::tree::flatten(m, "", e, 60_000, now);
+            flat.retarget(Arc::clone(snap), now);
+            b.iter(|| {
+                for i in 0..40.min(flat.rows.len()) {
+                    black_box(flat.row(black_box(i)));
+                }
+            })
+        });
+    }
+
+    // The pivot cold path — three full materialisations of the same data, and
+    // the number that sizes the arena follow-up.
+    group.bench_function("pivot_50k_producer", |b| {
+        b.iter(|| {
+            black_box(zengui::view::tree::pivot_flatten(
+                black_box(&merged),
+                "",
+                zengui::view::tree::Pivot::Producer,
+                black_box(&expanded),
+                "",
+                60_000,
+                now,
+            ))
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_echo,
     bench_hex,
     bench_roster,
     bench_series,
-    bench_expansion
+    bench_expansion,
+    bench_tree
 );
 criterion_main!(benches);
