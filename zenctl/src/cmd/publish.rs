@@ -131,15 +131,8 @@ pub async fn run(
 
     let publication =
         zenkey_fleet::declare_publication(&session, key, qos, prepared.encoding.as_deref()).await?;
-    // Matching note (#38): a routing fact about THIS publisher — informative,
-    // never gating, and never a fleet verdict (RFC 05 §3.1).
-    match publication.matching_status().await {
-        Ok(true) => eprintln!("matching: a subscriber currently matches {key}"),
-        Ok(false) => eprintln!(
-            "matching: no subscriber currently matches {key} — a routing fact about \
-             this publisher, not a fleet verdict (RFC 05 §3.1)"
-        ),
-        Err(_) => {}
+    if let Some(note) = matching_note(&publication, key).await {
+        eprintln!("{}", note.to_line());
     }
     let times = repeat.max(1);
     for n in 0..times {
@@ -157,6 +150,32 @@ pub async fn run(
     }
     publication.undeclare().await?;
     Ok(())
+}
+
+/// The #38 matching note: a routing fact about **this** publisher.
+///
+/// Informative, never gating, and never a fleet verdict — a zero here means
+/// this session sees no matching subscriber, which is not the same claim as
+/// "nobody is listening" (RFC 05 §3.1). `None` when the status could not be
+/// read at all: an unanswerable question earns no sentence.
+///
+/// One spelling, because `pub` and `retire` print the same fact and the second
+/// site's comment said so — "the same routing fact pub prints" — beside a
+/// verbatim copy of it (#210).
+async fn matching_note(
+    publication: &zenkey_fleet::Publication,
+    key: &str,
+) -> Option<crate::render::Note> {
+    match publication.matching_status().await {
+        Ok(true) => Some(crate::render::Note::caveat(format!(
+            "matching: a subscriber currently matches {key}"
+        ))),
+        Ok(false) => Some(crate::render::Note::silence(format!(
+            "matching: no subscriber currently matches {key} — a routing fact \
+             about this publisher, not a fleet verdict"
+        ))),
+        Err(_) => None,
+    }
 }
 
 /// `topic retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
@@ -189,14 +208,8 @@ pub async fn retire(key: &str, qos: &str, i_know: bool, args: &BusArgs) -> Resul
 
     let session = args.session().await?;
     let publication = zenkey_fleet::declare_publication(&session, key, qos, None).await?;
-    // The same routing fact pub prints, with the same bounds (RFC 05 §3.1).
-    match publication.matching_status().await {
-        Ok(true) => eprintln!("matching: a subscriber currently matches {key}"),
-        Ok(false) => eprintln!(
-            "matching: no subscriber currently matches {key} — a routing fact about \
-             this publisher, not a fleet verdict (RFC 05 §3.1)"
-        ),
-        Err(_) => {}
+    if let Some(note) = matching_note(&publication, key).await {
+        eprintln!("{}", note.to_line());
     }
     publication.retire().await?;
     eprintln!("retired {key}");
