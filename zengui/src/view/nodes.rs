@@ -42,6 +42,15 @@ pub struct NodesData<'a> {
     pub detail: &'a DetailState,
 }
 
+/// Wrap one of this pane's messages for the app (#176).
+///
+/// One place the pane's name is spelled, rather than at every widget —
+/// which is what the other seven panes already did, and what makes the
+/// six-group regroup a one-line change here instead of 2.
+fn msg(m: NodesMsg) -> Message {
+    Message::Nodes(m)
+}
+
 pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
     let mut col = column![kit::section_header("nodes", None)].spacing(space::SM);
 
@@ -99,11 +108,11 @@ fn origin_card<'a>(
         )
         .style(iced::widget::button::text)
         .padding(0)
-        .on_press(Message::Nodes(NodesMsg::Selected(origin.to_string()))),
+        .on_press(msg(NodesMsg::Selected(origin.to_string()))),
         iced::widget::space::horizontal(),
         iced::widget::button(text("show in tree").size(font::CAPTION))
             .padding(2)
-            .on_press(Message::Nodes(NodesMsg::ShowInTree(origin.to_string()))),
+            .on_press(msg(NodesMsg::ShowInTree(origin.to_string()))),
     ]
     .spacing(space::SM)
     .align_y(iced::Alignment::Center);

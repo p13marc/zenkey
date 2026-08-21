@@ -42,6 +42,15 @@ fn tone(severity: DoctorSeverity) -> SeverityTone {
     }
 }
 
+/// Wrap one of this pane's messages for the app (#176).
+///
+/// One place the pane's name is spelled, rather than at every widget —
+/// which is what the other seven panes already did, and what makes the
+/// six-group regroup a one-line change here instead of 5.
+fn msg(m: DoctorMsg) -> Message {
+    Message::Doctor(m)
+}
+
 pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
     let run_label = if state.in_flight {
         "running…"
@@ -50,17 +59,17 @@ pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
     };
     let mut run = iced::widget::button(text(run_label).size(font::CAPTION)).padding(4);
     if !state.in_flight {
-        run = run.on_press(Message::Doctor(DoctorMsg::Run));
+        run = run.on_press(msg(DoctorMsg::Run));
     }
     let deep = checkbox(state.deep)
         .label("deep: freshness + storage sweeps (adds query load)")
         .size(font::CAPTION)
         .text_size(font::CAPTION)
-        .on_toggle(|b| Message::Doctor(DoctorMsg::DeepToggled(b)));
+        .on_toggle(|b| msg(DoctorMsg::DeepToggled(b)));
     // The listen window (#161): off by default — a passive phase still holds
     // subscribers open, and ambient cost is the thing this panel refuses.
     let listen = iced::widget::text_input("listen (s, empty = off)", &state.listen)
-        .on_input(|t| Message::Doctor(DoctorMsg::ListenChanged(t)))
+        .on_input(|t| msg(DoctorMsg::ListenChanged(t)))
         .size(font::CAPTION)
         .width(Length::Fixed(140.0));
 
@@ -68,7 +77,7 @@ pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
     // of thing as the run button: an explicit, costed re-ask, never ambient.
     let reask = iced::widget::button(text("re-ask schemas").size(font::CAPTION))
         .padding(4)
-        .on_press(Message::Doctor(DoctorMsg::ReaskSchemas));
+        .on_press(msg(DoctorMsg::ReaskSchemas));
 
     let mut col = column![
         kit::section_header("doctor", None),
@@ -222,7 +231,7 @@ fn finding_row<'a>(
         body = body.push(
             iced::widget::button(text("go to subject").size(font::CAPTION))
                 .padding(2)
-                .on_press(Message::Doctor(DoctorMsg::FindingClicked(index))),
+                .on_press(msg(DoctorMsg::FindingClicked(index))),
         );
     }
     kit::card(body)

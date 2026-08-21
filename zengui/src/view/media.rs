@@ -150,6 +150,15 @@ pub fn decodable(encoding: &str) -> bool {
     )
 }
 
+/// Wrap one of this pane's messages for the app (#176).
+///
+/// One place the pane's name is spelled, rather than at every widget —
+/// which is what the other seven panes already did, and what makes the
+/// six-group regroup a one-line change here instead of 6.
+fn msg(m: MediaMsg) -> Message {
+    Message::Media(m)
+}
+
 pub fn pane<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Element<'a, Message> {
     let mut col = column![kit::section_header("Media", None)].spacing(space::SM);
 
@@ -190,7 +199,7 @@ pub fn pane<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Element<
                     if decodable(&m.encoding) {
                         col = col.push(
                             button(text(label).size(font::CAPTION))
-                                .on_press(Message::Media(MediaMsg::DeclPicked {
+                                .on_press(msg(MediaMsg::DeclPicked {
                                     producer: slice.name.clone(),
                                     path: m.path.clone(),
                                 }))
@@ -205,16 +214,16 @@ pub fn pane<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Element<
     }
 
     let origin = text_input("origin: h-… (exact — never a wildcard)", &state.origin)
-        .on_input(|s| Message::Media(MediaMsg::OriginChanged(s)))
+        .on_input(|s| msg(MediaMsg::OriginChanged(s)))
         .size(font::CAPTION);
     let producer = text_input("producer", &state.producer)
-        .on_input(|s| Message::Media(MediaMsg::ProducerChanged(s)))
+        .on_input(|s| msg(MediaMsg::ProducerChanged(s)))
         .size(font::CAPTION);
     let subpath = text_input(
         "stream path: fill every {var} (e.g. cam0/preview/png)",
         &state.subpath,
     )
-    .on_input(|s| Message::Media(MediaMsg::SubpathChanged(s)))
+    .on_input(|s| msg(MediaMsg::SubpathChanged(s)))
     .size(font::CAPTION);
     let controls = row![
         origin,
@@ -222,10 +231,10 @@ pub fn pane<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Element<
         subpath,
         match &state.viewing {
             None => button(text("view").size(font::CAPTION))
-                .on_press(Message::Media(MediaMsg::View))
+                .on_press(msg(MediaMsg::View))
                 .padding(4),
             Some(_) => button(text("stop").size(font::CAPTION))
-                .on_press(Message::Media(MediaMsg::Stop))
+                .on_press(msg(MediaMsg::Stop))
                 .padding(4),
         },
     ]
