@@ -8,236 +8,33 @@
 //! value on demand. `--eager` restores the bootstrap behavior from the
 //! command line, labelled by its cost.
 
-use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use iced::widget::{column, pick_list, row, text};
 use iced::{Element, Length, Subscription, Task};
-use zenkey_fleet::{
-    DiscoveredBase, FetchOutcome, KeyTreeSnapshot, MergedNode, Monitor, Skeleton, SliceSet, WatchId,
-};
 
 use crate::config::Settings;
-use crate::echo::EchoRing;
 use crate::link::{self, LinkKey};
 use crate::message::{BusTick, LinkState, Message};
 use crate::scope::{self, ScopePreset};
 use crate::services;
+use crate::state::workspace::{RecordingHandle, RepeatLoad};
+use crate::state::{Chrome, Deployment, Observation, Subject, TreeState, Workspace};
 use crate::view;
 use crate::view::status::{SliceSource, Status};
 use crate::view::tokens::space;
-
-/// Cap on tree rows built per flatten. With virtualized rendering (issue
-/// #65) this is a memory bound, not a display truncation — the view builds
-/// only the scrolled-into window.
-///
-/// It is now true of all three flatten paths. `search_flatten` and
-/// `pivot_flatten` used to apply it *after* the walk, so the sentence above
-/// described one path of three and the "rows not built" the pane prints was
-/// false in the other two (#249).
-const MAX_ROWS: usize = 50_000;
 
 use crate::message::{
     BusMsg, ChromeMsg, DeploymentMsg, PaneMsg, RightPane, SubjectMsg, WorkspaceMsg,
 };
 
-/// What an armed repeating publication resends each tick: the declaration,
-/// the prepared bytes, and the attachment that rode the first send (#117).
-struct RepeatLoad {
-    publication: Arc<zenkey_fleet::Publication>,
-    bytes: Arc<Vec<u8>>,
-    attachment: Option<Arc<Vec<u8>>>,
-}
-
 pub struct Zengui {
-    settings: Settings,
-    session: Option<zenoh::Session>,
-    monitor: Option<Arc<Monitor>>,
-    link: LinkState,
-    /// Bumped per monitor generation — the pump's identity.
-    epoch: u64,
-
-    observed: Arc<KeyTreeSnapshot>,
-    skeleton: Option<Arc<Skeleton>>,
-    /// The last merge, kept while its three inputs are unchanged (#177).
-    ///
-    /// `reflatten` is `merge` **plus** a flatten, and the merge is the larger
-    /// half — 24.97 ms against 22.08 ms at 50,000 keys. Expanding a node,
-    /// collapsing one, typing in the find box and switching pivot all change
-    /// only *how the tree is presented*: the skeleton, the observed snapshot
-    /// and the watch set are identical, so the merge is pure repetition. Now it
-    /// is paid once and the interaction costs a flatten.
-    ///
-    /// Legitimate precisely because of the shape/statistics split: `merge`'s
-    /// `stats` field is read only for `is_entry`, which is structural for the
-    /// reason `RowShape` documents. A cached merge cannot show stale numbers,
-    /// because the numbers no longer come through it.
-    ///
-    /// The trade, stated: one merged tree is retained between reflattens rather
-    /// than built and dropped each time. Peak is unchanged — today's transient
-    /// peak is the same figure — but it is not returned. If that ever matters,
-    /// drop this field and pay a merge per expand again.
-    merged_cache: Option<MergedCache>,
-    /// Active watch selectors, as the last tick reported them (coverage, O5).
-    watched: std::sync::Arc<[String]>,
-    /// This app's per-subtree watches: display path → watch id.
-    my_watches: HashMap<String, WatchId>,
-    /// The same key set, cached for the view (a borrowed pane cannot borrow
-    /// a per-frame local).
-    my_watch_paths: BTreeSet<String>,
-    /// The scope-preset watch ids, when "observe scope" is on.
-    scope_watches: Vec<WatchId>,
-    /// Watches whose seed phase has not resolved yet (issue #92):
-    /// id → the tree display path when the watch came from a tree toggle
-    /// (`None` for scope watches, whose selectors are not tree paths).
-    seeding: HashMap<WatchId, Option<String>>,
-    /// The same tree paths as a set, for the tree's "seeding…" badges.
-    seeding_paths: BTreeSet<String>,
-    /// Cumulative seed coverage since connect: (cache replies, storage
-    /// replies, superseded) — zeros are observations (O4).
-    seed_totals: (usize, usize, u64),
-    /// Seed phases completed since connect.
-    seeded_watches: usize,
-    flat: view::tree::Flattened,
-    /// How the tree groups its entries (issue #65).
-    pivot: view::tree::Pivot,
-    /// The find-in-tree query; empty = no filter.
-    tree_search: String,
-    /// Scroll position + viewport height, driving the virtual window.
-    tree_scroll: (f32, f32),
-    echo: EchoRing,
-    expanded: crate::expansion::Expansion,
-    selected: Option<String>,
-    /// The selected key's history recording (issue #63). Created on selection,
-    /// dropped on the next one — which is what makes deselecting stop the
-    /// cost, since there is then nothing left to feed.
-    history: Option<crate::history::HistoryRecorder>,
-    /// The selected key's rate series (issue #64), sampled once per stats
-    /// tick. Reset with the selection, like the history it sits beside.
-    rate_series: crate::series::RateSampler,
-    /// Which numeric leaf the value sparkline plots; `None` follows the first
-    /// leaf the payload offers.
-    series_leaf: Option<String>,
-    /// The detail pane's chart data, rebuilt when its **inputs** change rather
-    /// than on every frame (#178).
-    ///
-    /// It was computed inside `view()`, which meant walking the history ring
-    /// twice and cloning the whole rate series ~60 times a second for a
-    /// picture that changes on the 250 ms tick. `refresh_series` is the one
-    /// rebuild point; everything that can change the chart calls it, and
-    /// nothing else may write this field.
-    series: Option<view::detail::SeriesData>,
-    /// The last on-demand fetch: (key, outcome-or-error).
-    fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
-    /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
-    echo_view: view::echo::EchoView,
-    /// The connection pane's state (issue #67): contexts and endpoints.
-    context_form: view::contexts::ContextForm,
-    /// The command palette / overlay state (issue #75).
-    palette: view::palette::PaletteState,
-
-    /// The node dashboard's presence model (#61), fed by liveliness only.
-    roster: crate::nodes::NodeRoster,
-    /// The selected origin in the nodes pane.
-    node_selected: Option<String>,
-    /// The selected key's observed skewed-latency summary, refreshed on the
-    /// bus tick (#119) — never computed on the render path, and cleared
-    /// with the selection.
-    selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
-    /// Its one-shot `node_info` detail — the pane's only data-plane cost.
-    node_detail: view::nodes::DetailState,
-    /// The doctor panel's run state (#71) — run-on-demand only.
-    doctor: crate::doctor::DoctorState,
-    /// The blob browser's state (#68) — probe and fetch, both on demand.
-    blob: crate::blob::BlobState,
-    /// The admin & storage panel's state (#70) — swept on demand.
-    admin: crate::admin::AdminState,
-    /// The media viewer's state (#69) — subscribes only on an explicit
-    /// view, never for opening the pane (the RFC 07 §1 plane deserves the
-    /// laziest posture in the app).
-    media: view::media::MediaState,
-
-    call_form: view::call::CallForm,
-    publish_form: view::publish::PublishForm,
-    /// The armed publication and what it repeats (#60). Held here rather
-    /// than in the form because a `Publication` is a live bus declaration, not
-    /// view state — dropping it undeclares.
-    publication: Option<RepeatLoad>,
-    /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
-    schema_store: Option<Arc<zenkey_fleet::decode::SchemaStore>>,
-    /// The decode of the last fetched value.
-    decoded: Option<(Option<String>, zenkey_fleet::decode::Rendering)>,
-    /// Which right-hand pane is showing.
-    right_pane: RightPane,
-    /// Bounded, and it says what the bound costs (#107).
-    facts: zenkey_fleet::FactsCache,
-    slices: Option<Arc<SliceSet>>,
-    slice_source: SliceSource,
-
-    /// Persisted UI preferences (issue #73) — theme, zoom, geometry, and the
-    /// scope/context the window was last on.
-    prefs: crate::prefs::Prefs,
-    /// Geometry changed and has not been written yet (issue #189). Drives the
-    /// settle timer, so a drag writes the file once rather than per pixel.
-    window_dirty: bool,
-    /// Why the defaults are in force, when a prefs file could not be read.
-    /// Rendered once in the status strip; never a reason to refuse to open.
-    prefs_note: Option<String>,
-
-    bases: Vec<DiscoveredBase>,
-
-    /// The base picker's option list, rebuilt when `bases` changes rather
-    /// than on every frame (#178). The empty string leads: it is a
-    /// deployment — the bus root — not a "no selection" placeholder.
-    base_options: Vec<String>,
-    keys: usize,
-    keys_evicted: u64,
-    keys_unwatched: u64,
-    /// Ticks that reused the cached tree shape, and ticks that rebuilt it
-    /// (#177).
-    ///
-    /// Not surfaced anywhere, and deliberately: the honesty rule is that a
-    /// *bound* reports what it cost, and this cache hides nothing — it is
-    /// either exactly correct or it is a bug. So the guarantee belongs in a
-    /// test, and criterion cannot express it because it cannot count
-    /// allocations. `steady_state_ticks_reuse_the_tree_shape` reads these.
-    shape_reused: u64,
-    shape_rebuilt: u64,
-    totals: (u64, u64, f64),
-
-    /// Replay mode (issue #74): while `Some`, the panes are fed from the
-    /// file and the live link subscription is not built at all — nothing in
-    /// replay can publish or subscribe, structurally.
-    replay: Option<crate::replay::ReplayState>,
-    /// The open row's path input; `None` = row hidden.
-    replay_open: Option<String>,
-    /// Why the last open failed, shown beside the path box.
-    replay_note: Option<String>,
-    /// A capture in flight (the toolbar's record toggle): the stop signal
-    /// and where it is writing.
-    recording: Option<RecordingHandle>,
-    /// The last finished capture, for the status strip: (samples, dropped,
-    /// path) or the failure.
-    recorded: Option<Result<(u64, u64, String), String>>,
-}
-
-/// A merge, and the three inputs it was made from (#177).
-///
-/// All three are `Arc`s the app replaces wholesale, so validity is three
-/// pointer comparisons — no content hashing, and no chance of a key that
-/// compares equal while the tree behind it moved.
-struct MergedCache {
-    skeleton: Option<Arc<Skeleton>>,
-    observed: Arc<KeyTreeSnapshot>,
-    watched: Arc<[String]>,
-    merged: Arc<MergedNode>,
-}
-
-/// A running toolbar capture (#74): dropping the notify without firing it
-/// would leak the task, so `stop` is fired on toggle-off and on exit.
-struct RecordingHandle {
-    stop: Arc<tokio::sync::Notify>,
-    path: String,
+    chrome: Chrome,
+    dep: Deployment,
+    obs: Observation,
+    sub: Subject,
+    tree: TreeState,
+    work: Workspace,
 }
 
 impl Zengui {
@@ -253,81 +50,19 @@ impl Zengui {
         prefs: crate::prefs::Prefs,
         prefs_note: Option<String>,
     ) -> (Zengui, Task<Message>) {
-        let echo = EchoRing::new(settings.echo_lines);
-        // Read before `settings` is moved into the struct. The projection
-        // cache takes the *same* bound as the engine's key table: it cannot
-        // usefully outgrow the table it shadows, and one number keeps that
-        // one sentence (#107).
-        let max_keys = settings.max_keys;
+        let echo_lines = settings.echo_lines;
+        // Read before `settings` is moved into the deployment.
         let connect = settings.connect.clone();
         let listen = settings.listen.clone();
         let scouting = settings.scouting;
         let zenoh_config = settings.zenoh_config.clone();
         let app = Zengui {
-            settings,
-            session: None,
-            monitor: None,
-            link: LinkState::Connecting,
-            epoch: 0,
-            observed: Arc::new(KeyTreeSnapshot::default()),
-            merged_cache: None,
-            skeleton: None,
-            watched: std::sync::Arc::from([] as [String; 0]),
-            my_watches: HashMap::new(),
-            my_watch_paths: BTreeSet::new(),
-            scope_watches: Vec::new(),
-            seeding: HashMap::new(),
-            seeding_paths: BTreeSet::new(),
-            seed_totals: (0, 0, 0),
-            seeded_watches: 0,
-            flat: view::tree::Flattened::empty(),
-            pivot: view::tree::Pivot::default(),
-            tree_search: String::new(),
-            tree_scroll: (0.0, 600.0),
-            echo,
-            expanded: crate::expansion::Expansion::new(),
-            selected: None,
-            history: None,
-            rate_series: crate::series::RateSampler::new(),
-            series_leaf: None,
-            series: None,
-            fetched: None,
-            echo_view: view::echo::EchoView::new(),
-            context_form: view::contexts::ContextForm::default(),
-            palette: view::palette::PaletteState::default(),
-            roster: crate::nodes::NodeRoster::default(),
-            node_selected: None,
-            selected_latency: None,
-            node_detail: view::nodes::DetailState::default(),
-            doctor: crate::doctor::DoctorState::default(),
-            blob: crate::blob::BlobState::default(),
-            admin: crate::admin::AdminState::default(),
-            media: view::media::MediaState::default(),
-            call_form: view::call::CallForm::default(),
-            publish_form: view::publish::PublishForm::default(),
-            publication: None,
-            schema_store: None,
-            decoded: None,
-            right_pane: RightPane::Echo,
-            facts: zenkey_fleet::FactsCache::with_capacity(max_keys),
-            slices: None,
-            slice_source: SliceSource::None,
-            prefs,
-            prefs_note,
-            window_dirty: false,
-            bases: Vec::new(),
-            base_options: vec![String::new()],
-            keys: 0,
-            keys_evicted: 0,
-            keys_unwatched: 0,
-            shape_reused: 0,
-            shape_rebuilt: 0,
-            totals: (0, 0, 0.0),
-            replay: None,
-            replay_open: None,
-            replay_note: None,
-            recording: None,
-            recorded: None,
+            chrome: Chrome::new(prefs, prefs_note),
+            dep: Deployment::new(settings),
+            obs: Observation::default(),
+            sub: Subject::default(),
+            tree: TreeState::default(),
+            work: Workspace::new(echo_lines),
         };
         (
             app,
@@ -336,16 +71,16 @@ impl Zengui {
     }
 
     pub fn title(&self) -> String {
-        format!("zengui — {}", self.settings.base_label())
+        format!("zengui — {}", self.dep.base_label())
     }
 
     pub fn theme(&self) -> iced::Theme {
-        self.prefs.theme.theme()
+        self.chrome.prefs.theme.theme()
     }
 
     /// The UI scale factor iced applies to the whole window (issue #73).
     pub fn scale_factor(&self) -> f32 {
-        self.prefs.zoom
+        self.chrome.prefs.zoom
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -363,40 +98,40 @@ impl Zengui {
     fn update_bus(&mut self, msg: BusMsg) -> Task<Message> {
         match msg {
             BusMsg::SessionOpened(Ok(session)) => {
-                self.session = Some(session.clone());
+                self.dep.session = Some(session.clone());
                 // The context list is read from the shared file, not cached at
                 // launch: `zenctl context create` on the other side of the
                 // screen should show up here without a restart (#67).
                 self.refresh_contexts();
-                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
-                    &self.settings.base,
-                    self.settings.timeout(),
+                self.dep.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+                    self.dep.base(),
+                    self.dep.timeout(),
                 )));
-                let discover = services::link::discover_bases(&session, self.settings.timeout());
+                let discover = services::link::discover_bases(&session, self.dep.timeout());
                 Task::batch([discover, self.start_monitor(), self.load_slices()])
             }
             BusMsg::SessionOpened(Err(e)) => {
-                self.link = LinkState::Failed(e);
+                self.obs.link = LinkState::Failed(e);
                 Task::none()
             }
             BusMsg::MonitorStarted(Ok(monitor)) => {
-                self.monitor = Some(Arc::clone(&monitor));
-                self.epoch += 1;
-                if self.settings.eager {
+                self.obs.monitor = Some(Arc::clone(&monitor));
+                self.obs.epoch += 1;
+                if self.dep.settings.eager {
                     return self.watch_scope();
                 }
                 Task::none()
             }
             BusMsg::MonitorStarted(Err(e)) => {
-                self.link = LinkState::Failed(e);
+                self.obs.link = LinkState::Failed(e);
                 Task::none()
             }
             BusMsg::SkeletonBuilt(Ok((skeleton, roster))) => {
-                self.skeleton = Some(skeleton);
+                self.dep.skeleton = Some(skeleton);
                 // The build task gathered the roster anyway — seed the node
                 // dashboard from it instead of throwing it away (#61).
-                self.roster.seed(&roster);
-                self.reflatten();
+                self.work.verdicts.roster.seed(&roster);
+                self.tree.reflatten(&self.dep, &self.obs);
                 Task::none()
             }
             BusMsg::SkeletonBuilt(Err(e)) => {
@@ -404,7 +139,7 @@ impl Zengui {
                 Task::none()
             }
             BusMsg::BasesDiscovered(Ok(bases)) => {
-                self.bases = bases;
+                self.dep.bases = bases;
                 self.rebuild_base_options();
                 Task::none()
             }
@@ -413,7 +148,7 @@ impl Zengui {
                 Task::none()
             }
             BusMsg::SlicesLoaded(Ok(slices)) => {
-                self.slice_source = if self.settings.registry.is_empty() {
+                self.dep.slice_source = if self.dep.settings.registry.is_empty() {
                     SliceSource::Bus {
                         count: slices.slices().len(),
                     }
@@ -422,33 +157,33 @@ impl Zengui {
                         count: slices.slices().len(),
                     }
                 };
-                self.slices = Some(slices);
+                self.dep.slices = Some(slices);
                 self.reresolve_registrations();
                 self.refresh_blob_list();
                 // The skeleton is built FROM the slices — (re)build it now.
                 self.build_skeleton()
             }
             BusMsg::SlicesUnionLoaded(Ok((slices, from_bus, dirs_only, disagreements))) => {
-                self.slice_source = SliceSource::Union {
+                self.dep.slice_source = SliceSource::Union {
                     from_bus,
                     dirs_only,
                     disagreements,
                 };
-                self.slices = Some(slices);
+                self.dep.slices = Some(slices);
                 self.reresolve_registrations();
                 self.refresh_blob_list();
                 self.build_skeleton()
             }
             BusMsg::SlicesUnionLoaded(Err(e)) => {
-                self.slice_source = SliceSource::Failed(e);
+                self.dep.slice_source = SliceSource::Failed(e);
                 Task::none()
             }
             BusMsg::SlicesLoaded(Err(e)) => {
-                self.slice_source = SliceSource::Failed(e);
+                self.dep.slice_source = SliceSource::Failed(e);
                 Task::none()
             }
             BusMsg::Link(state) => {
-                self.link = state;
+                self.obs.link = state;
                 Task::none()
             }
             BusMsg::Tick(tick) => {
@@ -463,45 +198,45 @@ impl Zengui {
         match msg {
             DeploymentMsg::ScopeWatchesStarted(ids) => {
                 for id in &ids {
-                    self.seeding.insert(*id, None);
+                    self.obs.seeding.insert(*id, None);
                 }
-                self.scope_watches = ids;
+                self.obs.scope_watches = ids;
                 Task::none()
             }
             DeploymentMsg::ScopeWatchToggled => {
-                if self.scope_watches.is_empty() {
+                if self.obs.scope_watches.is_empty() {
                     self.watch_scope()
                 } else {
                     self.unwatch_scope()
                 }
             }
             DeploymentMsg::BaseSelected(base) => {
-                if base == self.settings.base {
+                if base == self.dep.base() {
                     return Task::none();
                 }
-                self.settings.base = base;
+                self.dep.settings.base = base;
                 // The base is an input to every projection and to the
                 // skeleton, and watch selectors are base-relative: a fresh
                 // monitor is the obviously-correct restart. Everything the old
                 // base taught us is evidence about a different deployment (O4).
                 self.forget_deployment();
-                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
-                    &self.settings.base,
-                    self.settings.timeout(),
+                self.dep.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+                    self.dep.base(),
+                    self.dep.timeout(),
                 )));
-                self.decoded = None;
-                self.reflatten();
+                self.sub.decoded = None;
+                self.tree.reflatten(&self.dep, &self.obs);
                 Task::batch([self.start_monitor(), self.load_slices()])
             }
             DeploymentMsg::ScopeSelected(scope) => {
-                if scope == self.settings.scope {
+                if scope == self.dep.settings.scope {
                     return Task::none();
                 }
-                self.settings.scope = scope;
+                self.dep.settings.scope = scope;
                 // Remembered for the next launch (issue #73).
                 self.remember();
                 // If the scope is being observed, re-point the observation.
-                if !self.scope_watches.is_empty() {
+                if !self.obs.scope_watches.is_empty() {
                     let release = self.unwatch_scope();
                     let acquire = self.watch_scope();
                     return Task::batch([release, acquire]);
@@ -520,11 +255,11 @@ impl Zengui {
         match msg {
             SubjectMsg::WatchToggled(path) => self.toggle_watch(path),
             SubjectMsg::WatchStarted(path, Ok(id)) => {
-                self.my_watch_paths.insert(path.clone());
-                self.seeding.insert(id, Some(path.clone()));
-                self.seeding_paths.insert(path.clone());
-                self.my_watches.insert(path, id);
-                self.reflatten();
+                self.obs.my_watch_paths.insert(path.clone());
+                self.obs.seeding.insert(id, Some(path.clone()));
+                self.obs.seeding_paths.insert(path.clone());
+                self.obs.my_watches.insert(path, id);
+                self.tree.reflatten(&self.dep, &self.obs);
                 Task::none()
             }
             SubjectMsg::WatchStarted(path, Err(e)) => {
@@ -543,22 +278,26 @@ impl Zengui {
                 // `fetched` through only while that exact key is selected.
                 // Residual: a stale landing can still flip the right pane to
                 // Detail — a focus nit, not a misattributed verdict.
-                self.decoded = None;
+                self.sub.decoded = None;
                 // A fetch normally lands the detail pane in view — except
                 // from the doctor's click-through, where losing the finding
                 // list would cost more than it shows (#71).
-                if self.right_pane != RightPane::Doctor {
-                    self.right_pane = RightPane::Detail;
+                if self.work.right_pane != RightPane::Doctor {
+                    self.work.right_pane = RightPane::Detail;
                 }
-                let decode_task = match (&outcome, &self.session, &self.schema_store, &self.slices)
-                {
+                let decode_task = match (
+                    &outcome,
+                    &self.dep.session,
+                    &self.dep.schema_store,
+                    &self.dep.slices,
+                ) {
                     (Ok(out), Some(session), Some(store), Some(slices)) => {
                         if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
                             services::value::decode(
                                 Arc::clone(store),
                                 session.clone(),
                                 Arc::clone(slices),
-                                self.settings.base.clone(),
+                                self.dep.base().to_string(),
                                 key.clone(),
                                 v.key.clone(),
                                 v.encoding.clone(),
@@ -570,34 +309,34 @@ impl Zengui {
                     }
                     _ => Task::none(),
                 };
-                self.fetched = Some((key, outcome));
+                self.sub.fetched = Some((key, outcome));
                 decode_task
             }
             SubjectMsg::ValueDecoded(key, type_name, rendering) => {
                 // Stale guard: only the currently selected key's decode lands.
-                if self.selected.as_deref() == Some(key.as_str()) {
-                    self.decoded = Some((type_name, (*rendering).clone()));
+                if self.sub.selected.as_deref() == Some(key.as_str()) {
+                    self.sub.decoded = Some((type_name, (*rendering).clone()));
                 }
                 Task::none()
             }
             SubjectMsg::SelectKey(key) => {
-                self.selected = key.clone();
+                self.sub.selected = key.clone();
                 // The old key's latency summary is not evidence about the
                 // new one — cleared now, refreshed on the next tick (#119).
-                self.selected_latency = None;
+                self.sub.selected_latency = None;
                 // History follows the selection and nothing else (issue #63):
                 // the previous recording is dropped here, which is what makes
                 // deselecting free. A symbolic skeleton path names no concrete
                 // key, so nothing can be recorded for it.
-                self.history = key.as_deref().filter(|k| !k.contains('{')).map(|k| {
-                    crate::history::HistoryRecorder::new(k, self.settings.history_entries)
+                self.sub.history = key.as_deref().filter(|k| !k.contains('{')).map(|k| {
+                    crate::history::HistoryRecorder::new(k, self.dep.settings.history_entries)
                 });
                 // The plotted series belong to the same selection (issue #64):
                 // they start empty, and stop being fed when it goes away.
-                self.rate_series = crate::series::RateSampler::new();
-                self.series_leaf = None;
+                self.sub.rate_series = crate::series::RateSampler::new();
+                self.sub.series_leaf = None;
                 self.refresh_series();
-                let (Some(session), Some(key)) = (self.session.clone(), key) else {
+                let (Some(session), Some(key)) = (self.dep.session.clone(), key) else {
                     return Task::none();
                 };
                 // Lazy value-on-demand: one fetch per selection, nothing
@@ -615,33 +354,33 @@ impl Zengui {
     fn update_workspace(&mut self, msg: WorkspaceMsg) -> Task<Message> {
         match msg {
             WorkspaceMsg::PivotSelected(pivot) => {
-                self.pivot = pivot;
-                self.tree_scroll.0 = 0.0;
-                self.reflatten();
+                self.tree.pivot = pivot;
+                self.tree.tree_scroll.0 = 0.0;
+                self.tree.reflatten(&self.dep, &self.obs);
                 Task::none()
             }
             WorkspaceMsg::TreeSearchChanged(q) => {
-                self.tree_search = q;
-                self.tree_scroll.0 = 0.0;
-                self.reflatten();
+                self.tree.tree_search = q;
+                self.tree.tree_scroll.0 = 0.0;
+                self.tree.reflatten(&self.dep, &self.obs);
                 Task::none()
             }
             WorkspaceMsg::TreeScrolled(y, h) => {
                 // View-only state: the next frame renders the new window.
-                self.tree_scroll = (y, h.max(100.0));
+                self.tree.tree_scroll = (y, h.max(100.0));
                 Task::none()
             }
             WorkspaceMsg::ToggleNode(path) => {
                 // Collapsing takes the subtree with it (#179) — see
                 // `expansion.rs` for why that trade is the fix rather than a
                 // side effect of it.
-                self.expanded.toggle(&path);
-                self.reflatten();
+                self.tree.expanded.toggle(&path);
+                self.tree.reflatten(&self.dep, &self.obs);
                 Task::none()
             }
             WorkspaceMsg::Replay(msg) => self.update_replay(msg),
             WorkspaceMsg::PaneSelected(pane) => {
-                self.right_pane = pane;
+                self.work.right_pane = pane;
                 Task::none()
             }
         }
@@ -656,12 +395,12 @@ impl Zengui {
                 // marked dirty; a settle timer writes it once the drag stops
                 // (issue #189). "Written on the next real change" meant a
                 // resize-then-quit lost the geometry entirely.
-                self.prefs.window = Some((w, h));
-                self.window_dirty = true;
+                self.chrome.prefs.window = Some((w, h));
+                self.chrome.window_dirty = true;
                 Task::none()
             }
             ChromeMsg::WindowSettled => {
-                if self.window_dirty {
+                if self.chrome.window_dirty {
                     self.remember();
                 }
                 Task::none()
@@ -671,10 +410,12 @@ impl Zengui {
             ChromeMsg::Prefs(msg) => {
                 use crate::message::PrefsMsg;
                 match msg {
-                    PrefsMsg::ThemeToggled => self.prefs.theme = self.prefs.theme.toggled(),
-                    PrefsMsg::ZoomIn => self.prefs.zoom_in(),
-                    PrefsMsg::ZoomOut => self.prefs.zoom_out(),
-                    PrefsMsg::ZoomReset => self.prefs.zoom_reset(),
+                    PrefsMsg::ThemeToggled => {
+                        self.chrome.prefs.theme = self.chrome.prefs.theme.toggled()
+                    }
+                    PrefsMsg::ZoomIn => self.chrome.prefs.zoom_in(),
+                    PrefsMsg::ZoomOut => self.chrome.prefs.zoom_out(),
+                    PrefsMsg::ZoomReset => self.chrome.prefs.zoom_reset(),
                 }
                 // Saved on every change rather than at exit: a GUI is killed,
                 // not quit, more often than anyone admits.
@@ -694,12 +435,12 @@ impl Zengui {
             PaneMsg::Media(msg) => self.update_media(msg),
             PaneMsg::Admin(msg) => self.update_admin(msg),
             PaneMsg::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
-                self.series_leaf = Some(path);
+                self.sub.series_leaf = Some(path);
                 self.refresh_series();
                 Task::none()
             }
             PaneMsg::History(msg) => {
-                if let Some(rec) = self.history.as_mut() {
+                if let Some(rec) = self.sub.history.as_mut() {
                     match msg {
                         view::history::HistoryMsg::Select(seq) => rec.selected = Some(seq),
                         view::history::HistoryMsg::Clear => {
@@ -724,30 +465,31 @@ impl Zengui {
                 // answer to the exact question the user pressed the button
                 // for, addressed by a full wire key naming its base — user
                 // output, not projected deployment state.
-                self.call_form.in_flight = false;
-                self.call_form.outcome =
+                self.work.bench.call_form.in_flight = false;
+                self.work.bench.call_form.outcome =
                     Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
                 Task::none()
             }
             CallMsg::ProducerPicked(p) => {
-                self.call_form.producer = Some(p);
-                self.call_form.procedure = None;
+                self.work.bench.call_form.producer = Some(p);
+                self.work.bench.call_form.procedure = None;
                 Task::none()
             }
             CallMsg::ProcedurePicked(p) => {
-                self.call_form.procedure = Some(p.clone());
+                self.work.bench.call_form.procedure = Some(p.clone());
                 // Scaffold from the served request schema (§6.4 item 3). Not
                 // asked yet is `None`, and stays `None` until an answer — the
                 // pane renders that as "not asked", never as "no fields".
-                self.call_form.request_fields = None;
+                self.work.bench.call_form.request_fields = None;
                 let (Some(session), Some(store), Some(producer)) = (
-                    self.session.clone(),
-                    self.schema_store.clone(),
-                    self.call_form.producer.clone(),
+                    self.dep.session.clone(),
+                    self.dep.schema_store.clone(),
+                    self.work.bench.call_form.producer.clone(),
                 ) else {
                     return Task::none();
                 };
                 let Some(request) = self
+                    .dep
                     .slices
                     .as_ref()
                     .and_then(|s| s.get(&producer))
@@ -756,69 +498,71 @@ impl Zengui {
                 else {
                     // No declared request type: there is nothing to scaffold,
                     // and that is an answer.
-                    self.call_form.request_fields = Some(Vec::new());
+                    self.work.bench.call_form.request_fields = Some(Vec::new());
                     return Task::none();
                 };
                 services::value::request_schema(session, store, producer, request)
             }
             CallMsg::RequestSchema(fields) => {
-                self.call_form.request_fields = fields;
+                self.work.bench.call_form.request_fields = fields;
                 Task::none()
             }
             CallMsg::ScaffoldBody => {
-                if let Some(body) = self.call_form.scaffold() {
-                    self.call_form.body = body;
+                if let Some(body) = self.work.bench.call_form.scaffold() {
+                    self.work.bench.call_form.body = body;
                 }
                 Task::none()
             }
             CallMsg::TargetChanged(t) => {
-                self.call_form.target = t;
+                self.work.bench.call_form.target = t;
                 Task::none()
             }
             CallMsg::ParamsChanged(t) => {
-                self.call_form.params = t;
+                self.work.bench.call_form.params = t;
                 Task::none()
             }
             CallMsg::BodyChanged(t) => {
-                self.call_form.body = t;
+                self.work.bench.call_form.body = t;
                 Task::none()
             }
             CallMsg::AttachmentChanged(t) => {
-                self.call_form.attachment = t;
+                self.work.bench.call_form.attachment = t;
                 Task::none()
             }
             CallMsg::Submit => {
                 let (Some(session), Some(producer), Some(procedure)) = (
-                    self.session.clone(),
-                    self.call_form.producer.clone(),
-                    self.call_form.procedure.clone(),
+                    self.dep.session.clone(),
+                    self.work.bench.call_form.producer.clone(),
+                    self.work.bench.call_form.procedure.clone(),
                 ) else {
                     return Task::none();
                 };
-                let target = self.call_form.target.clone();
+                let target = self.work.bench.call_form.target.clone();
                 let params: Vec<String> = self
+                    .work
+                    .bench
                     .call_form
                     .params
                     .split(';')
                     .filter(|p| !p.trim().is_empty())
                     .map(str::to_string)
                     .collect();
-                let body = if self.call_form.body.trim().is_empty() {
+                let body = if self.work.bench.call_form.body.trim().is_empty() {
                     None
                 } else {
-                    Some(self.call_form.body.clone().into_bytes())
+                    Some(self.work.bench.call_form.body.clone().into_bytes())
                 };
                 // Verbatim beside the body — never schema-encoded (#126).
-                let attachment = if self.call_form.attachment.trim().is_empty() {
+                let attachment = if self.work.bench.call_form.attachment.trim().is_empty() {
                     None
                 } else {
-                    Some(self.call_form.attachment.clone().into_bytes())
+                    Some(self.work.bench.call_form.attachment.clone().into_bytes())
                 };
-                let base = self.settings.base.clone();
-                let timeout = self.settings.timeout();
-                let slices = self.slices.clone();
-                self.call_form.in_flight = true;
-                self.call_form.outcome = None;
+                let base = self.dep.base().to_string();
+                let timeout = self.dep.timeout();
+                let slices = self.dep.slices.clone();
+                self.work.bench.call_form.in_flight = true;
+                self.work.bench.call_form.outcome = None;
                 services::write::call(
                     session, base, target, producer, procedure, params, body, attachment, timeout,
                     slices,
@@ -840,7 +584,7 @@ impl Zengui {
                 // evidence. (A publication straddling a context switch rides
                 // the old session's Arc until stopped — a session-lifetime
                 // question, out of #109's scope.)
-                let form = &mut self.publish_form;
+                let form = &mut self.work.bench.publish_form;
                 form.in_flight = false;
                 form.error = None;
                 form.source = Some(outcome.prepared.source.clone());
@@ -854,7 +598,7 @@ impl Zengui {
                 match &outcome.publication {
                     Some(publication) => {
                         form.armed = true;
-                        self.publication = Some(RepeatLoad {
+                        self.work.bench.publication = Some(RepeatLoad {
                             publication: publication.clone(),
                             bytes: Arc::new(outcome.prepared.bytes.clone()),
                             attachment: outcome.attachment.clone(),
@@ -863,22 +607,22 @@ impl Zengui {
                     // One-shot: the task already undeclared.
                     None => {
                         form.armed = false;
-                        self.publication = None;
+                        self.work.bench.publication = None;
                     }
                 }
                 Task::none()
             }
             PublishMsg::Ready(Err(e)) => {
-                let form = &mut self.publish_form;
+                let form = &mut self.work.bench.publish_form;
                 form.in_flight = false;
                 form.armed = false;
                 form.error = Some(e.clone());
                 form.log(false, format!("refused: {e}"));
-                self.publication = None;
+                self.work.bench.publication = None;
                 Task::none()
             }
             PublishMsg::Tick => {
-                let Some(load) = self.publication.as_ref() else {
+                let Some(load) = self.work.bench.publication.as_ref() else {
                     return Task::none();
                 };
                 let publication = load.publication.clone();
@@ -887,21 +631,26 @@ impl Zengui {
                 services::write::repeat(publication, bytes, attachment)
             }
             PublishMsg::Sent(Ok(n)) => {
-                let key = self.publish_form.key.clone();
-                self.publish_form
+                let key = self.work.bench.publish_form.key.clone();
+                self.work
+                    .bench
+                    .publish_form
                     .log(true, format!("sent {n} bytes → {key}"));
                 Task::none()
             }
             PublishMsg::Sent(Err(e)) => {
                 // A failed repeat disarms: a stream that silently stopped
                 // working would keep claiming it was publishing.
-                self.publish_form.log(false, format!("send failed: {e}"));
-                self.publish_form.armed = false;
-                self.publication = None;
+                self.work
+                    .bench
+                    .publish_form
+                    .log(false, format!("send failed: {e}"));
+                self.work.bench.publish_form.armed = false;
+                self.work.bench.publication = None;
                 Task::none()
             }
             PublishMsg::Retired(result) => {
-                let form = &mut self.publish_form;
+                let form = &mut self.work.bench.publish_form;
                 form.in_flight = false;
                 match result {
                     Ok(matching) => {
@@ -936,9 +685,13 @@ impl Zengui {
             PublishMsg::Stopped(result) => {
                 match result {
                     Ok(()) => self
+                        .work
+                        .bench
                         .publish_form
                         .log(true, "stopped — publication undeclared"),
                     Err(e) => self
+                        .work
+                        .bench
                         .publish_form
                         .log(false, format!("undeclare failed: {e}")),
                 }
@@ -946,58 +699,60 @@ impl Zengui {
             }
             PublishMsg::KeyChanged(k) => {
                 // Classify as you type, through the same ladder the tree uses.
-                self.publish_form.facts = (!k.trim().is_empty()).then(|| {
-                    zenkey_fleet::describe_key(&self.settings.base, &k, self.slices.as_deref())
+                self.work.bench.publish_form.facts = (!k.trim().is_empty()).then(|| {
+                    zenkey_fleet::describe_key(self.dep.base(), &k, self.dep.slices.as_deref())
                         .facts
                 });
                 // #158: the declared profile drives the picker until the user
                 // takes it over — and stops driving it the moment they do.
-                if !self.publish_form.qos_touched {
-                    let declared = view::publish::declared_qos(self.publish_form.facts.as_ref());
-                    self.publish_form.qos = view::publish::QosChoice(
+                if !self.work.bench.publish_form.qos_touched {
+                    let declared =
+                        view::publish::declared_qos(self.work.bench.publish_form.facts.as_ref());
+                    self.work.bench.publish_form.qos = view::publish::QosChoice(
                         declared.unwrap_or(zenkey::qos::QosProfile::Sampled),
                     );
                 }
-                self.publish_form.key = k;
+                self.work.bench.publish_form.key = k;
                 Task::none()
             }
             PublishMsg::BodyChanged(b) => {
-                self.publish_form.body = b;
+                self.work.bench.publish_form.body = b;
                 Task::none()
             }
             PublishMsg::QosPicked(q) => {
-                self.publish_form.qos = q;
-                self.publish_form.qos_touched = true;
+                self.work.bench.publish_form.qos = q;
+                self.work.bench.publish_form.qos_touched = true;
                 Task::none()
             }
             PublishMsg::EncodingChanged(e) => {
-                self.publish_form.encoding = e;
+                self.work.bench.publish_form.encoding = e;
                 Task::none()
             }
             PublishMsg::AttachmentChanged(a) => {
-                self.publish_form.attachment = a;
+                self.work.bench.publish_form.attachment = a;
                 Task::none()
             }
             PublishMsg::RawToggled(b) => {
-                self.publish_form.raw = b;
+                self.work.bench.publish_form.raw = b;
                 Task::none()
             }
             PublishMsg::RepeatToggled(b) => {
-                self.publish_form.repeat = b;
+                self.work.bench.publish_form.repeat = b;
                 // Turning repeat off mid-stream stops it, rather than leaving
                 // an armed publication with the checkbox saying otherwise.
-                if !b && self.publication.is_some() {
+                if !b && self.work.bench.publication.is_some() {
                     return self.update_publish(PublishMsg::Stop);
                 }
                 Task::none()
             }
             PublishMsg::IntervalChanged(i) => {
-                self.publish_form.interval = i;
+                self.work.bench.publish_form.interval = i;
                 Task::none()
             }
             PublishMsg::Stop => {
-                self.publish_form.armed = false;
-                let Some(RepeatLoad { publication, .. }) = self.publication.take() else {
+                self.work.bench.publish_form.armed = false;
+                let Some(RepeatLoad { publication, .. }) = self.work.bench.publication.take()
+                else {
                     return Task::none();
                 };
                 // Acknowledged undeclare when we hold the last reference; a
@@ -1008,14 +763,14 @@ impl Zengui {
                 }
             }
             PublishMsg::RetireIKnowToggled(b) => {
-                self.publish_form.retire_i_know = b;
+                self.work.bench.publish_form.retire_i_know = b;
                 Task::none()
             }
             PublishMsg::Retire => {
-                let Some(session) = self.session.clone() else {
+                let Some(session) = self.dep.session.clone() else {
                     return Task::none();
                 };
-                let key = self.publish_form.key.trim().to_string();
+                let key = self.work.bench.publish_form.key.trim().to_string();
                 if key.is_empty() {
                     return Task::none();
                 }
@@ -1025,31 +780,34 @@ impl Zengui {
                 // The engine is the judge (check_retire, RFC 04 §1.2 v1.12);
                 // the pane's checkbox only arms the force.
                 if let Err(e) = zenkey_fleet::check_retire(
-                    &self.settings.base,
+                    self.dep.base(),
                     &key,
-                    self.slices.as_deref(),
-                    self.publish_form.retire_i_know,
+                    self.dep.slices.as_deref(),
+                    self.work.bench.publish_form.retire_i_know,
                 ) {
                     let e = e.to_string();
-                    self.publish_form.error = Some(e.clone());
-                    self.publish_form.log(false, format!("refused: {e}"));
+                    self.work.bench.publish_form.error = Some(e.clone());
+                    self.work
+                        .bench
+                        .publish_form
+                        .log(false, format!("refused: {e}"));
                     return stop;
                 }
-                self.publish_form.in_flight = true;
-                self.publish_form.error = None;
+                self.work.bench.publish_form.in_flight = true;
+                self.work.bench.publish_form.error = None;
                 let send = services::write::retire(session, key);
                 Task::batch([stop, send])
             }
             PublishMsg::Send => {
                 let (Some(session), Some(store)) =
-                    (self.session.clone(), self.schema_store.clone())
+                    (self.dep.session.clone(), self.dep.schema_store.clone())
                 else {
                     return Task::none();
                 };
                 // A new send replaces any armed publication: two publishers on
                 // one key from one pane would double every sample.
                 let stop = self.update_publish(PublishMsg::Stop);
-                let form = &self.publish_form;
+                let form = &self.work.bench.publish_form;
                 let key = form.key.trim().to_string();
                 let body = form.body.clone().into_bytes();
                 let qos = form.qos.0;
@@ -1059,14 +817,14 @@ impl Zengui {
                 } else {
                     zenkey_fleet::PrepareMode::Encode
                 };
-                let base = self.settings.base.clone();
-                let slices = self.slices.clone();
+                let base = self.dep.base().to_string();
+                let slices = self.dep.slices.clone();
                 let repeat = form.repeat;
                 // Verbatim, never schema-encoded (#117); empty = none.
                 let attachment: Option<Arc<Vec<u8>>> = (!form.attachment.is_empty())
                     .then(|| Arc::new(form.attachment.clone().into_bytes()));
-                self.publish_form.in_flight = true;
-                self.publish_form.error = None;
+                self.work.bench.publish_form.in_flight = true;
+                self.work.bench.publish_form.error = None;
                 let send = services::write::publish(services::write::Publish {
                     session,
                     store,
@@ -1098,33 +856,19 @@ impl Zengui {
     /// rather than projected evidence. What cannot be cleared here — a task
     /// already in flight — is judged at its landing instead: doctor, blob
     /// probe/fetch and node_info each carry the base they ran against.
+    /// Point at a different fleet, and stop claiming anything about the old
+    /// one.
+    ///
+    /// Four of the six sub-states, and that number is the finding: the issue
+    /// assumed this could be one field replacement. Two of the four delegate,
+    /// one is a struct replacement, and exactly one line reaches across a
+    /// group boundary — `expanded`, because a stale path re-expands a
+    /// coincidentally matching new subtree (#179).
     fn forget_deployment(&mut self) {
-        self.facts.clear();
-        self.roster.clear();
-        self.node_selected = None;
-        self.node_detail = view::nodes::DetailState::NotAsked;
-        self.doctor.clear();
-        self.blob.clear();
-        self.admin.clear();
-        self.my_watches.clear();
-        self.my_watch_paths.clear();
-        self.scope_watches.clear();
-        self.seeding.clear();
-        self.seeding_paths.clear();
-        self.seed_totals = (0, 0, 0);
-        self.seeded_watches = 0;
-        self.skeleton = None;
-        self.slices = None;
-        self.slice_source = view::status::SliceSource::None;
-        self.merged_cache = None;
-        self.bases.clear();
-        self.base_options = vec![String::new()];
-        // #179: this was the one collection `forget_deployment` did not clear,
-        // so switching base left expansion keyed to paths that no longer
-        // exist — a leak, and a stale path re-expands a coincidentally
-        // matching new subtree. (`self.admin.clear()` above already resets
-        // `expanded_raw`, which the issue assumed it did not.)
-        self.expanded.clear();
+        self.dep.pointed_at();
+        self.obs.forget_coverage();
+        self.work.verdicts.forget();
+        self.tree.expanded.clear();
     }
 
     /// One key press, in context.
@@ -1142,14 +886,14 @@ impl Zengui {
         use view::palette::PaletteMsg;
 
         if crate::shortcuts::is_escape(key) {
-            if self.palette.is_open() {
-                self.palette.close();
-            } else if self.selected.is_some() {
+            if self.chrome.palette.is_open() {
+                self.chrome.palette.close();
+            } else if self.sub.selected.is_some() {
                 return self.update(Message::Subject(SubjectMsg::SelectKey(None)));
             }
             return Task::none();
         }
-        if self.palette.is_open() {
+        if self.chrome.palette.is_open() {
             match key {
                 Key::Named(Named::ArrowDown) => {
                     return self.update_palette(PaletteMsg::CursorDown);
@@ -1177,33 +921,34 @@ impl Zengui {
         use view::palette::PaletteMsg;
         match msg {
             PaletteMsg::Open(overlay) => {
-                self.palette.open(overlay);
+                self.chrome.palette.open(overlay);
                 Task::none()
             }
             PaletteMsg::Close => {
-                self.palette.close();
+                self.chrome.palette.close();
                 Task::none()
             }
             PaletteMsg::QueryChanged(q) => {
-                self.palette.query = q;
+                self.chrome.palette.query = q;
                 // A new query re-ranks the list, so the old cursor points at a
                 // different row — start from the best match again.
-                self.palette.cursor = 0;
+                self.chrome.palette.cursor = 0;
                 Task::none()
             }
             PaletteMsg::CursorUp => {
-                self.palette.cursor = self.palette.cursor.saturating_sub(1);
+                self.chrome.palette.cursor = self.chrome.palette.cursor.saturating_sub(1);
                 Task::none()
             }
             PaletteMsg::CursorDown => {
-                self.palette.cursor = self
+                self.chrome.palette.cursor = self
+                    .chrome
                     .palette
                     .cursor
                     .saturating_add(1)
                     .min(self.palette_row_count().saturating_sub(1));
                 Task::none()
             }
-            PaletteMsg::Activate => self.run_palette_row(self.palette.cursor),
+            PaletteMsg::Activate => self.run_palette_row(self.chrome.palette.cursor),
             PaletteMsg::Pick(i) => self.run_palette_row(i),
         }
     }
@@ -1213,17 +958,17 @@ impl Zengui {
     /// frame (#110).
     fn palette_row_count(&self) -> usize {
         use view::palette::{Overlay, actions, rank};
-        match self.palette.overlay {
+        match self.chrome.palette.overlay {
             Overlay::Commands => {
-                let items = actions(&self.context_form.known);
-                rank(&items, &self.palette.query, |a| a.label.as_str()).len()
+                let items = actions(&self.work.bench.context_form.known);
+                rank(&items, &self.chrome.palette.query, |a| a.label.as_str()).len()
             }
             Overlay::Keys => {
                 // Observed keys only — never a guess (O4): the jump-to
                 // overlay offers what is on the bus, not what a registry
                 // says could be.
-                let keys: Vec<&str> = self.facts.keys().collect();
-                rank(&keys, &self.palette.query, |k| *k).len()
+                let keys: Vec<&str> = self.dep.facts.keys().collect();
+                rank(&keys, &self.chrome.palette.query, |k| *k).len()
             }
             _ => 0,
         }
@@ -1233,15 +978,15 @@ impl Zengui {
     /// the palette ever clones a key `String` (#110): the activated row.
     fn palette_row(&self, index: usize) -> Option<Message> {
         use view::palette::{Overlay, actions, rank};
-        match self.palette.overlay {
+        match self.chrome.palette.overlay {
             Overlay::Commands => {
-                let items = actions(&self.context_form.known);
-                let order = rank(&items, &self.palette.query, |a| a.label.as_str());
+                let items = actions(&self.work.bench.context_form.known);
+                let order = rank(&items, &self.chrome.palette.query, |a| a.label.as_str());
                 order.get(index).map(|i| items[*i].message.clone())
             }
             Overlay::Keys => {
-                let keys: Vec<&str> = self.facts.keys().collect();
-                let order = rank(&keys, &self.palette.query, |k| *k);
+                let keys: Vec<&str> = self.dep.facts.keys().collect();
+                let order = rank(&keys, &self.chrome.palette.query, |k| *k);
                 order
                     .get(index)
                     .map(|i| Message::Subject(SubjectMsg::SelectKey(Some(keys[*i].to_string()))))
@@ -1256,10 +1001,10 @@ impl Zengui {
         };
         // Jumping to a key also shows it: selecting without switching panes
         // would look like nothing happened.
-        if matches!(self.palette.overlay, view::palette::Overlay::Keys) {
-            self.right_pane = RightPane::Detail;
+        if matches!(self.chrome.palette.overlay, view::palette::Overlay::Keys) {
+            self.work.right_pane = RightPane::Detail;
         }
-        self.palette.close();
+        self.chrome.palette.close();
         self.update(message)
     }
 
@@ -1277,47 +1022,47 @@ impl Zengui {
                 self.update(Message::Bus(BusMsg::SessionOpened(Ok(session))))
             }
             ContextMsg::Switched(Err(e)) => {
-                self.link = LinkState::Failed(e.clone());
-                self.context_form.status = Some(Err(format!("could not connect: {e}")));
+                self.obs.link = LinkState::Failed(e.clone());
+                self.work.bench.context_form.status = Some(Err(format!("could not connect: {e}")));
                 Task::none()
             }
             ContextMsg::NameChanged(v) => {
-                self.context_form.name = v;
+                self.work.bench.context_form.name = v;
                 Task::none()
             }
             ContextMsg::ConnectChanged(v) => {
-                self.context_form.connect = v;
+                self.work.bench.context_form.connect = v;
                 Task::none()
             }
             ContextMsg::ListenChanged(v) => {
-                self.context_form.listen = v;
+                self.work.bench.context_form.listen = v;
                 Task::none()
             }
             ContextMsg::BaseChanged(v) => {
-                self.context_form.base = v;
+                self.work.bench.context_form.base = v;
                 Task::none()
             }
             ContextMsg::ZenohConfigChanged(p) => {
-                self.context_form.zenoh_config = p;
+                self.work.bench.context_form.zenoh_config = p;
                 Task::none()
             }
             ContextMsg::RegistryChanged(v) => {
-                self.context_form.registry = v;
+                self.work.bench.context_form.registry = v;
                 Task::none()
             }
             ContextMsg::TimeoutChanged(v) => {
-                self.context_form.timeout = v;
+                self.work.bench.context_form.timeout = v;
                 Task::none()
             }
             ContextMsg::ScoutingToggled(b) => {
-                self.context_form.scouting = b;
+                self.work.bench.context_form.scouting = b;
                 Task::none()
             }
             ContextMsg::Isolate => {
                 // RFC 09 §0.1's isolated-verification recipe, one click:
                 // multicast off, explicit endpoints only.
-                self.context_form.scouting = false;
-                self.context_form.status = Some(Ok(
+                self.work.bench.context_form.scouting = false;
+                self.work.bench.context_form.status = Some(Ok(
                     "multicast scouting off — an empty result now means \"nothing on these \
                      endpoints\", never \"nothing on the network\" (RFC 09 §0.1)"
                         .into(),
@@ -1325,22 +1070,23 @@ impl Zengui {
                 Task::none()
             }
             ContextMsg::Load => {
-                let Some(name) = self.context_form.active.clone() else {
-                    self.context_form.status = Some(Err("pick a context first".into()));
+                let Some(name) = self.work.bench.context_form.active.clone() else {
+                    self.work.bench.context_form.status = Some(Err("pick a context first".into()));
                     return Task::none();
                 };
                 match zenkey_fleet::context_store::load() {
                     Ok(config) => match config.contexts.get(&name) {
                         Some(stored) => {
-                            self.context_form.load_from(&name, stored);
-                            self.context_form.status = Some(Ok(format!("loaded {name}")));
+                            self.work.bench.context_form.load_from(&name, stored);
+                            self.work.bench.context_form.status =
+                                Some(Ok(format!("loaded {name}")));
                         }
                         None => {
-                            self.context_form.status =
+                            self.work.bench.context_form.status =
                                 Some(Err(format!("{name} is no longer in the config")));
                         }
                     },
-                    Err(e) => self.context_form.status = Some(Err(e.to_string())),
+                    Err(e) => self.work.bench.context_form.status = Some(Err(e.to_string())),
                 }
                 Task::none()
             }
@@ -1355,13 +1101,13 @@ impl Zengui {
                 self.switch_to_form_context()
             }
             ContextMsg::Selected(name) => {
-                self.context_form.active = Some(name.clone());
+                self.work.bench.context_form.active = Some(name.clone());
                 match zenkey_fleet::context_store::load() {
                     Ok(mut config) => match config.contexts.get(&name).cloned() {
                         Some(stored) => {
-                            self.context_form.load_from(&name, &stored);
+                            self.work.bench.context_form.load_from(&name, &stored);
                             self.apply_context(stored);
-                            self.prefs.context = Some(name.clone());
+                            self.chrome.prefs.context = Some(name.clone());
                             self.remember();
                             // Move the store's own pointer too, not just this
                             // window's memory of it: the store is shared, and
@@ -1369,21 +1115,22 @@ impl Zengui {
                             // still naming the old one (issue #189).
                             config.current = Some(name.clone());
                             if let Err(e) = zenkey_fleet::context_store::save(&config) {
-                                self.context_form.status = Some(Err(format!(
+                                self.work.bench.context_form.status = Some(Err(format!(
                                     "switched to {name}, but the shared `current` \
                                      pointer could not be written: {e}"
                                 )));
                                 return self.reopen_session();
                             }
-                            self.context_form.status = Some(Ok(format!("switched to {name}")));
+                            self.work.bench.context_form.status =
+                                Some(Ok(format!("switched to {name}")));
                             return self.reopen_session();
                         }
                         None => {
-                            self.context_form.status =
+                            self.work.bench.context_form.status =
                                 Some(Err(format!("{name} is no longer in the config")));
                         }
                     },
-                    Err(e) => self.context_form.status = Some(Err(e.to_string())),
+                    Err(e) => self.work.bench.context_form.status = Some(Err(e.to_string())),
                 }
                 Task::none()
             }
@@ -1398,35 +1145,35 @@ impl Zengui {
     /// for the next field somebody adds to `StoredContext`.
     fn save_context(&mut self, select: bool) -> bool {
         // Validate before touching the store, so a rejected form leaves it be.
-        if let Err(e) = self.context_form.to_stored() {
-            self.context_form.status = Some(Err(e));
+        if let Err(e) = self.work.bench.context_form.to_stored() {
+            self.work.bench.context_form.status = Some(Err(e));
             return false;
         }
-        let name = self.context_form.name.trim().to_string();
+        let name = self.work.bench.context_form.name.trim().to_string();
         let mut config = match zenkey_fleet::context_store::load() {
             Ok(c) => c,
             Err(e) => {
-                self.context_form.status = Some(Err(e.to_string()));
+                self.work.bench.context_form.status = Some(Err(e.to_string()));
                 return false;
             }
         };
-        let form = self.context_form.clone();
+        let form = self.work.bench.context_form.clone();
         let mut applied = Ok(());
         zenkey_fleet::context_store::upsert(&mut config, &name, |c| applied = form.apply_to(c));
         if let Err(e) = applied {
-            self.context_form.status = Some(Err(e));
+            self.work.bench.context_form.status = Some(Err(e));
             return false;
         }
         if select {
             config.current = Some(name.clone());
         }
         if let Err(e) = zenkey_fleet::context_store::save(&config) {
-            self.context_form.status = Some(Err(e.to_string()));
+            self.work.bench.context_form.status = Some(Err(e.to_string()));
             return false;
         }
         self.refresh_contexts();
-        self.context_form.active = Some(name.clone());
-        self.context_form.status = Some(Ok(format!(
+        self.work.bench.context_form.active = Some(name.clone());
+        self.work.bench.context_form.status = Some(Ok(format!(
             "saved {name} to {}",
             zenkey_fleet::context_store::config_path().display()
         )));
@@ -1436,9 +1183,9 @@ impl Zengui {
     /// Re-read the context names from the shared config.
     fn refresh_contexts(&mut self) {
         if let Ok(config) = zenkey_fleet::context_store::load() {
-            self.context_form.known = config.contexts.keys().cloned().collect();
-            if self.context_form.active.is_none() {
-                self.context_form.active = config.current.clone();
+            self.work.bench.context_form.known = config.contexts.keys().cloned().collect();
+            if self.work.bench.context_form.active.is_none() {
+                self.work.bench.context_form.active = config.current.clone();
             }
         }
     }
@@ -1447,29 +1194,29 @@ impl Zengui {
     /// `Cli::settings_with` applies, minus the flags, because a context picked
     /// in-app *is* the explicit choice.
     fn apply_context(&mut self, stored: zenkey_fleet::StoredContext) {
-        self.settings.base = stored.base.unwrap_or_default();
-        self.settings.connect = stored.connect;
-        self.settings.listen = stored.listen;
-        self.settings.scouting = stored.scouting;
-        self.settings.zenoh_config = stored.zenoh_config;
+        self.dep.settings.base = stored.base.unwrap_or_default();
+        self.dep.settings.connect = stored.connect;
+        self.dep.settings.listen = stored.listen;
+        self.dep.settings.scouting = stored.scouting;
+        self.dep.settings.zenoh_config = stored.zenoh_config;
         if !stored.registry.is_empty() {
-            self.settings.registry = stored.registry;
+            self.dep.settings.registry = stored.registry;
         }
         if let Some(t) = stored.timeout {
-            self.settings.timeout_secs = t;
+            self.dep.settings.timeout_secs = t;
         }
     }
 
     fn switch_to_form_context(&mut self) -> Task<Message> {
-        let stored = match self.context_form.to_stored() {
+        let stored = match self.work.bench.context_form.to_stored() {
             Ok(s) => s,
             Err(e) => {
-                self.context_form.status = Some(Err(e));
+                self.work.bench.context_form.status = Some(Err(e));
                 return Task::none();
             }
         };
         self.apply_context(stored);
-        self.prefs.context = Some(self.context_form.name.trim().to_string());
+        self.chrome.prefs.context = Some(self.work.bench.context_form.name.trim().to_string());
         self.remember();
         self.reopen_session()
     }
@@ -1480,14 +1227,14 @@ impl Zengui {
     /// `MonitorStarted` is what retires the old pump; nothing here has to
     /// coordinate with it.
     fn reopen_session(&mut self) -> Task<Message> {
-        self.link = LinkState::Connecting;
-        self.monitor = None;
-        self.session = None;
+        self.obs.link = LinkState::Connecting;
+        self.obs.monitor = None;
+        self.dep.session = None;
         services::link::reopen(
-            self.settings.zenoh_config.clone(),
-            self.settings.connect.clone(),
-            self.settings.listen.clone(),
-            self.settings.scouting,
+            self.dep.settings.zenoh_config.clone(),
+            self.dep.settings.connect.clone(),
+            self.dep.settings.listen.clone(),
+            self.dep.settings.scouting,
         )
     }
 
@@ -1498,38 +1245,38 @@ impl Zengui {
         use view::echo::EchoMsg;
         match msg {
             EchoMsg::FilterChanged(f) => {
-                self.echo_view.filter = f;
+                self.work.echo.echo_view.filter = f;
                 Task::none()
             }
             EchoMsg::KeyFilterChanged(f) => {
-                self.echo_view.set_key_filter(f);
+                self.work.echo.echo_view.set_key_filter(f);
                 Task::none()
             }
             EchoMsg::FollowToggled => {
-                let seq = self.echo.next_seq();
-                if self.echo_view.following {
-                    self.echo_view.pause(seq);
+                let seq = self.work.echo.echo.next_seq();
+                if self.work.echo.echo_view.following {
+                    self.work.echo.echo_view.pause(seq);
                 } else {
-                    self.echo_view.resume(seq);
+                    self.work.echo.echo_view.resume(seq);
                 }
                 Task::none()
             }
             EchoMsg::Clear => {
-                self.echo.clear();
+                self.work.echo.echo.clear();
                 Task::none()
             }
             EchoMsg::LineClicked(key) => {
                 // Drill-through reuses the selection path rather than being a
                 // second way to open the inspector.
-                self.right_pane = RightPane::Detail;
+                self.work.right_pane = RightPane::Detail;
                 self.update(Message::Subject(SubjectMsg::SelectKey(Some(key))))
             }
             EchoMsg::Export => {
                 let text = view::echo::export(
-                    &self.echo,
-                    &self.echo_view,
-                    self.selected.as_deref(),
-                    &self.settings.base,
+                    &self.work.echo.echo,
+                    &self.work.echo.echo_view,
+                    self.sub.selected.as_deref(),
+                    self.dep.base(),
                 );
                 iced::clipboard::write(text)
             }
@@ -1540,19 +1287,19 @@ impl Zengui {
         use view::nodes::{DetailState, NodesMsg};
         match msg {
             NodesMsg::Selected(origin) => {
-                if self.node_selected.as_deref() == Some(origin.as_str()) {
+                if self.work.verdicts.node_selected.as_deref() == Some(origin.as_str()) {
                     // Re-click deselects (and drops the detail state).
-                    self.node_selected = None;
-                    self.node_detail = DetailState::NotAsked;
+                    self.work.verdicts.node_selected = None;
+                    self.work.verdicts.node_detail = DetailState::NotAsked;
                     return Task::none();
                 }
-                self.node_selected = Some(origin.clone());
-                self.node_detail = DetailState::Loading(origin.clone());
-                let Some(session) = self.session.clone() else {
+                self.work.verdicts.node_selected = Some(origin.clone());
+                self.work.verdicts.node_detail = DetailState::Loading(origin.clone());
+                let Some(session) = self.dep.session.clone() else {
                     return Task::none();
                 };
-                let base = self.settings.base.clone();
-                let timeout = self.settings.timeout();
+                let base = self.dep.base().to_string();
+                let timeout = self.dep.timeout();
                 // The pane's one data-plane cost: a one-shot node_info on
                 // selection (laziness ground rule, #84/#85).
                 services::sweep::node_info(session, base, origin, timeout)
@@ -1563,15 +1310,15 @@ impl Zengui {
                 // Origin ids are base-independent (#109): re-selecting the
                 // same host after a base switch would otherwise admit the old
                 // deployment's reply through the selection-only check.
-                if self.node_selected.as_deref() == Some(origin.as_str())
-                    && ran_against == self.settings.base
+                if self.work.verdicts.node_selected.as_deref() == Some(origin.as_str())
+                    && ran_against == self.dep.base()
                 {
-                    self.node_detail = DetailState::Loaded(origin, outcome);
+                    self.work.verdicts.node_detail = DetailState::Loaded(origin, outcome);
                 }
                 Task::none()
             }
             NodesMsg::ShowInTree(origin) => {
-                let path = scope::origin_display_path(&self.settings.base, &origin);
+                let path = scope::origin_display_path(self.dep.base(), &origin);
                 // Expand every prefix so the subtree is visible; select
                 // WITHOUT fetching (a subtree prefix is not a concrete key).
                 let mut prefix = String::new();
@@ -1580,10 +1327,10 @@ impl Zengui {
                         prefix.push('/');
                     }
                     prefix.push_str(chunk);
-                    self.expanded.open(prefix.clone());
+                    self.tree.expanded.open(prefix.clone());
                 }
-                self.selected = Some(path);
-                self.reflatten();
+                self.sub.selected = Some(path);
+                self.tree.reflatten(&self.dep, &self.obs);
                 Task::none()
             }
         }
@@ -1593,11 +1340,11 @@ impl Zengui {
         use view::doctor::DoctorMsg;
         match msg {
             DoctorMsg::DeepToggled(deep) => {
-                self.doctor.deep = deep;
+                self.work.verdicts.doctor.deep = deep;
                 Task::none()
             }
             DoctorMsg::ListenChanged(t) => {
-                self.doctor.listen = t;
+                self.work.verdicts.doctor.listen = t;
                 Task::none()
             }
             DoctorMsg::ReaskSchemas => {
@@ -1605,29 +1352,29 @@ impl Zengui {
                 // decode that needs a schema asks the bus. Nothing is fetched
                 // here — an explorer retrieves nothing it was not asked for
                 // (#85), and "re-ask" is a permission, not a sweep.
-                if let Some(store) = self.schema_store.as_ref() {
+                if let Some(store) = self.dep.schema_store.as_ref() {
                     store.forget_all();
-                    self.doctor.schemas_forgotten += 1;
+                    self.work.verdicts.doctor.schemas_forgotten += 1;
                 }
                 Task::none()
             }
             DoctorMsg::Run => {
-                if self.doctor.in_flight {
+                if self.work.verdicts.doctor.in_flight {
                     return Task::none();
                 }
-                let Some(session) = self.session.clone() else {
-                    self.doctor.error = Some("no session — connect first".into());
+                let Some(session) = self.dep.session.clone() else {
+                    self.work.verdicts.doctor.error = Some("no session — connect first".into());
                     return Task::none();
                 };
-                self.doctor.in_flight = true;
-                self.doctor.error = None;
-                let base = self.settings.base.clone();
-                let timeout = self.settings.timeout();
-                let deep = self.doctor.deep;
-                let listen = self.doctor.listen_window();
+                self.work.verdicts.doctor.in_flight = true;
+                self.work.verdicts.doctor.error = None;
+                let base = self.dep.base().to_string();
+                let timeout = self.dep.timeout();
+                let deep = self.work.verdicts.doctor.deep;
+                let listen = self.work.verdicts.doctor.listen_window();
                 // Locals come from the registry DIRS only — never the union
                 // set, which would diff the bus against itself.
-                let dirs = self.settings.registry.clone();
+                let dirs = self.dep.settings.registry.clone();
                 services::sweep::doctor(
                     session,
                     base,
@@ -1641,12 +1388,14 @@ impl Zengui {
                 )
             }
             DoctorMsg::Done(outcome) => {
-                let base = self.settings.base.clone();
-                self.doctor.finish(outcome, &base);
+                let base = self.dep.base().to_string();
+                self.work.verdicts.doctor.finish(outcome, &base);
                 Task::none()
             }
             DoctorMsg::FindingClicked(index) => {
                 let Some(finding) = self
+                    .work
+                    .verdicts
                     .doctor
                     .current
                     .as_deref()
@@ -1654,7 +1403,7 @@ impl Zengui {
                 else {
                     return Task::none();
                 };
-                match crate::doctor::finding_target(finding, &self.settings.base) {
+                match crate::doctor::finding_target(finding, self.dep.base()) {
                     // A concrete key: select in the tree (with the usual
                     // on-demand fetch); the right pane stays on Doctor so
                     // the finding list is not lost.
@@ -1665,14 +1414,14 @@ impl Zengui {
                                 prefix.push('/');
                             }
                             prefix.push_str(chunk);
-                            self.expanded.open(prefix.clone());
+                            self.tree.expanded.open(prefix.clone());
                         }
-                        self.reflatten();
+                        self.tree.reflatten(&self.dep, &self.obs);
                         self.update(Message::Subject(SubjectMsg::SelectKey(Some(key))))
                     }
                     // An origin/producer subject: land on the nodes pane.
                     Some(crate::doctor::Target::Node(origin)) => {
-                        self.right_pane = RightPane::Nodes;
+                        self.work.right_pane = RightPane::Nodes;
                         self.update_nodes(view::nodes::NodesMsg::Selected(origin))
                     }
                     None => Task::none(),
@@ -1689,20 +1438,20 @@ impl Zengui {
     /// `live_map()` returns `None` while unseeded, so an unasked join renders
     /// as "not asked" rather than as "nobody serves it" (O4).
     fn refresh_blob_list(&mut self) {
-        let Some(slices) = self.slices.as_deref() else {
-            self.blob.list = None;
+        let Some(slices) = self.dep.slices.as_deref() else {
+            self.work.verdicts.blob.list = None;
             return;
         };
-        let source = match self.slice_source {
+        let source = match self.dep.slice_source {
             view::status::SliceSource::Union { .. } => zenkey_fleet::report::BlobListSource::Union,
             view::status::SliceSource::Dirs { .. } => {
                 zenkey_fleet::report::BlobListSource::RegistryDirs
             }
             _ => zenkey_fleet::report::BlobListSource::Bus,
         };
-        self.blob.list = Some(zenkey_fleet::blob_list(
+        self.work.verdicts.blob.list = Some(zenkey_fleet::blob_list(
             slices.slices(),
-            self.roster.live_map().as_ref(),
+            self.work.verdicts.roster.live_map().as_ref(),
             source,
         ));
     }
@@ -1714,73 +1463,75 @@ impl Zengui {
         use view::media::MediaMsg as M;
         match msg {
             M::OriginChanged(s) => {
-                self.media.origin = s;
+                self.work.bench.media.origin = s;
                 Task::none()
             }
             M::ProducerChanged(s) => {
-                self.media.producer = s;
+                self.work.bench.media.producer = s;
                 Task::none()
             }
             M::SubpathChanged(s) => {
-                self.media.subpath = s;
+                self.work.bench.media.subpath = s;
                 Task::none()
             }
             M::DeclPicked { producer, path } => {
-                self.media.producer = producer;
-                self.media.subpath = path;
+                self.work.bench.media.producer = producer;
+                self.work.bench.media.subpath = path;
                 // A convenience, not a guess: if exactly one origin is on
                 // the roster, prefill it; otherwise the operator names one.
-                if self.media.origin.is_empty() {
+                if self.work.bench.media.origin.is_empty() {
                     let hosts: Vec<&String> = self
+                        .work
+                        .verdicts
                         .roster
                         .iter()
                         .map(|(origin, _)| origin)
                         .filter(|o| o.starts_with("h-"))
                         .collect();
                     if let [only] = hosts.as_slice() {
-                        self.media.origin = (*only).clone();
+                        self.work.bench.media.origin = (*only).clone();
                     }
                 }
                 Task::none()
             }
             M::View => {
-                let Some(monitor) = self.monitor.clone() else {
-                    self.media.error = Some("no session — connect first".into());
+                let Some(monitor) = self.obs.monitor.clone() else {
+                    self.work.bench.media.error = Some("no session — connect first".into());
                     return Task::none();
                 };
                 let key = match crate::scope::media_key(
-                    &self.settings.base,
-                    self.media.origin.trim(),
-                    self.media.producer.trim(),
-                    self.media.subpath.trim(),
+                    self.dep.base(),
+                    self.work.bench.media.origin.trim(),
+                    self.work.bench.media.producer.trim(),
+                    self.work.bench.media.subpath.trim(),
                 ) {
                     Ok(k) => k,
                     Err(e) => {
-                        self.media.error = Some(e);
+                        self.work.bench.media.error = Some(e);
                         return Task::none();
                     }
                 };
-                self.media.error = None;
+                self.work.bench.media.error = None;
                 // One stream at a time: release the previous watch first.
                 let release = self.stop_media_watch();
-                self.media.viewing = Some(view::media::Viewing::new(key.clone()));
+                self.work.bench.media.viewing = Some(view::media::Viewing::new(key.clone()));
                 let declare = services::watch::media(monitor, key);
                 Task::batch([release, declare])
             }
             M::Watched(Ok(id)) => {
-                if let Some(v) = &mut self.media.viewing {
+                if let Some(v) = &mut self.work.bench.media.viewing {
                     v.watch = Some(id);
                 }
                 Task::none()
             }
             M::Watched(Err(e)) => {
-                self.media.error = Some(e);
-                self.media.viewing = None;
+                self.work.bench.media.error = Some(e);
+                self.work.bench.media.viewing = None;
                 Task::none()
             }
             M::Stop => {
                 let release = self.stop_media_watch();
-                self.media.viewing = None;
+                self.work.bench.media.viewing = None;
                 release
             }
             M::Stopped => Task::none(),
@@ -1791,8 +1542,8 @@ impl Zengui {
     /// cost zero subscriptions" half of #69's contract.
     fn stop_media_watch(&mut self) -> Task<Message> {
         let (Some(monitor), Some(id)) = (
-            self.monitor.clone(),
-            self.media.viewing.as_ref().and_then(|v| v.watch),
+            self.obs.monitor.clone(),
+            self.work.bench.media.viewing.as_ref().and_then(|v| v.watch),
         ) else {
             return Task::none();
         };
@@ -1803,23 +1554,23 @@ impl Zengui {
         use view::blob::BlobMsg;
         match msg {
             BlobMsg::TargetChanged(t) => {
-                self.blob.set_target(t);
+                self.work.verdicts.blob.set_target(t);
                 Task::none()
             }
             BlobMsg::RootChanged(t) => {
-                self.blob.root_input = t;
+                self.work.verdicts.blob.root_input = t;
                 Task::none()
             }
             BlobMsg::DestChanged(t) => {
-                self.blob.dest_input = t;
+                self.work.verdicts.blob.dest_input = t;
                 Task::none()
             }
             BlobMsg::AllowUnpinnedToggled(b) => {
-                self.blob.allow_unpinned = b;
+                self.work.verdicts.blob.allow_unpinned = b;
                 Task::none()
             }
             BlobMsg::HolderPicked(i) => {
-                self.blob.holder = Some(i);
+                self.work.verdicts.blob.holder = Some(i);
                 Task::none()
             }
             BlobMsg::UseSuggestedName => {
@@ -1827,29 +1578,32 @@ impl Zengui {
                 // path on its own — a remote party does not choose where our
                 // bytes land.
                 if let Some(name) = self
+                    .work
+                    .verdicts
                     .blob
                     .selected()
                     .and_then(|h| h.manifest.as_ref())
                     .and_then(|m| m.filename.clone())
                 {
-                    self.blob.dest_input = name;
+                    self.work.verdicts.blob.dest_input = name;
                 }
                 Task::none()
             }
             BlobMsg::Probe => {
-                let Some(Ok(target)) = self.blob.target.clone() else {
+                let Some(Ok(target)) = self.work.verdicts.blob.target.clone() else {
                     return Task::none();
                 };
-                let Some(session) = self.session.clone() else {
-                    self.blob.probe =
+                let Some(session) = self.dep.session.clone() else {
+                    self.work.verdicts.blob.probe =
                         crate::blob::Probe::Failed("no session — connect first".into());
                     return Task::none();
                 };
-                self.blob.probe = crate::blob::Probe::InFlight;
-                self.blob.holder = None;
-                let base = self.settings.base.clone();
-                let timeout = self.settings.timeout();
+                self.work.verdicts.blob.probe = crate::blob::Probe::InFlight;
+                self.work.verdicts.blob.holder = None;
+                let base = self.dep.base().to_string();
+                let timeout = self.dep.timeout();
                 let slices = self
+                    .dep
                     .slices
                     .as_deref()
                     .map(|s| s.slices().to_vec())
@@ -1857,25 +1611,28 @@ impl Zengui {
                 services::sweep::blob_probe(session, base, target, slices, timeout)
             }
             BlobMsg::ProbeDone(ran_against, outcome) => {
-                self.blob
-                    .probe_finished(outcome, &ran_against, &self.settings.base);
+                self.work
+                    .verdicts
+                    .blob
+                    .probe_finished(outcome, &ran_against, self.dep.base());
                 Task::none()
             }
             BlobMsg::Fetch => {
-                if self.blob.fetch_ready().is_err() {
+                if self.work.verdicts.blob.fetch_ready().is_err() {
                     return Task::none();
                 }
-                let Some(Ok(target)) = self.blob.target.clone() else {
+                let Some(Ok(target)) = self.work.verdicts.blob.target.clone() else {
                     return Task::none();
                 };
-                let Some(session) = self.session.clone() else {
-                    self.blob.fetch =
+                let Some(session) = self.dep.session.clone() else {
+                    self.work.verdicts.blob.fetch =
                         crate::blob::Fetch::Failed("no session — connect first".into());
                     return Task::none();
                 };
                 // The origin comes off the chosen holder, which came off a
                 // reply key. There is no other way for one to enter here.
-                let Some(origin) = self.blob.selected().map(|h| h.origin.clone()) else {
+                let Some(origin) = self.work.verdicts.blob.selected().map(|h| h.origin.clone())
+                else {
                     return Task::none();
                 };
 
@@ -1885,33 +1642,34 @@ impl Zengui {
                 // the summary. No file, no progress stream, no cancel token.
                 if let zenkey_fleet::BlobTarget::Tree { root } = &target {
                     let root = root.clone();
-                    self.blob.fetch = crate::blob::Fetch::Inspecting;
-                    let base = self.settings.base.clone();
-                    let timeout = self.settings.timeout();
+                    self.work.verdicts.blob.fetch = crate::blob::Fetch::Inspecting;
+                    let base = self.dep.base().to_string();
+                    let timeout = self.dep.timeout();
                     return services::sweep::blob_tree(session, base, origin, root, timeout);
                 }
-                let root = match self.blob.root_input.trim() {
+                let root = match self.work.verdicts.blob.root_input.trim() {
                     "" => None,
                     hex => match zenkey::ContentHash::parse(hex) {
                         Ok(h) => Some(h),
                         Err(e) => {
-                            self.blob.fetch = crate::blob::Fetch::Failed(format!("root: {e}"));
+                            self.work.verdicts.blob.fetch =
+                                crate::blob::Fetch::Failed(format!("root: {e}"));
                             return Task::none();
                         }
                     },
                 };
 
                 let cancel = zenkey_fleet::zblob::CancelToken::new();
-                self.blob.cancel = Some(cancel.clone());
-                self.blob.fetch = crate::blob::Fetch::InFlight {
+                self.work.verdicts.blob.cancel = Some(cancel.clone());
+                self.work.verdicts.blob.fetch = crate::blob::Fetch::InFlight {
                     received: 0,
                     total: 0,
                     bytes: 0,
                 };
 
-                let dest = std::path::PathBuf::from(self.blob.dest_input.trim());
-                let base = self.settings.base.clone();
-                let timeout = self.settings.timeout();
+                let dest = std::path::PathBuf::from(self.work.verdicts.blob.dest_input.trim());
+                let base = self.dep.base().to_string();
+                let timeout = self.dep.timeout();
                 // Progress arrives on a channel rather than through the return
                 // value: a transfer that only reported at the end would leave
                 // the pane unable to say anything true while it ran.
@@ -1938,7 +1696,7 @@ impl Zengui {
                     received,
                     total,
                     bytes,
-                } = &mut self.blob.fetch
+                } = &mut self.work.verdicts.blob.fetch
                 {
                     match p {
                         BlobProgress::Started { chunk_count, .. } => *total = chunk_count,
@@ -1968,17 +1726,21 @@ impl Zengui {
                 Task::none()
             }
             BlobMsg::FetchDone(ran_against, outcome) => {
-                self.blob
-                    .fetch_finished(outcome, &ran_against, &self.settings.base);
+                self.work
+                    .verdicts
+                    .blob
+                    .fetch_finished(outcome, &ran_against, self.dep.base());
                 Task::none()
             }
             BlobMsg::InspectDone(ran_against, outcome) => {
-                self.blob
-                    .inspect_finished(outcome, &ran_against, &self.settings.base);
+                self.work
+                    .verdicts
+                    .blob
+                    .inspect_finished(outcome, &ran_against, self.dep.base());
                 Task::none()
             }
             BlobMsg::Cancel => {
-                if let Some(c) = self.blob.cancel.take() {
+                if let Some(c) = self.work.verdicts.blob.cancel.take() {
                     c.cancel();
                 }
                 Task::none()
@@ -1990,29 +1752,29 @@ impl Zengui {
         use view::admin::AdminMsg;
         match msg {
             AdminMsg::RawToggled(id) => {
-                self.admin.toggle_raw(id);
+                self.work.verdicts.admin.toggle_raw(id);
                 Task::none()
             }
             AdminMsg::FilterProducer(producer) => {
                 // The tree already owns "show me this": reusing its search is
                 // one behaviour, not two that can drift.
-                self.right_pane = RightPane::Echo;
+                self.work.right_pane = RightPane::Echo;
                 Task::done(Message::Workspace(WorkspaceMsg::TreeSearchChanged(
                     producer,
                 )))
             }
             AdminMsg::Run => {
-                if self.admin.in_flight {
+                if self.work.verdicts.admin.in_flight {
                     return Task::none();
                 }
-                let Some(session) = self.session.clone() else {
-                    self.admin.error = Some("no session — connect first".into());
+                let Some(session) = self.dep.session.clone() else {
+                    self.work.verdicts.admin.error = Some("no session — connect first".into());
                     return Task::none();
                 };
-                self.admin.in_flight = true;
-                self.admin.error = None;
-                let base = self.settings.base.clone();
-                let timeout = self.settings.timeout();
+                self.work.verdicts.admin.in_flight = true;
+                self.work.verdicts.admin.error = None;
+                let base = self.dep.base().to_string();
+                let timeout = self.dep.timeout();
                 // The app's *resolved* slice set — bus, dirs or the union.
                 //
                 // Deliberately NOT the doctor's `SliceSet::from_dirs`: that one
@@ -2021,88 +1783,90 @@ impl Zengui {
                 // which is `bus.slice_set()` in zenctl. Copying the doctor here
                 // would empty the coverage table on every bus-registry-only
                 // deployment — an invisible, plausible-looking wrong answer.
-                let slices = self.slices.clone();
+                let slices = self.dep.slices.clone();
                 services::sweep::admin(session, base, slices, timeout)
             }
             AdminMsg::Done(outcome) => {
-                let base = self.settings.base.clone();
-                self.admin.finish(outcome, &base);
+                let base = self.dep.base().to_string();
+                self.work.verdicts.admin.finish(outcome, &base);
                 Task::none()
             }
         }
     }
 
     fn start_monitor(&mut self) -> Task<Message> {
-        let Some(session) = self.session.clone() else {
+        let Some(session) = self.dep.session.clone() else {
             return Task::none();
         };
         // Liveliness is always on — zero payload by construction (RFC 04 §5)
         // — and needs both the fleet sweep and @catalog by name (D4).
-        let liveliness = if self.settings.base.is_empty() && self.bases.is_empty() {
+        let liveliness = if self.dep.base().is_empty() && self.dep.bases.is_empty() {
             scope::liveliness_any_base()
         } else {
-            scope::liveliness_selectors(&self.settings.base)
+            scope::liveliness_selectors(self.dep.base())
         };
-        services::watch::start_monitor(session, liveliness, self.settings.max_keys)
+        services::watch::start_monitor(session, liveliness, self.dep.settings.max_keys)
     }
 
     /// (Re)build the skeleton: slices are already loaded; roster + admin are
     /// gathered inside the task (both metadata-only).
     fn build_skeleton(&self) -> Task<Message> {
-        let (Some(session), Some(slices)) = (self.session.clone(), self.slices.clone()) else {
+        let (Some(session), Some(slices)) = (self.dep.session.clone(), self.dep.slices.clone())
+        else {
             return Task::none();
         };
-        let base = self.settings.base.clone();
-        let timeout = self.settings.timeout();
+        let base = self.dep.base().to_string();
+        let timeout = self.dep.timeout();
         services::sweep::skeleton(session, base, slices, timeout)
     }
 
     fn toggle_watch(&mut self, path: String) -> Task<Message> {
-        let Some(monitor) = self.monitor.clone() else {
+        let Some(monitor) = self.obs.monitor.clone() else {
             return Task::none();
         };
-        if let Some(id) = self.my_watches.remove(&path) {
-            self.my_watch_paths.remove(&path);
+        if let Some(id) = self.obs.my_watches.remove(&path) {
+            self.obs.my_watch_paths.remove(&path);
             // A watch released mid-seed never gets its boundary (the engine
             // aborts the seed task) — forget it here too.
-            self.seeding.remove(&id);
-            self.seeding_paths.remove(&path);
+            self.obs.seeding.remove(&id);
+            self.obs.seeding_paths.remove(&path);
             return services::watch::release(monitor, path, id);
         }
         // Watching seeds (issue #92): current state arrives before live
         // traffic, through the same merge discipline as everything else.
         let selector = scope::subtree_selector(&path);
         let policy = zenkey_fleet::SeedPolicy {
-            timeout: self.settings.timeout(),
+            timeout: self.dep.timeout(),
             ..Default::default()
         };
         services::watch::subtree(monitor, path, selector, policy)
     }
 
     fn watch_scope(&mut self) -> Task<Message> {
-        let Some(monitor) = self.monitor.clone() else {
+        let Some(monitor) = self.obs.monitor.clone() else {
             return Task::none();
         };
         let selectors = self
+            .dep
             .settings
             .scope
-            .selectors(&self.settings.base, &self.settings.selectors);
+            .selectors(self.dep.base(), &self.dep.settings.selectors);
         // Scope watches seed too (issue #92) — the eager preset is "observe
         // this scope", and current state is part of observing it.
         let policy = zenkey_fleet::SeedPolicy {
-            timeout: self.settings.timeout(),
+            timeout: self.dep.timeout(),
             ..Default::default()
         };
         services::watch::scope(monitor, selectors, policy)
     }
 
     fn unwatch_scope(&mut self) -> Task<Message> {
-        let Some(monitor) = self.monitor.clone() else {
+        let Some(monitor) = self.obs.monitor.clone() else {
             return Task::none();
         };
-        let ids = std::mem::take(&mut self.scope_watches);
+        let ids = std::mem::take(&mut self.obs.scope_watches);
         for id in &ids {
-            self.seeding.remove(id);
+            self.obs.seeding.remove(id);
         }
         services::watch::release_scope(monitor, ids)
     }
@@ -2111,14 +1875,14 @@ impl Zengui {
     /// (see `Prefs::save`) — a preference that cannot be written must not fail
     /// whatever the user was actually doing.
     fn remember(&mut self) {
-        self.prefs.scope = self.settings.scope;
-        self.prefs.context = self
-            .context_form
-            .active
-            .clone()
-            .or(self.prefs.context.take());
-        self.window_dirty = false;
-        self.prefs.save();
+        self.chrome.prefs.scope = self.dep.settings.scope;
+        self.chrome.prefs.context = self.work.bench.context_form.active.clone().or(self
+            .chrome
+            .prefs
+            .context
+            .take());
+        self.chrome.window_dirty = false;
+        self.chrome.prefs.save();
     }
 
     /// Replay mode (issue #74). The transport verbs synthesize ticks from
@@ -2128,21 +1892,23 @@ impl Zengui {
         use view::replay::ReplayMsg as R;
         match msg {
             R::OpenToggled => {
-                self.replay_open = match self.replay_open {
+                self.work.replay.replay_open = match self.work.replay.replay_open {
                     Some(_) => None,
                     None => Some(String::new()),
                 };
-                self.replay_note = None;
+                self.work.replay.replay_note = None;
                 Task::none()
             }
             R::PathChanged(s) => {
-                if let Some(p) = &mut self.replay_open {
+                if let Some(p) = &mut self.work.replay.replay_open {
                     *p = s;
                 }
                 Task::none()
             }
             R::Open => {
                 let Some(path) = self
+                    .work
+                    .replay
                     .replay_open
                     .as_deref()
                     .map(str::trim)
@@ -2158,23 +1924,23 @@ impl Zengui {
                     });
                 match loaded {
                     Ok(mut state) => {
-                        self.replay_open = None;
-                        self.replay_note = None;
+                        self.work.replay.replay_open = None;
+                        self.work.replay.replay_note = None;
                         // Mode honesty: the panes now show the file, from
                         // its start — nothing live bleeds through.
-                        self.echo.clear();
-                        self.history = None;
+                        self.work.echo.echo.clear();
+                        self.sub.history = None;
                         self.refresh_series();
                         let tick = state.scrub_to(0);
-                        self.replay = Some(state);
+                        self.work.replay.replay = Some(state);
                         self.apply_tick(&tick);
                     }
-                    Err(e) => self.replay_note = Some(e),
+                    Err(e) => self.work.replay.replay_note = Some(e),
                 }
                 Task::none()
             }
             R::Toggled => {
-                let tick = self.replay.as_mut().map(|r| {
+                let tick = self.work.replay.replay.as_mut().map(|r| {
                     // Play at the end means "from the top" — the one
                     // rewind that needs no scrubber.
                     if !r.playing && r.position_us >= r.span_us {
@@ -2187,25 +1953,30 @@ impl Zengui {
                     }
                 });
                 if let Some(Some(tick)) = tick {
-                    self.echo.clear();
+                    self.work.echo.echo.clear();
                     self.apply_tick(&tick);
                 }
                 Task::none()
             }
             R::SpeedSelected(s) => {
-                if let Some(r) = &mut self.replay {
+                if let Some(r) = &mut self.work.replay.replay {
                     r.speed = s.0;
                 }
                 Task::none()
             }
             R::Scrubbed(t_us) => {
-                let rewound = self.replay.as_ref().is_some_and(|r| t_us < r.position_us);
-                let tick = self.replay.as_mut().map(|r| r.scrub_to(t_us));
+                let rewound = self
+                    .work
+                    .replay
+                    .replay
+                    .as_ref()
+                    .is_some_and(|r| t_us < r.position_us);
+                let tick = self.work.replay.replay.as_mut().map(|r| r.scrub_to(t_us));
                 if let Some(tick) = tick {
                     if rewound {
                         // Backwards is a rebuild (LWW does not invert), and
                         // the scrollback rebuilds with it.
-                        self.echo.clear();
+                        self.work.echo.echo.clear();
                     }
                     self.apply_tick(&tick);
                 }
@@ -2213,6 +1984,8 @@ impl Zengui {
             }
             R::Advance => {
                 let tick = self
+                    .work
+                    .replay
                     .replay
                     .as_mut()
                     .filter(|r| r.playing)
@@ -2223,21 +1996,21 @@ impl Zengui {
                 Task::none()
             }
             R::Exit => {
-                self.replay = None;
+                self.work.replay.replay = None;
                 // The next live tick repaints the tree; the scrollback must
                 // not mix file lines into it.
-                self.echo.clear();
+                self.work.echo.echo.clear();
                 Task::none()
             }
             R::RecordToggled => {
-                if let Some(handle) = self.recording.take() {
+                if let Some(handle) = self.work.replay.recording.take() {
                     handle.stop.notify_waiters();
                     return Task::none();
                 }
-                let Some(monitor) = self.monitor.clone() else {
+                let Some(monitor) = self.obs.monitor.clone() else {
                     return Task::none();
                 };
-                if self.replay.is_some() {
+                if self.work.replay.replay.is_some() {
                     // Recording captures the live monitor; replay mode has
                     // nothing live to capture.
                     return Task::none();
@@ -2247,17 +2020,17 @@ impl Zengui {
                     "zengui-{}.zrec",
                     zenkey_fleet::record::rfc3339_now().replace(':', "-")
                 );
-                let base = self.settings.base.clone();
-                self.recording = Some(RecordingHandle {
+                let base = self.dep.base().to_string();
+                self.work.replay.recording = Some(RecordingHandle {
                     stop: Arc::clone(&stop),
                     path: path.clone(),
                 });
-                self.recorded = None;
+                self.work.replay.recorded = None;
                 services::record::start(monitor, path, base, stop)
             }
             R::RecordFinished(result) => {
-                self.recording = None;
-                self.recorded = Some(result);
+                self.work.replay.recording = None;
+                self.work.replay.recorded = Some(result);
                 Task::none()
             }
         }
@@ -2266,65 +2039,69 @@ impl Zengui {
     fn apply_tick(&mut self, tick: &BusTick) {
         // Decided *before* the fields below are overwritten (#177).
         let held = shape_held(
-            (self.keys, self.keys_evicted, self.keys_unwatched),
+            (
+                self.obs.keys,
+                self.obs.keys_evicted,
+                self.obs.keys_unwatched,
+            ),
             (tick.keys, tick.keys_evicted, tick.keys_unwatched),
-            &self.watched,
+            &self.obs.watched,
             &tick.watched,
         );
         // Per tick, not per frame: one bounded lock for one key's latency
         // summary (#119). None when unselected, unobserved, or unstamped.
-        self.selected_latency = match (&self.selected, &self.monitor) {
+        self.sub.selected_latency = match (&self.sub.selected, &self.obs.monitor) {
             // During replay the live monitor's stats are about a different
             // world than the panes are showing — consulting them would put
             // live latency under file data (O4 in miniature).
-            (Some(_), Some(_)) if self.replay.is_some() => None,
+            (Some(_), Some(_)) if self.work.replay.replay.is_some() => None,
             (Some(key), Some(monitor)) => monitor
                 .core()
                 .with_stats(|s| s.get(key).map(|k| (k.latency(), k.unstamped)))
                 .and_then(|(lat, unstamped)| lat.map(|l| (l, unstamped))),
             _ => None,
         };
-        self.observed = Arc::clone(&tick.tree);
-        self.keys = tick.keys;
-        self.keys_evicted = tick.keys_evicted;
-        self.keys_unwatched = tick.keys_unwatched;
-        self.totals = tick.totals;
-        self.watched = std::sync::Arc::clone(&tick.watched);
+        self.obs.observed = Arc::clone(&tick.tree);
+        self.obs.keys = tick.keys;
+        self.obs.keys_evicted = tick.keys_evicted;
+        self.obs.keys_unwatched = tick.keys_unwatched;
+        self.obs.totals = tick.totals;
+        self.obs.watched = std::sync::Arc::clone(&tick.watched);
         for (id, coverage) in &tick.seeded {
-            if let Some(path) = self.seeding.remove(id) {
+            if let Some(path) = self.obs.seeding.remove(id) {
                 if let Some(path) = path {
-                    self.seeding_paths.remove(&path);
+                    self.obs.seeding_paths.remove(&path);
                 }
-                self.seed_totals.0 += coverage.history_replies.unwrap_or(0);
-                self.seed_totals.1 += coverage.storage_replies.unwrap_or(0);
-                self.seed_totals.2 += coverage.superseded;
-                self.seeded_watches += 1;
+                self.obs.seed_totals.0 += coverage.history_replies.unwrap_or(0);
+                self.obs.seed_totals.1 += coverage.storage_replies.unwrap_or(0);
+                self.obs.seed_totals.2 += coverage.superseded;
+                self.obs.seeded_watches += 1;
             }
         }
         // Two different facts about the same window (O6): the broadcast
         // outran us vs. our own batch cap chose to coalesce.
-        self.echo.record_lag(tick.lagged);
-        self.echo.record_coalesced(tick.coalesced);
+        self.work.echo.echo.record_lag(tick.lagged);
+        self.work.echo.echo.record_coalesced(tick.coalesced);
         // One point per tick for the selected key's rate (issue #64). The
         // count is what says whether the EWMA moved: it never decays on its
         // own, so an unchanged count is silence, and the sampler records a gap
         // rather than a confident flat line.
-        if let Some(rec) = self.history.as_ref() {
+        if let Some(rec) = self.sub.history.as_ref() {
             let chunks: Vec<&str> = rec.key.split('/').collect();
             let observed = tick.tree.node(&chunks).map(|n| (n.count, n.rate_hz));
-            self.rate_series.tick(observed);
+            self.sub.rate_series.tick(observed);
         }
         for sample in &tick.samples {
             self.ensure_facts(&sample.key);
-            self.echo.push(sample);
+            self.work.echo.echo.push(sample);
             // History is per-key and costs no subscription of its own: these
             // samples are already flowing for an existing watch (issue #63).
-            if let Some(rec) = self.history.as_mut() {
+            if let Some(rec) = self.sub.history.as_mut() {
                 rec.observe(sample);
             }
             // The media viewer's frames arrive on the exact key it watches
             // (issue #69) — same pipeline, no extra subscription.
-            if let Some(v) = self.media.viewing.as_mut()
+            if let Some(v) = self.work.bench.media.viewing.as_mut()
                 && v.key == sample.key
             {
                 v.on_frame(sample);
@@ -2336,10 +2113,14 @@ impl Zengui {
         // The node dashboard (#61): transitions in arrival order (flap-
         // correct), then the zero-cost watched-freshness join.
         let now = std::time::Instant::now();
-        self.roster
-            .apply_transitions(&self.settings.base, &tick.nodes, now);
-        self.roster
-            .refresh(&tick.tree, &self.settings.base, &tick.watched, now);
+        self.work
+            .verdicts
+            .roster
+            .apply_transitions(self.dep.base(), &tick.nodes, now);
+        self.work
+            .verdicts
+            .roster
+            .refresh(&tick.tree, self.dep.base(), &tick.watched, now);
         // The chart's inputs all advanced above — the history ring, the rate
         // sampler, the facts behind the unit. Rebuilt once here rather than
         // once per frame (#178).
@@ -2351,119 +2132,40 @@ impl Zengui {
         let now = std::time::Instant::now();
         if held
             && self
+                .tree
                 .flat
-                .retarget(std::sync::Arc::clone(&self.observed), now)
+                .retarget(std::sync::Arc::clone(&self.obs.observed), now)
         {
-            self.shape_reused += 1;
+            self.tree.shape_reused += 1;
         } else {
-            self.shape_rebuilt += 1;
-            self.reflatten();
+            self.tree.shape_rebuilt += 1;
+            self.tree.reflatten(&self.dep, &self.obs);
         }
-    }
-
-    /// The merged declared-∪-observed tree, from cache when its inputs have
-    /// not moved (#177).
-    fn merged(&mut self) -> Arc<MergedNode> {
-        let same_skeleton = |a: &Option<Arc<Skeleton>>| match (a, &self.skeleton) {
-            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-            (None, None) => true,
-            _ => false,
-        };
-        let fresh = self.merged_cache.as_ref().is_some_and(|c| {
-            same_skeleton(&c.skeleton)
-                && Arc::ptr_eq(&c.observed, &self.observed)
-                && Arc::ptr_eq(&c.watched, &self.watched)
-        });
-        if let Some(c) = &self.merged_cache
-            && fresh
-        {
-            return Arc::clone(&c.merged);
-        }
-        // No registry has answered yet, so there is nothing declared to merge
-        // against. This used to be rebuilt on *every* `reflatten` just to have
-        // an empty tree to hand the merge; now it is built only when the merge
-        // itself is.
-        let empty_skeleton;
-        let skeleton = match &self.skeleton {
-            Some(s) => s.as_ref(),
-            None => {
-                empty_skeleton = Skeleton::build(
-                    &self.settings.base,
-                    &SliceSet::default(),
-                    &std::collections::BTreeMap::new(),
-                    None,
-                );
-                &empty_skeleton
-            }
-        };
-        let merged = Arc::new(zenkey_fleet::skeleton::merge(
-            skeleton,
-            &self.observed,
-            &self.watched,
-        ));
-        self.merged_cache = Some(MergedCache {
-            skeleton: self.skeleton.clone(),
-            observed: Arc::clone(&self.observed),
-            watched: Arc::clone(&self.watched),
-            merged: Arc::clone(&merged),
-        });
-        merged
-    }
-
-    fn reflatten(&mut self) {
-        let merged = self.merged();
-        let now = std::time::Instant::now();
-        // Pivot and filter re-key the flattened entries here — the hot tree
-        // stays registry-blind (issue #65).
-        self.flat = match (self.pivot, self.tree_search.is_empty()) {
-            (view::tree::Pivot::Chunks, true) => {
-                view::tree::flatten(&merged, &self.settings.base, &self.expanded, MAX_ROWS, now)
-            }
-            (view::tree::Pivot::Chunks, false) => view::tree::search_flatten(
-                &merged,
-                &self.settings.base,
-                &self.tree_search,
-                MAX_ROWS,
-                now,
-            ),
-            (pivot, _) => view::tree::pivot_flatten(
-                &merged,
-                &self.settings.base,
-                pivot,
-                &self.expanded,
-                &self.tree_search,
-                MAX_ROWS,
-                now,
-            ),
-        };
-        // Wire shapes track the live snapshot from here on, so a tick that
-        // changes only the numbers can point them at the new one instead of
-        // walking the tree again (#177). Pivot shapes refuse, and say so.
-        self.flat
-            .retarget(std::sync::Arc::clone(&self.observed), now);
     }
 
     fn ensure_facts(&mut self, key: &str) {
         // One line, and the bound lives in the engine with the counter that
         // reports it (#107). This is still the single insert point.
-        let base = self.settings.base.clone();
-        self.facts.ensure(&base, key, self.slices.as_deref());
+        let base = self.dep.base().to_string();
+        self.dep
+            .facts
+            .ensure(&base, key, self.dep.slices.as_deref());
     }
 
     fn reresolve_registrations(&mut self) {
-        let Some(slices) = self.slices.clone() else {
+        let Some(slices) = self.dep.slices.clone() else {
             return;
         };
-        self.facts.resolve_all(&slices);
+        self.dep.facts.resolve_all(&slices);
     }
 
     fn load_slices(&self) -> Task<Message> {
-        let dirs = self.settings.registry.clone();
-        let Some(session) = self.session.clone() else {
+        let dirs = self.dep.settings.registry.clone();
+        let Some(session) = self.dep.session.clone() else {
             return Task::none();
         };
-        let base = self.settings.base.clone();
-        let timeout = self.settings.timeout();
+        let base = self.dep.base().to_string();
+        let timeout = self.dep.timeout();
         if !dirs.is_empty() {
             // The §6.1 union (issue #43): served wins, dirs fill, and the
             // disagreement count reaches the status strip as data.
@@ -2476,18 +2178,18 @@ impl Zengui {
         let mut subs = Vec::new();
         // Replay mode replaces the link (#74): while a `.zrec` feeds the
         // panes, the live pump is not built at all — the mode cannot leak.
-        if self.replay.is_none()
-            && let Some(monitor) = self.monitor.clone()
+        if self.work.replay.replay.is_none()
+            && let Some(monitor) = self.obs.monitor.clone()
         {
             subs.push(link::subscribe(LinkKey {
                 monitor,
-                epoch: self.epoch,
+                epoch: self.obs.epoch,
             }));
         }
         // The play clock, only while actually playing (a paused replay
         // costs nothing) — the same cadence as the live stats tick, so the
         // panes tick at the rate they were built for.
-        if self.replay.as_ref().is_some_and(|r| r.playing) {
+        if self.work.replay.replay.as_ref().is_some_and(|r| r.playing) {
             subs.push(
                 iced::time::every(std::time::Duration::from_millis(250)).map(|_| {
                     Message::Workspace(WorkspaceMsg::Replay(view::replay::ReplayMsg::Advance))
@@ -2496,8 +2198,9 @@ impl Zengui {
         }
         // The repeat clock for a sustained publish (#60). It exists only while
         // a publication is armed, so an idle pane costs nothing.
-        if self.publish_form.armed {
-            let period = std::time::Duration::from_secs_f64(self.publish_form.interval_secs());
+        if self.work.bench.publish_form.armed {
+            let period =
+                std::time::Duration::from_secs_f64(self.work.bench.publish_form.interval_secs());
             subs.push(
                 iced::time::every(period)
                     .map(|_| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Tick))),
@@ -2512,7 +2215,7 @@ impl Zengui {
         // …and the settle timer that actually writes it, which exists only
         // while a resize is outstanding (issue #189). One file write per drag
         // rather than per pixel, and none at all while the window is still.
-        if self.window_dirty {
+        if self.chrome.window_dirty {
             subs.push(
                 iced::time::every(std::time::Duration::from_millis(700))
                     .map(|_| Message::Chrome(ChromeMsg::WindowSettled)),
@@ -2537,64 +2240,77 @@ impl Zengui {
     pub fn view(&self) -> Element<'_, Message> {
         let panes = row![
             iced::widget::container(view::tree::pane(view::tree::TreeData {
-                flat: &self.flat,
-                pivot: self.pivot,
-                search: &self.tree_search,
-                scroll_y: self.tree_scroll.0,
-                viewport_h: self.tree_scroll.1,
-                facts: &self.facts,
+                flat: &self.tree.flat,
+                pivot: self.tree.pivot,
+                search: &self.tree.tree_search,
+                scroll_y: self.tree.tree_scroll.0,
+                viewport_h: self.tree.tree_scroll.1,
+                facts: &self.dep.facts,
                 watches: view::tree::Watches {
-                    mine: &self.my_watch_paths,
-                    seeding: &self.seeding_paths,
+                    mine: &self.obs.my_watch_paths,
+                    seeding: &self.obs.seeding_paths,
                 },
-                selected: self.selected.as_deref(),
+                selected: self.sub.selected.as_deref(),
             }))
-            .width(Length::FillPortion(self.prefs.split_portions().0))
+            .width(Length::FillPortion(self.chrome.prefs.split_portions().0))
             .height(Length::Fill),
-            iced::widget::container(match self.right_pane {
+            iced::widget::container(match self.work.right_pane {
                 RightPane::Echo => view::echo::pane(
-                    &self.echo,
-                    &self.echo_view,
-                    self.selected.as_deref(),
-                    self.echo.next_seq(),
+                    &self.work.echo.echo,
+                    &self.work.echo.echo_view,
+                    self.sub.selected.as_deref(),
+                    self.work.echo.echo.next_seq(),
                 ),
-                RightPane::Call =>
-                    view::call::pane(&self.call_form, self.slices.as_deref(), &self.roster,),
+                RightPane::Call => view::call::pane(
+                    &self.work.bench.call_form,
+                    self.dep.slices.as_deref(),
+                    &self.work.verdicts.roster,
+                ),
                 RightPane::Publish =>
-                    view::publish::pane(&self.publish_form, self.slices.is_some()),
+                    view::publish::pane(&self.work.bench.publish_form, self.dep.slices.is_some()),
                 RightPane::Detail => view::detail::pane(view::detail::DetailData {
-                    key: self.selected.as_deref().unwrap_or("(nothing selected)"),
-                    facts: self.selected.as_deref().and_then(|k| self.facts.get(k)),
-                    fetched: self.fetched.as_ref().and_then(|(k, o)| {
-                        (Some(k.as_str()) == self.selected.as_deref()).then_some(o)
-                    }),
-                    decoded: self.decoded.as_ref(),
-                    series: self.series.as_ref(),
-                    history_entries: self.history.as_ref().map(|r| r.ring.len()),
-                    observed: self.history.as_ref().and_then(|r| r.ring.newest()),
-                    latency: self.selected_latency.clone(),
-                }),
-                RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
-                    roster: &self.roster,
-                    selected: self.node_selected.as_deref(),
-                    detail: &self.node_detail,
-                }),
-                RightPane::Doctor => view::doctor::pane(&self.doctor, &self.settings.base),
-                RightPane::Blob => view::blob::pane(&self.blob, self.slices.is_some()),
-                RightPane::Media => view::media::pane(&self.media, self.slices.as_deref()),
-                RightPane::Admin => view::admin::pane(&self.admin),
-                RightPane::History => view::history::pane(view::history::HistoryData {
-                    key: self.selected.as_deref(),
-                    recorder: self.history.as_ref(),
-                    watched: self
+                    key: self.sub.selected.as_deref().unwrap_or("(nothing selected)"),
+                    facts: self
+                        .sub
                         .selected
                         .as_deref()
-                        .is_some_and(|k| key_is_watched(&self.watched, k)),
+                        .and_then(|k| self.dep.facts.get(k)),
+                    fetched: self.sub.fetched.as_ref().and_then(|(k, o)| {
+                        (Some(k.as_str()) == self.sub.selected.as_deref()).then_some(o)
+                    }),
+                    decoded: self.sub.decoded.as_ref(),
+                    series: self.sub.series.as_ref(),
+                    history_entries: self.sub.history.as_ref().map(|r| r.ring.len()),
+                    observed: self.sub.history.as_ref().and_then(|r| r.ring.newest()),
+                    latency: self.sub.selected_latency.clone(),
                 }),
-                RightPane::Connect =>
-                    view::contexts::pane(&self.context_form, self.settings.is_unreachable(),),
+                RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
+                    roster: &self.work.verdicts.roster,
+                    selected: self.work.verdicts.node_selected.as_deref(),
+                    detail: &self.work.verdicts.node_detail,
+                }),
+                RightPane::Doctor =>
+                    view::doctor::pane(&self.work.verdicts.doctor, self.dep.base()),
+                RightPane::Blob =>
+                    view::blob::pane(&self.work.verdicts.blob, self.dep.slices.is_some()),
+                RightPane::Media =>
+                    view::media::pane(&self.work.bench.media, self.dep.slices.as_deref()),
+                RightPane::Admin => view::admin::pane(&self.work.verdicts.admin),
+                RightPane::History => view::history::pane(view::history::HistoryData {
+                    key: self.sub.selected.as_deref(),
+                    recorder: self.sub.history.as_ref(),
+                    watched: self
+                        .sub
+                        .selected
+                        .as_deref()
+                        .is_some_and(|k| key_is_watched(&self.obs.watched, k)),
+                }),
+                RightPane::Connect => view::contexts::pane(
+                    &self.work.bench.context_form,
+                    self.dep.settings.is_unreachable(),
+                ),
             })
-            .width(Length::FillPortion(self.prefs.split_portions().1))
+            .width(Length::FillPortion(self.chrome.prefs.split_portions().1))
             .height(Length::Fill),
         ]
         .spacing(space::MD);
@@ -2605,22 +2321,22 @@ impl Zengui {
         // Replay-mode surfaces (#74), between the toolbar and the panes so
         // the mode is unmistakable: the open row, the REPLAY banner with
         // the scrubber, and the capture status line.
-        if let Some(path) = &self.replay_open {
+        if let Some(path) = &self.work.replay.replay_open {
             layout = layout.push(view::replay::open_row(path));
-            if let Some(note) = &self.replay_note {
+            if let Some(note) = &self.work.replay.replay_note {
                 layout = layout.push(view::kit::muted(format!("could not open: {note}")));
             }
         }
-        if let Some(replay) = &self.replay {
+        if let Some(replay) = &self.work.replay.replay {
             layout = layout.push(view::replay::banner(replay));
         }
-        if let Some(rec) = &self.recording {
+        if let Some(rec) = &self.work.replay.recording {
             layout = layout.push(view::kit::muted(format!(
                 "● recording current watches to {} — toolbar 'stop recording' finishes the file",
                 rec.path
             )));
         }
-        if let Some(done) = &self.recorded {
+        if let Some(done) = &self.work.replay.recorded {
             layout = layout.push(view::kit::muted(match done {
                 Ok((samples, dropped, path)) => format!(
                     "recorded {samples} sample(s) to {path} ({dropped} dropped — in-file ledger)"
@@ -2629,25 +2345,25 @@ impl Zengui {
             }));
         }
         let layout = layout.push(panes).push(view::status::strip(Status {
-            link: &self.link,
-            base_label: self.settings.base_label(),
-            scope_label: self.settings.scope.short(),
-            keys: self.keys,
-            keys_evicted: self.keys_evicted,
-            keys_unwatched: self.keys_unwatched,
-            facts_cached: self.facts.len(),
-            facts_evicted: self.facts.evicted(),
-            watched: &self.watched,
-            skeleton: self.skeleton.as_deref().map(|s| s.coverage),
-            fetched: self.fetched.as_ref(),
-            totals: self.totals,
-            slices: &self.slice_source,
-            seeding: self.seeding.len(),
-            seeded_watches: self.seeded_watches,
-            seed_totals: self.seed_totals,
-            unreachable: self.settings.is_unreachable(),
-            prefs_note: self.prefs_note.as_deref(),
-            replaying: self.replay.is_some(),
+            link: &self.obs.link,
+            base_label: self.dep.base_label(),
+            scope_label: self.dep.settings.scope.short(),
+            keys: self.obs.keys,
+            keys_evicted: self.obs.keys_evicted,
+            keys_unwatched: self.obs.keys_unwatched,
+            facts_cached: self.dep.facts.len(),
+            facts_evicted: self.dep.facts.evicted(),
+            watched: &self.obs.watched,
+            skeleton: self.dep.skeleton.as_deref().map(|s| s.coverage),
+            fetched: self.sub.fetched.as_ref(),
+            totals: self.obs.totals,
+            slices: &self.dep.slice_source,
+            seeding: self.obs.seeding.len(),
+            seeded_watches: self.obs.seeded_watches,
+            seed_totals: self.obs.seed_totals,
+            unreachable: self.dep.settings.is_unreachable(),
+            prefs_note: self.chrome.prefs_note.as_deref(),
+            replaying: self.work.replay.replay.is_some(),
         }));
 
         // The overlay floats above everything (#75). `stack` rather than a
@@ -2656,7 +2372,11 @@ impl Zengui {
         // dismissal policy would fight it.
         // A lazy iterator: a closed overlay never touches the cache, and
         // the open one clones only what it draws (#110).
-        match view::palette::overlay(&self.palette, &self.context_form.known, self.facts.keys()) {
+        match view::palette::overlay(
+            &self.chrome.palette,
+            &self.work.bench.context_form.known,
+            self.dep.facts.keys(),
+        ) {
             None => layout.into(),
             Some(overlay) => iced::widget::stack![
                 layout,
@@ -2672,10 +2392,11 @@ impl Zengui {
 
     /// The base picker's options, after a discovery sweep landed.
     fn rebuild_base_options(&mut self) {
-        self.base_options = vec![String::new()];
-        self.base_options
-            .extend(self.bases.iter().map(|b| b.base.clone()));
-        self.base_options.dedup();
+        self.dep.base_options = vec![String::new()];
+        self.dep
+            .base_options
+            .extend(self.dep.bases.iter().map(|b| b.base.clone()));
+        self.dep.base_options.dedup();
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
@@ -2683,9 +2404,11 @@ impl Zengui {
         // slice is as good as a `Vec` — and the toolbar redraws at frame rate
         // while its options change on a discovery sweep, which is minutes
         // apart.
-        let base_picker = pick_list(&self.base_options[..], Some(&self.settings.base), |r| {
-            Message::Deployment(DeploymentMsg::BaseSelected(r))
-        })
+        let base_picker = pick_list(
+            &self.dep.base_options[..],
+            Some(self.dep.settings.base.clone()),
+            |r| Message::Deployment(DeploymentMsg::BaseSelected(r)),
+        )
         .placeholder("base")
         .text_size(crate::view::tokens::font::CAPTION);
 
@@ -2697,13 +2420,13 @@ impl Zengui {
             ScopePreset::State,
             ScopePreset::Events,
         ];
-        let scope_picker = pick_list(&SCOPES[..], Some(self.settings.scope), |r| {
+        let scope_picker = pick_list(&SCOPES[..], Some(self.dep.settings.scope), |r| {
             Message::Deployment(DeploymentMsg::ScopeSelected(r))
         })
         .text_size(crate::view::tokens::font::CAPTION);
 
         // Observation is opt-in and labelled by its cost (issue #85).
-        let observing = !self.scope_watches.is_empty();
+        let observing = !self.obs.scope_watches.is_empty();
         let observe = iced::widget::button(
             text(if observing {
                 "stop observing scope"
@@ -2724,16 +2447,16 @@ impl Zengui {
             iced::widget::Row::from_iter(RightPane::ALL.into_iter().map(|p| {
                 crate::view::kit::tab(
                     p.label(),
-                    self.right_pane == p,
+                    self.work.right_pane == p,
                     Message::Workspace(WorkspaceMsg::PaneSelected(p)),
                 )
             }))
             .spacing(space::XS),
-            crate::view::kit::muted(self.settings.scope.label()),
+            crate::view::kit::muted(self.dep.settings.scope.label()),
             // Capture and replay (#74): record writes the current watches
             // to a .zrec; replay feeds the panes from one.
             iced::widget::button(
-                text(if self.recording.is_some() {
+                text(if self.work.replay.recording.is_some() {
                     "stop recording"
                 } else {
                     "record"
@@ -2753,7 +2476,7 @@ impl Zengui {
             // Window preferences (issue #73): the theme name is the button,
             // so the label says what you get rather than what you have.
             iced::widget::button(
-                text(format!("theme: {}", self.prefs.theme.label()))
+                text(format!("theme: {}", self.chrome.prefs.theme.label()))
                     .size(crate::view::tokens::font::CAPTION)
             )
             .on_press(Message::Chrome(ChromeMsg::Prefs(
@@ -2766,8 +2489,11 @@ impl Zengui {
                 )))
                 .padding(4),
             iced::widget::button(
-                text(format!("{}%", (self.prefs.zoom * 100.0).round() as i32))
-                    .size(crate::view::tokens::font::CAPTION)
+                text(format!(
+                    "{}%",
+                    (self.chrome.prefs.zoom * 100.0).round() as i32
+                ))
+                .size(crate::view::tokens::font::CAPTION)
             )
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomReset
@@ -2804,11 +2530,11 @@ impl Zengui {
     /// must call this; `series_data` is private so it cannot be called from
     /// the render path again (#178).
     fn refresh_series(&mut self) {
-        self.series = self.series_data();
+        self.sub.series = self.series_data();
     }
 
     fn series_data(&self) -> Option<view::detail::SeriesData> {
-        let rec = self.history.as_ref()?;
+        let rec = self.sub.history.as_ref()?;
         // The most recent entry that *is* a document, not simply the most
         // recent one: a tombstone carries no fields, and letting it empty the
         // picker would make the chart vanish on every retirement and come
@@ -2822,6 +2548,7 @@ impl Zengui {
         // The chosen leaf, if the newest payload still carries it — a field
         // that disappeared should not silently keep plotting its own gaps.
         let leaf = self
+            .sub
             .series_leaf
             .as_ref()
             .filter(|p| leaves.leaves.iter().any(|(k, _)| k == *p))
@@ -2831,7 +2558,7 @@ impl Zengui {
             Some(p) => crate::series::value_series(&rec.ring, p),
             None => crate::series::Series::new(),
         };
-        let unit = match self.facts.get(&rec.key).map(|f| &f.registration) {
+        let unit = match self.dep.facts.get(&rec.key).map(|f| &f.registration) {
             Some(zenkey_fleet::Registration::Registered(s)) => s.unit.clone(),
             _ => None,
         };
@@ -2843,7 +2570,7 @@ impl Zengui {
             // called exactly when the chart's inputs moved, which is exactly
             // when the retained geometry stopped being valid (#178).
             caches: view::detail::SeriesCaches::default(),
-            rate: self.rate_series.series().clone(),
+            rate: self.sub.rate_series.series().clone(),
             unit,
         })
     }
@@ -2949,15 +2676,78 @@ mod tests {
     fn switching_base_forgets_every_node_that_was_open() {
         let mut app = app();
         for i in 0..10_000 {
-            app.expanded.open(format!("v1/h-{i:04}/state/sysinfo"));
+            app.tree.expanded.open(format!("v1/h-{i:04}/state/sysinfo"));
         }
-        assert_eq!(app.expanded.len(), 10_000);
+        assert_eq!(app.tree.expanded.len(), 10_000);
         app.forget_deployment();
-        assert!(app.expanded.is_empty());
+        assert!(app.tree.expanded.is_empty());
         assert!(
-            app.admin.expanded_raw.is_empty(),
+            app.work.verdicts.admin.expanded_raw.is_empty(),
             "`AdminState::clear` is `*self = default()`, so this was already \
              true — asserted here so it stays true if that changes"
+        );
+    }
+
+    /// The other half of the old checklist, as behaviour rather than a list.
+    ///
+    /// `KEPT` named 43 fields and asserted only that `forget_deployment` did
+    /// not mention them. That is weaker than it reads: a field can be listed
+    /// as kept and still be clobbered by the same message through some other
+    /// path. This asks the question the user asks — "is my half-written
+    /// publish body still there?" — of the three groups that hold typing.
+    #[test]
+    fn switching_base_keeps_what_the_user_typed() {
+        let mut app = app();
+        app.work.bench.publish_form.body = "{\"celsius\": 21.5}".into();
+        app.work.bench.call_form.params = "origin=h-3fa9c2d41b7e".into();
+        app.work.bench.context_form.connect = "tcp/10.0.0.1:7447".into();
+        app.tree.tree_search = "sysinfo".into();
+        app.sub.selected = Some("v1/h-3fa9c2d41b7e/state/sysinfo/health".into());
+        app.chrome.prefs.zoom = 1.25;
+
+        app.forget_deployment();
+
+        assert_eq!(app.work.bench.publish_form.body, "{\"celsius\": 21.5}");
+        assert_eq!(app.work.bench.call_form.params, "origin=h-3fa9c2d41b7e");
+        assert_eq!(app.work.bench.context_form.connect, "tcp/10.0.0.1:7447");
+        assert_eq!(app.tree.tree_search, "sysinfo");
+        assert_eq!(
+            app.sub.selected.as_deref(),
+            Some("v1/h-3fa9c2d41b7e/state/sysinfo/health"),
+            "a selection follows the user, not the fleet — the panes then say \
+             honestly that they have not asked about it yet"
+        );
+        assert_eq!(app.chrome.prefs.zoom, 1.25);
+    }
+
+    /// The proof for a deleted line.
+    ///
+    /// `forget_deployment` used to reset `merged_cache`, and that line was
+    /// dead: `merged`'s validity check compares the skeleton `Option`s, and
+    /// after a forget the cached `Some` cannot match the new `None`. If both
+    /// were already `None`, all three merge inputs are identical and reuse is
+    /// *correct*. Deleting a line needs the same evidence as adding one.
+    #[test]
+    fn a_forgotten_deployment_needs_no_merge_cache_reset() {
+        let mut app = app();
+        app.dep.skeleton = Some(Arc::new(zenkey_fleet::Skeleton::build(
+            "",
+            &zenkey_fleet::SliceSet::default(),
+            &std::collections::BTreeMap::new(),
+            None,
+        )));
+        let with_skeleton = app.tree.merged(&app.dep, &app.obs);
+
+        app.forget_deployment();
+        assert!(
+            app.tree.merged_cache.is_some(),
+            "the cache is deliberately not cleared — this test exists to \
+             notice if someone reinstates the reset"
+        );
+        let after = app.tree.merged(&app.dep, &app.obs);
+        assert!(
+            !Arc::ptr_eq(&with_skeleton, &after),
+            "a forgotten skeleton must not be served from cache"
         );
     }
 
@@ -2989,7 +2779,7 @@ mod tests {
             app.apply_tick(&tick(7, 0, 0, &watched));
         }
         assert_eq!(
-            (app.shape_rebuilt, app.shape_reused),
+            (app.tree.shape_rebuilt, app.tree.shape_reused),
             (1, 99),
             "one rebuild to establish the shape, then ninety-nine retargets"
         );
@@ -3010,10 +2800,10 @@ mod tests {
         ] {
             let mut app = app();
             app.apply_tick(&tick(7, 0, 0, &watched));
-            let before = app.shape_rebuilt;
+            let before = app.tree.shape_rebuilt;
             app.apply_tick(&tick(next.0, next.1, next.2, &watched));
             assert_eq!(
-                app.shape_rebuilt,
+                app.tree.shape_rebuilt,
                 before + 1,
                 "{label} changes the tree and must rebuild it"
             );
@@ -3023,11 +2813,11 @@ mod tests {
         // `NodeStatus`, so the badge would freeze without this rung.
         let mut app = app();
         app.apply_tick(&tick(7, 0, 0, &watched));
-        let before = app.shape_rebuilt;
+        let before = app.tree.shape_rebuilt;
         let other: Arc<[String]> = Arc::from(["v1/**".to_string()]);
         app.apply_tick(&tick(7, 0, 0, &other));
         assert_eq!(
-            app.shape_rebuilt,
+            app.tree.shape_rebuilt,
             before + 1,
             "a new watch-set Arc rebuilds even when every counter matches"
         );
@@ -3045,11 +2835,11 @@ mod tests {
         let mut app = app();
         let two: Arc<[String]> = Arc::from(["v1/a/**".to_string(), "v1/b/**".to_string()]);
         app.apply_tick(&tick(7, 0, 0, &two));
-        let before = app.shape_rebuilt;
+        let before = app.tree.shape_rebuilt;
         // The release: same keys, same counters, one selector fewer.
         let one: Arc<[String]> = Arc::from(["v1/a/**".to_string()]);
         app.apply_tick(&tick(7, 0, 0, &one));
-        assert_eq!(app.shape_rebuilt, before + 1);
+        assert_eq!(app.tree.shape_rebuilt, before + 1);
     }
 
     /// Expanding, collapsing, typing in the find box and switching pivot all
@@ -3059,23 +2849,29 @@ mod tests {
     #[test]
     fn a_presentation_change_does_not_re_merge_the_tree() {
         let mut app = app();
-        app.reflatten();
-        let first = Arc::clone(&app.merged_cache.as_ref().expect("cached").merged);
+        app.tree.reflatten(&app.dep, &app.obs);
+        let first = Arc::clone(&app.tree.merged_cache.as_ref().expect("cached").merged);
 
-        app.expanded.open("v1");
-        app.reflatten();
+        app.tree.expanded.open("v1");
+        app.tree.reflatten(&app.dep, &app.obs);
         assert!(
-            Arc::ptr_eq(&first, &app.merged_cache.as_ref().expect("cached").merged),
+            Arc::ptr_eq(
+                &first,
+                &app.tree.merged_cache.as_ref().expect("cached").merged
+            ),
             "an expand changes no input to the merge"
         );
 
         // A new observed snapshot is a different tree, and must not be served
         // from the cache.
         let stats = zenkey_fleet::stats::StatsTable::new();
-        app.observed = Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats));
-        app.reflatten();
+        app.obs.observed = Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats));
+        app.tree.reflatten(&app.dep, &app.obs);
         assert!(
-            !Arc::ptr_eq(&first, &app.merged_cache.as_ref().expect("cached").merged),
+            !Arc::ptr_eq(
+                &first,
+                &app.tree.merged_cache.as_ref().expect("cached").merged
+            ),
             "a new snapshot is new evidence, whatever it contains"
         );
     }
@@ -3097,116 +2893,5 @@ mod tests {
         // A replay seeking backwards moves the counters *down*, which is why
         // the comparison is equality and not a `>`.
         assert!(!shape_held((9, 9, 9), (1, 2, 3), &a, &a));
-    }
-
-    /// The bug class, gated rather than fixed once.
-    ///
-    /// #179 and #194 are the same mistake at different sites: a field added to
-    /// a struct and not added to the routine that resets it. So this reads the
-    /// source, lists the fields `forget_deployment` does **not** touch, and
-    /// compares against a checklist — adding a field to `Zengui` is then a
-    /// decision recorded in a diff rather than an omission nobody sees.
-    ///
-    /// Modelled on `zenctl/tests/render.rs`'s family checklist, which exists
-    /// for the same reason.
-    #[test]
-    fn every_zengui_field_is_either_forgotten_or_deliberately_kept() {
-        /// Survives a deployment change, each for a stated reason.
-        const KEPT: &[&str] = &[
-            // The window and the process, not the deployment.
-            "settings",
-            "prefs",
-            "window_dirty",
-            "prefs_note",
-            "epoch",
-            "right_pane",
-            // The link is *re*built rather than forgotten — a base change
-            // restarts the monitor, and these are replaced on the way.
-            "session",
-            "monitor",
-            "link",
-            "observed",
-            "watched",
-            "schema_store",
-            "keys",
-            "keys_evicted",
-            "keys_unwatched",
-            // Session-lifetime instrumentation, not deployment evidence: they
-            // count how the cache behaved, and a base change is one of the
-            // things they are counting (#177).
-            "shape_reused",
-            "shape_rebuilt",
-            "totals",
-            "flat",
-            // View state about *this window*, not about the fleet.
-            "pivot",
-            "tree_search",
-            "tree_scroll",
-            "echo",
-            "echo_view",
-            "context_form",
-            "palette",
-            "call_form",
-            "publish_form",
-            "media",
-            "selected",
-            "selected_latency",
-            "history",
-            "rate_series",
-            "series_leaf",
-            // Derived from `history` and `rate_series`, both of which are
-            // kept: it follows the selection, not the deployment.
-            "series",
-            "fetched",
-            "decoded",
-            "publication",
-            // Replay is a mode, and a base change inside it is the user
-            // moving around the file they opened.
-            "replay",
-            "replay_open",
-            "replay_note",
-            "recording",
-            "recorded",
-        ];
-
-        let src = include_str!("app.rs");
-        let start = src
-            .find("pub struct Zengui {")
-            .expect("the struct is in this file");
-        let body = &src[start..start + src[start..].find("\n}\n").expect("its end")];
-        let fields: Vec<&str> = body
-            .lines()
-            .filter_map(|l| {
-                let l = l.trim();
-                if l.starts_with("//") || l.starts_with('/') || !l.contains(':') {
-                    return None;
-                }
-                l.split(':').next().filter(|n| {
-                    !n.is_empty() && n.chars().all(|c| c.is_ascii_lowercase() || c == '_')
-                })
-            })
-            .collect();
-        assert!(fields.len() > 40, "the field scan found only {fields:?}");
-
-        let fstart = src
-            .find("fn forget_deployment(&mut self) {")
-            .expect("the routine");
-        let forget = &src[fstart..fstart + src[fstart..].find("\n    }\n").expect("its end")];
-
-        let mut kept: Vec<&str> = fields
-            .into_iter()
-            .filter(|f| !forget.contains(&format!("self.{f}")))
-            .collect();
-        kept.sort_unstable();
-        kept.dedup();
-        let mut expected: Vec<&str> = KEPT.to_vec();
-        expected.sort_unstable();
-        assert_eq!(
-            kept, expected,
-            "a field of `Zengui` changed sides. Either `forget_deployment` \
-             should clear it — that is #179's defect, and #194 was the same \
-             mistake on the save path — or it genuinely outlives a deployment \
-             and belongs on this list, with the reason beside it."
-        );
     }
 }

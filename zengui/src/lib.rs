@@ -34,4 +34,5 @@ pub mod scope;
 pub mod series;
 pub mod services;
 pub mod shortcuts;
+pub(crate) mod state;
 pub mod view;
