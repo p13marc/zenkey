@@ -22,7 +22,7 @@ use iced::{Element, Length};
 use zenkey_fleet::decode::Rendering;
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
-use crate::message::{Message, RightPane};
+use crate::message::{Message, RightPane, WorkspaceMsg};
 use crate::series::{NumericLeaves, Series};
 use crate::view::kit;
 use crate::view::spark;
@@ -202,7 +202,7 @@ pub struct SeriesCaches {
 
 /// Wrap one of this pane's messages for the app (#176).
 ///
-/// `Message::PaneSelected` below is deliberately *not* routed through
+/// `Message::Workspace(WorkspaceMsg::PaneSelected)` below is deliberately *not* routed through
 /// this: it names another region, and a pane reaching across is a fact
 /// worth leaving visible at its call site.
 fn msg(m: DetailMsg) -> Message {
@@ -331,7 +331,9 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
                 ))
                 .size(font::CAPTION),
             )
-            .on_press(Message::PaneSelected(RightPane::History))
+            .on_press(Message::Workspace(WorkspaceMsg::PaneSelected(
+                RightPane::History,
+            )))
             .style(iced::widget::button::text)
             .padding(0),
         );

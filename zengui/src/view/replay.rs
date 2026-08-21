@@ -15,7 +15,7 @@ use iced::{Element, Length};
 use super::kit;
 use super::theme::colors;
 use super::tokens::{font, space};
-use crate::message::Message;
+use crate::message::{Message, WorkspaceMsg};
 use crate::replay::ReplayState;
 
 /// Replay-mode interactions.
@@ -44,7 +44,7 @@ pub enum ReplayMsg {
 }
 
 fn msg(m: ReplayMsg) -> Message {
-    Message::Replay(m)
+    Message::Workspace(WorkspaceMsg::Replay(m))
 }
 
 /// A pacing scale the picker can display.

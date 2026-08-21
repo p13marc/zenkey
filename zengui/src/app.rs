@@ -37,7 +37,7 @@ use crate::view::tokens::space;
 /// false in the other two (#249).
 const MAX_ROWS: usize = 50_000;
 
-use crate::message::{BusMsg, DeploymentMsg, RightPane, SubjectMsg};
+use crate::message::{BusMsg, DeploymentMsg, RightPane, SubjectMsg, WorkspaceMsg};
 
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
@@ -356,31 +356,7 @@ impl Zengui {
             Message::Bus(m) => self.update_bus(m),
             Message::Subject(m) => self.update_subject(m),
             Message::Deployment(m) => self.update_deployment(m),
-            Message::PivotSelected(pivot) => {
-                self.pivot = pivot;
-                self.tree_scroll.0 = 0.0;
-                self.reflatten();
-                Task::none()
-            }
-            Message::TreeSearchChanged(q) => {
-                self.tree_search = q;
-                self.tree_scroll.0 = 0.0;
-                self.reflatten();
-                Task::none()
-            }
-            Message::TreeScrolled(y, h) => {
-                // View-only state: the next frame renders the new window.
-                self.tree_scroll = (y, h.max(100.0));
-                Task::none()
-            }
-            Message::ToggleNode(path) => {
-                // Collapsing takes the subtree with it (#179) — see
-                // `expansion.rs` for why that trade is the fix rather than a
-                // side effect of it.
-                self.expanded.toggle(&path);
-                self.reflatten();
-                Task::none()
-            }
+            Message::Workspace(m) => self.update_workspace(m),
             Message::Call(msg) => self.update_call(msg),
             Message::Nodes(msg) => self.update_nodes(msg),
             Message::Doctor(msg) => self.update_doctor(msg),
@@ -406,12 +382,7 @@ impl Zengui {
             }
             Message::Publish(msg) => self.update_publish(msg),
             Message::Echo(msg) => self.update_echo(msg),
-            Message::Replay(msg) => self.update_replay(msg),
             Message::Context(msg) => self.update_context(msg),
-            Message::PaneSelected(pane) => {
-                self.right_pane = pane;
-                Task::none()
-            }
             Message::WindowResized(w, h) => {
                 // Not on every pixel of a drag — the prefs file would be
                 // rewritten hundreds of times per resize. Recorded here and
@@ -734,6 +705,42 @@ impl Zengui {
                     },
                     |(key, out)| Message::Subject(SubjectMsg::ValueFetched(key, out)),
                 )
+            }
+        }
+    }
+
+    /// The shell around the panes, and the replay mode.
+    fn update_workspace(&mut self, msg: WorkspaceMsg) -> Task<Message> {
+        match msg {
+            WorkspaceMsg::PivotSelected(pivot) => {
+                self.pivot = pivot;
+                self.tree_scroll.0 = 0.0;
+                self.reflatten();
+                Task::none()
+            }
+            WorkspaceMsg::TreeSearchChanged(q) => {
+                self.tree_search = q;
+                self.tree_scroll.0 = 0.0;
+                self.reflatten();
+                Task::none()
+            }
+            WorkspaceMsg::TreeScrolled(y, h) => {
+                // View-only state: the next frame renders the new window.
+                self.tree_scroll = (y, h.max(100.0));
+                Task::none()
+            }
+            WorkspaceMsg::ToggleNode(path) => {
+                // Collapsing takes the subtree with it (#179) — see
+                // `expansion.rs` for why that trade is the fix rather than a
+                // side effect of it.
+                self.expanded.toggle(&path);
+                self.reflatten();
+                Task::none()
+            }
+            WorkspaceMsg::Replay(msg) => self.update_replay(msg),
+            WorkspaceMsg::PaneSelected(pane) => {
+                self.right_pane = pane;
+                Task::none()
             }
         }
     }
@@ -2196,7 +2203,9 @@ impl Zengui {
                 // The tree already owns "show me this": reusing its search is
                 // one behaviour, not two that can drift.
                 self.right_pane = RightPane::Echo;
-                Task::done(Message::TreeSearchChanged(producer))
+                Task::done(Message::Workspace(WorkspaceMsg::TreeSearchChanged(
+                    producer,
+                )))
             }
             AdminMsg::Run => {
                 if self.admin.in_flight {
@@ -2590,7 +2599,7 @@ impl Zengui {
                         writer.finish().map_err(|e| e.to_string())?;
                         Ok((samples, dropped, path))
                     },
-                    |r| Message::Replay(R::RecordFinished(r)),
+                    |r| Message::Workspace(WorkspaceMsg::Replay(R::RecordFinished(r))),
                 )
             }
             R::RecordFinished(result) => {
@@ -2850,8 +2859,9 @@ impl Zengui {
         // panes tick at the rate they were built for.
         if self.replay.as_ref().is_some_and(|r| r.playing) {
             subs.push(
-                iced::time::every(std::time::Duration::from_millis(250))
-                    .map(|_| Message::Replay(view::replay::ReplayMsg::Advance)),
+                iced::time::every(std::time::Duration::from_millis(250)).map(|_| {
+                    Message::Workspace(WorkspaceMsg::Replay(view::replay::ReplayMsg::Advance))
+                }),
             );
         }
         // The repeat clock for a sustained publish (#60). It exists only while
@@ -3079,7 +3089,11 @@ impl Zengui {
             scope_picker,
             observe,
             iced::widget::Row::from_iter(RightPane::ALL.into_iter().map(|p| {
-                crate::view::kit::tab(p.label(), self.right_pane == p, Message::PaneSelected(p))
+                crate::view::kit::tab(
+                    p.label(),
+                    self.right_pane == p,
+                    Message::Workspace(WorkspaceMsg::PaneSelected(p)),
+                )
             }))
             .spacing(space::XS),
             crate::view::kit::muted(self.settings.scope.label()),
@@ -3093,10 +3107,14 @@ impl Zengui {
                 })
                 .size(crate::view::tokens::font::CAPTION)
             )
-            .on_press(Message::Replay(view::replay::ReplayMsg::RecordToggled))
+            .on_press(Message::Workspace(WorkspaceMsg::Replay(
+                view::replay::ReplayMsg::RecordToggled
+            )))
             .padding(4),
             iced::widget::button(text("replay…").size(crate::view::tokens::font::CAPTION))
-                .on_press(Message::Replay(view::replay::ReplayMsg::OpenToggled))
+                .on_press(Message::Workspace(WorkspaceMsg::Replay(
+                    view::replay::ReplayMsg::OpenToggled
+                )))
                 .padding(4),
             iced::widget::space::horizontal(),
             // Window preferences (issue #73): the theme name is the button,

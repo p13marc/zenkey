@@ -20,7 +20,7 @@
 use iced::widget::{Column, column, container, row, text, text_input};
 use iced::{Element, Length};
 
-use crate::message::{DeploymentMsg, Message, PrefsMsg, RightPane};
+use crate::message::{DeploymentMsg, Message, PrefsMsg, RightPane, WorkspaceMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -107,7 +107,7 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         .into_iter()
         .map(|p| Action {
             label: format!("go to {} pane", p.label()),
-            message: Message::PaneSelected(p),
+            message: Message::Workspace(WorkspaceMsg::PaneSelected(p)),
         })
         .collect();
 
@@ -395,7 +395,7 @@ mod tests {
         for pane in RightPane::ALL {
             assert_eq!(
                 find(&format!("go to {} pane", pane.label())),
-                format!("{:?}", Message::PaneSelected(pane))
+                format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))
             );
         }
         // Scope: the same message the toolbar picker sends.

@@ -12,7 +12,7 @@
 
 use iced::keyboard::{Key, Modifiers, key::Named};
 
-use crate::message::{DeploymentMsg, Message, PrefsMsg, RightPane};
+use crate::message::{DeploymentMsg, Message, PrefsMsg, RightPane, WorkspaceMsg};
 use crate::view::palette::{Overlay, PaletteMsg};
 
 /// One binding: how it is typed, what it does, and the message it sends.
@@ -99,16 +99,16 @@ const PANE_WHAT: [&str; 10] = [
     "admin pane",
 ];
 const PANE_MESSAGES: [fn() -> Message; 10] = [
-    || Message::PaneSelected(RightPane::Echo),
-    || Message::PaneSelected(RightPane::Call),
-    || Message::PaneSelected(RightPane::Publish),
-    || Message::PaneSelected(RightPane::Detail),
-    || Message::PaneSelected(RightPane::Nodes),
-    || Message::PaneSelected(RightPane::Doctor),
-    || Message::PaneSelected(RightPane::History),
-    || Message::PaneSelected(RightPane::Blob),
-    || Message::PaneSelected(RightPane::Media),
-    || Message::PaneSelected(RightPane::Admin),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Echo)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Call)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Publish)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Detail)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Nodes)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Doctor)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::History)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Blob)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Media)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Admin)),
 ];
 
 /// A key press → the message it should send, if any.
@@ -152,7 +152,9 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
         // arbitrary.
         let n = if digit == 0 { 10 } else { digit };
         if (1..=RightPane::ALL.len()).contains(&n) {
-            return Some(Message::PaneSelected(RightPane::ALL[n - 1]));
+            return Some(Message::Workspace(WorkspaceMsg::PaneSelected(
+                RightPane::ALL[n - 1],
+            )));
         }
     }
     None
@@ -220,7 +222,7 @@ mod tests {
         for (i, pane) in RightPane::ALL.into_iter().take(PANE_KEYS.len()).enumerate() {
             assert_eq!(
                 format!("{:?}", PANE_MESSAGES[i]()),
-                format!("{:?}", Message::PaneSelected(pane))
+                format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))
             );
         }
     }
@@ -270,26 +272,32 @@ mod tests {
     fn alt_digits_cover_the_panes_and_stop() {
         assert!(matches!(
             press("9", Modifiers::ALT),
-            Some(Message::PaneSelected(RightPane::Media))
+            Some(Message::Workspace(WorkspaceMsg::PaneSelected(
+                RightPane::Media
+            )))
         ));
         assert!(matches!(
             press("0", Modifiers::ALT),
-            Some(Message::PaneSelected(RightPane::Admin))
+            Some(Message::Workspace(WorkspaceMsg::PaneSelected(
+                RightPane::Admin
+            )))
         ));
         // The first ten panes are each reachable by a digit; the eleventh
         // (Connect) deliberately is not — tab strip and palette reach it,
         // and resolve() stops rather than wrapping.
         for pane in RightPane::ALL.into_iter().take(PANE_KEYS.len()) {
             assert!(
-                PANE_MESSAGES
-                    .iter()
-                    .any(|m| format!("{:?}", m()) == format!("{:?}", Message::PaneSelected(pane))),
+                PANE_MESSAGES.iter().any(|m| format!("{:?}", m())
+                    == format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))),
                 "{pane:?} has no binding"
             );
         }
         assert!(
             !PANE_MESSAGES.iter().any(|m| format!("{:?}", m())
-                == format!("{:?}", Message::PaneSelected(RightPane::Connect))),
+                == format!(
+                    "{:?}",
+                    Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Connect))
+                )),
             "the overflow pane is a stated fact, not an accident"
         );
     }

@@ -99,12 +99,44 @@ pub enum SubjectMsg {
     SelectKey(Option<String>),
 }
 
+/// The shell around the panes: which one shows, the tree's own chrome, and the
+/// replay mode (#176).
+///
+/// **Not what #176's issue body describes.** It sketched "pane_grid
+/// drag/resize/close, layout switch, window open/close" — none of which exist:
+/// `grep -rn pane_grid zengui/src` is empty and the layout is a fixed
+/// `row![tree, right]`. Those arrive with #180.
+///
+/// `Replay` is here and not a pane, because `view/replay.rs` has no `pane()` at
+/// all: it renders a banner between the toolbar and the panes, and `RightPane`
+/// has no `Replay` variant. Adding one to make it fit would put a twelfth tab in
+/// the strip and break `PANE_KEYS`' ten-digit arithmetic — a message reshape that
+/// changes the toolbar has escaped its scope.
+#[derive(Debug, Clone)]
+pub enum WorkspaceMsg {
+    ToggleNode(String),
+    /// The tree pivot changed (issue #65).
+    PivotSelected(crate::view::tree::Pivot),
+    /// The find-in-tree query changed (issue #65).
+    TreeSearchChanged(String),
+    /// The tree scrolled: (absolute y offset, viewport height) — what the
+    /// virtualized window renders against (issue #65).
+    TreeScrolled(f32, f32),
+    /// Switch the right-hand pane (the toolbar's tab strip).
+    PaneSelected(RightPane),
+    /// Replay-mode interactions (issue #74): open/scrub/play a `.zrec`,
+    /// record the current watches to one.
+    Replay(crate::view::replay::ReplayMsg),
+}
+
 /// Everything that can move the app.
 ///
 /// `Clone` is required by iced's widget callbacks. Every payload here is
 /// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// The shell around the panes: which one shows, the tree's own chrome, and the
+    Workspace(WorkspaceMsg),
     /// One key: chosen, observed, fetched, decoded (#176).
     Subject(SubjectMsg),
     /// What the app is pointed at, and the coverage that follows (#176).
@@ -131,20 +163,10 @@ pub enum Message {
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
 
-    ToggleNode(String),
-    /// The tree pivot changed (issue #65).
-    PivotSelected(crate::view::tree::Pivot),
-    /// The find-in-tree query changed (issue #65).
-    TreeSearchChanged(String),
-    /// The tree scrolled: (absolute y offset, viewport height) — what the
-    /// virtualized window renders against (issue #65).
-    TreeScrolled(f32, f32),
     /// Echo pane interactions (issue #72, echo v2).
     Echo(crate::view::echo::EchoMsg),
     /// Connection pane interactions (issue #67).
     Context(crate::view::contexts::ContextMsg),
-    /// Switch the right-hand pane (the toolbar's tab strip).
-    PaneSelected(RightPane),
 
     /// A key press no widget consumed (issues #73, #75).
     ///
@@ -155,9 +177,6 @@ pub enum Message {
     Key(iced::keyboard::Key, iced::keyboard::Modifiers),
     /// Command-palette / overlay interactions (issue #75).
     Palette(crate::view::palette::PaletteMsg),
-    /// Replay-mode interactions (issue #74): open/scrub/play a `.zrec`,
-    /// record the current watches to one.
-    Replay(crate::view::replay::ReplayMsg),
     /// A persisted-preference change (issue #73). Each one saves.
     Prefs(PrefsMsg),
     /// The window was resized — remembered for the next launch (issue #73).
