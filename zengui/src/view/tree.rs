@@ -1158,6 +1158,59 @@ pub fn registration_label(reg: &Registration) -> &'static str {
 /// `&self` read from the render path.
 pub type FactsIndex = zenkey_fleet::FactsCache;
 
+/// The tree's two watch sets — same type, opposite meanings (#250).
+///
+/// They were adjacent `&BTreeSet<String>` parameters at **three** call layers —
+/// [`pane`], [`tree_view`] and `row_view`, which is where both are actually
+/// read: one picks "seeding…" over "quiet", the other ◉ over ○. Transposing
+/// them compiled, and the tree then drew every watched subtree as still
+/// seeding and every seeding one as settled.
+///
+/// Named fields make that a type error at all three. Two flat fields on
+/// [`TreeData`] would have fixed only the outermost — `row_view` takes six
+/// arguments, so clippy never flagged it and it is invisible to #250's own
+/// acceptance grep.
+#[derive(Clone, Copy)]
+pub struct Watches<'a> {
+    /// Subtrees this app watches: the ◉/○ toggle on each row.
+    pub mine: &'a BTreeSet<String>,
+    /// Watches whose seed phase has not resolved yet (issue #92) — the
+    /// "seeding…" badge, which must never read as "quiet".
+    pub seeding: &'a BTreeSet<String>,
+}
+
+/// What the app hands the tree pane (#250, on `DetailData`'s precedent).
+///
+/// Ordered by **where each field comes from**, not by where it is drawn: the
+/// tree's own display state, then what has been observed about it, then what
+/// the user chose. That is a defensible order on its own terms, and #175 —
+/// which splits `Zengui` along those same seams — is the corroboration: each
+/// run below becomes one sub-state's prefix, so the call site stays one
+/// literal.
+///
+/// A builder was rejected. The test call sites want a literal, and a literal
+/// missing a field is a compile error where a builder missing a `.with_…` is a
+/// silent default — and these are honesty inputs, where a default is a claim
+/// nobody made.
+pub struct TreeData<'a> {
+    /// The flattened rows and their numbers, as of the last rebuild (#177).
+    pub flat: &'a Flattened,
+    /// How the tree groups its entries (issue #65).
+    pub pivot: Pivot,
+    /// The find-in-tree query; empty = no filter.
+    pub search: &'a str,
+    /// Scroll offset, and…
+    pub scroll_y: f32,
+    /// …the viewport height: together, the virtual window.
+    pub viewport_h: f32,
+    /// Per-key projections, for the row badges.
+    pub facts: &'a FactsIndex,
+    /// The pair this struct exists for.
+    pub watches: Watches<'a>,
+    /// The selected wire key, if any.
+    pub selected: Option<&'a str>,
+}
+
 /// What clicking the row body does (issue #93): concrete entries select
 /// (detail fetch acts on `target`); groups toggle. Pure, so it is testable
 /// without a renderer.
@@ -1196,16 +1249,15 @@ pub fn window(rows: usize, scroll_y: f32, viewport_h: f32) -> (usize, usize) {
     (first.min(rows), last)
 }
 
-/// Render the tree pane.
-pub fn tree_view<'a>(
-    flat: &'a Flattened,
-    facts: &'a FactsIndex,
-    selected: Option<&'a str>,
-    watched_paths: &'a BTreeSet<String>,
-    seeding_paths: &'a BTreeSet<String>,
-    scroll_y: f32,
-    viewport_h: f32,
-) -> Element<'a, Message> {
+/// Render the rows.
+///
+/// Takes the same [`TreeData`] as [`pane`], which formally hands it `pivot` and
+/// `search` that it does not use. That is the trade: the two functions overlap
+/// on five arguments, and one struct is what stops them drifting apart — this
+/// one sat at exactly seven arguments, one below the lint, so the next field
+/// the tree pane needs would have re-earned the allow that chunk AL deleted.
+fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
+    let flat = d.flat;
     if flat.rows.is_empty() {
         if flat.filtered && flat.total_keys > 0 {
             return kit::empty_state(
@@ -1221,7 +1273,7 @@ pub fn tree_view<'a>(
         );
     }
 
-    let (first, last) = window(flat.rows.len(), scroll_y, viewport_h);
+    let (first, last) = window(flat.rows.len(), d.scroll_y, d.viewport_h);
     let mut col = Column::new();
     if first > 0 {
         col = col.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * ROW_HEIGHT)));
@@ -1233,15 +1285,8 @@ pub fn tree_view<'a>(
         let shape = &flat.rows[i];
         let r = flat.row(i);
         col = col.push(
-            iced::widget::container(row_view(
-                shape,
-                &r,
-                facts,
-                selected,
-                watched_paths,
-                seeding_paths,
-            ))
-            .height(Length::Fixed(ROW_HEIGHT)),
+            iced::widget::container(row_view(shape, &r, d.facts, d.selected, d.watches))
+                .height(Length::Fixed(ROW_HEIGHT)),
         );
     }
     if last < flat.rows.len() {
@@ -1282,8 +1327,7 @@ fn row_view<'a>(
     r: &TreeRow,
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
-    watched_paths: &'a BTreeSet<String>,
-    seeding_paths: &'a BTreeSet<String>,
+    watches: Watches<'a>,
 ) -> Element<'a, Message> {
     let indent = iced::widget::Space::new().width(Length::Fixed(r.depth as f32 * 14.0));
 
@@ -1348,7 +1392,7 @@ fn row_view<'a>(
             // While the watch's seed phase is still running, "quiet" is not
             // yet an observation — the seed may still deliver (issue #92).
             let check = r.target.as_deref().unwrap_or(&r.path);
-            if under_seeding(check, seeding_paths) {
+            if under_seeding(check, watches.seeding) {
                 line = line.push(kit::muted("seeding…"));
             } else {
                 line = line.push(kit::muted("quiet"));
@@ -1402,7 +1446,7 @@ fn row_view<'a>(
     // a real wire subtree offer it (pivot groups are synthetic).
     let watch: Element<'a, Message> = match &r.target {
         Some(t) => {
-            let watch_label = if watched_paths.contains(t) {
+            let watch_label = if watches.mine.contains(t) {
                 "◉"
             } else {
                 "○"
@@ -1432,23 +1476,13 @@ fn row_view<'a>(
 }
 
 /// A standalone pane, for tests and for the `view/mod` composition.
-#[allow(clippy::too_many_arguments)]
-pub fn pane<'a>(
-    flat: &'a Flattened,
-    facts: &'a FactsIndex,
-    selected: Option<&'a str>,
-    watched_paths: &'a BTreeSet<String>,
-    seeding_paths: &'a BTreeSet<String>,
-    pivot: Pivot,
-    search: &'a str,
-    scroll_y: f32,
-    viewport_h: f32,
-) -> Element<'a, Message> {
-    let pivot_picker = iced::widget::pick_list(Pivot::ALL.to_vec(), Some(pivot), |v| {
+pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
+    let flat = d.flat;
+    let pivot_picker = iced::widget::pick_list(Pivot::ALL.to_vec(), Some(d.pivot), |v| {
         Message::Workspace(WorkspaceMsg::PivotSelected(v))
     })
     .text_size(font::CAPTION);
-    let find = iced::widget::text_input("find keys…", search)
+    let find = iced::widget::text_input("find keys…", d.search)
         .size(font::CAPTION)
         .on_input(|v| Message::Workspace(WorkspaceMsg::TreeSearchChanged(v)));
     let mut header = row![pivot_picker, find]
@@ -1462,21 +1496,9 @@ pub fn pane<'a>(
             flat.total_keys
         )));
     }
-    column![
-        kit::section_header("Keys", None),
-        header,
-        tree_view(
-            flat,
-            facts,
-            selected,
-            watched_paths,
-            seeding_paths,
-            scroll_y,
-            viewport_h
-        )
-    ]
-    .spacing(space::SM)
-    .into()
+    column![kit::section_header("Keys", None), header, tree_view(d)]
+        .spacing(space::SM)
+        .into()
 }
 
 #[cfg(test)]

@@ -81,17 +81,19 @@ fn the_tree_renders_the_registration_state() {
     let keys = [REGISTERED, UNREGISTERED, FOREIGN];
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(
-        &flat,
-        &facts,
-        None,
-        &watches,
-        &watches,
-        tree::Pivot::Chunks,
-        "",
-        0.0,
-        600.0,
-    ));
+    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        flat: &flat,
+        pivot: tree::Pivot::Chunks,
+        search: "",
+        scroll_y: 0.0,
+        viewport_h: 600.0,
+        facts: &facts,
+        watches: tree::Watches {
+            mine: &watches,
+            seeding: &watches,
+        },
+        selected: None,
+    }));
 
     assert!(
         ui.find("registered").is_ok(),
@@ -119,17 +121,19 @@ fn an_unresolved_tree_claims_neither_way() {
     let keys = [REGISTERED];
     let (flat, facts) = render(&keys, false);
     let watches = BTreeSet::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(
-        &flat,
-        &facts,
-        None,
-        &watches,
-        &watches,
-        tree::Pivot::Chunks,
-        "",
-        0.0,
-        600.0,
-    ));
+    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        flat: &flat,
+        pivot: tree::Pivot::Chunks,
+        search: "",
+        scroll_y: 0.0,
+        viewport_h: 600.0,
+        facts: &facts,
+        watches: tree::Watches {
+            mine: &watches,
+            seeding: &watches,
+        },
+        selected: None,
+    }));
 
     assert!(
         ui.find("unregistered").is_err(),
@@ -147,17 +151,19 @@ fn foreign_keys_render_without_convention_labels() {
     let keys = [FOREIGN];
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(
-        &flat,
-        &facts,
-        None,
-        &watches,
-        &watches,
-        tree::Pivot::Chunks,
-        "",
-        0.0,
-        600.0,
-    ));
+    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        flat: &flat,
+        pivot: tree::Pivot::Chunks,
+        search: "",
+        scroll_y: 0.0,
+        viewport_h: 600.0,
+        facts: &facts,
+        watches: tree::Watches {
+            mine: &watches,
+            seeding: &watches,
+        },
+        selected: None,
+    }));
 
     for role in ["version", "origin", "class", "producer", "subject"] {
         assert!(
@@ -176,17 +182,19 @@ fn the_empty_tree_explains_itself() {
     let flat = tree::Flattened::empty();
     let facts = FactsIndex::default();
     let watches = BTreeSet::new();
-    let mut ui = simulator::<Message, _, _>(tree::pane(
-        &flat,
-        &facts,
-        None,
-        &watches,
-        &watches,
-        tree::Pivot::Chunks,
-        "",
-        0.0,
-        600.0,
-    ));
+    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        flat: &flat,
+        pivot: tree::Pivot::Chunks,
+        search: "",
+        scroll_y: 0.0,
+        viewport_h: 600.0,
+        facts: &facts,
+        watches: tree::Watches {
+            mine: &watches,
+            seeding: &watches,
+        },
+        selected: None,
+    }));
 
     assert!(ui.find("Nothing observed yet").is_ok());
     // Selectors match a widget's whole text, so this is the full disclaimer.
