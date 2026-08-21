@@ -680,6 +680,8 @@ pub(crate) enum RegistryCmd {
         /// Deprecation ledger; defaults to `<dir>/deprecated.lock`.
         #[arg(long, value_name = "FILE")]
         ledger: Option<PathBuf>,
+        #[command(flatten)]
+        out: OutputArgs,
     },
     /// Write or update the RFC 08 §3.1 compatibility lock (registry.lock).
     ///
@@ -694,6 +696,8 @@ pub(crate) enum RegistryCmd {
         /// Rewrite pins over an incompatible edit — the loud break.
         #[arg(long)]
         force: bool,
+        #[command(flatten)]
+        out: OutputArgs,
     },
 }
 
@@ -834,17 +838,40 @@ pub(crate) enum ContextCmd {
         /// Select it as the current context.
         #[arg(long)]
         select: bool,
+        #[command(flatten)]
+        out: OutputArgs,
     },
     /// List contexts (the `*` marks the current one).
-    List,
+    List {
+        #[command(flatten)]
+        out: OutputArgs,
+    },
     /// Show one context (default: the current one).
-    Show { name: Option<String> },
+    ///
+    /// `--format json` is how a CI job asks which deployment a runner is
+    /// pinned to: `zenctl context show --format json | jq -r .base`.
+    Show {
+        name: Option<String>,
+        #[command(flatten)]
+        out: OutputArgs,
+    },
     /// Select the current context.
-    Select { name: String },
+    Select {
+        name: String,
+        #[command(flatten)]
+        out: OutputArgs,
+    },
     /// Remove a context.
-    Rm { name: String },
+    Rm {
+        name: String,
+        #[command(flatten)]
+        out: OutputArgs,
+    },
     /// Open the whole config file in $VISUAL/$EDITOR, validating afterwards.
-    Edit,
+    Edit {
+        #[command(flatten)]
+        out: OutputArgs,
+    },
 }
 
 #[derive(Subcommand)]

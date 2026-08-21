@@ -371,3 +371,286 @@ impl Render for GetReport {
         Vec::new()
     }
 }
+
+/// One context as `zenctl context list` shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextRow {
+    pub name: String,
+    /// The `*` in the table: this is the one commands resolve against.
+    pub current: bool,
+    /// Three states, and the reason this is an `Option<String>` rather than a
+    /// `String`: a stored **empty** base (`""`, the legal bus-root deployment)
+    /// must not read like an unset one. In the table they are `""` and `—`;
+    /// in json they are `""` and absent (RFC 09 §5.1 O4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    pub connect: Vec<String>,
+}
+
+/// What `zenctl context list` found in the config file.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextList {
+    pub path: String,
+    pub contexts: Vec<ContextRow>,
+}
+
+impl Render for ContextList {
+    const FAMILY: &'static str = "context-list";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = serde_json::Map::new();
+        e.insert("path".into(), self.path.clone().into());
+        e.insert("contexts".into(), self.contexts.len().into());
+        e
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for c in &self.contexts {
+            out(Row::of("context", c));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        // The marker rides the name cell rather than owning a column of its
+        // own: a one-character column still pads to the gutter, which turned
+        // `* lab` into `*  lab`.
+        let mut g = Grid::unheaded(2);
+        for c in &self.contexts {
+            g.row([
+                Cell::text(format!("{} {}", if c.current { "*" } else { " " }, c.name)),
+                Cell::text(format!(
+                    "base={}  connect={:?}",
+                    match c.base.as_deref() {
+                        Some("") => "\"\"",
+                        Some(b) => b,
+                        None => "-",
+                    },
+                    c.connect
+                )),
+            ]);
+        }
+        t.grid(g);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        if self.contexts.is_empty() {
+            // The empty case is a state, not an error, and it says what to
+            // type next — which is why it is a note rather than an early
+            // `return` from `table()` (#199).
+            return vec![Note::summary(
+                "no contexts. create one:\n  zenctl context create lab \
+                 --base zensight -c tcp/127.0.0.1:7447",
+            )];
+        }
+        vec![Note::summary(format!(
+            "{} context(s) in {}",
+            self.contexts.len(),
+            self.path
+        ))]
+    }
+}
+
+/// One context in full — `zenctl context show`.
+///
+/// The envelope carries `StoredContext`'s own fields **flat**, because the
+/// question a CI job asks is `zenctl context show --format json | jq -r .base`
+/// and a nested `.context.base` would be a shape invented for no reader (#242).
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextShow {
+    pub name: String,
+    pub current: bool,
+    #[serde(flatten)]
+    pub context: zenkey_fleet::context_store::StoredContext,
+}
+
+impl Render for ContextShow {
+    const FAMILY: &'static str = "context";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        }
+    }
+
+    fn rows(&self, _out: &mut dyn FnMut(Row)) {}
+
+    fn table(&self, t: &mut Table) {
+        // TOML, as it has always been: this is the file's own language, and a
+        // person reading `context show` is usually about to edit it.
+        match toml::to_string_pretty(&self.context) {
+            Ok(text) => t.line(text.trim_end()),
+            Err(e) => t.line(format!("(cannot render: {e})")),
+        };
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        vec![Note::summary(format!(
+            "context {:?}{}",
+            self.name,
+            if self.current { " (selected)" } else { "" }
+        ))]
+    }
+}
+
+/// A context verb that changed the file: create, update, select, remove.
+///
+/// Notes-only. There is no wire shape to invent — the answer is "it happened",
+/// and the envelope's `action`/`name` pair is already the whole of it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextAction {
+    /// `created`, `updated`, `selected` or `removed`.
+    pub action: &'static str,
+    pub name: String,
+    /// Whether this context is now the one commands resolve against.
+    pub current: bool,
+}
+
+impl Render for ContextAction {
+    const FAMILY: &'static str = "context-action";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        }
+    }
+
+    fn rows(&self, _out: &mut dyn FnMut(Row)) {}
+
+    fn table(&self, _t: &mut Table) {}
+
+    fn notes(&self) -> Vec<Note> {
+        vec![Note::summary(format!(
+            "{} context {:?}{}",
+            self.action,
+            self.name,
+            if self.current && self.action != "removed" {
+                " (selected)"
+            } else {
+                ""
+            }
+        ))]
+    }
+}
+
+/// `registry lint` — the RFC 08 §5 lints, passed.
+///
+/// Notes-only, deliberately. This command's stated value is *the build's own
+/// wording, verbatim*; a `{dir, passed, message}` struct would be a second
+/// shape to keep in step with `zenkey_build`'s, over an exit code and a
+/// sentence. A failure is still an `Err` carrying the build's text.
+#[derive(Debug, Clone, Serialize)]
+pub struct LintReport {
+    pub dir: String,
+}
+
+impl Render for LintReport {
+    const FAMILY: &'static str = "registry-lint";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = serde_json::Map::new();
+        e.insert("dir".into(), self.dir.clone().into());
+        e.insert("passed".into(), true.into());
+        e
+    }
+
+    fn rows(&self, _out: &mut dyn FnMut(Row)) {}
+
+    fn table(&self, _t: &mut Table) {}
+
+    fn notes(&self) -> Vec<Note> {
+        vec![Note::summary(format!(
+            "{}: registry lints pass (RFC 08 §5).",
+            self.dir
+        ))]
+    }
+}
+
+/// `registry lock` — what the RFC 08 §3.1 compatibility lock became.
+#[derive(Debug, Clone, Serialize)]
+pub struct LockReport {
+    pub path: String,
+    pub created: bool,
+    pub added: usize,
+    pub retired: usize,
+    /// Every pin a `--force` broke, verbatim. Loud by contract: the escape
+    /// hatch is legal, silent it is not.
+    pub forced: Vec<String>,
+}
+
+impl Render for LockReport {
+    const FAMILY: &'static str = "registry-lock";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        }
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for broken in &self.forced {
+            out(Row::tagged(
+                "forced-break",
+                serde_json::json!({ "detail": broken }),
+            ));
+        }
+    }
+
+    fn table(&self, _t: &mut Table) {}
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = vec![Note::summary(format!(
+            "{}: {} ({} pinned entr{} added, {} released)",
+            self.path,
+            if self.created { "created" } else { "updated" },
+            self.added,
+            if self.added == 1 { "y" } else { "ies" },
+            self.retired,
+        ))];
+        for broken in &self.forced {
+            notes.push(Note::caveat(format!("FORCED BREAK:\n{broken}")).cite("RFC 08 §3.1"));
+        }
+        notes
+    }
+}
+
+/// `zenctl cache refresh|clear` — what happened to this tool's own disk
+/// footprint.
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheAction {
+    /// `refreshed` or `cleared`.
+    pub action: &'static str,
+    pub dir: String,
+    /// Producers cached, for `refresh`. Absent for `clear`, which counts
+    /// nothing — not zero (RFC 09 §5.1 O4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slices: Option<usize>,
+    /// Whether there was anything there. `clear` on an absent directory is
+    /// the desired end state, not a failure.
+    pub existed: bool,
+}
+
+impl Render for CacheAction {
+    const FAMILY: &'static str = "cache-action";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        }
+    }
+
+    fn rows(&self, _out: &mut dyn FnMut(Row)) {}
+
+    fn table(&self, _t: &mut Table) {}
+
+    fn notes(&self) -> Vec<Note> {
+        vec![Note::summary(match (self.action, self.slices) {
+            ("refreshed", Some(n)) => format!("cached {n} producer(s) to {}", self.dir),
+            (_, _) if self.existed => format!("removed {}", self.dir),
+            _ => format!("{} does not exist — nothing to clear", self.dir),
+        })]
+    }
+}

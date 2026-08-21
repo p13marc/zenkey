@@ -49,7 +49,8 @@
 mod impls;
 pub use impls::RateView;
 pub use impls::local::{
-    CacheReport, CachedSlice, GenPlan, GetReport, KeyCanon, KeyRelation, SchemaCheck,
+    CacheAction, CacheReport, CachedSlice, ContextAction, ContextList, ContextRow, ContextShow,
+    GenPlan, GetReport, KeyCanon, KeyRelation, LintReport, LockReport, SchemaCheck,
 };
 pub use impls::observations::TopologyView;
 pub mod style;

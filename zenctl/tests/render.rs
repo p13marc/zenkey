@@ -898,7 +898,11 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "blob-probe",
         "blob-tree",
         "cache",
+        "cache-action",
         "call",
+        "context",
+        "context-action",
+        "context-list",
         "cutover",
         "doctor",
         "expect",
@@ -915,6 +919,8 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "rate",
         "record",
         "registry-diff",
+        "registry-lint",
+        "registry-lock",
         "replay",
         "schema-check",
         "schema-dump",
@@ -957,5 +963,180 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "a Render impl was added or removed without the checklist in this test \
          moving with it — and the moment to write its snapshot is now, while \
          you still remember what it draws"
+    );
+}
+
+/// The context family, which until #242 had no machine surface at all.
+///
+/// The two things worth pinning are the three-state base — a stored empty
+/// base (`""`, the legal bus-root deployment) must not read like an unset one
+/// — and the *flat* json envelope, because the whole point is
+/// `zenctl context show --format json | jq -r .base`.
+#[test]
+fn a_context_list_keeps_an_empty_base_distinct_from_an_absent_one() {
+    let list = zenctl::render::ContextList {
+        path: "/home/u/.config/zenkey-explorer/config.toml".into(),
+        contexts: vec![
+            zenctl::render::ContextRow {
+                name: "lab".into(),
+                current: true,
+                base: Some("zensight".into()),
+                connect: vec!["tcp/127.0.0.1:7447".into()],
+            },
+            zenctl::render::ContextRow {
+                name: "root".into(),
+                current: false,
+                // A deployment, not an absence.
+                base: Some(String::new()),
+                connect: vec![],
+            },
+            zenctl::render::ContextRow {
+                name: "unset".into(),
+                current: false,
+                base: None,
+                connect: vec![],
+            },
+        ],
+    };
+    assert_data_eq!(
+        table(&list),
+        str![[r#"
+* lab    base=zensight  connect=["tcp/127.0.0.1:7447"]
+  root   base=""  connect=[]
+  unset  base=-  connect=[]
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&list)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[0]["contexts"], 3);
+    assert_eq!(
+        lines[2]["base"], "",
+        "the empty base is carried, not dropped"
+    );
+    assert!(
+        lines[3].get("base").is_none(),
+        "an unset base is absent, never null (RFC 09 §5.1 O4)"
+    );
+}
+
+#[test]
+fn a_context_show_puts_the_settings_flat_on_the_envelope() {
+    let show = zenctl::render::ContextShow {
+        name: "lab".into(),
+        current: true,
+        context: zenkey_fleet::context_store::StoredContext {
+            base: Some("zensight".into()),
+            connect: vec!["tcp/127.0.0.1:7447".into()],
+            timeout: Some(30),
+            ..Default::default()
+        },
+    };
+    assert_data_eq!(
+        table(&show),
+        str![[r#"
+base = "zensight"
+connect = ["tcp/127.0.0.1:7447"]
+timeout = 30
+
+"#]]
+    );
+    let doc: serde_json::Value =
+        serde_json::from_str(ndjson(&show).lines().next().unwrap()).unwrap();
+    assert_eq!(
+        doc["base"], "zensight",
+        "`jq -r .base`, not `.context.base`"
+    );
+    assert_eq!(doc["name"], "lab");
+    assert_eq!(doc["current"], true);
+}
+
+/// The four file-changing verbs answer "it happened", which is an envelope and
+/// a sentence — no rows, and nothing on the table.
+#[test]
+fn a_context_action_is_an_envelope_and_a_sentence() {
+    let created = zenctl::render::ContextAction {
+        action: "created",
+        name: "lab".into(),
+        current: true,
+    };
+    assert_eq!(table(&created), "", "nothing to draw");
+    assert!(notes(&created).contains(r#"created context "lab" (selected)"#));
+    let removed = zenctl::render::ContextAction {
+        action: "removed",
+        name: "lab".into(),
+        current: false,
+    };
+    assert!(
+        !notes(&removed).contains("selected"),
+        "a removed context is not the selected one"
+    );
+}
+
+/// `registry lint` stays thin on purpose: its stated value is the build's own
+/// wording, and a `{dir, passed, message}` struct would be a second shape to
+/// keep in step with `zenkey_build`'s over an exit code and a sentence.
+#[test]
+fn a_registry_lint_is_notes_only_and_says_so_in_json() {
+    let pass = zenctl::render::LintReport {
+        dir: "registry".into(),
+    };
+    assert_eq!(table(&pass), "");
+    assert!(notes(&pass).contains("registry lints pass (RFC 08 §5)."));
+    let doc: serde_json::Value =
+        serde_json::from_str(ndjson(&pass).lines().next().unwrap()).unwrap();
+    assert_eq!(doc["passed"], true);
+    assert_eq!(doc["dir"], "registry");
+}
+
+/// A forced break is loud by contract (RFC 08 §3.1): every broken pin is a row
+/// *and* a note, so neither a script nor a person can miss one.
+#[test]
+fn a_forced_lock_break_is_a_row_and_a_note() {
+    let forced = zenctl::render::LockReport {
+        path: "registry/registry.lock".into(),
+        created: false,
+        added: 1,
+        retired: 0,
+        forced: vec!["sysinfo/health: Health -> HealthV2".into()],
+    };
+    assert!(notes(&forced).contains("1 pinned entry added, 0 released"));
+    assert!(notes(&forced).contains("FORCED BREAK"));
+    assert!(notes(&forced).contains("RFC 08 §3.1"));
+    let lines: Vec<serde_json::Value> = ndjson(&forced)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[1]["row"], "forced-break");
+    assert_eq!(lines[1]["detail"], "sysinfo/health: Health -> HealthV2");
+}
+
+/// `cache clear` has two outcomes that used to differ only in prose. `existed`
+/// is what a script branches on: removing a cache that was not there is the
+/// desired end state, and not the same event.
+#[test]
+fn a_cache_clear_says_whether_there_was_anything_to_clear() {
+    let removed = zenctl::render::CacheAction {
+        action: "cleared",
+        dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
+        slices: None,
+        existed: true,
+    };
+    assert!(notes(&removed).starts_with("removed /home/u"));
+    let absent = zenctl::render::CacheAction {
+        action: "cleared",
+        dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
+        slices: None,
+        existed: false,
+    };
+    assert!(notes(&absent).contains("does not exist — nothing to clear"));
+    let doc: serde_json::Value =
+        serde_json::from_str(ndjson(&absent).lines().next().unwrap()).unwrap();
+    assert_eq!(doc["existed"], false);
+    assert!(
+        doc.get("slices").is_none(),
+        "clear counts nothing — absent, not zero (RFC 09 §5.1 O4)"
     );
 }

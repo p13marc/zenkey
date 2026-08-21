@@ -1,6 +1,20 @@
 //! `topic pub` — publish through the write facade (issue #47): a declared
 //! publisher, never an ad-hoc put (P7); and since #97, a body that actually
 //! ships in the encoding the subject declares.
+//!
+//! ## An empty stdout is the contract (#242)
+//!
+//! Every sentence this module prints goes to **stderr**, and every one of the
+//! sixteen is deliberate. `pub` and `retire` have no document to emit: their
+//! answer is "it went out", and inventing a wire shape for that would be a
+//! shape with no reader. What the empty stdout buys is composition — `topic
+//! echo --format ndjson | topic pub --from ndjson` is the same row shape in
+//! both directions (#235, RFC 09 §5.2), and a report on pub's stdout would put
+//! something in the pipe that the next stage did not ask for.
+//!
+//! So `--format json` here is an empty stdout on purpose. It is not a verb
+//! that was missed when the renderer seam went in; it is the one place the
+//! seam's answer is "nothing".
 
 use std::time::Duration;
 

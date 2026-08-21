@@ -13,6 +13,20 @@ use anyhow::Result;
 
 use crate::Bus;
 
+/// `zenctl cache <verb>` — the three, dispatched.
+///
+/// One arm in the dispatch rather than three, on the pattern `context` set:
+/// each verb resolves the same `Bus` the same way, and three copies of that
+/// line is three chances for one of them to drift.
+pub async fn dispatch(cmd: crate::cli::CacheCmd) -> Result<()> {
+    use crate::cli::CacheCmd;
+    match cmd {
+        CacheCmd::Show { bus } => show(&Bus::resolve(&bus)?),
+        CacheCmd::Refresh { bus } => refresh(&Bus::resolve(&bus)?).await,
+        CacheCmd::Clear { bus } => clear(&Bus::resolve(&bus)?),
+    }
+}
+
 /// Where this invocation's cache lives.
 fn dir(args: &Bus) -> std::path::PathBuf {
     zenkey_fleet::cache_dir(zenkey_fleet::active_name(args.context_name()).as_deref())
@@ -44,23 +58,39 @@ pub fn show(args: &Bus) -> Result<()> {
 pub async fn refresh(args: &Bus) -> Result<()> {
     // Loading is what writes the cache, so this is a load with no output.
     let set = args.slice_set().await?;
-    println!(
-        "cached {} producer(s) to {}",
-        set.slices().len(),
-        dir(args).display()
-    );
-    Ok(())
+    emit(
+        args,
+        crate::render::CacheAction {
+            action: "refreshed",
+            dir: dir(args).display().to_string(),
+            slices: Some(set.slices().len()),
+            existed: true,
+        },
+    )
+}
+
+/// One cache action out, however the user asked for it.
+fn emit(args: &Bus, action: crate::render::CacheAction) -> Result<()> {
+    crate::render::emit_with(&mut std::io::stdout(), &action, args.format(), args.color())
 }
 
 pub fn clear(args: &Bus) -> Result<()> {
     let dir = dir(args);
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => println!("removed {}", dir.display()),
-        // Nothing to remove is the desired end state, not a failure.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            println!("{} does not exist — nothing to clear", dir.display());
-        }
+    let existed = match std::fs::remove_dir_all(&dir) {
+        Ok(()) => true,
+        // Nothing to remove is the desired end state, not a failure — but it
+        // is a different fact, and the report says which happened rather than
+        // leaving a script to parse two sentences apart.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
         Err(e) => return Err(e.into()),
-    }
-    Ok(())
+    };
+    emit(
+        args,
+        crate::render::CacheAction {
+            action: "cleared",
+            dir: dir.display().to_string(),
+            slices: None,
+            existed,
+        },
+    )
 }

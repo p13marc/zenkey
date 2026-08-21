@@ -36,8 +36,8 @@ use anyhow::Result;
 /// past every way resolution can fail (#209).
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
-    AdminCmd, BaseCmd, BenchCmd, BlobCmd, CacheCmd, Cli, Command, InterfaceCmd, KeyCmd, NodeCmd,
-    PubSource, RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
+    AdminCmd, BaseCmd, BenchCmd, BlobCmd, Cli, Command, InterfaceCmd, KeyCmd, NodeCmd, PubSource,
+    RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -441,10 +441,12 @@ pub async fn run() -> Result<()> {
             let bus = Bus::resolve(&bus)?;
             cmd::registry::diff(&bus).await
         }
-        Command::Registry(RegistryCmd::Lint { dir, ledger }) => {
-            cmd::registry::lint(&dir, ledger.as_ref())
+        Command::Registry(RegistryCmd::Lint { dir, ledger, out }) => {
+            cmd::registry::lint(&dir, ledger.as_ref(), out)
         }
-        Command::Registry(RegistryCmd::Lock { dir, force }) => cmd::registry::lock(&dir, force),
+        Command::Registry(RegistryCmd::Lock { dir, force, out }) => {
+            cmd::registry::lock(&dir, force, out)
+        }
         Command::Bench(BenchCmd::Rpc {
             origin,
             producer,
@@ -467,18 +469,7 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
-        Command::Cache(CacheCmd::Show { bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::cache::show(&bus)
-        }
-        Command::Cache(CacheCmd::Refresh { bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::cache::refresh(&bus).await
-        }
-        Command::Cache(CacheCmd::Clear { bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::cache::clear(&bus)
-        }
+        Command::Cache(cmd) => cmd::cache::dispatch(cmd).await,
         Command::Context(cmd) => context::dispatch(cmd),
         Command::Completions { shell, static_only } => completion::emit(shell, static_only),
         Command::Doctor {

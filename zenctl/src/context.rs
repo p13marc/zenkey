@@ -28,6 +28,7 @@ pub fn dispatch(cmd: crate::cli::ContextCmd) -> Result<()> {
             timeout,
             zenoh_config,
             select,
+            out,
         } => create(
             &name,
             StoredContext {
@@ -42,20 +43,26 @@ pub fn dispatch(cmd: crate::cli::ContextCmd) -> Result<()> {
                 zenoh_config,
             },
             select,
+            out,
         ),
-        ContextCmd::List => list(),
-        ContextCmd::Edit => edit(),
-        ContextCmd::Show { name } => show(name.as_deref()),
-        ContextCmd::Select { name } => select(&name),
-        ContextCmd::Rm { name } => remove(&name),
+        ContextCmd::List { out } => list(out),
+        ContextCmd::Edit { out } => edit(out),
+        ContextCmd::Show { name, out } => show(name.as_deref(), out),
+        ContextCmd::Select { name, out } => select(&name, out),
+        ContextCmd::Rm { name, out } => remove(&name, out),
     }
+}
+
+/// One report out, however the user asked for it.
+fn emit<R: crate::render::Render>(r: &R, out: crate::cli::OutputArgs) -> Result<()> {
+    crate::render::emit_with(&mut std::io::stdout(), r, out.format, out.color)
 }
 
 /// `context edit` — open the whole config file in `$VISUAL`/`$EDITOR`, then
 /// validate: a file that no longer parses is reported (with its path) and
 /// kept — the user's edit is never discarded, but a broken config must not
 /// fail silently at the next command.
-pub fn edit() -> Result<()> {
+pub fn edit(out: crate::cli::OutputArgs) -> Result<()> {
     let editor = std::env::var("VISUAL")
         .or_else(|_| std::env::var("EDITOR"))
         .map_err(|_| anyhow!("neither $VISUAL nor $EDITOR is set"))?;
@@ -71,18 +78,7 @@ pub fn edit() -> Result<()> {
         bail!("{editor} exited with {status} — config left as it is");
     }
     match load() {
-        Ok(config) => {
-            println!(
-                "ok: {} context(s){}",
-                config.contexts.len(),
-                config
-                    .current
-                    .as_deref()
-                    .map(|c| format!(", {c:?} selected"))
-                    .unwrap_or_default()
-            );
-            Ok(())
-        }
+        Ok(config) => emit(&list_report(&config)?, out),
         Err(e) => {
             eprintln!("{} no longer parses: {e}", path.display());
             eprintln!("the file is kept as you wrote it — fix it and re-run");
@@ -99,7 +95,12 @@ pub fn edit() -> Result<()> {
 /// the base, registry dirs and timeout an earlier `create` had set (the CLI
 /// half of issue #194). An unset flag means "leave it alone" here exactly as
 /// it does everywhere else in this tool; clearing a field is `context edit`.
-pub fn create(name: &str, flags: StoredContext, select: bool) -> Result<()> {
+pub fn create(
+    name: &str,
+    flags: StoredContext,
+    select: bool,
+    out: crate::cli::OutputArgs,
+) -> Result<()> {
     let mut config = load()?;
     let existed = config.contexts.contains_key(name);
     zenkey_fleet::context_store::upsert(&mut config, name, |c| {
@@ -131,45 +132,45 @@ pub fn create(name: &str, flags: StoredContext, select: bool) -> Result<()> {
         config.current = Some(name.to_string());
     }
     save(&config)?;
-    println!(
-        "{} context {name:?}{}",
-        if existed { "updated" } else { "created" },
-        if config.current.as_deref() == Some(name) {
-            " (selected)"
-        } else {
-            ""
-        }
-    );
-    Ok(())
+    emit(
+        &crate::render::ContextAction {
+            action: if existed { "updated" } else { "created" },
+            name: name.to_string(),
+            current: config.current.as_deref() == Some(name),
+        },
+        out,
+    )
 }
 
-pub fn list() -> Result<()> {
-    let config = load()?;
-    if config.contexts.is_empty() {
-        println!(
-            "no contexts. create one:\n  zenctl context create lab --base zensight -c tcp/127.0.0.1:7447"
-        );
-        return Ok(());
-    }
-    for (name, c) in &config.contexts {
-        let marker = if config.current.as_deref() == Some(name.as_str()) {
-            "*"
-        } else {
-            " "
-        };
-        // Three distinct renderings: a stored empty base (`""`, a legal
-        // observer target) must not read like an unset one (`-`).
-        let base = match c.base.as_deref() {
-            Some("") => "\"\"",
-            Some(b) => b,
-            None => "-",
-        };
-        println!("{marker} {name}  base={base}  connect={:?}", c.connect);
-    }
-    Ok(())
+/// The config file as `context list` reports it.
+fn list_report(
+    config: &zenkey_fleet::context_store::ConfigFile,
+) -> Result<crate::render::ContextList> {
+    Ok(crate::render::ContextList {
+        path: zenkey_fleet::context_store::config_path()
+            .display()
+            .to_string(),
+        contexts: config
+            .contexts
+            .iter()
+            .map(|(name, c)| crate::render::ContextRow {
+                name: name.clone(),
+                current: config.current.as_deref() == Some(name.as_str()),
+                base: c.base.clone(),
+                connect: c.connect.clone(),
+            })
+            .collect(),
+    })
 }
 
-pub fn show(name: Option<&str>) -> Result<()> {
+pub fn list(out: crate::cli::OutputArgs) -> Result<()> {
+    // The empty case is a note on the report, not an early return: an empty
+    // set is a state and it says what to type next, and a `return` here is
+    // exactly what used to make `--format ndjson` print nothing at all (#199).
+    emit(&list_report(&load()?)?, out)
+}
+
+pub fn show(name: Option<&str>, out: crate::cli::OutputArgs) -> Result<()> {
     let config = load()?;
     let name = name
         .map(str::to_string)
@@ -179,22 +180,34 @@ pub fn show(name: Option<&str>) -> Result<()> {
         .contexts
         .get(&name)
         .ok_or_else(|| anyhow!("context {name:?} not found"))?;
-    print!("{}", toml::to_string_pretty(c).context("serializes")?);
-    Ok(())
+    emit(
+        &crate::render::ContextShow {
+            current: config.current.as_deref() == Some(name.as_str()),
+            name,
+            context: c.clone(),
+        },
+        out,
+    )
 }
 
-pub fn select(name: &str) -> Result<()> {
+pub fn select(name: &str, out: crate::cli::OutputArgs) -> Result<()> {
     let mut config = load()?;
     if !config.contexts.contains_key(name) {
         bail!("context {name:?} not found — `zenctl context list`");
     }
     config.current = Some(name.to_string());
     save(&config)?;
-    println!("selected context {name:?}");
-    Ok(())
+    emit(
+        &crate::render::ContextAction {
+            action: "selected",
+            name: name.to_string(),
+            current: true,
+        },
+        out,
+    )
 }
 
-pub fn remove(name: &str) -> Result<()> {
+pub fn remove(name: &str, out: crate::cli::OutputArgs) -> Result<()> {
     let mut config = load()?;
     if config.contexts.remove(name).is_none() {
         bail!("context {name:?} not found");
@@ -203,8 +216,14 @@ pub fn remove(name: &str) -> Result<()> {
         config.current = None;
     }
     save(&config)?;
-    println!("removed context {name:?}");
-    Ok(())
+    emit(
+        &crate::render::ContextAction {
+            action: "removed",
+            name: name.to_string(),
+            current: false,
+        },
+        out,
+    )
 }
 
 #[cfg(test)]
@@ -213,6 +232,16 @@ mod tests {
 
     /// Serialize the whole config lifecycle against a scratch config dir.
     /// One test (not several) because ZENCTL_CONFIG_DIR is process-global.
+    /// The verbs write a report now, and a test has no opinion about how it
+    /// is rendered — table to a captured stdout is fine, and `Never` keeps
+    /// escapes out of a comparison nobody makes.
+    fn quiet() -> crate::cli::OutputArgs {
+        crate::cli::OutputArgs {
+            format: crate::render::Format::Table,
+            color: crate::render::ColorChoice::Never,
+        }
+    }
+
     #[test]
     fn config_lifecycle_round_trip() {
         let dir = std::env::temp_dir().join(format!("zenctl-ctx-{}", std::process::id()));
@@ -229,19 +258,19 @@ mod tests {
             connect: vec!["tcp/127.0.0.1:7447".into()],
             ..Default::default()
         };
-        create("lab", stored.clone(), false).unwrap();
+        create("lab", stored.clone(), false, quiet()).unwrap();
         // First context auto-selects.
         assert_eq!(active(None).unwrap(), Some(stored.clone()));
 
         // Explicit name beats the pointer; unknown explicit name errors.
-        create("prod", StoredContext::default(), false).unwrap();
+        create("prod", StoredContext::default(), false, quiet()).unwrap();
         assert_eq!(active(Some("lab")).unwrap(), Some(stored));
         assert!(active(Some("nope")).is_err());
 
-        select("prod").unwrap();
+        select("prod", quiet()).unwrap();
         assert_eq!(active(None).unwrap(), Some(StoredContext::default()));
 
-        remove("prod").unwrap();
+        remove("prod", quiet()).unwrap();
         // Dangling current pointer degrades to none, not an error.
         assert!(active(None).unwrap().is_none());
 
@@ -251,7 +280,7 @@ mod tests {
             base: Some(String::new()),
             ..Default::default()
         };
-        create("bare", empty.clone(), true).unwrap();
+        create("bare", empty.clone(), true, quiet()).unwrap();
         assert_eq!(active(None).unwrap(), Some(empty));
 
         // `create` on an existing name updates, and an update must not drop
@@ -264,7 +293,7 @@ mod tests {
             timeout: Some(10),
             ..Default::default()
         };
-        create("keep", full, false).unwrap();
+        create("keep", full, false, quiet()).unwrap();
         // …now the same shape a `--connect`-only invocation produces.
         create(
             "keep",
@@ -273,6 +302,7 @@ mod tests {
                 ..Default::default()
             },
             false,
+            quiet(),
         )
         .unwrap();
         let kept = active(Some("keep")).unwrap().expect("keep");
