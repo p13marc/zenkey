@@ -896,17 +896,19 @@ pub fn pivot_flatten(
     let mut truncated = 0usize;
     flatten_pnode(
         &root,
-        expanded,
-        filtered,
-        pivot.key(),
+        &mut PivotCtx {
+            expanded,
+            auto_expand: filtered,
+            pivot_key: pivot.key(),
+            emit: Emit {
+                max_rows,
+                rows: &mut rows,
+                stats: &mut stats,
+                truncated: &mut truncated,
+            },
+        },
         String::new(),
         0,
-        &mut Emit {
-            max_rows,
-            rows: &mut rows,
-            stats: &mut stats,
-            truncated: &mut truncated,
-        },
     );
     Flattened {
         rows,
@@ -1024,6 +1026,33 @@ fn pivot_chunks(
         .collect()
 }
 
+/// The pivot walk's invariants, and where it writes (#250).
+///
+/// The shape [`Ctx`] gives [`walk`]: what does not change during the descent
+/// travels in the context, so only what does — node, path, depth — stays a
+/// parameter. `flatten_pnode` carried `expanded`, `auto_expand` and `pivot_key`
+/// loose instead, which is the whole reason it carried clippy's
+/// argument-count allow.
+///
+/// **This retires a count, not a defect.** Unlike `pane`'s two adjacent
+/// `&BTreeSet<String>` watch sets, `flatten_pnode`'s eight parameters were six
+/// distinct types with nothing transposable among them.
+///
+/// It embeds [`Emit`] rather than restating four sink fields, so "what a
+/// row-emitting pass writes into" keeps one spelling — and so `search_emit`
+/// still cannot reach `expanded`, which is what `Emit` exists to withhold.
+/// Extending `Emit` with `expanded` instead would have handed `search_emit`
+/// exactly the field its own doc comment refuses it.
+struct PivotCtx<'a> {
+    /// Paths the user has opened.
+    expanded: &'a BTreeSet<String>,
+    /// A filtered pivot opens everything, so the matches are visible.
+    auto_expand: bool,
+    /// The active pivot's key, which prefixes every synthetic path.
+    pivot_key: &'a str,
+    emit: Emit<'a>,
+}
+
 /// The cap is enforced **during** the walk, as `flatten` does it (#249). It
 /// used to be a `truncate` afterwards, so `truncated` reported rows that had
 /// been built and dropped while the string beside it said "not built".
@@ -1032,42 +1061,25 @@ fn pivot_chunks(
 /// entry per concrete key, and that population is bounded by the key table,
 /// which the status strip already reports as `keys_evicted`. Two bounds, two
 /// counters, two sentences.
-#[allow(clippy::too_many_arguments)]
-fn flatten_pnode(
-    node: &PNode,
-    expanded: &BTreeSet<String>,
-    auto_expand: bool,
-    pivot_key: &str,
-    path: String,
-    depth: usize,
-    ctx: &mut Emit<'_>,
-) {
+fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, path: String, depth: usize) {
     for (chunk, child) in &node.children {
         let child_path = if path.is_empty() {
-            format!("pivot:{pivot_key}:{chunk}")
+            format!("pivot:{}:{chunk}", ctx.pivot_key)
         } else {
             format!("{path}/{chunk}")
         };
-        let is_open = auto_expand || expanded.contains(&child_path);
+        let is_open = ctx.auto_expand || ctx.expanded.contains(&child_path);
         let own = child.leaf.as_ref().and_then(|(_, s, _)| *s);
-        if ctx.rows.len() >= ctx.max_rows {
-            *ctx.truncated += 1;
+        if ctx.emit.rows.len() >= ctx.emit.max_rows {
+            *ctx.emit.truncated += 1;
             // Still descend: a collapsed count would understate the tree, and
             // the rows below are counted the same way.
             if is_open {
-                flatten_pnode(
-                    child,
-                    expanded,
-                    auto_expand,
-                    pivot_key,
-                    child_path,
-                    depth + 1,
-                    ctx,
-                );
+                flatten_pnode(child, ctx, child_path, depth + 1);
             }
             continue;
         }
-        ctx.rows.push(RowShape {
+        ctx.emit.rows.push(RowShape {
             depth,
             chunk: chunk.clone(),
             path: child_path.clone(),
@@ -1093,7 +1105,7 @@ fn flatten_pnode(
         // The row's own numbers are the group's *aggregates*, which is why
         // these can never be retargeted: `agg_*` sums a synthetic membership,
         // and no wire path names it.
-        ctx.stats.push(Some(NodeStats {
+        ctx.emit.stats.push(Some(NodeStats {
             count: own.map(|s| s.count).unwrap_or(0),
             bytes: own.map(|s| s.bytes).unwrap_or(0),
             rate_hz: own.map(|s| s.rate_hz).unwrap_or(0.0),
@@ -1104,15 +1116,7 @@ fn flatten_pnode(
             subtree_last_seen: child.agg_last,
         }));
         if is_open {
-            flatten_pnode(
-                child,
-                expanded,
-                auto_expand,
-                pivot_key,
-                child_path,
-                depth + 1,
-                ctx,
-            );
+            flatten_pnode(child, ctx, child_path, depth + 1);
         }
     }
 }
@@ -1154,6 +1158,59 @@ pub fn registration_label(reg: &Registration) -> &'static str {
 /// `&self` read from the render path.
 pub type FactsIndex = zenkey_fleet::FactsCache;
 
+/// The tree's two watch sets — same type, opposite meanings (#250).
+///
+/// They were adjacent `&BTreeSet<String>` parameters at **three** call layers —
+/// [`pane`], `tree_view` and `row_view`, which is where both are actually
+/// read: one picks "seeding…" over "quiet", the other ◉ over ○. Transposing
+/// them compiled, and the tree then drew every watched subtree as still
+/// seeding and every seeding one as settled.
+///
+/// Named fields make that a type error at all three. Two flat fields on
+/// [`TreeData`] would have fixed only the outermost — `row_view` takes six
+/// arguments, so clippy never flagged it and it is invisible to #250's own
+/// acceptance grep.
+#[derive(Clone, Copy)]
+pub struct Watches<'a> {
+    /// Subtrees this app watches: the ◉/○ toggle on each row.
+    pub mine: &'a BTreeSet<String>,
+    /// Watches whose seed phase has not resolved yet (issue #92) — the
+    /// "seeding…" badge, which must never read as "quiet".
+    pub seeding: &'a BTreeSet<String>,
+}
+
+/// What the app hands the tree pane (#250, on `DetailData`'s precedent).
+///
+/// Ordered by **where each field comes from**, not by where it is drawn: the
+/// tree's own display state, then what has been observed about it, then what
+/// the user chose. That is a defensible order on its own terms, and #175 —
+/// which splits `Zengui` along those same seams — is the corroboration: each
+/// run below becomes one sub-state's prefix, so the call site stays one
+/// literal.
+///
+/// A builder was rejected. The test call sites want a literal, and a literal
+/// missing a field is a compile error where a builder missing a `.with_…` is a
+/// silent default — and these are honesty inputs, where a default is a claim
+/// nobody made.
+pub struct TreeData<'a> {
+    /// The flattened rows and their numbers, as of the last rebuild (#177).
+    pub flat: &'a Flattened,
+    /// How the tree groups its entries (issue #65).
+    pub pivot: Pivot,
+    /// The find-in-tree query; empty = no filter.
+    pub search: &'a str,
+    /// Scroll offset, and…
+    pub scroll_y: f32,
+    /// …the viewport height: together, the virtual window.
+    pub viewport_h: f32,
+    /// Per-key projections, for the row badges.
+    pub facts: &'a FactsIndex,
+    /// The pair this struct exists for.
+    pub watches: Watches<'a>,
+    /// The selected wire key, if any.
+    pub selected: Option<&'a str>,
+}
+
 /// What clicking the row body does (issue #93): concrete entries select
 /// (detail fetch acts on `target`); groups toggle. Pure, so it is testable
 /// without a renderer.
@@ -1192,16 +1249,15 @@ pub fn window(rows: usize, scroll_y: f32, viewport_h: f32) -> (usize, usize) {
     (first.min(rows), last)
 }
 
-/// Render the tree pane.
-pub fn tree_view<'a>(
-    flat: &'a Flattened,
-    facts: &'a FactsIndex,
-    selected: Option<&'a str>,
-    watched_paths: &'a BTreeSet<String>,
-    seeding_paths: &'a BTreeSet<String>,
-    scroll_y: f32,
-    viewport_h: f32,
-) -> Element<'a, Message> {
+/// Render the rows.
+///
+/// Takes the same [`TreeData`] as [`pane`], which formally hands it `pivot` and
+/// `search` that it does not use. That is the trade: the two functions overlap
+/// on five arguments, and one struct is what stops them drifting apart — this
+/// one sat at exactly seven arguments, one below the lint, so the next field
+/// the tree pane needs would have re-earned the allow that chunk AL deleted.
+fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
+    let flat = d.flat;
     if flat.rows.is_empty() {
         if flat.filtered && flat.total_keys > 0 {
             return kit::empty_state(
@@ -1217,7 +1273,7 @@ pub fn tree_view<'a>(
         );
     }
 
-    let (first, last) = window(flat.rows.len(), scroll_y, viewport_h);
+    let (first, last) = window(flat.rows.len(), d.scroll_y, d.viewport_h);
     let mut col = Column::new();
     if first > 0 {
         col = col.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * ROW_HEIGHT)));
@@ -1229,15 +1285,8 @@ pub fn tree_view<'a>(
         let shape = &flat.rows[i];
         let r = flat.row(i);
         col = col.push(
-            iced::widget::container(row_view(
-                shape,
-                &r,
-                facts,
-                selected,
-                watched_paths,
-                seeding_paths,
-            ))
-            .height(Length::Fixed(ROW_HEIGHT)),
+            iced::widget::container(row_view(shape, &r, d.facts, d.selected, d.watches))
+                .height(Length::Fixed(ROW_HEIGHT)),
         );
     }
     if last < flat.rows.len() {
@@ -1278,8 +1327,7 @@ fn row_view<'a>(
     r: &TreeRow,
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
-    watched_paths: &'a BTreeSet<String>,
-    seeding_paths: &'a BTreeSet<String>,
+    watches: Watches<'a>,
 ) -> Element<'a, Message> {
     let indent = iced::widget::Space::new().width(Length::Fixed(r.depth as f32 * 14.0));
 
@@ -1344,7 +1392,7 @@ fn row_view<'a>(
             // While the watch's seed phase is still running, "quiet" is not
             // yet an observation — the seed may still deliver (issue #92).
             let check = r.target.as_deref().unwrap_or(&r.path);
-            if under_seeding(check, seeding_paths) {
+            if under_seeding(check, watches.seeding) {
                 line = line.push(kit::muted("seeding…"));
             } else {
                 line = line.push(kit::muted("quiet"));
@@ -1398,7 +1446,7 @@ fn row_view<'a>(
     // a real wire subtree offer it (pivot groups are synthetic).
     let watch: Element<'a, Message> = match &r.target {
         Some(t) => {
-            let watch_label = if watched_paths.contains(t) {
+            let watch_label = if watches.mine.contains(t) {
                 "◉"
             } else {
                 "○"
@@ -1428,23 +1476,13 @@ fn row_view<'a>(
 }
 
 /// A standalone pane, for tests and for the `view/mod` composition.
-#[allow(clippy::too_many_arguments)]
-pub fn pane<'a>(
-    flat: &'a Flattened,
-    facts: &'a FactsIndex,
-    selected: Option<&'a str>,
-    watched_paths: &'a BTreeSet<String>,
-    seeding_paths: &'a BTreeSet<String>,
-    pivot: Pivot,
-    search: &'a str,
-    scroll_y: f32,
-    viewport_h: f32,
-) -> Element<'a, Message> {
-    let pivot_picker = iced::widget::pick_list(Pivot::ALL.to_vec(), Some(pivot), |v| {
+pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
+    let flat = d.flat;
+    let pivot_picker = iced::widget::pick_list(Pivot::ALL.to_vec(), Some(d.pivot), |v| {
         Message::Workspace(WorkspaceMsg::PivotSelected(v))
     })
     .text_size(font::CAPTION);
-    let find = iced::widget::text_input("find keys…", search)
+    let find = iced::widget::text_input("find keys…", d.search)
         .size(font::CAPTION)
         .on_input(|v| Message::Workspace(WorkspaceMsg::TreeSearchChanged(v)));
     let mut header = row![pivot_picker, find]
@@ -1458,21 +1496,9 @@ pub fn pane<'a>(
             flat.total_keys
         )));
     }
-    column![
-        kit::section_header("Keys", None),
-        header,
-        tree_view(
-            flat,
-            facts,
-            selected,
-            watched_paths,
-            seeding_paths,
-            scroll_y,
-            viewport_h
-        )
-    ]
-    .spacing(space::SM)
-    .into()
+    column![kit::section_header("Keys", None), header, tree_view(d)]
+        .spacing(space::SM)
+        .into()
 }
 
 #[cfg(test)]

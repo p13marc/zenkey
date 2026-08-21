@@ -2924,17 +2924,19 @@ impl Zengui {
 
     pub fn view(&self) -> Element<'_, Message> {
         let panes = row![
-            iced::widget::container(view::tree::pane(
-                &self.flat,
-                &self.facts,
-                self.selected.as_deref(),
-                &self.my_watch_paths,
-                &self.seeding_paths,
-                self.pivot,
-                &self.tree_search,
-                self.tree_scroll.0,
-                self.tree_scroll.1,
-            ))
+            iced::widget::container(view::tree::pane(view::tree::TreeData {
+                flat: &self.flat,
+                pivot: self.pivot,
+                search: &self.tree_search,
+                scroll_y: self.tree_scroll.0,
+                viewport_h: self.tree_scroll.1,
+                facts: &self.facts,
+                watches: view::tree::Watches {
+                    mine: &self.my_watch_paths,
+                    seeding: &self.seeding_paths,
+                },
+                selected: self.selected.as_deref(),
+            }))
             .width(Length::FillPortion(self.prefs.split_portions().0))
             .height(Length::Fill),
             iced::widget::container(match self.right_pane {
