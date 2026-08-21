@@ -19,6 +19,7 @@
 pub mod cli;
 pub mod errors;
 pub mod output;
+pub mod render;
 pub mod report;
 
 mod cmd;
