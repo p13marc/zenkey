@@ -244,3 +244,27 @@ rows the walk then discards (#249).
 `PathArena` follow-up: `collect_entries` deep-copies a `Vec<String>` tail at
 every child node, then a second `BTreeMap`-keyed tree is built, then the rows.
 Three full materialisations of the same data.
+
+### After the row-cap fix (#249)
+
+| Bench | Before | After | Change |
+|---|---|---|---|
+| tree/search_50k_no_match | 33.08 ms | 24.06 ms | **−27%** |
+| tree/search_50k_all_match | 36.92 ms | 29.33 ms | **−21%** |
+| tree/pivot_50k_producer | 93.35 ms | 83.45 ms | **−11%** |
+
+The no-match search is the one a user feels, and the remaining 24 ms is not
+waste: deciding that nothing matches means looking at every key, and pass one
+does exactly that with one reusable path buffer and one `bool` per node. What
+went away was building 160,000 rows in order to discard them.
+
+**A fresh demonstration of the methodology note above, worth recording because
+it nearly changed a decision.** Recording each subtree's slot count in pass one —
+so pass two steps over a dropped branch in O(1) rather than walking it — first
+measured as a **+40% regression**, on an interval of [26.8, 38.7] ms. A re-run of
+the *identical binary* measured **−32%**, on [23.81, 23.90] ms. Same code, same
+filter, minutes apart. The first reading would have reverted a change that is
+both algorithmically better and marginally faster.
+
+The rule that follows: at `sample_size(10)` on this box, **a delta whose interval
+is wider than the delta is not a measurement**. Re-run before believing one.

@@ -30,6 +30,11 @@ use crate::view::tokens::space;
 /// Cap on tree rows built per flatten. With virtualized rendering (issue
 /// #65) this is a memory bound, not a display truncation — the view builds
 /// only the scrolled-into window.
+///
+/// It is now true of all three flatten paths. `search_flatten` and
+/// `pivot_flatten` used to apply it *after* the walk, so the sentence above
+/// described one path of three and the "rows not built" the pane prints was
+/// false in the other two (#249).
 const MAX_ROWS: usize = 50_000;
 
 use crate::message::RightPane;

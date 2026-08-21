@@ -547,101 +547,186 @@ pub fn search_flatten(
     max_rows: usize,
     now: Instant,
 ) -> Flattened {
-    let mut rows = Vec::new();
-    let mut stats = Vec::new();
+    // Two passes, and the reason is #249: retention is decided *bottom-up* —
+    // a node renders because something beneath it matched — so at push time
+    // the first pass does not yet know whether a row counts against the cap.
+    // The old single pass resolved that by building every row and dropping
+    // most of them again, which on a 40k-key tree is ~160,000 `String`
+    // allocations per keystroke, and left the cap to a `truncate` afterwards,
+    // so the memory bound `app.rs` documents did not hold here at all.
+    //
+    // Pass one decides and allocates nothing but the verdicts: one reusable
+    // path buffer for the descent — the trick `skeleton::merge` already uses,
+    // and that `docs/zero-copy.md` §2 names — and one `bool` per node in
+    // pre-order. Pass two walks the identical order and builds only what it
+    // keeps, honouring the cap *during* the walk exactly as `flatten` does.
+    let mut keep: Vec<Mark> = Vec::new();
     let mut shown = 0usize;
     let mut total = 0usize;
-    search_walk(
+    let mut probe = String::new();
+    search_mark(
+        merged,
+        &mut probe,
+        start_expect(base),
+        query,
+        &mut keep,
+        &mut shown,
+        &mut total,
+    );
+
+    let mut rows = Vec::new();
+    let mut stats = Vec::new();
+    let mut truncated = 0usize;
+    let mut at = 0usize;
+    search_emit(
         merged,
         String::new(),
         0,
         start_expect(base),
-        query,
-        &mut rows,
-        &mut stats,
-        &mut shown,
-        &mut total,
+        &keep,
+        &mut at,
+        &mut Emit {
+            max_rows,
+            rows: &mut rows,
+            stats: &mut stats,
+            truncated: &mut truncated,
+        },
     );
-    let truncated = rows.len().saturating_sub(max_rows);
-    rows.truncate(max_rows);
-    stats.truncate(max_rows);
     Flattened {
         rows,
         truncated,
         shown_keys: shown,
         total_keys: total,
-        filtered: true,
+        // Computed, not asserted. `search_flatten` used to hardcode `true`,
+        // and `filtered` feeds an empty-state sentence and a coverage line —
+        // an honesty field set by assumption is the thing this crate does not
+        // do (RFC 09 §5.1 O4).
+        filtered: !query.is_empty(),
         numbers: Numbers::Frozen(stats),
         paths: PathKind::Wire,
         now,
     }
 }
 
-/// Returns whether this subtree contains any match (so ancestors render).
-#[allow(clippy::too_many_arguments)]
-fn search_walk(
+/// One node's verdict from pass one, in pre-order.
+#[derive(Debug, Clone, Copy, Default)]
+struct Mark {
+    /// This node or something beneath it matched, so it renders.
+    keep: bool,
+    /// Pre-order slots this node's subtree occupies. A dropped branch is
+    /// stepped over with this rather than re-walked — which on the common
+    /// no-match query is the whole tree.
+    slots: usize,
+}
+
+/// What pass two writes into. Deliberately *not* [`Ctx`]: that carries
+/// `expanded` and `total_keys`, which a search decides in pass one and must not
+/// be able to touch again here.
+struct Emit<'a> {
+    max_rows: usize,
+    rows: &'a mut Vec<RowShape>,
+    stats: &'a mut Vec<Option<NodeStats>>,
+    truncated: &'a mut usize,
+}
+
+/// Pass one: which nodes are retained, in pre-order, allocating nothing.
+///
+/// Returns whether this subtree contains any match, so ancestors render.
+/// `probe` is one buffer reused for the whole descent rather than a `String`
+/// per node — the path is needed for `fuzzy_match` and for nothing else here.
+fn search_mark(
     node: &MergedNode,
-    path: String,
-    depth: usize,
+    probe: &mut String,
     expect: Expect,
     query: &str,
-    rows: &mut Vec<RowShape>,
-    stats: &mut Vec<Option<NodeStats>>,
+    keep: &mut Vec<Mark>,
     shown: &mut usize,
     total: &mut usize,
 ) -> bool {
     let mut any = false;
     for (chunk, child) in &node.children {
+        let base_len = probe.len();
+        if base_len > 0 {
+            probe.push('/');
+        }
+        probe.push_str(chunk);
+        let (_, next_expect) = classify(chunk, expect);
+        let entry = is_entry(child);
+        if entry {
+            *total += 1;
+        }
+        let self_match = entry && fuzzy_match(probe, query);
+        if self_match {
+            *shown += 1;
+        }
+        // The verdict is not known until the recursion returns, so reserve
+        // this node's slot at its pre-order index and fill it after — along
+        // with how many slots its subtree took, so pass two can step over a
+        // dropped branch in O(1) instead of walking it to find out.
+        let at = keep.len();
+        keep.push(Mark::default());
+        let below = search_mark(child, probe, next_expect, query, keep, shown, total);
+        keep[at] = Mark {
+            keep: self_match || below,
+            slots: keep.len() - at - 1,
+        };
+        any |= keep[at].keep;
+        probe.truncate(base_len);
+    }
+    any
+}
+
+/// Pass two: build the retained rows, bounded by the cap during the walk.
+///
+/// Walks the identical pre-order as [`search_mark`] — `BTreeMap` iteration is
+/// deterministic — so one counter keeps the two in lockstep.
+fn search_emit(
+    node: &MergedNode,
+    path: String,
+    depth: usize,
+    expect: Expect,
+    keep: &[Mark],
+    at: &mut usize,
+    ctx: &mut Emit<'_>,
+) {
+    for (chunk, child) in &node.children {
+        let (role, next_expect) = classify(chunk, expect);
+        let mark = keep[*at];
+        *at += 1;
+        if !mark.keep {
+            // Nothing below a dropped node is kept, and pass one already
+            // counted how many slots to step over — so a dropped branch costs
+            // one addition rather than a walk to find its size. On the common
+            // no-match query that branch is the whole tree.
+            *at += mark.slots;
+            continue;
+        }
         let child_path = if path.is_empty() {
             chunk.clone()
         } else {
             format!("{path}/{chunk}")
         };
-        let (role, next_expect) = classify(chunk, expect);
-        let entry = is_entry(child);
-        if entry {
-            *total += 1;
-        }
-        let self_match = entry && fuzzy_match(&child_path, query);
-        if self_match {
-            *shown += 1;
-        }
-
-        // Tentatively emit the row, then recurse; drop it again if neither it
-        // nor anything below matched. The waste this represents is #249's.
-        let at = rows.len();
-        rows.push(RowShape {
-            depth,
-            chunk: chunk.clone(),
-            path: child_path.clone(),
-            target: Some(child_path.clone()),
-            has_children: !child.children.is_empty(),
-            expanded: true,
-            status: child.status,
-            is_leaf: child.stats.map(|s| s.count > 0).unwrap_or(false),
-            role,
-            decl_type: child.decl.as_ref().map(|d| d.type_name.clone()),
-        });
-        stats.push(child.stats);
-        let below = search_walk(
-            child,
-            child_path,
-            depth + 1,
-            next_expect,
-            query,
-            rows,
-            stats,
-            shown,
-            total,
-        );
-        if self_match || below {
-            any = true;
+        if ctx.rows.len() >= ctx.max_rows {
+            *ctx.truncated += 1;
         } else {
-            rows.truncate(at);
-            stats.truncate(at);
+            ctx.rows.push(RowShape {
+                depth,
+                chunk: chunk.clone(),
+                path: child_path.clone(),
+                target: Some(child_path.clone()),
+                has_children: !child.children.is_empty(),
+                // A search shows the chain to every match, so an ancestor of a
+                // match is open by definition.
+                expanded: true,
+                status: child.status,
+                is_leaf: child.stats.map(|s| s.count > 0).unwrap_or(false),
+                role,
+                decl_type: child.decl.as_ref().map(|d| d.type_name.clone()),
+            });
+            ctx.stats.push(child.stats);
         }
+        search_emit(child, child_path, depth + 1, next_expect, keep, at, ctx);
     }
-    any
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +893,7 @@ pub fn pivot_flatten(
 
     let mut rows = Vec::new();
     let mut stats = Vec::new();
+    let mut truncated = 0usize;
     flatten_pnode(
         &root,
         expanded,
@@ -815,12 +901,13 @@ pub fn pivot_flatten(
         pivot.key(),
         String::new(),
         0,
-        &mut rows,
-        &mut stats,
+        &mut Emit {
+            max_rows,
+            rows: &mut rows,
+            stats: &mut stats,
+            truncated: &mut truncated,
+        },
     );
-    let truncated = rows.len().saturating_sub(max_rows);
-    rows.truncate(max_rows);
-    stats.truncate(max_rows);
     Flattened {
         rows,
         truncated,
@@ -937,6 +1024,14 @@ fn pivot_chunks(
         .collect()
 }
 
+/// The cap is enforced **during** the walk, as `flatten` does it (#249). It
+/// used to be a `truncate` afterwards, so `truncated` reported rows that had
+/// been built and dropped while the string beside it said "not built".
+///
+/// What this does *not* bound, and should not: `collect_entries` yields one
+/// entry per concrete key, and that population is bounded by the key table,
+/// which the status strip already reports as `keys_evicted`. Two bounds, two
+/// counters, two sentences.
 #[allow(clippy::too_many_arguments)]
 fn flatten_pnode(
     node: &PNode,
@@ -945,8 +1040,7 @@ fn flatten_pnode(
     pivot_key: &str,
     path: String,
     depth: usize,
-    rows: &mut Vec<RowShape>,
-    stats: &mut Vec<Option<NodeStats>>,
+    ctx: &mut Emit<'_>,
 ) {
     for (chunk, child) in &node.children {
         let child_path = if path.is_empty() {
@@ -956,7 +1050,24 @@ fn flatten_pnode(
         };
         let is_open = auto_expand || expanded.contains(&child_path);
         let own = child.leaf.as_ref().and_then(|(_, s, _)| *s);
-        rows.push(RowShape {
+        if ctx.rows.len() >= ctx.max_rows {
+            *ctx.truncated += 1;
+            // Still descend: a collapsed count would understate the tree, and
+            // the rows below are counted the same way.
+            if is_open {
+                flatten_pnode(
+                    child,
+                    expanded,
+                    auto_expand,
+                    pivot_key,
+                    child_path,
+                    depth + 1,
+                    ctx,
+                );
+            }
+            continue;
+        }
+        ctx.rows.push(RowShape {
             depth,
             chunk: chunk.clone(),
             path: child_path.clone(),
@@ -982,7 +1093,7 @@ fn flatten_pnode(
         // The row's own numbers are the group's *aggregates*, which is why
         // these can never be retargeted: `agg_*` sums a synthetic membership,
         // and no wire path names it.
-        stats.push(Some(NodeStats {
+        ctx.stats.push(Some(NodeStats {
             count: own.map(|s| s.count).unwrap_or(0),
             bytes: own.map(|s| s.bytes).unwrap_or(0),
             rate_hz: own.map(|s| s.rate_hz).unwrap_or(0.0),
@@ -1000,8 +1111,7 @@ fn flatten_pnode(
                 pivot_key,
                 child_path,
                 depth + 1,
-                rows,
-                stats,
+                ctx,
             );
         }
     }
@@ -1631,6 +1741,102 @@ mod tests {
         let none = search_flatten(&snap, "", "zzz", 1000, Instant::now());
         assert_eq!(none.rows.len(), 0);
         assert_eq!((none.shown_keys, none.total_keys), (0, 3));
+    }
+
+    /// #249: a search that matches nothing builds nothing.
+    ///
+    /// It used to build a complete row — four owned `String`s — for every node
+    /// in the tree and then drop them again, because retention is decided
+    /// bottom-up. On a 40k-key bus that was ~160,000 allocations per keystroke,
+    /// for a result of zero rows. The two-pass walk decides first.
+    #[test]
+    fn a_search_that_matches_nothing_builds_no_rows() {
+        let snap = snapshot(&[
+            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
+            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+        ]);
+        // A cap of zero: under the old code the walk built every row before
+        // the post-hoc truncate could look, so this could only pass by never
+        // building one.
+        let none = search_flatten(&snap, "", "zzzznope", 0, Instant::now());
+        assert!(none.rows.is_empty());
+        assert_eq!(
+            none.truncated, 0,
+            "nothing was retained, so nothing went unbuilt — a cap is not a \
+             filter and must not report one as the other"
+        );
+        assert_eq!((none.shown_keys, none.total_keys), (0, 3));
+    }
+
+    /// #249: the cap bounds a search that matches everything.
+    ///
+    /// This is the direction that was genuinely unbounded — `rows` grew to node
+    /// count and the cap was applied afterwards, so the memory bound
+    /// `app.rs`'s `MAX_ROWS` documents did not hold in this path at all.
+    #[test]
+    fn the_row_cap_bounds_a_search_that_matches_everything() {
+        let keys: Vec<String> = (0..200)
+            .map(|i| format!("v1/h-3fa9c2d41b7e/telemetry/sysinfo/k{i}"))
+            .collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let snap = snapshot(&refs);
+        let capped = search_flatten(&snap, "", "k", 10, Instant::now());
+        assert_eq!(capped.rows.len(), 10, "the cap is a bound during the walk");
+        assert!(
+            capped.truncated > 0,
+            "and what it cost is reported, never silently dropped"
+        );
+        // The denominator ignores the cap: it is a fact about the bus, not
+        // about how many rows this view chose to build.
+        assert_eq!(capped.total_keys, 200);
+        assert_eq!(capped.shown_keys, 200);
+
+        // Uncapped, the same query yields the same counts — so the cap changed
+        // what was *built*, not what was *counted*.
+        let full = search_flatten(&snap, "", "k", 10_000, Instant::now());
+        assert_eq!(
+            (full.shown_keys, full.total_keys),
+            (capped.shown_keys, capped.total_keys)
+        );
+        assert_eq!(full.truncated, 0);
+        assert_eq!(
+            full.rows[..10],
+            capped.rows[..],
+            "the cap takes a prefix of the same walk, not a different one"
+        );
+    }
+
+    /// #249: `filtered` is computed rather than asserted.
+    ///
+    /// `search_flatten` hardcoded `true`, and `filtered` decides which
+    /// empty-state sentence the pane shows and whether it prints a coverage
+    /// line — an honesty field set by assumption is the thing this crate does
+    /// not do.
+    #[test]
+    fn an_empty_query_is_not_a_filter() {
+        let snap = snapshot(&["v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
+        assert!(!search_flatten(&snap, "", "", 100, Instant::now()).filtered);
+        assert!(search_flatten(&snap, "", "cpu", 100, Instant::now()).filtered);
+    }
+
+    /// #249: a capped pivot reports the rows it did not build, and still
+    /// counts the entries beneath them.
+    #[test]
+    fn a_capped_pivot_reports_the_rows_it_did_not_build() {
+        let keys: Vec<String> = (0..50)
+            .map(|i| format!("v1/h-3fa9c2d41b7e/telemetry/p{i}/leaf"))
+            .collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let snap = snapshot(&refs);
+        let all = expand(&[]);
+        let capped = pivot_flatten(&snap, "", Pivot::Producer, &all, "", 5, Instant::now());
+        assert_eq!(capped.rows.len(), 5);
+        assert!(capped.truncated > 0);
+        assert_eq!(
+            capped.total_keys, 50,
+            "the denominator is the bus, not the cap"
+        );
     }
 
     /// Pivot by producer: host keys group under the producer; a service
