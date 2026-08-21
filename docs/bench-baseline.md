@@ -206,3 +206,41 @@ cost, so it appears here only as a cadence column. And `media`'s frame handle,
 `toolbar`'s pickers and `line_view`'s two `String`s became borrows, which the
 type system now enforces; the honest measurement of a removed allocation is
 that it is not there.
+
+## zengui tree pipeline (#177), 2026-08-21 — BEFORE
+
+`reflatten` (`zengui/src/app.rs`) is `skeleton::merge` **plus** a flatten, both
+unconditional, called from nine sites including `apply_tick` — so the first two
+rows below are paid together, four times a second, forever.
+
+Neither had ever been measured from this side. The engine's `skeleton/merge_10k`
+exists but is marked `~` above (19.5 ms and 74.8 ms for the same code on this
+box), and there was **no bench for `flatten` at all** — #177's headline, "50,000
+tree rows four times a second", was a count and never a duration.
+
+- Commit: chunk AL, branch `chunk-al-tree`, production code unchanged
+- Date: 2026-08-21
+- Machine: Linux 6.12.101+deb13-cloud-amd64 x86_64
+- 50,000 synthetic keys, 100 per group; every prefix expanded
+
+| Bench | Cadence | Time (point) |
+|---|---|---|
+| tree/merge_50k | tick | 24.97 ms |
+| tree/flatten_50k_expanded | tick | 22.08 ms |
+| tree/search_50k_no_match | keystroke | 33.08 ms |
+| tree/search_50k_all_match | keystroke | 36.92 ms |
+| tree/pivot_50k_producer | tick | 93.35 ms |
+
+**What that means against a 250 ms tick.** In the default `Pivot::Chunks` view,
+`reflatten` is 24.97 + 22.08 ≈ **47 ms, or 19% of the tick interval**, spent on
+the update thread producing rows of which the virtual window draws ~40. Under a
+producer pivot it is 24.97 + 93.35 ≈ **118 ms — 47% of the interval**.
+
+`search_50k_no_match` is the one a user feels directly: 33 ms **per keystroke**,
+because `Message::TreeSearchChanged` reflattens, and almost all of it is building
+rows the walk then discards (#249).
+
+`pivot_50k_producer` at nearly 4× the plain flatten is the number that sizes the
+`PathArena` follow-up: `collect_entries` deep-copies a `Vec<String>` tail at
+every child node, then a second `BTreeMap`-keyed tree is built, then the rows.
+Three full materialisations of the same data.
