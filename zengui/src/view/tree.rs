@@ -896,17 +896,19 @@ pub fn pivot_flatten(
     let mut truncated = 0usize;
     flatten_pnode(
         &root,
-        expanded,
-        filtered,
-        pivot.key(),
+        &mut PivotCtx {
+            expanded,
+            auto_expand: filtered,
+            pivot_key: pivot.key(),
+            emit: Emit {
+                max_rows,
+                rows: &mut rows,
+                stats: &mut stats,
+                truncated: &mut truncated,
+            },
+        },
         String::new(),
         0,
-        &mut Emit {
-            max_rows,
-            rows: &mut rows,
-            stats: &mut stats,
-            truncated: &mut truncated,
-        },
     );
     Flattened {
         rows,
@@ -1024,6 +1026,33 @@ fn pivot_chunks(
         .collect()
 }
 
+/// The pivot walk's invariants, and where it writes (#250).
+///
+/// The shape [`Ctx`] gives [`walk`]: what does not change during the descent
+/// travels in the context, so only what does — node, path, depth — stays a
+/// parameter. `flatten_pnode` carried `expanded`, `auto_expand` and `pivot_key`
+/// loose instead, which is the whole reason it carried clippy's
+/// argument-count allow.
+///
+/// **This retires a count, not a defect.** Unlike `pane`'s two adjacent
+/// `&BTreeSet<String>` watch sets, `flatten_pnode`'s eight parameters were six
+/// distinct types with nothing transposable among them.
+///
+/// It embeds [`Emit`] rather than restating four sink fields, so "what a
+/// row-emitting pass writes into" keeps one spelling — and so `search_emit`
+/// still cannot reach `expanded`, which is what `Emit` exists to withhold.
+/// Extending `Emit` with `expanded` instead would have handed `search_emit`
+/// exactly the field its own doc comment refuses it.
+struct PivotCtx<'a> {
+    /// Paths the user has opened.
+    expanded: &'a BTreeSet<String>,
+    /// A filtered pivot opens everything, so the matches are visible.
+    auto_expand: bool,
+    /// The active pivot's key, which prefixes every synthetic path.
+    pivot_key: &'a str,
+    emit: Emit<'a>,
+}
+
 /// The cap is enforced **during** the walk, as `flatten` does it (#249). It
 /// used to be a `truncate` afterwards, so `truncated` reported rows that had
 /// been built and dropped while the string beside it said "not built".
@@ -1032,42 +1061,25 @@ fn pivot_chunks(
 /// entry per concrete key, and that population is bounded by the key table,
 /// which the status strip already reports as `keys_evicted`. Two bounds, two
 /// counters, two sentences.
-#[allow(clippy::too_many_arguments)]
-fn flatten_pnode(
-    node: &PNode,
-    expanded: &BTreeSet<String>,
-    auto_expand: bool,
-    pivot_key: &str,
-    path: String,
-    depth: usize,
-    ctx: &mut Emit<'_>,
-) {
+fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, path: String, depth: usize) {
     for (chunk, child) in &node.children {
         let child_path = if path.is_empty() {
-            format!("pivot:{pivot_key}:{chunk}")
+            format!("pivot:{}:{chunk}", ctx.pivot_key)
         } else {
             format!("{path}/{chunk}")
         };
-        let is_open = auto_expand || expanded.contains(&child_path);
+        let is_open = ctx.auto_expand || ctx.expanded.contains(&child_path);
         let own = child.leaf.as_ref().and_then(|(_, s, _)| *s);
-        if ctx.rows.len() >= ctx.max_rows {
-            *ctx.truncated += 1;
+        if ctx.emit.rows.len() >= ctx.emit.max_rows {
+            *ctx.emit.truncated += 1;
             // Still descend: a collapsed count would understate the tree, and
             // the rows below are counted the same way.
             if is_open {
-                flatten_pnode(
-                    child,
-                    expanded,
-                    auto_expand,
-                    pivot_key,
-                    child_path,
-                    depth + 1,
-                    ctx,
-                );
+                flatten_pnode(child, ctx, child_path, depth + 1);
             }
             continue;
         }
-        ctx.rows.push(RowShape {
+        ctx.emit.rows.push(RowShape {
             depth,
             chunk: chunk.clone(),
             path: child_path.clone(),
@@ -1093,7 +1105,7 @@ fn flatten_pnode(
         // The row's own numbers are the group's *aggregates*, which is why
         // these can never be retargeted: `agg_*` sums a synthetic membership,
         // and no wire path names it.
-        ctx.stats.push(Some(NodeStats {
+        ctx.emit.stats.push(Some(NodeStats {
             count: own.map(|s| s.count).unwrap_or(0),
             bytes: own.map(|s| s.bytes).unwrap_or(0),
             rate_hz: own.map(|s| s.rate_hz).unwrap_or(0.0),
@@ -1104,15 +1116,7 @@ fn flatten_pnode(
             subtree_last_seen: child.agg_last,
         }));
         if is_open {
-            flatten_pnode(
-                child,
-                expanded,
-                auto_expand,
-                pivot_key,
-                child_path,
-                depth + 1,
-                ctx,
-            );
+            flatten_pnode(child, ctx, child_path, depth + 1);
         }
     }
 }
