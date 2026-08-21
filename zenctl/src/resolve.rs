@@ -215,11 +215,17 @@ pub mod notes {
     /// answered", and the note has to say which, with the two questions that
     /// tell them apart.
     pub fn no_slices(base: &str) -> Note {
-        Note::silence(format!(
-            "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
+        // `Note::silence` would append the citation, and this sentence already
+        // spends it mid-clause — where it belongs, because it is the *zero*
+        // that is not a verdict, not the note as a whole.
+        Note::new(
+            crate::render::NoteKind::Silence,
+            format!(
+                "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
              `zenctl node list --base {base:?}` says who is actually up.\n\
              (offline alternative: --registry <dir> with the app's registry TOMLs)"
-        ))
+            ),
+        )
     }
 }
 
@@ -375,6 +381,11 @@ mod tests {
     fn an_empty_sweep_is_never_a_verdict() {
         let line = notes::no_slices("zensight").to_line();
         assert!(line.contains("not a verdict (RFC 05 §3.1)"), "{line}");
+        assert_eq!(
+            line.matches("RFC 05 §3.1").count(),
+            1,
+            "the citation is spent once — `Note::silence` would append a second: {line}"
+        );
         assert!(line.contains("node list --base"), "{line}");
         assert!(
             line.contains("--registry <dir>"),

@@ -936,8 +936,17 @@ pub(crate) enum TopicCmd {
     },
     /// Publish to a key (issue #47) — a declared publisher, never an ad-hoc
     /// put (P7).
+    // The two shapes — `<KEY> <BODY>` or `--from ndjson` — are the parser's
+    // business, not the dispatch's (#209): exactly one source is required, and
+    // a key without a body is a usage error rather than an `anyhow` message
+    // four frames later. That moves the refusal's exit code from 1 to 2, which
+    // is what clap exits with for every other mis-shaped invocation here.
+    // Deliberately a `//` comment: it is an argument about the parser, not
+    // help text, and `///` would print it under `topic pub --help`.
+    #[command(group(clap::ArgGroup::new("source").required(true).args(["from", "key"])))]
     Pub {
         /// Full wire key to publish on (omit with --from ndjson).
+        #[arg(requires = "body")]
         key: Option<String>,
         /// Payload: inline text, `@file`, or `-` for stdin (omit with --from).
         body: Option<Source>,

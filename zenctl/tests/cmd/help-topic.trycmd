@@ -265,7 +265,7 @@ Options:
 $ zenctl topic pub --help
 Publish to a key (issue #47) — a declared publisher, never an ad-hoc put (P7)
 
-Usage: zenctl topic pub [OPTIONS] [KEY] [BODY]
+Usage: zenctl topic pub [OPTIONS] <--from <FROM>|KEY> [BODY]
 
 Arguments:
   [KEY]
@@ -604,5 +604,60 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+```
+
+## `topic pub`'s two shapes are the parser's business
+
+`<KEY> <BODY>` or `--from ndjson`, never both and never neither. That used to
+be a `match (from, key, body)` in the dispatch handing back an `anyhow`
+message, which meant a mis-shaped invocation exited **1** — the same code a
+publish that actually failed on the bus exits with. Clap refuses it at 2, like
+every other usage error in this tool (#209).
+
+(`--base <BASE>` rides these usage lines because the corpus sets `ZENCTL_BASE`
+and clap renders an env-backed flag as required in a *usage* line — the same
+quirk `tests/cli.rs` documents for `ZENCTL_FORMAT`. A user without the variable
+set does not see it, which is why the `--help` case above does not carry it.)
+
+Neither source:
+
+```console
+$ zenctl topic pub
+? 2
+error: the following required arguments were not provided:
+  <--from <FROM>|KEY>
+
+Usage: zenctl topic pub --base <BASE> <--from <FROM>|KEY> [BODY]
+
+For more information, try '--help'.
+
+```
+
+A key with no body — the shape the old `match` fell through to its catch-all
+arm for, and the one where naming the missing argument helps most:
+
+```console
+$ zenctl topic pub v1/h-3fa9c2d41b7e/state/sysinfo/health
+? 2
+error: the following required arguments were not provided:
+  <BODY>
+
+Usage: zenctl topic pub --base <BASE> <--from <FROM>|KEY> <BODY>
+
+For more information, try '--help'.
+
+```
+
+Both sources:
+
+```console
+$ zenctl topic pub --from ndjson v1/h-3fa9c2d41b7e/state/sysinfo/health '{}'
+? 2
+error: the argument '--from <FROM>' cannot be used with '[KEY]'
+
+Usage: zenctl topic pub --base <BASE> <--from <FROM>|KEY> <BODY>
+
+For more information, try '--help'.
 
 ```

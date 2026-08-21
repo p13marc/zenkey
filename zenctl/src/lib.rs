@@ -137,14 +137,13 @@ pub async fn run() -> Result<()> {
             bus,
         }) => {
             let bus = Bus::resolve(&bus)?;
+            // The `ArgGroup` on the variant has already refused every other
+            // combination: exactly one of --from/<KEY>, and <KEY> requires
+            // <BODY>. What is left is the two real shapes (#209).
             match (from, key, body) {
-                (Some(PubSource::Ndjson), None, None) => {
+                (Some(PubSource::Ndjson), _, _) => {
                     cmd::publish::run_from_ndjson(qos.as_deref(), interval, i_know, &bus).await
                 }
-                (Some(_), _, _) => Err(anyhow::anyhow!(
-                    "--from ndjson reads keys and payloads from stdin rows — drop the \
-                 key/body arguments"
-                )),
                 (None, Some(key), Some(body)) => {
                     cmd::publish::run(
                         &key,
@@ -160,9 +159,9 @@ pub async fn run() -> Result<()> {
                     )
                     .await
                 }
-                (None, _, _) => Err(anyhow::anyhow!(
-                    "topic pub needs <KEY> <BODY>, or --from ndjson with rows on stdin"
-                )),
+                (None, _, _) => unreachable!(
+                    "the `source` ArgGroup requires --from or <KEY>, and <KEY> requires <BODY>"
+                ),
             }
         }
         Command::Topic(TopicCmd::Retire {
