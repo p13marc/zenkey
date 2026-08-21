@@ -8,12 +8,18 @@
 //! set of sub-states it can move — and reads the rest through [`Ctx`], which
 //! is shared.
 //!
-//! Two of them name five of six, and that is the measurement rather than a
-//! lapse: [`bus`] moves five because a tick moves everything the bus can move,
-//! and [`deployment`] moves five because pointing at a different fleet
-//! invalidates four sub-states and remembers a preference. `pane::replay`
-//! names the same five for the same reason as `bus` — a replayed tick moves
-//! what a live one moves.
+//! The count, honestly: [`deployment`] names **all six** — a base change
+//! clears four, remembers a preference in `chrome`, and drops the selected
+//! key's decode in `sub`. [`bus`], [`subject`] and [`workspace`] name five,
+//! each for a traceable reason: a tick moves everything the bus can move; a
+//! selection is a causal chain that ends in a fetch; and the workspace has one
+//! arm that hands to [`pane::replay`], which is a bus in disguise. [`chrome`]
+//! names four and cannot move a row or a watch, and [`pane`] hands each pane
+//! only its own state.
+//!
+//! Five is not a failure to decompose. `&mut Zengui` said *nothing*;
+//! `(dep, obs, sub, tree, work)` says five-of-six, and `(&mut CallForm, Ctx)`
+//! says one-plus-reads. The measurement is the deliverable.
 //!
 //! ## `Ctx` is not `Status`
 //!
@@ -25,7 +31,11 @@
 use crate::state::{Deployment, Observation, Subject};
 
 pub(crate) mod bus;
+pub(crate) mod chrome;
+pub(crate) mod deployment;
 pub(crate) mod pane;
+pub(crate) mod subject;
+pub(crate) mod workspace;
 
 /// What a handler may read but not move.
 ///

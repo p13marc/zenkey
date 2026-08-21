@@ -8,25 +8,21 @@
 //! value on demand. `--eager` restores the bootstrap behavior from the
 //! command line, labelled by its cost.
 
-use std::sync::Arc;
-
 use iced::widget::{column, pick_list, row, text};
 use iced::{Element, Length, Subscription, Task};
 
 use crate::config::Settings;
 use crate::link::{self, LinkKey};
-use crate::message::{LinkState, Message};
-use crate::scope::{self, ScopePreset};
+use crate::message::Message;
+use crate::scope::ScopePreset;
 use crate::services;
 use crate::state::{Chrome, Deployment, Observation, Subject, TreeState, Workspace};
-use crate::update::{self, Ctx};
+use crate::update::{self};
 use crate::view;
-use crate::view::status::{SliceSource, Status};
+use crate::view::status::Status;
 use crate::view::tokens::space;
 
-use crate::message::{
-    BusMsg, ChromeMsg, DeploymentMsg, PaneMsg, RightPane, SubjectMsg, WorkspaceMsg,
-};
+use crate::message::{ChromeMsg, DeploymentMsg, PaneMsg, RightPane, WorkspaceMsg};
 
 pub struct Zengui {
     chrome: Chrome,
@@ -83,825 +79,35 @@ impl Zengui {
         self.chrome.prefs.zoom
     }
 
+    /// The one function that still takes `&mut Zengui`, and the only one
+    /// that ever will.
+    ///
+    /// It destructures immediately, so what each group can move is its
+    /// parameter list rather than a promise. The honest count: `deployment`
+    /// names all six, and `bus`, `subject` and `workspace` name five —
+    /// `subject` through the causal chain from `SelectKey`, `workspace`
+    /// through the one arm that hands to replay. The two that stay narrow are
+    /// `chrome`, which cannot move a row or a watch, and `pane`, which hands
+    /// each pane only its own state.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let Zengui {
+            chrome,
+            dep,
+            obs,
+            sub,
+            tree,
+            work,
+        } = self;
         match message {
-            Message::Bus(m) => self.update_bus(m),
-            Message::Subject(m) => self.update_subject(m),
-            Message::Deployment(m) => self.update_deployment(m),
-            Message::Workspace(m) => self.update_workspace(m),
-            Message::Pane(m) => self.update_pane(m),
-            Message::Chrome(m) => self.update_chrome(m),
+            Message::Bus(m) => update::bus::update(dep, obs, sub, tree, work, m),
+            Message::Subject(m) => update::subject::update(dep, obs, sub, tree, work, m),
+            Message::Deployment(m) => {
+                update::deployment::update(chrome, dep, obs, sub, tree, work, m)
+            }
+            Message::Workspace(m) => update::workspace::update(dep, obs, sub, tree, work, m),
+            Message::Pane(m) => update::pane::update(dep, obs, sub, work, m),
+            Message::Chrome(m) => update::chrome::update(chrome, dep, sub, work, m),
         }
-    }
-
-    /// Everything the world answered — a task landing or a `link.rs` yield.
-    fn update_bus(&mut self, msg: BusMsg) -> Task<Message> {
-        match msg {
-            BusMsg::SessionOpened(Ok(session)) => {
-                // A new session is a new everything: the base may differ, so
-                // every projection, roster and verdict from the old one is
-                // evidence about a different deployment (O4).
-                //
-                // This variant has exactly two producers — the launch open and
-                // the context switch — and forgetting on the launch one is a
-                // no-op over a `Deployment` nothing has written yet. So it can
-                // live here, which removes the worst cross-group reach in the
-                // file: a pane resetting the app.
-                self.forget_deployment();
-                self.dep.session = Some(session.clone());
-                // The context list is read from the shared file, not cached at
-                // launch: `zenctl context create` on the other side of the
-                // screen should show up here without a restart (#67).
-                update::pane::context::refresh_contexts(&mut self.work.bench.context_form);
-                self.dep.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
-                    self.dep.base(),
-                    self.dep.timeout(),
-                )));
-                let discover = services::link::discover_bases(&session, self.dep.timeout());
-                Task::batch([discover, self.start_monitor(), self.load_slices()])
-            }
-            BusMsg::SessionOpened(Err(e)) => {
-                self.obs.link = LinkState::Failed(e);
-                Task::none()
-            }
-            BusMsg::MonitorStarted(Ok(monitor)) => {
-                self.obs.monitor = Some(Arc::clone(&monitor));
-                self.obs.epoch += 1;
-                if self.dep.settings.eager {
-                    return self.watch_scope();
-                }
-                Task::none()
-            }
-            BusMsg::MonitorStarted(Err(e)) => {
-                self.obs.link = LinkState::Failed(e);
-                Task::none()
-            }
-            BusMsg::SkeletonBuilt(Ok((skeleton, roster))) => {
-                self.dep.skeleton = Some(skeleton);
-                // The build task gathered the roster anyway — seed the node
-                // dashboard from it instead of throwing it away (#61).
-                self.work.verdicts.roster.seed(&roster);
-                self.tree.reflatten(&self.dep, &self.obs);
-                Task::none()
-            }
-            BusMsg::SkeletonBuilt(Err(e)) => {
-                tracing::warn!("skeleton build failed: {e}");
-                Task::none()
-            }
-            BusMsg::BasesDiscovered(Ok(bases)) => {
-                self.dep.bases = bases;
-                self.rebuild_base_options();
-                Task::none()
-            }
-            BusMsg::BasesDiscovered(Err(e)) => {
-                tracing::warn!("base discovery failed: {e}");
-                Task::none()
-            }
-            BusMsg::SlicesLoaded(Ok(slices)) => {
-                self.dep.slice_source = if self.dep.settings.registry.is_empty() {
-                    SliceSource::Bus {
-                        count: slices.slices().len(),
-                    }
-                } else {
-                    SliceSource::Dirs {
-                        count: slices.slices().len(),
-                    }
-                };
-                self.dep.slices = Some(slices);
-                self.reresolve_registrations();
-                self.refresh_blob_list();
-                // The skeleton is built FROM the slices — (re)build it now.
-                self.build_skeleton()
-            }
-            BusMsg::SlicesUnionLoaded(Ok((slices, from_bus, dirs_only, disagreements))) => {
-                self.dep.slice_source = SliceSource::Union {
-                    from_bus,
-                    dirs_only,
-                    disagreements,
-                };
-                self.dep.slices = Some(slices);
-                self.reresolve_registrations();
-                self.refresh_blob_list();
-                self.build_skeleton()
-            }
-            BusMsg::SlicesUnionLoaded(Err(e)) => {
-                self.dep.slice_source = SliceSource::Failed(e);
-                Task::none()
-            }
-            BusMsg::SlicesLoaded(Err(e)) => {
-                self.dep.slice_source = SliceSource::Failed(e);
-                Task::none()
-            }
-            BusMsg::Link(state) => {
-                self.obs.link = state;
-                Task::none()
-            }
-            BusMsg::Tick(tick) => {
-                update::bus::apply_tick(
-                    &mut self.dep,
-                    &mut self.obs,
-                    &mut self.sub,
-                    &mut self.tree,
-                    &mut self.work,
-                    &tick,
-                );
-                Task::none()
-            }
-        }
-    }
-
-    /// What the app is pointed at, and the coverage that follows.
-    fn update_deployment(&mut self, msg: DeploymentMsg) -> Task<Message> {
-        match msg {
-            DeploymentMsg::ScopeWatchesStarted(ids) => {
-                for id in &ids {
-                    self.obs.seeding.insert(*id, None);
-                }
-                self.obs.scope_watches = ids;
-                Task::none()
-            }
-            DeploymentMsg::ScopeWatchesReleased(Ok(())) => Task::none(),
-            DeploymentMsg::ScopeWatchesReleased(Err(e)) => {
-                tracing::warn!("releasing the scope watches failed: {e}");
-                Task::none()
-            }
-            DeploymentMsg::ContextApplied { name, stored } => {
-                self.apply_context(*stored);
-                self.chrome.prefs.context = name;
-                self.remember();
-                self.reopen_session()
-            }
-            DeploymentMsg::ScopeWatchToggled => {
-                if self.obs.scope_watches.is_empty() {
-                    self.watch_scope()
-                } else {
-                    self.unwatch_scope()
-                }
-            }
-            DeploymentMsg::BaseSelected(base) => {
-                if base == self.dep.base() {
-                    return Task::none();
-                }
-                self.dep.settings.base = base;
-                // The base is an input to every projection and to the
-                // skeleton, and watch selectors are base-relative: a fresh
-                // monitor is the obviously-correct restart. Everything the old
-                // base taught us is evidence about a different deployment (O4).
-                self.forget_deployment();
-                self.dep.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
-                    self.dep.base(),
-                    self.dep.timeout(),
-                )));
-                self.sub.decoded = None;
-                self.tree.reflatten(&self.dep, &self.obs);
-                Task::batch([self.start_monitor(), self.load_slices()])
-            }
-            DeploymentMsg::ScopeSelected(scope) => {
-                if scope == self.dep.settings.scope {
-                    return Task::none();
-                }
-                self.dep.settings.scope = scope;
-                // Remembered for the next launch (issue #73).
-                self.remember();
-                // If the scope is being observed, re-point the observation.
-                if !self.obs.scope_watches.is_empty() {
-                    let release = self.unwatch_scope();
-                    let acquire = self.watch_scope();
-                    return Task::batch([release, acquire]);
-                }
-                Task::none()
-            }
-            DeploymentMsg::Reconnect => {
-                self.forget_deployment();
-                self.start_monitor()
-            }
-        }
-    }
-
-    /// One key: chosen, observed, fetched, decoded.
-    fn update_subject(&mut self, msg: SubjectMsg) -> Task<Message> {
-        match msg {
-            SubjectMsg::WatchToggled(path) => self.toggle_watch(path),
-            SubjectMsg::WatchStarted(path, Ok(id)) => {
-                self.obs.my_watch_paths.insert(path.clone());
-                self.obs.seeding.insert(id, Some(path.clone()));
-                self.obs.seeding_paths.insert(path.clone());
-                self.obs.my_watches.insert(path, id);
-                self.tree.reflatten(&self.dep, &self.obs);
-                Task::none()
-            }
-            SubjectMsg::WatchStarted(path, Err(e)) => {
-                tracing::warn!("watch {path} failed: {e}");
-                Task::none()
-            }
-            SubjectMsg::WatchReleased(_, Ok(())) => Task::none(),
-            SubjectMsg::WatchReleased(path, Err(e)) => {
-                tracing::warn!("unwatch {path} failed: {e}");
-                Task::none()
-            }
-            SubjectMsg::SelectPath(path) => {
-                self.sub.selected = Some(path);
-                Task::none()
-            }
-            SubjectMsg::ValueFetched(key, outcome) => {
-                // No base guard needed (#109 audit): the evidence is keyed by
-                // the full wire key, which names its own base (an explorer
-                // runs un-namespaced, RFC 09 §5), and the view passes
-                // `fetched` through only while that exact key is selected.
-                // Residual: a stale landing can still flip the right pane to
-                // Detail — a focus nit, not a misattributed verdict.
-                self.sub.decoded = None;
-                // A fetch normally lands the detail pane in view — except
-                // from the doctor's click-through, where losing the finding
-                // list would cost more than it shows (#71).
-                if self.work.right_pane != RightPane::Doctor {
-                    self.work.right_pane = RightPane::Detail;
-                }
-                let decode_task = match (
-                    &outcome,
-                    &self.dep.session,
-                    &self.dep.schema_store,
-                    &self.dep.slices,
-                ) {
-                    (Ok(out), Some(session), Some(store), Some(slices)) => {
-                        if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
-                            services::value::decode(
-                                Arc::clone(store),
-                                session.clone(),
-                                Arc::clone(slices),
-                                self.dep.base().to_string(),
-                                key.clone(),
-                                v.key.clone(),
-                                v.encoding.clone(),
-                                v.payload.clone(),
-                            )
-                        } else {
-                            Task::none()
-                        }
-                    }
-                    _ => Task::none(),
-                };
-                self.sub.fetched = Some((key, outcome));
-                decode_task
-            }
-            SubjectMsg::ValueDecoded(key, type_name, rendering) => {
-                // Stale guard: only the currently selected key's decode lands.
-                if self.sub.selected.as_deref() == Some(key.as_str()) {
-                    self.sub.decoded = Some((type_name, (*rendering).clone()));
-                }
-                Task::none()
-            }
-            SubjectMsg::SelectKey(key) => {
-                self.sub.selected = key.clone();
-                // The old key's latency summary is not evidence about the
-                // new one — cleared now, refreshed on the next tick (#119).
-                self.sub.selected_latency = None;
-                // History follows the selection and nothing else (issue #63):
-                // the previous recording is dropped here, which is what makes
-                // deselecting free. A symbolic skeleton path names no concrete
-                // key, so nothing can be recorded for it.
-                self.sub.history = key.as_deref().filter(|k| !k.contains('{')).map(|k| {
-                    crate::history::HistoryRecorder::new(k, self.dep.settings.history_entries)
-                });
-                // The plotted series belong to the same selection (issue #64):
-                // they start empty, and stop being fed when it goes away.
-                self.sub.rate_series = crate::series::RateSampler::new();
-                self.sub.series_leaf = None;
-                self.sub.refresh_series(&self.dep);
-                let (Some(session), Some(key)) = (self.dep.session.clone(), key) else {
-                    return Task::none();
-                };
-                // Lazy value-on-demand: one fetch per selection, nothing
-                // ambient (issue #85). Symbolic skeleton paths have no
-                // concrete value to fetch.
-                if key.contains('{') {
-                    return Task::none();
-                }
-                services::value::fetch(session, key)
-            }
-        }
-    }
-
-    /// The shell around the panes, and the replay mode.
-    fn update_workspace(&mut self, msg: WorkspaceMsg) -> Task<Message> {
-        match msg {
-            WorkspaceMsg::PivotSelected(pivot) => {
-                self.tree.pivot = pivot;
-                self.tree.tree_scroll.0 = 0.0;
-                self.tree.reflatten(&self.dep, &self.obs);
-                Task::none()
-            }
-            WorkspaceMsg::TreeSearchChanged(q) => {
-                self.tree.tree_search = q;
-                self.tree.tree_scroll.0 = 0.0;
-                self.tree.reflatten(&self.dep, &self.obs);
-                Task::none()
-            }
-            WorkspaceMsg::TreeScrolled(y, h) => {
-                // View-only state: the next frame renders the new window.
-                self.tree.tree_scroll = (y, h.max(100.0));
-                Task::none()
-            }
-            WorkspaceMsg::ToggleNode(path) => {
-                // Collapsing takes the subtree with it (#179) — see
-                // `expansion.rs` for why that trade is the fix rather than a
-                // side effect of it.
-                self.tree.expanded.toggle(&path);
-                self.tree.reflatten(&self.dep, &self.obs);
-                Task::none()
-            }
-            WorkspaceMsg::Replay(msg) => update::pane::replay::update(
-                &mut self.dep,
-                &mut self.obs,
-                &mut self.sub,
-                &mut self.tree,
-                &mut self.work,
-                msg,
-            ),
-            WorkspaceMsg::Reveal(path) => {
-                let mut prefix = String::new();
-                for chunk in path.split('/') {
-                    if !prefix.is_empty() {
-                        prefix.push('/');
-                    }
-                    prefix.push_str(chunk);
-                    self.tree.expanded.open(prefix.clone());
-                }
-                self.tree.reflatten(&self.dep, &self.obs);
-                Task::none()
-            }
-            WorkspaceMsg::PaneSelected(pane) => {
-                self.work.right_pane = pane;
-                Task::none()
-            }
-        }
-    }
-
-    /// The window, and what floats over it.
-    fn update_chrome(&mut self, msg: ChromeMsg) -> Task<Message> {
-        match msg {
-            ChromeMsg::WindowResized(w, h) => {
-                // Not on every pixel of a drag — the prefs file would be
-                // rewritten hundreds of times per resize. Recorded here and
-                // marked dirty; a settle timer writes it once the drag stops
-                // (issue #189). "Written on the next real change" meant a
-                // resize-then-quit lost the geometry entirely.
-                self.chrome.prefs.window = Some((w, h));
-                self.chrome.window_dirty = true;
-                Task::none()
-            }
-            ChromeMsg::WindowSettled => {
-                if self.chrome.window_dirty {
-                    self.remember();
-                }
-                Task::none()
-            }
-            ChromeMsg::Key(key, modifiers) => self.update_key(&key, modifiers),
-            ChromeMsg::Palette(msg) => self.update_palette(msg),
-            ChromeMsg::Prefs(msg) => {
-                use crate::message::PrefsMsg;
-                match msg {
-                    PrefsMsg::ThemeToggled => {
-                        self.chrome.prefs.theme = self.chrome.prefs.theme.toggled()
-                    }
-                    PrefsMsg::ZoomIn => self.chrome.prefs.zoom_in(),
-                    PrefsMsg::ZoomOut => self.chrome.prefs.zoom_out(),
-                    PrefsMsg::ZoomReset => self.chrome.prefs.zoom_reset(),
-                }
-                // Saved on every change rather than at exit: a GUI is killed,
-                // not quit, more often than anyone admits.
-                self.remember();
-                Task::none()
-            }
-        }
-    }
-
-    /// One of the eleven right-hand panes.
-    fn update_pane(&mut self, msg: PaneMsg) -> Task<Message> {
-        match msg {
-            PaneMsg::Call(msg) => update::pane::call::update(
-                &mut self.work.bench.call_form,
-                msg,
-                Ctx {
-                    dep: &self.dep,
-                    obs: &self.obs,
-                    sub: &self.sub,
-                },
-            ),
-            PaneMsg::Nodes(msg) => update::pane::nodes::update(
-                &mut self.work.verdicts,
-                msg,
-                Ctx {
-                    dep: &self.dep,
-                    obs: &self.obs,
-                    sub: &self.sub,
-                },
-            ),
-            PaneMsg::Doctor(msg) => update::pane::doctor::update(
-                &mut self.work.verdicts,
-                &mut self.work.right_pane,
-                msg,
-                Ctx {
-                    dep: &self.dep,
-                    obs: &self.obs,
-                    sub: &self.sub,
-                },
-            ),
-            PaneMsg::Blob(msg) => update::pane::blob::update(
-                &mut self.work.verdicts.blob,
-                msg,
-                Ctx {
-                    dep: &self.dep,
-                    obs: &self.obs,
-                    sub: &self.sub,
-                },
-            ),
-            PaneMsg::Media(msg) => update::pane::media::update(
-                &mut self.work.bench.media,
-                &self.work.verdicts.roster,
-                msg,
-                Ctx {
-                    dep: &self.dep,
-                    obs: &self.obs,
-                    sub: &self.sub,
-                },
-            ),
-            PaneMsg::Admin(msg) => update::pane::admin::update(
-                &mut self.work.verdicts.admin,
-                &mut self.work.right_pane,
-                msg,
-                Ctx {
-                    dep: &self.dep,
-                    obs: &self.obs,
-                    sub: &self.sub,
-                },
-            ),
-            PaneMsg::Detail(msg) => update::pane::detail::update(&mut self.sub, &self.dep, msg),
-            PaneMsg::History(msg) => update::pane::detail::history(&mut self.sub, msg),
-            PaneMsg::Publish(msg) => update::pane::publish::update(
-                &mut self.work.bench,
-                msg,
-                Ctx {
-                    dep: &self.dep,
-                    obs: &self.obs,
-                    sub: &self.sub,
-                },
-            ),
-            PaneMsg::Echo(msg) => update::pane::echo::update(
-                &mut self.work.echo,
-                &mut self.work.right_pane,
-                msg,
-                Ctx {
-                    dep: &self.dep,
-                    obs: &self.obs,
-                    sub: &self.sub,
-                },
-            ),
-            PaneMsg::Context(msg) => {
-                update::pane::context::update(&mut self.work.bench.context_form, msg)
-            }
-        }
-    }
-
-    /// Everything a session learned about one deployment, forgotten.
-    ///
-    /// Factored out because three paths need exactly this — a base change, a
-    /// reconnect, and a context switch — and each one that forgot a different
-    /// subset would leave a stale verdict on screen about a fleet it is no
-    /// longer looking at (O4).
-    ///
-    /// What survives, deliberately (#109 audit): the tree selection, the
-    /// fetched value, the history recorder, and the call/publish forms —
-    /// each keyed by a full wire key that names its own base, or user input
-    /// rather than projected evidence. What cannot be cleared here — a task
-    /// already in flight — is judged at its landing instead: doctor, blob
-    /// probe/fetch and node_info each carry the base they ran against.
-    /// Point at a different fleet, and stop claiming anything about the old
-    /// one.
-    ///
-    /// Four of the six sub-states, and that number is the finding: the issue
-    /// assumed this could be one field replacement. Two of the four delegate,
-    /// one is a struct replacement, and exactly one line reaches across a
-    /// group boundary — `expanded`, because a stale path re-expands a
-    /// coincidentally matching new subtree (#179).
-    fn forget_deployment(&mut self) {
-        self.dep.pointed_at();
-        self.obs.forget_coverage();
-        self.work.verdicts.forget();
-        self.tree.expanded.clear();
-    }
-
-    /// One key press, in context.
-    ///
-    /// **Esc layering** (#75): palette first, then a tree selection, then
-    /// nothing — one layer per press, so Esc never does two things at once.
-    /// The arrows drive the overlay only while one is open, which is what
-    /// keeps them available to the panes the rest of the time.
-    fn update_key(
-        &mut self,
-        key: &iced::keyboard::Key,
-        modifiers: iced::keyboard::Modifiers,
-    ) -> Task<Message> {
-        use iced::keyboard::{Key, key::Named};
-        use view::palette::PaletteMsg;
-
-        if crate::shortcuts::is_escape(key) {
-            if self.chrome.palette.is_open() {
-                self.chrome.palette.close();
-            } else if self.sub.selected.is_some() {
-                return Task::done(Message::Subject(SubjectMsg::SelectKey(None)));
-            }
-            return Task::none();
-        }
-        if self.chrome.palette.is_open() {
-            match key {
-                Key::Named(Named::ArrowDown) => {
-                    return self.update_palette(PaletteMsg::CursorDown);
-                }
-                Key::Named(Named::ArrowUp) => {
-                    return self.update_palette(PaletteMsg::CursorUp);
-                }
-                Key::Named(Named::Enter) => return self.update_palette(PaletteMsg::Activate),
-                _ => {}
-            }
-        }
-        match crate::shortcuts::resolve(key, modifiers) {
-            Some(message) => Task::done(message),
-            None => Task::none(),
-        }
-    }
-
-    /// The command palette (#75).
-    ///
-    /// Every activation *returns* the action's own message as a `Task::done`,
-    /// which is what keeps the palette from being a second implementation of
-    /// anything: it is a faster way to send a message the UI already sends,
-    /// and nothing more. It used to re-enter `update` directly; the message
-    /// goes back out to iced now, which changes nothing about ordering — a
-    /// `Task::done` resolves immediately — and everything about what a
-    /// handler is allowed to reach.
-    fn update_palette(&mut self, msg: view::palette::PaletteMsg) -> Task<Message> {
-        use view::palette::PaletteMsg;
-        match msg {
-            PaletteMsg::Open(overlay) => {
-                self.chrome.palette.open(overlay);
-                Task::none()
-            }
-            PaletteMsg::Close => {
-                self.chrome.palette.close();
-                Task::none()
-            }
-            PaletteMsg::QueryChanged(q) => {
-                self.chrome.palette.query = q;
-                // A new query re-ranks the list, so the old cursor points at a
-                // different row — start from the best match again.
-                self.chrome.palette.cursor = 0;
-                Task::none()
-            }
-            PaletteMsg::CursorUp => {
-                self.chrome.palette.cursor = self.chrome.palette.cursor.saturating_sub(1);
-                Task::none()
-            }
-            PaletteMsg::CursorDown => {
-                self.chrome.palette.cursor = self
-                    .chrome
-                    .palette
-                    .cursor
-                    .saturating_add(1)
-                    .min(self.palette_row_count().saturating_sub(1));
-                Task::none()
-            }
-            PaletteMsg::Activate => self.run_palette_row(self.chrome.palette.cursor),
-            PaletteMsg::Pick(i) => self.run_palette_row(i),
-        }
-    }
-
-    /// How many rows the open overlay currently shows. Ranks over borrowed
-    /// keys (fat pointers, no string bytes) — runs per keypress, not per
-    /// frame (#110).
-    fn palette_row_count(&self) -> usize {
-        use view::palette::{Overlay, actions, rank};
-        match self.chrome.palette.overlay {
-            Overlay::Commands => {
-                let items = actions(&self.work.bench.context_form.known);
-                rank(&items, &self.chrome.palette.query, |a| a.label.as_str()).len()
-            }
-            Overlay::Keys => {
-                // Observed keys only — never a guess (O4): the jump-to
-                // overlay offers what is on the bus, not what a registry
-                // says could be.
-                let keys: Vec<&str> = self.dep.facts.keys().collect();
-                rank(&keys, &self.chrome.palette.query, |k| *k).len()
-            }
-            _ => 0,
-        }
-    }
-
-    /// The message behind row `index` — on the Keys overlay, the one place
-    /// the palette ever clones a key `String` (#110): the activated row.
-    fn palette_row(&self, index: usize) -> Option<Message> {
-        use view::palette::{Overlay, actions, rank};
-        match self.chrome.palette.overlay {
-            Overlay::Commands => {
-                let items = actions(&self.work.bench.context_form.known);
-                let order = rank(&items, &self.chrome.palette.query, |a| a.label.as_str());
-                order.get(index).map(|i| items[*i].message.clone())
-            }
-            Overlay::Keys => {
-                let keys: Vec<&str> = self.dep.facts.keys().collect();
-                let order = rank(&keys, &self.chrome.palette.query, |k| *k);
-                order
-                    .get(index)
-                    .map(|i| Message::Subject(SubjectMsg::SelectKey(Some(keys[*i].to_string()))))
-            }
-            _ => None,
-        }
-    }
-
-    fn run_palette_row(&mut self, index: usize) -> Task<Message> {
-        let Some(message) = self.palette_row(index) else {
-            return Task::none();
-        };
-        // Jumping to a key also shows it: selecting without switching panes
-        // would look like nothing happened.
-        if matches!(self.chrome.palette.overlay, view::palette::Overlay::Keys) {
-            self.work.right_pane = RightPane::Detail;
-        }
-        self.chrome.palette.close();
-        Task::done(message)
-    }
-
-    /// Layer a stored context over the live settings — the same precedence
-    /// `Cli::settings_with` applies, minus the flags, because a context picked
-    /// in-app *is* the explicit choice.
-    fn apply_context(&mut self, stored: zenkey_fleet::StoredContext) {
-        self.dep.settings.base = stored.base.unwrap_or_default();
-        self.dep.settings.connect = stored.connect;
-        self.dep.settings.listen = stored.listen;
-        self.dep.settings.scouting = stored.scouting;
-        self.dep.settings.zenoh_config = stored.zenoh_config;
-        if !stored.registry.is_empty() {
-            self.dep.settings.registry = stored.registry;
-        }
-        if let Some(t) = stored.timeout {
-            self.dep.settings.timeout_secs = t;
-        }
-    }
-
-    /// Tear the link down and build a new one on the current settings.
-    ///
-    /// The epoch bump the subscription machinery already does on
-    /// `MonitorStarted` is what retires the old pump; nothing here has to
-    /// coordinate with it.
-    fn reopen_session(&mut self) -> Task<Message> {
-        self.obs.link = LinkState::Connecting;
-        self.obs.monitor = None;
-        self.dep.session = None;
-        services::link::reopen(
-            self.dep.settings.zenoh_config.clone(),
-            self.dep.settings.connect.clone(),
-            self.dep.settings.listen.clone(),
-            self.dep.settings.scouting,
-        )
-    }
-
-    /// Reproject the registry's `[[blob]]` declarations after a slice load.
-    ///
-    /// Costs nothing on the bus: it reads slices already in hand and joins them
-    /// against the roster already observed. The laziness rule (#84/#85) governs
-    /// *fetching*, not rendering what has arrived — and the roster's
-    /// `live_map()` returns `None` while unseeded, so an unasked join renders
-    /// as "not asked" rather than as "nobody serves it" (O4).
-    fn refresh_blob_list(&mut self) {
-        let Some(slices) = self.dep.slices.as_deref() else {
-            self.work.verdicts.blob.list = None;
-            return;
-        };
-        let source = match self.dep.slice_source {
-            view::status::SliceSource::Union { .. } => zenkey_fleet::report::BlobListSource::Union,
-            view::status::SliceSource::Dirs { .. } => {
-                zenkey_fleet::report::BlobListSource::RegistryDirs
-            }
-            _ => zenkey_fleet::report::BlobListSource::Bus,
-        };
-        self.work.verdicts.blob.list = Some(zenkey_fleet::blob_list(
-            slices.slices(),
-            self.work.verdicts.roster.live_map().as_ref(),
-            source,
-        ));
-    }
-
-    fn start_monitor(&mut self) -> Task<Message> {
-        let Some(session) = self.dep.session.clone() else {
-            return Task::none();
-        };
-        // Liveliness is always on — zero payload by construction (RFC 04 §5)
-        // — and needs both the fleet sweep and @catalog by name (D4).
-        let liveliness = if self.dep.base().is_empty() && self.dep.bases.is_empty() {
-            scope::liveliness_any_base()
-        } else {
-            scope::liveliness_selectors(self.dep.base())
-        };
-        services::watch::start_monitor(session, liveliness, self.dep.settings.max_keys)
-    }
-
-    /// (Re)build the skeleton: slices are already loaded; roster + admin are
-    /// gathered inside the task (both metadata-only).
-    fn build_skeleton(&self) -> Task<Message> {
-        let (Some(session), Some(slices)) = (self.dep.session.clone(), self.dep.slices.clone())
-        else {
-            return Task::none();
-        };
-        let base = self.dep.base().to_string();
-        let timeout = self.dep.timeout();
-        services::sweep::skeleton(session, base, slices, timeout)
-    }
-
-    fn toggle_watch(&mut self, path: String) -> Task<Message> {
-        let Some(monitor) = self.obs.monitor.clone() else {
-            return Task::none();
-        };
-        if let Some(id) = self.obs.my_watches.remove(&path) {
-            self.obs.my_watch_paths.remove(&path);
-            // A watch released mid-seed never gets its boundary (the engine
-            // aborts the seed task) — forget it here too.
-            self.obs.seeding.remove(&id);
-            self.obs.seeding_paths.remove(&path);
-            return services::watch::release(monitor, path, id);
-        }
-        // Watching seeds (issue #92): current state arrives before live
-        // traffic, through the same merge discipline as everything else.
-        let selector = scope::subtree_selector(&path);
-        let policy = zenkey_fleet::SeedPolicy {
-            timeout: self.dep.timeout(),
-            ..Default::default()
-        };
-        services::watch::subtree(monitor, path, selector, policy)
-    }
-
-    fn watch_scope(&mut self) -> Task<Message> {
-        let Some(monitor) = self.obs.monitor.clone() else {
-            return Task::none();
-        };
-        let selectors = self
-            .dep
-            .settings
-            .scope
-            .selectors(self.dep.base(), &self.dep.settings.selectors);
-        // Scope watches seed too (issue #92) — the eager preset is "observe
-        // this scope", and current state is part of observing it.
-        let policy = zenkey_fleet::SeedPolicy {
-            timeout: self.dep.timeout(),
-            ..Default::default()
-        };
-        services::watch::scope(monitor, selectors, policy)
-    }
-
-    fn unwatch_scope(&mut self) -> Task<Message> {
-        let Some(monitor) = self.obs.monitor.clone() else {
-            return Task::none();
-        };
-        let ids = std::mem::take(&mut self.obs.scope_watches);
-        for id in &ids {
-            self.obs.seeding.remove(id);
-        }
-        services::watch::release_scope(monitor, ids)
-    }
-
-    /// Persist what the window looks like now. Best-effort by construction
-    /// (see `Prefs::save`) — a preference that cannot be written must not fail
-    /// whatever the user was actually doing.
-    fn remember(&mut self) {
-        self.chrome.prefs.scope = self.dep.settings.scope;
-        self.chrome.prefs.context = self.work.bench.context_form.active.clone().or(self
-            .chrome
-            .prefs
-            .context
-            .take());
-        self.chrome.window_dirty = false;
-        self.chrome.prefs.save();
-    }
-
-    fn reresolve_registrations(&mut self) {
-        let Some(slices) = self.dep.slices.clone() else {
-            return;
-        };
-        self.dep.facts.resolve_all(&slices);
-    }
-
-    fn load_slices(&self) -> Task<Message> {
-        let dirs = self.dep.settings.registry.clone();
-        let Some(session) = self.dep.session.clone() else {
-            return Task::none();
-        };
-        let base = self.dep.base().to_string();
-        let timeout = self.dep.timeout();
-        if !dirs.is_empty() {
-            // The §6.1 union (issue #43): served wins, dirs fill, and the
-            // disagreement count reaches the status strip as data.
-            return services::sweep::slices_union(session, base, dirs, timeout);
-        }
-        services::sweep::slices(session, base, timeout)
     }
 
     /// Feed one tick, for tests that assert what a tick does to the whole
@@ -1135,15 +341,6 @@ impl Zengui {
         }
     }
 
-    /// The base picker's options, after a discovery sweep landed.
-    fn rebuild_base_options(&mut self) {
-        self.dep.base_options = vec![String::new()];
-        self.dep
-            .base_options
-            .extend(self.dep.bases.iter().map(|b| b.base.clone()));
-        self.dep.base_options.dedup();
-    }
-
     fn toolbar(&self) -> Element<'_, Message> {
         // Both pickers borrow (#178). `pick_list` takes `L: Borrow<[T]>`, so a
         // slice is as good as a `Vec` — and the toolbar redraws at frame rate
@@ -1278,6 +475,8 @@ fn key_is_watched(watched: &[String], key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::message::BusTick;
     use crate::state::tree::shape_held;
@@ -1335,7 +534,7 @@ mod tests {
             app.tree.expanded.open(format!("v1/h-{i:04}/state/sysinfo"));
         }
         assert_eq!(app.tree.expanded.len(), 10_000);
-        app.forget_deployment();
+        update::deployment::forget(&mut app.dep, &mut app.obs, &mut app.tree, &mut app.work);
         assert!(app.tree.expanded.is_empty());
         assert!(
             app.work.verdicts.admin.expanded_raw.is_empty(),
@@ -1361,7 +560,7 @@ mod tests {
         app.sub.selected = Some("v1/h-3fa9c2d41b7e/state/sysinfo/health".into());
         app.chrome.prefs.zoom = 1.25;
 
-        app.forget_deployment();
+        update::deployment::forget(&mut app.dep, &mut app.obs, &mut app.tree, &mut app.work);
 
         assert_eq!(app.work.bench.publish_form.body, "{\"celsius\": 21.5}");
         assert_eq!(app.work.bench.call_form.params, "origin=h-3fa9c2d41b7e");
@@ -1394,7 +593,7 @@ mod tests {
         )));
         let with_skeleton = app.tree.merged(&app.dep, &app.obs);
 
-        app.forget_deployment();
+        update::deployment::forget(&mut app.dep, &mut app.obs, &mut app.tree, &mut app.work);
         assert!(
             app.tree.merged_cache.is_some(),
             "the cache is deliberately not cleared — this test exists to \
