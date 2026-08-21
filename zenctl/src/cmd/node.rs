@@ -115,9 +115,9 @@ pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
 /// the initial view) and every NodeUp/NodeDown re-renders. A producer
 /// stopping is reflected within one liveliness event (#56 acceptance).
 pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
 
-    use crate::cmd::watch::{Marks, diff_marks, render_cycle, validate_format};
+    use crate::cmd::watch::{render_cycle, validate_format};
 
     validate_format(args.format)?;
     let session = args.session().await?;
@@ -132,47 +132,30 @@ pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
     } else {
         None
     };
-    let mut prev: Option<BTreeSet<String>> = None;
+    let mut prev: Vec<String> = Vec::new();
+    let mut tick = 0u64;
 
+    // The report renders itself (#199): this used to build a second copy of
+    // `node list`'s table here, with its own column widths.
     let render = |roster: &BTreeMap<String, Vec<String>>,
                   slices: Option<&zenkey_fleet::SliceSet>,
-                  prev: &mut Option<BTreeSet<String>>| {
+                  prev: &mut Vec<String>,
+                  tick: &mut u64|
+     -> Result<()> {
         let report = bus::node_rows(roster, slices);
-        let rows: Vec<(String, String)> = report
-            .nodes
-            .iter()
-            .map(|r| {
-                (
-                    format!("{}/{}", r.origin, r.producer),
-                    match (&r.app, &r.registry_version) {
-                        (Some(app), Some(v)) => {
-                            format!("{:<16} {}  (app {app}, registry {v})", r.origin, r.producer)
-                        }
-                        _ if report.slices_joined => {
-                            format!("{:<16} {}  (no served slice)", r.origin, r.producer)
-                        }
-                        _ => format!("{:<16} {}", r.origin, r.producer),
-                    },
-                )
-            })
-            .collect();
-        let cur: BTreeSet<String> = rows.iter().map(|(id, _)| id.clone()).collect();
-        let marks = match &prev {
-            Some(p) => diff_marks(p, &cur),
-            None => Marks::new(),
-        };
         let footer = format!(
             "{} producer(s) — watching liveliness events, Ctrl-C to stop \
              (+ appeared, - disappeared)",
-            rows.len()
+            report.nodes.len()
         );
-        render_cycle(&report, &rows, &marks, args.format, &footer);
-        *prev = Some(cur);
+        render_cycle(&report, *tick, prev, args.format, &footer)?;
+        *tick += 1;
+        Ok(())
     };
 
     // First frame, even when empty: "0 producers" is a statement, not silence
     // (RFC 05 §3.1).
-    render(watch.roster(), slices.as_ref(), &mut prev);
+    render(watch.roster(), slices.as_ref(), &mut prev, &mut tick)?;
 
     loop {
         let change = tokio::select! {
@@ -185,7 +168,7 @@ pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
         if verbose && change.node_up {
             slices = Some(args.slice_set().await?);
         }
-        render(watch.roster(), slices.as_ref(), &mut prev);
+        render(watch.roster(), slices.as_ref(), &mut prev, &mut tick)?;
     }
     watch.stop().await;
     Ok(())

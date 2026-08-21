@@ -48,6 +48,7 @@
 
 mod impls;
 pub use impls::RateView;
+pub use impls::local::{CacheReport, CachedSlice};
 pub mod table;
 
 use std::io::Write;

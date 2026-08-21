@@ -24,4 +24,5 @@ mod observations;
 mod rate;
 pub use rate::RateView;
 mod listings;
+pub mod local;
 mod services;

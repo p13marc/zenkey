@@ -36,12 +36,13 @@ connect = ["tcp/127.0.0.1:7447"]
 The cache is keyed by context name, and says what it is *for* rather than only
 what is in it — nothing reads it except shell completion, and it is never a
 source of truth (#54). The path is wildcarded because it is this machine's, not
-the code's.
+the code's; `--format` is named because the default is `auto`, and `auto` off a
+tty is ndjson.
 
 ```console
-$ zenctl cache show
+$ zenctl cache show --format table
 [..]/cache/lab/slices
-  empty — completion falls back to the static command tree. Any command that loads slices fills it (or `zenctl cache refresh`).
+empty — completion falls back to the static command tree. Any command that loads slices fills it (or `zenctl cache refresh`)
 
 $ zenctl cache clear
 [..]/cache/lab/slices does not exist — nothing to clear
