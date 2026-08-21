@@ -16,7 +16,7 @@ use iced::widget::{Column, button, column, row, text, text_input};
 use iced::{Element, Length};
 
 use crate::echo::{EchoLine, EchoRing};
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -242,7 +242,7 @@ pub enum EchoMsg {
 }
 
 fn msg(m: EchoMsg) -> Message {
-    Message::Echo(m)
+    Message::Pane(PaneMsg::Echo(m))
 }
 
 /// Render the echo pane.

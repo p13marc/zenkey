@@ -28,7 +28,9 @@ use iced::{Element, Length};
 use zenkey::qos::QosProfile;
 use zenkey_fleet::{BodySource, KeyFacts};
 
-use crate::message::Message;
+use std::sync::Arc;
+
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -178,7 +180,7 @@ impl PublishForm {
     }
 }
 
-/// Messages the pane emits (wrapped into the app's `Message::Publish`).
+/// Messages the pane emits (wrapped into the app's `Message::Pane(PaneMsg::Publish)`).
 #[derive(Debug, Clone)]
 pub enum PublishMsg {
     KeyChanged(String),
@@ -197,6 +199,23 @@ pub enum PublishMsg {
     Retire,
     /// The v1.12 operator confirmation for an off-state retire.
     RetireIKnowToggled(bool),
+    /// A prepare→declare→send round finished: the prepared body's provenance,
+    /// the declared publication (kept when repeating), and its matching status.
+    ///
+    /// The five below were `Message` variants until #176. They are async
+    /// landings for *this* pane — every one writes `PublishForm::error` or
+    /// `PublishForm::log` — and twelve of their siblings across the other panes
+    /// were already nested. They were the inconsistency, not the rule.
+    Ready(Result<Arc<crate::message::PublishOutcome>, String>),
+    /// One repeat tick fired.
+    Tick,
+    /// A repeat send landed (or did not).
+    Sent(Result<usize, String>),
+    /// The armed publication was undeclared.
+    Stopped(Result<(), String>),
+    /// A retire round finished (#115): the tombstone shipped (with the
+    /// publication's matching fact), or it did not.
+    Retired(Result<Option<bool>, String>),
 }
 
 /// Whether retiring this key is the v1.12 operator act — i.e. anything but a
@@ -211,7 +230,7 @@ pub fn retire_needs_i_know(facts: Option<&KeyFacts>) -> bool {
 }
 
 fn msg(m: PublishMsg) -> Message {
-    Message::Publish(m)
+    Message::Pane(PaneMsg::Publish(m))
 }
 
 pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Message> {

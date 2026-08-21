@@ -34,7 +34,7 @@ use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
 use crate::keyfacts::Registration;
-use crate::message::Message;
+use crate::message::{Message, SubjectMsg, WorkspaceMsg};
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::{RegistrationTone, colors};
 use crate::view::tokens::{font, space};
@@ -1162,15 +1162,16 @@ pub type FactsIndex = zenkey_fleet::FactsCache;
 /// that reason — see [`RowShape`].
 pub fn row_press(r: &RowShape) -> Message {
     match (&r.target, r.is_leaf || !r.has_children) {
-        (Some(t), true) => Message::SelectKey(Some(t.clone())),
-        _ => Message::ToggleNode(r.path.clone()),
+        (Some(t), true) => Message::Subject(SubjectMsg::SelectKey(Some(t.clone()))),
+        _ => Message::Workspace(WorkspaceMsg::ToggleNode(r.path.clone())),
     }
 }
 
 /// What clicking the expand marker does — its own affordance, so a concrete
 /// key that is also a prefix of deeper keys stays selectable (issue #93).
 pub fn marker_press(r: &RowShape) -> Option<Message> {
-    r.has_children.then(|| Message::ToggleNode(r.path.clone()))
+    r.has_children
+        .then(|| Message::Workspace(WorkspaceMsg::ToggleNode(r.path.clone())))
 }
 
 /// Whether a row sits at or under one of the still-seeding watch paths.
@@ -1254,7 +1255,10 @@ pub fn tree_view<'a>(
     iced::widget::scrollable(col)
         .height(Length::Fill)
         .on_scroll(|viewport| {
-            Message::TreeScrolled(viewport.absolute_offset().y, viewport.bounds().height)
+            Message::Workspace(WorkspaceMsg::TreeScrolled(
+                viewport.absolute_offset().y,
+                viewport.bounds().height,
+            ))
         })
         .into()
 }
@@ -1402,7 +1406,7 @@ fn row_view<'a>(
             button(text(watch_label).size(font::CAPTION))
                 .padding(2)
                 .style(button::text)
-                .on_press(Message::WatchToggled(t.clone()))
+                .on_press(Message::Subject(SubjectMsg::WatchToggled(t.clone())))
                 .into()
         }
         None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
@@ -1436,12 +1440,13 @@ pub fn pane<'a>(
     scroll_y: f32,
     viewport_h: f32,
 ) -> Element<'a, Message> {
-    let pivot_picker =
-        iced::widget::pick_list(Pivot::ALL.to_vec(), Some(pivot), Message::PivotSelected)
-            .text_size(font::CAPTION);
+    let pivot_picker = iced::widget::pick_list(Pivot::ALL.to_vec(), Some(pivot), |v| {
+        Message::Workspace(WorkspaceMsg::PivotSelected(v))
+    })
+    .text_size(font::CAPTION);
     let find = iced::widget::text_input("find keys…", search)
         .size(font::CAPTION)
-        .on_input(Message::TreeSearchChanged);
+        .on_input(|v| Message::Workspace(WorkspaceMsg::TreeSearchChanged(v)));
     let mut header = row![pivot_picker, find]
         .spacing(space::SM)
         .align_y(iced::Alignment::Center);
@@ -2108,13 +2113,16 @@ mod tests {
             .expect("prefix row");
         assert!(prefix.is_leaf && prefix.has_children);
         match row_press(prefix) {
-            Message::SelectKey(Some(k)) => {
+            Message::Subject(SubjectMsg::SelectKey(Some(k))) => {
                 assert_eq!(k, "v1/h-3fa9c2d41b7e/state/tc/iface")
             }
             other => panic!("body must select, got {other:?}"),
         }
         assert!(
-            matches!(marker_press(prefix), Some(Message::ToggleNode(_))),
+            matches!(
+                marker_press(prefix),
+                Some(Message::Workspace(WorkspaceMsg::ToggleNode(_)))
+            ),
             "the marker is the expand affordance"
         );
         // A plain group row still toggles on body click.
@@ -2123,7 +2131,10 @@ mod tests {
             .iter()
             .find(|r| r.path == "v1/h-3fa9c2d41b7e/state")
             .expect("group row");
-        assert!(matches!(row_press(group), Message::ToggleNode(_)));
+        assert!(matches!(
+            row_press(group),
+            Message::Workspace(WorkspaceMsg::ToggleNode(_))
+        ));
     }
 
     /// Issue #93: expansion paths are namespaced per pivot, so switching

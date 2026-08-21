@@ -37,7 +37,9 @@ use crate::view::tokens::space;
 /// false in the other two (#249).
 const MAX_ROWS: usize = 50_000;
 
-use crate::message::RightPane;
+use crate::message::{
+    BusMsg, ChromeMsg, DeploymentMsg, PaneMsg, RightPane, SubjectMsg, WorkspaceMsg,
+};
 
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
@@ -333,7 +335,7 @@ impl Zengui {
                     .await
                     .map_err(|e| e.to_string())
             },
-            Message::SessionOpened,
+            |r| Message::Bus(BusMsg::SessionOpened(r)),
         );
         (app, open)
     }
@@ -353,7 +355,19 @@ impl Zengui {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::SessionOpened(Ok(session)) => {
+            Message::Bus(m) => self.update_bus(m),
+            Message::Subject(m) => self.update_subject(m),
+            Message::Deployment(m) => self.update_deployment(m),
+            Message::Workspace(m) => self.update_workspace(m),
+            Message::Pane(m) => self.update_pane(m),
+            Message::Chrome(m) => self.update_chrome(m),
+        }
+    }
+
+    /// Everything the world answered — a task landing or a `link.rs` yield.
+    fn update_bus(&mut self, msg: BusMsg) -> Task<Message> {
+        match msg {
+            BusMsg::SessionOpened(Ok(session)) => {
                 self.session = Some(session.clone());
                 // The context list is read from the shared file, not cached at
                 // launch: `zenctl context create` on the other side of the
@@ -373,15 +387,15 @@ impl Zengui {
                                 .map_err(|e| e.to_string())
                         }
                     },
-                    Message::BasesDiscovered,
+                    |r| Message::Bus(BusMsg::BasesDiscovered(r)),
                 );
                 Task::batch([discover, self.start_monitor(), self.load_slices()])
             }
-            Message::SessionOpened(Err(e)) => {
+            BusMsg::SessionOpened(Err(e)) => {
                 self.link = LinkState::Failed(e);
                 Task::none()
             }
-            Message::MonitorStarted(Ok(monitor)) => {
+            BusMsg::MonitorStarted(Ok(monitor)) => {
                 self.monitor = Some(Arc::clone(&monitor));
                 self.epoch += 1;
                 if self.settings.eager {
@@ -389,11 +403,11 @@ impl Zengui {
                 }
                 Task::none()
             }
-            Message::MonitorStarted(Err(e)) => {
+            BusMsg::MonitorStarted(Err(e)) => {
                 self.link = LinkState::Failed(e);
                 Task::none()
             }
-            Message::SkeletonBuilt(Ok((skeleton, roster))) => {
+            BusMsg::SkeletonBuilt(Ok((skeleton, roster))) => {
                 self.skeleton = Some(skeleton);
                 // The build task gathered the roster anyway — seed the node
                 // dashboard from it instead of throwing it away (#61).
@@ -401,20 +415,20 @@ impl Zengui {
                 self.reflatten();
                 Task::none()
             }
-            Message::SkeletonBuilt(Err(e)) => {
+            BusMsg::SkeletonBuilt(Err(e)) => {
                 tracing::warn!("skeleton build failed: {e}");
                 Task::none()
             }
-            Message::BasesDiscovered(Ok(bases)) => {
+            BusMsg::BasesDiscovered(Ok(bases)) => {
                 self.bases = bases;
                 self.rebuild_base_options();
                 Task::none()
             }
-            Message::BasesDiscovered(Err(e)) => {
+            BusMsg::BasesDiscovered(Err(e)) => {
                 tracing::warn!("base discovery failed: {e}");
                 Task::none()
             }
-            Message::SlicesLoaded(Ok(slices)) => {
+            BusMsg::SlicesLoaded(Ok(slices)) => {
                 self.slice_source = if self.settings.registry.is_empty() {
                     SliceSource::Bus {
                         count: slices.slices().len(),
@@ -430,7 +444,7 @@ impl Zengui {
                 // The skeleton is built FROM the slices — (re)build it now.
                 self.build_skeleton()
             }
-            Message::SlicesUnionLoaded(Ok((slices, from_bus, dirs_only, disagreements))) => {
+            BusMsg::SlicesUnionLoaded(Ok((slices, from_bus, dirs_only, disagreements))) => {
                 self.slice_source = SliceSource::Union {
                     from_bus,
                     dirs_only,
@@ -441,24 +455,87 @@ impl Zengui {
                 self.refresh_blob_list();
                 self.build_skeleton()
             }
-            Message::SlicesUnionLoaded(Err(e)) => {
+            BusMsg::SlicesUnionLoaded(Err(e)) => {
                 self.slice_source = SliceSource::Failed(e);
                 Task::none()
             }
-            Message::SlicesLoaded(Err(e)) => {
+            BusMsg::SlicesLoaded(Err(e)) => {
                 self.slice_source = SliceSource::Failed(e);
                 Task::none()
             }
-            Message::Link(state) => {
+            BusMsg::Link(state) => {
                 self.link = state;
                 Task::none()
             }
-            Message::Tick(tick) => {
+            BusMsg::Tick(tick) => {
                 self.apply_tick(&tick);
                 Task::none()
             }
-            Message::WatchToggled(path) => self.toggle_watch(path),
-            Message::WatchStarted(path, Ok(id)) => {
+        }
+    }
+
+    /// What the app is pointed at, and the coverage that follows.
+    fn update_deployment(&mut self, msg: DeploymentMsg) -> Task<Message> {
+        match msg {
+            DeploymentMsg::ScopeWatchesStarted(ids) => {
+                for id in &ids {
+                    self.seeding.insert(*id, None);
+                }
+                self.scope_watches = ids;
+                Task::none()
+            }
+            DeploymentMsg::ScopeWatchToggled => {
+                if self.scope_watches.is_empty() {
+                    self.watch_scope()
+                } else {
+                    self.unwatch_scope()
+                }
+            }
+            DeploymentMsg::BaseSelected(base) => {
+                if base == self.settings.base {
+                    return Task::none();
+                }
+                self.settings.base = base;
+                // The base is an input to every projection and to the
+                // skeleton, and watch selectors are base-relative: a fresh
+                // monitor is the obviously-correct restart. Everything the old
+                // base taught us is evidence about a different deployment (O4).
+                self.forget_deployment();
+                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+                    &self.settings.base,
+                    self.settings.timeout(),
+                )));
+                self.decoded = None;
+                self.reflatten();
+                Task::batch([self.start_monitor(), self.load_slices()])
+            }
+            DeploymentMsg::ScopeSelected(scope) => {
+                if scope == self.settings.scope {
+                    return Task::none();
+                }
+                self.settings.scope = scope;
+                // Remembered for the next launch (issue #73).
+                self.remember();
+                // If the scope is being observed, re-point the observation.
+                if !self.scope_watches.is_empty() {
+                    let release = self.unwatch_scope();
+                    let acquire = self.watch_scope();
+                    return Task::batch([release, acquire]);
+                }
+                Task::none()
+            }
+            DeploymentMsg::Reconnect => {
+                self.forget_deployment();
+                self.start_monitor()
+            }
+        }
+    }
+
+    /// One key: chosen, observed, fetched, decoded.
+    fn update_subject(&mut self, msg: SubjectMsg) -> Task<Message> {
+        match msg {
+            SubjectMsg::WatchToggled(path) => self.toggle_watch(path),
+            SubjectMsg::WatchStarted(path, Ok(id)) => {
                 self.my_watch_paths.insert(path.clone());
                 self.seeding.insert(id, Some(path.clone()));
                 self.seeding_paths.insert(path.clone());
@@ -466,30 +543,16 @@ impl Zengui {
                 self.reflatten();
                 Task::none()
             }
-            Message::WatchStarted(path, Err(e)) => {
+            SubjectMsg::WatchStarted(path, Err(e)) => {
                 tracing::warn!("watch {path} failed: {e}");
                 Task::none()
             }
-            Message::ScopeWatchesStarted(ids) => {
-                for id in &ids {
-                    self.seeding.insert(*id, None);
-                }
-                self.scope_watches = ids;
-                Task::none()
-            }
-            Message::WatchReleased(_, Ok(())) => Task::none(),
-            Message::WatchReleased(path, Err(e)) => {
+            SubjectMsg::WatchReleased(_, Ok(())) => Task::none(),
+            SubjectMsg::WatchReleased(path, Err(e)) => {
                 tracing::warn!("unwatch {path} failed: {e}");
                 Task::none()
             }
-            Message::ScopeWatchToggled => {
-                if self.scope_watches.is_empty() {
-                    self.watch_scope()
-                } else {
-                    self.unwatch_scope()
-                }
-            }
-            Message::ValueFetched(key, outcome) => {
+            SubjectMsg::ValueFetched(key, outcome) => {
                 // No base guard needed (#109 audit): the evidence is keyed by
                 // the full wire key, which names its own base (an explorer
                 // runs un-namespaced, RFC 09 §5), and the view passes
@@ -531,7 +594,7 @@ impl Zengui {
                                     // detail pane learns to render it in #164.
                                     (fkey, d.type_name, Arc::new(d.rendering))
                                 },
-                                |(k, t, r)| Message::ValueDecoded(k, t, r),
+                                |(k, t, r)| Message::Subject(SubjectMsg::ValueDecoded(k, t, r)),
                             )
                         } else {
                             Task::none()
@@ -542,72 +605,14 @@ impl Zengui {
                 self.fetched = Some((key, outcome));
                 decode_task
             }
-            Message::ValueDecoded(key, type_name, rendering) => {
+            SubjectMsg::ValueDecoded(key, type_name, rendering) => {
                 // Stale guard: only the currently selected key's decode lands.
                 if self.selected.as_deref() == Some(key.as_str()) {
                     self.decoded = Some((type_name, (*rendering).clone()));
                 }
                 Task::none()
             }
-            Message::BaseSelected(base) => {
-                if base == self.settings.base {
-                    return Task::none();
-                }
-                self.settings.base = base;
-                // The base is an input to every projection and to the
-                // skeleton, and watch selectors are base-relative: a fresh
-                // monitor is the obviously-correct restart. Everything the old
-                // base taught us is evidence about a different deployment (O4).
-                self.forget_deployment();
-                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
-                    &self.settings.base,
-                    self.settings.timeout(),
-                )));
-                self.decoded = None;
-                self.reflatten();
-                Task::batch([self.start_monitor(), self.load_slices()])
-            }
-            Message::ScopeSelected(scope) => {
-                if scope == self.settings.scope {
-                    return Task::none();
-                }
-                self.settings.scope = scope;
-                // Remembered for the next launch (issue #73).
-                self.remember();
-                // If the scope is being observed, re-point the observation.
-                if !self.scope_watches.is_empty() {
-                    let release = self.unwatch_scope();
-                    let acquire = self.watch_scope();
-                    return Task::batch([release, acquire]);
-                }
-                Task::none()
-            }
-            Message::PivotSelected(pivot) => {
-                self.pivot = pivot;
-                self.tree_scroll.0 = 0.0;
-                self.reflatten();
-                Task::none()
-            }
-            Message::TreeSearchChanged(q) => {
-                self.tree_search = q;
-                self.tree_scroll.0 = 0.0;
-                self.reflatten();
-                Task::none()
-            }
-            Message::TreeScrolled(y, h) => {
-                // View-only state: the next frame renders the new window.
-                self.tree_scroll = (y, h.max(100.0));
-                Task::none()
-            }
-            Message::ToggleNode(path) => {
-                // Collapsing takes the subtree with it (#179) — see
-                // `expansion.rs` for why that trade is the fix rather than a
-                // side effect of it.
-                self.expanded.toggle(&path);
-                self.reflatten();
-                Task::none()
-            }
-            Message::SelectKey(key) => {
+            SubjectMsg::SelectKey(key) => {
                 self.selected = key.clone();
                 // The old key's latency summary is not evidence about the
                 // new one — cleared now, refreshed on the next tick (#119).
@@ -645,185 +650,52 @@ impl Zengui {
                         .map_err(|e| e.to_string());
                         (key, out)
                     },
-                    |(key, out)| Message::ValueFetched(key, out),
+                    |(key, out)| Message::Subject(SubjectMsg::ValueFetched(key, out)),
                 )
             }
-            Message::Call(msg) => self.update_call(msg),
-            Message::Nodes(msg) => self.update_nodes(msg),
-            Message::Doctor(msg) => self.update_doctor(msg),
-            Message::Blob(msg) => self.update_blob(msg),
-            Message::Media(msg) => self.update_media(msg),
-            Message::Admin(msg) => self.update_admin(msg),
-            Message::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
-                self.series_leaf = Some(path);
-                self.refresh_series();
+        }
+    }
+
+    /// The shell around the panes, and the replay mode.
+    fn update_workspace(&mut self, msg: WorkspaceMsg) -> Task<Message> {
+        match msg {
+            WorkspaceMsg::PivotSelected(pivot) => {
+                self.pivot = pivot;
+                self.tree_scroll.0 = 0.0;
+                self.reflatten();
                 Task::none()
             }
-            Message::History(msg) => {
-                if let Some(rec) = self.history.as_mut() {
-                    match msg {
-                        view::history::HistoryMsg::Select(seq) => rec.selected = Some(seq),
-                        view::history::HistoryMsg::Clear => {
-                            rec.ring.clear();
-                            rec.selected = None;
-                        }
-                    }
-                }
+            WorkspaceMsg::TreeSearchChanged(q) => {
+                self.tree_search = q;
+                self.tree_scroll.0 = 0.0;
+                self.reflatten();
                 Task::none()
             }
-            Message::Publish(msg) => self.update_publish(msg),
-            Message::CallDone(outcome) => {
-                // No base guard needed (#109 audit): a call reply is the
-                // answer to the exact question the user pressed the button
-                // for, addressed by a full wire key naming its base — user
-                // output, not projected deployment state.
-                self.call_form.in_flight = false;
-                self.call_form.outcome =
-                    Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
+            WorkspaceMsg::TreeScrolled(y, h) => {
+                // View-only state: the next frame renders the new window.
+                self.tree_scroll = (y, h.max(100.0));
                 Task::none()
             }
-            Message::PublishReady(Ok(outcome)) => {
-                // No base guard needed (#109 audit): publishing is
-                // user-initiated *output* on a full wire key, not observed
-                // evidence. (A publication straddling a context switch rides
-                // the old session's Arc until stopped — a session-lifetime
-                // question, out of #109's scope.)
-                let form = &mut self.publish_form;
-                form.in_flight = false;
-                form.error = None;
-                form.source = Some(outcome.prepared.source.clone());
-                form.note = outcome.prepared.note.clone();
-                form.encoding_used = outcome.prepared.encoding.clone();
-                form.matching = outcome.matching;
-                form.log(
-                    true,
-                    format!("sent {} bytes → {}", outcome.prepared.bytes.len(), form.key),
-                );
-                match &outcome.publication {
-                    Some(publication) => {
-                        form.armed = true;
-                        self.publication = Some(RepeatLoad {
-                            publication: publication.clone(),
-                            bytes: Arc::new(outcome.prepared.bytes.clone()),
-                            attachment: outcome.attachment.clone(),
-                        });
-                    }
-                    // One-shot: the task already undeclared.
-                    None => {
-                        form.armed = false;
-                        self.publication = None;
-                    }
-                }
+            WorkspaceMsg::ToggleNode(path) => {
+                // Collapsing takes the subtree with it (#179) — see
+                // `expansion.rs` for why that trade is the fix rather than a
+                // side effect of it.
+                self.expanded.toggle(&path);
+                self.reflatten();
                 Task::none()
             }
-            Message::PublishReady(Err(e)) => {
-                let form = &mut self.publish_form;
-                form.in_flight = false;
-                form.armed = false;
-                form.error = Some(e.clone());
-                form.log(false, format!("refused: {e}"));
-                self.publication = None;
-                Task::none()
-            }
-            Message::PublishTick => {
-                let Some(load) = self.publication.as_ref() else {
-                    return Task::none();
-                };
-                let publication = load.publication.clone();
-                let bytes = load.bytes.clone();
-                let attachment = load.attachment.clone();
-                Task::perform(
-                    async move {
-                        publication
-                            .send(
-                                bytes.as_ref().clone(),
-                                attachment.as_ref().map(|a| a.as_ref().clone()),
-                            )
-                            .await
-                            .map(|()| bytes.len())
-                            .map_err(|e| e.to_string())
-                    },
-                    Message::PublishSent,
-                )
-            }
-            Message::PublishSent(Ok(n)) => {
-                let key = self.publish_form.key.clone();
-                self.publish_form
-                    .log(true, format!("sent {n} bytes → {key}"));
-                Task::none()
-            }
-            Message::PublishSent(Err(e)) => {
-                // A failed repeat disarms: a stream that silently stopped
-                // working would keep claiming it was publishing.
-                self.publish_form.log(false, format!("send failed: {e}"));
-                self.publish_form.armed = false;
-                self.publication = None;
-                Task::none()
-            }
-            Message::PublishRetired(result) => {
-                let form = &mut self.publish_form;
-                form.in_flight = false;
-                match result {
-                    Ok(matching) => {
-                        // A tombstone has no body provenance: a stale
-                        // encoded/as-typed/raw line claiming a body shipped
-                        // would be the pane's own O4 mistake.
-                        form.source = None;
-                        form.note = None;
-                        let key = form.key.clone();
-                        form.log(
-                            true,
-                            format!(
-                                "retired {key} — an authoritative delete (RFC 04 §1.2), \
-                                 not an empty value"
-                            ),
-                        );
-                        if matching == Some(false) {
-                            form.log(
-                                true,
-                                "matching: no subscriber matched the tombstone — a routing \
-                                 fact, not a fleet verdict (RFC 05 §3.1)",
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        form.error = Some(e.clone());
-                        form.log(false, format!("retire failed: {e}"));
-                    }
-                }
-                Task::none()
-            }
-            Message::PublishStopped(result) => {
-                match result {
-                    Ok(()) => self
-                        .publish_form
-                        .log(true, "stopped — publication undeclared"),
-                    Err(e) => self
-                        .publish_form
-                        .log(false, format!("undeclare failed: {e}")),
-                }
-                Task::none()
-            }
-            Message::Echo(msg) => self.update_echo(msg),
-            Message::Replay(msg) => self.update_replay(msg),
-            Message::Context(msg) => self.update_context(msg),
-            Message::ContextSwitched(Ok(session)) => {
-                // A new session is a new everything: the base may differ, so
-                // every projection, roster and verdict from the old one is
-                // evidence about a different deployment (O4).
-                self.forget_deployment();
-                self.update(Message::SessionOpened(Ok(session)))
-            }
-            Message::ContextSwitched(Err(e)) => {
-                self.link = LinkState::Failed(e.clone());
-                self.context_form.status = Some(Err(format!("could not connect: {e}")));
-                Task::none()
-            }
-            Message::PaneSelected(pane) => {
+            WorkspaceMsg::Replay(msg) => self.update_replay(msg),
+            WorkspaceMsg::PaneSelected(pane) => {
                 self.right_pane = pane;
                 Task::none()
             }
-            Message::WindowResized(w, h) => {
+        }
+    }
+
+    /// The window, and what floats over it.
+    fn update_chrome(&mut self, msg: ChromeMsg) -> Task<Message> {
+        match msg {
+            ChromeMsg::WindowResized(w, h) => {
                 // Not on every pixel of a drag — the prefs file would be
                 // rewritten hundreds of times per resize. Recorded here and
                 // marked dirty; a settle timer writes it once the drag stops
@@ -833,15 +705,15 @@ impl Zengui {
                 self.window_dirty = true;
                 Task::none()
             }
-            Message::WindowSettled => {
+            ChromeMsg::WindowSettled => {
                 if self.window_dirty {
                     self.remember();
                 }
                 Task::none()
             }
-            Message::Key(key, modifiers) => self.update_key(&key, modifiers),
-            Message::Palette(msg) => self.update_palette(msg),
-            Message::Prefs(msg) => {
+            ChromeMsg::Key(key, modifiers) => self.update_key(&key, modifiers),
+            ChromeMsg::Palette(msg) => self.update_palette(msg),
+            ChromeMsg::Prefs(msg) => {
                 use crate::message::PrefsMsg;
                 match msg {
                     PrefsMsg::ThemeToggled => self.prefs.theme = self.prefs.theme.toggled(),
@@ -854,16 +726,54 @@ impl Zengui {
                 self.remember();
                 Task::none()
             }
-            Message::Reconnect => {
-                self.forget_deployment();
-                self.start_monitor()
+        }
+    }
+
+    /// One of the eleven right-hand panes.
+    fn update_pane(&mut self, msg: PaneMsg) -> Task<Message> {
+        match msg {
+            PaneMsg::Call(msg) => self.update_call(msg),
+            PaneMsg::Nodes(msg) => self.update_nodes(msg),
+            PaneMsg::Doctor(msg) => self.update_doctor(msg),
+            PaneMsg::Blob(msg) => self.update_blob(msg),
+            PaneMsg::Media(msg) => self.update_media(msg),
+            PaneMsg::Admin(msg) => self.update_admin(msg),
+            PaneMsg::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
+                self.series_leaf = Some(path);
+                self.refresh_series();
+                Task::none()
             }
+            PaneMsg::History(msg) => {
+                if let Some(rec) = self.history.as_mut() {
+                    match msg {
+                        view::history::HistoryMsg::Select(seq) => rec.selected = Some(seq),
+                        view::history::HistoryMsg::Clear => {
+                            rec.ring.clear();
+                            rec.selected = None;
+                        }
+                    }
+                }
+                Task::none()
+            }
+            PaneMsg::Publish(msg) => self.update_publish(msg),
+            PaneMsg::Echo(msg) => self.update_echo(msg),
+            PaneMsg::Context(msg) => self.update_context(msg),
         }
     }
 
     fn update_call(&mut self, msg: view::call::CallMsg) -> Task<Message> {
         use view::call::CallMsg;
         match msg {
+            CallMsg::Done(outcome) => {
+                // No base guard needed (#109 audit): a call reply is the
+                // answer to the exact question the user pressed the button
+                // for, addressed by a full wire key naming its base — user
+                // output, not projected deployment state.
+                self.call_form.in_flight = false;
+                self.call_form.outcome =
+                    Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
+                Task::none()
+            }
             CallMsg::ProducerPicked(p) => {
                 self.call_form.producer = Some(p);
                 self.call_form.procedure = None;
@@ -901,7 +811,7 @@ impl Zengui {
                             .await
                             .map(|schema| view::call::schema_fields(&schema))
                     },
-                    |fields| Message::Call(CallMsg::RequestSchema(fields)),
+                    |fields| Message::Pane(PaneMsg::Call(CallMsg::RequestSchema(fields))),
                 )
             }
             CallMsg::RequestSchema(fields) => {
@@ -982,7 +892,7 @@ impl Zengui {
                         .map(Arc::new)
                         .map_err(|e| e.to_string())
                     },
-                    Message::CallDone,
+                    |r| Message::Pane(PaneMsg::Call(view::call::CallMsg::Done(r))),
                 )
             }
         }
@@ -995,6 +905,128 @@ impl Zengui {
     fn update_publish(&mut self, msg: view::publish::PublishMsg) -> Task<Message> {
         use view::publish::PublishMsg;
         match msg {
+            PublishMsg::Ready(Ok(outcome)) => {
+                // No base guard needed (#109 audit): publishing is
+                // user-initiated *output* on a full wire key, not observed
+                // evidence. (A publication straddling a context switch rides
+                // the old session's Arc until stopped — a session-lifetime
+                // question, out of #109's scope.)
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                form.error = None;
+                form.source = Some(outcome.prepared.source.clone());
+                form.note = outcome.prepared.note.clone();
+                form.encoding_used = outcome.prepared.encoding.clone();
+                form.matching = outcome.matching;
+                form.log(
+                    true,
+                    format!("sent {} bytes → {}", outcome.prepared.bytes.len(), form.key),
+                );
+                match &outcome.publication {
+                    Some(publication) => {
+                        form.armed = true;
+                        self.publication = Some(RepeatLoad {
+                            publication: publication.clone(),
+                            bytes: Arc::new(outcome.prepared.bytes.clone()),
+                            attachment: outcome.attachment.clone(),
+                        });
+                    }
+                    // One-shot: the task already undeclared.
+                    None => {
+                        form.armed = false;
+                        self.publication = None;
+                    }
+                }
+                Task::none()
+            }
+            PublishMsg::Ready(Err(e)) => {
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                form.armed = false;
+                form.error = Some(e.clone());
+                form.log(false, format!("refused: {e}"));
+                self.publication = None;
+                Task::none()
+            }
+            PublishMsg::Tick => {
+                let Some(load) = self.publication.as_ref() else {
+                    return Task::none();
+                };
+                let publication = load.publication.clone();
+                let bytes = load.bytes.clone();
+                let attachment = load.attachment.clone();
+                Task::perform(
+                    async move {
+                        publication
+                            .send(
+                                bytes.as_ref().clone(),
+                                attachment.as_ref().map(|a| a.as_ref().clone()),
+                            )
+                            .await
+                            .map(|()| bytes.len())
+                            .map_err(|e| e.to_string())
+                    },
+                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Sent(r))),
+                )
+            }
+            PublishMsg::Sent(Ok(n)) => {
+                let key = self.publish_form.key.clone();
+                self.publish_form
+                    .log(true, format!("sent {n} bytes → {key}"));
+                Task::none()
+            }
+            PublishMsg::Sent(Err(e)) => {
+                // A failed repeat disarms: a stream that silently stopped
+                // working would keep claiming it was publishing.
+                self.publish_form.log(false, format!("send failed: {e}"));
+                self.publish_form.armed = false;
+                self.publication = None;
+                Task::none()
+            }
+            PublishMsg::Retired(result) => {
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                match result {
+                    Ok(matching) => {
+                        // A tombstone has no body provenance: a stale
+                        // encoded/as-typed/raw line claiming a body shipped
+                        // would be the pane's own O4 mistake.
+                        form.source = None;
+                        form.note = None;
+                        let key = form.key.clone();
+                        form.log(
+                            true,
+                            format!(
+                                "retired {key} — an authoritative delete (RFC 04 §1.2), \
+                                 not an empty value"
+                            ),
+                        );
+                        if matching == Some(false) {
+                            form.log(
+                                true,
+                                "matching: no subscriber matched the tombstone — a routing \
+                                 fact, not a fleet verdict (RFC 05 §3.1)",
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        form.error = Some(e.clone());
+                        form.log(false, format!("retire failed: {e}"));
+                    }
+                }
+                Task::none()
+            }
+            PublishMsg::Stopped(result) => {
+                match result {
+                    Ok(()) => self
+                        .publish_form
+                        .log(true, "stopped — publication undeclared"),
+                    Err(e) => self
+                        .publish_form
+                        .log(false, format!("undeclare failed: {e}")),
+                }
+                Task::none()
+            }
             PublishMsg::KeyChanged(k) => {
                 // Classify as you type, through the same ladder the tree uses.
                 self.publish_form.facts = (!k.trim().is_empty()).then(|| {
@@ -1056,7 +1088,7 @@ impl Zengui {
                 match Arc::try_unwrap(publication) {
                     Ok(p) => Task::perform(
                         async move { p.undeclare().await.map_err(|e| e.to_string()) },
-                        Message::PublishStopped,
+                        |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Stopped(r))),
                     ),
                     Err(_) => Task::none(),
                 }
@@ -1108,7 +1140,7 @@ impl Zengui {
                         publication.undeclare().await.map_err(|e| e.to_string())?;
                         Ok(matching)
                     },
-                    Message::PublishRetired,
+                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Retired(r))),
                 );
                 Task::batch([stop, send])
             }
@@ -1188,7 +1220,7 @@ impl Zengui {
                             attachment,
                         }))
                     },
-                    Message::PublishReady,
+                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Ready(r))),
                 );
                 Task::batch([stop, send])
             }
@@ -1255,7 +1287,7 @@ impl Zengui {
             if self.palette.is_open() {
                 self.palette.close();
             } else if self.selected.is_some() {
-                return self.update(Message::SelectKey(None));
+                return self.update(Message::Subject(SubjectMsg::SelectKey(None)));
             }
             return Task::none();
         }
@@ -1354,7 +1386,7 @@ impl Zengui {
                 let order = rank(&keys, &self.palette.query, |k| *k);
                 order
                     .get(index)
-                    .map(|i| Message::SelectKey(Some(keys[*i].to_string())))
+                    .map(|i| Message::Subject(SubjectMsg::SelectKey(Some(keys[*i].to_string()))))
             }
             _ => None,
         }
@@ -1379,6 +1411,18 @@ impl Zengui {
     fn update_context(&mut self, msg: view::contexts::ContextMsg) -> Task<Message> {
         use view::contexts::ContextMsg;
         match msg {
+            ContextMsg::Switched(Ok(session)) => {
+                // A new session is a new everything: the base may differ, so
+                // every projection, roster and verdict from the old one is
+                // evidence about a different deployment (O4).
+                self.forget_deployment();
+                self.update(Message::Bus(BusMsg::SessionOpened(Ok(session))))
+            }
+            ContextMsg::Switched(Err(e)) => {
+                self.link = LinkState::Failed(e.clone());
+                self.context_form.status = Some(Err(format!("could not connect: {e}")));
+                Task::none()
+            }
             ContextMsg::NameChanged(v) => {
                 self.context_form.name = v;
                 Task::none()
@@ -1591,7 +1635,7 @@ impl Zengui {
                     .await
                     .map_err(|e| e.to_string())
             },
-            Message::ContextSwitched,
+            |r| Message::Pane(PaneMsg::Context(view::contexts::ContextMsg::Switched(r))),
         )
     }
 
@@ -1626,7 +1670,7 @@ impl Zengui {
                 // Drill-through reuses the selection path rather than being a
                 // second way to open the inspector.
                 self.right_pane = RightPane::Detail;
-                self.update(Message::SelectKey(Some(key)))
+                self.update(Message::Subject(SubjectMsg::SelectKey(Some(key))))
             }
             EchoMsg::Export => {
                 let text = view::echo::export(
@@ -1667,7 +1711,9 @@ impl Zengui {
                             .map_err(|e| e.to_string());
                         (origin, base, out)
                     },
-                    |(origin, ran, out)| Message::Nodes(NodesMsg::InfoLoaded(origin, ran, out)),
+                    |(origin, ran, out)| {
+                        Message::Pane(PaneMsg::Nodes(NodesMsg::InfoLoaded(origin, ran, out)))
+                    },
                 )
             }
             NodesMsg::InfoLoaded(origin, ran_against, outcome) => {
@@ -1767,7 +1813,7 @@ impl Zengui {
                         })
                         .map_err(|e| e.to_string())
                     },
-                    |out| Message::Doctor(DoctorMsg::Done(out)),
+                    |out| Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(out))),
                 )
             }
             DoctorMsg::Done(outcome) => {
@@ -1798,7 +1844,7 @@ impl Zengui {
                             self.expanded.open(prefix.clone());
                         }
                         self.reflatten();
-                        self.update(Message::SelectKey(Some(key)))
+                        self.update(Message::Subject(SubjectMsg::SelectKey(Some(key))))
                     }
                     // An origin/producer subject: land on the nodes pane.
                     Some(crate::doctor::Target::Node(origin)) => {
@@ -1896,7 +1942,7 @@ impl Zengui {
                 self.media.viewing = Some(view::media::Viewing::new(key.clone()));
                 let declare = Task::perform(
                     async move { monitor.watch(&key).await.map_err(|e| e.to_string()) },
-                    |r| Message::Media(M::Watched(r)),
+                    |r| Message::Pane(PaneMsg::Media(M::Watched(r))),
                 );
                 Task::batch([release, declare])
             }
@@ -1933,7 +1979,7 @@ impl Zengui {
             async move {
                 let _ = monitor.unwatch(id).await;
             },
-            |()| Message::Media(view::media::MediaMsg::Stopped),
+            |()| Message::Pane(PaneMsg::Media(view::media::MediaMsg::Stopped)),
         )
     }
 
@@ -2001,7 +2047,7 @@ impl Zengui {
                                 .map_err(|e| e.to_string());
                         (base, out)
                     },
-                    |(ran, out)| Message::Blob(BlobMsg::ProbeDone(ran, out)),
+                    |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::ProbeDone(ran, out))),
                 )
             }
             BlobMsg::ProbeDone(ran_against, outcome) => {
@@ -2046,7 +2092,7 @@ impl Zengui {
                             .map_err(|e| e.to_string());
                             (base, out)
                         },
-                        |(ran, out)| Message::Blob(BlobMsg::InspectDone(ran, out)),
+                        |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::InspectDone(ran, out))),
                     );
                 }
                 let root = match self.blob.root_input.trim() {
@@ -2082,7 +2128,7 @@ impl Zengui {
                             yield p;
                         }
                     },
-                    |p| Message::Blob(BlobMsg::Progress(p)),
+                    |p| Message::Pane(PaneMsg::Blob(BlobMsg::Progress(p))),
                 );
                 let run = Task::perform(
                     async move {
@@ -2103,7 +2149,7 @@ impl Zengui {
                         .map_err(|e| e.to_string());
                         (base, out)
                     },
-                    |(ran, out)| Message::Blob(BlobMsg::FetchDone(ran, out)),
+                    |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::FetchDone(ran, out))),
                 );
                 Task::batch([progress, run])
             }
@@ -2175,7 +2221,9 @@ impl Zengui {
                 // The tree already owns "show me this": reusing its search is
                 // one behaviour, not two that can drift.
                 self.right_pane = RightPane::Echo;
-                Task::done(Message::TreeSearchChanged(producer))
+                Task::done(Message::Workspace(WorkspaceMsg::TreeSearchChanged(
+                    producer,
+                )))
             }
             AdminMsg::Run => {
                 if self.admin.in_flight {
@@ -2242,7 +2290,7 @@ impl Zengui {
                             base,
                         }))
                     },
-                    |out| Message::Admin(AdminMsg::Done(out)),
+                    |out| Message::Pane(PaneMsg::Admin(AdminMsg::Done(out))),
                 )
             }
             AdminMsg::Done(outcome) => {
@@ -2280,7 +2328,7 @@ impl Zengui {
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
             },
-            Message::MonitorStarted,
+            |r| Message::Bus(BusMsg::MonitorStarted(r)),
         )
     }
 
@@ -2303,7 +2351,7 @@ impl Zengui {
                 let skeleton = Arc::new(Skeleton::build(&base, &slices, &roster, admin.as_ref()));
                 Ok((skeleton, Arc::new(roster)))
             },
-            Message::SkeletonBuilt,
+            |r| Message::Bus(BusMsg::SkeletonBuilt(r)),
         )
     }
 
@@ -2319,7 +2367,7 @@ impl Zengui {
             self.seeding_paths.remove(&path);
             return Task::perform(
                 async move { monitor.unwatch(id).await.map_err(|e| e.to_string()) },
-                move |r| Message::WatchReleased(path.clone(), r),
+                move |r| Message::Subject(SubjectMsg::WatchReleased(path.clone(), r)),
             );
         }
         // Watching seeds (issue #92): current state arrives before live
@@ -2336,7 +2384,7 @@ impl Zengui {
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |r| Message::WatchStarted(path.clone(), r),
+            move |r| Message::Subject(SubjectMsg::WatchStarted(path.clone(), r)),
         )
     }
 
@@ -2365,7 +2413,7 @@ impl Zengui {
                 }
                 ids
             },
-            Message::ScopeWatchesStarted,
+            |r| Message::Deployment(DeploymentMsg::ScopeWatchesStarted(r)),
         )
     }
 
@@ -2386,7 +2434,7 @@ impl Zengui {
                 }
                 Ok(())
             },
-            |r| Message::WatchReleased("(scope)".into(), r),
+            |r| Message::Subject(SubjectMsg::WatchReleased("(scope)".into(), r)),
         )
     }
 
@@ -2569,7 +2617,7 @@ impl Zengui {
                         writer.finish().map_err(|e| e.to_string())?;
                         Ok((samples, dropped, path))
                     },
-                    |r| Message::Replay(R::RecordFinished(r)),
+                    |r| Message::Workspace(WorkspaceMsg::Replay(R::RecordFinished(r))),
                 )
             }
             R::RecordFinished(result) => {
@@ -2798,7 +2846,7 @@ impl Zengui {
                         })
                         .map_err(|e| e.to_string())
                 },
-                Message::SlicesUnionLoaded,
+                |r| Message::Bus(BusMsg::SlicesUnionLoaded(r)),
             );
         }
         Task::perform(
@@ -2808,7 +2856,7 @@ impl Zengui {
                     .map(Arc::new)
                     .map_err(|e| e.to_string())
             },
-            Message::SlicesLoaded,
+            |r| Message::Bus(BusMsg::SlicesLoaded(r)),
         )
     }
 
@@ -2829,20 +2877,25 @@ impl Zengui {
         // panes tick at the rate they were built for.
         if self.replay.as_ref().is_some_and(|r| r.playing) {
             subs.push(
-                iced::time::every(std::time::Duration::from_millis(250))
-                    .map(|_| Message::Replay(view::replay::ReplayMsg::Advance)),
+                iced::time::every(std::time::Duration::from_millis(250)).map(|_| {
+                    Message::Workspace(WorkspaceMsg::Replay(view::replay::ReplayMsg::Advance))
+                }),
             );
         }
         // The repeat clock for a sustained publish (#60). It exists only while
         // a publication is armed, so an idle pane costs nothing.
         if self.publish_form.armed {
             let period = std::time::Duration::from_secs_f64(self.publish_form.interval_secs());
-            subs.push(iced::time::every(period).map(|_| Message::PublishTick));
+            subs.push(
+                iced::time::every(period)
+                    .map(|_| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Tick))),
+            );
         }
         // Window geometry, for the next launch (issue #73).
         subs.push(
-            iced::window::resize_events()
-                .map(|(_, size)| Message::WindowResized(size.width, size.height)),
+            iced::window::resize_events().map(|(_, size)| {
+                Message::Chrome(ChromeMsg::WindowResized(size.width, size.height))
+            }),
         );
         // …and the settle timer that actually writes it, which exists only
         // while a resize is outstanding (issue #189). One file write per drag
@@ -2850,7 +2903,7 @@ impl Zengui {
         if self.window_dirty {
             subs.push(
                 iced::time::every(std::time::Duration::from_millis(700))
-                    .map(|_| Message::WindowSettled),
+                    .map(|_| Message::Chrome(ChromeMsg::WindowSettled)),
             );
         }
         // Keyboard shortcuts (issues #73, #75). `listen` only sees events no
@@ -2862,7 +2915,7 @@ impl Zengui {
         // layering needs to know what is open).
         subs.push(iced::keyboard::listen().filter_map(|event| match event {
             iced::keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                Some(Message::Key(key, modifiers))
+                Some(Message::Chrome(ChromeMsg::Key(key, modifiers)))
             }
             _ => None,
         }));
@@ -3016,11 +3069,9 @@ impl Zengui {
         // slice is as good as a `Vec` — and the toolbar redraws at frame rate
         // while its options change on a discovery sweep, which is minutes
         // apart.
-        let base_picker = pick_list(
-            &self.base_options[..],
-            Some(&self.settings.base),
-            Message::BaseSelected,
-        )
+        let base_picker = pick_list(&self.base_options[..], Some(&self.settings.base), |r| {
+            Message::Deployment(DeploymentMsg::BaseSelected(r))
+        })
         .placeholder("base")
         .text_size(crate::view::tokens::font::CAPTION);
 
@@ -3032,11 +3083,9 @@ impl Zengui {
             ScopePreset::State,
             ScopePreset::Events,
         ];
-        let scope_picker = pick_list(
-            &SCOPES[..],
-            Some(self.settings.scope),
-            Message::ScopeSelected,
-        )
+        let scope_picker = pick_list(&SCOPES[..], Some(self.settings.scope), |r| {
+            Message::Deployment(DeploymentMsg::ScopeSelected(r))
+        })
         .text_size(crate::view::tokens::font::CAPTION);
 
         // Observation is opt-in and labelled by its cost (issue #85).
@@ -3049,7 +3098,7 @@ impl Zengui {
             })
             .size(crate::view::tokens::font::CAPTION),
         )
-        .on_press(Message::ScopeWatchToggled)
+        .on_press(Message::Deployment(DeploymentMsg::ScopeWatchToggled))
         .padding(4);
 
         row![
@@ -3059,7 +3108,11 @@ impl Zengui {
             scope_picker,
             observe,
             iced::widget::Row::from_iter(RightPane::ALL.into_iter().map(|p| {
-                crate::view::kit::tab(p.label(), self.right_pane == p, Message::PaneSelected(p))
+                crate::view::kit::tab(
+                    p.label(),
+                    self.right_pane == p,
+                    Message::Workspace(WorkspaceMsg::PaneSelected(p)),
+                )
             }))
             .spacing(space::XS),
             crate::view::kit::muted(self.settings.scope.label()),
@@ -3073,10 +3126,14 @@ impl Zengui {
                 })
                 .size(crate::view::tokens::font::CAPTION)
             )
-            .on_press(Message::Replay(view::replay::ReplayMsg::RecordToggled))
+            .on_press(Message::Workspace(WorkspaceMsg::Replay(
+                view::replay::ReplayMsg::RecordToggled
+            )))
             .padding(4),
             iced::widget::button(text("replay…").size(crate::view::tokens::font::CAPTION))
-                .on_press(Message::Replay(view::replay::ReplayMsg::OpenToggled))
+                .on_press(Message::Workspace(WorkspaceMsg::Replay(
+                    view::replay::ReplayMsg::OpenToggled
+                )))
                 .padding(4),
             iced::widget::space::horizontal(),
             // Window preferences (issue #73): the theme name is the button,
@@ -3085,22 +3142,30 @@ impl Zengui {
                 text(format!("theme: {}", self.prefs.theme.label()))
                     .size(crate::view::tokens::font::CAPTION)
             )
-            .on_press(Message::Prefs(crate::message::PrefsMsg::ThemeToggled))
+            .on_press(Message::Chrome(ChromeMsg::Prefs(
+                crate::message::PrefsMsg::ThemeToggled
+            )))
             .padding(4),
             iced::widget::button(text("-").size(crate::view::tokens::font::CAPTION))
-                .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomOut))
+                .on_press(Message::Chrome(ChromeMsg::Prefs(
+                    crate::message::PrefsMsg::ZoomOut
+                )))
                 .padding(4),
             iced::widget::button(
                 text(format!("{}%", (self.prefs.zoom * 100.0).round() as i32))
                     .size(crate::view::tokens::font::CAPTION)
             )
-            .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomReset))
+            .on_press(Message::Chrome(ChromeMsg::Prefs(
+                crate::message::PrefsMsg::ZoomReset
+            )))
             .padding(4),
             iced::widget::button(text("+").size(crate::view::tokens::font::CAPTION))
-                .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomIn))
+                .on_press(Message::Chrome(ChromeMsg::Prefs(
+                    crate::message::PrefsMsg::ZoomIn
+                )))
                 .padding(4),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))
-                .on_press(Message::Reconnect)
+                .on_press(Message::Deployment(DeploymentMsg::Reconnect))
                 .padding(4),
         ]
         .spacing(space::SM)
@@ -3186,7 +3251,7 @@ impl Zengui {
 /// event and hands out `Arc::clone` every tick, so pointer identity is an exact
 /// test that costs nothing.
 ///
-/// That second rung also covers a hazard: `Message::WatchReleased` does not
+/// That second rung also covers a hazard: `Message::Subject(SubjectMsg::WatchReleased)` does not
 /// reflatten — it returns `Task::none()` and has always relied on the
 /// unconditional tick rebuild. Releasing a watch fires `WatchChanged`, which
 /// swaps the `Arc`, which lands here as `false`.
@@ -3356,7 +3421,7 @@ mod tests {
 
     /// The hazard the watch rung covers, named so it cannot be optimised away.
     ///
-    /// `Message::WatchReleased` does **not** reflatten — it returns
+    /// `Message::Subject(SubjectMsg::WatchReleased)` does **not** reflatten — it returns
     /// `Task::none()` and has always relied on the unconditional tick rebuild
     /// to repaint node status. Under a conditional trigger that would be a live
     /// bug, except that releasing a watch fires `WatchChanged`, which is the

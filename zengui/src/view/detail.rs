@@ -22,7 +22,7 @@ use iced::{Element, Length};
 use zenkey_fleet::decode::Rendering;
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
-use crate::message::{Message, RightPane};
+use crate::message::{Message, PaneMsg, RightPane, WorkspaceMsg};
 use crate::series::{NumericLeaves, Series};
 use crate::view::kit;
 use crate::view::spark;
@@ -200,6 +200,15 @@ pub struct SeriesCaches {
     pub rate: iced::widget::canvas::Cache,
 }
 
+/// Wrap one of this pane's messages for the app (#176).
+///
+/// `Message::Workspace(WorkspaceMsg::PaneSelected)` below is deliberately *not* routed through
+/// this: it names another region, and a pane reaching across is a fact
+/// worth leaving visible at its call site.
+fn msg(m: DetailMsg) -> Message {
+    Message::Pane(PaneMsg::Detail(m))
+}
+
 pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
     let mut col = Column::new().spacing(space::SM);
     col = col.push(kit::section_header("Detail", None));
@@ -322,7 +331,9 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
                 ))
                 .size(font::CAPTION),
             )
-            .on_press(Message::PaneSelected(RightPane::History))
+            .on_press(Message::Workspace(WorkspaceMsg::PaneSelected(
+                RightPane::History,
+            )))
             .style(iced::widget::button::text)
             .padding(0),
         );
@@ -358,7 +369,7 @@ fn series_section<'a>(data: &'a SeriesData) -> Option<Element<'a, Message>> {
             picker = picker.push(kit::tab(
                 path.clone(),
                 active,
-                Message::Detail(DetailMsg::LeafSelected(path.clone())),
+                msg(DetailMsg::LeafSelected(path.clone())),
             ));
         }
         col = col.push(iced::widget::scrollable(picker).width(Length::Fill));

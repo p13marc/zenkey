@@ -26,7 +26,7 @@ use std::sync::Arc;
 use iced::Subscription;
 use zenkey_fleet::{FleetEvent, Monitor, StreamItem};
 
-use crate::message::{BusTick, LinkState, Message};
+use crate::message::{BusMsg, BusTick, LinkState, Message};
 
 /// How many samples one tick may carry to the UI. Beyond this they are counted
 /// as `coalesced` rather than queued — an echo pane cannot render 10 k lines in
@@ -59,7 +59,7 @@ pub fn subscribe(key: LinkKey) -> Subscription<Message> {
 fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
     async_stream::stream! {
         let monitor = key.monitor;
-        yield Message::Link(LinkState::Pumping);
+        yield Message::Bus(BusMsg::Link(LinkState::Pumping));
 
         let mut events = monitor.events();
         let mut samples = Vec::with_capacity(BATCH_CAP);
@@ -106,7 +106,7 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         tree.root.subtree_bytes,
                         tree.root.subtree_rate_hz,
                     );
-                    yield Message::Tick(Arc::new(BusTick {
+                    yield Message::Bus(BusMsg::Tick(Arc::new(BusTick {
                         tree,
                         samples: std::mem::take(&mut samples),
                         lagged: std::mem::take(&mut lagged),
@@ -118,10 +118,10 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         watched: std::sync::Arc::clone(&watched),
                         seeded: std::mem::take(&mut seeded),
                         totals,
-                    }));
+                    })));
                 }
             }
         }
-        yield Message::Link(LinkState::Ended);
+        yield Message::Bus(BusMsg::Link(LinkState::Ended));
     }
 }

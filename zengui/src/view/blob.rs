@@ -23,7 +23,7 @@ use iced::{Element, Length};
 use zenkey_fleet::report::{BlobHolder, BlobList, BlobProbeReport};
 
 use crate::blob::{BlobState, Fetch, Probe};
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::{SeverityTone, colors};
 use crate::view::tokens::{font, space};
@@ -59,7 +59,7 @@ pub enum BlobMsg {
 }
 
 fn msg(m: BlobMsg) -> Message {
-    Message::Blob(m)
+    Message::Pane(PaneMsg::Blob(m))
 }
 
 pub fn pane<'a>(state: &'a BlobState, slices_loaded: bool) -> Element<'a, Message> {

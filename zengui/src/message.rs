@@ -1,5 +1,28 @@
-//! The whole event vocabulary, in one file so the async/sync boundary is
-//! readable at a glance.
+//! The whole event vocabulary, in one file.
+//!
+//! Six groups since #176, and one rule decides every placement:
+//!
+//! > **A message lives where its failure is displayed.**
+//!
+//! `SessionOpened(Err)` writes `link`, which the status strip renders → `Bus`.
+//! `CallDone(Err)` writes `CallForm::outcome` → `Pane`. `ContextSwitched(Err)`
+//! writes `ContextForm::status` → `Pane`. It settles the cases a topic-shaped
+//! grouping leaves to taste, and it is why `Reconnect` is `Deployment` (its
+//! handler is the tail of `BaseSelected`'s) rather than `Bus` or `Chrome`
+//! (it is reachable from the toolbar, Ctrl-R *and* the palette, so provenance
+//! says nothing).
+//!
+//! ## What this file no longer claims
+//!
+//! It used to say it was "in one file so the async/sync boundary is readable at
+//! a glance". That was already half-false when it was written: six async
+//! landings were listed here while twelve more lived in `view/*.rs`, so the
+//! file looked complete and was not. #176 moved the six to join the twelve,
+//! which makes it uniformly false — the better state, because a reader can now
+//! find the boundary rather than half of it.
+//!
+//! **Every async landing is a `Task::perform` in `app.rs` or a `yield` in
+//! `link.rs`. Grep those.** This file is the top-level vocabulary.
 
 use std::sync::Arc;
 
@@ -12,12 +35,19 @@ use crate::scope::ScopePreset;
 /// The engine roster's shape: origin → live producer names.
 pub type LiveRoster = std::collections::BTreeMap<String, Vec<String>>;
 
-/// Everything that can move the app.
+/// Everything the bus, the monitor or a fleet sweep answered (#176).
 ///
-/// `Clone` is required by iced's widget callbacks. Every payload here is
-/// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
+/// None of these is user intent: each is a `Task::perform` or a `link.rs`
+/// `yield` landing. A message lives where its failure is displayed, and every
+/// failure here reaches the status strip rather than a pane —
+/// `SessionOpened(Err)` and `MonitorStarted(Err)` write `link`, and
+/// `SkeletonBuilt(Err)` is a `tracing::warn!` nobody's pane shows.
+///
+/// `SlicesLoaded` and `SlicesUnionLoaded` are here rather than under
+/// `Deployment` for the same reason: a registry sweep is a *landing*, like
+/// `BasesDiscovered`. `Deployment` holds the intent that asked for it.
 #[derive(Debug, Clone)]
-pub enum Message {
+pub enum BusMsg {
     /// One coalesced batch from the bus link. See [`BusTick`].
     Tick(Arc<BusTick>),
     /// The link changed state.
@@ -36,7 +66,47 @@ pub enum Message {
     SlicesLoaded(Result<Arc<SliceSet>, String>),
     /// The §6.1 union arrived: (set, from_bus, dirs_only, disagreements).
     SlicesUnionLoaded(Result<(Arc<SliceSet>, usize, usize, usize), String>),
+}
 
+/// What the app is pointed at, and the coverage that follows (#176).
+///
+/// The invariant: **every variant here invalidates or re-points observation.**
+///
+/// `Reconnect` is here rather than under `Bus`, on behaviour rather than taste:
+/// its handler is byte-for-byte the tail of `BaseSelected`'s, and a message whose
+/// body is a subset of another's belongs in that group. Where it is *reached
+/// from* — the toolbar, Ctrl-R, the palette — is a bad tiebreaker, because it is
+/// all three.
+///
+/// The scope watches come along for the same reason: `ScopeSelected`'s handler
+/// *is* `unwatch_scope()` then `watch_scope()`, so keeping them apart would put
+/// one behaviour in two enums.
+#[derive(Debug, Clone)]
+pub enum DeploymentMsg {
+    /// The scope preset's watches were declared (the eager set).
+    ScopeWatchesStarted(Vec<WatchId>),
+    /// Apply/release the scope preset's selectors as watches — the eager
+    /// mode, made explicit and labelled by its cost.
+    ScopeWatchToggled,
+    BaseSelected(String),
+    ScopeSelected(ScopePreset),
+    Reconnect,
+}
+
+/// One key: chosen, observed, fetched, decoded (#176).
+///
+/// `SelectKey` heads a causal chain — its own handler ends in the
+/// `Task::perform` that produces `ValueFetched`, which produces `ValueDecoded` —
+/// so filing the head under the workspace and the tail here would force
+/// `update_subject` to re-enter `update_workspace` to do its own job.
+///
+/// `ValueFetched`/`ValueDecoded` are deliberately *not* folded into `DetailMsg`,
+/// which the async-result rule might seem to demand. They are not a pane's
+/// result: the fetch is issued by the **tree's** selection and the handler flips
+/// `right_pane`. A detail pane owning a fetch it never requested would be a
+/// worse lie than the placement it replaced.
+#[derive(Debug, Clone)]
+pub enum SubjectMsg {
     /// The user toggled observation of one subtree (the tree's watch button).
     /// Carries the row's display path.
     WatchToggled(String),
@@ -44,35 +114,102 @@ pub enum Message {
     WatchStarted(String, Result<WatchId, String>),
     /// A watch was released for the given display path.
     WatchReleased(String, Result<(), String>),
-    /// The scope preset's watches were declared (the eager set).
-    ScopeWatchesStarted(Vec<WatchId>),
-    /// Apply/release the scope preset's selectors as watches — the eager
-    /// mode, made explicit and labelled by its cost.
-    ScopeWatchToggled,
     /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
     ValueFetched(String, Result<Arc<FetchOutcome>, String>),
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
     /// (key, declared type if any, rendering).
     ValueDecoded(String, Option<String>, Arc<zenkey_fleet::decode::Rendering>),
+    SelectKey(Option<String>),
+}
 
+/// The shell around the panes: which one shows, the tree's own chrome, and the
+/// replay mode (#176).
+///
+/// **Not what #176's issue body describes.** It sketched "pane_grid
+/// drag/resize/close, layout switch, window open/close" — none of which exist:
+/// `grep -rn pane_grid zengui/src` is empty and the layout is a fixed
+/// `row![tree, right]`. Those arrive with #180.
+///
+/// `Replay` is here and not a pane, because `view/replay.rs` has no `pane()` at
+/// all: it renders a banner between the toolbar and the panes, and `RightPane`
+/// has no `Replay` variant. Adding one to make it fit would put a twelfth tab in
+/// the strip and break `PANE_KEYS`' ten-digit arithmetic — a message reshape that
+/// changes the toolbar has escaped its scope.
+#[derive(Debug, Clone)]
+pub enum WorkspaceMsg {
+    ToggleNode(String),
+    /// The tree pivot changed (issue #65).
+    PivotSelected(crate::view::tree::Pivot),
+    /// The find-in-tree query changed (issue #65).
+    TreeSearchChanged(String),
+    /// The tree scrolled: (absolute y offset, viewport height) — what the
+    /// virtualized window renders against (issue #65).
+    TreeScrolled(f32, f32),
+    /// Switch the right-hand pane (the toolbar's tab strip).
+    PaneSelected(RightPane),
+    /// Replay-mode interactions (issue #74): open/scrub/play a `.zrec`,
+    /// record the current watches to one.
+    Replay(crate::view::replay::ReplayMsg),
+}
+
+/// The window, and what floats over it (#176).
+///
+/// `Palette` is here rather than under `Pane`: `palette::overlay` returns an
+/// `Option<Element>` `stack!`ed above the whole layout, so it is neither a pane
+/// nor a workspace region. The load-bearing reason is re-entrancy, though —
+/// `update_key` calls `update_palette` three times and dispatches
+/// `shortcuts::resolve`'s output through `update`. Keeping `Key` and `Palette` in
+/// one group keeps the tightest re-entrant loop inside one handler family
+/// instead of straddling a group boundary.
+#[derive(Debug, Clone)]
+pub enum ChromeMsg {
+    /// A key press no widget consumed (issues #73, #75).
+    ///
+    /// Delivered raw rather than pre-resolved because Esc and the arrows mean
+    /// different things depending on what is open, and iced's subscription
+    /// closures must not capture — so the decision belongs in `update`, where
+    /// the state is.
+    Key(iced::keyboard::Key, iced::keyboard::Modifiers),
+    /// Command-palette / overlay interactions (issue #75).
+    Palette(crate::view::palette::PaletteMsg),
+    /// A persisted-preference change (issue #73). Each one saves.
+    Prefs(PrefsMsg),
+    /// The window was resized — remembered for the next launch (issue #73).
+    WindowResized(f32, f32),
+    /// The resize settled: write the geometry once, rather than per pixel
+    /// (issue #189).
+    WindowSettled,
+}
+
+/// A message from one of the eleven right-hand panes (#176).
+///
+/// One variant per [`RightPane`], and **not** the `Pane(PaneId, PaneMsg)` pair
+/// #176 first sketched: that makes 121 states representable where eleven are
+/// legal — `Pane(PaneId::Call, PaneMsg::Blob(..))` would compile and mean
+/// nothing. The pane identity is already the variant tag.
+///
+/// `Pane(..)` is a **provenance** tag — which surface emitted the message — not
+/// a **scope** claim about what its handler may touch. Six of them mutate
+/// app-wide state today and #176 deliberately left them:
+///
+/// * `NodesMsg::ShowInTree` — writes `expanded` and `selected`, reflattens
+/// * `DoctorMsg::FindingClicked` — opens tree prefixes and re-enters a
+///   selection, or flips `right_pane` and drives the nodes handler
+/// * `DoctorMsg::ReaskSchemas` — clears the global schema store
+/// * `AdminMsg::FilterProducer` — flips `right_pane`, re-emits a tree search
+/// * `EchoMsg::LineClicked` — flips `right_pane`, re-enters a selection
+/// * `ContextMsg::{SaveAndSelect, Isolate}` — reopens the session, rewrites
+///   deployment settings
+///
+/// Rejected: promoting them to `Workspace`. They are emitted by a pane's own
+/// widget, and a pane that constructs another region's message is the same
+/// coupling wearing a different name.
+#[derive(Debug, Clone)]
+pub enum PaneMsg {
     /// Publish/call pane interactions (issue #60).
     Call(crate::view::call::CallMsg),
-    /// A call finished.
-    CallDone(Result<Arc<zenkey_fleet::report::CallReport>, String>),
     /// Publish pane interactions (issue #60's other half).
     Publish(crate::view::publish::PublishMsg),
-    /// A prepare→declare→send round finished: the prepared body's provenance,
-    /// the declared publication (kept when repeating), and its matching status.
-    PublishReady(Result<Arc<PublishOutcome>, String>),
-    /// One repeat tick fired.
-    PublishTick,
-    /// A repeat send landed (or did not).
-    PublishSent(Result<usize, String>),
-    /// The armed publication was undeclared.
-    PublishStopped(Result<(), String>),
-    /// A retire round finished (#115): the tombstone shipped (with the
-    /// publication's matching fact), or it did not.
-    PublishRetired(Result<Option<bool>, String>),
     /// Node dashboard interactions (issue #61).
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).
@@ -87,47 +224,54 @@ pub enum Message {
     Media(crate::view::media::MediaMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
-
-    BaseSelected(String),
-    ScopeSelected(ScopePreset),
-    ToggleNode(String),
-    SelectKey(Option<String>),
-    /// The tree pivot changed (issue #65).
-    PivotSelected(crate::view::tree::Pivot),
-    /// The find-in-tree query changed (issue #65).
-    TreeSearchChanged(String),
-    /// The tree scrolled: (absolute y offset, viewport height) — what the
-    /// virtualized window renders against (issue #65).
-    TreeScrolled(f32, f32),
     /// Echo pane interactions (issue #72, echo v2).
     Echo(crate::view::echo::EchoMsg),
     /// Connection pane interactions (issue #67).
     Context(crate::view::contexts::ContextMsg),
-    /// A context switch finished re-opening the session.
-    ContextSwitched(Result<zenoh::Session, String>),
-    /// Switch the right-hand pane (the toolbar's tab strip).
-    PaneSelected(RightPane),
-    Reconnect,
+}
 
-    /// A key press no widget consumed (issues #73, #75).
+impl PaneMsg {
+    /// Which pane emitted it.
     ///
-    /// Delivered raw rather than pre-resolved because Esc and the arrows mean
-    /// different things depending on what is open, and iced's subscription
-    /// closures must not capture — so the decision belongs in `update`, where
-    /// the state is.
-    Key(iced::keyboard::Key, iced::keyboard::Modifiers),
-    /// Command-palette / overlay interactions (issue #75).
-    Palette(crate::view::palette::PaletteMsg),
-    /// Replay-mode interactions (issue #74): open/scrub/play a `.zrec`,
-    /// record the current watches to one.
-    Replay(crate::view::replay::ReplayMsg),
-    /// A persisted-preference change (issue #73). Each one saves.
-    Prefs(PrefsMsg),
-    /// The window was resized — remembered for the next launch (issue #73).
-    WindowResized(f32, f32),
-    /// The resize settled: write the geometry once, rather than per pixel
-    /// (issue #189).
-    WindowSettled,
+    /// `RightPane::ALL` and this `match` are the same list, and
+    /// `every_pane_has_a_message_and_every_message_a_pane` is what keeps them
+    /// so — the same shape as the palette's and the shortcut map's own coverage
+    /// tests.
+    pub fn pane(&self) -> RightPane {
+        match self {
+            PaneMsg::Echo(_) => RightPane::Echo,
+            PaneMsg::Call(_) => RightPane::Call,
+            PaneMsg::Publish(_) => RightPane::Publish,
+            PaneMsg::Detail(_) => RightPane::Detail,
+            PaneMsg::Nodes(_) => RightPane::Nodes,
+            PaneMsg::Doctor(_) => RightPane::Doctor,
+            PaneMsg::History(_) => RightPane::History,
+            PaneMsg::Blob(_) => RightPane::Blob,
+            PaneMsg::Media(_) => RightPane::Media,
+            PaneMsg::Admin(_) => RightPane::Admin,
+            PaneMsg::Context(_) => RightPane::Connect,
+        }
+    }
+}
+
+/// Everything that can move the app.
+///
+/// `Clone` is required by iced's widget callbacks. Every payload here is
+/// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
+#[derive(Debug, Clone)]
+pub enum Message {
+    /// One of the eleven right-hand panes.
+    Pane(PaneMsg),
+    /// The window, and what floats over it.
+    Chrome(ChromeMsg),
+    /// The shell around the panes, and the replay mode.
+    Workspace(WorkspaceMsg),
+    /// One key: chosen, observed, fetched, decoded.
+    Subject(SubjectMsg),
+    /// What the app is pointed at, and the coverage that follows.
+    Deployment(DeploymentMsg),
+    /// The bus, the monitor, a sweep: something the world answered.
+    Bus(BusMsg),
 }
 
 /// What a user can change about the window itself.
@@ -262,4 +406,42 @@ pub struct BusTick {
     pub seeded: Vec<(WatchId, zenkey_fleet::SeedCoverage)>,
     /// `(samples, bytes, rate_hz)` across everything watched.
     pub totals: (u64, u64, f64),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pane vocabulary is one list, spelled twice — `RightPane::ALL` and
+    /// `PaneMsg`'s variants — and this is what keeps them the same list (#176).
+    ///
+    /// Same shape as `the_palette_covers_every_pane_without_being_told` and
+    /// `the_pane_bindings_cover_every_pane`: a tab that exists and cannot be
+    /// spoken to, or a message from a pane that is not in the strip, is the
+    /// failure all three guard.
+    #[test]
+    fn every_pane_has_a_message_and_every_message_a_pane() {
+        use crate::view;
+        let one_per_pane = [
+            PaneMsg::Echo(view::echo::EchoMsg::Clear),
+            PaneMsg::Call(view::call::CallMsg::Submit),
+            PaneMsg::Publish(view::publish::PublishMsg::Send),
+            PaneMsg::Detail(view::detail::DetailMsg::LeafSelected(String::new())),
+            PaneMsg::Nodes(view::nodes::NodesMsg::Selected(String::new())),
+            PaneMsg::Doctor(view::doctor::DoctorMsg::Run),
+            PaneMsg::History(view::history::HistoryMsg::Clear),
+            PaneMsg::Blob(view::blob::BlobMsg::Probe),
+            PaneMsg::Media(view::media::MediaMsg::Stop),
+            PaneMsg::Admin(view::admin::AdminMsg::Run),
+            PaneMsg::Context(view::contexts::ContextMsg::Load),
+        ];
+        let mut covered: Vec<RightPane> = one_per_pane.iter().map(PaneMsg::pane).collect();
+        covered.sort_by_key(|p| p.label());
+        let mut all = RightPane::ALL.to_vec();
+        all.sort_by_key(|p| p.label());
+        assert_eq!(
+            covered, all,
+            "every pane in the strip owes `PaneMsg` a variant, and vice versa"
+        );
+    }
 }

@@ -12,15 +12,17 @@
 //! same messages the UI path sends, and there is nothing else to keep in step.
 //!
 //! Jump-to-key is the same idea over data instead of verbs: fuzzy over the
-//! keys *actually observed*, selecting one emits the ordinary
-//! [`Message::SelectKey`]. It offers nothing it has not seen, which keeps the
-//! overlay from inventing a keyspace (O4 — a suggestion is not an observation,
+//! keys *actually observed*, and selecting one emits the ordinary
+//! [`SubjectMsg::SelectKey`](crate::message::SubjectMsg::SelectKey). It offers
+//! nothing it has not seen, which keeps the overlay from inventing a keyspace (O4 — a suggestion is not an observation,
 //! and these are only ever the latter).
 
 use iced::widget::{Column, column, container, row, text, text_input};
 use iced::{Element, Length};
 
-use crate::message::{Message, PrefsMsg, RightPane};
+use crate::message::{
+    ChromeMsg, DeploymentMsg, Message, PaneMsg, PrefsMsg, RightPane, WorkspaceMsg,
+};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -107,7 +109,7 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         .into_iter()
         .map(|p| Action {
             label: format!("go to {} pane", p.label()),
-            message: Message::PaneSelected(p),
+            message: Message::Workspace(WorkspaceMsg::PaneSelected(p)),
         })
         .collect();
 
@@ -120,57 +122,59 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
     ] {
         out.push(Action {
             label: format!("scope: {}", scope.short()),
-            message: Message::ScopeSelected(scope),
+            message: Message::Deployment(DeploymentMsg::ScopeSelected(scope)),
         });
     }
 
     for name in contexts {
         out.push(Action {
             label: format!("context: {name}"),
-            message: Message::Context(crate::view::contexts::ContextMsg::Selected(name.clone())),
+            message: Message::Pane(PaneMsg::Context(
+                crate::view::contexts::ContextMsg::Selected(name.clone()),
+            )),
         });
     }
 
     out.extend([
         Action {
             label: "observe scope (start/stop)".into(),
-            message: Message::ScopeWatchToggled,
+            message: Message::Deployment(DeploymentMsg::ScopeWatchToggled),
         },
         Action {
             label: "run doctor".into(),
-            message: Message::Doctor(crate::view::doctor::DoctorMsg::Run),
+            message: Message::Pane(PaneMsg::Doctor(crate::view::doctor::DoctorMsg::Run)),
         },
         Action {
             label: "reconnect".into(),
-            message: Message::Reconnect,
+            message: Message::Deployment(DeploymentMsg::Reconnect),
         },
         Action {
             label: "toggle theme".into(),
-            message: Message::Prefs(PrefsMsg::ThemeToggled),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)),
         },
         Action {
             label: "zoom in".into(),
-            message: Message::Prefs(PrefsMsg::ZoomIn),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)),
         },
         Action {
             label: "zoom out".into(),
-            message: Message::Prefs(PrefsMsg::ZoomOut),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)),
         },
         Action {
             label: "reset zoom".into(),
-            message: Message::Prefs(PrefsMsg::ZoomReset),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)),
         },
         Action {
             label: "clear echo".into(),
-            message: Message::Echo(crate::view::echo::EchoMsg::Clear),
+            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Clear)),
         },
         Action {
             label: "export echo as ndjson".into(),
-            message: Message::Echo(crate::view::echo::EchoMsg::Export),
+            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Export)),
         },
         Action {
             label: "pause/follow echo".into(),
-            message: Message::Echo(crate::view::echo::EchoMsg::FollowToggled),
+            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::FollowToggled)),
         },
     ]);
     out
@@ -268,8 +272,8 @@ fn list<'a>(
     rows: Vec<String>,
 ) -> Element<'a, Message> {
     let input = text_input("…", &state.query)
-        .on_input(|q| Message::Palette(PaletteMsg::QueryChanged(q)))
-        .on_submit(Message::Palette(PaletteMsg::Activate))
+        .on_input(|q| Message::Chrome(ChromeMsg::Palette(PaletteMsg::QueryChanged(q))))
+        .on_submit(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Activate)))
         .size(font::BODY);
 
     let mut body = Column::new().spacing(1);
@@ -288,7 +292,7 @@ fn list<'a>(
                 ]
                 .spacing(space::SM),
             )
-            .on_press(Message::Palette(PaletteMsg::Pick(i)))
+            .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Pick(i))))
             .style(if selected {
                 iced::widget::button::secondary
             } else {
@@ -395,7 +399,7 @@ mod tests {
         for pane in RightPane::ALL {
             assert_eq!(
                 find(&format!("go to {} pane", pane.label())),
-                format!("{:?}", Message::PaneSelected(pane))
+                format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))
             );
         }
         // Scope: the same message the toolbar picker sends.
@@ -406,7 +410,9 @@ mod tests {
             )),
             format!(
                 "{:?}",
-                Message::ScopeSelected(crate::scope::ScopePreset::Everything)
+                Message::Deployment(DeploymentMsg::ScopeSelected(
+                    crate::scope::ScopePreset::Everything
+                ))
             )
         );
         // Context: the same message the connect pane's picker sends.
@@ -414,15 +420,23 @@ mod tests {
             find("context: lab"),
             format!(
                 "{:?}",
-                Message::Context(crate::view::contexts::ContextMsg::Selected("lab".into()))
+                Message::Pane(PaneMsg::Context(
+                    crate::view::contexts::ContextMsg::Selected("lab".into())
+                ))
             )
         );
         // Echo actions: the same messages that pane's buttons send.
         assert_eq!(
             find("clear echo"),
-            format!("{:?}", Message::Echo(crate::view::echo::EchoMsg::Clear))
+            format!(
+                "{:?}",
+                Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Clear))
+            )
         );
-        assert_eq!(find("reconnect"), format!("{:?}", Message::Reconnect));
+        assert_eq!(
+            find("reconnect"),
+            format!("{:?}", Message::Deployment(DeploymentMsg::Reconnect))
+        );
     }
 
     /// The pane list is generated, so a pane added anywhere shows up here.

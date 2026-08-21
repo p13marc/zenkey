@@ -13,7 +13,9 @@ use iced::{Element, Length};
 use zenkey_fleet::SliceSet;
 use zenkey_fleet::report::CallReport;
 
-use crate::message::Message;
+use std::sync::Arc;
+
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -116,7 +118,7 @@ impl CallForm {
     }
 }
 
-/// Messages the pane emits (wrapped into the app's `Message::Call`).
+/// Messages the pane emits (wrapped into the app's `Message::Pane(PaneMsg::Call)`).
 #[derive(Debug, Clone)]
 pub enum CallMsg {
     ProducerPicked(String),
@@ -130,6 +132,22 @@ pub enum CallMsg {
     Submit,
     /// The selected procedure's request schema arrived (or did not).
     RequestSchema(Option<Vec<SchemaField>>),
+    /// The call finished — its report, or why it did not (#176).
+    ///
+    /// Here rather than at `Message`'s top level, where it lived beside
+    /// `RequestSchema`, which is the identical shape and was already nested. A
+    /// message lives where its failure is displayed, and this one's `Err` is
+    /// written into `CallForm::outcome`.
+    Done(Result<Arc<zenkey_fleet::report::CallReport>, String>),
+}
+
+/// Wrap one of this pane's messages for the app (#176).
+///
+/// One place the pane's name is spelled, rather than at every widget —
+/// which is what the other seven panes already did, and what makes the
+/// six-group regroup a one-line change here instead of 8.
+fn msg(m: CallMsg) -> Message {
+    Message::Pane(PaneMsg::Call(m))
 }
 
 /// Render the pane. `slices` scaffolds the pickers; without a registry the
@@ -164,7 +182,7 @@ pub fn pane<'a>(
     }
 
     let producer_pick = pick_list(producers, form.producer.clone(), |p| {
-        Message::Call(CallMsg::ProducerPicked(p))
+        msg(CallMsg::ProducerPicked(p))
     })
     .placeholder("producer")
     .text_size(font::CAPTION);
@@ -176,7 +194,7 @@ pub fn pane<'a>(
         .map(|s| s.procedures.iter().map(|p| p.path.clone()).collect())
         .unwrap_or_default();
     let procedure_pick = pick_list(procedures, form.procedure.clone(), |p| {
-        Message::Call(CallMsg::ProcedurePicked(p))
+        msg(CallMsg::ProcedurePicked(p))
     })
     .placeholder("procedure")
     .text_size(font::CAPTION);
@@ -221,7 +239,7 @@ pub fn pane<'a>(
                         )),
                         button(text("scaffold body").size(font::CAPTION))
                             .padding(2)
-                            .on_press(Message::Call(CallMsg::ScaffoldBody)),
+                            .on_press(msg(CallMsg::ScaffoldBody)),
                     ]
                     .spacing(space::SM)
                     .align_y(iced::Alignment::Center),
@@ -247,19 +265,19 @@ pub fn pane<'a>(
     }
 
     let target = text_input("target: h-… | @service | *", &form.target)
-        .on_input(|t| Message::Call(CallMsg::TargetChanged(t)))
+        .on_input(|t| msg(CallMsg::TargetChanged(t)))
         .size(font::CAPTION);
     let params = text_input("params: k=v;k=v (selector)", &form.params)
-        .on_input(|t| Message::Call(CallMsg::ParamsChanged(t)))
+        .on_input(|t| msg(CallMsg::ParamsChanged(t)))
         .size(font::CAPTION);
     let body = text_input("body: JSON (query payload)", &form.body)
-        .on_input(|t| Message::Call(CallMsg::BodyChanged(t)))
+        .on_input(|t| msg(CallMsg::BodyChanged(t)))
         .size(font::CAPTION);
     let attachment = text_input(
         "attachment: verbatim, beside the body (empty = none)",
         &form.attachment,
     )
-    .on_input(|t| Message::Call(CallMsg::AttachmentChanged(t)))
+    .on_input(|t| msg(CallMsg::AttachmentChanged(t)))
     .size(font::CAPTION);
 
     let ready = decl.is_some()
@@ -270,7 +288,7 @@ pub fn pane<'a>(
         button(text(if form.in_flight { "calling…" } else { "call" }).size(font::CAPTION))
             .padding(4);
     if ready {
-        submit = submit.on_press(Message::Call(CallMsg::Submit));
+        submit = submit.on_press(msg(CallMsg::Submit));
     }
 
     let mut col = column![

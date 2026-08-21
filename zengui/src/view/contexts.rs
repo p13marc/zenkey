@@ -21,7 +21,7 @@ use iced::widget::{Column, button, checkbox, column, pick_list, row, text, text_
 use iced::{Element, Length};
 use zenkey_fleet::StoredContext;
 
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -76,10 +76,17 @@ pub enum ContextMsg {
     /// The isolated-verification recipe, one click (RFC 09 §0.1): multicast
     /// off, explicit endpoints, nothing discovered by accident.
     Isolate,
+    /// The switch landed — a session on the new context, or why not (#176).
+    ///
+    /// It handed back a `zenoh::Session` and so read as bus plumbing, but a
+    /// message lives where its *failure* is displayed: the `Err` is written
+    /// into `ContextForm::status`, beside the picker that started it, and
+    /// nowhere else. It is this pane's async result like any other.
+    Switched(Result<zenoh::Session, String>),
 }
 
 fn msg(m: ContextMsg) -> Message {
-    Message::Context(m)
+    Message::Pane(PaneMsg::Context(m))
 }
 
 /// Split a user-typed list. Commas, spaces and newlines all work — these are
