@@ -109,12 +109,7 @@ pub fn release_scope(monitor: Arc<Monitor>, ids: Vec<WatchId>) -> Task<Message> 
             }
             Ok(())
         },
-        // Reports through `Subject` with a synthesised path, while its mirror
-        // `scope` reports through `Deployment` — two halves of one operation
-        // landing in different groups, and the fake string exists only to be
-        // printed in the failure warning. Fixed in the re-entrancy commit;
-        // spelled here so the extraction changes nothing (#175).
-        |r| Message::Subject(SubjectMsg::WatchReleased("(scope)".into(), r)),
+        |r| Message::Deployment(DeploymentMsg::ScopeWatchesReleased(r)),
     )
 }
 

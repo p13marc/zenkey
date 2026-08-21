@@ -98,6 +98,16 @@ impl Zengui {
     fn update_bus(&mut self, msg: BusMsg) -> Task<Message> {
         match msg {
             BusMsg::SessionOpened(Ok(session)) => {
+                // A new session is a new everything: the base may differ, so
+                // every projection, roster and verdict from the old one is
+                // evidence about a different deployment (O4).
+                //
+                // This variant has exactly two producers — the launch open and
+                // the context switch — and forgetting on the launch one is a
+                // no-op over a `Deployment` nothing has written yet. So it can
+                // live here, which removes the worst cross-group reach in the
+                // file: a pane resetting the app.
+                self.forget_deployment();
                 self.dep.session = Some(session.clone());
                 // The context list is read from the shared file, not cached at
                 // launch: `zenctl context create` on the other side of the
@@ -203,6 +213,17 @@ impl Zengui {
                 self.obs.scope_watches = ids;
                 Task::none()
             }
+            DeploymentMsg::ScopeWatchesReleased(Ok(())) => Task::none(),
+            DeploymentMsg::ScopeWatchesReleased(Err(e)) => {
+                tracing::warn!("releasing the scope watches failed: {e}");
+                Task::none()
+            }
+            DeploymentMsg::ContextApplied { name, stored } => {
+                self.apply_context(*stored);
+                self.chrome.prefs.context = name;
+                self.remember();
+                self.reopen_session()
+            }
             DeploymentMsg::ScopeWatchToggled => {
                 if self.obs.scope_watches.is_empty() {
                     self.watch_scope()
@@ -269,6 +290,10 @@ impl Zengui {
             SubjectMsg::WatchReleased(_, Ok(())) => Task::none(),
             SubjectMsg::WatchReleased(path, Err(e)) => {
                 tracing::warn!("unwatch {path} failed: {e}");
+                Task::none()
+            }
+            SubjectMsg::SelectPath(path) => {
+                self.sub.selected = Some(path);
                 Task::none()
             }
             SubjectMsg::ValueFetched(key, outcome) => {
@@ -379,6 +404,18 @@ impl Zengui {
                 Task::none()
             }
             WorkspaceMsg::Replay(msg) => self.update_replay(msg),
+            WorkspaceMsg::Reveal(path) => {
+                let mut prefix = String::new();
+                for chunk in path.split('/') {
+                    if !prefix.is_empty() {
+                        prefix.push('/');
+                    }
+                    prefix.push_str(chunk);
+                    self.tree.expanded.open(prefix.clone());
+                }
+                self.tree.reflatten(&self.dep, &self.obs);
+                Task::none()
+            }
             WorkspaceMsg::PaneSelected(pane) => {
                 self.work.right_pane = pane;
                 Task::none()
@@ -889,7 +926,7 @@ impl Zengui {
             if self.chrome.palette.is_open() {
                 self.chrome.palette.close();
             } else if self.sub.selected.is_some() {
-                return self.update(Message::Subject(SubjectMsg::SelectKey(None)));
+                return Task::done(Message::Subject(SubjectMsg::SelectKey(None)));
             }
             return Task::none();
         }
@@ -906,17 +943,20 @@ impl Zengui {
             }
         }
         match crate::shortcuts::resolve(key, modifiers) {
-            Some(message) => self.update(message),
+            Some(message) => Task::done(message),
             None => Task::none(),
         }
     }
 
     /// The command palette (#75).
     ///
-    /// Every activation dispatches through `self.update(...)` with the
-    /// action's own message, which is what keeps the palette from being a
-    /// second implementation of anything: it is a faster way to send a message
-    /// the UI already sends, and nothing more.
+    /// Every activation *returns* the action's own message as a `Task::done`,
+    /// which is what keeps the palette from being a second implementation of
+    /// anything: it is a faster way to send a message the UI already sends,
+    /// and nothing more. It used to re-enter `update` directly; the message
+    /// goes back out to iced now, which changes nothing about ordering — a
+    /// `Task::done` resolves immediately — and everything about what a
+    /// handler is allowed to reach.
     fn update_palette(&mut self, msg: view::palette::PaletteMsg) -> Task<Message> {
         use view::palette::PaletteMsg;
         match msg {
@@ -1005,7 +1045,7 @@ impl Zengui {
             self.work.right_pane = RightPane::Detail;
         }
         self.chrome.palette.close();
-        self.update(message)
+        Task::done(message)
     }
 
     /// The connection pane (#67). Contexts are read and written through the
@@ -1015,11 +1055,9 @@ impl Zengui {
         use view::contexts::ContextMsg;
         match msg {
             ContextMsg::Switched(Ok(session)) => {
-                // A new session is a new everything: the base may differ, so
-                // every projection, roster and verdict from the old one is
-                // evidence about a different deployment (O4).
-                self.forget_deployment();
-                self.update(Message::Bus(BusMsg::SessionOpened(Ok(session))))
+                // The forget rides on `SessionOpened` now, for both of that
+                // variant's producers — see its handler.
+                Task::done(Message::Bus(BusMsg::SessionOpened(Ok(session))))
             }
             ContextMsg::Switched(Err(e)) => {
                 self.obs.link = LinkState::Failed(e.clone());
@@ -1098,7 +1136,17 @@ impl Zengui {
                 if !self.save_context(true) {
                     return Task::none();
                 }
-                self.switch_to_form_context()
+                let stored = match self.work.bench.context_form.to_stored() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        self.work.bench.context_form.status = Some(Err(e));
+                        return Task::none();
+                    }
+                };
+                Task::done(Message::Deployment(DeploymentMsg::ContextApplied {
+                    name: Some(self.work.bench.context_form.name.trim().to_string()),
+                    stored: Box::new(stored),
+                }))
             }
             ContextMsg::Selected(name) => {
                 self.work.bench.context_form.active = Some(name.clone());
@@ -1106,24 +1154,25 @@ impl Zengui {
                     Ok(mut config) => match config.contexts.get(&name).cloned() {
                         Some(stored) => {
                             self.work.bench.context_form.load_from(&name, &stored);
-                            self.apply_context(stored);
-                            self.chrome.prefs.context = Some(name.clone());
-                            self.remember();
                             // Move the store's own pointer too, not just this
                             // window's memory of it: the store is shared, and
                             // picking a context here left `zenctl context show`
                             // still naming the old one (issue #189).
                             config.current = Some(name.clone());
-                            if let Err(e) = zenkey_fleet::context_store::save(&config) {
-                                self.work.bench.context_form.status = Some(Err(format!(
-                                    "switched to {name}, but the shared `current` \
-                                     pointer could not be written: {e}"
-                                )));
-                                return self.reopen_session();
-                            }
                             self.work.bench.context_form.status =
-                                Some(Ok(format!("switched to {name}")));
-                            return self.reopen_session();
+                                match zenkey_fleet::context_store::save(&config) {
+                                    Ok(()) => Some(Ok(format!("switched to {name}"))),
+                                    Err(e) => Some(Err(format!(
+                                        "switched to {name}, but the shared `current` \
+                                         pointer could not be written: {e}"
+                                    ))),
+                                };
+                            return Task::done(Message::Deployment(
+                                DeploymentMsg::ContextApplied {
+                                    name: Some(name),
+                                    stored: Box::new(stored),
+                                },
+                            ));
                         }
                         None => {
                             self.work.bench.context_form.status =
@@ -1207,20 +1256,6 @@ impl Zengui {
         }
     }
 
-    fn switch_to_form_context(&mut self) -> Task<Message> {
-        let stored = match self.work.bench.context_form.to_stored() {
-            Ok(s) => s,
-            Err(e) => {
-                self.work.bench.context_form.status = Some(Err(e));
-                return Task::none();
-            }
-        };
-        self.apply_context(stored);
-        self.chrome.prefs.context = Some(self.work.bench.context_form.name.trim().to_string());
-        self.remember();
-        self.reopen_session()
-    }
-
     /// Tear the link down and build a new one on the current settings.
     ///
     /// The epoch bump the subscription machinery already does on
@@ -1269,7 +1304,7 @@ impl Zengui {
                 // Drill-through reuses the selection path rather than being a
                 // second way to open the inspector.
                 self.work.right_pane = RightPane::Detail;
-                self.update(Message::Subject(SubjectMsg::SelectKey(Some(key))))
+                Task::done(Message::Subject(SubjectMsg::SelectKey(Some(key))))
             }
             EchoMsg::Export => {
                 let text = view::echo::export(
@@ -1319,19 +1354,13 @@ impl Zengui {
             }
             NodesMsg::ShowInTree(origin) => {
                 let path = scope::origin_display_path(self.dep.base(), &origin);
-                // Expand every prefix so the subtree is visible; select
-                // WITHOUT fetching (a subtree prefix is not a concrete key).
-                let mut prefix = String::new();
-                for chunk in path.split('/') {
-                    if !prefix.is_empty() {
-                        prefix.push('/');
-                    }
-                    prefix.push_str(chunk);
-                    self.tree.expanded.open(prefix.clone());
-                }
-                self.sub.selected = Some(path);
-                self.tree.reflatten(&self.dep, &self.obs);
-                Task::none()
+                // Reveal, then select WITHOUT fetching: a subtree prefix is
+                // not a concrete key, and asking for its value would be a GET
+                // no producer answers (#85).
+                Task::batch([
+                    Task::done(Message::Workspace(WorkspaceMsg::Reveal(path.clone()))),
+                    Task::done(Message::Subject(SubjectMsg::SelectPath(path))),
+                ])
             }
         }
     }
@@ -1407,18 +1436,10 @@ impl Zengui {
                     // A concrete key: select in the tree (with the usual
                     // on-demand fetch); the right pane stays on Doctor so
                     // the finding list is not lost.
-                    Some(crate::doctor::Target::Key(key)) => {
-                        let mut prefix = String::new();
-                        for chunk in key.split('/') {
-                            if !prefix.is_empty() {
-                                prefix.push('/');
-                            }
-                            prefix.push_str(chunk);
-                            self.tree.expanded.open(prefix.clone());
-                        }
-                        self.tree.reflatten(&self.dep, &self.obs);
-                        self.update(Message::Subject(SubjectMsg::SelectKey(Some(key))))
-                    }
+                    Some(crate::doctor::Target::Key(key)) => Task::batch([
+                        Task::done(Message::Workspace(WorkspaceMsg::Reveal(key.clone()))),
+                        Task::done(Message::Subject(SubjectMsg::SelectKey(Some(key)))),
+                    ]),
                     // An origin/producer subject: land on the nodes pane.
                     Some(crate::doctor::Target::Node(origin)) => {
                         self.work.right_pane = RightPane::Nodes;
