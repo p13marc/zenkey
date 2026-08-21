@@ -14,8 +14,7 @@ use std::sync::Arc;
 use iced::widget::{column, pick_list, row, text};
 use iced::{Element, Length, Subscription, Task};
 use zenkey_fleet::{
-    DiscoveredBase, FetchOutcome, KeyTreeSnapshot, MergedNode, Monitor, MonitorSpec, Skeleton,
-    SliceSet, WatchId,
+    DiscoveredBase, FetchOutcome, KeyTreeSnapshot, MergedNode, Monitor, Skeleton, SliceSet, WatchId,
 };
 
 use crate::config::Settings;
@@ -23,6 +22,7 @@ use crate::echo::EchoRing;
 use crate::link::{self, LinkKey};
 use crate::message::{BusTick, LinkState, Message};
 use crate::scope::{self, ScopePreset};
+use crate::services;
 use crate::view;
 use crate::view::status::{SliceSource, Status};
 use crate::view::tokens::space;
@@ -329,15 +329,10 @@ impl Zengui {
             recording: None,
             recorded: None,
         };
-        let open = Task::perform(
-            async move {
-                zenkey_fleet::open_with_config(zenoh_config.as_deref(), &connect, &listen, scouting)
-                    .await
-                    .map_err(|e| e.to_string())
-            },
-            |r| Message::Bus(BusMsg::SessionOpened(r)),
-        );
-        (app, open)
+        (
+            app,
+            services::link::open(zenoh_config, connect, listen, scouting),
+        )
     }
 
     pub fn title(&self) -> String {
@@ -377,18 +372,7 @@ impl Zengui {
                     &self.settings.base,
                     self.settings.timeout(),
                 )));
-                let timeout = self.settings.timeout();
-                let discover = Task::perform(
-                    {
-                        let s = session.clone();
-                        async move {
-                            zenkey_fleet::discover_bases(&s, timeout)
-                                .await
-                                .map_err(|e| e.to_string())
-                        }
-                    },
-                    |r| Message::Bus(BusMsg::BasesDiscovered(r)),
-                );
+                let discover = services::link::discover_bases(&session, self.settings.timeout());
                 Task::batch([discover, self.start_monitor(), self.load_slices()])
             }
             BusMsg::SessionOpened(Err(e)) => {
@@ -570,31 +554,15 @@ impl Zengui {
                 {
                     (Ok(out), Some(session), Some(store), Some(slices)) => {
                         if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
-                            let (session, store, slices) =
-                                (session.clone(), Arc::clone(store), Arc::clone(slices));
-                            let base = self.settings.base.clone();
-                            let (fkey, wire_key) = (key.clone(), v.key.clone());
-                            let encoding = v.encoding.clone();
-                            let bytes = v.payload.clone();
-                            // decode_sample is async (may fetch describe on
-                            // first miss) — a Task, never the render path.
-                            Task::perform(
-                                async move {
-                                    let d = zenkey_fleet::decode::decode_sample(
-                                        &store,
-                                        &session,
-                                        &slices,
-                                        &base,
-                                        &wire_key,
-                                        Some(&encoding),
-                                        &bytes.to_bytes(),
-                                    )
-                                    .await;
-                                    // The verdict rides the sample (#159); the
-                                    // detail pane learns to render it in #164.
-                                    (fkey, d.type_name, Arc::new(d.rendering))
-                                },
-                                |(k, t, r)| Message::Subject(SubjectMsg::ValueDecoded(k, t, r)),
+                            services::value::decode(
+                                Arc::clone(store),
+                                session.clone(),
+                                Arc::clone(slices),
+                                self.settings.base.clone(),
+                                key.clone(),
+                                v.key.clone(),
+                                v.encoding.clone(),
+                                v.payload.clone(),
                             )
                         } else {
                             Task::none()
@@ -638,20 +606,7 @@ impl Zengui {
                 if key.contains('{') {
                     return Task::none();
                 }
-                Task::perform(
-                    async move {
-                        let out = zenkey_fleet::fetch_value(
-                            &session,
-                            &key,
-                            zenkey_fleet::FetchSpec::default(),
-                        )
-                        .await
-                        .map(Arc::new)
-                        .map_err(|e| e.to_string());
-                        (key, out)
-                    },
-                    |(key, out)| Message::Subject(SubjectMsg::ValueFetched(key, out)),
-                )
+                services::value::fetch(session, key)
             }
         }
     }
@@ -804,15 +759,7 @@ impl Zengui {
                     self.call_form.request_fields = Some(Vec::new());
                     return Task::none();
                 };
-                Task::perform(
-                    async move {
-                        store
-                            .schema_for(&session, &producer, &request)
-                            .await
-                            .map(|schema| view::call::schema_fields(&schema))
-                    },
-                    |fields| Message::Pane(PaneMsg::Call(CallMsg::RequestSchema(fields))),
-                )
+                services::value::request_schema(session, store, producer, request)
             }
             CallMsg::RequestSchema(fields) => {
                 self.call_form.request_fields = fields;
@@ -872,27 +819,9 @@ impl Zengui {
                 let slices = self.slices.clone();
                 self.call_form.in_flight = true;
                 self.call_form.outcome = None;
-                Task::perform(
-                    async move {
-                        let target =
-                            zenkey_fleet::CallTarget::parse(&target).map_err(|e| e.to_string())?;
-                        zenkey_fleet::call(
-                            &session,
-                            &base,
-                            &target,
-                            &producer,
-                            &procedure,
-                            &params,
-                            body,
-                            attachment,
-                            timeout,
-                            slices.as_deref(),
-                        )
-                        .await
-                        .map(Arc::new)
-                        .map_err(|e| e.to_string())
-                    },
-                    |r| Message::Pane(PaneMsg::Call(view::call::CallMsg::Done(r))),
+                services::write::call(
+                    session, base, target, producer, procedure, params, body, attachment, timeout,
+                    slices,
                 )
             }
         }
@@ -955,19 +884,7 @@ impl Zengui {
                 let publication = load.publication.clone();
                 let bytes = load.bytes.clone();
                 let attachment = load.attachment.clone();
-                Task::perform(
-                    async move {
-                        publication
-                            .send(
-                                bytes.as_ref().clone(),
-                                attachment.as_ref().map(|a| a.as_ref().clone()),
-                            )
-                            .await
-                            .map(|()| bytes.len())
-                            .map_err(|e| e.to_string())
-                    },
-                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Sent(r))),
-                )
+                services::write::repeat(publication, bytes, attachment)
             }
             PublishMsg::Sent(Ok(n)) => {
                 let key = self.publish_form.key.clone();
@@ -1086,10 +1003,7 @@ impl Zengui {
                 // Acknowledged undeclare when we hold the last reference; a
                 // drop would undeclare too, but silently.
                 match Arc::try_unwrap(publication) {
-                    Ok(p) => Task::perform(
-                        async move { p.undeclare().await.map_err(|e| e.to_string()) },
-                        |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Stopped(r))),
-                    ),
+                    Ok(p) => services::write::undeclare(p),
                     Err(_) => Task::none(),
                 }
             }
@@ -1123,25 +1037,7 @@ impl Zengui {
                 }
                 self.publish_form.in_flight = true;
                 self.publish_form.error = None;
-                let send = Task::perform(
-                    async move {
-                        // A retirement is the final state transition: the
-                        // reliable profile, like `zenctl topic retire`.
-                        let publication = zenkey_fleet::declare_publication(
-                            &session,
-                            &key,
-                            zenkey::qos::QosProfile::Transition,
-                            None,
-                        )
-                        .await
-                        .map_err(|e| e.to_string())?;
-                        let matching = publication.matching_status().await.ok();
-                        publication.retire().await.map_err(|e| e.to_string())?;
-                        publication.undeclare().await.map_err(|e| e.to_string())?;
-                        Ok(matching)
-                    },
-                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Retired(r))),
-                );
+                let send = services::write::retire(session, key);
                 Task::batch([stop, send])
             }
             PublishMsg::Send => {
@@ -1171,57 +1067,19 @@ impl Zengui {
                     .then(|| Arc::new(form.attachment.clone().into_bytes()));
                 self.publish_form.in_flight = true;
                 self.publish_form.error = None;
-                let send = Task::perform(
-                    async move {
-                        let prepared = zenkey_fleet::prepare_publish(
-                            &session,
-                            &store,
-                            slices.as_deref(),
-                            &base,
-                            &key,
-                            (!encoding.is_empty()).then_some(encoding.as_str()),
-                            &body,
-                            mode,
-                        )
-                        .await
-                        .map_err(|e| e.to_string())?;
-                        let publication = zenkey_fleet::declare_publication(
-                            &session,
-                            &key,
-                            qos,
-                            prepared.encoding.as_deref(),
-                        )
-                        .await
-                        .map_err(|e| e.to_string())?;
-                        publication
-                            .send(
-                                prepared.bytes.clone(),
-                                attachment.as_ref().map(|a| a.as_ref().clone()),
-                            )
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        // The badge is a routing fact about this publisher and
-                        // nothing else; an error asking is "not asked" (O4),
-                        // never "nobody listens".
-                        let matching = publication.matching_status().await.ok();
-                        // A one-shot undeclares here, acknowledged, exactly as
-                        // `zenctl topic pub` does; only a repeating publish
-                        // hands the declaration back to be held.
-                        let publication = if repeat {
-                            Some(Arc::new(publication))
-                        } else {
-                            publication.undeclare().await.map_err(|e| e.to_string())?;
-                            None
-                        };
-                        Ok(Arc::new(crate::message::PublishOutcome {
-                            prepared,
-                            publication,
-                            matching,
-                            attachment,
-                        }))
-                    },
-                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Ready(r))),
-                );
+                let send = services::write::publish(services::write::Publish {
+                    session,
+                    store,
+                    slices,
+                    base,
+                    key,
+                    encoding,
+                    body,
+                    mode,
+                    qos,
+                    attachment,
+                    repeat,
+                });
                 Task::batch([stop, send])
             }
         }
@@ -1625,17 +1483,11 @@ impl Zengui {
         self.link = LinkState::Connecting;
         self.monitor = None;
         self.session = None;
-        let connect = self.settings.connect.clone();
-        let listen = self.settings.listen.clone();
-        let scouting = self.settings.scouting;
-        let zenoh_config = self.settings.zenoh_config.clone();
-        Task::perform(
-            async move {
-                zenkey_fleet::open_with_config(zenoh_config.as_deref(), &connect, &listen, scouting)
-                    .await
-                    .map_err(|e| e.to_string())
-            },
-            |r| Message::Pane(PaneMsg::Context(view::contexts::ContextMsg::Switched(r))),
+        services::link::reopen(
+            self.settings.zenoh_config.clone(),
+            self.settings.connect.clone(),
+            self.settings.listen.clone(),
+            self.settings.scouting,
         )
     }
 
@@ -1703,18 +1555,7 @@ impl Zengui {
                 let timeout = self.settings.timeout();
                 // The pane's one data-plane cost: a one-shot node_info on
                 // selection (laziness ground rule, #84/#85).
-                Task::perform(
-                    async move {
-                        let out = zenkey_fleet::node_info(&session, &base, &origin, timeout, true)
-                            .await
-                            .map(Arc::new)
-                            .map_err(|e| e.to_string());
-                        (origin, base, out)
-                    },
-                    |(origin, ran, out)| {
-                        Message::Pane(PaneMsg::Nodes(NodesMsg::InfoLoaded(origin, ran, out)))
-                    },
-                )
+                services::sweep::node_info(session, base, origin, timeout)
             }
             NodesMsg::InfoLoaded(origin, ran_against, outcome) => {
                 // Stale guard: only the currently selected origin's info lands
@@ -1787,33 +1628,16 @@ impl Zengui {
                 // Locals come from the registry DIRS only — never the union
                 // set, which would diff the bus against itself.
                 let dirs = self.settings.registry.clone();
-                Task::perform(
-                    async move {
-                        let locals = match SliceSet::from_dirs(&dirs) {
-                            Ok(set) => set.slices().to_vec(),
-                            Err(e) => return Err(format!("registry dirs: {e}")),
-                        };
-                        zenkey_fleet::run_doctor(
-                            &session,
-                            &base,
-                            &locals,
-                            &zenkey_fleet::DoctorSpec {
-                                deep,
-                                sample: None,
-                                timeout,
-                                listen,
-                            },
-                        )
-                        .await
-                        // The run carries the base it was judged against —
-                        // the staleness guard's other half (#109).
-                        .map(|r| crate::doctor::DoctorRun {
-                            report: Arc::new(r),
-                            base,
-                        })
-                        .map_err(|e| e.to_string())
+                services::sweep::doctor(
+                    session,
+                    base,
+                    dirs,
+                    zenkey_fleet::DoctorSpec {
+                        deep,
+                        sample: None,
+                        timeout,
+                        listen,
                     },
-                    |out| Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(out))),
                 )
             }
             DoctorMsg::Done(outcome) => {
@@ -1940,10 +1764,7 @@ impl Zengui {
                 // One stream at a time: release the previous watch first.
                 let release = self.stop_media_watch();
                 self.media.viewing = Some(view::media::Viewing::new(key.clone()));
-                let declare = Task::perform(
-                    async move { monitor.watch(&key).await.map_err(|e| e.to_string()) },
-                    |r| Message::Pane(PaneMsg::Media(M::Watched(r))),
-                );
+                let declare = services::watch::media(monitor, key);
                 Task::batch([release, declare])
             }
             M::Watched(Ok(id)) => {
@@ -1975,12 +1796,7 @@ impl Zengui {
         ) else {
             return Task::none();
         };
-        Task::perform(
-            async move {
-                let _ = monitor.unwatch(id).await;
-            },
-            |()| Message::Pane(PaneMsg::Media(view::media::MediaMsg::Stopped)),
-        )
+        services::watch::release_media(monitor, id)
     }
 
     fn update_blob(&mut self, msg: view::blob::BlobMsg) -> Task<Message> {
@@ -2038,17 +1854,7 @@ impl Zengui {
                     .as_deref()
                     .map(|s| s.slices().to_vec())
                     .unwrap_or_default();
-                Task::perform(
-                    async move {
-                        let out =
-                            zenkey_fleet::blob_probe(&session, &base, &target, &slices, timeout)
-                                .await
-                                .map(Arc::new)
-                                .map_err(|e| e.to_string());
-                        (base, out)
-                    },
-                    |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::ProbeDone(ran, out))),
-                )
+                services::sweep::blob_probe(session, base, target, slices, timeout)
             }
             BlobMsg::ProbeDone(ran_against, outcome) => {
                 self.blob
@@ -2082,18 +1888,7 @@ impl Zengui {
                     self.blob.fetch = crate::blob::Fetch::Inspecting;
                     let base = self.settings.base.clone();
                     let timeout = self.settings.timeout();
-                    return Task::perform(
-                        async move {
-                            let out = zenkey_fleet::blob_tree_index(
-                                &session, &base, &origin, &root, timeout,
-                            )
-                            .await
-                            .map(Arc::new)
-                            .map_err(|e| e.to_string());
-                            (base, out)
-                        },
-                        |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::InspectDone(ran, out))),
-                    );
+                    return services::sweep::blob_tree(session, base, origin, root, timeout);
                 }
                 let root = match self.blob.root_input.trim() {
                     "" => None,
@@ -2120,38 +1915,19 @@ impl Zengui {
                 // Progress arrives on a channel rather than through the return
                 // value: a transfer that only reported at the end would leave
                 // the pane unable to say anything true while it ran.
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                let progress = Task::run(
-                    async_stream::stream! {
-                        let mut rx = rx;
-                        while let Some(p) = rx.recv().await {
-                            yield p;
-                        }
+                services::sweep::blob_fetch(services::sweep::BlobFetch {
+                    session,
+                    base,
+                    origin,
+                    target,
+                    dest,
+                    spec: zenkey_fleet::BlobFetchSpec {
+                        timeout,
+                        overwrite: true,
+                        root,
+                        cancel,
                     },
-                    |p| Message::Pane(PaneMsg::Blob(BlobMsg::Progress(p))),
-                );
-                let run = Task::perform(
-                    async move {
-                        let spec = zenkey_fleet::BlobFetchSpec {
-                            timeout,
-                            overwrite: true,
-                            root,
-                            cancel,
-                        };
-                        let sink = move |p| {
-                            let _ = tx.send(p);
-                        };
-                        let out = zenkey_fleet::blob_fetch(
-                            &session, &base, &origin, &target, &dest, &spec, &sink,
-                        )
-                        .await
-                        .map(Arc::new)
-                        .map_err(|e| e.to_string());
-                        (base, out)
-                    },
-                    |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::FetchDone(ran, out))),
-                );
-                Task::batch([progress, run])
+                })
             }
             BlobMsg::Progress(p) => {
                 use zenkey_fleet::report::BlobProgress;
@@ -2246,52 +2022,7 @@ impl Zengui {
                 // would empty the coverage table on every bus-registry-only
                 // deployment — an invisible, plausible-looking wrong answer.
                 let slices = self.slices.clone();
-                Task::perform(
-                    async move {
-                        let routers = zenkey_fleet::routers(&session, timeout)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        let storages = zenkey_fleet::storages(&session, timeout)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        let declared = zenkey_fleet::declared_entities(&session, timeout)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        let (coverage, coverage_note) = match slices.as_deref() {
-                            Some(set) => {
-                                (zenkey_fleet::state_coverage(set, &base, &storages), None)
-                            }
-                            None => (
-                                Vec::new(),
-                                Some(
-                                    "no registry slices resolved, so the declared state \
-                                     families are unknown — this is \"not asked\", not \
-                                     \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, \
-                                     or wait for the bus registry (RFC 08 §6)."
-                                        .to_string(),
-                                ),
-                            ),
-                        };
-                        let topology = zenkey_fleet::topology(&session, timeout)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        // The origin join (#131): part of the same explicit
-                        // sweep the user asked for — one more admin GET.
-                        let origins = zenkey_fleet::origin_attachments(&session, &base, timeout)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        Ok(Arc::new(crate::admin::AdminSweep {
-                            routers,
-                            storage: zenkey_fleet::report::StorageList { storages, coverage },
-                            declared,
-                            coverage_note,
-                            topology,
-                            origins,
-                            base,
-                        }))
-                    },
-                    |out| Message::Pane(PaneMsg::Admin(AdminMsg::Done(out))),
-                )
+                services::sweep::admin(session, base, slices, timeout)
             }
             AdminMsg::Done(outcome) => {
                 let base = self.settings.base.clone();
@@ -2312,24 +2043,7 @@ impl Zengui {
         } else {
             scope::liveliness_selectors(&self.settings.base)
         };
-        let max_keys = self.settings.max_keys;
-        Task::perform(
-            async move {
-                Monitor::start(
-                    &session,
-                    MonitorSpec {
-                        selectors: vec![], // lazy: no data-plane watches
-                        liveliness,
-                        max_keys,
-                        ..Default::default()
-                    },
-                )
-                .await
-                .map(Arc::new)
-                .map_err(|e| e.to_string())
-            },
-            |r| Message::Bus(BusMsg::MonitorStarted(r)),
-        )
+        services::watch::start_monitor(session, liveliness, self.settings.max_keys)
     }
 
     /// (Re)build the skeleton: slices are already loaded; roster + admin are
@@ -2340,19 +2054,7 @@ impl Zengui {
         };
         let base = self.settings.base.clone();
         let timeout = self.settings.timeout();
-        Task::perform(
-            async move {
-                let roster = zenkey_fleet::roster(&session, &base, timeout)
-                    .await
-                    .unwrap_or_default();
-                let admin = zenkey_fleet::declared_entities(&session, timeout)
-                    .await
-                    .unwrap_or(None);
-                let skeleton = Arc::new(Skeleton::build(&base, &slices, &roster, admin.as_ref()));
-                Ok((skeleton, Arc::new(roster)))
-            },
-            |r| Message::Bus(BusMsg::SkeletonBuilt(r)),
-        )
+        services::sweep::skeleton(session, base, slices, timeout)
     }
 
     fn toggle_watch(&mut self, path: String) -> Task<Message> {
@@ -2365,10 +2067,7 @@ impl Zengui {
             // aborts the seed task) — forget it here too.
             self.seeding.remove(&id);
             self.seeding_paths.remove(&path);
-            return Task::perform(
-                async move { monitor.unwatch(id).await.map_err(|e| e.to_string()) },
-                move |r| Message::Subject(SubjectMsg::WatchReleased(path.clone(), r)),
-            );
+            return services::watch::release(monitor, path, id);
         }
         // Watching seeds (issue #92): current state arrives before live
         // traffic, through the same merge discipline as everything else.
@@ -2377,15 +2076,7 @@ impl Zengui {
             timeout: self.settings.timeout(),
             ..Default::default()
         };
-        Task::perform(
-            async move {
-                monitor
-                    .watch_seeded(&selector, policy)
-                    .await
-                    .map_err(|e| e.to_string())
-            },
-            move |r| Message::Subject(SubjectMsg::WatchStarted(path.clone(), r)),
-        )
+        services::watch::subtree(monitor, path, selector, policy)
     }
 
     fn watch_scope(&mut self) -> Task<Message> {
@@ -2402,19 +2093,7 @@ impl Zengui {
             timeout: self.settings.timeout(),
             ..Default::default()
         };
-        Task::perform(
-            async move {
-                let mut ids = Vec::new();
-                for sel in &selectors {
-                    match monitor.watch_seeded(sel, policy).await {
-                        Ok(id) => ids.push(id),
-                        Err(e) => tracing::warn!("scope watch {sel}: {e}"),
-                    }
-                }
-                ids
-            },
-            |r| Message::Deployment(DeploymentMsg::ScopeWatchesStarted(r)),
-        )
+        services::watch::scope(monitor, selectors, policy)
     }
 
     fn unwatch_scope(&mut self) -> Task<Message> {
@@ -2425,17 +2104,7 @@ impl Zengui {
         for id in &ids {
             self.seeding.remove(id);
         }
-        Task::perform(
-            async move {
-                for id in ids {
-                    if let Err(e) = monitor.unwatch(id).await {
-                        tracing::warn!("scope unwatch: {e}");
-                    }
-                }
-                Ok(())
-            },
-            |r| Message::Subject(SubjectMsg::WatchReleased("(scope)".into(), r)),
-        )
+        services::watch::release_scope(monitor, ids)
     }
 
     /// Persist what the window looks like now. Best-effort by construction
@@ -2584,41 +2253,7 @@ impl Zengui {
                     path: path.clone(),
                 });
                 self.recorded = None;
-                Task::perform(
-                    async move {
-                        let selectors: Vec<String> = monitor
-                            .watched()
-                            .await
-                            .into_iter()
-                            .map(|(_, s)| s)
-                            .collect();
-                        let header = zenkey_fleet::ZrecHeader {
-                            zrec: zenkey_fleet::ZREC_VERSION,
-                            selectors,
-                            base,
-                            captured_at: zenkey_fleet::record::rfc3339_now(),
-                        };
-                        let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-                        let mut writer =
-                            zenkey_fleet::ZrecWriter::new(std::io::BufWriter::new(file), &header)
-                                .map_err(|e| e.to_string())?;
-                        let mut events = monitor.events();
-                        let recording = zenkey_fleet::record(
-                            &mut events,
-                            &mut writer,
-                            zenkey_fleet::RecordBounds::default(),
-                            |_, _| {},
-                        );
-                        tokio::select! {
-                            r = recording => r.map_err(|e| e.to_string())?,
-                            _ = stop.notified() => {}
-                        }
-                        let (samples, dropped) = writer.counts();
-                        writer.finish().map_err(|e| e.to_string())?;
-                        Ok((samples, dropped, path))
-                    },
-                    |r| Message::Workspace(WorkspaceMsg::Replay(R::RecordFinished(r))),
-                )
+                services::record::start(monitor, path, base, stop)
             }
             R::RecordFinished(result) => {
                 self.recording = None;
@@ -2832,32 +2467,9 @@ impl Zengui {
         if !dirs.is_empty() {
             // The §6.1 union (issue #43): served wins, dirs fill, and the
             // disagreement count reaches the status strip as data.
-            return Task::perform(
-                async move {
-                    SliceSet::from_union(&session, &base, &dirs, timeout)
-                        .await
-                        .map(|out| {
-                            (
-                                Arc::new(out.set),
-                                out.from_bus.len(),
-                                out.dirs_only.len(),
-                                out.disagreements.len(),
-                            )
-                        })
-                        .map_err(|e| e.to_string())
-                },
-                |r| Message::Bus(BusMsg::SlicesUnionLoaded(r)),
-            );
+            return services::sweep::slices_union(session, base, dirs, timeout);
         }
-        Task::perform(
-            async move {
-                SliceSet::from_bus(&session, &base, timeout)
-                    .await
-                    .map(Arc::new)
-                    .map_err(|e| e.to_string())
-            },
-            |r| Message::Bus(BusMsg::SlicesLoaded(r)),
-        )
+        services::sweep::slices(session, base, timeout)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
