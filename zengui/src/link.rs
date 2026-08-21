@@ -66,7 +66,9 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
         let mut nodes = Vec::new();
         let mut seeded = Vec::new();
         let (mut lagged, mut coalesced) = (0u64, 0u64);
-        let mut watched: Vec<String> =
+        // Rebuilt only on a `WatchChanged`, and shared with every tick after
+        // it: the ticks in between hand out a pointer (#178).
+        let mut watched: std::sync::Arc<[String]> =
             monitor.watched().await.into_iter().map(|(_, s)| s).collect();
 
         while let Some(item) = events.recv().await {
@@ -113,7 +115,7 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         keys,
                         keys_evicted,
                         keys_unwatched,
-                        watched: watched.clone(),
+                        watched: std::sync::Arc::clone(&watched),
                         seeded: std::mem::take(&mut seeded),
                         totals,
                     }));

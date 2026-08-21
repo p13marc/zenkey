@@ -98,7 +98,7 @@ pub fn pane(state: &AdminState) -> Element<'_, Message> {
             .into();
     };
 
-    col = col.push(topology(sweep));
+    col = col.push(topology(sweep, &state.mesh_cache));
     col = col.push(routers(&sweep.routers, state));
     col = col.push(storages(&sweep.storage, state));
     col = col.push(coverage(&sweep.storage, sweep.coverage_note.as_deref()));
@@ -355,7 +355,10 @@ struct MeshOrigin {
 }
 
 /// The caption + canvas pair.
-fn topology<'a>(sweep: &'a AdminSweep) -> Element<'a, Message> {
+fn topology<'a>(
+    sweep: &'a AdminSweep,
+    mesh_cache: &'a iced::widget::canvas::Cache,
+) -> Element<'a, Message> {
     let mut col = column![kit::section_header("topology", None)].spacing(space::XS);
     let report = &sweep.topology;
     if report.answered == 0 {
@@ -467,6 +470,7 @@ fn topology<'a>(sweep: &'a AdminSweep) -> Element<'a, Message> {
             nodes,
             edges,
             origins,
+            cache: mesh_cache,
         })
         .width(Length::Fill)
         .height(Length::Fixed(MESH_HEIGHT)),
@@ -486,10 +490,19 @@ fn short_zid(zid: &str) -> String {
 const MESH_HEIGHT: f32 = 220.0;
 const NODE_R: f32 = 7.0;
 
-struct Mesh {
+struct Mesh<'a> {
     nodes: Vec<MeshNode>,
     edges: Vec<(usize, usize)>,
     origins: Vec<MeshOrigin>,
+    /// Retained geometry (#178).
+    ///
+    /// The drawing depends on the sweep *and* on the pan/zoom viewport, and
+    /// the viewport lives inside the canvas widget's own `State` where the
+    /// app cannot see it — so the cache is invalidated from `update`, which is
+    /// the only thing that moves it, and by `AdminState::finish` replacing the
+    /// whole `AdminState` when a sweep lands. Between those, a redraw is a
+    /// pointer.
+    cache: &'a iced::widget::canvas::Cache,
 }
 
 /// The canvas viewport (#131): pan by drag, zoom by wheel, double-click
@@ -511,7 +524,7 @@ impl Default for Viewport {
     }
 }
 
-impl iced::widget::canvas::Program<Message> for Mesh {
+impl iced::widget::canvas::Program<Message> for Mesh<'_> {
     type State = Viewport;
 
     fn update(
@@ -531,6 +544,7 @@ impl iced::widget::canvas::Program<Message> for Mesh {
                     mouse::ScrollDelta::Pixels { y, .. } => *y / 40.0,
                 };
                 state.zoom = (state.zoom * (1.0 + ticks * 0.1)).clamp(0.25, 6.0);
+                self.cache.clear();
                 Some(Action::request_redraw().and_capture())
             }
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
@@ -547,6 +561,7 @@ impl iced::widget::canvas::Program<Message> for Mesh {
                 };
                 state.offset += to - from;
                 state.drag = Some(to);
+                self.cache.clear();
                 Some(Action::request_redraw().and_capture())
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -559,6 +574,7 @@ impl iced::widget::canvas::Program<Message> for Mesh {
                 // Right-click resets too — double-click detection is not
                 // worth a timer; the caption says both.
                 *state = Viewport::default();
+                self.cache.clear();
                 Some(Action::request_redraw().and_capture())
             }
             _ => None,
@@ -575,129 +591,130 @@ impl iced::widget::canvas::Program<Message> for Mesh {
     ) -> Vec<iced::widget::canvas::Geometry> {
         use iced::Point;
         use iced::widget::canvas;
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
         let n = self.nodes.len();
         if n == 0 {
-            return vec![frame.into_geometry()];
+            return vec![canvas::Frame::new(renderer, bounds.size()).into_geometry()];
         }
-        // Pan/zoom (#131): translate then scale around the panned center.
-        frame.translate(state.offset);
-        let cx = bounds.width / 2.0;
-        let cy = MESH_HEIGHT / 2.0;
-        frame.translate(iced::Vector::new(cx, cy));
-        frame.scale(state.zoom);
-        frame.translate(iced::Vector::new(-cx, -cy));
-        let radius = (MESH_HEIGHT / 2.0 - 30.0).max(10.0);
-        let pos = |i: usize| {
-            let angle = std::f32::consts::TAU * (i as f32) / (n as f32);
-            Point::new(cx + radius * angle.cos(), cy + radius * angle.sin())
-        };
-        let palette = colors(theme);
-        for (a, b) in &self.edges {
-            let path = canvas::Path::line(pos(*a), pos(*b));
-            frame.stroke(
-                &path,
-                canvas::Stroke::default()
-                    .with_width(1.0)
-                    .with_color(palette.axis()),
-            );
-        }
-        for (i, node) in self.nodes.iter().enumerate() {
-            let p = pos(i);
-            let dot = canvas::Path::circle(p, NODE_R);
-            let tone = if node.router {
-                palette.primary()
-            } else {
-                palette.text_muted()
+        let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+            // Pan/zoom (#131): translate then scale around the panned center.
+            frame.translate(state.offset);
+            let cx = bounds.width / 2.0;
+            let cy = MESH_HEIGHT / 2.0;
+            frame.translate(iced::Vector::new(cx, cy));
+            frame.scale(state.zoom);
+            frame.translate(iced::Vector::new(-cx, -cy));
+            let radius = (MESH_HEIGHT / 2.0 - 30.0).max(10.0);
+            let pos = |i: usize| {
+                let angle = std::f32::consts::TAU * (i as f32) / (n as f32);
+                Point::new(cx + radius * angle.cos(), cy + radius * angle.sin())
             };
-            if node.answered {
-                frame.fill(&dot, tone);
-            } else {
-                // Heard of, not queryable: an outline, not a filled claim.
+            let palette = colors(theme);
+            for (a, b) in &self.edges {
+                let path = canvas::Path::line(pos(*a), pos(*b));
                 frame.stroke(
-                    &dot,
-                    canvas::Stroke::default().with_width(1.5).with_color(tone),
-                );
-            }
-            if node.is_self {
-                let ring = canvas::Path::circle(p, NODE_R + 3.5);
-                frame.stroke(
-                    &ring,
+                    &path,
                     canvas::Stroke::default()
-                        .with_width(1.5)
-                        .with_color(palette.success()),
+                        .with_width(1.0)
+                        .with_color(palette.axis()),
                 );
             }
-            if node.has_storage {
-                let mark = canvas::Path::rectangle(
-                    Point::new(p.x + NODE_R, p.y - NODE_R - 4.0),
-                    iced::Size::new(5.0, 5.0),
-                );
-                frame.fill(&mark, palette.warning());
-            }
-            frame.fill_text(canvas::Text {
-                content: node.label.clone(),
-                position: Point::new(p.x + NODE_R + 3.0, p.y + 3.0),
-                color: palette.text(),
-                size: iced::Pixels(11.0),
-                ..canvas::Text::default()
-            });
-        }
-        // Origin satellites (#131): hexagon-ish diamonds fanned around
-        // their anchor, solid line for a sources-named session, dotted for
-        // reported-only — the drawing keeps the evidence distinction.
-        let mut fan: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-        for o in &self.origins {
-            let slot = fan.entry(o.anchor).or_insert(0);
-            let k = *slot;
-            *slot += 1;
-            let a = pos(o.anchor);
-            let angle = std::f32::consts::TAU * (k as f32) / 6.0 + 0.5;
-            let d = NODE_R + 22.0 + 10.0 * (k / 6) as f32;
-            let p = Point::new(a.x + d * angle.cos(), a.y + d * angle.sin());
-            let tone = palette.success();
-            if o.reported {
-                // Dotted: short dashes along the anchor line.
-                let steps = 6;
-                for t in 0..steps {
-                    let f0 = t as f32 / steps as f32;
-                    let f1 = f0 + 0.5 / steps as f32;
-                    let seg = canvas::Path::line(
-                        Point::new(a.x + (p.x - a.x) * f0, a.y + (p.y - a.y) * f0),
-                        Point::new(a.x + (p.x - a.x) * f1, a.y + (p.y - a.y) * f1),
-                    );
+            for (i, node) in self.nodes.iter().enumerate() {
+                let p = pos(i);
+                let dot = canvas::Path::circle(p, NODE_R);
+                let tone = if node.router {
+                    palette.primary()
+                } else {
+                    palette.text_muted()
+                };
+                if node.answered {
+                    frame.fill(&dot, tone);
+                } else {
+                    // Heard of, not queryable: an outline, not a filled claim.
                     frame.stroke(
-                        &seg,
-                        canvas::Stroke::default()
-                            .with_width(1.0)
-                            .with_color(palette.text_muted()),
+                        &dot,
+                        canvas::Stroke::default().with_width(1.5).with_color(tone),
                     );
                 }
-            } else {
-                frame.stroke(
-                    &canvas::Path::line(a, p),
-                    canvas::Stroke::default().with_width(1.0).with_color(tone),
-                );
+                if node.is_self {
+                    let ring = canvas::Path::circle(p, NODE_R + 3.5);
+                    frame.stroke(
+                        &ring,
+                        canvas::Stroke::default()
+                            .with_width(1.5)
+                            .with_color(palette.success()),
+                    );
+                }
+                if node.has_storage {
+                    let mark = canvas::Path::rectangle(
+                        Point::new(p.x + NODE_R, p.y - NODE_R - 4.0),
+                        iced::Size::new(5.0, 5.0),
+                    );
+                    frame.fill(&mark, palette.warning());
+                }
+                frame.fill_text(canvas::Text {
+                    content: node.label.clone(),
+                    position: Point::new(p.x + NODE_R + 3.0, p.y + 3.0),
+                    color: palette.text(),
+                    size: iced::Pixels(11.0),
+                    ..canvas::Text::default()
+                });
             }
-            let dot = canvas::Path::circle(p, NODE_R - 3.0);
-            if o.reported {
-                frame.stroke(
-                    &dot,
-                    canvas::Stroke::default()
-                        .with_width(1.2)
-                        .with_color(palette.text_muted()),
-                );
-            } else {
-                frame.fill(&dot, tone);
+            // Origin satellites (#131): hexagon-ish diamonds fanned around
+            // their anchor, solid line for a sources-named session, dotted for
+            // reported-only — the drawing keeps the evidence distinction.
+            let mut fan: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            for o in &self.origins {
+                let slot = fan.entry(o.anchor).or_insert(0);
+                let k = *slot;
+                *slot += 1;
+                let a = pos(o.anchor);
+                let angle = std::f32::consts::TAU * (k as f32) / 6.0 + 0.5;
+                let d = NODE_R + 22.0 + 10.0 * (k / 6) as f32;
+                let p = Point::new(a.x + d * angle.cos(), a.y + d * angle.sin());
+                let tone = palette.success();
+                if o.reported {
+                    // Dotted: short dashes along the anchor line.
+                    let steps = 6;
+                    for t in 0..steps {
+                        let f0 = t as f32 / steps as f32;
+                        let f1 = f0 + 0.5 / steps as f32;
+                        let seg = canvas::Path::line(
+                            Point::new(a.x + (p.x - a.x) * f0, a.y + (p.y - a.y) * f0),
+                            Point::new(a.x + (p.x - a.x) * f1, a.y + (p.y - a.y) * f1),
+                        );
+                        frame.stroke(
+                            &seg,
+                            canvas::Stroke::default()
+                                .with_width(1.0)
+                                .with_color(palette.text_muted()),
+                        );
+                    }
+                } else {
+                    frame.stroke(
+                        &canvas::Path::line(a, p),
+                        canvas::Stroke::default().with_width(1.0).with_color(tone),
+                    );
+                }
+                let dot = canvas::Path::circle(p, NODE_R - 3.0);
+                if o.reported {
+                    frame.stroke(
+                        &dot,
+                        canvas::Stroke::default()
+                            .with_width(1.2)
+                            .with_color(palette.text_muted()),
+                    );
+                } else {
+                    frame.fill(&dot, tone);
+                }
+                frame.fill_text(canvas::Text {
+                    content: o.label.clone(),
+                    position: Point::new(p.x + NODE_R, p.y + 3.0),
+                    color: palette.text_muted(),
+                    size: iced::Pixels(10.0),
+                    ..canvas::Text::default()
+                });
             }
-            frame.fill_text(canvas::Text {
-                content: o.label.clone(),
-                position: Point::new(p.x + NODE_R, p.y + 3.0),
-                color: palette.text_muted(),
-                size: iced::Pixels(10.0),
-                ..canvas::Text::default()
-            });
-        }
-        vec![frame.into_geometry()]
+        });
+        vec![geometry]
     }
 }

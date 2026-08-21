@@ -8077,6 +8077,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "clap",
+ "criterion",
  "iced",
  "iced_test",
  "prost-reflect",

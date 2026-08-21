@@ -53,6 +53,14 @@ pub struct AdminState {
     /// Rows whose raw admin document is expanded. Admin layouts vary by
     /// version, so `raw` is the honest fallback and the pane can show it.
     pub expanded_raw: BTreeSet<String>,
+    /// The topology drawing's retained geometry (#178).
+    ///
+    /// Here rather than on [`AdminSweep`], which crosses a task boundary in an
+    /// `Arc` and therefore has to be `Send`: `canvas::Cache` is a `RefCell`
+    /// and is not. It is cleared when a sweep lands (below) and when the pan
+    /// or zoom moves (`view::admin`, which is the only thing that can see the
+    /// viewport); a base change replaces the whole state.
+    pub mesh_cache: iced::widget::canvas::Cache,
 }
 
 impl AdminState {
@@ -69,6 +77,9 @@ impl AdminState {
                 self.runs += 1;
                 self.sweep = Some(sweep);
                 self.error = None;
+                // New nodes, new edges: the retained drawing is of the old
+                // mesh (#178).
+                self.mesh_cache.clear();
             }
             Ok(_) => {
                 // Silently dropped, deliberately: it is not an error, and

@@ -44,3 +44,8 @@ iced_test = { workspace = true }
 # subject only a served schema can decode.
 prost-reflect = { workspace = true }
 zenkey = { workspace = true, features = ["schema"] }
+criterion = { workspace = true }
+
+[[bench]]
+name = "frame"
+harness = false

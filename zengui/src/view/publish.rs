@@ -59,8 +59,15 @@ impl std::fmt::Display for QosChoice {
 
 /// Every profile, as picker options. Derived from the closed enum
 /// (`QosProfile::ALL`), so the picker cannot drift from RFC 04 §3.
-pub fn qos_choices() -> Vec<QosChoice> {
-    QosProfile::ALL.into_iter().map(QosChoice).collect()
+///
+/// Built once for the process rather than once per frame (#178): the list is
+/// five constants and the pane redraws at frame rate. `LazyLock` rather than a
+/// `const` array so it still *derives* from `ALL` — a hand-written second list
+/// is exactly the drift the doc comment above promises cannot happen.
+pub fn qos_choices() -> &'static [QosChoice] {
+    static CHOICES: std::sync::LazyLock<[QosChoice; QosProfile::ALL.len()]> =
+        std::sync::LazyLock::new(|| QosProfile::ALL.map(QosChoice));
+    &*CHOICES
 }
 
 /// The declared profile behind a classified key, when there is one (#158).

@@ -22,6 +22,7 @@ pub mod blob;
 pub mod config;
 pub mod doctor;
 pub mod echo;
+pub mod expansion;
 pub mod history;
 pub mod keyfacts;
 pub mod link;

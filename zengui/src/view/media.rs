@@ -55,7 +55,7 @@ pub struct Viewing {
     pub watch: Option<WatchId>,
     /// The newest frame's bytes and declared encoding — handed to the image
     /// widget when the encoding is image-decodable.
-    pub frame: Option<(Vec<u8>, String)>,
+    pub frame: Option<Frame>,
     /// The newest frame's attachment, rendered structurally (never
     /// schema-decoded — RFC 07 §1 puts metadata on the attachment).
     pub meta: Option<String>,
@@ -88,7 +88,17 @@ impl Viewing {
             self.arrivals.pop_front();
         }
         self.arrivals.push_back(sample.received);
-        self.frame = Some((bytes.to_vec(), sample.encoding.clone()));
+        // The decode happens **here**, once per arrival, not once per redraw
+        // (#178). `Handle` is reference-counted, so the view clones a pointer;
+        // `Handle::from_bytes(bytes.clone())` in the view copied the whole
+        // frame ~60 times a second, on top of the one copy above that is
+        // actually needed.
+        self.frame = Some(Frame {
+            handle: decodable(&sample.encoding)
+                .then(|| iced::widget::image::Handle::from_bytes(bytes.to_vec())),
+            encoding: sample.encoding.clone(),
+            len: bytes.len(),
+        });
         self.meta = sample.attachment.as_ref().map(|a| {
             let b = a.to_bytes();
             match serde_json::from_slice::<serde_json::Value>(&b) {
@@ -104,6 +114,21 @@ impl Viewing {
         let span = last.saturating_duration_since(*first).as_secs_f64();
         (self.arrivals.len() >= 2 && span > 0.0).then(|| (self.arrivals.len() - 1) as f64 / span)
     }
+}
+
+/// The newest frame, decoded once on arrival.
+///
+/// Holding the `Handle` rather than the bytes is the point: it is
+/// reference-counted, so a redraw clones a pointer. The bytes are kept only
+/// inside it, and only when the codec is one this app can actually draw —
+/// `len` and `encoding` are what the undecodable branch has to say, and it
+/// should not need the payload to say it.
+#[derive(Debug, Clone)]
+pub struct Frame {
+    /// `Some` iff [`decodable`] accepted the encoding.
+    pub handle: Option<iced::widget::image::Handle>,
+    pub encoding: String,
+    pub len: usize,
 }
 
 /// The pane's state.
@@ -237,18 +262,18 @@ pub fn pane<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Element<
                      nothing to publish either; RFC 07 §1's demand-driven tiers)",
                 ));
             }
-            Some((bytes, encoding)) if decodable(encoding) => {
-                col = col.push(
-                    iced::widget::image(iced::widget::image::Handle::from_bytes(bytes.clone()))
-                        .width(Length::Fill),
-                );
+            Some(Frame {
+                handle: Some(handle),
+                ..
+            }) => {
+                col = col.push(iced::widget::image(handle.clone()).width(Length::Fill));
             }
-            Some((bytes, encoding)) => {
+            Some(frame) => {
                 col = col.push(kit::muted(format!(
-                    "frame arrived: {} B as {encoding} — no decode story for this \
+                    "frame arrived: {} B as {} — no decode story for this \
                      codec; shown as metadata only (RFC 07 §1: the codec is the \
                      wire Encoding, and pretending to render it would be a lie)",
-                    bytes.len()
+                    frame.len, frame.encoding
                 )));
             }
         }

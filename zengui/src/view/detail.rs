@@ -50,7 +50,9 @@ pub struct DetailData<'a> {
     /// The plotted series (issue #64). Owned rather than borrowed: they are
     /// derived per frame from the history ring, and a pane cannot borrow a
     /// per-frame local.
-    pub series: Option<SeriesData>,
+    /// The chart data, borrowed — the app rebuilds it when its inputs move,
+    /// not when the frame does (#178).
+    pub series: Option<&'a SeriesData>,
     /// How many history entries have been recorded for this key, when a
     /// recording is running — the link into the history pane.
     pub history_entries: Option<usize>,
@@ -177,6 +179,25 @@ pub struct SeriesData {
     pub rate: Series,
     /// The registry-declared unit, when the subject declares one.
     pub unit: Option<String>,
+    /// Retained geometry for the two charts (#178).
+    ///
+    /// A `canvas::Cache` has to outlive the frame to be worth anything, and
+    /// this struct is now the thing that does: it is rebuilt when the chart's
+    /// inputs move, which is exactly when the geometry stops being valid. A
+    /// fresh `SeriesData` therefore *is* a cleared cache, and there is no
+    /// second invalidation rule to keep in step with the first.
+    ///
+    /// `view/spark.rs` used to justify having no cache by the 250 ms tick —
+    /// but that is the rate the *data* changes at, and a canvas redraws with
+    /// the frame.
+    pub caches: SeriesCaches,
+}
+
+/// The retained geometry, one per chart.
+#[derive(Default)]
+pub struct SeriesCaches {
+    pub value: iced::widget::canvas::Cache,
+    pub rate: iced::widget::canvas::Cache,
 }
 
 pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
@@ -286,7 +307,7 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
 
     // — Series: sparklines over the recorded history (issue #64).
     if let Some(series) = data.series
-        && let Some(section) = series_section(&series)
+        && let Some(section) = series_section(series)
     {
         col = col.push(section);
     }
@@ -315,7 +336,7 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
 /// Returning `None` is the point: a payload that carries no number is an
 /// ordinary fact, and rendering an empty chart or an error for it would invent
 /// a problem (#64's second acceptance line).
-fn series_section<'a>(data: &SeriesData) -> Option<Element<'a, Message>> {
+fn series_section<'a>(data: &'a SeriesData) -> Option<Element<'a, Message>> {
     let plottable = !data.leaves.leaves.is_empty();
     if !plottable && !data.rate.has_data() {
         return None;
@@ -353,10 +374,17 @@ fn series_section<'a>(data: &SeriesData) -> Option<Element<'a, Message>> {
             &data.value,
             SeriesTone::Value,
             data.unit.as_deref(),
+            &data.caches.value,
         ));
     }
 
-    col = col.push(spark::chart("rate", &data.rate, SeriesTone::Rate, None));
+    col = col.push(spark::chart(
+        "rate",
+        &data.rate,
+        SeriesTone::Rate,
+        None,
+        &data.caches.rate,
+    ));
     Some(col.into())
 }
 
@@ -434,16 +462,43 @@ pub(crate) fn facts_section(f: &KeyFacts) -> Element<'_, Message> {
 }
 
 /// The hex side: offset + bytes, bounded, truncation stated.
-fn hex_pane<'a>(bytes: &[u8]) -> Element<'a, Message> {
-    let shown = &bytes[..bytes.len().min(HEX_VIEW_BYTES)];
-    let mut out = String::with_capacity(shown.len() * 4);
-    for (i, chunk) in shown.chunks(16).enumerate() {
-        out.push_str(&format!("{:06x}  ", i * 16));
+/// `000000  de ad be ef` — sixteen bytes to a row, offset first.
+///
+/// One pre-sized `String` and a nibble table, rather than a `format!` per byte
+/// plus one per offset (#178). The pane runs at frame rate over up to 1,024
+/// bytes, so it was ~1,090 allocations per redraw for a rendering that has not
+/// changed since the last one. `docs/zero-copy.md` records this pane being
+/// fixed once already, for the double *copy*; the allocation churn is a
+/// different defect at the same site.
+///
+/// Split out from the pane so the bytes-to-text half is testable — the old
+/// version's exact output is what the test pins, because a hand-rolled
+/// formatter is only an improvement if it agrees with `{:02x}`.
+pub fn hex_dump(bytes: &[u8]) -> String {
+    /// Lowercase nibbles, indexed by the half-byte.
+    const HEX: [u8; 16] = *b"0123456789abcdef";
+
+    let rows = bytes.len().div_ceil(16);
+    let mut out = String::with_capacity(rows * (8 + 16 * 3 + 1));
+    for (i, chunk) in bytes.chunks(16).enumerate() {
+        let offset = i * 16;
+        for shift in (0..24).step_by(4).rev() {
+            out.push(HEX[(offset >> shift) & 0xf] as char);
+        }
+        out.push_str("  ");
         for b in chunk {
-            out.push_str(&format!("{b:02x} "));
+            out.push(HEX[(b >> 4) as usize] as char);
+            out.push(HEX[(b & 0xf) as usize] as char);
+            out.push(' ');
         }
         out.push('\n');
     }
+    out
+}
+
+fn hex_pane<'a>(bytes: &[u8]) -> Element<'a, Message> {
+    let shown = &bytes[..bytes.len().min(HEX_VIEW_BYTES)];
+    let out = hex_dump(shown);
     let mut col = Column::new().spacing(2);
     col = col.push(kit::muted("hex"));
     col = col.push(kit::mono(out));
@@ -505,6 +560,31 @@ fn decoded_pane<'a>(
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    /// The hand-rolled formatter agrees with `{:06x}`/`{:02x}`, byte for byte,
+    /// which is the only thing that makes it an improvement rather than a
+    /// rewrite (#178). Checked against the exact expression it replaced.
+    #[test]
+    fn the_hex_dump_matches_the_formatter_it_replaced() {
+        fn reference(bytes: &[u8]) -> String {
+            let mut out = String::new();
+            for (i, chunk) in bytes.chunks(16).enumerate() {
+                out.push_str(&format!("{:06x}  ", i * 16));
+                for b in chunk {
+                    out.push_str(&format!("{b:02x} "));
+                }
+                out.push('\n');
+            }
+            out
+        }
+        for len in [0usize, 1, 15, 16, 17, 255, 256, 1024] {
+            // A deterministic spread that exercises both nibbles of every
+            // byte value, and offsets past 0xff so the six-digit offset is
+            // not always five zeros and a digit.
+            let bytes: Vec<u8> = (0..len).map(|i| (i * 37 % 256) as u8).collect();
+            assert_eq!(hex_dump(&bytes), reference(&bytes), "len {len}");
+        }
+    }
 
     fn entry(profile: zenkey::qos::QosProfile) -> crate::history::HistoryEntry {
         crate::history::HistoryEntry {
