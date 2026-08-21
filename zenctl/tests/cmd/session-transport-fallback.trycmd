@@ -21,7 +21,7 @@ $ zenctl topic info --format table --zenoh-config tests/cmd/fixtures/dead-bus.js
 no session (failed to open Zenoh session); answering from --registry only: ../fixture-tests/registry.
 That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
 key       v1/h-3fa9c2d41b7e/state/sysinfo/health
-verdict   Registered
+verdict   registered
 origin    h-3fa9c2d41b7e
 producer  sysinfo
 class     state
@@ -35,32 +35,20 @@ ttl       120s  (refresh <= 60s; stale after 120s)
 The same answer as ndjson, which is where the note's *placement* shows: it goes
 to stderr, so the document on stdout stays parseable.
 
-**Two things below are pinned as they are, not as they should be** — the same
-discipline `zenkey-fleet/tests/report_contract.rs` states for the JSON surface,
-and both are chunk AI's to change:
+**Both things this case used to pin as-they-are are now fixed** (#232, #198),
+and this is where the corpus states it:
 
-* the ndjson is a **pretty, multi-line document**. That is not ndjson — it
-  cannot be read a line at a time, which is the only reason the format exists.
-  `topic_info` collapses `Json | Ndjson` into one arm and calls
-  `to_string_pretty` (#232 item 3, #198).
-* `verdict` reads `Registered` in the table and `"registered"` in the document.
-  The table arm formats the enum with `{:?}`; the wire vocabulary is
-  `rename_all = "snake_case"`. One value, two spellings.
+* the ndjson was a **pretty, multi-line document** — not ndjson, because it
+  could not be read a line at a time. It is one line, with the family name on
+  it.
+* `verdict` read `Registered` in the table and `"registered"` in the document.
+  The table now takes the word from the serialization rather than from `{:?}`,
+  so the two cannot drift again.
 
 ```console
 $ zenctl topic info --format ndjson --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
 no session (failed to open Zenoh session); answering from --registry only: ../fixture-tests/registry.
 That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
-{
-  "key": "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-  "verdict": "registered",
-  "note": "",
-  "origin": "h-3fa9c2d41b7e",
-  "producer": "sysinfo",
-  "class": "state",
-  "subject": "health",
-  "payload_type": "HealthSnapshot",
-  "ttl_s": 120
-}
+{"class":"state","key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","note":"","origin":"h-3fa9c2d41b7e","payload_type":"HealthSnapshot","producer":"sysinfo","report":"topic-info","subject":"health","ttl_s":120,"verdict":"registered"}
 
 ```

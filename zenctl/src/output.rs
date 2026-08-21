@@ -30,71 +30,7 @@ pub fn topic_list(report: &TopicList, format: Format) -> Result<()> {
 }
 
 pub fn topic_info(report: &TopicInfo, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json | Format::Ndjson => {
-            json_doc(report);
-            Ok(())
-        }
-        _ => {
-            println!("key       {}", report.key);
-            println!("verdict   {:?}", report.verdict);
-            if !report.note.is_empty() {
-                println!("          {}", report.note);
-            }
-            if let Some(origin) = &report.origin {
-                println!("origin    {origin}");
-            }
-            if let Some(producer) = &report.producer {
-                println!("producer  {producer}");
-            }
-            if let Some(class) = &report.class {
-                println!("class     {class}");
-            }
-            if let Some(subject) = &report.subject {
-                println!("subject   {subject}");
-            }
-            if !report.variables.is_empty() {
-                println!("variables");
-                for (name, value) in &report.variables {
-                    println!("  {name} = {value}");
-                }
-            }
-            if let Some(payload) = &report.payload_type {
-                println!("payload   {payload}");
-                // Since RFC 08 §7 the shape is served, so point at it rather
-                // than at the old "lives with the application" dead end.
-                println!("  (`zenctl interface show {payload} --schema` for the served shape)");
-            }
-            if let Some(unit) = &report.unit {
-                println!("unit      {unit}");
-            }
-            if let Some(qos) = &report.qos {
-                println!("qos       {qos}");
-            }
-            if let Some(ttl) = report.ttl_s {
-                println!(
-                    "ttl       {ttl}s  (refresh <= {}s; stale after {ttl}s)",
-                    ttl / 2
-                );
-            }
-            if let Some(rate) = &report.rate {
-                println!("rate      {rate}");
-            }
-            if let Some(cardinality) = report.cardinality {
-                println!("cardinality  {cardinality}");
-            }
-            if let Some(encoding) = &report.encoding {
-                println!("encoding  {encoding}");
-            }
-            if let Some(since) = &report.since {
-                println!("since     {since}");
-            }
-            if let Some(description) = &report.description {
-                println!("about     {description}");
-            }
-            Ok(())
-        }
-    }
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 pub fn service_list(report: &ServiceList, format: Format) -> Result<()> {
     crate::render::emit(&mut std::io::stdout(), report, format)
@@ -110,46 +46,7 @@ pub fn interface_list(report: &InterfaceList, format: Format) -> Result<()> {
 }
 
 pub fn interface_show(report: &InterfaceShow, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json | Format::Ndjson => json_doc(report),
-        _ => {
-            println!("type      {}", report.type_name);
-            println!(
-                "\ncarried by {} subject(s)/procedure(s):",
-                report.carriers.len()
-            );
-            for c in report.carriers.iter().take(20) {
-                println!("  {:<10} {:<10} {}", c.producer, c.class, c.path);
-            }
-            if report.carriers.len() > 20 {
-                println!("  … and {} more", report.carriers.len() - 20);
-            }
-            if !report.schemas.is_empty() {
-                println!("\nserved schema (RFC 08 §7):");
-                for s in &report.schemas {
-                    println!("  {:<10} {:<12} {}", s.producer, s.kind, s.hash);
-                }
-                // Same name, different hash across producers: §7 says this is
-                // a finding, and the type's own page is where it is worth
-                // seeing.
-                let first = &report.schemas[0].hash;
-                if report.schemas.iter().any(|s| &s.hash != first) {
-                    println!(
-                        "\n  ⚠ producers disagree about {}'s shape — a schema-drift finding \
-                         (RFC 08 §7); `zenctl doctor` carries it as one",
-                        report.type_name
-                    );
-                }
-                for s in &report.schemas {
-                    if let Some(doc) = &s.document {
-                        println!("\n  {} says:", s.producer);
-                        println!("{}", serde_json::to_string_pretty(doc).unwrap_or_default());
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `zenctl bench rpc` (issue #52).
@@ -211,203 +108,19 @@ pub fn blob_list(report: &BlobList, format: Format) -> Result<()> {
 
 /// `blob probe` — who answered, and at which root (RFC 07 §2.5).
 pub fn blob_probe(report: &BlobProbeReport, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => {
-            // An envelope line first, *always*, then one line per holder.
-            //
-            // Row-per-line alone would mean a probe that found nobody — or one
-            // that was never issued at all, as the content-addressed tiers are
-            // — emits an empty stream, which reads as "asked, nobody holds it".
-            // The coverage statement (O5) and the reason nothing was asked (O4)
-            // have to survive the pipe, so they get their own object.
-            json_line(&serde_json::json!({
-                "probe": report.target,
-                "tier": report.tier,
-                "asked": report.asked,
-                "not_probed": report.not_probed,
-                "answered": report.answered,
-                "roots": report.roots,
-                "declared_by": report.declared_by,
-            }));
-            report.holders.iter().for_each(json_line);
-        }
-        _ => {
-            println!("target  {}  (tier {})", report.target, report.tier);
-
-            // O5: name the coverage before the result, so "no holders" is read
-            // against what was actually asked.
-            if let Some(why) = &report.not_probed {
-                println!("\nnot probed: {why}");
-                if !report.declared_by.is_empty() {
-                    println!(
-                        "\ndeclared by: {} — a capability claim from the registry, not a \
-                         statement that any of them holds this object.",
-                        report.declared_by.join(", ")
-                    );
-                }
-                return Ok(());
-            }
-            println!("asked:");
-            for selector in &report.asked {
-                println!("  {selector}");
-            }
-
-            if report.holders.is_empty() {
-                println!(
-                    "\nno replies. Silence is not a verdict (RFC 05 §3.1): no origin holds \
-                     this id, none is up, or the timeout was too short."
-                );
-                if !report.declared_by.is_empty() {
-                    println!(
-                        "declared by: {} — so the tier exists in the registry; \
-                         `zenctl node list` says whether they are up.",
-                        report.declared_by.join(", ")
-                    );
-                }
-                return Ok(());
-            }
-
-            println!("\nholders:\n");
-            // Only tier 1 has a manifest endpoint, so "no manifest reply" is
-            // a verdict there and a category error on the tier-2 rows.
-            let tier1 = report.tier == "artifact";
-            for h in &report.holders {
-                print!("  {:<16}", h.origin);
-                match (&h.availability, &h.manifest) {
-                    (Some(a), Some(m)) => print!(
-                        "  {}/{} chunks · {} bytes · root {}",
-                        a.have,
-                        a.chunk_count,
-                        m.total_len,
-                        short(&m.root)
-                    ),
-                    (Some(a), None) if tier1 => {
-                        print!("  {}/{} chunks · no manifest reply", a.have, a.chunk_count)
-                    }
-                    (Some(a), None) => print!("  {}/{} chunks", a.have, a.chunk_count),
-                    (None, Some(m)) => print!(
-                        "  {} bytes · root {} · no have reply",
-                        m.total_len,
-                        short(&m.root)
-                    ),
-                    (None, None) => print!("  answered, said nothing readable"),
-                }
-                println!();
-                if let Some(n) = &h.note {
-                    println!("      note: {n}");
-                }
-                if let Some(u) = &h.unreadable {
-                    println!("      unreadable: {u}");
-                }
-                if let Some(e) = &h.error {
-                    println!("      ✗ {} — {}", e.name, e.message);
-                }
-                println!("      {}", h.key);
-            }
-
-            if report.roots.len() > 1 {
-                println!(
-                    "\nROOT DIFFERS — {} distinct content roots under one id:",
-                    report.roots.len()
-                );
-                for r in &report.roots {
-                    println!("  {r}");
-                }
-                println!(
-                    "The id is a name; the root is the anchor (RFC 07 §2.1). This is a \
-                     finding, not a tie-break: pass --root <hex> to say which content you \
-                     mean, and the fetch will refuse anything else."
-                );
-            }
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `blob fetch tree/<root>` — the validated index summary (RFC 07 §2.3,
 /// v1.17). Inspection, not download: no destination file, no content store,
 /// and the pin is the key itself.
 pub fn blob_tree(report: &BlobTreeIndexReport, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json | Format::Ndjson => {
-            json_doc(report);
-            Ok(())
-        }
-        _ => {
-            println!("tree/{}", report.root);
-            println!("  from      {} ({})", report.origin, report.key);
-            println!(
-                "  index     {} entr{}, {} file(s)",
-                report.entries,
-                if report.entries == 1 { "y" } else { "ies" },
-                report.files
-            );
-            println!(
-                "  content   {} bytes in {} distinct chunk(s) — not fetched; \
-                 the summary needs no content store (RFC 07 §2.3)",
-                report.total_size, report.chunks
-            );
-            println!("  priority  {} (RFC 07 §2.6)", report.priority);
-            println!(
-                "  root      {} (pinned by construction — the key is the identity)",
-                report.root
-            );
-            Ok(())
-        }
-    }
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `blob fetch` — what one transfer cost and proved.
 pub fn blob_fetch(report: &BlobFetchReport, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json | Format::Ndjson => json_doc(report),
-        _ => {
-            println!("{}", report.dest);
-            println!("  from      {} ({})", report.origin, report.key);
-            println!(
-                "  bytes     {} in {} chunk(s){}",
-                report.bytes,
-                report.chunks,
-                if report.chunks_resumed > 0 {
-                    format!(", {} resumed", report.chunks_resumed)
-                } else {
-                    String::new()
-                }
-            );
-            println!("  priority  {} (RFC 07 §2.6)", report.priority);
-            if report.root_pinned {
-                println!("  root      {} (pinned)", report.root);
-            } else {
-                println!(
-                    "  root      trust-on-first-use — this origin chose the content \
-                     (RFC 07 §2.1)"
-                );
-            }
-            // Nonzero rejections mean a replier served bytes that did not
-            // verify. The transfer succeeded anyway, which is the point of
-            // verifying before disk — but it is a fact about the fleet.
-            if report.rejected > 0 {
-                println!(
-                    "  rejected  {} repl{} failed verification before disk",
-                    report.rejected,
-                    if report.rejected == 1 { "y" } else { "ies" }
-                );
-            }
-            if report.retries > 0 {
-                println!("  retries   {}", report.retries);
-            }
-            eprintln!("{} ms", report.elapsed_ms);
-        }
-    }
-    Ok(())
-}
-
-fn short(hash: &str) -> String {
-    if hash.len() <= 16 {
-        return hash.to_string();
-    }
-    format!("{}…", &hash[..16])
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 pub fn storage_list(report: &StorageList, format: Format) -> Result<()> {
