@@ -37,7 +37,7 @@ use crate::view::tokens::space;
 /// false in the other two (#249).
 const MAX_ROWS: usize = 50_000;
 
-use crate::message::{BusMsg, RightPane};
+use crate::message::{BusMsg, DeploymentMsg, RightPane};
 
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
@@ -367,24 +367,11 @@ impl Zengui {
                 tracing::warn!("watch {path} failed: {e}");
                 Task::none()
             }
-            Message::ScopeWatchesStarted(ids) => {
-                for id in &ids {
-                    self.seeding.insert(*id, None);
-                }
-                self.scope_watches = ids;
-                Task::none()
-            }
+            Message::Deployment(m) => self.update_deployment(m),
             Message::WatchReleased(_, Ok(())) => Task::none(),
             Message::WatchReleased(path, Err(e)) => {
                 tracing::warn!("unwatch {path} failed: {e}");
                 Task::none()
-            }
-            Message::ScopeWatchToggled => {
-                if self.scope_watches.is_empty() {
-                    self.watch_scope()
-                } else {
-                    self.unwatch_scope()
-                }
             }
             Message::ValueFetched(key, outcome) => {
                 // No base guard needed (#109 audit): the evidence is keyed by
@@ -443,39 +430,6 @@ impl Zengui {
                 // Stale guard: only the currently selected key's decode lands.
                 if self.selected.as_deref() == Some(key.as_str()) {
                     self.decoded = Some((type_name, (*rendering).clone()));
-                }
-                Task::none()
-            }
-            Message::BaseSelected(base) => {
-                if base == self.settings.base {
-                    return Task::none();
-                }
-                self.settings.base = base;
-                // The base is an input to every projection and to the
-                // skeleton, and watch selectors are base-relative: a fresh
-                // monitor is the obviously-correct restart. Everything the old
-                // base taught us is evidence about a different deployment (O4).
-                self.forget_deployment();
-                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
-                    &self.settings.base,
-                    self.settings.timeout(),
-                )));
-                self.decoded = None;
-                self.reflatten();
-                Task::batch([self.start_monitor(), self.load_slices()])
-            }
-            Message::ScopeSelected(scope) => {
-                if scope == self.settings.scope {
-                    return Task::none();
-                }
-                self.settings.scope = scope;
-                // Remembered for the next launch (issue #73).
-                self.remember();
-                // If the scope is being observed, re-point the observation.
-                if !self.scope_watches.is_empty() {
-                    let release = self.unwatch_scope();
-                    let acquire = self.watch_scope();
-                    return Task::batch([release, acquire]);
                 }
                 Task::none()
             }
@@ -607,10 +561,6 @@ impl Zengui {
                 self.remember();
                 Task::none()
             }
-            Message::Reconnect => {
-                self.forget_deployment();
-                self.start_monitor()
-            }
         }
     }
 
@@ -720,6 +670,63 @@ impl Zengui {
             BusMsg::Tick(tick) => {
                 self.apply_tick(&tick);
                 Task::none()
+            }
+        }
+    }
+
+    /// What the app is pointed at, and the coverage that follows.
+    fn update_deployment(&mut self, msg: DeploymentMsg) -> Task<Message> {
+        match msg {
+            DeploymentMsg::ScopeWatchesStarted(ids) => {
+                for id in &ids {
+                    self.seeding.insert(*id, None);
+                }
+                self.scope_watches = ids;
+                Task::none()
+            }
+            DeploymentMsg::ScopeWatchToggled => {
+                if self.scope_watches.is_empty() {
+                    self.watch_scope()
+                } else {
+                    self.unwatch_scope()
+                }
+            }
+            DeploymentMsg::BaseSelected(base) => {
+                if base == self.settings.base {
+                    return Task::none();
+                }
+                self.settings.base = base;
+                // The base is an input to every projection and to the
+                // skeleton, and watch selectors are base-relative: a fresh
+                // monitor is the obviously-correct restart. Everything the old
+                // base taught us is evidence about a different deployment (O4).
+                self.forget_deployment();
+                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+                    &self.settings.base,
+                    self.settings.timeout(),
+                )));
+                self.decoded = None;
+                self.reflatten();
+                Task::batch([self.start_monitor(), self.load_slices()])
+            }
+            DeploymentMsg::ScopeSelected(scope) => {
+                if scope == self.settings.scope {
+                    return Task::none();
+                }
+                self.settings.scope = scope;
+                // Remembered for the next launch (issue #73).
+                self.remember();
+                // If the scope is being observed, re-point the observation.
+                if !self.scope_watches.is_empty() {
+                    let release = self.unwatch_scope();
+                    let acquire = self.watch_scope();
+                    return Task::batch([release, acquire]);
+                }
+                Task::none()
+            }
+            DeploymentMsg::Reconnect => {
+                self.forget_deployment();
+                self.start_monitor()
             }
         }
     }
@@ -2372,7 +2379,7 @@ impl Zengui {
                 }
                 ids
             },
-            Message::ScopeWatchesStarted,
+            |r| Message::Deployment(DeploymentMsg::ScopeWatchesStarted(r)),
         )
     }
 
@@ -3026,11 +3033,9 @@ impl Zengui {
         // slice is as good as a `Vec` — and the toolbar redraws at frame rate
         // while its options change on a discovery sweep, which is minutes
         // apart.
-        let base_picker = pick_list(
-            &self.base_options[..],
-            Some(&self.settings.base),
-            Message::BaseSelected,
-        )
+        let base_picker = pick_list(&self.base_options[..], Some(&self.settings.base), |r| {
+            Message::Deployment(DeploymentMsg::BaseSelected(r))
+        })
         .placeholder("base")
         .text_size(crate::view::tokens::font::CAPTION);
 
@@ -3042,11 +3047,9 @@ impl Zengui {
             ScopePreset::State,
             ScopePreset::Events,
         ];
-        let scope_picker = pick_list(
-            &SCOPES[..],
-            Some(self.settings.scope),
-            Message::ScopeSelected,
-        )
+        let scope_picker = pick_list(&SCOPES[..], Some(self.settings.scope), |r| {
+            Message::Deployment(DeploymentMsg::ScopeSelected(r))
+        })
         .text_size(crate::view::tokens::font::CAPTION);
 
         // Observation is opt-in and labelled by its cost (issue #85).
@@ -3059,7 +3062,7 @@ impl Zengui {
             })
             .size(crate::view::tokens::font::CAPTION),
         )
-        .on_press(Message::ScopeWatchToggled)
+        .on_press(Message::Deployment(DeploymentMsg::ScopeWatchToggled))
         .padding(4);
 
         row![
@@ -3110,7 +3113,7 @@ impl Zengui {
                 .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomIn))
                 .padding(4),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))
-                .on_press(Message::Reconnect)
+                .on_press(Message::Deployment(DeploymentMsg::Reconnect))
                 .padding(4),
         ]
         .spacing(space::SM)

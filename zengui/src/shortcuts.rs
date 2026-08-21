@@ -12,7 +12,7 @@
 
 use iced::keyboard::{Key, Modifiers, key::Named};
 
-use crate::message::{Message, PrefsMsg, RightPane};
+use crate::message::{DeploymentMsg, Message, PrefsMsg, RightPane};
 use crate::view::palette::{Overlay, PaletteMsg};
 
 /// One binding: how it is typed, what it does, and the message it sends.
@@ -51,7 +51,7 @@ pub fn map() -> Vec<Binding> {
         Binding {
             keys: "Ctrl R",
             what: "reconnect",
-            message: || Message::Reconnect,
+            message: || Message::Deployment(DeploymentMsg::Reconnect),
         },
         Binding {
             keys: "Ctrl P",
@@ -128,7 +128,7 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
             "-" | "_" => Some(Message::Prefs(PrefsMsg::ZoomOut)),
             "0" => Some(Message::Prefs(PrefsMsg::ZoomReset)),
             "t" | "T" => Some(Message::Prefs(PrefsMsg::ThemeToggled)),
-            "r" | "R" => Some(Message::Reconnect),
+            "r" | "R" => Some(Message::Deployment(DeploymentMsg::Reconnect)),
             "p" | "P" => Some(Message::Palette(PaletteMsg::Open(Overlay::Commands))),
             "k" | "K" => Some(Message::Palette(PaletteMsg::Open(Overlay::Keys))),
             _ => None,

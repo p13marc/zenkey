@@ -45,12 +45,39 @@ pub enum BusMsg {
     SlicesUnionLoaded(Result<(Arc<SliceSet>, usize, usize, usize), String>),
 }
 
+/// What the app is pointed at, and the coverage that follows (#176).
+///
+/// The invariant: **every variant here invalidates or re-points observation.**
+///
+/// `Reconnect` is here rather than under `Bus`, on behaviour rather than taste:
+/// its handler is byte-for-byte the tail of `BaseSelected`'s, and a message whose
+/// body is a subset of another's belongs in that group. Where it is *reached
+/// from* — the toolbar, Ctrl-R, the palette — is a bad tiebreaker, because it is
+/// all three.
+///
+/// The scope watches come along for the same reason: `ScopeSelected`'s handler
+/// *is* `unwatch_scope()` then `watch_scope()`, so keeping them apart would put
+/// one behaviour in two enums.
+#[derive(Debug, Clone)]
+pub enum DeploymentMsg {
+    /// The scope preset's watches were declared (the eager set).
+    ScopeWatchesStarted(Vec<WatchId>),
+    /// Apply/release the scope preset's selectors as watches — the eager
+    /// mode, made explicit and labelled by its cost.
+    ScopeWatchToggled,
+    BaseSelected(String),
+    ScopeSelected(ScopePreset),
+    Reconnect,
+}
+
 /// Everything that can move the app.
 ///
 /// `Clone` is required by iced's widget callbacks. Every payload here is
 /// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// What the app is pointed at, and the coverage that follows (#176).
+    Deployment(DeploymentMsg),
     /// The bus, the monitor, a sweep: something the world answered.
     Bus(BusMsg),
 
@@ -61,11 +88,6 @@ pub enum Message {
     WatchStarted(String, Result<WatchId, String>),
     /// A watch was released for the given display path.
     WatchReleased(String, Result<(), String>),
-    /// The scope preset's watches were declared (the eager set).
-    ScopeWatchesStarted(Vec<WatchId>),
-    /// Apply/release the scope preset's selectors as watches — the eager
-    /// mode, made explicit and labelled by its cost.
-    ScopeWatchToggled,
     /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
     ValueFetched(String, Result<Arc<FetchOutcome>, String>),
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
@@ -91,8 +113,6 @@ pub enum Message {
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
 
-    BaseSelected(String),
-    ScopeSelected(ScopePreset),
     ToggleNode(String),
     SelectKey(Option<String>),
     /// The tree pivot changed (issue #65).
@@ -108,7 +128,6 @@ pub enum Message {
     Context(crate::view::contexts::ContextMsg),
     /// Switch the right-hand pane (the toolbar's tab strip).
     PaneSelected(RightPane),
-    Reconnect,
 
     /// A key press no widget consumed (issues #73, #75).
     ///

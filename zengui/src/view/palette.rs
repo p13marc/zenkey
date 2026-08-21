@@ -20,7 +20,7 @@
 use iced::widget::{Column, column, container, row, text, text_input};
 use iced::{Element, Length};
 
-use crate::message::{Message, PrefsMsg, RightPane};
+use crate::message::{DeploymentMsg, Message, PrefsMsg, RightPane};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -120,7 +120,7 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
     ] {
         out.push(Action {
             label: format!("scope: {}", scope.short()),
-            message: Message::ScopeSelected(scope),
+            message: Message::Deployment(DeploymentMsg::ScopeSelected(scope)),
         });
     }
 
@@ -134,7 +134,7 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
     out.extend([
         Action {
             label: "observe scope (start/stop)".into(),
-            message: Message::ScopeWatchToggled,
+            message: Message::Deployment(DeploymentMsg::ScopeWatchToggled),
         },
         Action {
             label: "run doctor".into(),
@@ -142,7 +142,7 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         },
         Action {
             label: "reconnect".into(),
-            message: Message::Reconnect,
+            message: Message::Deployment(DeploymentMsg::Reconnect),
         },
         Action {
             label: "toggle theme".into(),
@@ -406,7 +406,9 @@ mod tests {
             )),
             format!(
                 "{:?}",
-                Message::ScopeSelected(crate::scope::ScopePreset::Everything)
+                Message::Deployment(DeploymentMsg::ScopeSelected(
+                    crate::scope::ScopePreset::Everything
+                ))
             )
         );
         // Context: the same message the connect pane's picker sends.
@@ -422,7 +424,10 @@ mod tests {
             find("clear echo"),
             format!("{:?}", Message::Echo(crate::view::echo::EchoMsg::Clear))
         );
-        assert_eq!(find("reconnect"), format!("{:?}", Message::Reconnect));
+        assert_eq!(
+            find("reconnect"),
+            format!("{:?}", Message::Deployment(DeploymentMsg::Reconnect))
+        );
     }
 
     /// The pane list is generated, so a pane added anywhere shows up here.
