@@ -268,3 +268,31 @@ both algorithmically better and marginally faster.
 
 The rule that follows: at `sample_size(10)` on this box, **a delta whose interval
 is wider than the delta is not a measurement**. Re-run before believing one.
+
+### After the shape cache (#177)
+
+`retarget` is what a steady-state tick does instead of `merge` + `flatten`:
+
+| Path | Cost per tick |
+|---|---|
+| before — merge + flatten | 24.97 + 22.08 = **47.05 ms** |
+| after — retarget | **11.3 ns** |
+
+Four million times cheaper is not a meaningful ratio; the meaningful statement is
+that the tick's tree work stopped being a function of the tree. `retarget_1k`
+(11.34 ns) and `retarget_50k` (11.31 ns) are the evidence — one size would have
+proved nothing, and criterion cannot count allocations, so the pair plus
+`steady_state_ticks_reuse_the_tree_shape` (one rebuild in a hundred ticks) is
+what stands in for #177's "allocation is O(1)" acceptance.
+
+What moved to the frame is `window_rows_40_of_*`: 11.29 µs at 1k rows, 12.57 µs
+at 50k — one screenful either way, and the 11% between them is the `BTreeMap`
+descent being log(keys) deep rather than anything to do with the row count. At
+frame rate that is 0.08% of a 16 ms budget.
+
+**What this does not buy**, stated because the issue's "~100% of rebuilds" is
+unqualified: nothing, on a bus *at* the key-table bound, where every arriving key
+evicts an old one, `keys_evicted` moves every tick and the shape genuinely
+changes every tick. There the rebuild is correct work. Pivot views likewise
+rebuild every tick by construction — their numbers are aggregates over a
+synthetic grouping no snapshot can be asked about.

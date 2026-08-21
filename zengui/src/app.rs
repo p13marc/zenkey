@@ -172,6 +172,16 @@ pub struct Zengui {
     keys: usize,
     keys_evicted: u64,
     keys_unwatched: u64,
+    /// Ticks that reused the cached tree shape, and ticks that rebuilt it
+    /// (#177).
+    ///
+    /// Not surfaced anywhere, and deliberately: the honesty rule is that a
+    /// *bound* reports what it cost, and this cache hides nothing — it is
+    /// either exactly correct or it is a bug. So the guarantee belongs in a
+    /// test, and criterion cannot express it because it cannot count
+    /// allocations. `steady_state_ticks_reuse_the_tree_shape` reads these.
+    shape_reused: u64,
+    shape_rebuilt: u64,
     totals: (u64, u64, f64),
 
     /// Replay mode (issue #74): while `Some`, the panes are fed from the
@@ -276,6 +286,8 @@ impl Zengui {
             keys: 0,
             keys_evicted: 0,
             keys_unwatched: 0,
+            shape_reused: 0,
+            shape_rebuilt: 0,
             totals: (0, 0, 0.0),
             replay: None,
             replay_open: None,
@@ -2536,6 +2548,13 @@ impl Zengui {
     }
 
     fn apply_tick(&mut self, tick: &BusTick) {
+        // Decided *before* the fields below are overwritten (#177).
+        let held = shape_held(
+            (self.keys, self.keys_evicted, self.keys_unwatched),
+            (tick.keys, tick.keys_evicted, tick.keys_unwatched),
+            &self.watched,
+            &tick.watched,
+        );
         // Per tick, not per frame: one bounded lock for one key's latency
         // summary (#119). None when unselected, unobserved, or unstamped.
         self.selected_latency = match (&self.selected, &self.monitor) {
@@ -2609,7 +2628,21 @@ impl Zengui {
         // sampler, the facts behind the unit. Rebuilt once here rather than
         // once per frame (#178).
         self.refresh_series();
-        self.reflatten();
+        // The tree's shape survived, so point it at this tick's numbers
+        // instead of walking 50,000 nodes to move eight of them (#177).
+        // `retarget` refuses a pivot, which is the other half of the
+        // condition: those rebuild every tick, exactly as before.
+        let now = std::time::Instant::now();
+        if held
+            && self
+                .flat
+                .retarget(std::sync::Arc::clone(&self.observed), now)
+        {
+            self.shape_reused += 1;
+        } else {
+            self.shape_rebuilt += 1;
+            self.reflatten();
+        }
     }
 
     fn reflatten(&mut self) {
@@ -3068,6 +3101,35 @@ impl Zengui {
     }
 }
 
+/// Whether the tree's *shape* can have survived this tick (#177).
+///
+/// Two rungs, and both are needed.
+///
+/// **The key-set triple.** Keys leave `StatsTable` by exactly two routes —
+/// `retire_unwatched` bumps `unwatched`, `evict` bumps `evicted` — and enter by
+/// `record`, which moves `len()`. So any change to the set moves at least one
+/// member. The comparison is equality rather than `>`, so a replay seeking
+/// backwards trips it too.
+///
+/// **The watch set's identity.** `is_covered` is what flips a node's
+/// `NodeStatus` when a watch is released, so the triple alone would freeze the
+/// unwatched badge. `link.rs` reassigns `watched` *only* on a `WatchChanged`
+/// event and hands out `Arc::clone` every tick, so pointer identity is an exact
+/// test that costs nothing.
+///
+/// That second rung also covers a hazard: `Message::WatchReleased` does not
+/// reflatten — it returns `Task::none()` and has always relied on the
+/// unconditional tick rebuild. Releasing a watch fires `WatchChanged`, which
+/// swaps the `Arc`, which lands here as `false`.
+fn shape_held(
+    prev: (usize, u64, u64),
+    next: (usize, u64, u64),
+    prev_watched: &std::sync::Arc<[String]>,
+    next_watched: &std::sync::Arc<[String]>,
+) -> bool {
+    prev == next && std::sync::Arc::ptr_eq(prev_watched, next_watched)
+}
+
 /// Whether any active watch selector covers this exact key.
 ///
 /// The distinction the history pane rests on: with no watch, no sample can
@@ -3151,6 +3213,116 @@ mod tests {
         );
     }
 
+    /// A tick that changes nothing about the key set or the watch set.
+    fn tick(keys: usize, evicted: u64, unwatched: u64, watched: &Arc<[String]>) -> BusTick {
+        let stats = zenkey_fleet::stats::StatsTable::new();
+        BusTick {
+            tree: Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats)),
+            samples: Vec::new(),
+            lagged: 0,
+            coalesced: 0,
+            nodes: Vec::new(),
+            keys,
+            keys_evicted: evicted,
+            keys_unwatched: unwatched,
+            watched: Arc::clone(watched),
+            seeded: Vec::new(),
+            totals: (0, 0, 0.0),
+        }
+    }
+
+    /// #177's whole claim, and the thing criterion cannot say because it
+    /// cannot count allocations: at steady state the tree is walked once.
+    #[test]
+    fn steady_state_ticks_reuse_the_tree_shape() {
+        let mut app = app();
+        let watched: Arc<[String]> = Arc::from(["v1/**".to_string()]);
+        for _ in 0..100 {
+            app.apply_tick(&tick(7, 0, 0, &watched));
+        }
+        assert_eq!(
+            (app.shape_rebuilt, app.shape_reused),
+            (1, 99),
+            "one rebuild to establish the shape, then ninety-nine retargets"
+        );
+    }
+
+    /// Each of the four things that can move the shape, alone.
+    ///
+    /// The `keys` rung needs the other two beside it: `keys` is a *current*
+    /// count, so a key added and evicted within one 250 ms window cancels out
+    /// — which is exactly why the trigger is a triple and not a number.
+    #[test]
+    fn a_new_key_an_eviction_an_unwatch_or_a_new_watch_set_all_rebuild() {
+        let watched: Arc<[String]> = Arc::from(["v1/**".to_string()]);
+        for (label, next) in [
+            ("a new key", (8usize, 0u64, 0u64)),
+            ("an eviction", (7, 1, 0)),
+            ("an unwatch", (7, 0, 1)),
+        ] {
+            let mut app = app();
+            app.apply_tick(&tick(7, 0, 0, &watched));
+            let before = app.shape_rebuilt;
+            app.apply_tick(&tick(next.0, next.1, next.2, &watched));
+            assert_eq!(
+                app.shape_rebuilt,
+                before + 1,
+                "{label} changes the tree and must rebuild it"
+            );
+        }
+
+        // A different watch set with identical counters: `is_covered` decides
+        // `NodeStatus`, so the badge would freeze without this rung.
+        let mut app = app();
+        app.apply_tick(&tick(7, 0, 0, &watched));
+        let before = app.shape_rebuilt;
+        let other: Arc<[String]> = Arc::from(["v1/**".to_string()]);
+        app.apply_tick(&tick(7, 0, 0, &other));
+        assert_eq!(
+            app.shape_rebuilt,
+            before + 1,
+            "a new watch-set Arc rebuilds even when every counter matches"
+        );
+    }
+
+    /// The hazard the watch rung covers, named so it cannot be optimised away.
+    ///
+    /// `Message::WatchReleased` does **not** reflatten — it returns
+    /// `Task::none()` and has always relied on the unconditional tick rebuild
+    /// to repaint node status. Under a conditional trigger that would be a live
+    /// bug, except that releasing a watch fires `WatchChanged`, which is the
+    /// only thing that reassigns `watched` in `link.rs`, which swaps the `Arc`.
+    #[test]
+    fn a_released_watch_still_repaints_the_tree() {
+        let mut app = app();
+        let two: Arc<[String]> = Arc::from(["v1/a/**".to_string(), "v1/b/**".to_string()]);
+        app.apply_tick(&tick(7, 0, 0, &two));
+        let before = app.shape_rebuilt;
+        // The release: same keys, same counters, one selector fewer.
+        let one: Arc<[String]> = Arc::from(["v1/a/**".to_string()]);
+        app.apply_tick(&tick(7, 0, 0, &one));
+        assert_eq!(app.shape_rebuilt, before + 1);
+    }
+
+    /// The predicate on its own, since it is the whole trigger.
+    #[test]
+    fn the_shape_trigger_reads_every_rung() {
+        let a: Arc<[String]> = Arc::from(["x".to_string()]);
+        let b: Arc<[String]> = Arc::from(["x".to_string()]);
+        assert!(shape_held((1, 2, 3), (1, 2, 3), &a, &a));
+        assert!(!shape_held((1, 2, 3), (2, 2, 3), &a, &a));
+        assert!(!shape_held((1, 2, 3), (1, 3, 3), &a, &a));
+        assert!(!shape_held((1, 2, 3), (1, 2, 4), &a, &a));
+        assert!(
+            !shape_held((1, 2, 3), (1, 2, 3), &a, &b),
+            "equal contents, different Arc: the watch set was rebuilt, and \
+             only a rebuild reassigns it"
+        );
+        // A replay seeking backwards moves the counters *down*, which is why
+        // the comparison is equality and not a `>`.
+        assert!(!shape_held((9, 9, 9), (1, 2, 3), &a, &a));
+    }
+
     /// The bug class, gated rather than fixed once.
     ///
     /// #179 and #194 are the same mistake at different sites: a field added to
@@ -3183,6 +3355,11 @@ mod tests {
             "keys",
             "keys_evicted",
             "keys_unwatched",
+            // Session-lifetime instrumentation, not deployment evidence: they
+            // count how the cache behaved, and a base change is one of the
+            // things they are counting (#177).
+            "shape_reused",
+            "shape_rebuilt",
             "totals",
             "flat",
             // View state about *this window*, not about the fleet.
