@@ -37,7 +37,7 @@ use crate::view::tokens::space;
 /// false in the other two (#249).
 const MAX_ROWS: usize = 50_000;
 
-use crate::message::RightPane;
+use crate::message::{BusMsg, RightPane};
 
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
@@ -333,7 +333,7 @@ impl Zengui {
                     .await
                     .map_err(|e| e.to_string())
             },
-            Message::SessionOpened,
+            |r| Message::Bus(BusMsg::SessionOpened(r)),
         );
         (app, open)
     }
@@ -353,110 +353,7 @@ impl Zengui {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::SessionOpened(Ok(session)) => {
-                self.session = Some(session.clone());
-                // The context list is read from the shared file, not cached at
-                // launch: `zenctl context create` on the other side of the
-                // screen should show up here without a restart (#67).
-                self.refresh_contexts();
-                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
-                    &self.settings.base,
-                    self.settings.timeout(),
-                )));
-                let timeout = self.settings.timeout();
-                let discover = Task::perform(
-                    {
-                        let s = session.clone();
-                        async move {
-                            zenkey_fleet::discover_bases(&s, timeout)
-                                .await
-                                .map_err(|e| e.to_string())
-                        }
-                    },
-                    Message::BasesDiscovered,
-                );
-                Task::batch([discover, self.start_monitor(), self.load_slices()])
-            }
-            Message::SessionOpened(Err(e)) => {
-                self.link = LinkState::Failed(e);
-                Task::none()
-            }
-            Message::MonitorStarted(Ok(monitor)) => {
-                self.monitor = Some(Arc::clone(&monitor));
-                self.epoch += 1;
-                if self.settings.eager {
-                    return self.watch_scope();
-                }
-                Task::none()
-            }
-            Message::MonitorStarted(Err(e)) => {
-                self.link = LinkState::Failed(e);
-                Task::none()
-            }
-            Message::SkeletonBuilt(Ok((skeleton, roster))) => {
-                self.skeleton = Some(skeleton);
-                // The build task gathered the roster anyway — seed the node
-                // dashboard from it instead of throwing it away (#61).
-                self.roster.seed(&roster);
-                self.reflatten();
-                Task::none()
-            }
-            Message::SkeletonBuilt(Err(e)) => {
-                tracing::warn!("skeleton build failed: {e}");
-                Task::none()
-            }
-            Message::BasesDiscovered(Ok(bases)) => {
-                self.bases = bases;
-                self.rebuild_base_options();
-                Task::none()
-            }
-            Message::BasesDiscovered(Err(e)) => {
-                tracing::warn!("base discovery failed: {e}");
-                Task::none()
-            }
-            Message::SlicesLoaded(Ok(slices)) => {
-                self.slice_source = if self.settings.registry.is_empty() {
-                    SliceSource::Bus {
-                        count: slices.slices().len(),
-                    }
-                } else {
-                    SliceSource::Dirs {
-                        count: slices.slices().len(),
-                    }
-                };
-                self.slices = Some(slices);
-                self.reresolve_registrations();
-                self.refresh_blob_list();
-                // The skeleton is built FROM the slices — (re)build it now.
-                self.build_skeleton()
-            }
-            Message::SlicesUnionLoaded(Ok((slices, from_bus, dirs_only, disagreements))) => {
-                self.slice_source = SliceSource::Union {
-                    from_bus,
-                    dirs_only,
-                    disagreements,
-                };
-                self.slices = Some(slices);
-                self.reresolve_registrations();
-                self.refresh_blob_list();
-                self.build_skeleton()
-            }
-            Message::SlicesUnionLoaded(Err(e)) => {
-                self.slice_source = SliceSource::Failed(e);
-                Task::none()
-            }
-            Message::SlicesLoaded(Err(e)) => {
-                self.slice_source = SliceSource::Failed(e);
-                Task::none()
-            }
-            Message::Link(state) => {
-                self.link = state;
-                Task::none()
-            }
-            Message::Tick(tick) => {
-                self.apply_tick(&tick);
-                Task::none()
-            }
+            Message::Bus(m) => self.update_bus(m),
             Message::WatchToggled(path) => self.toggle_watch(path),
             Message::WatchStarted(path, Ok(id)) => {
                 self.my_watch_paths.insert(path.clone());
@@ -713,6 +610,116 @@ impl Zengui {
             Message::Reconnect => {
                 self.forget_deployment();
                 self.start_monitor()
+            }
+        }
+    }
+
+    /// Everything the world answered — a task landing or a `link.rs` yield.
+    fn update_bus(&mut self, msg: BusMsg) -> Task<Message> {
+        match msg {
+            BusMsg::SessionOpened(Ok(session)) => {
+                self.session = Some(session.clone());
+                // The context list is read from the shared file, not cached at
+                // launch: `zenctl context create` on the other side of the
+                // screen should show up here without a restart (#67).
+                self.refresh_contexts();
+                self.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+                    &self.settings.base,
+                    self.settings.timeout(),
+                )));
+                let timeout = self.settings.timeout();
+                let discover = Task::perform(
+                    {
+                        let s = session.clone();
+                        async move {
+                            zenkey_fleet::discover_bases(&s, timeout)
+                                .await
+                                .map_err(|e| e.to_string())
+                        }
+                    },
+                    |r| Message::Bus(BusMsg::BasesDiscovered(r)),
+                );
+                Task::batch([discover, self.start_monitor(), self.load_slices()])
+            }
+            BusMsg::SessionOpened(Err(e)) => {
+                self.link = LinkState::Failed(e);
+                Task::none()
+            }
+            BusMsg::MonitorStarted(Ok(monitor)) => {
+                self.monitor = Some(Arc::clone(&monitor));
+                self.epoch += 1;
+                if self.settings.eager {
+                    return self.watch_scope();
+                }
+                Task::none()
+            }
+            BusMsg::MonitorStarted(Err(e)) => {
+                self.link = LinkState::Failed(e);
+                Task::none()
+            }
+            BusMsg::SkeletonBuilt(Ok((skeleton, roster))) => {
+                self.skeleton = Some(skeleton);
+                // The build task gathered the roster anyway — seed the node
+                // dashboard from it instead of throwing it away (#61).
+                self.roster.seed(&roster);
+                self.reflatten();
+                Task::none()
+            }
+            BusMsg::SkeletonBuilt(Err(e)) => {
+                tracing::warn!("skeleton build failed: {e}");
+                Task::none()
+            }
+            BusMsg::BasesDiscovered(Ok(bases)) => {
+                self.bases = bases;
+                self.rebuild_base_options();
+                Task::none()
+            }
+            BusMsg::BasesDiscovered(Err(e)) => {
+                tracing::warn!("base discovery failed: {e}");
+                Task::none()
+            }
+            BusMsg::SlicesLoaded(Ok(slices)) => {
+                self.slice_source = if self.settings.registry.is_empty() {
+                    SliceSource::Bus {
+                        count: slices.slices().len(),
+                    }
+                } else {
+                    SliceSource::Dirs {
+                        count: slices.slices().len(),
+                    }
+                };
+                self.slices = Some(slices);
+                self.reresolve_registrations();
+                self.refresh_blob_list();
+                // The skeleton is built FROM the slices — (re)build it now.
+                self.build_skeleton()
+            }
+            BusMsg::SlicesUnionLoaded(Ok((slices, from_bus, dirs_only, disagreements))) => {
+                self.slice_source = SliceSource::Union {
+                    from_bus,
+                    dirs_only,
+                    disagreements,
+                };
+                self.slices = Some(slices);
+                self.reresolve_registrations();
+                self.refresh_blob_list();
+                self.build_skeleton()
+            }
+            BusMsg::SlicesUnionLoaded(Err(e)) => {
+                self.slice_source = SliceSource::Failed(e);
+                Task::none()
+            }
+            BusMsg::SlicesLoaded(Err(e)) => {
+                self.slice_source = SliceSource::Failed(e);
+                Task::none()
+            }
+            BusMsg::Link(state) => {
+                self.link = state;
+                Task::none()
+            }
+            BusMsg::Tick(tick) => {
+                self.apply_tick(&tick);
+                Task::none()
             }
         }
     }
@@ -1372,7 +1379,7 @@ impl Zengui {
                 // every projection, roster and verdict from the old one is
                 // evidence about a different deployment (O4).
                 self.forget_deployment();
-                self.update(Message::SessionOpened(Ok(session)))
+                self.update(Message::Bus(BusMsg::SessionOpened(Ok(session))))
             }
             ContextMsg::Switched(Err(e)) => {
                 self.link = LinkState::Failed(e.clone());
@@ -2280,7 +2287,7 @@ impl Zengui {
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
             },
-            Message::MonitorStarted,
+            |r| Message::Bus(BusMsg::MonitorStarted(r)),
         )
     }
 
@@ -2303,7 +2310,7 @@ impl Zengui {
                 let skeleton = Arc::new(Skeleton::build(&base, &slices, &roster, admin.as_ref()));
                 Ok((skeleton, Arc::new(roster)))
             },
-            Message::SkeletonBuilt,
+            |r| Message::Bus(BusMsg::SkeletonBuilt(r)),
         )
     }
 
@@ -2798,7 +2805,7 @@ impl Zengui {
                         })
                         .map_err(|e| e.to_string())
                 },
-                Message::SlicesUnionLoaded,
+                |r| Message::Bus(BusMsg::SlicesUnionLoaded(r)),
             );
         }
         Task::perform(
@@ -2808,7 +2815,7 @@ impl Zengui {
                     .map(Arc::new)
                     .map_err(|e| e.to_string())
             },
-            Message::SlicesLoaded,
+            |r| Message::Bus(BusMsg::SlicesLoaded(r)),
         )
     }
 

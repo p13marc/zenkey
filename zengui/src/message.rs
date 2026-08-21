@@ -12,12 +12,19 @@ use crate::scope::ScopePreset;
 /// The engine roster's shape: origin → live producer names.
 pub type LiveRoster = std::collections::BTreeMap<String, Vec<String>>;
 
-/// Everything that can move the app.
+/// Everything the bus, the monitor or a fleet sweep answered (#176).
 ///
-/// `Clone` is required by iced's widget callbacks. Every payload here is
-/// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
+/// None of these is user intent: each is a `Task::perform` or a `link.rs`
+/// `yield` landing. A message lives where its failure is displayed, and every
+/// failure here reaches the status strip rather than a pane —
+/// `SessionOpened(Err)` and `MonitorStarted(Err)` write `link`, and
+/// `SkeletonBuilt(Err)` is a `tracing::warn!` nobody's pane shows.
+///
+/// `SlicesLoaded` and `SlicesUnionLoaded` are here rather than under
+/// `Deployment` for the same reason: a registry sweep is a *landing*, like
+/// `BasesDiscovered`. `Deployment` holds the intent that asked for it.
 #[derive(Debug, Clone)]
-pub enum Message {
+pub enum BusMsg {
     /// One coalesced batch from the bus link. See [`BusTick`].
     Tick(Arc<BusTick>),
     /// The link changed state.
@@ -36,6 +43,16 @@ pub enum Message {
     SlicesLoaded(Result<Arc<SliceSet>, String>),
     /// The §6.1 union arrived: (set, from_bus, dirs_only, disagreements).
     SlicesUnionLoaded(Result<(Arc<SliceSet>, usize, usize, usize), String>),
+}
+
+/// Everything that can move the app.
+///
+/// `Clone` is required by iced's widget callbacks. Every payload here is
+/// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
+#[derive(Debug, Clone)]
+pub enum Message {
+    /// The bus, the monitor, a sweep: something the world answered.
+    Bus(BusMsg),
 
     /// The user toggled observation of one subtree (the tree's watch button).
     /// Carries the row's display path.
