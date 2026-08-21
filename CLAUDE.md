@@ -39,6 +39,12 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   which is why the roster always names the service token explicitly.
   Deviation from `docs/redesign-2026-07.md` §15, deliberate: it lives here
   rather than in a separate `p13marc/zengui` repo.
+  **Layout (#175)**: `app.rs` is the shell only — `new`/`update`/`view`/
+  `subscription`. The state lives in `state/` as six sub-states named for what
+  invalidates them; the handlers in `update/` (one module per message group,
+  one per pane), where a signature is the exhaustive list of sub-states it can
+  move; every bus call in `services/` as a free `fn -> Task<Message>`. Nothing
+  but `update` takes `&mut Zengui`, and nothing under `view/` names it at all.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus

@@ -85,10 +85,31 @@ pub enum BusMsg {
 pub enum DeploymentMsg {
     /// The scope preset's watches were declared (the eager set).
     ScopeWatchesStarted(Vec<WatchId>),
+    /// The scope preset's watches were released.
+    ///
+    /// The mirror of `ScopeWatchesStarted`, and it did not exist: the release
+    /// half reported through `SubjectMsg::WatchReleased` with a synthesised
+    /// `"(scope)"` path, which was read in exactly one place — the string
+    /// interpolated into a failure warning. Two halves of one operation
+    /// landing in two groups, held together by a fake key (#175).
+    ScopeWatchesReleased(Result<(), String>),
     /// Apply/release the scope preset's selectors as watches — the eager
     /// mode, made explicit and labelled by its cost.
     ScopeWatchToggled,
     BaseSelected(String),
+    /// A stored context was chosen, and the deployment must now become it.
+    ///
+    /// The connect pane raises this rather than rewriting seven `Settings`
+    /// fields itself. That keeps the pane's handler about the *form* — which
+    /// is what lets it take `(&mut ContextForm, Ctx)` once the panes dock
+    /// (#180) — and puts the deployment rewrite where every other one is.
+    ///
+    /// `name` is what to remember as the active context, `None` when the
+    /// context is unnamed.
+    ContextApplied {
+        name: Option<String>,
+        stored: Box<zenkey_fleet::StoredContext>,
+    },
     ScopeSelected(ScopePreset),
     Reconnect,
 }
@@ -120,6 +141,14 @@ pub enum SubjectMsg {
     /// (key, declared type if any, rendering).
     ValueDecoded(String, Option<String>, Arc<zenkey_fleet::decode::Rendering>),
     SelectKey(Option<String>),
+    /// Select a *subtree prefix* — no fetch.
+    ///
+    /// Not a cosmetic split from `SelectKey`. A prefix is not a key, and
+    /// routing "show this origin in the tree" through `SelectKey` would issue
+    /// a `fetch_value` GET against something no producer publishes: an
+    /// unasked-for bus query introduced by a refactor, which is exactly what
+    /// #85's laziness rule forbids.
+    SelectPath(String),
 }
 
 /// The shell around the panes: which one shows, the tree's own chrome, and the
@@ -147,6 +176,11 @@ pub enum WorkspaceMsg {
     TreeScrolled(f32, f32),
     /// Switch the right-hand pane (the toolbar's tab strip).
     PaneSelected(RightPane),
+    /// Open every prefix of a path so its subtree is visible, and reflatten.
+    ///
+    /// One message for what was the same eight-line loop written twice — in
+    /// the nodes pane's "show in tree" and in the doctor's finding jump.
+    Reveal(String),
     /// Replay-mode interactions (issue #74): open/scrub/play a `.zrec`,
     /// record the current watches to one.
     Replay(crate::view::replay::ReplayMsg),
@@ -156,11 +190,12 @@ pub enum WorkspaceMsg {
 ///
 /// `Palette` is here rather than under `Pane`: `palette::overlay` returns an
 /// `Option<Element>` `stack!`ed above the whole layout, so it is neither a pane
-/// nor a workspace region. The load-bearing reason is re-entrancy, though —
-/// `update_key` calls `update_palette` three times and dispatches
-/// `shortcuts::resolve`'s output through `update`. Keeping `Key` and `Palette` in
-/// one group keeps the tightest re-entrant loop inside one handler family
-/// instead of straddling a group boundary.
+/// nor a workspace region. The load-bearing reason was re-entrancy — `update_key`
+/// called `update_palette` three times and pushed `shortcuts::resolve`'s output
+/// back through `update` — and #175 replaced the last of those with
+/// `Task::done`. The grouping stands on the weaker reason now, which is still a
+/// reason: Esc and the arrows mean different things depending on what is open,
+/// so the key and the overlay it disambiguates against belong together.
 #[derive(Debug, Clone)]
 pub enum ChromeMsg {
     /// A key press no widget consumed (issues #73, #75).
