@@ -212,8 +212,14 @@ pub async fn storages(session: &Session, timeout: Duration) -> Result<Vec<Storag
 }
 
 /// How a declared state family relates to the configured storages.
+///
+/// `rename_all` is not decoration: without it this enum inherited Rust's
+/// variant spelling and serialized `"Covered"` while every other vocabulary in
+/// the report surface — `TopicVerdict`, `DoctorSeverity`, `CutoverVerdict`,
+/// `ExpectVerdict` — was snake_case (#232). A consumer could not learn the
+/// file's conventions from one document and apply them to the next.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(tag = "coverage", content = "storage")]
+#[serde(tag = "coverage", content = "storage", rename_all = "snake_case")]
 pub enum Coverage {
     /// Some storage's key expression includes every key of the family.
     Covered(String),

@@ -16,8 +16,10 @@
 //! guarding it.
 //!
 //! Where a shape here looks inconsistent with its neighbours, it is pinned as
-//! it *is* and the inconsistency is filed. Changing a wire contract is chunk
-//! AI's job, under `breaking`.
+//! it *is* and the inconsistency is filed. That promise has now been kept
+//! once: #232 named three, chunk AI changed them, and each change had to state
+//! itself in this file to land. `Coverage`'s tags are snake_case below because
+//! of it. The rule stands for the next one.
 
 use serde_json::json;
 use zenkey_fleet::report::*;
@@ -213,11 +215,14 @@ fn blob_origins_distinguish_not_asked_from_nobody_answered() {
 }
 
 /// The trickiest shape in the file: a `#[serde(flatten)]` over an adjacently
-/// tagged enum. Note the tag values are **PascalCase** while every other enum
-/// in `report.rs` is snake or kebab — pinned as it is, and filed rather than
-/// quietly changed, because it is a wire contract.
+/// tagged enum.
+///
+/// Its tag values were **PascalCase** while every other enum in this surface
+/// was snake or kebab — pinned here as it was, and filed as #232 rather than
+/// quietly changed, because it is a wire contract. #232 is that change, and
+/// this is where it states itself.
 #[test]
-fn coverage_flattens_into_its_row_with_pascal_case_tags() {
+fn coverage_flattens_into_its_row_with_snake_case_tags() {
     let covered = CoverageRow {
         producer: "sysinfo".into(),
         path: "health".into(),
@@ -230,7 +235,7 @@ fn coverage_flattens_into_its_row_with_pascal_case_tags() {
             "producer": "sysinfo",
             "path": "health",
             "ttl_s": 30,
-            "coverage": "Covered",
+            "coverage": "covered",
             "storage": "main@abc",
         })
     );
@@ -243,14 +248,14 @@ fn coverage_flattens_into_its_row_with_pascal_case_tags() {
     };
     assert_eq!(
         serde_json::to_value(&uncovered).unwrap(),
-        json!({"producer": "sysinfo", "path": "health", "coverage": "Uncovered"}),
+        json!({"producer": "sysinfo", "path": "health", "coverage": "uncovered"}),
         "no storage key at all when nothing covers it, and no ttl when none \
          is declared"
     );
 
     assert_eq!(
         serde_json::to_value(Coverage::Partial("main@abc".into())).unwrap(),
-        json!({"coverage": "Partial", "storage": "main@abc"})
+        json!({"coverage": "partial", "storage": "main@abc"})
     );
 }
 
@@ -498,4 +503,167 @@ fn doctor_severities_are_the_stable_lowercase_vocabulary() {
         }),
         "an uncited finding omits the key rather than nulling it"
     );
+}
+
+/// Every enum in this surface, its wire spelling, behind an exhaustive
+/// `match`.
+///
+/// A naming *lint* cannot exist — serde attributes are not reflectable — so
+/// this is the mechanism that works instead, and it is stronger: the `match`
+/// arms below are exhaustive, so **adding a variant fails to compile** until
+/// its wire string is written down here. A list of values would not do that;
+/// the `match` is the whole guard, and the values merely exercise it.
+///
+/// Two vocabularies, deliberately, and documented rather than accidental:
+/// **snake_case** for the verdict and severity vocabularies, **kebab-case**
+/// for the blob plane's event and source tags, which shipped as a coherent
+/// pair. A third would be drift; a documented second is not.
+#[test]
+fn every_enum_in_the_surface_names_its_wire_vocabulary() {
+    fn topic(v: &TopicVerdict) -> &'static str {
+        match v {
+            TopicVerdict::Registered => "registered",
+            TopicVerdict::Unregistered => "unregistered",
+            TopicVerdict::NoSliceForProducer => "no_slice_for_producer",
+            TopicVerdict::NotADataClass => "not_a_data_class",
+            TopicVerdict::NotV1 => "not_v1",
+            TopicVerdict::NotUnderBase => "not_under_base",
+            TopicVerdict::RegistryNotLoaded => "registry_not_loaded",
+        }
+    }
+    fn severity(v: &DoctorSeverity) -> &'static str {
+        match v {
+            DoctorSeverity::Error => "error",
+            DoctorSeverity::Warning => "warning",
+            DoctorSeverity::Info => "info",
+        }
+    }
+    fn cutover(v: &CutoverVerdict) -> &'static str {
+        match v {
+            CutoverVerdict::Pass => "pass",
+            CutoverVerdict::OldStillSpeaks => "old_still_speaks",
+            CutoverVerdict::Unproven => "unproven",
+        }
+    }
+    fn expect(v: &ExpectVerdict) -> &'static str {
+        match v {
+            ExpectVerdict::Met => "met",
+            ExpectVerdict::NotMet => "not_met",
+            ExpectVerdict::Impaired => "impaired",
+        }
+    }
+    // #232: this one was PascalCase, alone in the file.
+    fn coverage(v: &Coverage) -> &'static str {
+        match v {
+            Coverage::Covered(_) => "covered",
+            Coverage::Partial(_) => "partial",
+            Coverage::Uncovered => "uncovered",
+        }
+    }
+    // The blob plane's pair: kebab, and staying kebab.
+    fn blob_source(v: &BlobListSource) -> &'static str {
+        match v {
+            BlobListSource::Bus => "bus",
+            BlobListSource::RegistryDirs => "registry-dirs",
+            BlobListSource::Union => "union",
+        }
+    }
+    fn blob_progress(v: &BlobProgress) -> &'static str {
+        match v {
+            BlobProgress::Started { .. } => "started",
+            BlobProgress::Resumed { .. } => "resumed",
+            BlobProgress::Chunk { .. } => "chunk",
+            BlobProgress::Verifying => "verifying",
+            BlobProgress::Completed { .. } => "completed",
+            BlobProgress::Cancelled { .. } => "cancelled",
+            BlobProgress::Failed { .. } => "failed",
+        }
+    }
+
+    /// The tag as it actually serializes — a bare string for an externally
+    /// tagged vocabulary, the tag field for an adjacently or internally
+    /// tagged one.
+    fn wire<T: serde::Serialize>(v: &T, tag: &str) -> String {
+        match serde_json::to_value(v).unwrap() {
+            serde_json::Value::String(s) => s,
+            serde_json::Value::Object(o) => o
+                .get(tag)
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("no `{tag}` tag on {o:?}"))
+                .to_string(),
+            other => panic!("not a vocabulary: {other}"),
+        }
+    }
+
+    for v in [
+        TopicVerdict::Registered,
+        TopicVerdict::Unregistered,
+        TopicVerdict::NoSliceForProducer,
+        TopicVerdict::NotADataClass,
+        TopicVerdict::NotV1,
+        TopicVerdict::NotUnderBase,
+        TopicVerdict::RegistryNotLoaded,
+    ] {
+        assert_eq!(wire(&v, ""), topic(&v));
+    }
+    for v in [
+        DoctorSeverity::Error,
+        DoctorSeverity::Warning,
+        DoctorSeverity::Info,
+    ] {
+        assert_eq!(wire(&v, ""), severity(&v));
+    }
+    for v in [
+        CutoverVerdict::Pass,
+        CutoverVerdict::OldStillSpeaks,
+        CutoverVerdict::Unproven,
+    ] {
+        assert_eq!(wire(&v, ""), cutover(&v));
+    }
+    for v in [
+        ExpectVerdict::Met,
+        ExpectVerdict::NotMet,
+        ExpectVerdict::Impaired,
+    ] {
+        assert_eq!(wire(&v, ""), expect(&v));
+    }
+    for v in [
+        Coverage::Covered("s".into()),
+        Coverage::Partial("s".into()),
+        Coverage::Uncovered,
+    ] {
+        assert_eq!(wire(&v, "coverage"), coverage(&v));
+    }
+    for v in [
+        BlobListSource::Bus,
+        BlobListSource::RegistryDirs,
+        BlobListSource::Union,
+    ] {
+        assert_eq!(wire(&v, ""), blob_source(&v));
+    }
+    for v in [
+        BlobProgress::Started {
+            total_len: 1,
+            chunk_count: 1,
+        },
+        BlobProgress::Resumed {
+            received: 1,
+            total: 2,
+        },
+        BlobProgress::Chunk {
+            index: 0,
+            received: 1,
+            total: 2,
+            bytes_received: 3,
+        },
+        BlobProgress::Verifying,
+        BlobProgress::Completed { path: "p".into() },
+        BlobProgress::Cancelled {
+            received: 1,
+            total: 2,
+        },
+        BlobProgress::Failed { error: "e".into() },
+    ] {
+        assert_eq!(wire(&v, "event"), blob_progress(&v));
+    }
 }
