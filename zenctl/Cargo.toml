@@ -54,6 +54,14 @@ tracing-subscriber = { workspace = true }
 # the renderer rewrite (#198/#199) rather than after it, so it guards the
 # refactor instead of being written to match whatever the refactor produced.
 trycmd = { workspace = true }
+# `snapbox` comes with trycmd and is what `str![[...]]` inline snapshots use.
+# Named explicitly rather than leaned on transitively, since the render tests
+# depend on it directly.
+snapbox = { workspace = true }
+# The report values `zenkey-fleet/tests/report_contract.rs` is written against
+# — the same ones, so the wire corpus and the render corpus cannot disagree
+# about what a report is (#201).
+zenkey-report-fixtures = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # Crate-local rather than workspace-declared, and the only such dep here: the

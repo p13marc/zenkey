@@ -47,6 +47,11 @@ dirs = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# The report values `tests/report_contract.rs` is written against, shared with
+# zenctl's render tests so the two corpora cannot drift about what a report
+# *is* (#201). A dev-dependency cycle — this crate depends on that one — which
+# cargo permits because the dev edge is cut when building the dependency.
+zenkey-report-fixtures = { workspace = true }
 tokio = { workspace = true }
 # The engine's hot paths are benched here rather than in a consumer, because
 # they are the paths BOTH explorers run per sample and per tick (#44).

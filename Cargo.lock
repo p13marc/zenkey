@@ -8055,6 +8055,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "snapbox",
  "tokio",
  "toml 1.1.4+spec-1.1.0",
  "tracing-subscriber",
@@ -8062,6 +8063,7 @@ dependencies = [
  "zenkey",
  "zenkey-build",
  "zenkey-fleet",
+ "zenkey-report-fixtures",
  "zenoh",
 ]
 
@@ -8147,8 +8149,17 @@ dependencies = [
  "tracing",
  "zblob",
  "zenkey",
+ "zenkey-report-fixtures",
  "zenoh",
  "zenoh-ext",
+]
+
+[[package]]
+name = "zenkey-report-fixtures"
+version = "0.6.0"
+dependencies = [
+ "serde_json",
+ "zenkey-fleet",
 ]
 
 [[package]]

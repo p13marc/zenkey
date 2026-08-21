@@ -5,6 +5,7 @@ members = [
     "zenkey-build",
     "zenkey-fleet",
     "fixture-tests",
+    "report-fixtures",
     "zenctl",
     "zengui",
 ]
@@ -56,6 +57,7 @@ tempfile = "3"
 # rather than a `cargo install`ed subcommand, which is what keeps `justfile`'s
 # "plain cargo remains the build system" true.
 trycmd = "1.2"
+snapbox = "1.2"
 
 # GUI (zengui only). The `tokio` feature makes iced drive its subscriptions on a
 # tokio runtime, which is what lets the Zenoh link stream live inside an
@@ -84,3 +86,4 @@ zblob = "0.3"
 zenkey = { version = "0.6.0", path = "zenkey" }
 zenkey-build = { version = "0.6.0", path = "zenkey-build" }
 zenkey-fleet = { version = "0.9.0", path = "zenkey-fleet" }
+zenkey-report-fixtures = { path = "report-fixtures" }

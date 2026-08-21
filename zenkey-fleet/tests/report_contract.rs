@@ -15,6 +15,13 @@
 //! carried entirely by `skip_serializing_if`. A test that cannot see it is not
 //! guarding it.
 //!
+//! The values come from `zenkey-report-fixtures`, shared with `zenctl`'s
+//! render corpus: this file pins what a report *serializes to*, that one pins
+//! how the same value is *drawn*, and sharing the constructors is what stops
+//! the two drifting about what a report is. Where a shape needs an edge case
+//! the shared value does not cover, the test builds that one inline — the
+//! fixtures are a baseline, not a ceiling.
+//!
 //! Where a shape here looks inconsistent with its neighbours, it is pinned as
 //! it *is* and the inconsistency is filed. That promise has now been kept
 //! once: #232 named three, chunk AI changed them, and each change had to state
@@ -24,6 +31,7 @@
 use serde_json::json;
 use zenkey_fleet::report::*;
 use zenkey_fleet::{Coverage, CoverageRow};
+use zenkey_report_fixtures as fx;
 
 /// `open_ended: false` serializes; `deprecated: false` does **not**. Both are
 /// bools on the same struct, and the asymmetry is deliberate — a deprecation
@@ -31,18 +39,7 @@ use zenkey_fleet::{Coverage, CoverageRow};
 /// refactor unifies by accident.
 #[test]
 fn a_false_deprecated_flag_is_absent_while_a_false_open_ended_flag_is_not() {
-    let plain = TopicRow {
-        producer: "sysinfo".into(),
-        registry_version: "1.0".into(),
-        class: "telemetry".into(),
-        path: "disk/{mount}/used".into(),
-        type_name: "TelemetryPoint".into(),
-        open_ended: false,
-        since: None,
-        deprecated: false,
-        deprecated_since: None,
-        replaced_by: None,
-    };
+    let plain = fx::topic_row();
     assert_eq!(
         serde_json::to_value(&plain).unwrap(),
         json!({
@@ -56,14 +53,7 @@ fn a_false_deprecated_flag_is_absent_while_a_false_open_ended_flag_is_not() {
         "a false `deprecated` is absent, a false `open_ended` is present"
     );
 
-    let retired = TopicRow {
-        open_ended: true,
-        since: Some("1.0".into()),
-        deprecated: true,
-        deprecated_since: Some("2.0".into()),
-        replaced_by: Some("disk/{mount}/bytes_used".into()),
-        ..plain
-    };
+    let retired = fx::topic_row_retired();
     assert_eq!(
         serde_json::to_value(&retired).unwrap(),
         json!({
@@ -133,20 +123,8 @@ fn the_topic_verdict_vocabulary_is_snake_case_and_partial_reports_omit() {
 /// and nothing was served" and "never asked" are the same document.
 #[test]
 fn a_node_list_says_whether_the_slice_join_was_even_attempted() {
-    let row = NodeRow {
-        origin: "h-3fa9c2d41b7e".into(),
-        producer: "sysinfo".into(),
-        app: None,
-        registry_version: None,
-    };
-    let unasked = NodeList {
-        nodes: vec![row.clone()],
-        slices_joined: false,
-    };
-    let asked = NodeList {
-        nodes: vec![row],
-        slices_joined: true,
-    };
+    let unasked = fx::node_list_unjoined();
+    let asked = fx::node_list();
     assert_eq!(
         serde_json::to_value(&unasked).unwrap(),
         json!({
@@ -157,7 +135,7 @@ fn a_node_list_says_whether_the_slice_join_was_even_attempted() {
     assert_eq!(
         serde_json::to_value(&asked).unwrap()["slices_joined"],
         json!(true),
-        "same rows, different meaning — the flag is the whole difference"
+        "a row with no app means two different things, and only the flag says which"
     );
 }
 
