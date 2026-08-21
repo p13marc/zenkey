@@ -59,10 +59,15 @@ const GAP: &str = "  ";
 /// distinction expressed as a type rather than as a spelling convention.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cell {
-    /// A value the tool has. May be empty — *asked, and the answer was
-    /// nothing*.
-    Text(String),
+    /// A value the tool has, and optionally the emphasis its own words
+    /// already carry. May be empty — *asked, and the answer was nothing*.
+    Text(String, Option<anstyle::Style>),
     /// **Not asked.** Renders `—`.
+    ///
+    /// No style field, and that is structural: colouring the em dash would
+    /// make colour a *carrier* of the O4 distinction rather than a re-encoding
+    /// of it, and a reader with no colour would lose what the dash says. Doing
+    /// it would require changing this enum, which is a reviewable act.
     Unknown,
     /// A count. Right-aligned by default and never truncated.
     Int(u64),
@@ -72,7 +77,14 @@ pub enum Cell {
 
 impl Cell {
     pub fn text(s: impl Into<String>) -> Cell {
-        Cell::Text(s.into())
+        Cell::Text(s.into(), None)
+    }
+
+    /// A value whose own words already carry the distinction, marked so that
+    /// a terminal can carry it a second way (#200). Stripping the escape must
+    /// leave the same meaning — see `render::style`.
+    pub fn styled(s: impl Into<String>, style: anstyle::Style) -> Cell {
+        Cell::Text(s.into(), Some(style))
     }
 
     /// The **only** bridge from an `Option`, and `None` means *not asked*.
@@ -81,7 +93,7 @@ impl Cell {
     /// write `Cell::text(v.unwrap_or_default())` and mean it.
     pub fn asked<T: Into<String>>(v: Option<T>) -> Cell {
         match v {
-            Some(v) => Cell::Text(v.into()),
+            Some(v) => Cell::Text(v.into(), None),
             None => Cell::Unknown,
         }
     }
@@ -97,7 +109,7 @@ impl Cell {
     /// The rendering before any width decision.
     fn plain(&self) -> String {
         match self {
-            Cell::Text(s) => s.clone(),
+            Cell::Text(s, _) => s.clone(),
             Cell::Unknown => "—".to_string(),
             Cell::Int(n) => n.to_string(),
             Cell::Num(v, d) => format!("{v:.*}", *d as usize),
@@ -116,7 +128,14 @@ impl Cell {
 
     /// Numbers keep every digit; only text is cut.
     fn truncatable(&self) -> bool {
-        matches!(self, Cell::Text(_))
+        matches!(self, Cell::Text(..))
+    }
+
+    fn style(&self) -> Option<anstyle::Style> {
+        match self {
+            Cell::Text(_, s) => *s,
+            _ => None,
+        }
     }
 }
 
@@ -258,16 +277,16 @@ impl Grid {
 
     /// Render, with every line right-trimmed: trailing padding is what breaks
     /// `cut` and makes a snapshot diff unreadable.
-    pub(crate) fn render(&self, budget: Width) -> String {
+    pub(crate) fn render(&self, budget: Width, styling: super::Styling) -> String {
         let w = self.widths(budget);
         let mut out = String::new();
         if !self.headers.is_empty() && !self.is_empty() {
             let cells: Vec<Cell> = self.headers.iter().map(|h| Cell::text(*h)).collect();
-            push_row(&mut out, &cells, &w, &self.right);
+            push_row(&mut out, &cells, &w, &self.right, styling);
         }
         for item in &self.items {
             match item {
-                Item::Row(cells) => push_row(&mut out, cells, &w, &self.right),
+                Item::Row(cells) => push_row(&mut out, cells, &w, &self.right, styling),
                 Item::Group(h) => {
                     if !out.is_empty() {
                         out.push('\n');
@@ -285,14 +304,25 @@ impl Grid {
     }
 }
 
-fn push_row(out: &mut String, cells: &[Cell], w: &[usize], right: &[bool]) {
+fn push_row(
+    out: &mut String,
+    cells: &[Cell],
+    w: &[usize],
+    right: &[bool],
+    styling: super::Styling,
+) {
     let mut line = String::new();
     for (i, c) in cells.iter().enumerate() {
         if i > 0 {
             line.push_str(GAP);
         }
         let text = fit(c, w[i]);
+        // Width from the *unstyled* text, and the padding written outside the
+        // escapes. Padding inside them is the classic colour-breaks-alignment
+        // bug, and making the writer the one place that pads is what reduces
+        // it to this comment.
         let pad = w[i].saturating_sub(text.chars().count());
+        let text = styling.paint(&text, c.style());
         let right = right[i] || matches!(c, Cell::Int(_) | Cell::Num(..));
         if right {
             for _ in 0..pad {
@@ -341,8 +371,8 @@ pub struct Table {
 #[derive(Debug, Clone)]
 enum Block {
     Grid(Grid),
-    /// A line of prose, verbatim.
-    Line(String),
+    /// A line of prose, verbatim, and the emphasis its own words carry.
+    Line(String, Option<anstyle::Style>),
     /// A blank separator; consecutive ones collapse.
     Blank,
 }
@@ -360,7 +390,13 @@ impl Table {
 
     /// A line of prose — a header, a label, a sentence that is not a note.
     pub fn line(&mut self, text: impl Into<String>) -> &mut Table {
-        self.blocks.push(Block::Line(text.into()));
+        self.blocks.push(Block::Line(text.into(), None));
+        self
+    }
+
+    /// A line whose own words carry a distinction — a verdict, chiefly (#200).
+    pub fn line_styled(&mut self, text: impl Into<String>, style: anstyle::Style) -> &mut Table {
+        self.blocks.push(Block::Line(text.into(), Some(style)));
         self
     }
 
@@ -393,12 +429,12 @@ impl Table {
     pub fn is_empty(&self) -> bool {
         self.blocks.iter().all(|b| match b {
             Block::Grid(g) => g.is_empty(),
-            Block::Line(_) => false,
+            Block::Line(..) => false,
             Block::Blank => true,
         })
     }
 
-    pub(crate) fn render(&self, budget: Width) -> String {
+    pub(crate) fn render(&self, budget: Width, styling: super::Styling) -> String {
         let mut out = String::new();
         let mut pending_blank = false;
         for block in &self.blocks {
@@ -407,8 +443,10 @@ impl Table {
                     pending_blank = !out.is_empty();
                     continue;
                 }
-                Block::Line(l) => format!("{}\n", l.trim_end()),
-                Block::Grid(g) => g.render(budget),
+                Block::Line(l, style) => {
+                    format!("{}\n", styling.paint(l.trim_end(), *style))
+                }
+                Block::Grid(g) => g.render(budget, styling),
             };
             if text.is_empty() {
                 continue;

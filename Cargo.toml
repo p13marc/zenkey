@@ -59,6 +59,15 @@ tempfile = "3"
 trycmd = "1.2"
 snapbox = "1.2"
 
+# Colour (#200). Already in `Cargo.lock` via clap 4, so the dependency-tree
+# cost is zero. `anstream` is a **dev**-dependency only: its `AutoStream`
+# cannot wrap `emit`'s generic `impl Write`, and it is wanted here for exactly
+# one thing — `adapter::strip_str`, in the test that proves stripping every
+# escape is a no-op on meaning.
+anstyle = "1"
+anstyle-query = "1"
+anstream = "1"
+
 # GUI (zengui only). The `tokio` feature makes iced drive its subscriptions on a
 # tokio runtime, which is what lets the Zenoh link stream live inside an
 # `iced::Subscription`. Deliberately *not* `sipper`/`advanced`: the link is an

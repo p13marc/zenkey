@@ -94,7 +94,7 @@ pub async fn run(
     )
     .await?;
 
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // Exit-code discipline preserved: 1 = an error reply, 2 = zero replies
     // (silence stays a distinct non-verdict — RFC 05 §3.1).
     let code = report.exit_code();

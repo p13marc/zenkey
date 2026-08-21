@@ -17,7 +17,7 @@ pub async fn routers(args: &BusArgs) -> Result<()> {
         asked: "@/*/router".to_string(),
         routers,
     };
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
 /// `admin graph` — the mesh as the admin space answered it (#118), as a
@@ -37,13 +37,14 @@ pub async fn graph(dot: bool, origins: bool, args: &BusArgs) -> Result<()> {
         honesty(&report);
         return Ok(());
     }
-    crate::render::emit(
+    crate::render::emit_with(
         &mut std::io::stdout(),
         &crate::render::TopologyView {
             report: &report,
             attachments: &attachments,
         },
-        args.format,
+        args.format(),
+        args.color(),
     )
 }
 

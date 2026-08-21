@@ -118,14 +118,15 @@ pub async fn run(
     }
 
     // The plan, before anything is published (the replay dry-run precedent).
-    crate::render::emit(
+    crate::render::emit_with(
         &mut std::io::stdout(),
         &crate::render::GenPlan {
             origin: &origin,
             duration_s: duration,
             entries: &plan,
         },
-        args.format,
+        args.format(),
+        args.color(),
     )?;
     if dry_run {
         eprintln!("--dry-run: nothing published");
@@ -163,7 +164,7 @@ pub async fn run(
     let report = zenkey_fleet::generate::run_gen(&session, &store, &plan, &spec).await?;
     drop(mock);
 
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     if report.refused > 0 {
         std::process::exit(1);
     }

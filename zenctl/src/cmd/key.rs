@@ -94,7 +94,13 @@ pub fn judge(op: &str, a: &str, b: &str) -> Verdict {
 }
 
 /// `key includes <a> <b>` / `key intersects <a> <b>`.
-pub fn relate(op: &str, a: &str, b: &str, format: Format) -> Result<()> {
+pub fn relate(
+    op: &str,
+    a: &str,
+    b: &str,
+    format: Format,
+    color: crate::render::ColorChoice,
+) -> Result<()> {
     let verdict = judge(op, a, b);
     match &verdict {
         Verdict::Yes | Verdict::No { .. } => {
@@ -108,7 +114,7 @@ pub fn relate(op: &str, a: &str, b: &str, format: Format) -> Result<()> {
                     _ => None,
                 },
             };
-            crate::render::emit(&mut std::io::stdout(), &report, format)?;
+            crate::render::emit_with(&mut std::io::stdout(), &report, format, color)?;
         }
         Verdict::Invalid { which, error } => {
             // The grammar's own message, verbatim (the keyfacts rule) — minus
@@ -124,7 +130,7 @@ pub fn relate(op: &str, a: &str, b: &str, format: Format) -> Result<()> {
 }
 
 /// `key canon <expr>` — canonical spelling, or the parse error verbatim.
-pub fn canon(expr: &str, format: Format) -> Result<()> {
+pub fn canon(expr: &str, format: Format, color: crate::render::ColorChoice) -> Result<()> {
     match KeyExpr::autocanonize(expr.to_string()) {
         Ok(k) => {
             let report = crate::render::KeyCanon {
@@ -132,7 +138,7 @@ pub fn canon(expr: &str, format: Format) -> Result<()> {
                 canon: k.as_str().to_string(),
                 changed: k.as_str() != expr,
             };
-            crate::render::emit(&mut std::io::stdout(), &report, format)
+            crate::render::emit_with(&mut std::io::stdout(), &report, format, color)
         }
         Err(e) => {
             eprintln!(

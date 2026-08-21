@@ -15,7 +15,7 @@ impl Render for TopicList {
 
     fn table(&self, t: &mut Table) {
         let mut current: Option<&String> = None;
-        let mut grid = Grid::unheaded(3).max(1, 44);
+        let mut grid = Grid::unheaded(4).max(1, 44);
         for s in &self.subjects {
             if current != Some(&s.producer) {
                 grid.group(format!("{}  (registry {})", s.producer, s.registry_version));
@@ -25,13 +25,17 @@ impl Render for TopicList {
             if s.open_ended {
                 tail.push_str("  [open-ended]");
             }
+            // A retirement gets its own cell rather than being appended to
+            // the type, so the word can carry a mark. Empty for every other
+            // row, which costs no width (#200).
+            let mut retired = String::new();
             if s.deprecated {
-                tail.push_str("  DEPRECATED");
+                retired.push_str("DEPRECATED");
                 if let Some(v) = &s.deprecated_since {
-                    tail.push_str(&format!(" since {v}"));
+                    retired.push_str(&format!(" since {v}"));
                 }
                 if let Some(r) = &s.replaced_by {
-                    tail.push_str(&format!(" → {r}"));
+                    retired.push_str(&format!(" → {r}"));
                 }
             }
             // Indented under the group heading, which is what tells a row
@@ -40,6 +44,7 @@ impl Render for TopicList {
                 Cell::text(format!("  {}", s.class)),
                 Cell::text(&s.path),
                 Cell::text(tail),
+                Cell::styled(retired, crate::render::style::DEPRECATED),
             ]);
         }
         t.grid(grid);

@@ -89,11 +89,16 @@ impl<R: Render> Render for WatchTick<'_, R> {
 /// Redraw one cycle as a table, marking what changed since the last one.
 ///
 /// `prev` is the previous cycle's lines; it is updated in place.
-fn redraw<R: Render>(report: &R, prev: &mut Vec<String>, footer: &str) -> Result<()> {
+fn redraw<R: Render>(
+    report: &R,
+    prev: &mut Vec<String>,
+    color: crate::render::ColorChoice,
+    footer: &str,
+) -> Result<()> {
     let mut table = Table::new();
     report.table(&mut table);
     let lines: Vec<String> = table
-        .render(crate::render::term_width())
+        .render(crate::render::term_width(), color.resolve())
         .lines()
         .map(str::to_string)
         .collect();
@@ -134,19 +139,21 @@ pub fn render_cycle<R: Render>(
     tick: u64,
     prev: &mut Vec<String>,
     format: Format,
+    color: crate::render::ColorChoice,
     footer: &str,
 ) -> Result<()> {
     if crate::render::Mode::of(format).machine() {
-        crate::render::emit(
+        crate::render::emit_with(
             &mut std::io::stdout(),
             &WatchTick {
                 inner: report,
                 tick,
             },
             format,
+            color,
         )
     } else {
-        redraw(report, prev, footer)
+        redraw(report, prev, color, footer)
     }
 }
 
@@ -154,6 +161,7 @@ pub fn render_cycle<R: Render>(
 pub async fn poll_loop<R: Render>(
     interval: Duration,
     format: Format,
+    color: crate::render::ColorChoice,
     mut fetch: impl AsyncFnMut() -> Result<R>,
 ) -> Result<()> {
     validate_format(format)?;
@@ -170,7 +178,7 @@ pub async fn poll_loop<R: Render>(
                     "watching every {:.0}s, Ctrl-C to stop (+ appeared, - disappeared)",
                     interval.as_secs_f64()
                 );
-                render_cycle(&report, tick, &mut prev, format, &footer)?;
+                render_cycle(&report, tick, &mut prev, format, color, &footer)?;
                 tick += 1;
             }
         }
@@ -206,7 +214,7 @@ impl TopicFilter {
 }
 
 pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::BusArgs) -> Result<()> {
-    validate_format(args.format)?;
+    validate_format(args.format())?;
     let interval = interval_of(secs)?;
     let dirs = args.registry_dirs();
     if dirs.is_empty() {
@@ -224,7 +232,7 @@ pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::BusArgs) 
                 .collect();
             filter.apply(&zenkey_fleet::SliceSet::from_slices(slices))
         };
-        poll_loop(interval, args.format, fetch).await?;
+        poll_loop(interval, args.format(), args.color(), fetch).await?;
         repeating.undeclare().await
     } else {
         // Dirs given: the union set (bus wins, dirs fill) per cycle, same
@@ -233,12 +241,12 @@ pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::BusArgs) 
             let slices = args.slice_set().await?;
             filter.apply(&slices)
         };
-        poll_loop(interval, args.format, fetch).await
+        poll_loop(interval, args.format(), args.color(), fetch).await
     }
 }
 
 pub async fn storage_list(secs: f64, args: &crate::BusArgs) -> Result<()> {
-    validate_format(args.format)?;
+    validate_format(args.format())?;
     let interval = interval_of(secs)?;
     let session = args.session().await?;
     let fetch = async || {
@@ -249,18 +257,18 @@ pub async fn storage_list(secs: f64, args: &crate::BusArgs) -> Result<()> {
         };
         Ok(crate::report::StorageList { storages, coverage })
     };
-    poll_loop(interval, args.format, fetch).await
+    poll_loop(interval, args.format(), args.color(), fetch).await
 }
 
 pub async fn base_list(secs: f64, args: &crate::BusArgs) -> Result<()> {
-    validate_format(args.format)?;
+    validate_format(args.format())?;
     let interval = interval_of(secs)?;
     let session = args.session().await?;
     let fetch = async || {
         let bases = zenkey_fleet::discover_bases(&session, args.timeout()).await?;
         Ok(crate::report::BaseList { bases })
     };
-    poll_loop(interval, args.format, fetch).await
+    poll_loop(interval, args.format(), args.color(), fetch).await
 }
 
 #[cfg(test)]

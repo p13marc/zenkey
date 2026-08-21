@@ -8047,6 +8047,9 @@ dependencies = [
 name = "zenctl"
 version = "0.4.0"
 dependencies = [
+ "anstream",
+ "anstyle",
+ "anstyle-query",
  "anyhow",
  "ciborium",
  "clap",

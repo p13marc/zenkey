@@ -31,7 +31,7 @@ pub async fn dump(
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let report =
         zenkey_fleet::schema_dump(&store, &session, &slices, producer, type_filter, full).await;
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
 /// `zenctl schema check` (#159): one payload against one schema, exit-coded
@@ -129,7 +129,7 @@ pub async fn check(
         verdict: verdict.to_string(),
         detail,
     };
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     if verdict != "valid" {
         std::process::exit(1);
     }

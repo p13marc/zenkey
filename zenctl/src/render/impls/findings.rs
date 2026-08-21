@@ -33,7 +33,10 @@ impl Render for DoctorReport {
     fn table(&self, t: &mut Table) {
         let mut grid = Grid::unheaded(2);
         for s in &self.synced {
-            grid.row([Cell::text("✓"), Cell::text(format!("{s}: in sync"))]);
+            grid.row([
+                Cell::styled("✓", crate::render::style::PASS),
+                Cell::text(format!("{s}: in sync")),
+            ]);
         }
         for f in &self.findings {
             let mark = match f.severity {
@@ -47,7 +50,9 @@ impl Render for DoctorReport {
                 .map(|c| format!("  [{c}]"))
                 .unwrap_or_default();
             grid.row([
-                Cell::text(mark),
+                // The mark already says which severity it is; colour only
+                // repeats it, so stripping the escape loses nothing (#200).
+                Cell::styled(mark, crate::render::style::severity(f.severity)),
                 Cell::text(format!(
                     "{}: {} — {}{citation}",
                     f.check, f.subject, f.evidence

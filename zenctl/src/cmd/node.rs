@@ -18,7 +18,7 @@ pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let info = zenkey_fleet::node_info(&session, args.base(), origin, args.timeout(), true).await?;
 
-    crate::render::emit(&mut std::io::stdout(), &info, args.format)
+    crate::render::emit_with(&mut std::io::stdout(), &info, args.format(), args.color())
 }
 
 pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
@@ -37,10 +37,11 @@ pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
     } else {
         None
     };
-    crate::render::emit(
+    crate::render::emit_with(
         &mut std::io::stdout(),
         &bus::node_rows(&roster, slices.as_ref()),
-        args.format,
+        args.format(),
+        args.color(),
     )
 }
 
@@ -53,7 +54,7 @@ pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
 
     use crate::cmd::watch::{render_cycle, validate_format};
 
-    validate_format(args.format)?;
+    validate_format(args.format())?;
     let session = args.session().await?;
     // The roster is pushed by the bus, so this does not poll. The subscribe/
     // seed/coalesce loop lives in the engine (#207) — both explorers were
@@ -82,7 +83,7 @@ pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
              (+ appeared, - disappeared)",
             report.nodes.len()
         );
-        render_cycle(&report, *tick, prev, args.format, &footer)?;
+        render_cycle(&report, *tick, prev, args.format(), args.color(), &footer)?;
         *tick += 1;
         Ok(())
     };

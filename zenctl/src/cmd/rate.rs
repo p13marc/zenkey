@@ -75,13 +75,14 @@ pub async fn run(
         }
     });
     monitor.stop();
-    crate::render::emit(
+    crate::render::emit_with(
         &mut std::io::stdout(),
         &crate::render::RateView {
             report: &rep,
             bandwidth,
         },
-        args.format,
+        args.format(),
+        args.color(),
     )?;
     Ok(())
 }

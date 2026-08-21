@@ -83,11 +83,11 @@ pub async fn run() -> Result<()> {
                 return cmd::watch::topic_list(secs, &filter, &bus).await;
             }
             let report = filter.apply(&bus.slice_set().await?)?;
-            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
+            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
             let report = bus.slice_set().await?.topic_info(bus.base(), &key);
-            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
+            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
         Command::Topic(TopicCmd::Echo {
             selector,
@@ -232,10 +232,11 @@ pub async fn run() -> Result<()> {
             // answers "what would I even pass as --base?".
             let session = bus.session().await?;
             let bases = bus::discover_bases(&session, bus.timeout()).await?;
-            crate::render::emit(
+            crate::render::emit_with(
                 &mut std::io::stdout(),
                 &report::BaseList { bases },
-                bus.format,
+                bus.format(),
+                bus.color(),
             )
         }
         Command::Storage(StorageCmd::List { watch, bus }) => {
@@ -253,10 +254,11 @@ pub async fn run() -> Result<()> {
                     Vec::new()
                 }
             };
-            crate::render::emit(
+            crate::render::emit_with(
                 &mut std::io::stdout(),
                 &report::StorageList { storages, coverage },
-                bus.format,
+                bus.format(),
+                bus.color(),
             )
         }
         Command::Blob(BlobCmd::List {
@@ -313,7 +315,7 @@ pub async fn run() -> Result<()> {
         }
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let report = bus.slice_set().await?.service_list(producer.as_deref());
-            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
+            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
         Command::Service(ServiceCmd::Info {
             producer,
@@ -324,7 +326,7 @@ pub async fn run() -> Result<()> {
                 .slice_set()
                 .await?
                 .service_info(&producer, procedure.as_deref())?;
-            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
+            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
         Command::Service(ServiceCmd::Call {
             origin,
@@ -352,7 +354,7 @@ pub async fn run() -> Result<()> {
         }
         Command::Interface(InterfaceCmd::List { bus }) => {
             let report = bus.slice_set().await?.interface_list();
-            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
+            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
         Command::Interface(InterfaceCmd::Show {
             type_name,
@@ -373,7 +375,7 @@ pub async fn run() -> Result<()> {
                     zenkey_fleet::schemas_for_type(&store, &session, &producers, &type_name, full)
                         .await;
             }
-            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
+            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
         Command::Schema {
             cmd:
@@ -517,13 +519,13 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
-        Command::Key(KeyCmd::Includes { a, b, format }) => {
-            cmd::key::relate("includes", &a, &b, format)
+        Command::Key(KeyCmd::Includes { a, b, out }) => {
+            cmd::key::relate("includes", &a, &b, out.format, out.color)
         }
-        Command::Key(KeyCmd::Intersects { a, b, format }) => {
-            cmd::key::relate("intersects", &a, &b, format)
+        Command::Key(KeyCmd::Intersects { a, b, out }) => {
+            cmd::key::relate("intersects", &a, &b, out.format, out.color)
         }
-        Command::Key(KeyCmd::Canon { expr, format }) => cmd::key::canon(&expr, format),
+        Command::Key(KeyCmd::Canon { expr, out }) => cmd::key::canon(&expr, out.format, out.color),
         Command::Cutover {
             old_root,
             window,
@@ -628,7 +630,7 @@ pub async fn run() -> Result<()> {
             connect,
             listen,
             context,
-            format,
+            out,
         } => {
             // No BusArgs here: --base/--registry are meaningless before a
             // session exists. Contexts still resolve, for endpoints/timeout.
@@ -660,7 +662,7 @@ pub async fn run() -> Result<()> {
                     .or_else(|| stored.as_ref().and_then(|c| c.timeout))
                     .unwrap_or(5),
             );
-            cmd::scout::run(&what, timeout, &connect, &listen, format).await
+            cmd::scout::run(&what, timeout, &connect, &listen, out.format, out.color).await
         }
     }
 }

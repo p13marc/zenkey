@@ -43,6 +43,7 @@ pub async fn run(
     connect: &[String],
     listen: &[String],
     format: Format,
+    color: crate::render::ColorChoice,
 ) -> Result<()> {
     let stream = zenkey_fleet::scout(matcher(what), connect, listen).await?;
     let deadline = tokio::time::Instant::now() + timeout;
@@ -83,7 +84,7 @@ pub async fn run(
         timeout_s: timeout.as_secs(),
         heard: dedup_by_zid(heard),
     };
-    crate::render::emit(&mut std::io::stdout(), &report, format)
+    crate::render::emit_with(&mut std::io::stdout(), &report, format, color)
 }
 
 #[cfg(test)]

@@ -53,7 +53,7 @@ pub async fn run(
     // One resolution for the whole run, and it happens in `Mode::of` (#198).
     // A streaming verb's question is only ever "is a program reading this" —
     // it has rows for one and prose for the other, and no third answer.
-    let ndjson = crate::render::Mode::of(args.format).machine();
+    let ndjson = crate::render::Mode::of(args.format()).machine();
     let mut on_event = |ev: ReplayEvent<'_>| match ev {
         ReplayEvent::WouldPut {
             key,
@@ -117,7 +117,7 @@ pub async fn run(
     };
 
     let failed = report.malformed > 0 || report.refused > 0;
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     if failed {
         std::process::exit(1);
     }

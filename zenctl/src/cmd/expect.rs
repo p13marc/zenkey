@@ -64,7 +64,7 @@ pub async fn run(
             std::process::exit(2);
         }
     };
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     match report.verdict {
         zenkey_fleet::report::ExpectVerdict::Met => Ok(()),
         zenkey_fleet::report::ExpectVerdict::NotMet => std::process::exit(1),

@@ -44,7 +44,7 @@ pub async fn run(
         },
     )
     .await?;
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
 
     let failed = match fail_on {
         Some(FailOn::Error) => report.count(DoctorSeverity::Error) > 0,

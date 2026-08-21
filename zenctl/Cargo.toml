@@ -48,6 +48,8 @@ toml = { workspace = true }
 dirs = { workspace = true }
 ciborium = { workspace = true }
 tracing-subscriber = { workspace = true }
+anstyle = { workspace = true }
+anstyle-query = { workspace = true }
 
 [dev-dependencies]
 # #201: 9,272 LOC with no `tests/` directory at all. The corpus lands *before*
@@ -58,6 +60,8 @@ trycmd = { workspace = true }
 # Named explicitly rather than leaned on transitively, since the render tests
 # depend on it directly.
 snapbox = { workspace = true }
+# `strip_str`, for the acceptance test and nothing else.
+anstream = { workspace = true }
 # The report values `zenkey-fleet/tests/report_contract.rs` is written against
 # — the same ones, so the wire corpus and the render corpus cannot disagree
 # about what a report is (#201).

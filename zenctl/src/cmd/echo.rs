@@ -69,7 +69,7 @@ pub async fn run(
     // One resolution for the whole run, and it happens in `Mode::of` (#198).
     // A streaming verb's question is only ever "is a program reading this" —
     // it has rows for one and prose for the other, and no third answer.
-    let ndjson = crate::render::Mode::of(args.format).machine();
+    let ndjson = crate::render::Mode::of(args.format()).machine();
     if !ndjson {
         eprintln!(
             "echoing {selector}{} (ctrl-c to stop)",

@@ -48,7 +48,7 @@ pub async fn rpc(
     )
     .await
     .map_err(|e| anyhow!("{e}"))?;
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // A benchmark that reached nobody is not a benchmark. Exit 2 matches
     // `service call`'s "zero replies" code — silence keeps its own meaning.
     if report.origins.is_empty() {

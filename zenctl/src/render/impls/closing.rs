@@ -145,11 +145,15 @@ impl Render for CutoverReport {
             }
             t.grid(g);
         }
-        t.line(match self.verdict {
-            CutoverVerdict::Pass => "PASS",
-            CutoverVerdict::OldStillSpeaks => "FAIL",
-            CutoverVerdict::Unproven => "UNPROVEN",
-        });
+        // The word is the carrier; the colour repeats it (#200).
+        let (word, style) = match self.verdict {
+            CutoverVerdict::Pass => ("PASS", crate::render::style::PASS),
+            CutoverVerdict::OldStillSpeaks => ("FAIL", crate::render::style::ERROR),
+            // Dim, not yellow: "unproven" is the absence of a verdict rather
+            // than a milder failure.
+            CutoverVerdict::Unproven => ("UNPROVEN", crate::render::style::UNPROVEN),
+        };
+        t.line_styled(word, style);
     }
 
     fn notes(&self) -> Vec<Note> {
@@ -217,11 +221,18 @@ impl Render for ExpectReport {
             }
             t.grid(g);
         }
-        t.line(match self.verdict {
-            ExpectVerdict::Met => "MET",
-            ExpectVerdict::NotMet => "NOT MET — on a clean observation:",
-            ExpectVerdict::Impaired => "IMPAIRED — the observation cannot carry the claim:",
-        });
+        let (word, style) = match self.verdict {
+            ExpectVerdict::Met => ("MET", crate::render::style::PASS),
+            ExpectVerdict::NotMet => (
+                "NOT MET — on a clean observation:",
+                crate::render::style::ERROR,
+            ),
+            ExpectVerdict::Impaired => (
+                "IMPAIRED — the observation cannot carry the claim:",
+                crate::render::style::UNPROVEN,
+            ),
+        };
+        t.line_styled(word, style);
         if !self.unmet.is_empty() {
             let mark = if matches!(self.verdict, ExpectVerdict::Impaired) {
                 "  !"

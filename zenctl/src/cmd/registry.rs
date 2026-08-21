@@ -107,7 +107,7 @@ pub async fn diff(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let served = zenkey_fleet::SliceSet::from_bus(&session, args.base(), args.timeout()).await?;
     let report = served.diff(&local);
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
 /// `registry lint <dir>` — the consumer's build lints, without the build.

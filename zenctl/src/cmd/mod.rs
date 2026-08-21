@@ -74,7 +74,10 @@ mod tests {
             scouting: false,
             timeout: None,
             zenoh_config: None,
-            format: crate::render::Format::Table,
+            out: crate::cli::OutputArgs {
+                format: crate::render::Format::Table,
+                color: crate::render::ColorChoice::Never,
+            },
         };
         assert_eq!(
             compose_selector(&args, None, None, None).unwrap(),

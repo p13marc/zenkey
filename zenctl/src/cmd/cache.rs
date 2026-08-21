@@ -38,7 +38,7 @@ pub fn show(args: &BusArgs) -> Result<()> {
             })
             .collect(),
     };
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
 pub async fn refresh(args: &BusArgs) -> Result<()> {

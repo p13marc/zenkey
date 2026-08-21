@@ -52,6 +52,7 @@ pub use impls::local::{
     CacheReport, CachedSlice, GenPlan, GetReport, KeyCanon, KeyRelation, SchemaCheck,
 };
 pub use impls::observations::TopologyView;
+pub mod style;
 pub mod table;
 
 use std::io::Write;
@@ -59,6 +60,7 @@ use std::io::Write;
 use anyhow::Result;
 use serde::Serialize;
 
+pub use style::{ColorChoice, Styling};
 pub use table::{Cell, Grid, Table, Width};
 
 /// Which rendering the user asked for.
@@ -347,6 +349,7 @@ pub struct Sink<'a> {
     err: &'a mut dyn Write,
     mode: Mode,
     width: Width,
+    color: ColorChoice,
 }
 
 impl<'a> Sink<'a> {
@@ -356,11 +359,22 @@ impl<'a> Sink<'a> {
         format: Format,
         width: Width,
     ) -> Sink<'a> {
+        Sink::with_color(out, err, format, width, ColorChoice::default())
+    }
+
+    pub fn with_color(
+        out: &'a mut dyn Write,
+        err: &'a mut dyn Write,
+        format: Format,
+        width: Width,
+        color: ColorChoice,
+    ) -> Sink<'a> {
         Sink {
             out,
             err,
             mode: Mode::of(format),
             width,
+            color,
         }
     }
 
@@ -418,7 +432,14 @@ impl<'a> Sink<'a> {
             Mode::Table => {
                 let mut table = Table::new();
                 r.table(&mut table);
-                write!(self.out, "{}", table.render(self.width))?;
+                // The `Styling` is built *here* and reaches the writer only
+                // through `Table`. The two arms below have none in scope and
+                // `Render::rows` returns `serde_json::Value`, which has
+                // nowhere to put one — so an escape in a machine-readable
+                // stream is not a case that is handled, it is a case with no
+                // spelling (#200).
+                let styling = self.color.resolve();
+                write!(self.out, "{}", table.render(self.width, styling))?;
                 // The table's own notes first — they are about the rendering
                 // the reader just looked at — then the report's, which are
                 // about the fleet.
@@ -485,8 +506,18 @@ impl<'a> Sink<'a> {
 /// [`emit_to`] is the one the tests use, because capturing both streams is
 /// what makes "the honesty paragraph is present in ndjson mode" assertable.
 pub fn emit<R: Render>(w: &mut impl Write, r: &R, format: Format) -> Result<()> {
+    emit_with(w, r, format, ColorChoice::default())
+}
+
+/// Render one report, with the colour choice the user made.
+pub fn emit_with<R: Render>(
+    w: &mut impl Write,
+    r: &R,
+    format: Format,
+    color: ColorChoice,
+) -> Result<()> {
     let mut err = std::io::stderr();
-    emit_to(w, &mut err, r, format, term_width())
+    Sink::with_color(w, &mut err, format, term_width(), color).report(r)
 }
 
 /// Render one report, with both streams and the width supplied.
@@ -498,6 +529,19 @@ pub fn emit_to<R: Render>(
     width: Width,
 ) -> Result<()> {
     Sink::new(out, err, format, width).report(r)
+}
+
+/// The test entry point, with the colour choice supplied too.
+pub fn to_string_with<R: Render>(
+    r: &R,
+    format: Format,
+    width: Width,
+    color: ColorChoice,
+) -> Result<(String, String)> {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    Sink::with_color(&mut out, &mut err, format, width, color).report(r)?;
+    Ok((String::from_utf8(out)?, String::from_utf8(err)?))
 }
 
 fn insert_notes(doc: &mut serde_json::Map<String, serde_json::Value>, notes: &[Note]) {

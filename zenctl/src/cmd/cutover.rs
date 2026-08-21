@@ -26,7 +26,7 @@ pub async fn run(old_root: &str, window: u64, args: &BusArgs) -> Result<()> {
     );
 
     let report = zenkey_fleet::run_cutover(&session, &base, old_root, window).await?;
-    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // The one part that cannot move: a library returns a verdict, a command
     // exits with it (0 = pass, 1 = the old root still speaks, 2 = unproven —
     // silence is not a pass).

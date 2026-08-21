@@ -100,7 +100,7 @@ pub async fn run(
     // that decides which format to print it in is `emit` (#198). The decode
     // that builds a row is async, which is why the rows are built here beside
     // the session and rendered there.
-    if crate::render::Mode::of(args.format).machine() {
+    if crate::render::Mode::of(args.format()).machine() {
         let mut rows = Vec::with_capacity(answers.len());
         for a in &answers {
             rows.push(row(a, &store, &session, &slices, &base, raw, no_decode).await);
@@ -110,7 +110,7 @@ pub async fn run(
             timeout_s: secs,
             answers: rows,
         };
-        crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+        crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     } else {
         {
             let mut n = 0usize;

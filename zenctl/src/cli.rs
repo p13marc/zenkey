@@ -73,6 +73,29 @@ pub(crate) enum PubSource {
     Ndjson,
 }
 
+/// How output is rendered: which format, and whether it may carry colour.
+///
+/// One struct rather than two loose flags, and flattened everywhere either is
+/// wanted, so that **adding a `--format` without a `--color` beside it is not
+/// something you can do by forgetting** — the same move the `Render` trait
+/// makes for the `Json`/`Ndjson` collapse. Before this there were five
+/// separate `format` fields and it would have been five separate omissions.
+#[derive(Args, Clone, Copy)]
+pub(crate) struct OutputArgs {
+    /// Output format: table for humans, json (one document) or ndjson (one
+    /// object per row) for scripts; auto = table on a tty, ndjson piped.
+    #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
+    pub(crate) format: crate::render::Format,
+    /// Colour: auto (a terminal gets it, a pipe does not), always, never.
+    ///
+    /// Colour only ever re-encodes a distinction the plain text already makes,
+    /// so stripping every escape leaves the same information. `NO_COLOR` and
+    /// `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson`
+    /// never carries an escape whatever this says.
+    #[arg(long, value_enum, default_value_t = crate::render::ColorChoice::Auto)]
+    pub(crate) color: crate::render::ColorChoice,
+}
+
 #[derive(Parser)]
 #[command(
     name = "zenctl",
@@ -437,8 +460,8 @@ pub(crate) enum Command {
         context: Option<String>,
         /// table = census (deduped by zid); ndjson = arrival log, one Hello
         /// per line as heard.
-        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
-        format: crate::render::Format,
+        #[command(flatten)]
+        out: OutputArgs,
     },
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
@@ -508,8 +531,8 @@ pub(crate) enum KeyCmd {
     Includes {
         a: String,
         b: String,
-        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
-        format: crate::render::Format,
+        #[command(flatten)]
+        out: OutputArgs,
     },
     /// Can `a` and `b` name a common key? Exit 0 yes / 1 no / 2 invalid.
     ///
@@ -519,14 +542,14 @@ pub(crate) enum KeyCmd {
     Intersects {
         a: String,
         b: String,
-        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
-        format: crate::render::Format,
+        #[command(flatten)]
+        out: OutputArgs,
     },
     /// Canonicalize an expression, or print its parse error verbatim.
     Canon {
         expr: String,
-        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
-        format: crate::render::Format,
+        #[command(flatten)]
+        out: OutputArgs,
     },
 }
 
@@ -1212,13 +1235,22 @@ pub(crate) struct BusArgs {
     /// is refused — explorers run un-namespaced (RFC 09 §5).
     #[arg(long, value_name = "FILE", env = "ZENCTL_ZENOH_CONFIG")]
     pub(crate) zenoh_config: Option<PathBuf>,
-    /// Output format: table for humans, json (one document) or ndjson (one
-    /// object per row) for scripts; auto = table on a tty, ndjson piped.
-    #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
-    pub(crate) format: crate::render::Format,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
 }
 
 impl BusArgs {
+    /// The chosen format. A field before `OutputArgs` existed, and kept as an
+    /// accessor so twenty call sites did not have to learn a new spelling.
+    pub(crate) fn format(&self) -> crate::render::Format {
+        self.out.format
+    }
+
+    /// The chosen colour policy.
+    pub(crate) fn color(&self) -> crate::render::ColorChoice {
+        self.out.color
+    }
+
     /// The active stored context, loaded once per process (one BusArgs is
     /// ever used per invocation). A bad --context/ZENCTL_CONTEXT is fatal.
     pub(crate) fn stored(&self) -> Option<&'static context::StoredContext> {
