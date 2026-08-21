@@ -255,3 +255,39 @@ fn the_shape_trigger_reads_every_rung() {
     // the comparison is equality and not a `>`.
     assert!(!shape_held((9, 9, 9), (1, 2, 3), &a, &a));
 }
+
+/// The two messages the re-entrancy commit introduced, driven through
+/// `update` rather than by calling their handlers (#175).
+///
+/// `ShowInTree` used to be one arm that opened every prefix and set
+/// `selected` inline. It is now two messages, and the risk of splitting it is
+/// that one half silently stops arriving. So this asserts the *outcome* the
+/// arm used to produce, through the same entry point iced uses.
+#[test]
+fn revealing_a_subtree_opens_every_prefix_and_selects_without_fetching() {
+    use crate::message::{Message, SubjectMsg, WorkspaceMsg};
+
+    let mut app = test_app();
+    let path = "v1/h-3fa9c2d41b7e/state/sysinfo";
+
+    let _ = app.update(Message::Workspace(WorkspaceMsg::Reveal(path.to_string())));
+    for prefix in [
+        "v1",
+        "v1/h-3fa9c2d41b7e",
+        "v1/h-3fa9c2d41b7e/state",
+        "v1/h-3fa9c2d41b7e/state/sysinfo",
+    ] {
+        assert!(
+            app.tree.expanded.contains(prefix),
+            "{prefix} should be open after revealing {path}"
+        );
+    }
+
+    let _ = app.update(Message::Subject(SubjectMsg::SelectPath(path.to_string())));
+    assert_eq!(app.sub.selected.as_deref(), Some(path));
+    assert!(
+        app.sub.fetched.is_none(),
+        "a subtree prefix is not a key: selecting one must not leave a fetch \
+         behind, because no producer publishes it (#85)"
+    );
+}
