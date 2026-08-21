@@ -14,8 +14,8 @@ use std::sync::Arc;
 use iced::widget::{column, pick_list, row, text};
 use iced::{Element, Length, Subscription, Task};
 use zenkey_fleet::{
-    DiscoveredBase, FetchOutcome, KeyTreeSnapshot, Monitor, MonitorSpec, Skeleton, SliceSet,
-    WatchId,
+    DiscoveredBase, FetchOutcome, KeyTreeSnapshot, MergedNode, Monitor, MonitorSpec, Skeleton,
+    SliceSet, WatchId,
 };
 
 use crate::config::Settings;
@@ -57,6 +57,25 @@ pub struct Zengui {
 
     observed: Arc<KeyTreeSnapshot>,
     skeleton: Option<Arc<Skeleton>>,
+    /// The last merge, kept while its three inputs are unchanged (#177).
+    ///
+    /// `reflatten` is `merge` **plus** a flatten, and the merge is the larger
+    /// half — 24.97 ms against 22.08 ms at 50,000 keys. Expanding a node,
+    /// collapsing one, typing in the find box and switching pivot all change
+    /// only *how the tree is presented*: the skeleton, the observed snapshot
+    /// and the watch set are identical, so the merge is pure repetition. Now it
+    /// is paid once and the interaction costs a flatten.
+    ///
+    /// Legitimate precisely because of the shape/statistics split: `merge`'s
+    /// `stats` field is read only for `is_entry`, which is structural for the
+    /// reason `RowShape` documents. A cached merge cannot show stale numbers,
+    /// because the numbers no longer come through it.
+    ///
+    /// The trade, stated: one merged tree is retained between reflattens rather
+    /// than built and dropped each time. Peak is unchanged — today's transient
+    /// peak is the same figure — but it is not returned. If that ever matters,
+    /// drop this field and pay a merge per expand again.
+    merged_cache: Option<MergedCache>,
     /// Active watch selectors, as the last tick reported them (coverage, O5).
     watched: std::sync::Arc<[String]>,
     /// This app's per-subtree watches: display path → watch id.
@@ -200,6 +219,18 @@ pub struct Zengui {
     recorded: Option<Result<(u64, u64, String), String>>,
 }
 
+/// A merge, and the three inputs it was made from (#177).
+///
+/// All three are `Arc`s the app replaces wholesale, so validity is three
+/// pointer comparisons — no content hashing, and no chance of a key that
+/// compares equal while the tree behind it moved.
+struct MergedCache {
+    skeleton: Option<Arc<Skeleton>>,
+    observed: Arc<KeyTreeSnapshot>,
+    watched: Arc<[String]>,
+    merged: Arc<MergedNode>,
+}
+
 /// A running toolbar capture (#74): dropping the notify without firing it
 /// would leak the task, so `stop` is fired on toggle-off and on exit.
 struct RecordingHandle {
@@ -237,6 +268,7 @@ impl Zengui {
             link: LinkState::Connecting,
             epoch: 0,
             observed: Arc::new(KeyTreeSnapshot::default()),
+            merged_cache: None,
             skeleton: None,
             watched: std::sync::Arc::from([] as [String; 0]),
             my_watches: HashMap::new(),
@@ -1194,6 +1226,7 @@ impl Zengui {
         self.skeleton = None;
         self.slices = None;
         self.slice_source = view::status::SliceSource::None;
+        self.merged_cache = None;
         self.bases.clear();
         self.base_options = vec![String::new()];
         // #179: this was the one collection `forget_deployment` did not clear,
@@ -2645,7 +2678,28 @@ impl Zengui {
         }
     }
 
-    fn reflatten(&mut self) {
+    /// The merged declared-∪-observed tree, from cache when its inputs have
+    /// not moved (#177).
+    fn merged(&mut self) -> Arc<MergedNode> {
+        let same_skeleton = |a: &Option<Arc<Skeleton>>| match (a, &self.skeleton) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        let fresh = self.merged_cache.as_ref().is_some_and(|c| {
+            same_skeleton(&c.skeleton)
+                && Arc::ptr_eq(&c.observed, &self.observed)
+                && Arc::ptr_eq(&c.watched, &self.watched)
+        });
+        if let Some(c) = &self.merged_cache
+            && fresh
+        {
+            return Arc::clone(&c.merged);
+        }
+        // No registry has answered yet, so there is nothing declared to merge
+        // against. This used to be rebuilt on *every* `reflatten` just to have
+        // an empty tree to hand the merge; now it is built only when the merge
+        // itself is.
         let empty_skeleton;
         let skeleton = match &self.skeleton {
             Some(s) => s.as_ref(),
@@ -2659,7 +2713,22 @@ impl Zengui {
                 &empty_skeleton
             }
         };
-        let merged = zenkey_fleet::skeleton::merge(skeleton, &self.observed, &self.watched);
+        let merged = Arc::new(zenkey_fleet::skeleton::merge(
+            skeleton,
+            &self.observed,
+            &self.watched,
+        ));
+        self.merged_cache = Some(MergedCache {
+            skeleton: self.skeleton.clone(),
+            observed: Arc::clone(&self.observed),
+            watched: Arc::clone(&self.watched),
+            merged: Arc::clone(&merged),
+        });
+        merged
+    }
+
+    fn reflatten(&mut self) {
+        let merged = self.merged();
         let now = std::time::Instant::now();
         // Pivot and filter re-key the flattened entries here — the hot tree
         // stays registry-blind (issue #65).
@@ -3302,6 +3371,34 @@ mod tests {
         let one: Arc<[String]> = Arc::from(["v1/a/**".to_string()]);
         app.apply_tick(&tick(7, 0, 0, &one));
         assert_eq!(app.shape_rebuilt, before + 1);
+    }
+
+    /// Expanding, collapsing, typing in the find box and switching pivot all
+    /// change only *how* the tree is presented — so the merge behind it is
+    /// repetition, and at 50,000 keys it is the larger half of `reflatten`
+    /// (24.97 ms against 22.08 ms).
+    #[test]
+    fn a_presentation_change_does_not_re_merge_the_tree() {
+        let mut app = app();
+        app.reflatten();
+        let first = Arc::clone(&app.merged_cache.as_ref().expect("cached").merged);
+
+        app.expanded.open("v1");
+        app.reflatten();
+        assert!(
+            Arc::ptr_eq(&first, &app.merged_cache.as_ref().expect("cached").merged),
+            "an expand changes no input to the merge"
+        );
+
+        // A new observed snapshot is a different tree, and must not be served
+        // from the cache.
+        let stats = zenkey_fleet::stats::StatsTable::new();
+        app.observed = Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats));
+        app.reflatten();
+        assert!(
+            !Arc::ptr_eq(&first, &app.merged_cache.as_ref().expect("cached").merged),
+            "a new snapshot is new evidence, whatever it contains"
+        );
     }
 
     /// The predicate on its own, since it is the whole trigger.
