@@ -18,6 +18,7 @@
 use anyhow::Result;
 
 use crate::BusArgs;
+use crate::input::Source;
 
 /// `zenctl schema <producer> [--type X] [--full]`.
 pub async fn dump(
@@ -43,7 +44,7 @@ pub async fn dump(
 /// This checks; it never publishes and never encodes.
 pub async fn check(
     type_name: &str,
-    from: &str,
+    from: &Source,
     producer: Option<&str>,
     schema_set: Option<&std::path::Path>,
     encoding: Option<&str>,
@@ -52,17 +53,12 @@ pub async fn check(
     use zenkey::schema::WireEncoding;
     use zenkey_fleet::Verdict;
 
-    let bytes = match from {
-        "-" => {
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            std::io::stdin().read_to_end(&mut buf)?;
-            buf
-        }
-        b => match b.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => b.as_bytes().to_vec(),
-        },
+    // A payload that cannot be read is *unobservable*, not nonconformant
+    // (#244). `?` here would exit 1 — this verb's "does not conform" — and
+    // tell CI that a typo'd path is a schema violation.
+    let bytes = match from.read() {
+        Ok(bytes) => bytes,
+        Err(e) => not_checked(&format!("{e:#}")),
     };
 
     // Offline (--schema-set) needs no session at all — that is the whole

@@ -21,7 +21,7 @@ Arguments:
           Any key expression, params included (`key?k=v`)
 
 Options:
-      --body <BODY>
+      --body <TEXT|@FILE|->
           Query body: inline text, `@file`, or `-` for stdin — rides the same encode ladder as `topic pub` when the selector's key part refines to a registered subject
 
       --raw

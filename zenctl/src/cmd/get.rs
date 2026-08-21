@@ -10,6 +10,7 @@ use anyhow::Result;
 
 use super::sample::{attachment_display, attachment_json, format_sample, hex, type_tag};
 use crate::BusArgs;
+use crate::input::Source;
 use zenkey_fleet::{Answer, FleetAnswer};
 
 /// The reply discipline as an exit code: 0 = value replies only, 1 = at
@@ -31,7 +32,7 @@ fn exit_code(answers: &[FleetAnswer]) -> i32 {
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     selector: &str,
-    body: Option<&str>,
+    body: Option<&Source>,
     raw: bool,
     hex_payload: bool,
     fmt: Option<&str>,
@@ -53,18 +54,7 @@ pub async fn run(
     let payload = match body {
         None => None,
         Some(b) => {
-            let typed = match b {
-                "-" => {
-                    use std::io::Read as _;
-                    let mut buf = Vec::new();
-                    std::io::stdin().read_to_end(&mut buf)?;
-                    buf
-                }
-                b => match b.strip_prefix('@') {
-                    Some(path) => std::fs::read(path)?,
-                    None => b.as_bytes().to_vec(),
-                },
-            };
+            let typed = b.read()?;
             let key_part = selector.split('?').next().unwrap_or(selector);
             let prepared = zenkey_fleet::prepare_publish(
                 &session,

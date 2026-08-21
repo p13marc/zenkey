@@ -32,6 +32,7 @@ use clap_complete::ArgValueCandidates;
 use zenkey::RegistrySlice;
 use zenkey_fleet as bus;
 
+use crate::input::Source;
 use crate::{completion, context};
 
 // The four `ValueEnum`s below live here rather than beside the code that
@@ -126,8 +127,8 @@ pub(crate) enum Command {
         /// Query body: inline text, `@file`, or `-` for stdin — rides the
         /// same encode ladder as `topic pub` when the selector's key part
         /// refines to a registered subject.
-        #[arg(long)]
-        body: Option<String>,
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        body: Option<Source>,
         /// Ship the body verbatim and print payloads as hex; no decode.
         #[arg(long)]
         raw: bool,
@@ -209,7 +210,7 @@ pub(crate) enum Command {
         keyexpr: String,
         /// Reply body: inline text, `@file`, or `-` for stdin (read once) —
         /// through the same encode ladder as `topic pub`.
-        reply: String,
+        reply: Source,
         /// Wire encoding to declare on replies. Defaults to the registry's
         /// declared encoding when the keyexpr refines, else none.
         #[arg(long)]
@@ -632,7 +633,7 @@ pub(crate) enum SchemaCmd {
         type_name: String,
         /// Payload: inline text, `@file`, or `-` for stdin.
         #[arg(long, value_name = "TEXT|@FILE|-")]
-        from: String,
+        from: Source,
         /// Producer whose served `describe` carries the schema (live mode).
         #[arg(long, add = ArgValueCandidates::new(completion::producers))]
         producer: Option<String>,
@@ -943,7 +944,7 @@ pub(crate) enum TopicCmd {
         /// Full wire key to publish on (omit with --from ndjson).
         key: Option<String>,
         /// Payload: inline text, `@file`, or `-` for stdin (omit with --from).
-        body: Option<String>,
+        body: Option<Source>,
         /// Read rows from stdin instead: `--from ndjson` accepts the exact
         /// row shape `topic echo --format ndjson` (and the zengui export)
         /// emits — key + value per row, optionally encoding/qos/delete/
@@ -980,11 +981,11 @@ pub(crate) enum TopicCmd {
         /// The escape hatch for a subject this tool cannot type.
         #[arg(long)]
         raw: bool,
-        /// Attachment riding beside the payload: inline text or `@file`.
-        /// Never schema-encoded — the registry's vocabulary ends at the
-        /// payload (#117).
-        #[arg(long, value_name = "TEXT|@FILE")]
-        attachment: Option<String>,
+        /// Attachment riding beside the payload: inline text, `@file`, or
+        /// `-` for stdin. Never schema-encoded — the registry's vocabulary
+        /// ends at the payload (#117).
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        attachment: Option<Source>,
         #[command(flatten)]
         bus: BusArgs,
     },
@@ -1142,14 +1143,14 @@ pub(crate) enum ServiceCmd {
         /// Selector parameters, repeatable: `--param state=established`.
         #[arg(long = "param", value_name = "K=V")]
         params: Vec<String>,
-        /// Request body: inline JSON, or `@path` to read a file.
-        #[arg(long)]
-        body: Option<String>,
+        /// Request body: inline JSON, `@file`, or `-` for stdin.
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        body: Option<Source>,
         /// Attachment riding beside the request, verbatim — never
         /// schema-encoded (#117's rule, on the call side: #126). Inline
-        /// text, or `@path` to read a file.
-        #[arg(long)]
-        attachment: Option<String>,
+        /// text, `@file`, or `-` for stdin.
+        #[arg(long, value_name = "TEXT|@FILE|-")]
+        attachment: Option<Source>,
         /// Skip the registry lookup (and with it the registry-layer
         /// forbidden-fanout refusal and any body validation).
         #[arg(long)]

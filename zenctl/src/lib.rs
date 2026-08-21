@@ -18,6 +18,7 @@
 //! command that reports it.
 pub mod cli;
 pub mod errors;
+pub mod input;
 pub mod render;
 pub mod report;
 
@@ -150,7 +151,7 @@ pub async fn run() -> Result<()> {
                     interval,
                     no_validate,
                     raw,
-                    attachment.as_deref(),
+                    attachment.as_ref(),
                     &bus,
                 )
                 .await
@@ -304,7 +305,7 @@ pub async fn run() -> Result<()> {
         } => {
             cmd::get::run(
                 &selector,
-                body.as_deref(),
+                body.as_ref(),
                 raw,
                 hex,
                 fmt.as_deref(),
@@ -344,8 +345,8 @@ pub async fn run() -> Result<()> {
                 &producer,
                 &procedure,
                 &params,
-                body.as_deref(),
-                attachment.as_deref(),
+                body.as_ref(),
+                attachment.as_ref(),
                 no_validate,
                 raw,
                 &bus,

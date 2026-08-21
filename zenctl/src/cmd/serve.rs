@@ -7,11 +7,12 @@
 use anyhow::Result;
 
 use crate::BusArgs;
+use crate::input::Source;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     keyexpr: &str,
-    reply: &str,
+    reply: &Source,
     encoding: Option<&str>,
     no_validate: bool,
     raw: bool,
@@ -19,18 +20,7 @@ pub async fn run(
     count: usize,
     args: &BusArgs,
 ) -> Result<()> {
-    let typed = match reply {
-        "-" => {
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            std::io::stdin().read_to_end(&mut buf)?;
-            buf
-        }
-        b => match b.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => b.as_bytes().to_vec(),
-        },
-    };
+    let typed = reply.read()?;
 
     let session = args.session().await?;
     // The reply body rides the pub encode ladder: a concrete keyexpr that

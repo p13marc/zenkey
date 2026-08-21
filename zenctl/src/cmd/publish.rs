@@ -8,6 +8,7 @@ use anyhow::Result;
 use zenkey_fleet::{BodySource, PrepareMode};
 
 use crate::BusArgs;
+use crate::input::Source;
 
 /// Which of the engine's three preparation modes the flags select. Shared
 /// with `service call` so both write paths read the same flags the same way.
@@ -74,39 +75,22 @@ fn resolve_qos(
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     key: &str,
-    body: &str,
+    body: &Source,
     qos: Option<&str>,
     encoding: Option<&str>,
     repeat: usize,
     interval: f64,
     no_validate: bool,
     raw: bool,
-    attachment: Option<&str>,
+    attachment: Option<&Source>,
     args: &BusArgs,
 ) -> Result<()> {
     // An explicit --qos fails fast, before the body or the bus.
     let explicit_qos = qos.map(parse_qos).transpose()?;
-    let typed = match body {
-        "-" => {
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            std::io::stdin().read_to_end(&mut buf)?;
-            buf
-        }
-        b => match b.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => b.as_bytes().to_vec(),
-        },
-    };
+    let typed = body.read()?;
     // The attachment ships verbatim (#117): never schema-encoded, the
     // registry's vocabulary ends at the payload.
-    let attachment: Option<Vec<u8>> = match attachment {
-        None => None,
-        Some(a) => Some(match a.strip_prefix('@') {
-            Some(path) => std::fs::read(path)?,
-            None => a.as_bytes().to_vec(),
-        }),
-    };
+    let attachment: Option<Vec<u8>> = attachment.map(Source::read).transpose()?;
 
     let session = args.session().await?;
     // Registry awareness: when the key refines to a registered subject, the
