@@ -9,29 +9,10 @@ use serde::Serialize;
 
 use crate::report::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Format {
-    Auto,
-    Table,
-    Json,
-    Ndjson,
-}
-
-impl Format {
-    /// Resolve `auto` against the output stream.
-    pub fn resolved(self) -> Format {
-        match self {
-            Format::Auto => {
-                if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
-                    Format::Table
-                } else {
-                    Format::Ndjson
-                }
-            }
-            other => other,
-        }
-    }
-}
+/// Re-exported from [`crate::render`], which is where the one `match` on it
+/// lives (#198). The name stays reachable here so the twenty-odd `cmd/*` call
+/// sites keep compiling while the renderers move family by family.
+pub use crate::render::Format;
 
 fn json_line<T: Serialize>(row: &T) {
     println!("{}", serde_json::to_string(row).expect("report serializes"));
@@ -45,59 +26,7 @@ fn json_doc<T: Serialize>(report: &T) {
 }
 
 pub fn topic_list(report: &TopicList, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.subjects.iter().for_each(json_line),
-        _ => {
-            if report.subjects.is_empty() {
-                println!("no subjects match.");
-                return Ok(());
-            }
-            let mut current = None;
-            let mut open_ended = 0usize;
-            for s in &report.subjects {
-                if current != Some(&s.producer) {
-                    println!("\n{}  (registry {})", s.producer, s.registry_version);
-                    current = Some(&s.producer);
-                }
-                if s.open_ended {
-                    open_ended += 1;
-                }
-                let deprecation = if s.deprecated {
-                    format!(
-                        "  DEPRECATED{}{}",
-                        s.deprecated_since
-                            .as_deref()
-                            .map(|v| format!(" since {v}"))
-                            .unwrap_or_default(),
-                        s.replaced_by
-                            .as_deref()
-                            .map(|r| format!(" → {r}"))
-                            .unwrap_or_default()
-                    )
-                } else {
-                    String::new()
-                };
-                println!(
-                    "  {:<10} {:<44} {}{}{}",
-                    s.class,
-                    s.path,
-                    s.type_name,
-                    if s.open_ended { "  [open-ended]" } else { "" },
-                    deprecation
-                );
-            }
-            println!("\n{} registered subject(s).", report.subjects.len());
-            if open_ended > 0 {
-                let is = if open_ended == 1 { "is" } else { "are" };
-                println!(
-                    "{open_ended} {is} open-ended ({{var...}}): the registry fixes their shape, not their\n\
-                     members. Use `zenctl topic echo` to see what a live fleet actually publishes."
-                );
-            }
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 pub fn topic_info(report: &TopicInfo, format: Format) -> Result<()> {
@@ -168,120 +97,16 @@ pub fn topic_info(report: &TopicInfo, format: Format) -> Result<()> {
     }
 }
 pub fn service_list(report: &ServiceList, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.procedures.iter().for_each(json_line),
-        _ => {
-            if report.procedures.is_empty() {
-                println!("no procedures match.");
-                return Ok(());
-            }
-            let mut current = None;
-            for p in &report.procedures {
-                if current != Some(&p.producer) {
-                    println!("\n{}  (registry {})", p.producer, p.registry_version);
-                    current = Some(&p.producer);
-                }
-                println!(
-                    "  {:<6} {:<24} → {}",
-                    p.kind,
-                    p.path,
-                    p.reply.as_deref().unwrap_or("-")
-                );
-            }
-            println!("\n{} registered procedure(s).", report.procedures.len());
-            println!("call one with: zenctl service call <origin|*> <producer> <procedure>");
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `service info` (issue #211).
 pub fn service_info(report: &ServiceInfo, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.procedures.iter().for_each(json_line),
-        _ => {
-            println!(
-                "producer  {}  (registry {})",
-                report.producer, report.registry_version
-            );
-            if let Some(origin) = &report.service_origin {
-                println!(
-                    "origin    {origin}  (a service origin — its keys carry no producer chunk)"
-                );
-            }
-            if let Some(d) = &report.description {
-                println!("about     {d}");
-            }
-            if report.procedures.is_empty() {
-                println!(
-                    "\nno procedures declared. That is what the registry says, not what \
-                     the producer is capable of."
-                );
-                return Ok(());
-            }
-            println!("\n{} procedure(s):\n", report.procedures.len());
-            for p in &report.procedures {
-                println!("  {:<8} {}", p.kind, p.path);
-                println!("           {}", p.key);
-                let types = match (&p.request, &p.reply) {
-                    (Some(rq), Some(rp)) => format!("{rq} → {rp}"),
-                    (None, Some(rp)) => format!("→ {rp}"),
-                    (Some(rq), None) => format!("{rq} →"),
-                    (None, None) => String::new(),
-                };
-                if !types.is_empty() {
-                    println!("           {types}");
-                }
-                // Fan-out is worth seeing *before* reaching for `*`: a
-                // forbidden one has no fleet spelling at all (RFC 08 §1.1 G2).
-                if let Some(f) = &p.fanout {
-                    println!(
-                        "           fanout {f}{}",
-                        if f == "forbidden" {
-                            " — no fleet spelling exists; call one origin"
-                        } else {
-                            ""
-                        }
-                    );
-                }
-                if let Some(i) = p.idempotent {
-                    println!("           idempotent {i}");
-                }
-                if let Some(d) = &p.description {
-                    println!("           {d}");
-                }
-            }
-            println!(
-                "\ncall one with: zenctl service call <origin|*> {} <procedure>",
-                report.producer
-            );
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 pub fn interface_list(report: &InterfaceList, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.types.iter().for_each(json_line),
-        _ => {
-            if report.types.is_empty() {
-                println!("no payload types declared.");
-                return Ok(());
-            }
-            println!("declared payload types:\n");
-            for t in &report.types {
-                println!("  {:<24} {} carrier(s)", t.name, t.carriers);
-            }
-            println!(
-                "\n{} type(s). Schema definitions live with the owning application (RFC 08 §5).",
-                report.types.len()
-            );
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 pub fn interface_show(report: &InterfaceShow, format: Format) -> Result<()> {
@@ -329,52 +154,7 @@ pub fn interface_show(report: &InterfaceShow, format: Format) -> Result<()> {
 
 /// `zenctl bench rpc` (issue #52).
 pub fn bench(report: &BenchReport, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.origins.iter().for_each(json_line),
-        _ => {
-            println!("→ {}", report.key);
-            println!(
-                "{} call(s), concurrency {}, {:.2}s — {:.1} calls/s",
-                report.completed, report.concurrency, report.elapsed_s, report.calls_per_s
-            );
-            if report.completed < report.requested {
-                println!(
-                    "  {} of {} calls did not complete",
-                    report.requested - report.completed,
-                    report.requested
-                );
-            }
-            if report.origins.is_empty() {
-                // The same non-verdict `service call` reports, with the same
-                // wording: nothing answered, and that is not proof of absence.
-                println!(
-                    "\nno origin answered — a non-verdict, not proof of absence \
-                     (RFC 05 §3.1); `zenctl node list` says who is up."
-                );
-                return Ok(());
-            }
-            println!(
-                "\n{:<16} {:>8} {:>9} {:>9} {:>9} {:>9} {:>9}",
-                "origin", "replies", "min ms", "p50 ms", "p95 ms", "p99 ms", "max ms"
-            );
-            for o in &report.origins {
-                println!(
-                    "{:<16} {:>8} {:>9.2} {:>9.2} {:>9.2} {:>9.2} {:>9.2}",
-                    o.origin, o.replies, o.min_ms, o.p50_ms, o.p95_ms, o.p99_ms, o.max_ms
-                );
-            }
-            // Errors and silence are counted apart on purpose: averaging a
-            // non-answer into a latency figure is how a benchmark lies.
-            if report.errors > 0 || report.silent > 0 {
-                println!(
-                    "\n{} error repl(ies), {} call(s) drew no reply at all.",
-                    report.errors, report.silent
-                );
-            }
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `zenctl registry diff` (issue #50).
@@ -472,92 +252,11 @@ pub fn schema_dump(report: &SchemaDump, format: Format) -> Result<()> {
 }
 
 pub fn node_list(report: &NodeList, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.nodes.iter().for_each(json_line),
-        _ => {
-            if report.nodes.is_empty() {
-                println!("no live producers.");
-                return Ok(());
-            }
-            let mut last_origin = "";
-            for row in &report.nodes {
-                if row.origin != last_origin {
-                    println!("{}", row.origin);
-                    last_origin = &row.origin;
-                }
-                match (&row.app, &row.registry_version) {
-                    (Some(app), Some(v)) => {
-                        println!("  {}  (app {app}, registry {v})", row.producer)
-                    }
-                    // Asked and unanswered is a fact; not asked is not (O4).
-                    _ if report.slices_joined => {
-                        println!("  {}  (no served slice)", row.producer)
-                    }
-                    _ => println!("  {}", row.producer),
-                }
-            }
-            let origins: std::collections::BTreeSet<&str> =
-                report.nodes.iter().map(|r| r.origin.as_str()).collect();
-            println!(
-                "\n{} producer(s) on {} origin(s).",
-                report.nodes.len(),
-                origins.len()
-            );
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 pub fn base_list(report: &BaseList, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.bases.iter().for_each(json_line),
-        _ => {
-            if report.bases.is_empty() {
-                println!(
-                    "no bases discovered — nothing held a liveliness token matching \
-                     **/v1/*/state/*/alive and no storage config names one.\n\
-                     Silence is not a verdict (RFC 05 §3.1): producers may be down, the \
-                     mesh unreachable (--connect?), or holding no tokens."
-                );
-                return Ok(());
-            }
-            let mut saw_empty = false;
-            for b in &report.bases {
-                let display = if b.base.is_empty() {
-                    saw_empty = true;
-                    "(empty)"
-                } else {
-                    b.base.as_str()
-                };
-                print!(
-                    "{display:<24} {:>3} origin(s)  {:>3} producer(s)",
-                    b.origins.len(),
-                    b.producers.len()
-                );
-                if !b.storages.is_empty() {
-                    print!("  storage: {}", b.storages.join(", "));
-                }
-                if b.origins.is_empty() {
-                    print!("  (storage config only — nothing alive)");
-                }
-                println!();
-            }
-            println!(
-                "\n{} base(s). Pin one: zenctl context create <name> --base <base> \
-                 -c <endpoint> --select",
-                report.bases.len()
-            );
-            if saw_empty {
-                println!(
-                    "the (empty) base is selected with --base \"\" (keys start at v1/ \
-                     on the wire)."
-                );
-            }
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 pub fn call(report: &CallReport, format: Format, render_text: impl Fn(&CallAnswer) -> String) {
@@ -591,65 +290,7 @@ pub fn call(report: &CallReport, format: Format, render_text: impl Fn(&CallAnswe
 /// mistake this table invites is reading it as possession. So the prose says
 /// what would actually answer that question.
 pub fn blob_list(report: &BlobList, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.tiers.iter().for_each(json_line),
-        _ => {
-            if report.tiers.is_empty() {
-                println!(
-                    "no producer declares an @blob tier ({} slice(s) read). \
-                     An empty table here is what the registry says, not what the bus holds.",
-                    report.slices_considered
-                );
-                return Ok(());
-            }
-            println!("declared @blob tiers:\n");
-            for row in &report.tiers {
-                let flag = if row.known_tier {
-                    ""
-                } else {
-                    "  (unreserved tier token)"
-                };
-                println!(
-                    "  {:<12} {:<9} v{}{}",
-                    row.producer, row.tier, row.registry_version, flag
-                );
-                if !row.endpoints.is_empty() {
-                    println!("      endpoints  {}", row.endpoints.join(", "));
-                }
-                if let Some(algo) = &row.algo {
-                    println!("      algo       {algo}");
-                }
-                if let Some(t) = &row.reference {
-                    println!("      reference  {t}  (carries the content root — RFC 07 §2.1)");
-                }
-                if let Some(e) = &row.encoding {
-                    println!("      encoding   {e}");
-                }
-                // Three different facts, three different sentences. An empty
-                // roster is not a fleet verdict (RFC 05 §3.1) and an unasked
-                // one is not an empty one (RFC 09 §5.1 O4).
-                match &row.origins {
-                    Some(origins) if origins.is_empty() => println!(
-                        "      origins    — (no liveliness token answered; silence is not a \
-                         verdict — RFC 05 §3.1)"
-                    ),
-                    Some(origins) => println!("      origins    {}", origins.join(" ")),
-                    None => println!("      origins    — (roster not asked)"),
-                }
-                if let Some(d) = &row.description {
-                    println!("      {d}");
-                }
-            }
-            println!(
-                "\n{} of {} slice(s) declare a tier. A declaration is a capability, never \
-                 possession — `zenctl blob probe <id>` asks who actually holds one.",
-                report.slices_considered - report.slices_without_blob,
-                report.slices_considered
-            );
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `blob probe` — who answered, and at which root (RFC 07 §2.5).
@@ -854,58 +495,7 @@ fn short(hash: &str) -> String {
 }
 
 pub fn storage_list(report: &StorageList, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => {
-            report.storages.iter().for_each(json_line);
-            report.coverage.iter().for_each(json_line);
-        }
-        _ => {
-            if report.storages.is_empty() {
-                println!(
-                    "no storages found in the admin space — a peer-only mesh, a router \
-                     without the storage manager, or the admin space is disabled."
-                );
-            } else {
-                println!("configured storages:\n");
-                for s in &report.storages {
-                    println!(
-                        "  {:<16} @{}  {}",
-                        s.name,
-                        s.zid,
-                        s.key_expr.as_deref().unwrap_or("-")
-                    );
-                    // `-` where the layout did not say. Absent is not empty:
-                    // a storage with no strip_prefix and one whose admin
-                    // document omits the field are different facts.
-                    println!(
-                        "  {:<16} strip {}  ·  volume {}",
-                        "",
-                        s.strip_prefix.as_deref().unwrap_or("-"),
-                        s.volume.as_deref().unwrap_or("-")
-                    );
-                }
-            }
-            if !report.coverage.is_empty() {
-                println!("\ndeclared state families vs storage coverage:\n");
-                for row in &report.coverage {
-                    use zenkey_fleet::Coverage;
-                    let (mark, detail) = match &row.coverage {
-                        Coverage::Covered(s) => ("✓", format!("covered by {s}")),
-                        Coverage::Partial(s) => ("~", format!("PARTIAL via {s}")),
-                        Coverage::Uncovered => ("·", "uncovered".to_string()),
-                    };
-                    println!("  {mark} {:<10} {:<36} {}", row.producer, row.path, detail);
-                }
-                println!(
-                    "\nnote: an uncovered ttl'd family is not automatically a defect — \
-                     volatile-state seeding may ride the advanced-pub/sub cache \
-                     (RFC 04 §3.5); storage is authoritative for durable data."
-                );
-            }
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `topic hz` / `topic bw` (issue #46): the typed report renders through the

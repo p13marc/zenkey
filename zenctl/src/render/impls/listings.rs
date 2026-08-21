@@ -34,7 +34,13 @@ impl Render for TopicList {
                     tail.push_str(&format!(" → {r}"));
                 }
             }
-            grid.row([Cell::text(&s.class), Cell::text(&s.path), Cell::text(tail)]);
+            // Indented under the group heading, which is what tells a row
+            // from a producer name at a glance.
+            grid.row([
+                Cell::text(format!("  {}", s.class)),
+                Cell::text(&s.path),
+                Cell::text(tail),
+            ]);
         }
         t.grid(grid);
     }
