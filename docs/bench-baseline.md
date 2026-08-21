@@ -296,3 +296,23 @@ evicts an old one, `keys_evicted` moves every tick and the shape genuinely
 changes every tick. There the rebuild is correct work. Pivot views likewise
 rebuild every tick by construction — their numbers are aggregates over a
 synthetic grouping no snapshot can be asked about.
+
+### #177 and #249 together — the consolidated picture
+
+At 50,000 keys, default `Pivot::Chunks`:
+
+| Path | Before | After |
+|---|---|---|
+| steady-state tick | 47.05 ms (merge + flatten) | **11.3 ns** (retarget) |
+| expand / collapse / find keystroke | 47.05 ms | **~22 ms** (flatten; merge cached) |
+| search, no match | 33.08 ms | **24.06 ms** |
+| search, matching everything | 36.92 ms | **29.33 ms** |
+| pivot view, per tick | 93.35 ms | **83.45 ms** |
+| one screenful, per frame | — | 12.57 µs (new work) |
+
+Read the last two rows together with the first: a pivot view gets the row-cap fix
+and **not** the shape cache, because its numbers are aggregates over a synthetic
+grouping no snapshot can be asked about. 83 ms every tick is what #251 is for.
+
+The frame gained 12.57 µs of join — 0.08% of a 16 ms budget — in exchange for the
+tick losing 47 ms. That is the whole trade.

@@ -167,7 +167,8 @@ Recorded so they are not "fixed" by the next reader:
 | `zenkey-fleet/src/query.rs` — the error-reply arm | `String::from_utf8_lossy(…).to_string()` into an owned `Error{name,message}`. Rare, and the bytes must be owned. |
 | `zenkey-fleet/src/body.rs` — `body.to_vec()` | The write path builds an owned wire body, once per user action. Not per sample. |
 | `SampleView`'s two `String`s | The floor above. `Box<str>`/`Arc<str>` would save a pointer's worth and break an all-public-fields struct. |
-| `Flattened::rows` — one `Vec<TreeRow>` per flatten | Bounded by `MAX_ROWS`, and the rows are the pane's own data rather than a copy of the engine's. What it costs is #177's, not this doc's. |
+| `Flattened::rows` — one `Vec<RowShape>` per **rebuild** | Bounded by `MAX_ROWS` in all three flatten paths since #249, and no longer per *tick*: #177 separated the shape from the numbers, so a steady-state tick retargets in 11.3 ns and a `TreeRow` is a per-frame temporary of ~40. What a cold rebuild still costs is #251's. |
+| `Zengui::merged_cache` — one merged tree retained | #177. Peak is unchanged, since the transient peak was always this figure; what changed is that it is not returned between rebuilds. It buys the expand/collapse/search/pivot path a merge — the larger half of a `reflatten`. |
 
 ---
 
