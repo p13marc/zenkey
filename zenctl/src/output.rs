@@ -159,96 +159,12 @@ pub fn bench(report: &BenchReport, format: Format) -> Result<()> {
 
 /// `zenctl registry diff` (issue #50).
 pub fn registry_diff(report: &RegistryDiff, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.producers.iter().for_each(json_line),
-        _ => {
-            if report.producers.is_empty() {
-                println!("no producers on either side.");
-                return Ok(());
-            }
-            for p in &report.producers {
-                let versions = match (&p.served_version, &p.local_version) {
-                    (Some(s), Some(l)) if s == l => format!("registry {s}"),
-                    (Some(s), Some(l)) => format!("served {s} · local {l}"),
-                    (Some(s), None) => format!("served {s} · local —"),
-                    (None, Some(l)) => format!("served — · local {l}"),
-                    (None, None) => String::new(),
-                };
-                if p.findings.is_empty() {
-                    println!("  {:<16} {versions}   agree", p.producer);
-                } else {
-                    println!("✗ {:<16} {versions}", p.producer);
-                    for f in &p.findings {
-                        println!("      {f}");
-                    }
-                }
-            }
-            // RFC 08 §6: a disagreement is a finding, not a verdict — the
-            // count is reported, the exit code is not touched.
-            println!(
-                "\n{} producer(s), {} disagreeing (RFC 08 §6: a disagreement is a finding).",
-                report.producers.len(),
-                report.disagreeing()
-            );
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `zenctl schema <producer>` (issue #51).
 pub fn schema_dump(report: &SchemaDump, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => report.types.iter().for_each(json_line),
-        _ => {
-            if !report.served {
-                // §7 is a SHOULD. "Serves no describe" is a fact about the
-                // producer, not a verdict about its payloads (RFC 05 §3.1's
-                // rule applied to a schema fetch).
-                println!(
-                    "{} serves no `describe` — its payload shapes are undescribed, which is \
-                     not the same as having none (RFC 08 §7 is a SHOULD).",
-                    report.producer
-                );
-                return Ok(());
-            }
-            println!(
-                "producer  {}{}",
-                report.producer,
-                report
-                    .app
-                    .as_deref()
-                    .map(|a| format!("   (app {a})"))
-                    .unwrap_or_default()
-            );
-            if report.types.is_empty() {
-                println!("\nthe served set declares no matching types.");
-            } else {
-                println!("\n{} type(s):\n", report.types.len());
-                for t in &report.types {
-                    println!("  {:<24} {:<12} {}", t.type_name, t.kind, t.hash);
-                }
-            }
-            for t in &report.types {
-                if let Some(doc) = &t.document {
-                    println!("\n{}:", t.type_name);
-                    println!("{}", serde_json::to_string_pretty(doc).unwrap_or_default());
-                }
-            }
-            if !report.missing.is_empty() {
-                // RFC 08 §7's totality clause, checked where the user is
-                // already looking rather than only in `doctor`.
-                println!(
-                    "\n⚠ the registry references {} type(s) this set does not cover: {}\n  \
-                     (RFC 08 §7 totality — the set MUST cover every referenced name)",
-                    report.missing.len(),
-                    report.missing.join(", ")
-                );
-            }
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 pub fn node_list(report: &NodeList, format: Format) -> Result<()> {
@@ -612,85 +528,7 @@ pub fn rate(report: &RateReport, format: Format, bandwidth: bool, loss: bool, la
 /// subject, evidence, citation) or as the whole typed report in JSON —
 /// `zenctl doctor --format json | jq '.findings[]'` is the contract.
 pub fn doctor(report: &DoctorReport, format: Format) -> Result<()> {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => {
-            report.findings.iter().for_each(json_line);
-        }
-        _ => {
-            for s in &report.synced {
-                println!("✓ {s}: in sync");
-            }
-            for f in &report.findings {
-                let mark = match f.severity {
-                    DoctorSeverity::Error => "✗",
-                    DoctorSeverity::Warning => "⚠",
-                    DoctorSeverity::Info => "·",
-                };
-                let citation = f
-                    .citation
-                    .as_deref()
-                    .map(|c| format!("  [{c}]"))
-                    .unwrap_or_default();
-                println!(
-                    "{mark} {}: {} — {}{citation}",
-                    f.check, f.subject, f.evidence
-                );
-            }
-            // The listen phase's scope statement (#161): what was watched,
-            // for how long, and what the bounded observer missed (O5/O6).
-            if let Some(obs) = &report.observation {
-                println!(
-                    "\nlistened {:.0}s over {} scope(s): {} sample(s) on {} key(s), \
-                     {} dropped{}{}",
-                    obs.window_s,
-                    obs.scopes.len(),
-                    obs.samples,
-                    obs.keys_seen,
-                    obs.dropped,
-                    if obs.dropped > 0 {
-                        " (findings cover only what was seen — O6)"
-                    } else {
-                        ""
-                    },
-                    if obs.synthetic_marked > 0 {
-                        format!(
-                            "; {} sample(s) carried the synthetic marker",
-                            obs.synthetic_marked
-                        )
-                    } else {
-                        String::new()
-                    },
-                );
-            }
-            println!(
-                "\n{} introspect repl(y|ies) from {} live producer(s); {} producer(s) \
-                 serve describe, {} do not; {} router(s){}.",
-                report.introspect_answered,
-                report.live_producers,
-                report.describe_served,
-                report.describe_missing,
-                report.routers,
-                report
-                    .router_version
-                    .as_deref()
-                    .map(|v| format!(" (version {v})"))
-                    .unwrap_or_default(),
-            );
-            let errors = report.count(DoctorSeverity::Error);
-            let warnings = report.count(DoctorSeverity::Warning);
-            if errors == 0 && warnings == 0 {
-                println!("no findings — the fleet agrees with this build.");
-            } else {
-                println!(
-                    "{} finding(s): {errors} error(s), {warnings} warning(s), {} info.",
-                    report.findings.len(),
-                    report.count(DoctorSeverity::Info)
-                );
-            }
-        }
-    }
-    Ok(())
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// Microseconds, humanised with sign kept — a negative latency is the skew
