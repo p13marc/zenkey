@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use zenkey_fleet::FetchOutcome;
 
+use super::deployment::Deployment;
 use crate::view;
 
 sub_state! {
@@ -46,5 +47,66 @@ sub_state! {
         /// rebuild point; everything that can change the chart calls it, and
         /// nothing else may write this field.
         pub(crate) series: Option<view::detail::SeriesData>,
+    }
+}
+
+impl Subject {
+    /// Rebuild the detail pane's chart data.
+    ///
+    /// The one rebuild point (#178): everything that can change the chart
+    /// calls this, and nothing else writes `series`. It takes the deployment
+    /// because a registered unit is a *registry* fact about the key, not
+    /// something the history ring knows.
+    pub(crate) fn refresh_series(&mut self, dep: &Deployment) {
+        self.series = self.series_data(dep);
+    }
+
+    /// Derive the detail pane's sparkline data from the recorded history
+    /// (issue #64).
+    ///
+    /// The ring is the single source, so nothing here is cached beyond the
+    /// `SeriesData` this returns — a second cache would be one more thing to
+    /// invalidate on every eviction. The leaves come from the newest payload,
+    /// so a producer that starts emitting a new field offers it without a
+    /// restart.
+    fn series_data(&self, dep: &Deployment) -> Option<view::detail::SeriesData> {
+        let rec = self.history.as_ref()?;
+        // The most recent entry that *is* a document, not simply the most
+        // recent one: a tombstone carries no fields, and letting it empty the
+        // picker would make the chart vanish on every retirement and come
+        // back on the next put.
+        let leaves = rec
+            .ring
+            .iter()
+            .find_map(|e| e.value.as_ref())
+            .map(crate::series::numeric_leaves)
+            .unwrap_or_default();
+        // The chosen leaf, if the newest payload still carries it — a field
+        // that disappeared should not silently keep plotting its own gaps.
+        let leaf = self
+            .series_leaf
+            .as_ref()
+            .filter(|p| leaves.leaves.iter().any(|(k, _)| k == *p))
+            .cloned()
+            .or_else(|| leaves.leaves.first().map(|(k, _)| k.clone()));
+        let value = match &leaf {
+            Some(p) => crate::series::value_series(&rec.ring, p),
+            None => crate::series::Series::new(),
+        };
+        let unit = match dep.facts.get(&rec.key).map(|f| &f.registration) {
+            Some(zenkey_fleet::Registration::Registered(s)) => s.unit.clone(),
+            _ => None,
+        };
+        Some(view::detail::SeriesData {
+            leaves,
+            leaf,
+            value,
+            // A fresh `SeriesData` is a cleared cache: this function is
+            // called exactly when the chart's inputs moved, which is exactly
+            // when the retained geometry stopped being valid (#178).
+            caches: view::detail::SeriesCaches::default(),
+            rate: self.rate_series.series().clone(),
+            unit,
+        })
     }
 }

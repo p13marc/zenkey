@@ -176,3 +176,32 @@ impl TreeState {
             .retarget(std::sync::Arc::clone(&obs.observed), now);
     }
 }
+
+/// Whether the tree's *shape* can have survived this tick (#177).
+///
+/// Two rungs, and both are needed.
+///
+/// **The key-set triple.** Keys leave `StatsTable` by exactly two routes —
+/// `retire_unwatched` bumps `unwatched`, `evict` bumps `evicted` — and enter by
+/// `record`, which moves `len()`. So any change to the set moves at least one
+/// member. The comparison is equality rather than `>`, so a replay seeking
+/// backwards trips it too.
+///
+/// **The watch set's identity.** `is_covered` is what flips a node's
+/// `NodeStatus` when a watch is released, so the triple alone would freeze the
+/// unwatched badge. `link.rs` reassigns `watched` *only* on a `WatchChanged`
+/// event and hands out `Arc::clone` every tick, so pointer identity is an exact
+/// test that costs nothing.
+///
+/// That second rung also covers a hazard: `Message::Subject(SubjectMsg::WatchReleased)` does not
+/// reflatten — it returns `Task::none()` and has always relied on the
+/// unconditional tick rebuild. Releasing a watch fires `WatchChanged`, which
+/// swaps the `Arc`, which lands here as `false`.
+pub(crate) fn shape_held(
+    prev: (usize, u64, u64),
+    next: (usize, u64, u64),
+    prev_watched: &std::sync::Arc<[String]>,
+    next_watched: &std::sync::Arc<[String]>,
+) -> bool {
+    prev == next && std::sync::Arc::ptr_eq(prev_watched, next_watched)
+}
