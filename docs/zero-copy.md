@@ -76,11 +76,27 @@ The rule has teeth because the offenders were all in loops:
   reused path buffer threaded through the descent, and a scratch buffer for
   the subtree probe.
 
-Parse a selector **once per set**, never once per candidate. `view/echo.rs`
-already did this correctly — the filter is parsed once per render and
-`intersects` runs per line.
+- `NodeRoster::refresh` (`zengui/src/nodes.rs`) built a subtree selector with
+  `format!` and **two** owned exprs for **every (producer × watch) pair, every
+  tick**. Missed when `skeleton::merge` was fixed, and found by #178. Now: one
+  borrowed expr per selector per tick, and a reused buffer for the selector.
 
-*Pinned by:* `stats/retire_unwatched_1k`, `skeleton/merge_10k`.
+Parse a selector **once per set**, never once per candidate.
+
+> **This paragraph used to name `view/echo.rs` as the example that already did
+> it correctly.** It was the worst offender in the crate. `EchoView::admits`
+> parsed the filter *inside* the per-line loop, so a 2,000-line ring re-parsed
+> the same expression 2,000 times a frame — 120,000 times a second — to answer a
+> question that changes on a keystroke, and parsed each line's key beside it.
+> #178 measured the fix at 344 µs → 190 µs.
+>
+> Left standing here because a doc comment is not a claim anybody checks. It is
+> corrected rather than deleted: a discipline doc that once certified its own
+> counter-example should say so, since the next false certification will read
+> exactly like this one did.
+
+*Pinned by:* `stats/retire_unwatched_1k`, `skeleton/merge_10k`,
+`echo/admits_2k_keyexpr`, `roster/refresh_40p_8w`.
 
 ---
 
@@ -151,7 +167,7 @@ Recorded so they are not "fixed" by the next reader:
 | `zenkey-fleet/src/query.rs` — the error-reply arm | `String::from_utf8_lossy(…).to_string()` into an owned `Error{name,message}`. Rare, and the bytes must be owned. |
 | `zenkey-fleet/src/body.rs` — `body.to_vec()` | The write path builds an owned wire body, once per user action. Not per sample. |
 | `SampleView`'s two `String`s | The floor above. `Box<str>`/`Arc<str>` would save a pointer's worth and break an all-public-fields struct. |
-| `BusTick::watched` — a `Vec<String>` clone per tick | Four a second over a single-digit watch set. Measured, not worth the churn through `BusTick`, `App` and two call sites. |
+| `Flattened::rows` — one `Vec<TreeRow>` per flatten | Bounded by `MAX_ROWS`, and the rows are the pane's own data rather than a copy of the engine's. What it costs is #177's, not this doc's. |
 
 ---
 
@@ -161,10 +177,20 @@ Recorded so they are not "fixed" by the next reader:
 cargo bench -p zenkey-fleet                     # everything
 cargo bench -p zenkey-fleet -- stats/ monitor/  # the per-sample floor
 cargo bench -p zenkey-fleet -- tree/ skeleton/  # the per-tick paths
+cargo bench -p zengui                           # the frontend's own two cadences
+cargo bench -p zengui -- echo/ hex/             # per frame
+cargo bench -p zengui -- roster/ series/        # per tick
 ```
 
 `tree/build_50k` and `skeleton/merge_10k` are tens of milliseconds an
 iteration — release only, and slow even there.
+
+`zengui/benches/frame.rs` is **renderer-free by design**: it measures the work a
+`view::*` function does before it builds a widget, plus the per-tick joins that
+feed it. A bench needing a GPU surface would not run in CI, and one through
+`iced_test` would measure the simulator — so the widget-shaped half is held by
+`zengui/tests/panes.rs` and by the compiler instead. Saying which was measured
+beats a harness that implies both.
 
 The O6 counter ledger (`zenkey-fleet/tests/ledger.rs`) is the other half of
 this discipline: zero-copy is about not *spending*, the ledger is about not

@@ -606,7 +606,6 @@ fn fold_status(a: Option<NodeStatus>, b: NodeStatus) -> NodeStatus {
 /// Foreign keys group under `(foreign)` with their raw path below — present,
 /// unlabelled, never silently dropped. An optional `query` filters entries
 /// by real path (groups auto-expand while filtering).
-#[allow(clippy::too_many_arguments)]
 pub fn pivot_flatten(
     merged: &MergedNode,
     base: &str,
@@ -924,7 +923,6 @@ pub fn window(rows: usize, scroll_y: f32, viewport_h: f32) -> (usize, usize) {
 }
 
 /// Render the tree pane.
-#[allow(clippy::too_many_arguments)]
 pub fn tree_view<'a>(
     flat: &'a Flattened,
     facts: &'a FactsIndex,
