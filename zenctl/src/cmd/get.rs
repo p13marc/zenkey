@@ -40,10 +40,14 @@ pub async fn run(
     args: &Bus,
 ) -> Result<()> {
     let base = args.base().to_string();
+    // Slices enrich: they name each key's payload type, and without them the
+    // decode ladder falls to its structural rung — which is exactly what
+    // `--raw` asks for on purpose. A registry that will not answer must not
+    // cost the user the samples themselves (#210).
     let slices = if raw {
         zenkey_fleet::SliceSet::default()
     } else {
-        args.slice_set().await?
+        args.slices_optional().await?.unwrap_or_default()
     };
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
     let session = args.session().await?;

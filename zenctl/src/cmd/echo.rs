@@ -35,10 +35,14 @@ pub async fn run(
     // Slices first (a single introspect fan-in), then subscribe: the slice
     // set names each subject's payload type; the schema store fetches
     // `describe` lazily on first decode miss.
+    // Slices enrich: they name each key's payload type, and without them the
+    // decode ladder falls to its structural rung — which is exactly what
+    // `--raw` asks for on purpose. A registry that will not answer must not
+    // cost the user the stream itself (#210).
     let slices = if raw {
         zenkey_fleet::SliceSet::default()
     } else {
-        args.slice_set().await?
+        args.slices_optional().await?.unwrap_or_default()
     };
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
 
