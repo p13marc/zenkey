@@ -12,15 +12,17 @@
 //! same messages the UI path sends, and there is nothing else to keep in step.
 //!
 //! Jump-to-key is the same idea over data instead of verbs: fuzzy over the
-//! keys *actually observed*, selecting one emits the ordinary
-//! [`Message::Subject(SubjectMsg::SelectKey)`]. It offers nothing it has not seen, which keeps the
-//! overlay from inventing a keyspace (O4 — a suggestion is not an observation,
+//! keys *actually observed*, and selecting one emits the ordinary
+//! [`SubjectMsg::SelectKey`](crate::message::SubjectMsg::SelectKey). It offers
+//! nothing it has not seen, which keeps the overlay from inventing a keyspace (O4 — a suggestion is not an observation,
 //! and these are only ever the latter).
 
 use iced::widget::{Column, column, container, row, text, text_input};
 use iced::{Element, Length};
 
-use crate::message::{ChromeMsg, DeploymentMsg, Message, PrefsMsg, RightPane, WorkspaceMsg};
+use crate::message::{
+    ChromeMsg, DeploymentMsg, Message, PaneMsg, PrefsMsg, RightPane, WorkspaceMsg,
+};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -127,7 +129,9 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
     for name in contexts {
         out.push(Action {
             label: format!("context: {name}"),
-            message: Message::Context(crate::view::contexts::ContextMsg::Selected(name.clone())),
+            message: Message::Pane(PaneMsg::Context(
+                crate::view::contexts::ContextMsg::Selected(name.clone()),
+            )),
         });
     }
 
@@ -138,7 +142,7 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         },
         Action {
             label: "run doctor".into(),
-            message: Message::Doctor(crate::view::doctor::DoctorMsg::Run),
+            message: Message::Pane(PaneMsg::Doctor(crate::view::doctor::DoctorMsg::Run)),
         },
         Action {
             label: "reconnect".into(),
@@ -162,15 +166,15 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         },
         Action {
             label: "clear echo".into(),
-            message: Message::Echo(crate::view::echo::EchoMsg::Clear),
+            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Clear)),
         },
         Action {
             label: "export echo as ndjson".into(),
-            message: Message::Echo(crate::view::echo::EchoMsg::Export),
+            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Export)),
         },
         Action {
             label: "pause/follow echo".into(),
-            message: Message::Echo(crate::view::echo::EchoMsg::FollowToggled),
+            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::FollowToggled)),
         },
     ]);
     out
@@ -416,13 +420,18 @@ mod tests {
             find("context: lab"),
             format!(
                 "{:?}",
-                Message::Context(crate::view::contexts::ContextMsg::Selected("lab".into()))
+                Message::Pane(PaneMsg::Context(
+                    crate::view::contexts::ContextMsg::Selected("lab".into())
+                ))
             )
         );
         // Echo actions: the same messages that pane's buttons send.
         assert_eq!(
             find("clear echo"),
-            format!("{:?}", Message::Echo(crate::view::echo::EchoMsg::Clear))
+            format!(
+                "{:?}",
+                Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Clear))
+            )
         );
         assert_eq!(
             find("reconnect"),

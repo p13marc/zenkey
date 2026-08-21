@@ -21,7 +21,7 @@ use iced::{Element, Length};
 use zenkey_fleet::diff::{Change, ValueDiff};
 
 use crate::history::{HistoryEntry, HistoryRecorder};
-use crate::message::{Message, SubjectMsg};
+use crate::message::{Message, PaneMsg, SubjectMsg};
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -42,7 +42,7 @@ pub enum HistoryMsg {
 }
 
 fn msg(m: HistoryMsg) -> Message {
-    Message::History(m)
+    Message::Pane(PaneMsg::History(m))
 }
 
 /// What the app hands the pane.

@@ -15,7 +15,7 @@ use zenkey_fleet::report::CallReport;
 
 use std::sync::Arc;
 
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -118,7 +118,7 @@ impl CallForm {
     }
 }
 
-/// Messages the pane emits (wrapped into the app's `Message::Call`).
+/// Messages the pane emits (wrapped into the app's `Message::Pane(PaneMsg::Call)`).
 #[derive(Debug, Clone)]
 pub enum CallMsg {
     ProducerPicked(String),
@@ -147,7 +147,7 @@ pub enum CallMsg {
 /// which is what the other seven panes already did, and what makes the
 /// six-group regroup a one-line change here instead of 8.
 fn msg(m: CallMsg) -> Message {
-    Message::Call(m)
+    Message::Pane(PaneMsg::Call(m))
 }
 
 /// Render the pane. `slices` scaffolds the pickers; without a registry the

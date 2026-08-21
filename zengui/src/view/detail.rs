@@ -22,7 +22,7 @@ use iced::{Element, Length};
 use zenkey_fleet::decode::Rendering;
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
-use crate::message::{Message, RightPane, WorkspaceMsg};
+use crate::message::{Message, PaneMsg, RightPane, WorkspaceMsg};
 use crate::series::{NumericLeaves, Series};
 use crate::view::kit;
 use crate::view::spark;
@@ -206,7 +206,7 @@ pub struct SeriesCaches {
 /// this: it names another region, and a pane reaching across is a fact
 /// worth leaving visible at its call site.
 fn msg(m: DetailMsg) -> Message {
-    Message::Detail(m)
+    Message::Pane(PaneMsg::Detail(m))
 }
 
 pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {

@@ -1,5 +1,28 @@
-//! The whole event vocabulary, in one file so the async/sync boundary is
-//! readable at a glance.
+//! The whole event vocabulary, in one file.
+//!
+//! Six groups since #176, and one rule decides every placement:
+//!
+//! > **A message lives where its failure is displayed.**
+//!
+//! `SessionOpened(Err)` writes `link`, which the status strip renders → `Bus`.
+//! `CallDone(Err)` writes `CallForm::outcome` → `Pane`. `ContextSwitched(Err)`
+//! writes `ContextForm::status` → `Pane`. It settles the cases a topic-shaped
+//! grouping leaves to taste, and it is why `Reconnect` is `Deployment` (its
+//! handler is the tail of `BaseSelected`'s) rather than `Bus` or `Chrome`
+//! (it is reachable from the toolbar, Ctrl-R *and* the palette, so provenance
+//! says nothing).
+//!
+//! ## What this file no longer claims
+//!
+//! It used to say it was "in one file so the async/sync boundary is readable at
+//! a glance". That was already half-false when it was written: six async
+//! landings were listed here while twelve more lived in `view/*.rs`, so the
+//! file looked complete and was not. #176 moved the six to join the twelve,
+//! which makes it uniformly false — the better state, because a reader can now
+//! find the boundary rather than half of it.
+//!
+//! **Every async landing is a `Task::perform` in `app.rs` or a `yield` in
+//! `link.rs`. Grep those.** This file is the top-level vocabulary.
 
 use std::sync::Arc;
 
@@ -158,23 +181,31 @@ pub enum ChromeMsg {
     WindowSettled,
 }
 
-/// Everything that can move the app.
+/// A message from one of the eleven right-hand panes (#176).
 ///
-/// `Clone` is required by iced's widget callbacks. Every payload here is
-/// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
+/// One variant per [`RightPane`], and **not** the `Pane(PaneId, PaneMsg)` pair
+/// #176 first sketched: that makes 121 states representable where eleven are
+/// legal — `Pane(PaneId::Call, PaneMsg::Blob(..))` would compile and mean
+/// nothing. The pane identity is already the variant tag.
+///
+/// `Pane(..)` is a **provenance** tag — which surface emitted the message — not
+/// a **scope** claim about what its handler may touch. Six of them mutate
+/// app-wide state today and #176 deliberately left them:
+///
+/// * `NodesMsg::ShowInTree` — writes `expanded` and `selected`, reflattens
+/// * `DoctorMsg::FindingClicked` — opens tree prefixes and re-enters a
+///   selection, or flips `right_pane` and drives the nodes handler
+/// * `DoctorMsg::ReaskSchemas` — clears the global schema store
+/// * `AdminMsg::FilterProducer` — flips `right_pane`, re-emits a tree search
+/// * `EchoMsg::LineClicked` — flips `right_pane`, re-enters a selection
+/// * `ContextMsg::{SaveAndSelect, Isolate}` — reopens the session, rewrites
+///   deployment settings
+///
+/// Rejected: promoting them to `Workspace`. They are emitted by a pane's own
+/// widget, and a pane that constructs another region's message is the same
+/// coupling wearing a different name.
 #[derive(Debug, Clone)]
-pub enum Message {
-    /// The window, and what floats over it (#176).
-    Chrome(ChromeMsg),
-    /// The shell around the panes: which one shows, the tree's own chrome, and the
-    Workspace(WorkspaceMsg),
-    /// One key: chosen, observed, fetched, decoded (#176).
-    Subject(SubjectMsg),
-    /// What the app is pointed at, and the coverage that follows (#176).
-    Deployment(DeploymentMsg),
-    /// The bus, the monitor, a sweep: something the world answered.
-    Bus(BusMsg),
-
+pub enum PaneMsg {
     /// Publish/call pane interactions (issue #60).
     Call(crate::view::call::CallMsg),
     /// Publish pane interactions (issue #60's other half).
@@ -193,11 +224,54 @@ pub enum Message {
     Media(crate::view::media::MediaMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
-
     /// Echo pane interactions (issue #72, echo v2).
     Echo(crate::view::echo::EchoMsg),
     /// Connection pane interactions (issue #67).
     Context(crate::view::contexts::ContextMsg),
+}
+
+impl PaneMsg {
+    /// Which pane emitted it.
+    ///
+    /// `RightPane::ALL` and this `match` are the same list, and
+    /// `every_pane_has_a_message_and_every_message_a_pane` is what keeps them
+    /// so — the same shape as the palette's and the shortcut map's own coverage
+    /// tests.
+    pub fn pane(&self) -> RightPane {
+        match self {
+            PaneMsg::Echo(_) => RightPane::Echo,
+            PaneMsg::Call(_) => RightPane::Call,
+            PaneMsg::Publish(_) => RightPane::Publish,
+            PaneMsg::Detail(_) => RightPane::Detail,
+            PaneMsg::Nodes(_) => RightPane::Nodes,
+            PaneMsg::Doctor(_) => RightPane::Doctor,
+            PaneMsg::History(_) => RightPane::History,
+            PaneMsg::Blob(_) => RightPane::Blob,
+            PaneMsg::Media(_) => RightPane::Media,
+            PaneMsg::Admin(_) => RightPane::Admin,
+            PaneMsg::Context(_) => RightPane::Connect,
+        }
+    }
+}
+
+/// Everything that can move the app.
+///
+/// `Clone` is required by iced's widget callbacks. Every payload here is
+/// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
+#[derive(Debug, Clone)]
+pub enum Message {
+    /// One of the eleven right-hand panes.
+    Pane(PaneMsg),
+    /// The window, and what floats over it.
+    Chrome(ChromeMsg),
+    /// The shell around the panes, and the replay mode.
+    Workspace(WorkspaceMsg),
+    /// One key: chosen, observed, fetched, decoded.
+    Subject(SubjectMsg),
+    /// What the app is pointed at, and the coverage that follows.
+    Deployment(DeploymentMsg),
+    /// The bus, the monitor, a sweep: something the world answered.
+    Bus(BusMsg),
 }
 
 /// What a user can change about the window itself.
@@ -332,4 +406,42 @@ pub struct BusTick {
     pub seeded: Vec<(WatchId, zenkey_fleet::SeedCoverage)>,
     /// `(samples, bytes, rate_hz)` across everything watched.
     pub totals: (u64, u64, f64),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pane vocabulary is one list, spelled twice — `RightPane::ALL` and
+    /// `PaneMsg`'s variants — and this is what keeps them the same list (#176).
+    ///
+    /// Same shape as `the_palette_covers_every_pane_without_being_told` and
+    /// `the_pane_bindings_cover_every_pane`: a tab that exists and cannot be
+    /// spoken to, or a message from a pane that is not in the strip, is the
+    /// failure all three guard.
+    #[test]
+    fn every_pane_has_a_message_and_every_message_a_pane() {
+        use crate::view;
+        let one_per_pane = [
+            PaneMsg::Echo(view::echo::EchoMsg::Clear),
+            PaneMsg::Call(view::call::CallMsg::Submit),
+            PaneMsg::Publish(view::publish::PublishMsg::Send),
+            PaneMsg::Detail(view::detail::DetailMsg::LeafSelected(String::new())),
+            PaneMsg::Nodes(view::nodes::NodesMsg::Selected(String::new())),
+            PaneMsg::Doctor(view::doctor::DoctorMsg::Run),
+            PaneMsg::History(view::history::HistoryMsg::Clear),
+            PaneMsg::Blob(view::blob::BlobMsg::Probe),
+            PaneMsg::Media(view::media::MediaMsg::Stop),
+            PaneMsg::Admin(view::admin::AdminMsg::Run),
+            PaneMsg::Context(view::contexts::ContextMsg::Load),
+        ];
+        let mut covered: Vec<RightPane> = one_per_pane.iter().map(PaneMsg::pane).collect();
+        covered.sort_by_key(|p| p.label());
+        let mut all = RightPane::ALL.to_vec();
+        all.sort_by_key(|p| p.label());
+        assert_eq!(
+            covered, all,
+            "every pane in the strip owes `PaneMsg` a variant, and vice versa"
+        );
+    }
 }

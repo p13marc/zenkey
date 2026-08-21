@@ -30,7 +30,7 @@ use zenkey_fleet::{BodySource, KeyFacts};
 
 use std::sync::Arc;
 
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -180,7 +180,7 @@ impl PublishForm {
     }
 }
 
-/// Messages the pane emits (wrapped into the app's `Message::Publish`).
+/// Messages the pane emits (wrapped into the app's `Message::Pane(PaneMsg::Publish)`).
 #[derive(Debug, Clone)]
 pub enum PublishMsg {
     KeyChanged(String),
@@ -230,7 +230,7 @@ pub fn retire_needs_i_know(facts: Option<&KeyFacts>) -> bool {
 }
 
 fn msg(m: PublishMsg) -> Message {
-    Message::Publish(m)
+    Message::Pane(PaneMsg::Publish(m))
 }
 
 pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Message> {

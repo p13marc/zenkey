@@ -21,7 +21,7 @@ use iced::widget::{Column, button, checkbox, column, pick_list, row, text, text_
 use iced::{Element, Length};
 use zenkey_fleet::StoredContext;
 
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -86,7 +86,7 @@ pub enum ContextMsg {
 }
 
 fn msg(m: ContextMsg) -> Message {
-    Message::Context(m)
+    Message::Pane(PaneMsg::Context(m))
 }
 
 /// Split a user-typed list. Commas, spaces and newlines all work — these are

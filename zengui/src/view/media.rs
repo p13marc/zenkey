@@ -22,7 +22,7 @@ use zenkey_fleet::{SampleView, SliceSet, WatchId};
 
 use super::kit;
 use super::tokens::{font, space};
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 
 /// Media pane interactions.
 #[derive(Debug, Clone, PartialEq)]
@@ -156,7 +156,7 @@ pub fn decodable(encoding: &str) -> bool {
 /// which is what the other seven panes already did, and what makes the
 /// six-group regroup a one-line change here instead of 6.
 fn msg(m: MediaMsg) -> Message {
-    Message::Media(m)
+    Message::Pane(PaneMsg::Media(m))
 }
 
 pub fn pane<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Element<'a, Message> {

@@ -10,7 +10,7 @@ use iced::{Element, Length};
 use zenkey_fleet::report::{DoctorFinding, DoctorSeverity};
 
 use crate::doctor::{DoctorState, finding_target};
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::{SeverityTone, colors};
 use crate::view::tokens::{font, space};
@@ -48,7 +48,7 @@ fn tone(severity: DoctorSeverity) -> SeverityTone {
 /// which is what the other seven panes already did, and what makes the
 /// six-group regroup a one-line change here instead of 5.
 fn msg(m: DoctorMsg) -> Message {
-    Message::Doctor(m)
+    Message::Pane(PaneMsg::Doctor(m))
 }
 
 pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {

@@ -37,7 +37,9 @@ use crate::view::tokens::space;
 /// false in the other two (#249).
 const MAX_ROWS: usize = 50_000;
 
-use crate::message::{BusMsg, ChromeMsg, DeploymentMsg, RightPane, SubjectMsg, WorkspaceMsg};
+use crate::message::{
+    BusMsg, ChromeMsg, DeploymentMsg, PaneMsg, RightPane, SubjectMsg, WorkspaceMsg,
+};
 
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
@@ -357,32 +359,7 @@ impl Zengui {
             Message::Subject(m) => self.update_subject(m),
             Message::Deployment(m) => self.update_deployment(m),
             Message::Workspace(m) => self.update_workspace(m),
-            Message::Call(msg) => self.update_call(msg),
-            Message::Nodes(msg) => self.update_nodes(msg),
-            Message::Doctor(msg) => self.update_doctor(msg),
-            Message::Blob(msg) => self.update_blob(msg),
-            Message::Media(msg) => self.update_media(msg),
-            Message::Admin(msg) => self.update_admin(msg),
-            Message::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
-                self.series_leaf = Some(path);
-                self.refresh_series();
-                Task::none()
-            }
-            Message::History(msg) => {
-                if let Some(rec) = self.history.as_mut() {
-                    match msg {
-                        view::history::HistoryMsg::Select(seq) => rec.selected = Some(seq),
-                        view::history::HistoryMsg::Clear => {
-                            rec.ring.clear();
-                            rec.selected = None;
-                        }
-                    }
-                }
-                Task::none()
-            }
-            Message::Publish(msg) => self.update_publish(msg),
-            Message::Echo(msg) => self.update_echo(msg),
-            Message::Context(msg) => self.update_context(msg),
+            Message::Pane(m) => self.update_pane(m),
             Message::Chrome(m) => self.update_chrome(m),
         }
     }
@@ -752,6 +729,38 @@ impl Zengui {
         }
     }
 
+    /// One of the eleven right-hand panes.
+    fn update_pane(&mut self, msg: PaneMsg) -> Task<Message> {
+        match msg {
+            PaneMsg::Call(msg) => self.update_call(msg),
+            PaneMsg::Nodes(msg) => self.update_nodes(msg),
+            PaneMsg::Doctor(msg) => self.update_doctor(msg),
+            PaneMsg::Blob(msg) => self.update_blob(msg),
+            PaneMsg::Media(msg) => self.update_media(msg),
+            PaneMsg::Admin(msg) => self.update_admin(msg),
+            PaneMsg::Detail(view::detail::DetailMsg::LeafSelected(path)) => {
+                self.series_leaf = Some(path);
+                self.refresh_series();
+                Task::none()
+            }
+            PaneMsg::History(msg) => {
+                if let Some(rec) = self.history.as_mut() {
+                    match msg {
+                        view::history::HistoryMsg::Select(seq) => rec.selected = Some(seq),
+                        view::history::HistoryMsg::Clear => {
+                            rec.ring.clear();
+                            rec.selected = None;
+                        }
+                    }
+                }
+                Task::none()
+            }
+            PaneMsg::Publish(msg) => self.update_publish(msg),
+            PaneMsg::Echo(msg) => self.update_echo(msg),
+            PaneMsg::Context(msg) => self.update_context(msg),
+        }
+    }
+
     fn update_call(&mut self, msg: view::call::CallMsg) -> Task<Message> {
         use view::call::CallMsg;
         match msg {
@@ -802,7 +811,7 @@ impl Zengui {
                             .await
                             .map(|schema| view::call::schema_fields(&schema))
                     },
-                    |fields| Message::Call(CallMsg::RequestSchema(fields)),
+                    |fields| Message::Pane(PaneMsg::Call(CallMsg::RequestSchema(fields))),
                 )
             }
             CallMsg::RequestSchema(fields) => {
@@ -883,7 +892,7 @@ impl Zengui {
                         .map(Arc::new)
                         .map_err(|e| e.to_string())
                     },
-                    |r| Message::Call(view::call::CallMsg::Done(r)),
+                    |r| Message::Pane(PaneMsg::Call(view::call::CallMsg::Done(r))),
                 )
             }
         }
@@ -957,7 +966,7 @@ impl Zengui {
                             .map(|()| bytes.len())
                             .map_err(|e| e.to_string())
                     },
-                    |r| Message::Publish(view::publish::PublishMsg::Sent(r)),
+                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Sent(r))),
                 )
             }
             PublishMsg::Sent(Ok(n)) => {
@@ -1079,7 +1088,7 @@ impl Zengui {
                 match Arc::try_unwrap(publication) {
                     Ok(p) => Task::perform(
                         async move { p.undeclare().await.map_err(|e| e.to_string()) },
-                        |r| Message::Publish(view::publish::PublishMsg::Stopped(r)),
+                        |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Stopped(r))),
                     ),
                     Err(_) => Task::none(),
                 }
@@ -1131,7 +1140,7 @@ impl Zengui {
                         publication.undeclare().await.map_err(|e| e.to_string())?;
                         Ok(matching)
                     },
-                    |r| Message::Publish(view::publish::PublishMsg::Retired(r)),
+                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Retired(r))),
                 );
                 Task::batch([stop, send])
             }
@@ -1211,7 +1220,7 @@ impl Zengui {
                             attachment,
                         }))
                     },
-                    |r| Message::Publish(view::publish::PublishMsg::Ready(r)),
+                    |r| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Ready(r))),
                 );
                 Task::batch([stop, send])
             }
@@ -1626,7 +1635,7 @@ impl Zengui {
                     .await
                     .map_err(|e| e.to_string())
             },
-            |r| Message::Context(view::contexts::ContextMsg::Switched(r)),
+            |r| Message::Pane(PaneMsg::Context(view::contexts::ContextMsg::Switched(r))),
         )
     }
 
@@ -1702,7 +1711,9 @@ impl Zengui {
                             .map_err(|e| e.to_string());
                         (origin, base, out)
                     },
-                    |(origin, ran, out)| Message::Nodes(NodesMsg::InfoLoaded(origin, ran, out)),
+                    |(origin, ran, out)| {
+                        Message::Pane(PaneMsg::Nodes(NodesMsg::InfoLoaded(origin, ran, out)))
+                    },
                 )
             }
             NodesMsg::InfoLoaded(origin, ran_against, outcome) => {
@@ -1802,7 +1813,7 @@ impl Zengui {
                         })
                         .map_err(|e| e.to_string())
                     },
-                    |out| Message::Doctor(DoctorMsg::Done(out)),
+                    |out| Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(out))),
                 )
             }
             DoctorMsg::Done(outcome) => {
@@ -1931,7 +1942,7 @@ impl Zengui {
                 self.media.viewing = Some(view::media::Viewing::new(key.clone()));
                 let declare = Task::perform(
                     async move { monitor.watch(&key).await.map_err(|e| e.to_string()) },
-                    |r| Message::Media(M::Watched(r)),
+                    |r| Message::Pane(PaneMsg::Media(M::Watched(r))),
                 );
                 Task::batch([release, declare])
             }
@@ -1968,7 +1979,7 @@ impl Zengui {
             async move {
                 let _ = monitor.unwatch(id).await;
             },
-            |()| Message::Media(view::media::MediaMsg::Stopped),
+            |()| Message::Pane(PaneMsg::Media(view::media::MediaMsg::Stopped)),
         )
     }
 
@@ -2036,7 +2047,7 @@ impl Zengui {
                                 .map_err(|e| e.to_string());
                         (base, out)
                     },
-                    |(ran, out)| Message::Blob(BlobMsg::ProbeDone(ran, out)),
+                    |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::ProbeDone(ran, out))),
                 )
             }
             BlobMsg::ProbeDone(ran_against, outcome) => {
@@ -2081,7 +2092,7 @@ impl Zengui {
                             .map_err(|e| e.to_string());
                             (base, out)
                         },
-                        |(ran, out)| Message::Blob(BlobMsg::InspectDone(ran, out)),
+                        |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::InspectDone(ran, out))),
                     );
                 }
                 let root = match self.blob.root_input.trim() {
@@ -2117,7 +2128,7 @@ impl Zengui {
                             yield p;
                         }
                     },
-                    |p| Message::Blob(BlobMsg::Progress(p)),
+                    |p| Message::Pane(PaneMsg::Blob(BlobMsg::Progress(p))),
                 );
                 let run = Task::perform(
                     async move {
@@ -2138,7 +2149,7 @@ impl Zengui {
                         .map_err(|e| e.to_string());
                         (base, out)
                     },
-                    |(ran, out)| Message::Blob(BlobMsg::FetchDone(ran, out)),
+                    |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::FetchDone(ran, out))),
                 );
                 Task::batch([progress, run])
             }
@@ -2279,7 +2290,7 @@ impl Zengui {
                             base,
                         }))
                     },
-                    |out| Message::Admin(AdminMsg::Done(out)),
+                    |out| Message::Pane(PaneMsg::Admin(AdminMsg::Done(out))),
                 )
             }
             AdminMsg::Done(outcome) => {
@@ -2877,7 +2888,7 @@ impl Zengui {
             let period = std::time::Duration::from_secs_f64(self.publish_form.interval_secs());
             subs.push(
                 iced::time::every(period)
-                    .map(|_| Message::Publish(view::publish::PublishMsg::Tick)),
+                    .map(|_| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Tick))),
             );
         }
         // Window geometry, for the next launch (issue #73).

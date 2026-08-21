@@ -9,7 +9,7 @@ use iced::widget::{column, row, scrollable, text};
 use iced::{Element, Length};
 use zenkey_fleet::NodeInfo;
 
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
 use crate::view::kit;
 use crate::view::theme::{PresenceTone, colors};
@@ -48,7 +48,7 @@ pub struct NodesData<'a> {
 /// which is what the other seven panes already did, and what makes the
 /// six-group regroup a one-line change here instead of 2.
 fn msg(m: NodesMsg) -> Message {
-    Message::Nodes(m)
+    Message::Pane(PaneMsg::Nodes(m))
 }
 
 pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {

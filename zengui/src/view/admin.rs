@@ -23,7 +23,7 @@ use zenkey_fleet::report::StorageList;
 use zenkey_fleet::{Coverage, CoverageRow, RouterInfo, StorageInfo};
 
 use crate::admin::{AdminState, AdminSweep, router_row_id, storage_row_id};
-use crate::message::Message;
+use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::{CoverageTone, colors};
 use crate::view::tokens::{font, space};
@@ -48,7 +48,7 @@ pub enum AdminMsg {
 }
 
 fn msg(m: AdminMsg) -> Message {
-    Message::Admin(m)
+    Message::Pane(PaneMsg::Admin(m))
 }
 
 pub fn pane(state: &AdminState) -> Element<'_, Message> {
