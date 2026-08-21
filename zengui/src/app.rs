@@ -675,18 +675,6 @@ impl Zengui {
             Message::Echo(msg) => self.update_echo(msg),
             Message::Replay(msg) => self.update_replay(msg),
             Message::Context(msg) => self.update_context(msg),
-            Message::ContextSwitched(Ok(session)) => {
-                // A new session is a new everything: the base may differ, so
-                // every projection, roster and verdict from the old one is
-                // evidence about a different deployment (O4).
-                self.forget_deployment();
-                self.update(Message::SessionOpened(Ok(session)))
-            }
-            Message::ContextSwitched(Err(e)) => {
-                self.link = LinkState::Failed(e.clone());
-                self.context_form.status = Some(Err(format!("could not connect: {e}")));
-                Task::none()
-            }
             Message::PaneSelected(pane) => {
                 self.right_pane = pane;
                 Task::none()
@@ -1379,6 +1367,18 @@ impl Zengui {
     fn update_context(&mut self, msg: view::contexts::ContextMsg) -> Task<Message> {
         use view::contexts::ContextMsg;
         match msg {
+            ContextMsg::Switched(Ok(session)) => {
+                // A new session is a new everything: the base may differ, so
+                // every projection, roster and verdict from the old one is
+                // evidence about a different deployment (O4).
+                self.forget_deployment();
+                self.update(Message::SessionOpened(Ok(session)))
+            }
+            ContextMsg::Switched(Err(e)) => {
+                self.link = LinkState::Failed(e.clone());
+                self.context_form.status = Some(Err(format!("could not connect: {e}")));
+                Task::none()
+            }
             ContextMsg::NameChanged(v) => {
                 self.context_form.name = v;
                 Task::none()
@@ -1591,7 +1591,7 @@ impl Zengui {
                     .await
                     .map_err(|e| e.to_string())
             },
-            Message::ContextSwitched,
+            |r| Message::Context(view::contexts::ContextMsg::Switched(r)),
         )
     }
 

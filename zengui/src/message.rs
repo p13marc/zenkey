@@ -89,8 +89,6 @@ pub enum Message {
     Echo(crate::view::echo::EchoMsg),
     /// Connection pane interactions (issue #67).
     Context(crate::view::contexts::ContextMsg),
-    /// A context switch finished re-opening the session.
-    ContextSwitched(Result<zenoh::Session, String>),
     /// Switch the right-hand pane (the toolbar's tab strip).
     PaneSelected(RightPane),
     Reconnect,
