@@ -30,7 +30,6 @@ mod completion;
 mod context;
 
 use anyhow::Result;
-use clap::Parser as _;
 
 /// `cmd/*` runs against the **resolved** flags, never the parsed ones: the
 /// context is read once, at the edge, and a command that gets a [`Bus`] is
@@ -40,6 +39,24 @@ use crate::cli::{
     AdminCmd, BaseCmd, BenchCmd, BlobCmd, CacheCmd, Cli, Command, InterfaceCmd, KeyCmd, NodeCmd,
     PubSource, RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
 };
+
+/// Parse, through `get_matches` rather than `parse()`.
+///
+/// The extra step buys one thing: the `ArgMatches` remember *how* each value
+/// arrived, which is what lets `--format` conflict with a foreign document
+/// format only when both were typed — an exported `ZENCTL_FORMAT` is a
+/// preference, not a request (#243, and `cli::refuse_foreign_format`).
+fn parse() -> Cli {
+    let matches = <Cli as clap::CommandFactory>::command().get_matches();
+    cli::refuse_foreign_format(&matches);
+    match <Cli as clap::FromArgMatches>::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        // Unreachable in practice: `get_matches` has already exited on a bad
+        // command line, so anything left is a derive bug, and printing it the
+        // way clap prints its own errors is the most useful thing to do.
+        Err(e) => e.exit(),
+    }
+}
 
 pub async fn run() -> Result<()> {
     // Behave like a Unix filter under `zenctl … | head`: Rust masks SIGPIPE,
@@ -64,7 +81,7 @@ pub async fn run() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let cli = Cli::parse();
+    let cli = parse();
     match cli.command {
         Command::Topic(TopicCmd::List {
             producer,

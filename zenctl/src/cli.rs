@@ -653,7 +653,10 @@ pub(crate) enum RegistryCmd {
     /// bundles the producers' served `describe` schemas (RFC 08 §7);
     /// `--as asyncapi` maps subjects to channels and procedures to operations.
     Export {
-        /// Output document (note: `--format` stays the table/json switch).
+        /// Output document. A foreign schema, so `--format` has no say over
+        /// it: passing both is a usage error, not a silent preference.
+        // #243. Enforced in `refuse_foreign_format` rather than by
+        // `conflicts_with`, which would fire on `ZENCTL_FORMAT` too.
         #[arg(long = "as", value_enum, default_value = "toml")]
         target: ExportAs,
         /// Only this producer.
@@ -713,6 +716,10 @@ pub(crate) enum AdminCmd {
     /// render "heard of, not queryable" — never omitted.
     Graph {
         /// Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
+        ///
+        /// A foreign schema, so `--format` has no say over it: passing both is
+        /// a usage error, not a silent preference.
+        // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
         #[arg(long)]
         dot: bool,
         /// Also join liveliness origins to their sessions (#131) — one
@@ -1243,4 +1250,59 @@ pub(crate) struct BusArgs {
     pub(crate) zenoh_config: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) out: OutputArgs,
+}
+
+/// `--format` selects among **zenkey's own three renderings** of a report. A
+/// foreign document format — `--as toml|jsonschema|asyncapi`, `--dot` — is
+/// somebody else's schema, so the two are mutually exclusive (#243).
+///
+/// ## Why this is not `conflicts_with`
+///
+/// It was, for about ten minutes. `--format` carries `env = "ZENCTL_FORMAT"`,
+/// and clap counts an env-sourced value as *present* for conflict purposes —
+/// so a shell that exports a format preference could no longer run `admin
+/// graph --dot` at all, with no way to unset it for one invocation short of
+/// `env -u`. An exported default is a preference, not a request; only what the
+/// user typed on this command line can conflict with what else they typed on
+/// it.
+///
+/// Clap will not answer that from a derived struct, so this asks the
+/// `ArgMatches` directly, once, at the edge.
+pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
+    use clap::CommandFactory as _;
+    use clap::parser::ValueSource;
+
+    // Walk to the leaf: `admin graph` and `registry export` are both two deep,
+    // and the flags live on the leaf's own matches.
+    let mut m = matches;
+    while let Some((_, sub)) = m.subcommand() {
+        m = sub;
+    }
+    // `value_source` panics on an id this subcommand does not define, so ask
+    // whether it is defined here first — most leaves have neither flag.
+    let typed = |id: &str| {
+        m.ids().any(|i| i.as_str() == id) && m.value_source(id) == Some(ValueSource::CommandLine)
+    };
+    if !typed("format") {
+        return;
+    }
+    for (id, flag) in [("target", "--as"), ("dot", "--dot")] {
+        if typed(id) {
+            // A clap error, not an `anyhow` one: this is a usage error, and
+            // usage errors in this tool exit 2 and print a usage line. The
+            // only reason it is not a `conflicts_with` attribute is the env
+            // var, and that is no reason for it to look different.
+            Cli::command()
+                .error(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    format!(
+                        "the argument '{flag}' cannot be used with '--format <FORMAT>'\n\n\
+                         {flag} emits a foreign document format — somebody else's \
+                         schema — while --format chooses among zenctl's own three \
+                         renderings of a report. Drop one."
+                    ),
+                )
+                .exit();
+        }
+    }
 }

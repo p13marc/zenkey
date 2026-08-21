@@ -26,7 +26,7 @@ Usage: zenctl registry export [OPTIONS]
 
 Options:
       --as <TARGET>
-          Output document (note: `--format` stays the table/json switch)
+          Output document. A foreign schema, so `--format` has no say over it: passing both is a usage error, not a silent preference
 
           Possible values:
           - toml:       Registry TOML — round-trippable through `SliceSet::from_dirs`
@@ -183,5 +183,20 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+```
+
+## `--as` is the same rule (#243)
+
+```console
+$ zenctl registry export --as asyncapi --format ndjson
+? 2
+error: the argument '--as' cannot be used with '--format <FORMAT>'
+
+--as emits a foreign document format — somebody else's schema — while --format chooses among zenctl's own three renderings of a report. Drop one.
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
 
 ```
