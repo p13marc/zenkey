@@ -672,138 +672,6 @@ impl Zengui {
                 Task::none()
             }
             Message::Publish(msg) => self.update_publish(msg),
-            Message::CallDone(outcome) => {
-                // No base guard needed (#109 audit): a call reply is the
-                // answer to the exact question the user pressed the button
-                // for, addressed by a full wire key naming its base — user
-                // output, not projected deployment state.
-                self.call_form.in_flight = false;
-                self.call_form.outcome =
-                    Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
-                Task::none()
-            }
-            Message::PublishReady(Ok(outcome)) => {
-                // No base guard needed (#109 audit): publishing is
-                // user-initiated *output* on a full wire key, not observed
-                // evidence. (A publication straddling a context switch rides
-                // the old session's Arc until stopped — a session-lifetime
-                // question, out of #109's scope.)
-                let form = &mut self.publish_form;
-                form.in_flight = false;
-                form.error = None;
-                form.source = Some(outcome.prepared.source.clone());
-                form.note = outcome.prepared.note.clone();
-                form.encoding_used = outcome.prepared.encoding.clone();
-                form.matching = outcome.matching;
-                form.log(
-                    true,
-                    format!("sent {} bytes → {}", outcome.prepared.bytes.len(), form.key),
-                );
-                match &outcome.publication {
-                    Some(publication) => {
-                        form.armed = true;
-                        self.publication = Some(RepeatLoad {
-                            publication: publication.clone(),
-                            bytes: Arc::new(outcome.prepared.bytes.clone()),
-                            attachment: outcome.attachment.clone(),
-                        });
-                    }
-                    // One-shot: the task already undeclared.
-                    None => {
-                        form.armed = false;
-                        self.publication = None;
-                    }
-                }
-                Task::none()
-            }
-            Message::PublishReady(Err(e)) => {
-                let form = &mut self.publish_form;
-                form.in_flight = false;
-                form.armed = false;
-                form.error = Some(e.clone());
-                form.log(false, format!("refused: {e}"));
-                self.publication = None;
-                Task::none()
-            }
-            Message::PublishTick => {
-                let Some(load) = self.publication.as_ref() else {
-                    return Task::none();
-                };
-                let publication = load.publication.clone();
-                let bytes = load.bytes.clone();
-                let attachment = load.attachment.clone();
-                Task::perform(
-                    async move {
-                        publication
-                            .send(
-                                bytes.as_ref().clone(),
-                                attachment.as_ref().map(|a| a.as_ref().clone()),
-                            )
-                            .await
-                            .map(|()| bytes.len())
-                            .map_err(|e| e.to_string())
-                    },
-                    Message::PublishSent,
-                )
-            }
-            Message::PublishSent(Ok(n)) => {
-                let key = self.publish_form.key.clone();
-                self.publish_form
-                    .log(true, format!("sent {n} bytes → {key}"));
-                Task::none()
-            }
-            Message::PublishSent(Err(e)) => {
-                // A failed repeat disarms: a stream that silently stopped
-                // working would keep claiming it was publishing.
-                self.publish_form.log(false, format!("send failed: {e}"));
-                self.publish_form.armed = false;
-                self.publication = None;
-                Task::none()
-            }
-            Message::PublishRetired(result) => {
-                let form = &mut self.publish_form;
-                form.in_flight = false;
-                match result {
-                    Ok(matching) => {
-                        // A tombstone has no body provenance: a stale
-                        // encoded/as-typed/raw line claiming a body shipped
-                        // would be the pane's own O4 mistake.
-                        form.source = None;
-                        form.note = None;
-                        let key = form.key.clone();
-                        form.log(
-                            true,
-                            format!(
-                                "retired {key} — an authoritative delete (RFC 04 §1.2), \
-                                 not an empty value"
-                            ),
-                        );
-                        if matching == Some(false) {
-                            form.log(
-                                true,
-                                "matching: no subscriber matched the tombstone — a routing \
-                                 fact, not a fleet verdict (RFC 05 §3.1)",
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        form.error = Some(e.clone());
-                        form.log(false, format!("retire failed: {e}"));
-                    }
-                }
-                Task::none()
-            }
-            Message::PublishStopped(result) => {
-                match result {
-                    Ok(()) => self
-                        .publish_form
-                        .log(true, "stopped — publication undeclared"),
-                    Err(e) => self
-                        .publish_form
-                        .log(false, format!("undeclare failed: {e}")),
-                }
-                Task::none()
-            }
             Message::Echo(msg) => self.update_echo(msg),
             Message::Replay(msg) => self.update_replay(msg),
             Message::Context(msg) => self.update_context(msg),
@@ -864,6 +732,16 @@ impl Zengui {
     fn update_call(&mut self, msg: view::call::CallMsg) -> Task<Message> {
         use view::call::CallMsg;
         match msg {
+            CallMsg::Done(outcome) => {
+                // No base guard needed (#109 audit): a call reply is the
+                // answer to the exact question the user pressed the button
+                // for, addressed by a full wire key naming its base — user
+                // output, not projected deployment state.
+                self.call_form.in_flight = false;
+                self.call_form.outcome =
+                    Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
+                Task::none()
+            }
             CallMsg::ProducerPicked(p) => {
                 self.call_form.producer = Some(p);
                 self.call_form.procedure = None;
@@ -982,7 +860,7 @@ impl Zengui {
                         .map(Arc::new)
                         .map_err(|e| e.to_string())
                     },
-                    Message::CallDone,
+                    |r| Message::Call(view::call::CallMsg::Done(r)),
                 )
             }
         }
@@ -995,6 +873,128 @@ impl Zengui {
     fn update_publish(&mut self, msg: view::publish::PublishMsg) -> Task<Message> {
         use view::publish::PublishMsg;
         match msg {
+            PublishMsg::Ready(Ok(outcome)) => {
+                // No base guard needed (#109 audit): publishing is
+                // user-initiated *output* on a full wire key, not observed
+                // evidence. (A publication straddling a context switch rides
+                // the old session's Arc until stopped — a session-lifetime
+                // question, out of #109's scope.)
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                form.error = None;
+                form.source = Some(outcome.prepared.source.clone());
+                form.note = outcome.prepared.note.clone();
+                form.encoding_used = outcome.prepared.encoding.clone();
+                form.matching = outcome.matching;
+                form.log(
+                    true,
+                    format!("sent {} bytes → {}", outcome.prepared.bytes.len(), form.key),
+                );
+                match &outcome.publication {
+                    Some(publication) => {
+                        form.armed = true;
+                        self.publication = Some(RepeatLoad {
+                            publication: publication.clone(),
+                            bytes: Arc::new(outcome.prepared.bytes.clone()),
+                            attachment: outcome.attachment.clone(),
+                        });
+                    }
+                    // One-shot: the task already undeclared.
+                    None => {
+                        form.armed = false;
+                        self.publication = None;
+                    }
+                }
+                Task::none()
+            }
+            PublishMsg::Ready(Err(e)) => {
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                form.armed = false;
+                form.error = Some(e.clone());
+                form.log(false, format!("refused: {e}"));
+                self.publication = None;
+                Task::none()
+            }
+            PublishMsg::Tick => {
+                let Some(load) = self.publication.as_ref() else {
+                    return Task::none();
+                };
+                let publication = load.publication.clone();
+                let bytes = load.bytes.clone();
+                let attachment = load.attachment.clone();
+                Task::perform(
+                    async move {
+                        publication
+                            .send(
+                                bytes.as_ref().clone(),
+                                attachment.as_ref().map(|a| a.as_ref().clone()),
+                            )
+                            .await
+                            .map(|()| bytes.len())
+                            .map_err(|e| e.to_string())
+                    },
+                    |r| Message::Publish(view::publish::PublishMsg::Sent(r)),
+                )
+            }
+            PublishMsg::Sent(Ok(n)) => {
+                let key = self.publish_form.key.clone();
+                self.publish_form
+                    .log(true, format!("sent {n} bytes → {key}"));
+                Task::none()
+            }
+            PublishMsg::Sent(Err(e)) => {
+                // A failed repeat disarms: a stream that silently stopped
+                // working would keep claiming it was publishing.
+                self.publish_form.log(false, format!("send failed: {e}"));
+                self.publish_form.armed = false;
+                self.publication = None;
+                Task::none()
+            }
+            PublishMsg::Retired(result) => {
+                let form = &mut self.publish_form;
+                form.in_flight = false;
+                match result {
+                    Ok(matching) => {
+                        // A tombstone has no body provenance: a stale
+                        // encoded/as-typed/raw line claiming a body shipped
+                        // would be the pane's own O4 mistake.
+                        form.source = None;
+                        form.note = None;
+                        let key = form.key.clone();
+                        form.log(
+                            true,
+                            format!(
+                                "retired {key} — an authoritative delete (RFC 04 §1.2), \
+                                 not an empty value"
+                            ),
+                        );
+                        if matching == Some(false) {
+                            form.log(
+                                true,
+                                "matching: no subscriber matched the tombstone — a routing \
+                                 fact, not a fleet verdict (RFC 05 §3.1)",
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        form.error = Some(e.clone());
+                        form.log(false, format!("retire failed: {e}"));
+                    }
+                }
+                Task::none()
+            }
+            PublishMsg::Stopped(result) => {
+                match result {
+                    Ok(()) => self
+                        .publish_form
+                        .log(true, "stopped — publication undeclared"),
+                    Err(e) => self
+                        .publish_form
+                        .log(false, format!("undeclare failed: {e}")),
+                }
+                Task::none()
+            }
             PublishMsg::KeyChanged(k) => {
                 // Classify as you type, through the same ladder the tree uses.
                 self.publish_form.facts = (!k.trim().is_empty()).then(|| {
@@ -1056,7 +1056,7 @@ impl Zengui {
                 match Arc::try_unwrap(publication) {
                     Ok(p) => Task::perform(
                         async move { p.undeclare().await.map_err(|e| e.to_string()) },
-                        Message::PublishStopped,
+                        |r| Message::Publish(view::publish::PublishMsg::Stopped(r)),
                     ),
                     Err(_) => Task::none(),
                 }
@@ -1108,7 +1108,7 @@ impl Zengui {
                         publication.undeclare().await.map_err(|e| e.to_string())?;
                         Ok(matching)
                     },
-                    Message::PublishRetired,
+                    |r| Message::Publish(view::publish::PublishMsg::Retired(r)),
                 );
                 Task::batch([stop, send])
             }
@@ -1188,7 +1188,7 @@ impl Zengui {
                             attachment,
                         }))
                     },
-                    Message::PublishReady,
+                    |r| Message::Publish(view::publish::PublishMsg::Ready(r)),
                 );
                 Task::batch([stop, send])
             }
@@ -2837,7 +2837,10 @@ impl Zengui {
         // a publication is armed, so an idle pane costs nothing.
         if self.publish_form.armed {
             let period = std::time::Duration::from_secs_f64(self.publish_form.interval_secs());
-            subs.push(iced::time::every(period).map(|_| Message::PublishTick));
+            subs.push(
+                iced::time::every(period)
+                    .map(|_| Message::Publish(view::publish::PublishMsg::Tick)),
+            );
         }
         // Window geometry, for the next launch (issue #73).
         subs.push(

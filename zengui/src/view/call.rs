@@ -13,6 +13,8 @@ use iced::{Element, Length};
 use zenkey_fleet::SliceSet;
 use zenkey_fleet::report::CallReport;
 
+use std::sync::Arc;
+
 use crate::message::Message;
 use crate::view::kit;
 use crate::view::theme::colors;
@@ -130,6 +132,13 @@ pub enum CallMsg {
     Submit,
     /// The selected procedure's request schema arrived (or did not).
     RequestSchema(Option<Vec<SchemaField>>),
+    /// The call finished — its report, or why it did not (#176).
+    ///
+    /// Here rather than at `Message`'s top level, where it lived beside
+    /// `RequestSchema`, which is the identical shape and was already nested. A
+    /// message lives where its failure is displayed, and this one's `Err` is
+    /// written into `CallForm::outcome`.
+    Done(Result<Arc<zenkey_fleet::report::CallReport>, String>),
 }
 
 /// Render the pane. `slices` scaffolds the pickers; without a registry the

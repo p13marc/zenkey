@@ -57,22 +57,8 @@ pub enum Message {
 
     /// Publish/call pane interactions (issue #60).
     Call(crate::view::call::CallMsg),
-    /// A call finished.
-    CallDone(Result<Arc<zenkey_fleet::report::CallReport>, String>),
     /// Publish pane interactions (issue #60's other half).
     Publish(crate::view::publish::PublishMsg),
-    /// A prepare→declare→send round finished: the prepared body's provenance,
-    /// the declared publication (kept when repeating), and its matching status.
-    PublishReady(Result<Arc<PublishOutcome>, String>),
-    /// One repeat tick fired.
-    PublishTick,
-    /// A repeat send landed (or did not).
-    PublishSent(Result<usize, String>),
-    /// The armed publication was undeclared.
-    PublishStopped(Result<(), String>),
-    /// A retire round finished (#115): the tombstone shipped (with the
-    /// publication's matching fact), or it did not.
-    PublishRetired(Result<Option<bool>, String>),
     /// Node dashboard interactions (issue #61).
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).
