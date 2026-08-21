@@ -30,9 +30,9 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use clap_complete::ArgValueCandidates;
 use zenkey::RegistrySlice;
-use zenkey_fleet as bus;
 
 use crate::input::Source;
+use crate::resolve;
 use crate::{completion, context};
 
 // The four `ValueEnum`s below live here rather than beside the code that
@@ -1270,36 +1270,29 @@ impl BusArgs {
     /// The deployment base: flag > env > active context > empty (the
     /// base-less bus-root deployment — the RFC v1.6 default).
     pub(crate) fn base(&self) -> &str {
-        if let Some(b) = &self.base {
-            return b.as_str();
-        }
-        self.stored().and_then(|c| c.base.as_deref()).unwrap_or("")
+        resolve::base(self.base.as_deref(), self.stored())
     }
+
+    /// What to open, once — the four rungs `session()` and
+    /// `session_reporting()` used to climb separately and identically.
+    fn transport(&self) -> resolve::Transport {
+        resolve::transport(
+            self.zenoh_config.as_deref(),
+            &self.connect,
+            &self.listen,
+            self.scouting,
+            self.stored(),
+        )
+    }
+
     pub(crate) async fn session(&self) -> Result<zenoh::Session> {
-        let (connect, listen);
-        let stored = self.stored();
-        connect = if self.connect.is_empty() {
-            stored.map(|c| c.connect.clone()).unwrap_or_default()
-        } else {
-            self.connect.clone()
-        };
-        listen = if self.listen.is_empty() {
-            stored.map(|c| c.listen.clone()).unwrap_or_default()
-        } else {
-            self.listen.clone()
-        };
-        // Not-given stays distinguishable from off: with a config file the
-        // file's scouting choice must survive an absent flag (#122).
-        let scouting = if self.scouting {
-            Some(true)
-        } else {
-            stored.and_then(|c| c.scouting)
-        };
-        let file = self
-            .zenoh_config
-            .clone()
-            .or_else(|| stored.and_then(|c| c.zenoh_config.clone()));
-        bus::open_with_config(file.as_deref(), &connect, &listen, scouting).await
+        // Through the reporting form, which is how the engine does it too
+        // (`zenkey_fleet::session::open`): one ladder, one open, and the
+        // caller that does not need to know which half failed simply does not
+        // ask. Two spellings of one climb is what this was.
+        self.session_reporting()
+            .await
+            .map_err(zenkey_fleet::OpenFailure::into_error)
     }
 
     /// The same, saying which half failed — so a caller holding `--registry`
@@ -1308,47 +1301,18 @@ impl BusArgs {
     pub(crate) async fn session_reporting(
         &self,
     ) -> Result<zenoh::Session, zenkey_fleet::OpenFailure> {
-        let stored = self.stored();
-        let connect = if self.connect.is_empty() {
-            stored.map(|c| c.connect.clone()).unwrap_or_default()
-        } else {
-            self.connect.clone()
-        };
-        let listen = if self.listen.is_empty() {
-            stored.map(|c| c.listen.clone()).unwrap_or_default()
-        } else {
-            self.listen.clone()
-        };
-        let scouting = if self.scouting {
-            Some(true)
-        } else {
-            stored.and_then(|c| c.scouting)
-        };
-        let file = self
-            .zenoh_config
-            .clone()
-            .or_else(|| stored.and_then(|c| c.zenoh_config.clone()));
-        zenkey_fleet::open_reporting(file.as_deref(), &connect, &listen, scouting).await
+        let t = self.transport();
+        zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting).await
     }
     /// The `--context` name this invocation was given, if any.
     pub(crate) fn context_name(&self) -> Option<&str> {
         self.context.as_deref()
     }
     pub(crate) fn timeout(&self) -> Duration {
-        Duration::from_secs(
-            self.timeout
-                .or_else(|| self.stored().and_then(|c| c.timeout))
-                .unwrap_or(5),
-        )
+        resolve::timeout(self.timeout, self.stored())
     }
     pub(crate) fn registry_dirs(&self) -> Vec<PathBuf> {
-        if !self.registry.is_empty() {
-            self.registry.clone()
-        } else {
-            self.stored()
-                .map(|c| c.registry.clone())
-                .unwrap_or_default()
-        }
+        resolve::registry_dirs(&self.registry, self.stored())
     }
     /// Compose a base-relative key into the full wire key this un-namespaced
     /// tool must actually use.
@@ -1364,68 +1328,57 @@ impl BusArgs {
     }
     /// The same, as the fleet engine's indexed set (echo's decode path).
     pub(crate) async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
-        let dirs = self.registry_dirs();
         let base = self.base();
-        if !dirs.is_empty() {
-            // The README promises this works when the fleet is down, and it
-            // mostly did: zenoh opens a session against an unreachable
-            // endpoint, so the union simply falls back to the dirs. What it
-            // could not survive was a transport that would not come up at all
-            // — a taken listener port, say — which failed a question the dirs
-            // could answer on their own (#196).
-            let session = match self.session_reporting().await {
-                Ok(s) => s,
-                Err(zenkey_fleet::OpenFailure::Config(e)) => return Err(e),
-                Err(zenkey_fleet::OpenFailure::Transport(e)) => {
-                    let set = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
-                    eprintln!(
-                        "no session ({e}); answering from --registry only: {}.\n\
-                         That is what this checkout declares, not what the fleet \
-                         serves — `zenctl doctor --registry <dir>` compares them \
-                         when the bus is reachable (RFC 05 §3.1).",
-                        dirs.iter()
-                            .map(|d| d.display().to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                    self.cache(&set);
-                    return Ok(set);
+        let dirs = match resolve::slice_source(self.registry_dirs()) {
+            resolve::SliceSource::Bus => {
+                let session = self.session().await?;
+                let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
+                if set.slices().is_empty() {
+                    eprintln!("{}", resolve::notes::no_slices(base).to_line());
                 }
-            };
-            // §6.1's decision, delivered by issue #43: --registry and the bus
-            // stop being exclusive. Union: served wins per producer, dirs
-            // fill the gaps, disagreement is reported — never silently
-            // overwritten.
-            let out =
-                zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
-            for d in &out.disagreements {
-                eprintln!(
-                    "registry disagreement: {} — bus serves v{}, dirs carry v{}{} \
-                     (served wins; `zenctl doctor --registry <dir>` details the drift)",
-                    d.producer,
-                    d.bus_version,
-                    d.dirs_version,
-                    if d.shape_differs {
-                        ", shapes differ"
-                    } else {
-                        ""
-                    }
-                );
+                self.cache(&set);
+                return Ok(set);
             }
-            self.cache(&out.set);
-            return Ok(out.set);
-        }
-        let session = self.session().await?;
-        let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout()).await?;
-        if set.slices().is_empty() {
+            resolve::SliceSource::Union(dirs) => dirs,
+        };
+        // The README promises this works when the fleet is down, and it
+        // mostly did: zenoh opens a session against an unreachable
+        // endpoint, so the union simply falls back to the dirs. What it
+        // could not survive was a transport that would not come up at all
+        // — a taken listener port, say — which failed a question the dirs
+        // could answer on their own (#196).
+        let session = match self.session_reporting().await {
+            Ok(s) => s,
+            Err(zenkey_fleet::OpenFailure::Config(e)) => return Err(e),
+            Err(zenkey_fleet::OpenFailure::Transport(e)) => {
+                let set = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
+                eprintln!(
+                    "{}",
+                    resolve::notes::registry_only(&e.to_string(), &dirs).to_line()
+                );
+                self.cache(&set);
+                return Ok(set);
+            }
+        };
+        // §6.1's decision, delivered by issue #43: --registry and the bus
+        // stop being exclusive. Union: served wins per producer, dirs
+        // fill the gaps, disagreement is reported — never silently
+        // overwritten.
+        let out = zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout()).await?;
+        for d in &out.disagreements {
             eprintln!(
-                "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
-                 `zenctl node list --base {base:?}` says who is actually up.\n\
-                 (offline alternative: --registry <dir> with the app's registry TOMLs)"
+                "{}",
+                resolve::notes::disagreement(
+                    &d.producer,
+                    &d.bus_version.to_string(),
+                    &d.dirs_version.to_string(),
+                    d.shape_differs,
+                )
+                .to_line()
             );
         }
-        self.cache(&set);
-        Ok(set)
+        self.cache(&out.set);
+        Ok(out.set)
     }
 
     /// Persist the slice set for shell completion (issue #54).

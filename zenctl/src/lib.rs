@@ -21,6 +21,7 @@ pub mod errors;
 pub mod input;
 pub mod render;
 pub mod report;
+pub(crate) mod resolve;
 
 mod cmd;
 mod completion;
@@ -28,8 +29,6 @@ mod context;
 
 use anyhow::Result;
 use clap::Parser as _;
-
-use std::time::Duration;
 
 /// `cmd/*` reaches for `crate::BusArgs`; #209 moves it to `cli/bus.rs` and
 /// the ladders out of it entirely, so the re-export keeps twenty call sites
@@ -634,7 +633,10 @@ pub async fn run() -> Result<()> {
             out,
         } => {
             // No BusArgs here: --base/--registry are meaningless before a
-            // session exists. Contexts still resolve, for endpoints/timeout.
+            // session exists. Contexts still resolve, for endpoints/timeout —
+            // and this is the caller that proves the ladders must take
+            // scalars: when they demanded a `BusArgs`, this verb grew its own
+            // copy of two of them instead (#209).
             let stored = match context::active(context.as_deref()) {
                 Ok(c) => c,
                 Err(e) => {
@@ -642,27 +644,10 @@ pub async fn run() -> Result<()> {
                     std::process::exit(2);
                 }
             };
-            let connect = if connect.is_empty() {
-                stored
-                    .as_ref()
-                    .map(|c| c.connect.clone())
-                    .unwrap_or_default()
-            } else {
-                connect
-            };
-            let listen = if listen.is_empty() {
-                stored
-                    .as_ref()
-                    .map(|c| c.listen.clone())
-                    .unwrap_or_default()
-            } else {
-                listen
-            };
-            let timeout = Duration::from_secs(
-                timeout
-                    .or_else(|| stored.as_ref().and_then(|c| c.timeout))
-                    .unwrap_or(5),
-            );
+            let stored = stored.as_ref();
+            let connect = resolve::endpoints(&connect, stored.map(|c| c.connect.as_slice()));
+            let listen = resolve::endpoints(&listen, stored.map(|c| c.listen.as_slice()));
+            let timeout = resolve::timeout(timeout, stored);
             cmd::scout::run(&what, timeout, &connect, &listen, out.format, out.color).await
         }
     }
