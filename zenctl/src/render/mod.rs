@@ -1,8 +1,8 @@
 //! One report, three renderings — and exactly one place that knows which
 //! (#198).
 //!
-//! `output.rs` matched `format.resolved()` in 24 renderers and `cmd/*` in 16
-//! more, each re-deriving the same three-way decision. Six of them collapsed
+//! `output.rs` resolved the format in 24 renderers, and `cmd/*` in 16 more,
+//! each re-deriving the same three-way decision. Six of them collapsed
 //! `Json | Ndjson` into a single arm and printed a *pretty, multi-line*
 //! document under `--format ndjson` — which is not ndjson, because it cannot
 //! be read a line at a time, and being readable a line at a time is the only
@@ -48,7 +48,9 @@
 
 mod impls;
 pub use impls::RateView;
-pub use impls::local::{CacheReport, CachedSlice, GenPlan, KeyCanon, KeyRelation, SchemaCheck};
+pub use impls::local::{
+    CacheReport, CachedSlice, GenPlan, GetReport, KeyCanon, KeyRelation, SchemaCheck,
+};
 pub use impls::observations::TopologyView;
 pub mod table;
 
@@ -196,7 +198,15 @@ impl Row {
     /// tell them apart, so a consumer had to identify a line by guessing at
     /// its fields; `admin graph` emitted three such streams.
     pub fn of<T: Serialize>(kind: &'static str, value: &T) -> Row {
-        let v = serde_json::to_value(value).expect("a report row serializes");
+        Row::tagged(
+            kind,
+            serde_json::to_value(value).expect("a report row serializes"),
+        )
+    }
+
+    /// The same, over a value that is already JSON — what a streaming verb
+    /// has, because its rows are built beside an async decode.
+    pub fn tagged(kind: &'static str, v: serde_json::Value) -> Row {
         let mut map = match v {
             serde_json::Value::Object(m) => m,
             other => {
@@ -209,7 +219,12 @@ impl Row {
         Row(map)
     }
 
-    fn into_line(self) -> String {
+    /// The line as it goes on the wire.
+    ///
+    /// Public because a streaming verb writes its own rows — the tag comes
+    /// from here so the one convention is spelled once, even where the rows
+    /// arrive over time rather than in a report.
+    pub fn into_line(self) -> String {
         serde_json::to_string(&serde_json::Value::Object(self.0)).expect("a row serializes")
     }
 }
@@ -282,6 +297,188 @@ pub fn term_width() -> Width {
     Width::Unbounded
 }
 
+/// Which rendering a [`Sink`] is producing, with `Auto` already resolved
+/// away.
+///
+/// The type exists so that "we have decided" is a different thing from "we
+/// have not": a `Format` may still be `Auto`, a `Mode` never is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Table,
+    Json,
+    Ndjson,
+}
+
+impl Mode {
+    /// **The one place in the crate that resolves a [`Format`].**
+    ///
+    /// Everything else asks a `Mode` — a report through [`Sink::report`], a
+    /// streaming verb through [`Mode::machine`]. `output.rs` used to do this
+    /// in 24 renderers and `cmd/*` in 16 more, each re-deriving the same
+    /// three-way decision, and six of them collapsing two of the three (#198).
+    pub fn of(format: Format) -> Mode {
+        match format.resolved() {
+            Format::Table => Mode::Table,
+            Format::Json => Mode::Json,
+            Format::Ndjson => Mode::Ndjson,
+            // `resolved()` never yields it, and the compiler cannot know that.
+            Format::Auto => unreachable!("Format::Auto is resolved before it is matched"),
+        }
+    }
+
+    /// Whether the consumer on the other end is a program.
+    ///
+    /// The question a *streaming* verb actually has: it emits rows for one and
+    /// prose for the other, and it has no third answer. A verb with a whole
+    /// report in hand does not ask this — it hands the report to [`emit`].
+    pub fn machine(self) -> bool {
+        self != Mode::Table
+    }
+}
+
+/// Where a rendering goes, and in which form.
+///
+/// **The one place in the crate that resolves a [`Format`].** Everything else
+/// — every report, every streaming verb — asks the sink what mode it is in, or
+/// hands it a value and lets it decide. `emit` is a `Sink` with one report put
+/// through it.
+pub struct Sink<'a> {
+    out: &'a mut dyn Write,
+    err: &'a mut dyn Write,
+    mode: Mode,
+    width: Width,
+}
+
+impl<'a> Sink<'a> {
+    pub fn new(
+        out: &'a mut dyn Write,
+        err: &'a mut dyn Write,
+        format: Format,
+        width: Width,
+    ) -> Sink<'a> {
+        Sink {
+            out,
+            err,
+            mode: Mode::of(format),
+            width,
+        }
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Whether the consumer on the other end is a program.
+    ///
+    /// The question a streaming verb actually has: it emits rows for one and
+    /// prose for the other, and it has no third answer.
+    pub fn machine(&self) -> bool {
+        self.mode.machine()
+    }
+
+    /// One tagged row of a stream.
+    ///
+    /// A no-op in table mode, so a caller writes the row unconditionally and
+    /// the prose beside it — the same shape a `Render` impl has, spread over
+    /// time.
+    pub fn row(&mut self, kind: &'static str, value: serde_json::Value) -> Result<()> {
+        if self.machine() {
+            writeln!(self.out, "{}", Row::tagged(kind, value).into_line())?;
+        }
+        Ok(())
+    }
+
+    /// One line of prose for a person. A no-op in the machine modes.
+    pub fn line(&mut self, text: impl AsRef<str>) -> Result<()> {
+        if !self.machine() {
+            writeln!(self.out, "{}", text.as_ref().trim_end())?;
+        }
+        Ok(())
+    }
+
+    /// Something true *about* the stream. Always to stderr, in every mode:
+    /// stdout carries the data, stderr carries everything about it.
+    pub fn note(&mut self, note: &Note) -> Result<()> {
+        match note.cite {
+            Some(c) => writeln!(self.err, "{} ({c})", note.text)?,
+            None => writeln!(self.err, "{}", note.text)?,
+        }
+        Ok(())
+    }
+
+    pub fn flush(&mut self) -> Result<()> {
+        self.out.flush()?;
+        self.err.flush()?;
+        Ok(())
+    }
+
+    /// Put one whole report through.
+    pub fn report<R: Render>(&mut self, r: &R) -> Result<()> {
+        let notes = match self.mode {
+            Mode::Table => {
+                let mut table = Table::new();
+                r.table(&mut table);
+                write!(self.out, "{}", table.render(self.width))?;
+                // The table's own notes first — they are about the rendering
+                // the reader just looked at — then the report's, which are
+                // about the fleet.
+                let mut notes = table.rendering_notes().to_vec();
+                notes.extend(r.notes());
+                notes
+            }
+            Mode::Json => {
+                let mut doc = r.envelope();
+                doc.insert("report".into(), R::FAMILY.into());
+                let mut rows = Vec::new();
+                r.rows(&mut |row| rows.push(serde_json::Value::Object(row.0)));
+                if !rows.is_empty() {
+                    doc.insert("rows".into(), serde_json::Value::Array(rows));
+                }
+                let notes = r.notes();
+                insert_notes(&mut doc, &notes);
+                writeln!(
+                    self.out,
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::Value::Object(doc))?
+                )?;
+                notes
+            }
+            Mode::Ndjson => {
+                let mut envelope = r.envelope();
+                envelope.insert("report".into(), R::FAMILY.into());
+                let notes = r.notes();
+                insert_notes(&mut envelope, &notes);
+                writeln!(
+                    self.out,
+                    "{}",
+                    serde_json::to_string(&serde_json::Value::Object(envelope))?
+                )?;
+                let mut wrote = Ok(());
+                r.rows(&mut |row| {
+                    if wrote.is_ok() {
+                        wrote = writeln!(self.out, "{}", row.into_line());
+                    }
+                });
+                wrote?;
+                notes
+            }
+        };
+        for note in &notes {
+            // The honesty kinds already ride the document; the rest are for a
+            // person, and a person is reading stderr in every mode.
+            if self.machine() && !note.kind.machine_readable() {
+                continue;
+            }
+            self.note(note)?;
+        }
+        // `process::exit` is called after rendering at twenty sites and does
+        // not run destructors, so a buffered writer would lose the document it
+        // was handed. Flush before returning rather than trusting a drop that
+        // will not happen.
+        self.flush()
+    }
+}
+
 /// Render one report to a writer.
 ///
 /// The convenience form: notes go to stderr, and the width is the terminal's.
@@ -293,8 +490,6 @@ pub fn emit<R: Render>(w: &mut impl Write, r: &R, format: Format) -> Result<()> 
 }
 
 /// Render one report, with both streams and the width supplied.
-///
-/// The only `match` on [`Format`] in the crate.
 pub fn emit_to<R: Render>(
     out: &mut impl Write,
     err: &mut impl Write,
@@ -302,73 +497,7 @@ pub fn emit_to<R: Render>(
     format: Format,
     width: Width,
 ) -> Result<()> {
-    let notes = match format.resolved() {
-        Format::Table => {
-            let mut table = Table::new();
-            r.table(&mut table);
-            write!(out, "{}", table.render(width))?;
-            // The table's own notes first — they are about the rendering the
-            // reader just looked at — then the report's, which are about the
-            // fleet.
-            let mut notes = table.rendering_notes().to_vec();
-            notes.extend(r.notes());
-            notes
-        }
-        Format::Json => {
-            let mut doc = r.envelope();
-            doc.insert("report".into(), R::FAMILY.into());
-            let mut rows = Vec::new();
-            r.rows(&mut |row| rows.push(serde_json::Value::Object(row.0)));
-            if !rows.is_empty() {
-                doc.insert("rows".into(), serde_json::Value::Array(rows));
-            }
-            let notes = r.notes();
-            insert_notes(&mut doc, &notes);
-            writeln!(
-                out,
-                "{}",
-                serde_json::to_string_pretty(&serde_json::Value::Object(doc))?
-            )?;
-            notes
-        }
-        Format::Ndjson => {
-            let mut envelope = r.envelope();
-            envelope.insert("report".into(), R::FAMILY.into());
-            let notes = r.notes();
-            insert_notes(&mut envelope, &notes);
-            writeln!(
-                out,
-                "{}",
-                serde_json::to_string(&serde_json::Value::Object(envelope))?
-            )?;
-            let mut wrote = Ok(());
-            r.rows(&mut |row| {
-                if wrote.is_ok() {
-                    wrote = writeln!(out, "{}", row.into_line());
-                }
-            });
-            wrote?;
-            notes
-        }
-        // `resolved()` never yields it, and the compiler cannot know that.
-        Format::Auto => unreachable!("Format::Auto is resolved before it is matched"),
-    };
-    for note in &notes {
-        if format.resolved() != Format::Table && !note.kind.machine_readable() {
-            continue;
-        }
-        match note.cite {
-            Some(c) => writeln!(err, "{} ({c})", note.text)?,
-            None => writeln!(err, "{}", note.text)?,
-        }
-    }
-    // `process::exit` is called after rendering at twenty sites and does not
-    // run destructors, so a buffered writer would lose the document it was
-    // handed. Flush before returning rather than trusting a drop that will
-    // not happen.
-    out.flush()?;
-    err.flush()?;
-    Ok(())
+    Sink::new(out, err, format, width).report(r)
 }
 
 fn insert_notes(doc: &mut serde_json::Map<String, serde_json::Value>, notes: &[Note]) {

@@ -6,7 +6,7 @@ use anyhow::Result;
 use super::sample::{
     attachment_display, attachment_json, format_sample, hex, qos_summary, source_summary, type_tag,
 };
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 /// `topic echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
 /// GET-then-subscribe (it drops everything published in the gap).
@@ -66,7 +66,10 @@ pub async fn run(
         monitor.watch(&selector).await?;
     }
 
-    let ndjson = matches!(args.format.resolved(), output::Format::Ndjson);
+    // One resolution for the whole run, and it happens in `Mode::of` (#198).
+    // A streaming verb's question is only ever "is a program reading this" —
+    // it has rows for one and prose for the other, and no third answer.
+    let ndjson = crate::render::Mode::of(args.format).machine();
     if !ndjson {
         eprintln!(
             "echoing {selector}{} (ctrl-c to stop)",

@@ -9,7 +9,7 @@
 use anyhow::Result;
 
 use super::sample::{attachment_display, attachment_json, format_sample, hex, type_tag};
-use crate::{BusArgs, output};
+use crate::BusArgs;
 use zenkey_fleet::{Answer, FleetAnswer};
 
 /// The reply discipline as an exit code: 0 = value replies only, 1 = at
@@ -95,21 +95,24 @@ pub async fn run(
         zenkey_fleet::fleet_get(&session, &base, selector, payload, args.timeout()).await?;
 
     let secs = args.timeout().as_secs();
-    match args.format.resolved() {
-        output::Format::Json | output::Format::Ndjson => {
-            let mut rows = Vec::with_capacity(answers.len());
-            for a in &answers {
-                rows.push(row(a, &store, &session, &slices, &base, raw, no_decode).await);
-            }
-            if matches!(args.format.resolved(), output::Format::Json) {
-                println!("{}", serde_json::to_string_pretty(&rows)?);
-            } else {
-                for r in rows {
-                    println!("{r}");
-                }
-            }
+    // A fan-in GET *looks* like a stream and is not: it waits for the window,
+    // then has every answer in hand. So it is a document, and the one place
+    // that decides which format to print it in is `emit` (#198). The decode
+    // that builds a row is async, which is why the rows are built here beside
+    // the session and rendered there.
+    if crate::render::Mode::of(args.format).machine() {
+        let mut rows = Vec::with_capacity(answers.len());
+        for a in &answers {
+            rows.push(row(a, &store, &session, &slices, &base, raw, no_decode).await);
         }
-        _ => {
+        let report = crate::render::GetReport {
+            selector: selector.to_string(),
+            timeout_s: secs,
+            answers: rows,
+        };
+        crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
+    } else {
+        {
             let mut n = 0usize;
             for a in &answers {
                 match &a.answer {

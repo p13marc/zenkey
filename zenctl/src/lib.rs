@@ -18,7 +18,6 @@
 //! command that reports it.
 pub mod cli;
 pub mod errors;
-pub mod output;
 pub mod render;
 pub mod report;
 
@@ -84,11 +83,11 @@ pub async fn run() -> Result<()> {
                 return cmd::watch::topic_list(secs, &filter, &bus).await;
             }
             let report = filter.apply(&bus.slice_set().await?)?;
-            output::topic_list(&report, bus.format)
+            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
             let report = bus.slice_set().await?.topic_info(bus.base(), &key);
-            output::topic_info(&report, bus.format)
+            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
         }
         Command::Topic(TopicCmd::Echo {
             selector,
@@ -233,7 +232,11 @@ pub async fn run() -> Result<()> {
             // answers "what would I even pass as --base?".
             let session = bus.session().await?;
             let bases = bus::discover_bases(&session, bus.timeout()).await?;
-            output::base_list(&report::BaseList { bases }, bus.format)
+            crate::render::emit(
+                &mut std::io::stdout(),
+                &report::BaseList { bases },
+                bus.format,
+            )
         }
         Command::Storage(StorageCmd::List { watch, bus }) => {
             if let Some(secs) = watch {
@@ -250,7 +253,11 @@ pub async fn run() -> Result<()> {
                     Vec::new()
                 }
             };
-            output::storage_list(&report::StorageList { storages, coverage }, bus.format)
+            crate::render::emit(
+                &mut std::io::stdout(),
+                &report::StorageList { storages, coverage },
+                bus.format,
+            )
         }
         Command::Blob(BlobCmd::List {
             producer,
@@ -306,7 +313,7 @@ pub async fn run() -> Result<()> {
         }
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let report = bus.slice_set().await?.service_list(producer.as_deref());
-            output::service_list(&report, bus.format)
+            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
         }
         Command::Service(ServiceCmd::Info {
             producer,
@@ -317,7 +324,7 @@ pub async fn run() -> Result<()> {
                 .slice_set()
                 .await?
                 .service_info(&producer, procedure.as_deref())?;
-            output::service_info(&report, bus.format)
+            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
         }
         Command::Service(ServiceCmd::Call {
             origin,
@@ -345,7 +352,7 @@ pub async fn run() -> Result<()> {
         }
         Command::Interface(InterfaceCmd::List { bus }) => {
             let report = bus.slice_set().await?.interface_list();
-            output::interface_list(&report, bus.format)
+            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
         }
         Command::Interface(InterfaceCmd::Show {
             type_name,
@@ -366,7 +373,7 @@ pub async fn run() -> Result<()> {
                     zenkey_fleet::schemas_for_type(&store, &session, &producers, &type_name, full)
                         .await;
             }
-            output::interface_show(&report, bus.format)
+            crate::render::emit(&mut std::io::stdout(), &report, bus.format)
         }
         Command::Schema {
             cmd:

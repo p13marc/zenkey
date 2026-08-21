@@ -211,3 +211,99 @@ impl Render for StorageList {
         notes
     }
 }
+
+impl Render for zenkey_fleet::NodeInfo {
+    const FAMILY: &'static str = "node-info";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = serde_json::Map::new();
+        e.insert("origin".into(), self.origin.clone().into());
+        e.insert("producers".into(), self.producers.len().into());
+        e
+    }
+
+    /// **Two row kinds**: what this origin runs, and how fresh its declared
+    /// state is. This is #198's headline example — `node info --format ndjson`
+    /// emitted a *pretty multi-line document*, so the one command whose answer
+    /// is a list of producers could not be read a producer at a time.
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for p in &self.producers {
+            out(Row::of("producer", p));
+        }
+        for f in &self.freshness {
+            out(Row::of("freshness", f));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        t.line(format!("origin    {}", self.origin));
+        let mut g = Grid::unheaded(3).max(0, 16);
+        for p in &self.producers {
+            let alive = if p.alive { "alive" } else { "no token" };
+            let detail = match (&p.app, &p.registry_version) {
+                (Some(app), Some(v)) => {
+                    let mut d = format!(
+                        "app {app} · registry v{v} · {} subject(s) · {} procedure(s)",
+                        p.subjects, p.procedures
+                    );
+                    if !p.blob_tiers.is_empty() {
+                        d.push_str(&format!(" · blob: {}", p.blob_tiers.join(",")));
+                    }
+                    if !p.media.is_empty() {
+                        d.push_str(&format!(
+                            " · media: {}",
+                            p.media
+                                .iter()
+                                .map(|m| format!("{} ({})", m.path, m.encoding))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                    if p.deprecated_served > 0 {
+                        d.push_str(&format!(
+                            " · {} DEPRECATED still served",
+                            p.deprecated_served
+                        ));
+                    }
+                    d
+                }
+                // Unknown, not absent: no introspect reply is a fact about the
+                // fetch, never about the producer's capabilities (O4).
+                _ => "(no introspect reply — capabilities unknown, not absent)".to_string(),
+            };
+            g.row([
+                Cell::text(format!("  {}", p.name)),
+                Cell::text(format!("[{alive}]")),
+                Cell::text(detail),
+            ]);
+        }
+        t.grid(g);
+        if !self.freshness.is_empty() {
+            t.line("state freshness (declared ttl_s):");
+            let mut f = Grid::unheaded(3);
+            for row in &self.freshness {
+                f.row([
+                    Cell::text(format!("  {}/{}", row.producer, row.path)),
+                    // "No sample seen" is not "zero seconds old".
+                    Cell::asked(row.age_s.map(|a| format!("{a}s old"))),
+                    Cell::text(format!(
+                        "(ttl {}s){}",
+                        row.ttl_s,
+                        if row.stale { "  STALE" } else { "" }
+                    )),
+                ]);
+            }
+            t.grid(f);
+        }
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        if self.producers.is_empty() {
+            return vec![Note::silence(
+                "no liveliness token and no introspect reply — not on the roster, \
+                 which is not proof it does not exist",
+            )];
+        }
+        Vec::new()
+    }
+}

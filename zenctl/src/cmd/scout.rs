@@ -12,7 +12,7 @@ use anyhow::Result;
 use zenkey_fleet::HelloView;
 use zenoh::config::WhatAmIMatcher;
 
-use crate::output::Format;
+use crate::render::Format;
 
 /// The kinds of node a scout listens for.
 /// Fold the repeated `--what` flags into zenoh's matcher; no flags = all.

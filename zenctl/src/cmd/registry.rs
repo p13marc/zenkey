@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use zenkey::RegistrySlice;
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 /// What `registry export` emits.
 pub async fn export(target: ExportAs, producer: Option<&str>, args: &BusArgs) -> Result<()> {
@@ -107,7 +107,7 @@ pub async fn diff(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let served = zenkey_fleet::SliceSet::from_bus(&session, args.base(), args.timeout()).await?;
     let report = served.diff(&local);
-    output::registry_diff(&report, args.format)
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)
 }
 
 /// `registry lint <dir>` — the consumer's build lints, without the build.

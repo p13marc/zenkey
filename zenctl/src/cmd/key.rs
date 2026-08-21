@@ -11,7 +11,7 @@
 use anyhow::Result;
 use zenoh::key_expr::KeyExpr;
 
-use crate::output::Format;
+use crate::render::Format;
 
 /// The answer as an exit code: 0 yes, 1 no, 2 either expression invalid.
 pub enum Verdict {

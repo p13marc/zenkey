@@ -32,7 +32,7 @@ use clap_complete::ArgValueCandidates;
 use zenkey::RegistrySlice;
 use zenkey_fleet as bus;
 
-use crate::{completion, context, output};
+use crate::{completion, context};
 
 // The four `ValueEnum`s below live here rather than beside the code that
 // consumes them (#239's neighbour): a `pub` clap tree referencing a type in a
@@ -437,8 +437,8 @@ pub(crate) enum Command {
         context: Option<String>,
         /// table = census (deduped by zid); ndjson = arrival log, one Hello
         /// per line as heard.
-        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
-        format: output::Format,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
+        format: crate::render::Format,
     },
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
@@ -508,8 +508,8 @@ pub(crate) enum KeyCmd {
     Includes {
         a: String,
         b: String,
-        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
-        format: output::Format,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
+        format: crate::render::Format,
     },
     /// Can `a` and `b` name a common key? Exit 0 yes / 1 no / 2 invalid.
     ///
@@ -519,14 +519,14 @@ pub(crate) enum KeyCmd {
     Intersects {
         a: String,
         b: String,
-        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
-        format: output::Format,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
+        format: crate::render::Format,
     },
     /// Canonicalize an expression, or print its parse error verbatim.
     Canon {
         expr: String,
-        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
-        format: output::Format,
+        #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
+        format: crate::render::Format,
     },
 }
 
@@ -1214,8 +1214,8 @@ pub(crate) struct BusArgs {
     pub(crate) zenoh_config: Option<PathBuf>,
     /// Output format: table for humans, json (one document) or ndjson (one
     /// object per row) for scripts; auto = table on a tty, ndjson piped.
-    #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = output::Format::Auto)]
-    pub(crate) format: output::Format,
+    #[arg(long, env = "ZENCTL_FORMAT", value_enum, default_value_t = crate::render::Format::Auto)]
+    pub(crate) format: crate::render::Format,
 }
 
 impl BusArgs {

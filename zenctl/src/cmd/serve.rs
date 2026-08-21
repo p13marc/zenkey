@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -67,7 +67,10 @@ pub async fn run(
     )
     .await?;
 
-    let ndjson = matches!(args.format.resolved(), output::Format::Ndjson);
+    // One resolution for the whole run, and it happens in `Mode::of` (#198).
+    // A streaming verb's question is only ever "is a program reading this" —
+    // it has rows for one and prose for the other, and no third answer.
+    let ndjson = crate::render::Mode::of(args.format).machine();
     if !ndjson {
         eprintln!(
             "serving {keyexpr} — replying {} bytes{}{} per query (ctrl-c to stop)",
@@ -110,7 +113,7 @@ pub async fn run(
                 obj["attachment"] = super::sample::attachment_json(a);
                 obj["attachment_bytes"] = a.len().into();
             }
-            println!("{obj}");
+            println!("{}", crate::render::Row::tagged("query", obj).into_line());
         } else {
             let body = match &view.payload {
                 Some(p) => format!(

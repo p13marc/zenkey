@@ -13,7 +13,6 @@ use anyhow::{Context, Result, bail};
 use zenkey_fleet::{ReplayEvent, ReplayTarget, ZrecReader};
 
 use crate::BusArgs;
-use crate::output;
 
 #[allow(clippy::too_many_arguments)] // clap surface
 pub async fn run(
@@ -51,7 +50,10 @@ pub async fn run(
         );
     }
 
-    let ndjson = matches!(args.format.resolved(), output::Format::Ndjson);
+    // One resolution for the whole run, and it happens in `Mode::of` (#198).
+    // A streaming verb's question is only ever "is a program reading this" —
+    // it has rows for one and prose for the other, and no third answer.
+    let ndjson = crate::render::Mode::of(args.format).machine();
     let mut on_event = |ev: ReplayEvent<'_>| match ev {
         ReplayEvent::WouldPut {
             key,
@@ -115,7 +117,7 @@ pub async fn run(
     };
 
     let failed = report.malformed > 0 || report.refused > 0;
-    output::replay(&report, args.format)?;
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
     if failed {
         std::process::exit(1);
     }

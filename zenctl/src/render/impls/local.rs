@@ -318,3 +318,56 @@ impl Render for zenkey_fleet::generate::GenReport {
         ))]
     }
 }
+
+/// One reply to a fan-in GET.
+///
+/// Rows are already-built JSON because the decode that produces them is
+/// async and per-reply — a `Render` impl is synchronous by design, so the
+/// decoding happens where the session is and the rendering happens here.
+#[derive(Debug, Clone, Serialize)]
+pub struct GetReport {
+    /// The selector as asked. A GET's coverage claim is exactly this and no
+    /// wider (RFC 09 §5.1 O5).
+    pub selector: String,
+    /// Seconds waited — the other half of the claim, and what makes a silent
+    /// result legible.
+    pub timeout_s: u64,
+    #[serde(skip)]
+    pub answers: Vec<serde_json::Value>,
+}
+
+impl Render for GetReport {
+    const FAMILY: &'static str = "get";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = serde_json::Map::new();
+        e.insert("selector".into(), self.selector.clone().into());
+        e.insert("timeout_s".into(), self.timeout_s.into());
+        e.insert("answers".into(), self.answers.len().into());
+        e
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for a in &self.answers {
+            out(Row::of("answer", a));
+        }
+    }
+
+    /// Nothing: `get`'s human rendering decodes payloads and prints them with
+    /// their type tags, which happens on the async path beside the session.
+    /// This report exists for the machine formats, and saying that by
+    /// rendering an empty table is more honest than pretending otherwise.
+    fn table(&self, _t: &mut Table) {}
+
+    fn notes(&self) -> Vec<Note> {
+        if self.answers.is_empty() {
+            return vec![Note::silence(format!(
+                "no replies to {} within {}s. Nobody is registered for it, nobody \
+                 who is was up, or the timeout was short — and the three are \
+                 different",
+                self.selector, self.timeout_s
+            ))];
+        }
+        Vec::new()
+    }
+}

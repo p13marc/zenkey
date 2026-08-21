@@ -11,7 +11,6 @@ use anyhow::{Context, Result};
 use zenkey_fleet::{RecordBounds, RecordReport, ZREC_VERSION, ZrecHeader, ZrecWriter};
 
 use crate::BusArgs;
-use crate::output;
 
 #[allow(clippy::too_many_arguments)] // clap surface, mirrored from echo
 pub async fn run(
@@ -88,6 +87,6 @@ pub async fn run(
         dropped,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
-    output::record(&report, args.format)?;
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
     Ok(())
 }

@@ -17,7 +17,7 @@
 
 use anyhow::Result;
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 /// `zenctl schema <producer> [--type X] [--full]`.
 pub async fn dump(
@@ -31,7 +31,7 @@ pub async fn dump(
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let report =
         zenkey_fleet::schema_dump(&store, &session, &slices, producer, type_filter, full).await;
-    output::schema_dump(&report, args.format)
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)
 }
 
 /// `zenctl schema check` (#159): one payload against one schema, exit-coded

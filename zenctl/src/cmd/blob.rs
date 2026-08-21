@@ -19,7 +19,7 @@ use anyhow::{Result, bail};
 use zenkey_fleet::report::{BlobListSource, BlobProgress};
 use zenkey_fleet::{BlobFetchSpec, BlobTarget, blob_fetch, blob_list, blob_probe};
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 /// `blob list` — which producers declare which tiers.
 ///
@@ -53,7 +53,7 @@ pub async fn list(producer: Option<&str>, tier: Option<&str>, args: &BusArgs) ->
     if let Some(t) = tier {
         report.tiers.retain(|r| r.tier == t);
     }
-    output::blob_list(&report, args.format)
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)
 }
 
 /// `blob probe <target>` — who holds it, and at which root.
@@ -65,7 +65,7 @@ pub async fn probe(target: &str, args: &BusArgs) -> Result<()> {
     // still probes.
     let slices = args.slices().await.unwrap_or_default();
     let report = blob_probe(&session, args.base(), &target, &slices, args.timeout()).await?;
-    output::blob_probe(&report, args.format)
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)
 }
 
 /// `blob fetch <target> --from <origin> -o <path>` — one origin, verified.
@@ -126,7 +126,7 @@ pub async fn fetch(
         let report =
             zenkey_fleet::blob_tree_index(&session, args.base(), from, tree_root, args.timeout())
                 .await?;
-        return output::blob_tree(&report, args.format);
+        return crate::render::emit(&mut std::io::stdout(), &report, args.format);
     }
 
     let dest = out
@@ -186,7 +186,7 @@ pub async fn fetch(
         &on_progress,
     )
     .await?;
-    output::blob_fetch(&report, args.format)
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)
 }
 
 fn progress_line(p: &BlobProgress) -> Option<String> {

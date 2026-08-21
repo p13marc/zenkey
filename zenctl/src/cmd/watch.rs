@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 
-use crate::output::Format;
+use crate::render::Format;
 use crate::render::{Render, Row, Table};
 
 /// `--watch` accepts table (redraw) and ndjson (stream); a single growing
@@ -136,16 +136,17 @@ pub fn render_cycle<R: Render>(
     format: Format,
     footer: &str,
 ) -> Result<()> {
-    match format.resolved() {
-        Format::Table => redraw(report, prev, footer),
-        other => crate::render::emit(
+    if crate::render::Mode::of(format).machine() {
+        crate::render::emit(
             &mut std::io::stdout(),
             &WatchTick {
                 inner: report,
                 tick,
             },
-            other,
-        ),
+            format,
+        )
+    } else {
+        redraw(report, prev, footer)
     }
 }
 

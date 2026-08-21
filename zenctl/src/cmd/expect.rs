@@ -5,7 +5,6 @@
 use anyhow::Result;
 
 use crate::BusArgs;
-use crate::output;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -65,7 +64,7 @@ pub async fn run(
             std::process::exit(2);
         }
     };
-    output::expect(&report, args.format)?;
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
     match report.verdict {
         zenkey_fleet::report::ExpectVerdict::Met => Ok(()),
         zenkey_fleet::report::ExpectVerdict::NotMet => std::process::exit(1),

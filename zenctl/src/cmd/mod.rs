@@ -62,7 +62,6 @@ pub fn compose_selector(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::output;
 
     #[test]
     fn compose_selector_places_positions() {
@@ -75,7 +74,7 @@ mod tests {
             scouting: false,
             timeout: None,
             zenoh_config: None,
-            format: output::Format::Table,
+            format: crate::render::Format::Table,
         };
         assert_eq!(
             compose_selector(&args, None, None, None).unwrap(),
