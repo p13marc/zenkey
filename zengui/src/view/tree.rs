@@ -1161,7 +1161,7 @@ pub type FactsIndex = zenkey_fleet::FactsCache;
 /// The tree's two watch sets — same type, opposite meanings (#250).
 ///
 /// They were adjacent `&BTreeSet<String>` parameters at **three** call layers —
-/// [`pane`], [`tree_view`] and `row_view`, which is where both are actually
+/// [`pane`], `tree_view` and `row_view`, which is where both are actually
 /// read: one picks "seeding…" over "quiet", the other ◉ over ○. Transposing
 /// them compiled, and the tree then drew every watched subtree as still
 /// seeding and every seeding one as settled.
