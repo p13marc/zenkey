@@ -513,6 +513,37 @@ pub struct RateReport {
     pub sn_gaps: Option<u64>,
 }
 
+/// What a scouting round heard, and what it could have heard (#236).
+///
+/// A wrapper rather than a bare `Vec<HelloView>` for one reason, and it is
+/// RFC 09 §5.1 **O5**: scouting reaches the local multicast domain and the
+/// configured gossip, and nothing else. An empty list is a **boundary**, not a
+/// claim that nothing is running — and a bare array cannot say so, which is
+/// why `zenctl scout --format json` used to print that sentence as *prose on
+/// stdout* where a document was promised.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScoutReport {
+    /// The node kinds asked for; empty means all three.
+    pub asked: Vec<String>,
+    /// How long the round listened.
+    pub timeout_s: u64,
+    /// Distinct nodes heard, first sighting winning — a census, not an
+    /// arrival log.
+    pub heard: Vec<crate::scout::HelloView>,
+}
+
+/// The routers the admin space answered for (#236).
+///
+/// Same argument as [`ScoutReport`]: `[]` cannot distinguish a peer-only mesh
+/// from an admin space that is disabled, and those are different facts about
+/// the deployment. The selector that was actually asked rides with the answer.
+#[derive(Debug, Clone, Serialize)]
+pub struct RouterList {
+    /// The admin selector put to the bus.
+    pub asked: String,
+    pub routers: Vec<crate::admin::RouterInfo>,
+}
+
 /// How bad a doctor finding is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

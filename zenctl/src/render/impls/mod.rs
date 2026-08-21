@@ -20,6 +20,7 @@ mod calls;
 mod closing;
 mod documents;
 mod findings;
+mod observations;
 mod rate;
 pub use rate::RateView;
 mod listings;

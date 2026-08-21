@@ -37,15 +37,6 @@ fn dedup_by_zid(hellos: Vec<HelloView>) -> Vec<HelloView> {
         .collect()
 }
 
-/// An empty scout heard a boundary, not an absence — say which.
-fn empty_verdict(secs: u64) -> String {
-    format!(
-        "no Hellos within {secs}s on this segment — scouting reaches only the \
-         local multicast domain (or configured gossip); that is a boundary, \
-         not a claim that nothing is running"
-    )
-}
-
 pub async fn run(
     what: &[ScoutWhat],
     timeout: Duration,
@@ -54,54 +45,45 @@ pub async fn run(
     format: Format,
 ) -> Result<()> {
     let stream = zenkey_fleet::scout(matcher(what), connect, listen).await?;
-    let ndjson = matches!(format.resolved(), Format::Ndjson);
     let deadline = tokio::time::Instant::now() + timeout;
     let mut heard: Vec<HelloView> = Vec::new();
-    let mut streamed = 0usize;
     loop {
         let now = tokio::time::Instant::now();
         if now >= deadline {
             break;
         }
         match tokio::time::timeout(deadline - now, stream.recv()).await {
-            Ok(Some(hello)) => {
-                if ndjson {
-                    // The arrival log: one Hello per line, as heard, repeats
-                    // included — arrival is the fact.
-                    println!("{}", serde_json::to_string(&hello)?);
-                    streamed += 1;
-                } else {
-                    heard.push(hello);
-                }
-            }
+            Ok(Some(hello)) => heard.push(hello),
             // The scout stopped underneath us, or the deadline arrived.
             Ok(None) | Err(_) => break,
         }
     }
     stream.stop();
 
-    let secs = timeout.as_secs();
-    if ndjson {
-        if streamed == 0 {
-            eprintln!("{}", empty_verdict(secs));
-        }
-        return Ok(());
-    }
-    let nodes = dedup_by_zid(heard);
-    if nodes.is_empty() {
-        println!("{}", empty_verdict(secs));
-        return Ok(());
-    }
-    match format.resolved() {
-        Format::Json => println!("{}", serde_json::to_string_pretty(&nodes)?),
-        _ => {
-            for n in &nodes {
-                println!("{}  {}  {}", n.zid, n.whatami, n.locators.join(" "));
-            }
-            eprintln!("{} node(s) heard within {secs}s", nodes.len());
-        }
-    }
-    Ok(())
+    // One shape for every format. `--format ndjson` used to emit the *arrival
+    // log* — every Hello as heard, repeats included — while the table showed a
+    // deduped census, so the two formats meant different things and neither
+    // said which it was. The census is what the question wants ("is anything
+    // out there, and is multicast working"), and a note says the repeats were
+    // collapsed rather than leaving a reader to infer it (#236).
+    let report = zenkey_fleet::report::ScoutReport {
+        // Empty means all three, and the report says so rather than
+        // implying a narrower ask than was made (O5).
+        asked: if what.is_empty() {
+            vec!["router".into(), "peer".into(), "client".into()]
+        } else {
+            what.iter()
+                .map(|w| match w {
+                    ScoutWhat::Router => "router".to_string(),
+                    ScoutWhat::Peer => "peer".to_string(),
+                    ScoutWhat::Client => "client".to_string(),
+                })
+                .collect()
+        },
+        timeout_s: timeout.as_secs(),
+        heard: dedup_by_zid(heard),
+    };
+    crate::render::emit(&mut std::io::stdout(), &report, format)
 }
 
 #[cfg(test)]
@@ -133,12 +115,30 @@ mod tests {
     }
 
     /// Silence is a statement about the multicast domain, never a bare empty
-    /// table (RFC 05 §3.1's posture, applied below the session layer).
+    /// table — and now never a bare `[]` either (RFC 05 §3.1's posture applied
+    /// below the session layer; #236).
     #[test]
     fn the_empty_result_states_the_boundary() {
-        let v = empty_verdict(5);
-        assert!(v.contains("no Hellos within 5s"), "{v}");
-        assert!(v.contains("not a claim that nothing is running"), "{v}");
+        use crate::render::Render as _;
+        let empty = zenkey_fleet::report::ScoutReport {
+            asked: vec!["router".into()],
+            timeout_s: 5,
+            heard: Vec::new(),
+        };
+        let notes = empty.notes();
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].text.contains("no Hellos within 5s"), "{notes:?}");
+        assert!(
+            notes[0]
+                .text
+                .contains("not a claim that nothing is running"),
+            "{notes:?}"
+        );
+        assert_eq!(
+            notes[0].kind,
+            crate::render::NoteKind::Coverage,
+            "a boundary is a coverage statement, so it rides the document too"
+        );
     }
 
     /// No `--what` flag means all three kinds; flags combine.

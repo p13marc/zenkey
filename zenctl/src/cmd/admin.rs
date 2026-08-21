@@ -9,33 +9,15 @@ use crate::{BusArgs, output};
 pub async fn routers(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
     let routers = zenkey_fleet::routers(&session, args.timeout()).await?;
-    match args.format.resolved() {
-        output::Format::Json => {
-            println!("{}", serde_json::to_string_pretty(&routers)?)
-        }
-        output::Format::Ndjson => {
-            for r in &routers {
-                println!("{}", serde_json::to_string(r)?);
-            }
-        }
-        _ => {
-            if routers.is_empty() {
-                println!(
-                    "no routers answered @/*/router — a peer-only mesh, or the admin \
-                     space is disabled."
-                );
-            }
-            for r in &routers {
-                println!(
-                    "{}  {}  {}",
-                    r.zid,
-                    r.version.as_deref().unwrap_or("-"),
-                    r.locators.join(", ")
-                );
-            }
-        }
-    }
-    Ok(())
+    // `[]` on its own cannot tell a peer-only mesh from an admin space that is
+    // disabled, and those are different facts about the deployment (#236). The
+    // selector rides with the answer so the coverage claim is exactly what was
+    // asked, and no wider.
+    let report = zenkey_fleet::report::RouterList {
+        asked: "@/*/router".to_string(),
+        routers,
+    };
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)
 }
 
 /// `admin graph` — the mesh as the admin space answered it (#118), as a
