@@ -31,13 +31,13 @@ pub mod watch;
 
 use anyhow::{Result, anyhow};
 
-use crate::BusArgs;
+use crate::Bus;
 
 /// Compose a server-side selector from origin/class/producer positions
 /// (RFC 03: positions, not filters — never client-filter what the grammar
 /// can say). `None` positions wildcard.
 pub fn compose_selector(
-    args: &BusArgs,
+    args: &Bus,
     origin: Option<&str>,
     class: Option<&str>,
     producer: Option<&str>,
@@ -65,20 +65,10 @@ mod tests {
 
     #[test]
     fn compose_selector_places_positions() {
-        let args = BusArgs {
-            base: Some("zs".into()),
-            context: None,
-            registry: vec![],
-            connect: vec![],
-            listen: vec![],
-            scouting: false,
-            timeout: None,
-            zenoh_config: None,
-            out: crate::cli::OutputArgs {
-                format: crate::render::Format::Table,
-                color: crate::render::ColorChoice::Never,
-            },
-        };
+        // No config file: `bus_of` resolves against an absent context, so
+        // this test no longer passes merely by pinning `base` and never
+        // letting the ladder reach its second rung (#209).
+        let args = crate::bus::tests::bus_of(Some("zs"));
         assert_eq!(
             compose_selector(&args, None, None, None).unwrap(),
             "zs/v1/*/**"
@@ -94,10 +84,7 @@ mod tests {
         assert!(compose_selector(&args, None, Some("alerts"), None).is_err());
 
         // The empty base composes bare `v1/…` selectors (observer identity).
-        let args = BusArgs {
-            base: Some(String::new()),
-            ..args
-        };
+        let args = crate::bus::tests::bus_of(Some(""));
         assert_eq!(
             compose_selector(&args, None, None, None).unwrap(),
             "v1/*/**"

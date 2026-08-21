@@ -9,7 +9,7 @@
 use anyhow::Result;
 
 use super::sample::{self, attachment_display, attachment_json, format_sample, hex, type_tag};
-use crate::BusArgs;
+use crate::Bus;
 use crate::input::Source;
 use zenkey_fleet::{Answer, FleetAnswer};
 
@@ -37,7 +37,7 @@ pub async fn run(
     hex_payload: bool,
     fmt: Option<&str>,
     no_decode: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let base = args.base().to_string();
     let slices = if raw {

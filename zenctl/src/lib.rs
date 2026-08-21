@@ -16,6 +16,7 @@
 //!
 //! The gap between the two is drift, and `doctor` (bus + `--registry`) is the
 //! command that reports it.
+pub(crate) mod bus;
 pub mod cli;
 pub mod errors;
 pub mod input;
@@ -30,15 +31,14 @@ mod context;
 use anyhow::Result;
 use clap::Parser as _;
 
-/// `cmd/*` reaches for `crate::BusArgs`; #209 moves it to `cli/bus.rs` and
-/// the ladders out of it entirely, so the re-export keeps twenty call sites
-/// out of that churn.
-pub(crate) use crate::cli::BusArgs;
+/// `cmd/*` runs against the **resolved** flags, never the parsed ones: the
+/// context is read once, at the edge, and a command that gets a [`Bus`] is
+/// past every way resolution can fail (#209).
+pub(crate) use crate::bus::Bus;
 use crate::cli::{
     AdminCmd, BaseCmd, BenchCmd, BlobCmd, CacheCmd, Cli, Command, ContextCmd, InterfaceCmd, KeyCmd,
     NodeCmd, PubSource, RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
 };
-use zenkey_fleet as bus;
 
 pub async fn run() -> Result<()> {
     // Behave like a Unix filter under `zenctl … | head`: Rust masks SIGPIPE,
@@ -73,6 +73,7 @@ pub async fn run() -> Result<()> {
             watch,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             let filter = cmd::watch::TopicFilter {
                 producer,
                 class,
@@ -86,6 +87,7 @@ pub async fn run() -> Result<()> {
             crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
         Command::Topic(TopicCmd::Info { key, bus }) => {
+            let bus = Bus::resolve(&bus)?;
             let report = bus.slice_set().await?.topic_info(bus.base(), &key);
             crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
@@ -103,6 +105,7 @@ pub async fn run() -> Result<()> {
             seed,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             cmd::echo::run(
                 selector.as_deref(),
                 origin.as_deref(),
@@ -132,39 +135,45 @@ pub async fn run() -> Result<()> {
             raw,
             attachment,
             bus,
-        }) => match (from, key, body) {
-            (Some(PubSource::Ndjson), None, None) => {
-                cmd::publish::run_from_ndjson(qos.as_deref(), interval, i_know, &bus).await
-            }
-            (Some(_), _, _) => Err(anyhow::anyhow!(
-                "--from ndjson reads keys and payloads from stdin rows — drop the \
+        }) => {
+            let bus = Bus::resolve(&bus)?;
+            match (from, key, body) {
+                (Some(PubSource::Ndjson), None, None) => {
+                    cmd::publish::run_from_ndjson(qos.as_deref(), interval, i_know, &bus).await
+                }
+                (Some(_), _, _) => Err(anyhow::anyhow!(
+                    "--from ndjson reads keys and payloads from stdin rows — drop the \
                  key/body arguments"
-            )),
-            (None, Some(key), Some(body)) => {
-                cmd::publish::run(
-                    &key,
-                    &body,
-                    qos.as_deref(),
-                    encoding.as_deref(),
-                    repeat,
-                    interval,
-                    no_validate,
-                    raw,
-                    attachment.as_ref(),
-                    &bus,
-                )
-                .await
+                )),
+                (None, Some(key), Some(body)) => {
+                    cmd::publish::run(
+                        &key,
+                        &body,
+                        qos.as_deref(),
+                        encoding.as_deref(),
+                        repeat,
+                        interval,
+                        no_validate,
+                        raw,
+                        attachment.as_ref(),
+                        &bus,
+                    )
+                    .await
+                }
+                (None, _, _) => Err(anyhow::anyhow!(
+                    "topic pub needs <KEY> <BODY>, or --from ndjson with rows on stdin"
+                )),
             }
-            (None, _, _) => Err(anyhow::anyhow!(
-                "topic pub needs <KEY> <BODY>, or --from ndjson with rows on stdin"
-            )),
-        },
+        }
         Command::Topic(TopicCmd::Retire {
             key,
             qos,
             i_know,
             bus,
-        }) => cmd::publish::retire(&key, &qos, i_know, &bus).await,
+        }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::publish::retire(&key, &qos, i_know, &bus).await
+        }
         Command::Topic(TopicCmd::Hz {
             selector,
             origin,
@@ -176,6 +185,7 @@ pub async fn run() -> Result<()> {
             latency,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             cmd::rate::run(
                 selector.as_deref(),
                 origin.as_deref(),
@@ -199,6 +209,7 @@ pub async fn run() -> Result<()> {
             per_key,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             cmd::rate::run(
                 selector.as_deref(),
                 origin.as_deref(),
@@ -213,25 +224,30 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
-        Command::Node(NodeCmd::Info { origin, bus }) => cmd::node::info(&origin, &bus).await,
+        Command::Node(NodeCmd::Info { origin, bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::node::info(&origin, &bus).await
+        }
         Command::Node(NodeCmd::List {
             verbose,
             watch,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             if watch {
                 return cmd::node::watch(verbose, &bus).await;
             }
             cmd::node::list(verbose, &bus).await
         }
         Command::Base(BaseCmd::List { watch, bus }) => {
+            let bus = Bus::resolve(&bus)?;
             if let Some(secs) = watch {
                 return cmd::watch::base_list(secs, &bus).await;
             }
             // Deliberately never calls bus.base() — this is the command that
             // answers "what would I even pass as --base?".
             let session = bus.session().await?;
-            let bases = bus::discover_bases(&session, bus.timeout()).await?;
+            let bases = zenkey_fleet::discover_bases(&session, bus.timeout()).await?;
             crate::render::emit_with(
                 &mut std::io::stdout(),
                 &report::BaseList { bases },
@@ -240,6 +256,7 @@ pub async fn run() -> Result<()> {
             )
         }
         Command::Storage(StorageCmd::List { watch, bus }) => {
+            let bus = Bus::resolve(&bus)?;
             if let Some(secs) = watch {
                 return cmd::watch::storage_list(secs, &bus).await;
             }
@@ -265,8 +282,14 @@ pub async fn run() -> Result<()> {
             producer,
             tier,
             bus,
-        }) => cmd::blob::list(producer.as_deref(), tier.as_deref(), &bus).await,
-        Command::Blob(BlobCmd::Probe { target, bus }) => cmd::blob::probe(&target, &bus).await,
+        }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::blob::list(producer.as_deref(), tier.as_deref(), &bus).await
+        }
+        Command::Blob(BlobCmd::Probe { target, bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::blob::probe(&target, &bus).await
+        }
         Command::Blob(BlobCmd::Fetch {
             target,
             from,
@@ -277,6 +300,7 @@ pub async fn run() -> Result<()> {
             quiet,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             cmd::blob::fetch(
                 &target,
                 &from,
@@ -289,8 +313,12 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
-        Command::Admin(AdminCmd::Routers { bus }) => cmd::admin::routers(&bus).await,
+        Command::Admin(AdminCmd::Routers { bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::admin::routers(&bus).await
+        }
         Command::Admin(AdminCmd::Graph { dot, origins, bus }) => {
+            let bus = Bus::resolve(&bus)?;
             cmd::admin::graph(dot, origins, &bus).await
         }
         Command::Get {
@@ -302,6 +330,7 @@ pub async fn run() -> Result<()> {
             no_decode,
             bus,
         } => {
+            let bus = Bus::resolve(&bus)?;
             cmd::get::run(
                 &selector,
                 body.as_ref(),
@@ -314,6 +343,7 @@ pub async fn run() -> Result<()> {
             .await
         }
         Command::Service(ServiceCmd::List { producer, bus }) => {
+            let bus = Bus::resolve(&bus)?;
             let report = bus.slice_set().await?.service_list(producer.as_deref());
             crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
@@ -322,6 +352,7 @@ pub async fn run() -> Result<()> {
             procedure,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             let report = bus
                 .slice_set()
                 .await?
@@ -339,6 +370,7 @@ pub async fn run() -> Result<()> {
             raw,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             cmd::call::run(
                 &origin,
                 &producer,
@@ -353,6 +385,7 @@ pub async fn run() -> Result<()> {
             .await
         }
         Command::Interface(InterfaceCmd::List { bus }) => {
+            let bus = Bus::resolve(&bus)?;
             let report = bus.slice_set().await?.interface_list();
             crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
         }
@@ -362,6 +395,7 @@ pub async fn run() -> Result<()> {
             full,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             let slices = bus.slices().await?;
             let mut report =
                 zenkey_fleet::SliceSet::from_slices(slices.clone()).interface_show(&type_name)?;
@@ -389,6 +423,7 @@ pub async fn run() -> Result<()> {
                 }),
             ..
         } => {
+            let bus = Bus::resolve(&bus)?;
             cmd::schema::check(
                 &type_name,
                 &from,
@@ -405,7 +440,10 @@ pub async fn run() -> Result<()> {
             type_name,
             full,
             bus,
-        } => cmd::schema::dump(&producer, type_name.as_deref(), full, &bus).await,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::schema::dump(&producer, type_name.as_deref(), full, &bus).await
+        }
         Command::Schema {
             cmd: None,
             producer: None,
@@ -417,8 +455,14 @@ pub async fn run() -> Result<()> {
             target,
             producer,
             bus,
-        }) => cmd::registry::export(target, producer.as_deref(), &bus).await,
-        Command::Registry(RegistryCmd::Diff { bus }) => cmd::registry::diff(&bus).await,
+        }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::registry::export(target, producer.as_deref(), &bus).await
+        }
+        Command::Registry(RegistryCmd::Diff { bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::registry::diff(&bus).await
+        }
         Command::Registry(RegistryCmd::Lint { dir, ledger }) => {
             cmd::registry::lint(&dir, ledger.as_ref())
         }
@@ -432,6 +476,7 @@ pub async fn run() -> Result<()> {
             i_know,
             bus,
         }) => {
+            let bus = Bus::resolve(&bus)?;
             eprintln!("{}", cmd::bench::note(bus.timeout()));
             cmd::bench::rpc(
                 &origin,
@@ -444,9 +489,18 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
-        Command::Cache(CacheCmd::Show { bus }) => cmd::cache::show(&bus),
-        Command::Cache(CacheCmd::Refresh { bus }) => cmd::cache::refresh(&bus).await,
-        Command::Cache(CacheCmd::Clear { bus }) => cmd::cache::clear(&bus),
+        Command::Cache(CacheCmd::Show { bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::cache::show(&bus)
+        }
+        Command::Cache(CacheCmd::Refresh { bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::cache::refresh(&bus).await
+        }
+        Command::Cache(CacheCmd::Clear { bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::cache::clear(&bus)
+        }
         Command::Context(cmd) => match cmd {
             ContextCmd::Create {
                 name,
@@ -496,7 +550,10 @@ pub async fn run() -> Result<()> {
             listen,
             fail_on,
             bus,
-        } => cmd::doctor::run(deep, sample, listen, fail_on, &bus).await,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::doctor::run(deep, sample, listen, fail_on, &bus).await
+        }
         Command::Serve {
             keyexpr,
             reply,
@@ -507,6 +564,7 @@ pub async fn run() -> Result<()> {
             count,
             bus,
         } => {
+            let bus = Bus::resolve(&bus)?;
             cmd::serve::run(
                 &keyexpr,
                 &reply,
@@ -530,7 +588,10 @@ pub async fn run() -> Result<()> {
             old_root,
             window,
             bus,
-        } => cmd::cutover::run(&old_root, window, &bus).await,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::cutover::run(&old_root, window, &bus).await
+        }
         Command::Gen {
             producer,
             subject,
@@ -546,6 +607,7 @@ pub async fn run() -> Result<()> {
             i_know,
             bus,
         } => {
+            let bus = Bus::resolve(&bus)?;
             cmd::generate::run(
                 producer.as_deref(),
                 subject.as_deref(),
@@ -574,6 +636,7 @@ pub async fn run() -> Result<()> {
             absent,
             bus,
         } => {
+            let bus = Bus::resolve(&bus)?;
             cmd::expect::run(
                 &selector,
                 within,
@@ -592,7 +655,10 @@ pub async fn run() -> Result<()> {
             producer,
             procedure,
             bus,
-        } => cmd::probe::run(&target, &producer, &procedure, &bus).await,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::probe::run(&target, &producer, &procedure, &bus).await
+        }
         Command::Record {
             selector,
             origin,
@@ -603,6 +669,7 @@ pub async fn run() -> Result<()> {
             count,
             bus,
         } => {
+            let bus = Bus::resolve(&bus)?;
             cmd::record::run(
                 selector.as_deref(),
                 origin.as_deref(),
@@ -623,7 +690,10 @@ pub async fn run() -> Result<()> {
             i_know,
             qos,
             bus,
-        } => cmd::replay::run(&file, speed, dry_run, force_base, i_know, &qos, &bus).await,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::replay::run(&file, speed, dry_run, force_base, i_know, &qos, &bus).await
+        }
         Command::Scout {
             what,
             timeout,
@@ -637,13 +707,11 @@ pub async fn run() -> Result<()> {
             // and this is the caller that proves the ladders must take
             // scalars: when they demanded a `BusArgs`, this verb grew its own
             // copy of two of them instead (#209).
-            let stored = match context::active(context.as_deref()) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    std::process::exit(2);
-                }
-            };
+            // A bad name is an `Err` here too, and for the same reason it
+            // is one in `Bus::resolve`: this was the *second* `exit(2)` for
+            // one failure, and two exit codes for one mistake is how a
+            // contract stops being a contract.
+            let stored = context::active(context.as_deref())?;
             let stored = stored.as_ref();
             let connect = resolve::endpoints(&connect, stored.map(|c| c.connect.as_slice()));
             let listen = resolve::endpoints(&listen, stored.map(|c| c.listen.as_slice()));

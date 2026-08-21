@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -16,7 +16,7 @@ pub async fn run(
     valid_payload: bool,
     qos: Option<&str>,
     absent: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let qos = match qos {
         None => None,

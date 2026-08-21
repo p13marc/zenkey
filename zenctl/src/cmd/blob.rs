@@ -19,14 +19,14 @@ use anyhow::{Result, bail};
 use zenkey_fleet::report::{BlobListSource, BlobProgress};
 use zenkey_fleet::{BlobFetchSpec, BlobTarget, blob_fetch, blob_list, blob_probe};
 
-use crate::BusArgs;
+use crate::Bus;
 
 /// `blob list` — which producers declare which tiers.
 ///
 /// Answers offline from `--registry` alone. The liveliness join is attempted
 /// only when a session is available; when it is not, `origins` stays `None` and
 /// renders as "not asked" rather than as an empty set (RFC 09 §5.1 O4).
-pub async fn list(producer: Option<&str>, tier: Option<&str>, args: &BusArgs) -> Result<()> {
+pub async fn list(producer: Option<&str>, tier: Option<&str>, args: &Bus) -> Result<()> {
     let has_dirs = !args.registry_dirs().is_empty();
     let slices = args.slices().await?;
 
@@ -57,7 +57,7 @@ pub async fn list(producer: Option<&str>, tier: Option<&str>, args: &BusArgs) ->
 }
 
 /// `blob probe <target>` — who holds it, and at which root.
-pub async fn probe(target: &str, args: &BusArgs) -> Result<()> {
+pub async fn probe(target: &str, args: &Bus) -> Result<()> {
     let target = BlobTarget::parse(target)?;
     let session = args.session().await?;
     // Slices are best-effort here: they only fill `declared_by`, the capability
@@ -78,7 +78,7 @@ pub async fn fetch(
     allow_unpinned: bool,
     overwrite: bool,
     quiet: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let spec = target;
     let target = BlobTarget::parse(target)?;

@@ -17,16 +17,11 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
 use crate::input::Source;
 
 /// `zenctl schema <producer> [--type X] [--full]`.
-pub async fn dump(
-    producer: &str,
-    type_filter: Option<&str>,
-    full: bool,
-    args: &BusArgs,
-) -> Result<()> {
+pub async fn dump(producer: &str, type_filter: Option<&str>, full: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let slices = args.slice_set().await.unwrap_or_default();
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
@@ -48,7 +43,7 @@ pub async fn check(
     producer: Option<&str>,
     schema_set: Option<&std::path::Path>,
     encoding: Option<&str>,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     use zenkey::schema::WireEncoding;
     use zenkey_fleet::Verdict;

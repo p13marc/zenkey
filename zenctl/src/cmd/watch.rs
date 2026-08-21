@@ -213,7 +213,7 @@ impl TopicFilter {
     }
 }
 
-pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::BusArgs) -> Result<()> {
+pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::Bus) -> Result<()> {
     validate_format(args.format())?;
     let interval = interval_of(secs)?;
     let dirs = args.registry_dirs();
@@ -245,7 +245,7 @@ pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::BusArgs) 
     }
 }
 
-pub async fn storage_list(secs: f64, args: &crate::BusArgs) -> Result<()> {
+pub async fn storage_list(secs: f64, args: &crate::Bus) -> Result<()> {
     validate_format(args.format())?;
     let interval = interval_of(secs)?;
     let session = args.session().await?;
@@ -260,7 +260,7 @@ pub async fn storage_list(secs: f64, args: &crate::BusArgs) -> Result<()> {
     poll_loop(interval, args.format(), args.color(), fetch).await
 }
 
-pub async fn base_list(secs: f64, args: &crate::BusArgs) -> Result<()> {
+pub async fn base_list(secs: f64, args: &crate::Bus) -> Result<()> {
     validate_format(args.format())?;
     let interval = interval_of(secs)?;
     let session = args.session().await?;

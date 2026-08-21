@@ -14,9 +14,9 @@
 
 use anyhow::{Result, bail};
 
-use crate::BusArgs;
+use crate::Bus;
 
-pub async fn run(target: &str, producer: &str, procedure: &str, args: &BusArgs) -> Result<()> {
+pub async fn run(target: &str, producer: &str, procedure: &str, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let base = args.base().to_string();
 

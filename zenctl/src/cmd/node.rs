@@ -5,9 +5,9 @@
 use anyhow::{Result, anyhow};
 use zenkey_fleet as bus;
 
-use crate::BusArgs;
+use crate::Bus;
 
-pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
+pub async fn info(origin: &str, args: &Bus) -> Result<()> {
     // The identity bridge, enforced: an origin id or nothing (RFC 06 §6).
     if !zenkey::grammar::is_valid_host_origin(origin) && !origin.starts_with('@') {
         return Err(anyhow!(
@@ -21,7 +21,7 @@ pub async fn info(origin: &str, args: &BusArgs) -> Result<()> {
     crate::render::emit_with(&mut std::io::stdout(), &info, args.format(), args.color())
 }
 
-pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
+pub async fn list(verbose: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let roster = bus::roster(&session, args.base(), args.timeout()).await?;
 
@@ -49,7 +49,7 @@ pub async fn list(verbose: bool, args: &BusArgs) -> Result<()> {
 /// pushed by the bus, so the monitor subscribes (history-backed tokens seed
 /// the initial view) and every NodeUp/NodeDown re-renders. A producer
 /// stopping is reflected within one liveliness event (#56 acceptance).
-pub async fn watch(verbose: bool, args: &BusArgs) -> Result<()> {
+pub async fn watch(verbose: bool, args: &Bus) -> Result<()> {
     use std::collections::BTreeMap;
 
     use crate::cmd::watch::{render_cycle, validate_format};

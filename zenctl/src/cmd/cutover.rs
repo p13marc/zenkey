@@ -8,9 +8,9 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
 
-pub async fn run(old_root: &str, window: u64, args: &BusArgs) -> Result<()> {
+pub async fn run(old_root: &str, window: u64, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let base = args.base().to_string();
 

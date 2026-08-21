@@ -7,7 +7,7 @@ use super::sample::{
     self, attachment_display, attachment_json, format_sample, hex, qos_summary, source_summary,
     type_tag,
 };
-use crate::BusArgs;
+use crate::Bus;
 
 /// `topic echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
 /// GET-then-subscribe (it drops everything published in the gap).
@@ -24,7 +24,7 @@ pub async fn run(
     no_decode: bool,
     count: usize,
     seed: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let selector = match selector {
         Some(s) => s.to_string(),

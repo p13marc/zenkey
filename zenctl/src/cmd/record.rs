@@ -10,7 +10,7 @@ use std::io::BufWriter;
 use anyhow::{Context, Result};
 use zenkey_fleet::{RecordBounds, RecordReport, ZREC_VERSION, ZrecHeader, ZrecWriter};
 
-use crate::BusArgs;
+use crate::Bus;
 
 #[allow(clippy::too_many_arguments)] // clap surface, mirrored from echo
 pub async fn run(
@@ -21,7 +21,7 @@ pub async fn run(
     out: &str,
     duration: Option<u64>,
     count: u64,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let selector = match selector {
         Some(s) => s.to_string(),

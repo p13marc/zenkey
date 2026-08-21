@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::Result;
 use zenkey_fleet::{BodySource, PrepareMode};
 
-use crate::BusArgs;
+use crate::Bus;
 use crate::input::Source;
 
 /// Which of the engine's three preparation modes the flags select. Shared
@@ -83,7 +83,7 @@ pub async fn run(
     no_validate: bool,
     raw: bool,
     attachment: Option<&Source>,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     // An explicit --qos fails fast, before the body or the bus.
     let explicit_qos = qos.map(parse_qos).transpose()?;
@@ -179,7 +179,7 @@ async fn matching_note(
 }
 
 /// `topic retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
-pub async fn retire(key: &str, qos: &str, i_know: bool, args: &BusArgs) -> Result<()> {
+pub async fn retire(key: &str, qos: &str, i_know: bool, args: &Bus) -> Result<()> {
     let qos = parse_qos(qos)?;
     // Slices are best-effort, like pub: the guard is honest about a missing
     // registry (a state key still passes — the class is in the key).
@@ -227,7 +227,7 @@ pub async fn run_from_ndjson(
     default_qos: Option<&str>,
     interval: f64,
     i_know: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     use std::io::BufRead as _;
 

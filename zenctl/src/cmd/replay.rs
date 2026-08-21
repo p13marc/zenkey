@@ -12,7 +12,7 @@ use std::io::BufReader;
 use anyhow::{Context, Result, bail};
 use zenkey_fleet::{ReplayEvent, ReplayTarget, ZrecReader};
 
-use crate::BusArgs;
+use crate::Bus;
 
 #[allow(clippy::too_many_arguments)] // clap surface
 pub async fn run(
@@ -22,7 +22,7 @@ pub async fn run(
     force_base: bool,
     i_know: bool,
     qos: &str,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let source = std::fs::File::open(file).with_context(|| format!("open {file}"))?;
     let mut reader = ZrecReader::new(BufReader::new(source))?;

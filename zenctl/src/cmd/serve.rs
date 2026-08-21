@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
 use crate::input::Source;
 
 #[allow(clippy::too_many_arguments)]
@@ -18,7 +18,7 @@ pub async fn run(
     raw: bool,
     complete: bool,
     count: usize,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let typed = reply.read()?;
 

@@ -9,7 +9,8 @@
 use anyhow::Result;
 use zenkey_fleet::DoctorSpec;
 
-use crate::cli::{BusArgs, FailOn};
+use crate::Bus;
+use crate::cli::FailOn;
 use crate::report::DoctorSeverity;
 
 pub async fn run(
@@ -17,7 +18,7 @@ pub async fn run(
     sample: Option<usize>,
     listen: Option<f64>,
     fail_on: Option<FailOn>,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let session = args.session().await?;
     // The context's registry dirs count too — resolving through

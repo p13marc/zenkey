@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 
-use crate::BusArgs;
+use crate::Bus;
 
 /// A ceiling on `--count`, so a typo is a bounded mistake. Not a policy about
 /// how much load a fleet can take — the operator knows that and `--i-know`
@@ -25,7 +25,7 @@ pub async fn rpc(
     count: Option<usize>,
     concurrency: usize,
     i_know: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let target = zenkey_fleet::CallTarget::parse(origin)?;
     let slices = args.slice_set().await.ok();

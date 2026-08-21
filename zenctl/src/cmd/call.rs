@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
 use crate::input::Source;
 
 #[allow(clippy::too_many_arguments)]
@@ -15,7 +15,7 @@ pub async fn run(
     attachment: Option<&Source>,
     no_validate: bool,
     raw: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     // The typed target refuses a hostname outright (RFC 06 §6) and makes a
     // fleet call a deliberate variant; the engine's `call` composes the key

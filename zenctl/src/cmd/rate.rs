@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::{BusArgs, report};
+use crate::{Bus, report};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -20,7 +20,7 @@ pub async fn run(
     loss: bool,
     latency: bool,
     bandwidth: bool,
-    args: &BusArgs,
+    args: &Bus,
 ) -> Result<()> {
     let selector = match selector {
         Some(s) => s.to_string(),

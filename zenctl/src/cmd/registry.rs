@@ -17,10 +17,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use zenkey::RegistrySlice;
 
-use crate::BusArgs;
+use crate::Bus;
 
 /// What `registry export` emits.
-pub async fn export(target: ExportAs, producer: Option<&str>, args: &BusArgs) -> Result<()> {
+pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Result<()> {
     let slices = args.slice_set().await?;
     let selected: Vec<&RegistrySlice> = slices
         .slices()
@@ -95,7 +95,7 @@ pub async fn export(target: ExportAs, producer: Option<&str>, args: &BusArgs) ->
 }
 
 /// `registry diff` — local dirs against the live bus, per producer.
-pub async fn diff(args: &BusArgs) -> Result<()> {
+pub async fn diff(args: &Bus) -> Result<()> {
     let dirs = args.registry_dirs();
     if dirs.is_empty() {
         return Err(anyhow!(

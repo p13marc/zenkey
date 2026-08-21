@@ -11,14 +11,14 @@
 
 use anyhow::Result;
 
-use crate::BusArgs;
+use crate::Bus;
 
 /// Where this invocation's cache lives.
-fn dir(args: &BusArgs) -> std::path::PathBuf {
+fn dir(args: &Bus) -> std::path::PathBuf {
     zenkey_fleet::cache_dir(zenkey_fleet::active_name(args.context_name()).as_deref())
 }
 
-pub fn show(args: &BusArgs) -> Result<()> {
+pub fn show(args: &Bus) -> Result<()> {
     let dir = dir(args);
     let set = zenkey_fleet::SliceSet::read_cache(&dir);
     // A report rather than four `println!`s, so `cache show --format json |
@@ -41,7 +41,7 @@ pub fn show(args: &BusArgs) -> Result<()> {
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
-pub async fn refresh(args: &BusArgs) -> Result<()> {
+pub async fn refresh(args: &Bus) -> Result<()> {
     // Loading is what writes the cache, so this is a load with no output.
     let set = args.slice_set().await?;
     println!(
@@ -52,7 +52,7 @@ pub async fn refresh(args: &BusArgs) -> Result<()> {
     Ok(())
 }
 
-pub fn clear(args: &BusArgs) -> Result<()> {
+pub fn clear(args: &Bus) -> Result<()> {
     let dir = dir(args);
     match std::fs::remove_dir_all(&dir) {
         Ok(()) => println!("removed {}", dir.display()),
