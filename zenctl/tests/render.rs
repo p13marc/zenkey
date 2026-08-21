@@ -237,3 +237,725 @@ fn no_family_emits_trailing_whitespace() {
         }
     }
 }
+
+// ── Every remaining family ────────────────────────────────────────────────
+//
+// #201 asks for a table snapshot and an ndjson snapshot per `Render` impl, and
+// this is the rest of them. They read as a wall of captured output, which is
+// the point: a table regression was invisible to CI, and the only way it stops
+// being invisible is for somebody to have written down what the table is.
+//
+// The families whose report type is zenctl-local or feature-gated build their
+// fixtures here rather than in `zenkey-report-fixtures` — that crate cannot
+// see a `KeyRelation`, and it must not enable the `decode` feature `GenReport`
+// lives behind (#204).
+
+#[test]
+fn a_service_list_marks_a_procedure_that_declares_no_reply() {
+    assert_data_eq!(
+        table(&fx::service_list()),
+        str![[r#"
+sysinfo  (registry 1.0)
+  read   processes  → ProcessList
+  write  gc         —
+
+catalog  (registry 1.1)
+  read   names      → Vec<NameVal>
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::service_list()),
+        str![[r#"
+{"report":"service-list"}
+{"kind":"read","path":"processes","producer":"sysinfo","registry_version":"1.0","reply":"ProcessList","request":"ProcessQuery","row":"procedure"}
+{"kind":"write","path":"gc","producer":"sysinfo","registry_version":"1.0","row":"procedure"}
+{"kind":"read","path":"names","producer":"catalog","registry_version":"1.1","reply":"Vec<NameVal>","row":"procedure"}
+
+"#]]
+    );
+}
+
+#[test]
+fn a_service_info_lays_a_procedure_out_over_four_lines() {
+    assert_data_eq!(
+        table(&fx::service_info()),
+        str![[r#"
+producer  catalog  (registry 1.1)
+origin    @catalog  (a service origin — its keys carry no producer chunk)
+about     the fleet's entity registry
+
+2 procedure(s):
+
+  write  link
+           v1/@catalog/@rpc/catalog/link
+           LinkRequest → OperatorAssertion
+           fanout forbidden — no fleet spelling exists; call one origin
+           idempotent false
+           assert that two ids are one entity
+  read   names
+           v1/@catalog/@rpc/catalog/names
+           → Vec<NameVal>
+           idempotent true
+
+"#]]
+    );
+}
+
+#[test]
+fn an_interface_list_counts_carriers() {
+    assert_data_eq!(
+        table(&fx::interface_list()),
+        str![[r#"
+declared payload types:
+
+  TelemetryPoint  42 carrier(s)
+  HealthSnapshot  3 carrier(s)
+
+"#]]
+    );
+}
+
+/// Two producers, same type name, different hashes — the RFC 08 §7 drift
+/// finding on the type's own page.
+#[test]
+fn an_interface_show_names_a_schema_disagreement() {
+    assert_data_eq!(
+        table(&fx::interface_show()),
+        str![[r#"
+type      HealthSnapshot
+
+carried by 2 subject(s)/procedure(s):
+  sysinfo  state  health
+  gnmi     state  health
+
+served schema (RFC 08 §7):
+  sysinfo  json-schema  sha256:aaaa
+  gnmi     json-schema  sha256:bbbb
+
+"#]]
+    );
+    assert!(notes(&fx::interface_show()).contains("disagree about"));
+}
+
+/// The empty base is a real deployment, not a missing value, so it renders
+/// `(empty)` rather than `—`.
+#[test]
+fn a_base_list_names_the_empty_base_rather_than_dashing_it() {
+    assert_data_eq!(
+        table(&fx::base_list()),
+        str![[r#"
+acme     2 origin(s)  2 producer(s)    storage: main@aabbccdd
+(empty)  1 origin(s)  1 producer(s)
+staging  0 origin(s)  0 producer(s)    storage: archive@eeff0011  (storage config only — nothing alive)
+
+"#]]
+    );
+}
+
+#[test]
+fn a_bench_report_right_aligns_its_numbers_and_counts_non_answers_apart() {
+    assert_data_eq!(
+        table(&fx::bench_report()),
+        str![[r#"
+→ v1/h-3fa9c2d41b7e/@rpc/sysinfo/processes
+98 call(s), concurrency 8, 2.50s — 39.2 calls/s
+  2 of 100 calls did not complete
+
+origin          replies  min ms  p50 ms  p95 ms  p99 ms  max ms
+h-3fa9c2d41b7e       64    0.80    1.90   12.40   40.10  123.46
+h-bbbbbbbbbbbb       34    1.10    2.20    9.90   11.00   12.50
+
+"#]]
+    );
+    assert!(notes(&fx::bench_report()).contains("drew no reply"));
+}
+
+#[test]
+fn a_registry_diff_dashes_the_side_that_has_no_version() {
+    assert_data_eq!(
+        table(&fx::registry_diff()),
+        str![[r#"
+   catalog   registry 1.1   agree
+✗  sysinfo   served 1.1 · local 1.0
+      served declares telemetry disk/{mount}/inodes; local does not
+✗  parallax  served 1.3 · local —
+      no local slice for this producer
+
+"#]]
+    );
+}
+
+#[test]
+fn a_schema_dump_carries_its_totality_gap_and_its_unserved_case() {
+    assert_data_eq!(
+        table(&fx::schema_dump()),
+        str![[r#"
+producer  sysinfo   (app zensight)
+
+1 type(s):
+
+  HealthSnapshot  json-schema  sha256:aaaa
+
+"#]]
+    );
+    assert!(notes(&fx::schema_dump()).contains("does not cover"));
+    // Serving no `describe` renders nothing at all — the sentence is the note,
+    // which is what gets it into the machine formats.
+    assert_data_eq!(
+        table(&fx::schema_dump_unserved()),
+        str![[r#"
+
+"#]]
+    );
+    assert!(notes(&fx::schema_dump_unserved()).contains("not the same as having none"));
+}
+
+/// Three `origins` outcomes, three sentences: answered-and-empty, not asked,
+/// and a real list.
+#[test]
+fn a_blob_list_tells_three_kinds_of_empty_apart() {
+    assert_data_eq!(
+        table(&fx::blob_list()),
+        str![[r#"
+declared @blob tiers:
+
+  logs      store     v2.0
+      endpoints  have, chunk
+      algo       blake3
+      origins    — (no liveliness token answered; silence is not a verdict — RFC 05 §3.1)
+  parallax  artifact  v1.3
+      endpoints  manifest
+      algo       blake3
+      reference  ArtifactRef  (carries the content root — RFC 07 §2.1)
+      encoding   application/octet-stream
+      origins    — (roster not asked)
+      build artifacts
+
+"#]]
+    );
+}
+
+#[test]
+fn a_blob_probe_reports_two_roots_as_a_finding() {
+    assert_data_eq!(
+        table(&fx::blob_probe()),
+        str![[r#"
+target  artifact/01jqz3demo0001  (tier artifact)
+
+asked:
+  v1/*/@blob/artifact/01jqz3demo0001/manifest
+  v1/*/@blob/artifact/01jqz3demo0001/have
+
+holders:
+
+  h-3fa9c2d41b7e  8/8 chunks · 65536 bytes · root 60e03a78c0e0…
+      v1/h-3fa9c2d41b7e/@blob/artifact/01jqz3demo0001/manifest
+  h-bbbbbbbbbbbb  3/8 chunks · no manifest reply
+      note: every chunk but no index
+      v1/h-bbbbbbbbbbbb/@blob/artifact/01jqz3demo0001/have
+
+"#]]
+    );
+    assert!(notes(&fx::blob_probe()).contains("distinct content roots"));
+    // A probe that was never issued must never read as "nobody holds it".
+    assert_data_eq!(
+        table(&fx::blob_probe_unissued()),
+        str![[r#"
+target  tree/deadbeef  (tier tree)
+
+"#]]
+    );
+    assert!(notes(&fx::blob_probe_unissued()).contains("not probed"));
+}
+
+#[test]
+fn a_blob_tree_and_a_blob_fetch_are_one_ndjson_line_each() {
+    for out in [ndjson(&fx::blob_tree()), ndjson(&fx::blob_fetch())] {
+        assert_eq!(out.lines().count(), 1, "not a document:\n{out}");
+    }
+    assert_data_eq!(
+        table(&fx::blob_tree()),
+        str![[r#"
+tree/deadbeefcafe
+  from      h-3fa9c2d41b7e (v1/h-3fa9c2d41b7e/@blob/tree/deadbeef/index)
+  index     12 entries, 9 file(s)
+  content   1048576 bytes in 40 distinct chunk(s)
+  priority  data_low/block/reliable
+  root      deadbeefcafe
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&fx::blob_fetch()),
+        str![[r#"
+bundle.bin
+  from      h-3fa9c2d41b7e (v1/h-3fa9c2d41b7e/@blob/artifact/01jqz3demo0001/chunk)
+  bytes     65536 in 8 chunk(s), 2 resumed
+  priority  data_low/block/reliable
+  root      trust-on-first-use — this origin chose the content
+  retries                                                                        1
+
+"#]]
+    );
+    assert!(notes(&fx::blob_fetch()).contains("failed verification before disk"));
+}
+
+/// One reply, one error envelope, and the attachment clause `probe` used to
+/// drop (#237).
+#[test]
+fn a_call_and_a_probe_render_a_reply_identically() {
+    let call = table(&fx::call_report());
+    let probe = table(&fx::probe_report());
+    assert_data_eq!(
+        call.clone(),
+        str![[r#"
+h-3fa9c2d41b7e:
+{
+  "count": 214
+}
+  attachment (18 B): {"trace":"abc123"}
+h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
+
+"#]]
+    );
+    assert!(
+        probe.ends_with(&call),
+        "probe is the call plus one provenance line:\n{probe}"
+    );
+    assert!(call.contains("attachment (18 B)"), "the clause probe lost");
+}
+
+#[test]
+fn a_cutover_puts_the_verdict_word_beside_its_evidence() {
+    assert_data_eq!(
+        table(&fx::cutover_report()),
+        str![[r#"
+old root acme/legacy: 12 sample(s) on 2 key(s) over 30s
+  ✗  acme/legacy/sysinfo/health
+  ✗  acme/legacy/sysinfo/disk
+new plane acme/v1/**: 480 sample(s)
+leaks (outside acme/v1/ and not the old root): 3 sample(s) on 1 key(s)
+  !  acme/scratch/tmp
+FAIL
+
+"#]]
+    );
+    assert!(notes(&fx::cutover_report()).contains("still speaks"));
+}
+
+/// `IMPAIRED` is the absence of a verdict, and the note says so in every
+/// format.
+#[test]
+fn an_impaired_expectation_says_it_is_not_a_verdict_either_way() {
+    assert_data_eq!(
+        table(&fx::expect_report()),
+        str![[r#"
+acme/v1/**/state/**: 120 sample(s) on 4 key(s) over 5.0s, 24.00 Hz over the full window
+violations (1 shown of 9):
+  ✗  v1/h-3fa9c2d41b7e/state/sysinfo/health: qos data/drop
+IMPAIRED — the observation cannot carry the claim:
+  !  17 sample(s) were dropped while behind
+
+"#]]
+    );
+    assert!(notes(&fx::expect_report()).contains("not a verdict either way"));
+}
+
+#[test]
+fn a_record_and_a_replay_carry_their_drop_ledgers() {
+    assert_data_eq!(
+        table(&fx::record_report()),
+        str![[r#"
+recorded 4820 sample(s) in 10.0s to bus.zrec
+
+"#]]
+    );
+    assert!(notes(&fx::record_report()).contains("dropped while behind"));
+    assert_data_eq!(
+        table(&fx::replay_report()),
+        str![[r#"
+would replay 4800 put(s) and 20 tombstone(s) from acme/v1/** (captured 2026-08-21T00:00:00Z)
+  line 41: unknown QoS profile "data/drop/reliable"
+  line 88: refused delete on a telemetry key
+
+"#]]
+    );
+    assert!(notes(&fx::replay_report()).contains("partial view of a partial view"));
+}
+
+/// The O6 eviction count leads, so `| head -5` cannot lose it.
+#[test]
+fn a_rate_reports_bound_leads_its_ndjson() {
+    let view = zenctl::render::RateView {
+        report: &fx::rate_report(),
+        bandwidth: false,
+    };
+    let first = ndjson(&view).lines().next().unwrap().to_string();
+    let envelope: serde_json::Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(envelope["evicted"], 912);
+    assert_data_eq!(
+        table(&view),
+        str![[r#"
+5.00 Hz  v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used  (0 sn gap(s))  lat — (50 unstamped: no HLC, no latency — not zero)
+5.00 Hz  v1/h-3fa9c2d41b7e/state/sysinfo/health  (0 sn gap(s))
+total: 960.00 Hz over 50000 key(s) (9600 samples / 10s)
+
+"#]]
+    );
+
+    let bw = zenctl::render::RateView {
+        report: &fx::rate_report(),
+        bandwidth: true,
+    };
+    assert_data_eq!(
+        table(&bw),
+        str![[r#"
+225.0 B/s  v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used
+180.0 B/s  v1/h-3fa9c2d41b7e/state/sysinfo/health
+total: 52800.0 B/s over 50000 key(s) (528000 bytes / 10s)
+
+"#]]
+    );
+}
+
+/// An empty scout heard a boundary, and says so in the document — not as
+/// prose on stdout, which is what it used to do (#236).
+#[test]
+fn an_empty_scout_and_an_empty_router_list_are_boundaries_not_absences() {
+    assert_eq!(table(&fx::scout_report_empty()), "");
+    assert!(notes(&fx::scout_report_empty()).contains("boundary"));
+    assert_data_eq!(
+        table(&fx::scout_report()),
+        str![[r#"
+aabbccdd  router  tcp/10.0.0.1:7447
+
+"#]]
+    );
+
+    assert_eq!(table(&fx::router_list_empty()), "");
+    assert!(notes(&fx::router_list_empty()).contains("peer-only mesh"));
+    assert_data_eq!(
+        table(&fx::router_list()),
+        str![[r#"
+aabbccdd  1.9.0  tcp/10.0.0.1:7447
+
+"#]]
+    );
+}
+
+/// #198's headline example: `node info --format ndjson` was a pretty
+/// multi-line document, so the one command whose answer *is* a list of
+/// producers could not be read a producer at a time.
+#[test]
+fn a_node_info_has_two_row_kinds_and_never_says_zero_for_never_seen() {
+    let out = ndjson(&fx::node_info());
+    let kinds: Vec<String> = out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| v.get("row").and_then(|r| r.as_str()).map(str::to_string))
+        .collect();
+    assert_eq!(
+        kinds,
+        ["producer", "producer", "producer", "freshness", "freshness"]
+    );
+    assert_data_eq!(
+        table(&fx::node_info()),
+        str![[r#"
+origin    h-3fa9c2d41b7e
+  sysinfo   [alive]     app zensight · registry v1.0 · 41 subject(s) · 3 procedure(s) · blob: store · 2 DEPRECATED still served
+  parallax  [alive]     (no introspect reply — capabilities unknown, not absent)
+  probe     [no token]  app zensight · registry v1.0 · 2 subject(s) · 1 procedure(s)
+state freshness (declared ttl_s):
+  sysinfo/health  240s old  (ttl 120s)  STALE
+  sysinfo/errors  —         (ttl 300s)
+
+"#]]
+    );
+}
+
+/// Three row kinds on one stream, told apart by a tag rather than by probing
+/// for fields — and an origin whose sources named no single session is
+/// *reported*, not attached.
+#[test]
+fn an_admin_graph_tags_its_three_row_kinds() {
+    let report = fx::topology();
+    let attachments = fx::attachments();
+    let view = zenctl::render::TopologyView {
+        report: &report,
+        attachments: &attachments,
+    };
+    let kinds: Vec<String> = ndjson(&view)
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| v.get("row").and_then(|r| r.as_str()).map(str::to_string))
+        .collect();
+    assert_eq!(
+        kinds,
+        ["node", "node", "edge", "attachment", "attachment"],
+        "nodes, edges and attachments used to be one untagged stream"
+    );
+    assert_data_eq!(
+        table(&view),
+        str![[r#"
+aabbccdd  router  1.9.0  tcp/10.0.0.1:7447
+eeff0011  peer    —      (heard of, not queryable)
+  h-3fa9c2d41b7e  ⚓ session eeff0011  (token v1/h-3fa9c2d41b7e/state/sysinfo/alive)
+  h-bbbbbbbbbbbb  reported by aabbccdd — sources named no single session; shown as reported, not attached
+  aabbccdd —— eeff0011  [tcp]
+
+"#]]
+    );
+}
+
+// ── The zenctl-local families ─────────────────────────────────────────────
+//
+// Their fixtures are here rather than in `zenkey-report-fixtures`: that crate
+// cannot see a `KeyRelation`, and it must not enable the `decode` feature
+// `GenReport` lives behind (#204).
+
+#[test]
+fn a_key_relation_carries_its_convention_note_once() {
+    let no = zenctl::render::KeyRelation {
+        op: "includes".into(),
+        a: "v1/**".into(),
+        b: "v1/h-3fa9/@rpc/sysinfo/introspect".into(),
+        answer: false,
+        note: Some("`**` never crosses an `@`-chunk (RFC 03 §4 D2)".into()),
+    };
+    assert_data_eq!(
+        table(&no),
+        str![[r#"
+no — v1/** does not include all of v1/h-3fa9/@rpc/sysinfo/introspect
+`**` never crosses an `@`-chunk (RFC 03 §4 D2)
+
+"#]]
+    );
+    // Once: the note is a field of this report, so returning it from `notes()`
+    // as well would put the same sentence in the document twice.
+    let line = ndjson(&no);
+    let doc: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+    assert!(doc.get("note").is_some());
+    assert!(doc.get("notes").is_none(), "not twice: {doc}");
+}
+
+/// `key canon` is a filter: `$(zenctl key canon "$x")` has to be the answer
+/// and nothing else.
+#[test]
+fn a_key_canon_prints_the_answer_alone_when_it_changed() {
+    let changed = zenctl::render::KeyCanon {
+        input: "v1/**/**/a".into(),
+        canon: "v1/**/a".into(),
+        changed: true,
+    };
+    assert_eq!(table(&changed), "v1/**/a\n");
+    let same = zenctl::render::KeyCanon {
+        input: "v1/**/a".into(),
+        canon: "v1/**/a".into(),
+        changed: false,
+    };
+    assert_eq!(table(&same), "v1/**/a is already canonical\n");
+}
+
+/// Nothing to say is *absent*, not an empty array meaning the same thing.
+#[test]
+fn a_schema_check_omits_an_empty_detail_list() {
+    let valid = zenctl::render::SchemaCheck {
+        type_name: "Health".into(),
+        kind: "json-schema".into(),
+        verdict: "valid".into(),
+        detail: vec![],
+    };
+    let doc: serde_json::Value = serde_json::from_str(ndjson(&valid).trim()).unwrap();
+    assert_eq!(
+        doc,
+        serde_json::json!({
+            "report": "schema-check",
+            "type": "Health",
+            "kind": "json-schema",
+            "verdict": "valid",
+        })
+    );
+    assert_eq!(table(&valid), "Health (json-schema): valid\n");
+
+    let invalid = zenctl::render::SchemaCheck {
+        verdict: "invalid".into(),
+        detail: vec![r#"/status: "melted" is not one of "ok", "degraded" or "down""#.into()],
+        ..valid
+    };
+    assert_data_eq!(
+        table(&invalid),
+        str![[r#"
+Health (json-schema): invalid
+  /status: "melted" is not one of "ok", "degraded" or "down"
+
+"#]]
+    );
+}
+
+/// The cache is this tool's own disk footprint, and a script is a user:
+/// `cache show --format json | jq -r .dir` is the point of the command (#54).
+#[test]
+fn a_cache_report_names_its_directory_in_both_formats() {
+    let full = zenctl::render::CacheReport {
+        dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
+        slices: vec![zenctl::render::CachedSlice {
+            producer: "sysinfo".into(),
+            registry_version: "1.0".into(),
+            subjects: 41,
+            procedures: 3,
+        }],
+    };
+    assert_data_eq!(
+        table(&full),
+        str![[r#"
+/home/u/.cache/zenkey-explorer/lab/slices
+  sysinfo  registry 1.0  41 subject(s), 3 procedure(s)
+
+"#]]
+    );
+    let doc: serde_json::Value =
+        serde_json::from_str(ndjson(&full).lines().next().unwrap()).unwrap();
+    assert_eq!(doc["dir"], "/home/u/.cache/zenkey-explorer/lab/slices");
+
+    let empty = zenctl::render::CacheReport {
+        dir: "/home/u/.cache/zenkey-explorer/default/slices".into(),
+        slices: vec![],
+    };
+    assert!(notes(&empty).contains("falls back to the static command tree"));
+}
+
+/// A GET's coverage claim is exactly its selector and its window, and a silent
+/// one has to say so — three different silences, not one.
+#[test]
+fn a_get_with_no_replies_names_the_three_silences() {
+    let silent = zenctl::render::GetReport {
+        selector: "acme/v1/**/state/**".into(),
+        timeout_s: 5,
+        answers: vec![],
+    };
+    let n = notes(&silent);
+    assert!(n.contains("Nobody is registered for it"), "{n}");
+    assert!(n.contains("the three are different"), "{n}");
+    let doc: serde_json::Value =
+        serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
+    assert_eq!(doc["selector"], "acme/v1/**/state/**");
+    assert_eq!(doc["timeout_s"], 5);
+}
+
+/// Synthetic traffic is still publishing, so the plan is a dry run made
+/// visible before a byte moves — the `replay --dry-run` precedent
+/// (RFC 09 §5.3).
+#[test]
+fn a_gen_plan_states_the_synthetic_marker_before_anything_is_published() {
+    let entries: Vec<zenkey_fleet::generate::GenPlanEntry> = vec![];
+    let plan = zenctl::render::GenPlan {
+        origin: "h-3fa9c2d41b7e",
+        duration_s: 5.0,
+        entries: &entries,
+    };
+    let n = notes(&plan);
+    assert!(n.contains("synthetic"), "{n}");
+    assert!(n.contains("RFC 09 §5.3"), "{n}");
+
+    let report = zenkey_fleet::generate::GenReport {
+        duration_s: 5.0,
+        entries: 12,
+        sent: 240,
+        refused: 2,
+        first_errors: vec!["health: enum `status` has no synthesizable member".into()],
+    };
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+sent 240 sample(s) over 5.0s across 12 subject(s); 2 refused by schema
+  ✗  health: enum `status` has no synthesizable member
+
+"#]]
+    );
+    assert!(notes(&report).contains("counted, never silently"));
+}
+
+/// Every `Render` impl is drawn somewhere in this file — the mechanical floor
+/// #201 asks for, rather than a habit.
+///
+/// It reads the `FAMILY` constants out of `render/impls/` as text, because a
+/// trait impl cannot be enumerated at runtime. That is coarser than reflection
+/// and finer than nothing: adding a family fails here until somebody has
+/// written down what it draws, which is the moment to write the snapshot.
+///
+/// `COVERED` is not a second source of truth — it is a checklist, and the
+/// assertion is that the checklist and the code agree.
+#[test]
+fn every_render_impl_is_drawn_somewhere_in_this_file() {
+    const COVERED: &[&str] = &[
+        "admin-graph",
+        "admin-routers",
+        "base-list",
+        "bench",
+        "blob-fetch",
+        "blob-list",
+        "blob-probe",
+        "blob-tree",
+        "cache",
+        "call",
+        "cutover",
+        "doctor",
+        "expect",
+        "gen",
+        "gen-plan",
+        "get",
+        "interface-list",
+        "interface-show",
+        "key-canon",
+        "key-relation",
+        "node-info",
+        "node-list",
+        "probe",
+        "rate",
+        "record",
+        "registry-diff",
+        "replay",
+        "schema-check",
+        "schema-dump",
+        "scout",
+        "service-info",
+        "service-list",
+        "storage-list",
+        "topic-info",
+        "topic-list",
+    ];
+
+    fn families(dir: &std::path::Path, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).expect("the impls directory") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                families(&path, out);
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).expect("an impl file");
+            for line in src.lines() {
+                if let Some(rest) = line.trim().strip_prefix("const FAMILY: &'static str = \"")
+                    && let Some(name) = rest.split('"').next()
+                {
+                    out.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    let mut found = Vec::new();
+    families(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/render/impls"),
+        &mut found,
+    );
+    found.sort();
+    // `watch` wraps another family and takes its rendering wholesale, so it
+    // has no drawing of its own to pin; `cmd/watch.rs` owns its one test.
+    assert_eq!(
+        found, COVERED,
+        "a Render impl was added or removed without the checklist in this test \
+         moving with it — and the moment to write its snapshot is now, while \
+         you still remember what it draws"
+    );
+}
