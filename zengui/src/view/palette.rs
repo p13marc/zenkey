@@ -20,7 +20,7 @@
 use iced::widget::{Column, column, container, row, text, text_input};
 use iced::{Element, Length};
 
-use crate::message::{DeploymentMsg, Message, PrefsMsg, RightPane, WorkspaceMsg};
+use crate::message::{ChromeMsg, DeploymentMsg, Message, PrefsMsg, RightPane, WorkspaceMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
@@ -146,19 +146,19 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         },
         Action {
             label: "toggle theme".into(),
-            message: Message::Prefs(PrefsMsg::ThemeToggled),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)),
         },
         Action {
             label: "zoom in".into(),
-            message: Message::Prefs(PrefsMsg::ZoomIn),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)),
         },
         Action {
             label: "zoom out".into(),
-            message: Message::Prefs(PrefsMsg::ZoomOut),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)),
         },
         Action {
             label: "reset zoom".into(),
-            message: Message::Prefs(PrefsMsg::ZoomReset),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)),
         },
         Action {
             label: "clear echo".into(),
@@ -268,8 +268,8 @@ fn list<'a>(
     rows: Vec<String>,
 ) -> Element<'a, Message> {
     let input = text_input("…", &state.query)
-        .on_input(|q| Message::Palette(PaletteMsg::QueryChanged(q)))
-        .on_submit(Message::Palette(PaletteMsg::Activate))
+        .on_input(|q| Message::Chrome(ChromeMsg::Palette(PaletteMsg::QueryChanged(q))))
+        .on_submit(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Activate)))
         .size(font::BODY);
 
     let mut body = Column::new().spacing(1);
@@ -288,7 +288,7 @@ fn list<'a>(
                 ]
                 .spacing(space::SM),
             )
-            .on_press(Message::Palette(PaletteMsg::Pick(i)))
+            .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Pick(i))))
             .style(if selected {
                 iced::widget::button::secondary
             } else {

@@ -129,12 +129,43 @@ pub enum WorkspaceMsg {
     Replay(crate::view::replay::ReplayMsg),
 }
 
+/// The window, and what floats over it (#176).
+///
+/// `Palette` is here rather than under `Pane`: `palette::overlay` returns an
+/// `Option<Element>` `stack!`ed above the whole layout, so it is neither a pane
+/// nor a workspace region. The load-bearing reason is re-entrancy, though —
+/// `update_key` calls `update_palette` three times and dispatches
+/// `shortcuts::resolve`'s output through `update`. Keeping `Key` and `Palette` in
+/// one group keeps the tightest re-entrant loop inside one handler family
+/// instead of straddling a group boundary.
+#[derive(Debug, Clone)]
+pub enum ChromeMsg {
+    /// A key press no widget consumed (issues #73, #75).
+    ///
+    /// Delivered raw rather than pre-resolved because Esc and the arrows mean
+    /// different things depending on what is open, and iced's subscription
+    /// closures must not capture — so the decision belongs in `update`, where
+    /// the state is.
+    Key(iced::keyboard::Key, iced::keyboard::Modifiers),
+    /// Command-palette / overlay interactions (issue #75).
+    Palette(crate::view::palette::PaletteMsg),
+    /// A persisted-preference change (issue #73). Each one saves.
+    Prefs(PrefsMsg),
+    /// The window was resized — remembered for the next launch (issue #73).
+    WindowResized(f32, f32),
+    /// The resize settled: write the geometry once, rather than per pixel
+    /// (issue #189).
+    WindowSettled,
+}
+
 /// Everything that can move the app.
 ///
 /// `Clone` is required by iced's widget callbacks. Every payload here is
 /// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// The window, and what floats over it (#176).
+    Chrome(ChromeMsg),
     /// The shell around the panes: which one shows, the tree's own chrome, and the
     Workspace(WorkspaceMsg),
     /// One key: chosen, observed, fetched, decoded (#176).
@@ -167,23 +198,6 @@ pub enum Message {
     Echo(crate::view::echo::EchoMsg),
     /// Connection pane interactions (issue #67).
     Context(crate::view::contexts::ContextMsg),
-
-    /// A key press no widget consumed (issues #73, #75).
-    ///
-    /// Delivered raw rather than pre-resolved because Esc and the arrows mean
-    /// different things depending on what is open, and iced's subscription
-    /// closures must not capture — so the decision belongs in `update`, where
-    /// the state is.
-    Key(iced::keyboard::Key, iced::keyboard::Modifiers),
-    /// Command-palette / overlay interactions (issue #75).
-    Palette(crate::view::palette::PaletteMsg),
-    /// A persisted-preference change (issue #73). Each one saves.
-    Prefs(PrefsMsg),
-    /// The window was resized — remembered for the next launch (issue #73).
-    WindowResized(f32, f32),
-    /// The resize settled: write the geometry once, rather than per pixel
-    /// (issue #189).
-    WindowSettled,
 }
 
 /// What a user can change about the window itself.

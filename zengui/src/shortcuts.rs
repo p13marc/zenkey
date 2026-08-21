@@ -12,7 +12,7 @@
 
 use iced::keyboard::{Key, Modifiers, key::Named};
 
-use crate::message::{DeploymentMsg, Message, PrefsMsg, RightPane, WorkspaceMsg};
+use crate::message::{ChromeMsg, DeploymentMsg, Message, PrefsMsg, RightPane, WorkspaceMsg};
 use crate::view::palette::{Overlay, PaletteMsg};
 
 /// One binding: how it is typed, what it does, and the message it sends.
@@ -31,22 +31,22 @@ pub fn map() -> Vec<Binding> {
         Binding {
             keys: "Ctrl +",
             what: "zoom in",
-            message: || Message::Prefs(PrefsMsg::ZoomIn),
+            message: || Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)),
         },
         Binding {
             keys: "Ctrl -",
             what: "zoom out",
-            message: || Message::Prefs(PrefsMsg::ZoomOut),
+            message: || Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)),
         },
         Binding {
             keys: "Ctrl 0",
             what: "reset zoom",
-            message: || Message::Prefs(PrefsMsg::ZoomReset),
+            message: || Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)),
         },
         Binding {
             keys: "Ctrl T",
             what: "toggle theme",
-            message: || Message::Prefs(PrefsMsg::ThemeToggled),
+            message: || Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)),
         },
         Binding {
             keys: "Ctrl R",
@@ -56,12 +56,12 @@ pub fn map() -> Vec<Binding> {
         Binding {
             keys: "Ctrl P",
             what: "command palette",
-            message: || Message::Palette(PaletteMsg::Open(Overlay::Commands)),
+            message: || Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Commands))),
         },
         Binding {
             keys: "Ctrl K",
             what: "jump to an observed key",
-            message: || Message::Palette(PaletteMsg::Open(Overlay::Keys)),
+            message: || Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Keys))),
         },
     ];
     // The pane strip, in tab order — so the numbers on screen and the numbers
@@ -124,13 +124,17 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
         return match c.as_str() {
             // `+` normally needs Shift on `=`; accept both spellings rather
             // than making the user find the numpad.
-            "+" | "=" => Some(Message::Prefs(PrefsMsg::ZoomIn)),
-            "-" | "_" => Some(Message::Prefs(PrefsMsg::ZoomOut)),
-            "0" => Some(Message::Prefs(PrefsMsg::ZoomReset)),
-            "t" | "T" => Some(Message::Prefs(PrefsMsg::ThemeToggled)),
+            "+" | "=" => Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn))),
+            "-" | "_" => Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut))),
+            "0" => Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset))),
+            "t" | "T" => Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled))),
             "r" | "R" => Some(Message::Deployment(DeploymentMsg::Reconnect)),
-            "p" | "P" => Some(Message::Palette(PaletteMsg::Open(Overlay::Commands))),
-            "k" | "K" => Some(Message::Palette(PaletteMsg::Open(Overlay::Keys))),
+            "p" | "P" => Some(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+                Overlay::Commands,
+            )))),
+            "k" | "K" => Some(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+                Overlay::Keys,
+            )))),
             _ => None,
         };
     }
@@ -140,7 +144,9 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
     if let Key::Character(c) = key
         && c.as_str() == "?"
     {
-        return Some(Message::Palette(PaletteMsg::Open(Overlay::Help)));
+        return Some(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+            Overlay::Help,
+        ))));
     }
     if mods.alt()
         && let Key::Character(c) = key
@@ -233,13 +239,13 @@ mod tests {
         for c in ["+", "="] {
             assert!(matches!(
                 press(c, ctrl()),
-                Some(Message::Prefs(PrefsMsg::ZoomIn))
+                Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)))
             ));
         }
         for c in ["-", "_"] {
             assert!(matches!(
                 press(c, ctrl()),
-                Some(Message::Prefs(PrefsMsg::ZoomOut))
+                Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)))
             ));
         }
     }
@@ -261,7 +267,9 @@ mod tests {
     fn the_help_key_is_the_one_unmodified_binding() {
         assert!(matches!(
             press("?", Modifiers::empty()),
-            Some(Message::Palette(PaletteMsg::Open(Overlay::Help)))
+            Some(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+                Overlay::Help
+            ))))
         ));
     }
 

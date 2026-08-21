@@ -37,7 +37,7 @@ use crate::view::tokens::space;
 /// false in the other two (#249).
 const MAX_ROWS: usize = 50_000;
 
-use crate::message::{BusMsg, DeploymentMsg, RightPane, SubjectMsg, WorkspaceMsg};
+use crate::message::{BusMsg, ChromeMsg, DeploymentMsg, RightPane, SubjectMsg, WorkspaceMsg};
 
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
@@ -383,37 +383,7 @@ impl Zengui {
             Message::Publish(msg) => self.update_publish(msg),
             Message::Echo(msg) => self.update_echo(msg),
             Message::Context(msg) => self.update_context(msg),
-            Message::WindowResized(w, h) => {
-                // Not on every pixel of a drag — the prefs file would be
-                // rewritten hundreds of times per resize. Recorded here and
-                // marked dirty; a settle timer writes it once the drag stops
-                // (issue #189). "Written on the next real change" meant a
-                // resize-then-quit lost the geometry entirely.
-                self.prefs.window = Some((w, h));
-                self.window_dirty = true;
-                Task::none()
-            }
-            Message::WindowSettled => {
-                if self.window_dirty {
-                    self.remember();
-                }
-                Task::none()
-            }
-            Message::Key(key, modifiers) => self.update_key(&key, modifiers),
-            Message::Palette(msg) => self.update_palette(msg),
-            Message::Prefs(msg) => {
-                use crate::message::PrefsMsg;
-                match msg {
-                    PrefsMsg::ThemeToggled => self.prefs.theme = self.prefs.theme.toggled(),
-                    PrefsMsg::ZoomIn => self.prefs.zoom_in(),
-                    PrefsMsg::ZoomOut => self.prefs.zoom_out(),
-                    PrefsMsg::ZoomReset => self.prefs.zoom_reset(),
-                }
-                // Saved on every change rather than at exit: a GUI is killed,
-                // not quit, more often than anyone admits.
-                self.remember();
-                Task::none()
-            }
+            Message::Chrome(m) => self.update_chrome(m),
         }
     }
 
@@ -740,6 +710,43 @@ impl Zengui {
             WorkspaceMsg::Replay(msg) => self.update_replay(msg),
             WorkspaceMsg::PaneSelected(pane) => {
                 self.right_pane = pane;
+                Task::none()
+            }
+        }
+    }
+
+    /// The window, and what floats over it.
+    fn update_chrome(&mut self, msg: ChromeMsg) -> Task<Message> {
+        match msg {
+            ChromeMsg::WindowResized(w, h) => {
+                // Not on every pixel of a drag — the prefs file would be
+                // rewritten hundreds of times per resize. Recorded here and
+                // marked dirty; a settle timer writes it once the drag stops
+                // (issue #189). "Written on the next real change" meant a
+                // resize-then-quit lost the geometry entirely.
+                self.prefs.window = Some((w, h));
+                self.window_dirty = true;
+                Task::none()
+            }
+            ChromeMsg::WindowSettled => {
+                if self.window_dirty {
+                    self.remember();
+                }
+                Task::none()
+            }
+            ChromeMsg::Key(key, modifiers) => self.update_key(&key, modifiers),
+            ChromeMsg::Palette(msg) => self.update_palette(msg),
+            ChromeMsg::Prefs(msg) => {
+                use crate::message::PrefsMsg;
+                match msg {
+                    PrefsMsg::ThemeToggled => self.prefs.theme = self.prefs.theme.toggled(),
+                    PrefsMsg::ZoomIn => self.prefs.zoom_in(),
+                    PrefsMsg::ZoomOut => self.prefs.zoom_out(),
+                    PrefsMsg::ZoomReset => self.prefs.zoom_reset(),
+                }
+                // Saved on every change rather than at exit: a GUI is killed,
+                // not quit, more often than anyone admits.
+                self.remember();
                 Task::none()
             }
         }
@@ -2875,8 +2882,9 @@ impl Zengui {
         }
         // Window geometry, for the next launch (issue #73).
         subs.push(
-            iced::window::resize_events()
-                .map(|(_, size)| Message::WindowResized(size.width, size.height)),
+            iced::window::resize_events().map(|(_, size)| {
+                Message::Chrome(ChromeMsg::WindowResized(size.width, size.height))
+            }),
         );
         // …and the settle timer that actually writes it, which exists only
         // while a resize is outstanding (issue #189). One file write per drag
@@ -2884,7 +2892,7 @@ impl Zengui {
         if self.window_dirty {
             subs.push(
                 iced::time::every(std::time::Duration::from_millis(700))
-                    .map(|_| Message::WindowSettled),
+                    .map(|_| Message::Chrome(ChromeMsg::WindowSettled)),
             );
         }
         // Keyboard shortcuts (issues #73, #75). `listen` only sees events no
@@ -2896,7 +2904,7 @@ impl Zengui {
         // layering needs to know what is open).
         subs.push(iced::keyboard::listen().filter_map(|event| match event {
             iced::keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                Some(Message::Key(key, modifiers))
+                Some(Message::Chrome(ChromeMsg::Key(key, modifiers)))
             }
             _ => None,
         }));
@@ -3123,19 +3131,27 @@ impl Zengui {
                 text(format!("theme: {}", self.prefs.theme.label()))
                     .size(crate::view::tokens::font::CAPTION)
             )
-            .on_press(Message::Prefs(crate::message::PrefsMsg::ThemeToggled))
+            .on_press(Message::Chrome(ChromeMsg::Prefs(
+                crate::message::PrefsMsg::ThemeToggled
+            )))
             .padding(4),
             iced::widget::button(text("-").size(crate::view::tokens::font::CAPTION))
-                .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomOut))
+                .on_press(Message::Chrome(ChromeMsg::Prefs(
+                    crate::message::PrefsMsg::ZoomOut
+                )))
                 .padding(4),
             iced::widget::button(
                 text(format!("{}%", (self.prefs.zoom * 100.0).round() as i32))
                     .size(crate::view::tokens::font::CAPTION)
             )
-            .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomReset))
+            .on_press(Message::Chrome(ChromeMsg::Prefs(
+                crate::message::PrefsMsg::ZoomReset
+            )))
             .padding(4),
             iced::widget::button(text("+").size(crate::view::tokens::font::CAPTION))
-                .on_press(Message::Prefs(crate::message::PrefsMsg::ZoomIn))
+                .on_press(Message::Chrome(ChromeMsg::Prefs(
+                    crate::message::PrefsMsg::ZoomIn
+                )))
                 .padding(4),
             iced::widget::button(text("reconnect").size(crate::view::tokens::font::CAPTION))
                 .on_press(Message::Deployment(DeploymentMsg::Reconnect))
