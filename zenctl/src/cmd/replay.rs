@@ -115,7 +115,7 @@ pub async fn run(
     };
 
     let failed = report.malformed > 0 || report.refused > 0;
-    output::replay(&report, args.format);
+    output::replay(&report, args.format)?;
     if failed {
         std::process::exit(1);
     }

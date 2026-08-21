@@ -88,6 +88,6 @@ pub async fn run(
         dropped,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
-    output::record(&report, args.format);
+    output::record(&report, args.format)?;
     Ok(())
 }

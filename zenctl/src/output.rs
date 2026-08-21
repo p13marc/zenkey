@@ -235,183 +235,24 @@ fn human_us(us: i64) -> String {
 
 /// `zenctl record`'s closing report — the counts are the honest record;
 /// the progress line was never more than progress (issue #53).
-pub fn record(report: &zenkey_fleet::RecordReport, format: Format) {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => json_line(report),
-        _ => {
-            println!(
-                "recorded {} sample(s) in {:.1}s{}",
-                report.samples,
-                report.duration_ms as f64 / 1000.0,
-                report
-                    .out
-                    .as_deref()
-                    .map(|o| format!(" to {o}"))
-                    .unwrap_or_default(),
-            );
-            if report.dropped > 0 {
-                println!(
-                    "{} sample(s) dropped while behind — recorded as in-file drop \
-                     records where the gaps happened; the capture is a partial \
-                     view and says so (RFC 09 §5.1 O6)",
-                    report.dropped
-                );
-            }
-        }
-    }
+pub fn record(report: &zenkey_fleet::RecordReport, format: Format) -> Result<()> {
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `zenctl replay`'s closing report: what was (or would have been)
 /// published, and what the capture itself had already lost (issue #53).
-pub fn replay(report: &zenkey_fleet::ReplayReport, format: Format) {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => json_line(report),
-        _ => {
-            let verb = if report.dry_run {
-                "would replay"
-            } else {
-                "replayed"
-            };
-            println!(
-                "{verb} {} put(s) and {} tombstone(s) from {} (captured {})",
-                report.published,
-                report.tombstones,
-                report.header.selectors.join(" + "),
-                report.header.captured_at,
-            );
-            if report.capture_dropped > 0 {
-                println!(
-                    "the capture dropped {} sample(s) at record time — this \
-                     replay is a partial view of a partial view (RFC 09 §5.2)",
-                    report.capture_dropped
-                );
-            }
-            if report.malformed > 0 || report.refused > 0 {
-                println!(
-                    "{} malformed row(s), {} refused delete row(s) — counted, \
-                     not silently skipped:",
-                    report.malformed, report.refused
-                );
-                for e in &report.first_errors {
-                    println!("  {e}");
-                }
-            }
-        }
-    }
+pub fn replay(report: &zenkey_fleet::ReplayReport, format: Format) -> Result<()> {
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `zenctl cutover`'s report (issue #59): both halves of RFC 09 §6, and a
 /// three-state verdict — quiet-everywhere is a non-verdict, not a pass.
-pub fn cutover(report: &zenkey_fleet::report::CutoverReport, format: Format) {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => json_line(report),
-        _ => {
-            println!(
-                "old root {}: {} sample(s) on {} key(s) over {}s",
-                report.old_root, report.old_samples, report.old_keys_seen, report.window_s
-            );
-            for k in &report.old_examples {
-                println!("  ✗ {k}");
-            }
-            println!(
-                "new plane {}**: {} sample(s)",
-                report.new_prefix, report.new_samples
-            );
-            if report.leak_samples > 0 {
-                println!(
-                    "leaks (outside {} and not the old root): {} sample(s) on {} key(s)",
-                    report.new_prefix, report.leak_samples, report.leaked_keys_seen
-                );
-                for k in &report.leak_examples {
-                    println!("  ! {k}");
-                }
-            }
-            if report.dropped > 0 {
-                println!(
-                    "{} sample(s) dropped while behind (O6) — the silence claim \
-                     covers only what was seen",
-                    report.dropped
-                );
-            }
-            match report.verdict {
-                zenkey_fleet::report::CutoverVerdict::Pass => println!(
-                    "PASS — the retired family is silent while the new plane \
-                     carries traffic (RFC 09 §6, both halves)"
-                ),
-                zenkey_fleet::report::CutoverVerdict::OldStillSpeaks => println!(
-                    "FAIL — the retired family still speaks; a migration you can \
-                     assert the absence of is a migration you can finish (RFC 09 §6)"
-                ),
-                zenkey_fleet::report::CutoverVerdict::Unproven => println!(
-                    "UNPROVEN — the old root was silent but so was the new plane: \
-                     a dead fleet passes the silence half for free (RFC 05 §3.1); \
-                     bring the fleet up and run it again"
-                ),
-            }
-        }
-    }
+pub fn cutover(report: &zenkey_fleet::report::CutoverReport, format: Format) -> Result<()> {
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }
 
 /// `zenctl expect`'s report (#160): the window's facts, then the verdict
 /// with every failed requirement spelled out.
-pub fn expect(report: &zenkey_fleet::report::ExpectReport, format: Format) {
-    match format.resolved() {
-        Format::Json => json_doc(report),
-        Format::Ndjson => json_line(report),
-        _ => {
-            println!(
-                "{}: {} sample(s) on {} key(s) over {:.1}s{}{}",
-                report.selector,
-                report.samples,
-                report.keys_seen,
-                report.window_s,
-                if report.ended_early {
-                    " (met early)"
-                } else {
-                    ""
-                },
-                match report.rate_hz {
-                    Some(r) => format!(", {r:.2} Hz over the full window"),
-                    None => String::new(),
-                }
-            );
-            if report.dropped > 0 {
-                println!(
-                    "{} sample(s) dropped while behind (O6) — counted into the verdict",
-                    report.dropped
-                );
-            }
-            if !report.violations.is_empty() {
-                println!(
-                    "violations ({} shown of {}):",
-                    report.violations.len(),
-                    report.violations_total
-                );
-                for v in &report.violations {
-                    println!("  ✗ {v}");
-                }
-            }
-            match report.verdict {
-                zenkey_fleet::report::ExpectVerdict::Met => println!("MET"),
-                zenkey_fleet::report::ExpectVerdict::NotMet => {
-                    println!("NOT MET — on a clean observation:");
-                    for u in &report.unmet {
-                        println!("  ✗ {u}");
-                    }
-                }
-                zenkey_fleet::report::ExpectVerdict::Impaired => {
-                    println!(
-                        "IMPAIRED — the observation cannot carry the claim \
-                         (RFC 09 §5.1 O6); this is not a verdict either way:"
-                    );
-                    for u in &report.unmet {
-                        println!("  ! {u}");
-                    }
-                }
-            }
-        }
-    }
+pub fn expect(report: &zenkey_fleet::report::ExpectReport, format: Format) -> Result<()> {
+    crate::render::emit(&mut std::io::stdout(), report, format)
 }

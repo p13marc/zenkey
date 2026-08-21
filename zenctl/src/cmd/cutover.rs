@@ -27,7 +27,7 @@ pub async fn run(old_root: &str, window: u64, args: &BusArgs) -> Result<()> {
     );
 
     let report = zenkey_fleet::run_cutover(&session, &base, old_root, window).await?;
-    output::cutover(&report, args.format);
+    output::cutover(&report, args.format)?;
     // The one part that cannot move: a library returns a verdict, a command
     // exits with it (0 = pass, 1 = the old root still speaks, 2 = unproven —
     // silence is not a pass).

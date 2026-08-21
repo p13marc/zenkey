@@ -65,7 +65,7 @@ pub async fn run(
             std::process::exit(2);
         }
     };
-    output::expect(&report, args.format);
+    output::expect(&report, args.format)?;
     match report.verdict {
         zenkey_fleet::report::ExpectVerdict::Met => Ok(()),
         zenkey_fleet::report::ExpectVerdict::NotMet => std::process::exit(1),
