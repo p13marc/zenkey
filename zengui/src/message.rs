@@ -70,17 +70,20 @@ pub enum DeploymentMsg {
     Reconnect,
 }
 
-/// Everything that can move the app.
+/// One key: chosen, observed, fetched, decoded (#176).
 ///
-/// `Clone` is required by iced's widget callbacks. Every payload here is
-/// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
+/// `SelectKey` heads a causal chain — its own handler ends in the
+/// `Task::perform` that produces `ValueFetched`, which produces `ValueDecoded` —
+/// so filing the head under the workspace and the tail here would force
+/// `update_subject` to re-enter `update_workspace` to do its own job.
+///
+/// `ValueFetched`/`ValueDecoded` are deliberately *not* folded into `DetailMsg`,
+/// which the async-result rule might seem to demand. They are not a pane's
+/// result: the fetch is issued by the **tree's** selection and the handler flips
+/// `right_pane`. A detail pane owning a fetch it never requested would be a
+/// worse lie than the placement it replaced.
 #[derive(Debug, Clone)]
-pub enum Message {
-    /// What the app is pointed at, and the coverage that follows (#176).
-    Deployment(DeploymentMsg),
-    /// The bus, the monitor, a sweep: something the world answered.
-    Bus(BusMsg),
-
+pub enum SubjectMsg {
     /// The user toggled observation of one subtree (the tree's watch button).
     /// Carries the row's display path.
     WatchToggled(String),
@@ -93,6 +96,21 @@ pub enum Message {
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
     /// (key, declared type if any, rendering).
     ValueDecoded(String, Option<String>, Arc<zenkey_fleet::decode::Rendering>),
+    SelectKey(Option<String>),
+}
+
+/// Everything that can move the app.
+///
+/// `Clone` is required by iced's widget callbacks. Every payload here is
+/// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
+#[derive(Debug, Clone)]
+pub enum Message {
+    /// One key: chosen, observed, fetched, decoded (#176).
+    Subject(SubjectMsg),
+    /// What the app is pointed at, and the coverage that follows (#176).
+    Deployment(DeploymentMsg),
+    /// The bus, the monitor, a sweep: something the world answered.
+    Bus(BusMsg),
 
     /// Publish/call pane interactions (issue #60).
     Call(crate::view::call::CallMsg),
@@ -114,7 +132,6 @@ pub enum Message {
     Admin(crate::view::admin::AdminMsg),
 
     ToggleNode(String),
-    SelectKey(Option<String>),
     /// The tree pivot changed (issue #65).
     PivotSelected(crate::view::tree::Pivot),
     /// The find-in-tree query changed (issue #65).

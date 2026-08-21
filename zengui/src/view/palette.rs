@@ -13,7 +13,7 @@
 //!
 //! Jump-to-key is the same idea over data instead of verbs: fuzzy over the
 //! keys *actually observed*, selecting one emits the ordinary
-//! [`Message::SelectKey`]. It offers nothing it has not seen, which keeps the
+//! [`Message::Subject(SubjectMsg::SelectKey)`]. It offers nothing it has not seen, which keeps the
 //! overlay from inventing a keyspace (O4 — a suggestion is not an observation,
 //! and these are only ever the latter).
 

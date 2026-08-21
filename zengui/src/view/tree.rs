@@ -34,7 +34,7 @@ use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
 use crate::keyfacts::Registration;
-use crate::message::Message;
+use crate::message::{Message, SubjectMsg};
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::{RegistrationTone, colors};
 use crate::view::tokens::{font, space};
@@ -1162,7 +1162,7 @@ pub type FactsIndex = zenkey_fleet::FactsCache;
 /// that reason — see [`RowShape`].
 pub fn row_press(r: &RowShape) -> Message {
     match (&r.target, r.is_leaf || !r.has_children) {
-        (Some(t), true) => Message::SelectKey(Some(t.clone())),
+        (Some(t), true) => Message::Subject(SubjectMsg::SelectKey(Some(t.clone()))),
         _ => Message::ToggleNode(r.path.clone()),
     }
 }
@@ -1402,7 +1402,7 @@ fn row_view<'a>(
             button(text(watch_label).size(font::CAPTION))
                 .padding(2)
                 .style(button::text)
-                .on_press(Message::WatchToggled(t.clone()))
+                .on_press(Message::Subject(SubjectMsg::WatchToggled(t.clone())))
                 .into()
         }
         None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
@@ -2108,7 +2108,7 @@ mod tests {
             .expect("prefix row");
         assert!(prefix.is_leaf && prefix.has_children);
         match row_press(prefix) {
-            Message::SelectKey(Some(k)) => {
+            Message::Subject(SubjectMsg::SelectKey(Some(k))) => {
                 assert_eq!(k, "v1/h-3fa9c2d41b7e/state/tc/iface")
             }
             other => panic!("body must select, got {other:?}"),

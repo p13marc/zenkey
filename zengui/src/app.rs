@@ -37,7 +37,7 @@ use crate::view::tokens::space;
 /// false in the other two (#249).
 const MAX_ROWS: usize = 50_000;
 
-use crate::message::{BusMsg, DeploymentMsg, RightPane};
+use crate::message::{BusMsg, DeploymentMsg, RightPane, SubjectMsg};
 
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
@@ -354,85 +354,8 @@ impl Zengui {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Bus(m) => self.update_bus(m),
-            Message::WatchToggled(path) => self.toggle_watch(path),
-            Message::WatchStarted(path, Ok(id)) => {
-                self.my_watch_paths.insert(path.clone());
-                self.seeding.insert(id, Some(path.clone()));
-                self.seeding_paths.insert(path.clone());
-                self.my_watches.insert(path, id);
-                self.reflatten();
-                Task::none()
-            }
-            Message::WatchStarted(path, Err(e)) => {
-                tracing::warn!("watch {path} failed: {e}");
-                Task::none()
-            }
+            Message::Subject(m) => self.update_subject(m),
             Message::Deployment(m) => self.update_deployment(m),
-            Message::WatchReleased(_, Ok(())) => Task::none(),
-            Message::WatchReleased(path, Err(e)) => {
-                tracing::warn!("unwatch {path} failed: {e}");
-                Task::none()
-            }
-            Message::ValueFetched(key, outcome) => {
-                // No base guard needed (#109 audit): the evidence is keyed by
-                // the full wire key, which names its own base (an explorer
-                // runs un-namespaced, RFC 09 §5), and the view passes
-                // `fetched` through only while that exact key is selected.
-                // Residual: a stale landing can still flip the right pane to
-                // Detail — a focus nit, not a misattributed verdict.
-                self.decoded = None;
-                // A fetch normally lands the detail pane in view — except
-                // from the doctor's click-through, where losing the finding
-                // list would cost more than it shows (#71).
-                if self.right_pane != RightPane::Doctor {
-                    self.right_pane = RightPane::Detail;
-                }
-                let decode_task = match (&outcome, &self.session, &self.schema_store, &self.slices)
-                {
-                    (Ok(out), Some(session), Some(store), Some(slices)) => {
-                        if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
-                            let (session, store, slices) =
-                                (session.clone(), Arc::clone(store), Arc::clone(slices));
-                            let base = self.settings.base.clone();
-                            let (fkey, wire_key) = (key.clone(), v.key.clone());
-                            let encoding = v.encoding.clone();
-                            let bytes = v.payload.clone();
-                            // decode_sample is async (may fetch describe on
-                            // first miss) — a Task, never the render path.
-                            Task::perform(
-                                async move {
-                                    let d = zenkey_fleet::decode::decode_sample(
-                                        &store,
-                                        &session,
-                                        &slices,
-                                        &base,
-                                        &wire_key,
-                                        Some(&encoding),
-                                        &bytes.to_bytes(),
-                                    )
-                                    .await;
-                                    // The verdict rides the sample (#159); the
-                                    // detail pane learns to render it in #164.
-                                    (fkey, d.type_name, Arc::new(d.rendering))
-                                },
-                                |(k, t, r)| Message::ValueDecoded(k, t, r),
-                            )
-                        } else {
-                            Task::none()
-                        }
-                    }
-                    _ => Task::none(),
-                };
-                self.fetched = Some((key, outcome));
-                decode_task
-            }
-            Message::ValueDecoded(key, type_name, rendering) => {
-                // Stale guard: only the currently selected key's decode lands.
-                if self.selected.as_deref() == Some(key.as_str()) {
-                    self.decoded = Some((type_name, (*rendering).clone()));
-                }
-                Task::none()
-            }
             Message::PivotSelected(pivot) => {
                 self.pivot = pivot;
                 self.tree_scroll.0 = 0.0;
@@ -457,47 +380,6 @@ impl Zengui {
                 self.expanded.toggle(&path);
                 self.reflatten();
                 Task::none()
-            }
-            Message::SelectKey(key) => {
-                self.selected = key.clone();
-                // The old key's latency summary is not evidence about the
-                // new one — cleared now, refreshed on the next tick (#119).
-                self.selected_latency = None;
-                // History follows the selection and nothing else (issue #63):
-                // the previous recording is dropped here, which is what makes
-                // deselecting free. A symbolic skeleton path names no concrete
-                // key, so nothing can be recorded for it.
-                self.history = key.as_deref().filter(|k| !k.contains('{')).map(|k| {
-                    crate::history::HistoryRecorder::new(k, self.settings.history_entries)
-                });
-                // The plotted series belong to the same selection (issue #64):
-                // they start empty, and stop being fed when it goes away.
-                self.rate_series = crate::series::RateSampler::new();
-                self.series_leaf = None;
-                self.refresh_series();
-                let (Some(session), Some(key)) = (self.session.clone(), key) else {
-                    return Task::none();
-                };
-                // Lazy value-on-demand: one fetch per selection, nothing
-                // ambient (issue #85). Symbolic skeleton paths have no
-                // concrete value to fetch.
-                if key.contains('{') {
-                    return Task::none();
-                }
-                Task::perform(
-                    async move {
-                        let out = zenkey_fleet::fetch_value(
-                            &session,
-                            &key,
-                            zenkey_fleet::FetchSpec::default(),
-                        )
-                        .await
-                        .map(Arc::new)
-                        .map_err(|e| e.to_string());
-                        (key, out)
-                    },
-                    |(key, out)| Message::ValueFetched(key, out),
-                )
             }
             Message::Call(msg) => self.update_call(msg),
             Message::Nodes(msg) => self.update_nodes(msg),
@@ -727,6 +609,131 @@ impl Zengui {
             DeploymentMsg::Reconnect => {
                 self.forget_deployment();
                 self.start_monitor()
+            }
+        }
+    }
+
+    /// One key: chosen, observed, fetched, decoded.
+    fn update_subject(&mut self, msg: SubjectMsg) -> Task<Message> {
+        match msg {
+            SubjectMsg::WatchToggled(path) => self.toggle_watch(path),
+            SubjectMsg::WatchStarted(path, Ok(id)) => {
+                self.my_watch_paths.insert(path.clone());
+                self.seeding.insert(id, Some(path.clone()));
+                self.seeding_paths.insert(path.clone());
+                self.my_watches.insert(path, id);
+                self.reflatten();
+                Task::none()
+            }
+            SubjectMsg::WatchStarted(path, Err(e)) => {
+                tracing::warn!("watch {path} failed: {e}");
+                Task::none()
+            }
+            SubjectMsg::WatchReleased(_, Ok(())) => Task::none(),
+            SubjectMsg::WatchReleased(path, Err(e)) => {
+                tracing::warn!("unwatch {path} failed: {e}");
+                Task::none()
+            }
+            SubjectMsg::ValueFetched(key, outcome) => {
+                // No base guard needed (#109 audit): the evidence is keyed by
+                // the full wire key, which names its own base (an explorer
+                // runs un-namespaced, RFC 09 §5), and the view passes
+                // `fetched` through only while that exact key is selected.
+                // Residual: a stale landing can still flip the right pane to
+                // Detail — a focus nit, not a misattributed verdict.
+                self.decoded = None;
+                // A fetch normally lands the detail pane in view — except
+                // from the doctor's click-through, where losing the finding
+                // list would cost more than it shows (#71).
+                if self.right_pane != RightPane::Doctor {
+                    self.right_pane = RightPane::Detail;
+                }
+                let decode_task = match (&outcome, &self.session, &self.schema_store, &self.slices)
+                {
+                    (Ok(out), Some(session), Some(store), Some(slices)) => {
+                        if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
+                            let (session, store, slices) =
+                                (session.clone(), Arc::clone(store), Arc::clone(slices));
+                            let base = self.settings.base.clone();
+                            let (fkey, wire_key) = (key.clone(), v.key.clone());
+                            let encoding = v.encoding.clone();
+                            let bytes = v.payload.clone();
+                            // decode_sample is async (may fetch describe on
+                            // first miss) — a Task, never the render path.
+                            Task::perform(
+                                async move {
+                                    let d = zenkey_fleet::decode::decode_sample(
+                                        &store,
+                                        &session,
+                                        &slices,
+                                        &base,
+                                        &wire_key,
+                                        Some(&encoding),
+                                        &bytes.to_bytes(),
+                                    )
+                                    .await;
+                                    // The verdict rides the sample (#159); the
+                                    // detail pane learns to render it in #164.
+                                    (fkey, d.type_name, Arc::new(d.rendering))
+                                },
+                                |(k, t, r)| Message::Subject(SubjectMsg::ValueDecoded(k, t, r)),
+                            )
+                        } else {
+                            Task::none()
+                        }
+                    }
+                    _ => Task::none(),
+                };
+                self.fetched = Some((key, outcome));
+                decode_task
+            }
+            SubjectMsg::ValueDecoded(key, type_name, rendering) => {
+                // Stale guard: only the currently selected key's decode lands.
+                if self.selected.as_deref() == Some(key.as_str()) {
+                    self.decoded = Some((type_name, (*rendering).clone()));
+                }
+                Task::none()
+            }
+            SubjectMsg::SelectKey(key) => {
+                self.selected = key.clone();
+                // The old key's latency summary is not evidence about the
+                // new one — cleared now, refreshed on the next tick (#119).
+                self.selected_latency = None;
+                // History follows the selection and nothing else (issue #63):
+                // the previous recording is dropped here, which is what makes
+                // deselecting free. A symbolic skeleton path names no concrete
+                // key, so nothing can be recorded for it.
+                self.history = key.as_deref().filter(|k| !k.contains('{')).map(|k| {
+                    crate::history::HistoryRecorder::new(k, self.settings.history_entries)
+                });
+                // The plotted series belong to the same selection (issue #64):
+                // they start empty, and stop being fed when it goes away.
+                self.rate_series = crate::series::RateSampler::new();
+                self.series_leaf = None;
+                self.refresh_series();
+                let (Some(session), Some(key)) = (self.session.clone(), key) else {
+                    return Task::none();
+                };
+                // Lazy value-on-demand: one fetch per selection, nothing
+                // ambient (issue #85). Symbolic skeleton paths have no
+                // concrete value to fetch.
+                if key.contains('{') {
+                    return Task::none();
+                }
+                Task::perform(
+                    async move {
+                        let out = zenkey_fleet::fetch_value(
+                            &session,
+                            &key,
+                            zenkey_fleet::FetchSpec::default(),
+                        )
+                        .await
+                        .map(Arc::new)
+                        .map_err(|e| e.to_string());
+                        (key, out)
+                    },
+                    |(key, out)| Message::Subject(SubjectMsg::ValueFetched(key, out)),
+                )
             }
         }
     }
@@ -1257,7 +1264,7 @@ impl Zengui {
             if self.palette.is_open() {
                 self.palette.close();
             } else if self.selected.is_some() {
-                return self.update(Message::SelectKey(None));
+                return self.update(Message::Subject(SubjectMsg::SelectKey(None)));
             }
             return Task::none();
         }
@@ -1356,7 +1363,7 @@ impl Zengui {
                 let order = rank(&keys, &self.palette.query, |k| *k);
                 order
                     .get(index)
-                    .map(|i| Message::SelectKey(Some(keys[*i].to_string())))
+                    .map(|i| Message::Subject(SubjectMsg::SelectKey(Some(keys[*i].to_string()))))
             }
             _ => None,
         }
@@ -1640,7 +1647,7 @@ impl Zengui {
                 // Drill-through reuses the selection path rather than being a
                 // second way to open the inspector.
                 self.right_pane = RightPane::Detail;
-                self.update(Message::SelectKey(Some(key)))
+                self.update(Message::Subject(SubjectMsg::SelectKey(Some(key))))
             }
             EchoMsg::Export => {
                 let text = view::echo::export(
@@ -1812,7 +1819,7 @@ impl Zengui {
                             self.expanded.open(prefix.clone());
                         }
                         self.reflatten();
-                        self.update(Message::SelectKey(Some(key)))
+                        self.update(Message::Subject(SubjectMsg::SelectKey(Some(key))))
                     }
                     // An origin/producer subject: land on the nodes pane.
                     Some(crate::doctor::Target::Node(origin)) => {
@@ -2333,7 +2340,7 @@ impl Zengui {
             self.seeding_paths.remove(&path);
             return Task::perform(
                 async move { monitor.unwatch(id).await.map_err(|e| e.to_string()) },
-                move |r| Message::WatchReleased(path.clone(), r),
+                move |r| Message::Subject(SubjectMsg::WatchReleased(path.clone(), r)),
             );
         }
         // Watching seeds (issue #92): current state arrives before live
@@ -2350,7 +2357,7 @@ impl Zengui {
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |r| Message::WatchStarted(path.clone(), r),
+            move |r| Message::Subject(SubjectMsg::WatchStarted(path.clone(), r)),
         )
     }
 
@@ -2400,7 +2407,7 @@ impl Zengui {
                 }
                 Ok(())
             },
-            |r| Message::WatchReleased("(scope)".into(), r),
+            |r| Message::Subject(SubjectMsg::WatchReleased("(scope)".into(), r)),
         )
     }
 
@@ -3199,7 +3206,7 @@ impl Zengui {
 /// event and hands out `Arc::clone` every tick, so pointer identity is an exact
 /// test that costs nothing.
 ///
-/// That second rung also covers a hazard: `Message::WatchReleased` does not
+/// That second rung also covers a hazard: `Message::Subject(SubjectMsg::WatchReleased)` does not
 /// reflatten — it returns `Task::none()` and has always relied on the
 /// unconditional tick rebuild. Releasing a watch fires `WatchChanged`, which
 /// swaps the `Arc`, which lands here as `false`.
@@ -3369,7 +3376,7 @@ mod tests {
 
     /// The hazard the watch rung covers, named so it cannot be optimised away.
     ///
-    /// `Message::WatchReleased` does **not** reflatten — it returns
+    /// `Message::Subject(SubjectMsg::WatchReleased)` does **not** reflatten — it returns
     /// `Task::none()` and has always relied on the unconditional tick rebuild
     /// to repaint node status. Under a conditional trigger that would be a live
     /// bug, except that releasing a watch fires `WatchChanged`, which is the
