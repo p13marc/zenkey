@@ -10,6 +10,47 @@ use anyhow::{Context as _, Result, anyhow, bail};
 
 pub use zenkey_fleet::context_store::{StoredContext, active, load, save};
 
+/// `zenctl context <verb>` — the six verbs, dispatched.
+///
+/// Lived in the match arm until #209, where it was the only arm that built a
+/// `StoredContext` field by field: the flags-to-record mapping is a fact about
+/// contexts, and it belongs beside the code that reads the record back.
+pub fn dispatch(cmd: crate::cli::ContextCmd) -> Result<()> {
+    use crate::cli::ContextCmd;
+    match cmd {
+        ContextCmd::Create {
+            name,
+            base,
+            connect,
+            listen,
+            registry,
+            scouting,
+            timeout,
+            zenoh_config,
+            select,
+        } => create(
+            &name,
+            StoredContext {
+                base,
+                connect,
+                listen,
+                registry,
+                // An unset flag means "leave it alone", here as everywhere
+                // else in this tool — so `false` is `None`, not `Some(false)`.
+                scouting: scouting.then_some(true),
+                timeout,
+                zenoh_config,
+            },
+            select,
+        ),
+        ContextCmd::List => list(),
+        ContextCmd::Edit => edit(),
+        ContextCmd::Show { name } => show(name.as_deref()),
+        ContextCmd::Select { name } => select(&name),
+        ContextCmd::Rm { name } => remove(&name),
+    }
+}
+
 /// `context edit` — open the whole config file in `$VISUAL`/`$EDITOR`, then
 /// validate: a file that no longer parses is reported (with its path) and
 /// kept — the user's edit is never discarded, but a broken config must not

@@ -36,8 +36,8 @@ use clap::Parser as _;
 /// past every way resolution can fail (#209).
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
-    AdminCmd, BaseCmd, BenchCmd, BlobCmd, CacheCmd, Cli, Command, ContextCmd, InterfaceCmd, KeyCmd,
-    NodeCmd, PubSource, RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
+    AdminCmd, BaseCmd, BenchCmd, BlobCmd, CacheCmd, Cli, Command, InterfaceCmd, KeyCmd, NodeCmd,
+    PubSource, RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
 };
 
 pub async fn run() -> Result<()> {
@@ -461,49 +461,8 @@ pub async fn run() -> Result<()> {
             let bus = Bus::resolve(&bus)?;
             cmd::cache::clear(&bus)
         }
-        Command::Context(cmd) => match cmd {
-            ContextCmd::Create {
-                name,
-                base,
-                connect,
-                listen,
-                registry,
-                scouting,
-                timeout,
-                zenoh_config,
-                select,
-            } => context::create(
-                &name,
-                context::StoredContext {
-                    base,
-                    connect,
-                    listen,
-                    registry,
-                    scouting: scouting.then_some(true),
-                    timeout,
-                    zenoh_config,
-                },
-                select,
-            ),
-            ContextCmd::List => context::list(),
-            ContextCmd::Edit => context::edit(),
-            ContextCmd::Show { name } => context::show(name.as_deref()),
-            ContextCmd::Select { name } => context::select(&name),
-            ContextCmd::Rm { name } => context::remove(&name),
-        },
-        Command::Completions { shell, static_only } => {
-            use clap::CommandFactory as _;
-            if static_only {
-                clap_complete::aot::generate(
-                    shell,
-                    &mut Cli::command(),
-                    "zenctl",
-                    &mut std::io::stdout(),
-                );
-                return Ok(());
-            }
-            completion::registration(shell)
-        }
+        Command::Context(cmd) => context::dispatch(cmd),
+        Command::Completions { shell, static_only } => completion::emit(shell, static_only),
         Command::Doctor {
             deep,
             sample,
