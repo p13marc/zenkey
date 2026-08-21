@@ -7,7 +7,7 @@ also the clearest place in the tool where the 0/1/2 contract carries three
 
 ```console
 $ zenctl schema check --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from '{"status":"ok"}'
-{"detail":[],"kind":"json-schema","type":"Health","verdict":"valid"}
+{"kind":"json-schema","report":"schema-check","type":"Health","verdict":"valid"}
 
 ```
 
@@ -17,7 +17,7 @@ constraint named.
 ```console
 $ zenctl schema check --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from '{"status":"melted"}'
 ? 1
-{"detail":["/status: /"melted/" is not one of /"ok/", /"degraded/" or /"down/""],"kind":"json-schema","type":"Health","verdict":"invalid"}
+{"detail":["/status: /"melted/" is not one of /"ok/", /"degraded/" or /"down/""],"kind":"json-schema","report":"schema-check","type":"Health","verdict":"invalid"}
 
 ```
 

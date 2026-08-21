@@ -14,7 +14,7 @@ $ zenctl key includes --format table 'v1/**' 'v1/h-3fa9c2d41b7e/state/sysinfo/he
 yes — v1/** includes every key v1/h-3fa9c2d41b7e/state/sysinfo/health names
 
 $ zenctl key includes --format ndjson 'v1/**' 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
-{"a":"v1/**","answer":true,"b":"v1/h-3fa9c2d41b7e/state/sysinfo/health","op":"includes"}
+{"a":"v1/**","answer":true,"b":"v1/h-3fa9c2d41b7e/state/sysinfo/health","op":"includes","report":"key-relation"}
 
 ```
 
@@ -32,7 +32,7 @@ note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) 
 
 $ zenctl key includes --format ndjson 'v1/**' 'v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect'
 ? 1
-{"a":"v1/**","answer":false,"b":"v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect","note":"note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.","op":"includes"}
+{"a":"v1/**","answer":false,"b":"v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect","note":"note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.","op":"includes","report":"key-relation"}
 
 ```
 

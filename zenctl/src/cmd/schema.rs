@@ -123,23 +123,13 @@ pub async fn check(
         },
     };
 
-    if matches!(
-        args.format.resolved(),
-        crate::output::Format::Json | crate::output::Format::Ndjson
-    ) {
-        let obj = serde_json::json!({
-            "type": type_name,
-            "kind": schema.kind().as_str(),
-            "verdict": verdict,
-            "detail": detail,
-        });
-        println!("{obj}");
-    } else {
-        println!("{type_name} ({}): {verdict}", schema.kind().as_str());
-        for line in &detail {
-            println!("  {line}");
-        }
-    }
+    let report = crate::render::SchemaCheck {
+        type_name: type_name.to_string(),
+        kind: schema.kind().as_str().to_string(),
+        verdict: verdict.to_string(),
+        detail,
+    };
+    crate::render::emit(&mut std::io::stdout(), &report, args.format)?;
     if verdict != "valid" {
         std::process::exit(1);
     }

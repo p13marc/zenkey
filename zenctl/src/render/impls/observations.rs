@@ -124,3 +124,128 @@ impl Render for RouterList {
         ))]
     }
 }
+
+/// The mesh as the admin space reports it (#198).
+///
+/// A wrapper over the engine's `TopologyReport`, because the rendering needs
+/// two things the report does not carry: the origin→session attachments,
+/// which are a separate query, and the derived links. Both are already
+/// engine-computed; this only says how they are laid out.
+pub struct TopologyView<'a> {
+    pub report: &'a zenkey_fleet::TopologyReport,
+    pub attachments: &'a [zenkey_fleet::OriginAttachment],
+}
+
+impl serde::Serialize for TopologyView<'_> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.report.serialize(s)
+    }
+}
+
+impl Render for TopologyView<'_> {
+    const FAMILY: &'static str = "admin-graph";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = match serde_json::to_value(self.report).expect("a report serializes") {
+            serde_json::Value::Object(m) => m,
+            _ => unreachable!("a report is an object"),
+        };
+        // The rows carry these; the envelope carries what was asked and how
+        // much of it answered.
+        e.remove("nodes");
+        e.remove("edges");
+        e
+    }
+
+    /// **Three row kinds on one stream.** They used to be concatenated with no
+    /// discriminator at all, so a consumer told a node from an edge from an
+    /// attachment by probing for fields — the same defect `storage list` had,
+    /// one command over.
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for n in &self.report.nodes {
+            out(Row::of("node", n));
+        }
+        for e in &self.report.edges {
+            out(Row::of("edge", e));
+        }
+        for a in self.attachments {
+            out(Row::of("attachment", a));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        let mut nodes = Grid::unheaded(4);
+        for n in &self.report.nodes {
+            let you = if n.zid == self.report.self_zid {
+                "  ← you"
+            } else {
+                ""
+            };
+            if n.answered {
+                nodes.row([
+                    Cell::text(&n.zid),
+                    Cell::text(&n.whatami),
+                    // Heard of but never queried is not "no version".
+                    Cell::asked(n.version.clone()),
+                    Cell::text(format!("{}{you}", n.locators.join(" "))),
+                ]);
+            } else {
+                nodes.row([
+                    Cell::text(&n.zid),
+                    Cell::text(&n.whatami),
+                    Cell::Unknown,
+                    Cell::text(format!("(heard of, not queryable){you}")),
+                ]);
+            }
+        }
+        t.grid(nodes);
+
+        let mut rest = Grid::unheaded(1);
+        for a in self.attachments {
+            rest.row([Cell::text(match &a.session_zid {
+                Some(z) => format!("  {}  ⚓ session {z}  (token {})", a.origin, a.token_key),
+                // Reported, not attached: sources named no single session, and
+                // saying "attached" would invent one (O4).
+                None => format!(
+                    "  {}  reported by {} — sources named no single session; shown as \
+                     reported, not attached",
+                    a.origin, a.reporter_zid
+                ),
+            })]);
+        }
+        for link in zenkey_fleet::mesh_links(self.report) {
+            rest.row([Cell::text(format!(
+                "  {} —— {}{}{}",
+                link.a,
+                link.b,
+                if link.corroborated {
+                    "  (both report it)"
+                } else {
+                    ""
+                },
+                if link.links.is_empty() {
+                    String::new()
+                } else {
+                    format!("  [{}]", link.links.join(", "))
+                }
+            ))]);
+        }
+        t.grid(rest);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        match self.report.answered {
+            0 => vec![Note::silence(format!(
+                "no admin space answered {} — adminspace.enabled defaults off; this is \
+                 a reading about reachability, never an empty mesh",
+                self.report.asked
+            ))],
+            n => vec![Note::coverage(format!(
+                "{n} root doc(s) answered {}; {} node(s) total ({} only heard of)",
+                self.report.asked,
+                self.report.nodes.len(),
+                self.report.nodes.iter().filter(|x| !x.answered).count()
+            ))],
+        }
+    }
+}

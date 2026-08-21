@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 
-use crate::{BusArgs, output};
+use crate::BusArgs;
 
 pub async fn routers(args: &BusArgs) -> Result<()> {
     let session = args.session().await?;
@@ -37,69 +37,14 @@ pub async fn graph(dot: bool, origins: bool, args: &BusArgs) -> Result<()> {
         honesty(&report);
         return Ok(());
     }
-    match args.format.resolved() {
-        output::Format::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        output::Format::Ndjson => {
-            for n in &report.nodes {
-                println!("{}", serde_json::to_string(n)?);
-            }
-            for e in &report.edges {
-                println!("{}", serde_json::to_string(e)?);
-            }
-            for a in &attachments {
-                println!("{}", serde_json::to_string(a)?);
-            }
-        }
-        _ => {
-            for n in &report.nodes {
-                let you = if n.zid == report.self_zid {
-                    "  ← you"
-                } else {
-                    ""
-                };
-                if n.answered {
-                    println!(
-                        "{}  {}  {}  {}{you}",
-                        n.zid,
-                        n.whatami,
-                        n.version.as_deref().unwrap_or("-"),
-                        n.locators.join(" "),
-                    );
-                } else {
-                    println!("{}  {}  (heard of, not queryable){you}", n.zid, n.whatami);
-                }
-            }
-            for a in &attachments {
-                match &a.session_zid {
-                    Some(z) => println!("  {}  ⚓ session {z}  (token {})", a.origin, a.token_key),
-                    None => println!(
-                        "  {}  reported by {} — sources named no single session; \
-                         shown as reported, not attached (O4)",
-                        a.origin, a.reporter_zid
-                    ),
-                }
-            }
-            for link in zenkey_fleet::mesh_links(&report) {
-                println!(
-                    "  {} —— {}{}{}",
-                    link.a,
-                    link.b,
-                    if link.corroborated {
-                        "  (both report it)"
-                    } else {
-                        ""
-                    },
-                    if link.links.is_empty() {
-                        String::new()
-                    } else {
-                        format!("  [{}]", link.links.join(", "))
-                    }
-                );
-            }
-            honesty(&report);
-        }
-    }
-    Ok(())
+    crate::render::emit(
+        &mut std::io::stdout(),
+        &crate::render::TopologyView {
+            report: &report,
+            attachments: &attachments,
+        },
+        args.format,
+    )
 }
 
 fn honesty(report: &zenkey_fleet::TopologyReport) {
