@@ -31,9 +31,15 @@ pub async fn dump(producer: &str, type_filter: Option<&str>, full: bool, args: &
     // (RFC 09 §5.1 O4; #246).
     let slices = args.slices_optional().await?;
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
-    let report =
-        zenkey_fleet::schema_dump(&store, &session, slices.as_ref(), producer, type_filter, full)
-            .await;
+    let report = zenkey_fleet::schema_dump(
+        &store,
+        &session,
+        slices.as_ref(),
+        producer,
+        type_filter,
+        full,
+    )
+    .await;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 

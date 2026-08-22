@@ -324,9 +324,9 @@ mod tests {
     ) -> sample::Decoded {
         sample::Decoded {
             type_name: None,
-            rendering: zenkey_fleet::decode::Rendering::Structural(zenkey_fleet::decode::structural(
-                b"1",
-            )),
+            rendering: zenkey_fleet::decode::Rendering::Structural(
+                zenkey_fleet::decode::structural(b"1"),
+            ),
             verdict,
             decode_error,
         }
