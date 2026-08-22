@@ -163,11 +163,9 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     if let ReplaySource::Retained { taken } = &state.source
         && let Some(note) = retained_evicted_note(taken)
     {
-        meta = meta.push(
-            kit::caption(note).style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).warning()),
-            }),
-        );
+        meta = meta.push(kit::caption(note).style(|theme: &iced::Theme| text::Style {
+            color: Some(colors(theme).warning()),
+        }));
     }
     if state.capture_dropped > 0 {
         meta = meta.push(

@@ -212,16 +212,12 @@ impl ReplayState {
         watched: Arc<[String]>,
         taken: RetentionStats,
     ) -> ReplayState {
-        let epoch = window
-            .first()
-            .map_or_else(Instant::now, |v| v.received);
+        let epoch = window.first().map_or_else(Instant::now, |v| v.received);
         let rows: Vec<ReplayRow> = window
             .into_iter()
             .map(|view| ReplayRow {
-                t_us: u64::try_from(
-                    view.received.saturating_duration_since(epoch).as_micros(),
-                )
-                .unwrap_or(u64::MAX),
+                t_us: u64::try_from(view.received.saturating_duration_since(epoch).as_micros())
+                    .unwrap_or(u64::MAX),
                 view,
             })
             .collect();

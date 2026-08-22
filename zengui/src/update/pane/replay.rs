@@ -174,7 +174,9 @@ pub(crate) fn update(
             match &work.replay.replay {
                 // Back to live: identical to Exit, and routed through it so
                 // the two ways out cannot drift apart.
-                Some(state) if matches!(state.source, crate::replay::ReplaySource::Retained { .. }) => {
+                Some(state)
+                    if matches!(state.source, crate::replay::ReplaySource::Retained { .. }) =>
+                {
                     update(dep, obs, sub, tree, work, ReplayMsg::Exit)
                 }
                 // A file replay owns the scrubber; the toggle does nothing
@@ -198,11 +200,8 @@ pub(crate) fn update(
             if !matches!(state.source, crate::replay::ReplaySource::Retained { .. }) {
                 return Task::none();
             }
-            let rows: Vec<Arc<zenkey_fleet::SampleView>> = state
-                .rows
-                .iter()
-                .map(|r| Arc::clone(&r.view))
-                .collect();
+            let rows: Vec<Arc<zenkey_fleet::SampleView>> =
+                state.rows.iter().map(|r| Arc::clone(&r.view)).collect();
             let path = format!(
                 "zengui-window-{}.zrec",
                 zenkey_fleet::record::rfc3339_now().replace(':', "-")
@@ -238,11 +237,8 @@ pub(crate) fn enter_retained(
 ) {
     let taken = core.retention();
     let window = core.retained();
-    let mut state = crate::replay::ReplayState::from_retained(
-        window,
-        Arc::clone(&obs.watched),
-        taken,
-    );
+    let mut state =
+        crate::replay::ReplayState::from_retained(window, Arc::clone(&obs.watched), taken);
     // Mode honesty, exactly as opening a file: the panes now show the
     // window — nothing live bleeds through, and the scrollback restarts.
     work.echo.echo.clear();

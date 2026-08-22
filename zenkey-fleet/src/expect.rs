@@ -275,7 +275,8 @@ pub async fn run_expect(
         let met_states = [
             spec.absent
                 .then(|| condition::judge_silence(false, true, dropped == 0)),
-            spec.rate_max.map(|_| condition::judge_excess(false, dropped)),
+            spec.rate_max
+                .map(|_| condition::judge_excess(false, dropped)),
         ];
         if met_states
             .into_iter()

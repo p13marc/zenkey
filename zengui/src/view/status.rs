@@ -398,7 +398,10 @@ mod tests {
 
         r.evicted = 12;
         let costly = retention_text(&r);
-        assert!(costly.contains("+12 evicted by the byte budget"), "{costly}");
+        assert!(
+            costly.contains("+12 evicted by the byte budget"),
+            "{costly}"
+        );
         assert!(
             !costly.contains("retired"),
             "the stats table's word stays the stats table's: {costly}"

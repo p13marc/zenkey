@@ -775,7 +775,9 @@ mod tests {
     #[test]
     fn the_loopback_filter_is_judged_from_the_docs_own_version() {
         assert!(admin_doc_omits_loopback("1.10.0"));
-        assert!(admin_doc_omits_loopback("v1.10.0-12-gabcdef built with rustc"));
+        assert!(admin_doc_omits_loopback(
+            "v1.10.0-12-gabcdef built with rustc"
+        ));
         assert!(admin_doc_omits_loopback("1.11.2"));
         assert!(admin_doc_omits_loopback("2.0.0"));
         assert!(!admin_doc_omits_loopback("1.9.0"));
@@ -1082,10 +1084,7 @@ pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyRe
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string(),
-                region: s
-                    .get("region")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
+                region: s.get("region").and_then(|v| v.as_str()).map(str::to_string),
                 links: s
                     .get("links")
                     .and_then(|v| v.as_array())

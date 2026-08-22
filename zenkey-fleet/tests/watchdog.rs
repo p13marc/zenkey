@@ -105,10 +105,7 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
 
     // The unchanged rule spoke exactly once, at baseline — six ticks, one
     // line. This is the acceptance clause: no line per unchanged tick.
-    let dropped: Vec<&Transition> = transitions
-        .iter()
-        .filter(|t| t.rule == "dropped")
-        .collect();
+    let dropped: Vec<&Transition> = transitions.iter().filter(|t| t.rule == "dropped").collect();
     assert_eq!(dropped.len(), 1, "{transitions:#?}");
     assert_eq!(dropped[0].from, None);
     assert_eq!(dropped[0].to, CondState::Ok);

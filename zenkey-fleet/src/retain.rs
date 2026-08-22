@@ -92,7 +92,10 @@ pub fn sample_cost(view: &SampleView) -> usize {
     view.key.len()
         + view.payload.len()
         + view.encoding.len()
-        + view.attachment.as_ref().map_or(0, zenoh::bytes::ZBytes::len)
+        + view
+            .attachment
+            .as_ref()
+            .map_or(0, zenoh::bytes::ZBytes::len)
         + OVERHEAD
 }
 
@@ -243,7 +246,10 @@ mod tests {
             max_age: Duration::from_secs(10),
         });
         r.push(view("old", 4, t0), t0);
-        r.push(view("new", 4, t0 + Duration::from_secs(20)), t0 + Duration::from_secs(20));
+        r.push(
+            view("new", 4, t0 + Duration::from_secs(20)),
+            t0 + Duration::from_secs(20),
+        );
         let s = r.stats(t0 + Duration::from_secs(20));
         assert_eq!(s.retained, 1);
         assert_eq!(s.expired, 1);
@@ -264,7 +270,10 @@ mod tests {
         r.push(view("big", 1024, now), now);
         let s = r.stats(now);
         assert_eq!(s.retained, 1);
-        assert!(s.retained_bytes > s.budget.max_bytes, "over budget, and said so");
+        assert!(
+            s.retained_bytes > s.budget.max_bytes,
+            "over budget, and said so"
+        );
     }
 
     /// The span states what the window actually holds — which is shorter
@@ -274,7 +283,13 @@ mod tests {
         let t0 = Instant::now();
         let mut r = Retention::new(RetentionBudget::default());
         r.push(view("a", 4, t0), t0);
-        r.push(view("b", 4, t0 + Duration::from_secs(30)), t0 + Duration::from_secs(30));
-        assert_eq!(r.stats(t0 + Duration::from_secs(30)).span, Duration::from_secs(30));
+        r.push(
+            view("b", 4, t0 + Duration::from_secs(30)),
+            t0 + Duration::from_secs(30),
+        );
+        assert_eq!(
+            r.stats(t0 + Duration::from_secs(30)).span,
+            Duration::from_secs(30)
+        );
     }
 }

@@ -220,11 +220,15 @@ async fn injected_faults_deviate_by_exactly_one_dimension_and_stay_marked() {
 
     // Bucket observed samples by the fault kind their marker names.
     use std::collections::HashMap;
-    let mut by_fault: HashMap<String, Vec<std::sync::Arc<zenkey_fleet::SampleView>>> = HashMap::new();
+    let mut by_fault: HashMap<String, Vec<std::sync::Arc<zenkey_fleet::SampleView>>> =
+        HashMap::new();
     let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while let Ok(Some(item)) = tokio::time::timeout_at(drain_deadline, events.recv()).await {
         if let zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) = item {
-            let att = s.attachment.as_ref().expect("every faulted sample is marked");
+            let att = s
+                .attachment
+                .as_ref()
+                .expect("every faulted sample is marked");
             let marker: serde_json::Value =
                 serde_json::from_slice(&att.to_bytes()).expect("marker is JSON");
             assert_eq!(marker["synthetic"], true);

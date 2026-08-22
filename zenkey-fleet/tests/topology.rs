@@ -75,10 +75,7 @@ async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
     // endpoint of the reported link is the listen address — labelled link
     // evidence, kept out of `locators`, never an invented listen claim.
     assert!(
-        server
-            .locators_via_links
-            .iter()
-            .any(|l| l.contains("7522")),
+        server.locators_via_links.iter().any(|l| l.contains("7522")),
         "the listen endpoint rides out as link evidence: {:?}",
         server.locators_via_links
     );
