@@ -12,7 +12,8 @@
 
 use iced::keyboard::{Key, Modifiers, key::Named};
 
-use crate::message::{ChromeMsg, DeploymentMsg, Message, PrefsMsg, RightPane, WorkspaceMsg};
+use crate::message::{ChromeMsg, DeploymentMsg, Message, PrefsMsg, WorkspaceMsg};
+use crate::prefs::LayoutPreset;
 use crate::view::palette::{Overlay, PaletteMsg};
 
 /// One binding: how it is typed, what it does, and the message it sends.
@@ -71,42 +72,34 @@ pub fn map() -> Vec<Binding> {
             message: || Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Connect))),
         },
     ];
-    // The pane strip, in tab order — so the numbers on screen and the numbers
-    // under the fingers are the same list.
+    // The saved layouts, in preset order — so the numbers on screen and the
+    // numbers under the fingers are the same list.
     //
-    // Five panes, five digits: #182 folded four tabs into the Inspector,
-    // #183 moved Echo and Doctor into the Activity dock, and #185 made
-    // Connect an overlay with a chord of its own. The *remap* this list is
-    // heading for — Alt+1/2/3 for saved layouts, Alt+L/I/A to focus a dock —
-    // is #190's.
-    for (i, pane) in RightPane::ALL.into_iter().enumerate().take(PANE_KEYS.len()) {
+    // These digits pointed at panes until #180. Five panes had five digits;
+    // the panes are docks of a grid now, and "which pane shows" stopped
+    // being a thing a digit can mean. What a digit means instead is a whole
+    // layout: Explore, Watch, Diagnose. The rest of the remap — Alt+L/I/A to
+    // focus a dock — is #190's.
+    for (i, preset) in LayoutPreset::ALL.into_iter().enumerate() {
         out.push(Binding {
-            keys: PANE_KEYS[i],
-            what: PANE_WHAT[i],
-            message: PANE_MESSAGES[i],
+            keys: LAYOUT_KEYS[i],
+            what: LAYOUT_WHAT[i],
+            message: LAYOUT_MESSAGES[i],
         });
-        let _ = pane;
+        let _ = preset;
     }
     out
 }
 
-/// Alt+1..Alt+9 then Alt+0 for the tenth, one per pane. Parallel arrays rather
-/// than a formatted string because `Binding` holds `&'static str` — and the
-/// length assertion below is what keeps them in step with `RightPane::ALL`.
-const PANE_KEYS: [&str; 5] = ["Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5"];
-const PANE_WHAT: [&str; 5] = [
-    "call pane",
-    "publish pane",
-    "inspector",
-    "nodes pane",
-    "admin pane",
-];
-const PANE_MESSAGES: [fn() -> Message; 5] = [
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Call)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Publish)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Inspector)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Nodes)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Admin)),
+/// Alt+1/2/3, one per saved layout. Parallel arrays rather than a formatted
+/// string because `Binding` holds `&'static str` — and the length assertion
+/// below is what keeps them in step with `LayoutPreset::ALL`.
+const LAYOUT_KEYS: [&str; 3] = ["Alt 1", "Alt 2", "Alt 3"];
+const LAYOUT_WHAT: [&str; 3] = ["layout: explore", "layout: watch", "layout: diagnose"];
+const LAYOUT_MESSAGES: [fn() -> Message; 3] = [
+    || Message::Workspace(WorkspaceMsg::LayoutPreset(LayoutPreset::Explore)),
+    || Message::Workspace(WorkspaceMsg::LayoutPreset(LayoutPreset::Watch)),
+    || Message::Workspace(WorkspaceMsg::LayoutPreset(LayoutPreset::Diagnose)),
 ];
 
 /// A key press → the message it should send, if any.
@@ -155,16 +148,14 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
         && let Key::Character(c) = key
         && let Ok(digit) = c.parse::<usize>()
     {
-        // Alt+1..9 are panes 1..9; Alt+0 is the tenth, following the tab-bar
-        // convention every browser uses. Beyond ten panes the strip needs a
-        // different idea, and this stops rather than wrapping to something
-        // arbitrary. Since #185 there are five panes, so Alt+6 and up do
-        // nothing — the bound is `RightPane::ALL`, which is the point: the
-        // list shrank and no digit was left pointing at a pane that is gone.
-        let n = if digit == 0 { 10 } else { digit };
-        if (1..=RightPane::ALL.len()).contains(&n) {
-            return Some(Message::Workspace(WorkspaceMsg::PaneSelected(
-                RightPane::ALL[n - 1],
+        // Alt+1/2/3 are the saved layouts (#180). The digits pointed at
+        // panes until the panes became docks of one grid; the bound is
+        // `LayoutPreset::ALL`, so Alt+4 and up do nothing rather than
+        // quietly becoming something else — the same discipline the pane
+        // digits kept when their list shrank.
+        if (1..=LayoutPreset::ALL.len()).contains(&digit) {
+            return Some(Message::Workspace(WorkspaceMsg::LayoutPreset(
+                LayoutPreset::ALL[digit - 1],
             )));
         }
     }
@@ -225,22 +216,25 @@ mod tests {
         (mods, ch.to_lowercase())
     }
 
-    /// The pane list is generated from `RightPane::ALL`, so a new pane must
-    /// come with a key rather than silently falling off the end.
+    /// The layout list is generated from `LayoutPreset::ALL`, so a new preset
+    /// must come with a key rather than silently falling off the end.
     #[test]
-    fn the_pane_bindings_cover_every_pane() {
-        // Five panes, five digits: #182 folded four tabs into the Inspector,
-        // #183 docked two streams, #185 made Connect an overlay. There is no
-        // overflow now — which is a temporary state of affairs, and stated as
-        // one: #190 remaps these digits to saved layouts once there are docks
-        // rather than tabs.
-        assert_eq!(PANE_KEYS.len(), RightPane::ALL.len());
-        assert_eq!(PANE_WHAT.len(), PANE_KEYS.len());
-        assert_eq!(PANE_MESSAGES.len(), PANE_KEYS.len());
-        for (i, pane) in RightPane::ALL.into_iter().take(PANE_KEYS.len()).enumerate() {
+    fn the_layout_bindings_cover_every_preset() {
+        assert_eq!(LAYOUT_KEYS.len(), LayoutPreset::ALL.len());
+        assert_eq!(LAYOUT_WHAT.len(), LAYOUT_KEYS.len());
+        assert_eq!(LAYOUT_MESSAGES.len(), LAYOUT_KEYS.len());
+        for (i, preset) in LayoutPreset::ALL.into_iter().enumerate() {
             assert_eq!(
-                format!("{:?}", PANE_MESSAGES[i]()),
-                format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))
+                format!("{:?}", LAYOUT_MESSAGES[i]()),
+                format!(
+                    "{:?}",
+                    Message::Workspace(WorkspaceMsg::LayoutPreset(preset))
+                )
+            );
+            assert!(
+                LAYOUT_WHAT[i].ends_with(preset.label()),
+                "{} must name its preset",
+                LAYOUT_WHAT[i]
             );
         }
     }
@@ -301,36 +295,45 @@ mod tests {
         ));
     }
 
-    /// Alt+N reaches every pane and stops there: the range is `RightPane::ALL`,
-    /// so removing four panes moves the boundary rather than leaving four
-    /// digits pointing at nothing.
+    /// Alt+N reaches every saved layout and stops there: the range is
+    /// `LayoutPreset::ALL`, so the digits that pointed at panes until #180
+    /// were *retargeted*, not left dangling — and past the presets, nothing.
     #[test]
-    fn alt_digits_cover_the_panes_and_stop() {
+    fn alt_digits_cover_the_layouts_and_stop() {
+        assert!(matches!(
+            press("1", Modifiers::ALT),
+            Some(Message::Workspace(WorkspaceMsg::LayoutPreset(
+                LayoutPreset::Explore
+            )))
+        ));
+        assert!(matches!(
+            press("2", Modifiers::ALT),
+            Some(Message::Workspace(WorkspaceMsg::LayoutPreset(
+                LayoutPreset::Watch
+            )))
+        ));
         assert!(matches!(
             press("3", Modifiers::ALT),
-            Some(Message::Workspace(WorkspaceMsg::PaneSelected(
-                RightPane::Inspector
+            Some(Message::Workspace(WorkspaceMsg::LayoutPreset(
+                LayoutPreset::Diagnose
             )))
         ));
-        assert!(matches!(
-            press("5", Modifiers::ALT),
-            Some(Message::Workspace(WorkspaceMsg::PaneSelected(
-                RightPane::Admin
-            )))
-        ));
-        // Past the end is nothing, not a wrap. Alt+9 used to be the media
-        // pane, Alt+7 the history pane and Alt+6 the connect pane; all are
-        // sections or overlays of other surfaces now, and the digits must
-        // not quietly become something else on the way.
-        assert!(press("6", Modifiers::ALT).is_none());
-        assert!(press("7", Modifiers::ALT).is_none());
+        // Past the end is nothing, not a wrap. Alt+4 was the nodes pane and
+        // Alt+5 the admin pane until #180; both are workbench tools now,
+        // reached through the workbench's own strip and the palette, and the
+        // digits must not quietly become something else on the way.
+        assert!(press("4", Modifiers::ALT).is_none());
+        assert!(press("5", Modifiers::ALT).is_none());
         assert!(press("9", Modifiers::ALT).is_none());
         assert!(press("0", Modifiers::ALT).is_none());
-        for pane in RightPane::ALL {
+        for preset in LayoutPreset::ALL {
             assert!(
-                PANE_MESSAGES.iter().any(|m| format!("{:?}", m())
-                    == format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))),
-                "{pane:?} has no binding"
+                LAYOUT_MESSAGES.iter().any(|m| format!("{:?}", m())
+                    == format!(
+                        "{:?}",
+                        Message::Workspace(WorkspaceMsg::LayoutPreset(preset))
+                    )),
+                "{preset:?} has no binding"
             );
         }
     }

@@ -202,6 +202,26 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
             message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::FollowToggled)),
         },
     ]);
+
+    // The workspace grid (#180), past the first screenful on purpose — the
+    // bound keeps the fresh overlay a sampler, and typing (or Alt+1/2/3, or
+    // the dock strip) is the fast route to these anyway.
+    //
+    // The saved layouts: the same messages Alt+1/2/3 send.
+    for preset in crate::prefs::LayoutPreset::ALL {
+        out.push(Action {
+            label: format!("layout: {}", preset.label()),
+            message: Message::Workspace(WorkspaceMsg::LayoutPreset(preset)),
+        });
+    }
+    // The dock toggles: the same message the dock strip and each title bar's
+    // `×` send — and the keyboard route back to a closed dock.
+    for role in crate::prefs::DockRole::ALL {
+        out.push(Action {
+            label: format!("toggle {} dock", role.label()),
+            message: Message::Workspace(WorkspaceMsg::DockToggled(role)),
+        });
+    }
     out
 }
 
@@ -500,6 +520,24 @@ mod tests {
             find("reconnect"),
             format!("{:?}", Message::Deployment(DeploymentMsg::Reconnect))
         );
+        // Layouts: the same messages Alt+1/2/3 send (#180).
+        for preset in crate::prefs::LayoutPreset::ALL {
+            assert_eq!(
+                find(&format!("layout: {}", preset.label())),
+                format!(
+                    "{:?}",
+                    Message::Workspace(WorkspaceMsg::LayoutPreset(preset))
+                )
+            );
+        }
+        // Docks: the same message the dock strip and the title-bar × send
+        // (#180) — and the keyboard route back to a closed dock.
+        for role in crate::prefs::DockRole::ALL {
+            assert_eq!(
+                find(&format!("toggle {} dock", role.label())),
+                format!("{:?}", Message::Workspace(WorkspaceMsg::DockToggled(role)))
+            );
+        }
     }
 
     /// The pane list is generated, so a pane added anywhere shows up here.
