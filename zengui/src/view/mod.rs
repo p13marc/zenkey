@@ -18,6 +18,14 @@
 //! literal missing a field is a compile error where a builder missing a
 //! `.with_…` is a silent default.
 //!
+//! **A field's *type* carries the same weight as its name.** `DetailData`'s
+//! fetch outcome was an `Option`, which made "superseded" indistinguishable
+//! from "not asked" and let the pane deny a question it had answered
+//! ([`detail::Fetched`], #181). The rule the crate keeps rediscovering is the
+//! same one in three places now: if a surface has three states, do not hand it
+//! a type with two (#176's `Pane(PaneId, PaneMsg)`, #250's two adjacent watch
+//! sets, this).
+//!
 //! The contract survived the #175 split intact, and that is worth recording:
 //! `panes::split` and `toolbar::strip` moved *out* of `app.rs` and take five
 //! and four sub-states respectively — never `Zengui`. Nothing under `view/`

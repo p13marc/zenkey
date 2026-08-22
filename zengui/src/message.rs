@@ -132,6 +132,16 @@ pub enum DeploymentMsg {
 /// It also proposed `Key(PathId)`, and `PathId` is #251's path arena, which
 /// #177 deliberately deferred. A `String` until then.
 ///
+/// ## What one subject does not yet do
+///
+/// Pinning — a pane detaching to hold a *second* subject — is #257. It is not
+/// a second `Option<String>`: six fields of the subject sub-state are derived
+/// from the subject and rebuilt when it moves, so a real pin needs a second
+/// recorder fed by the same tick, a second fetch and a second decode. Freezing only the identity
+/// would leave a pane titled with one key while its chart described another,
+/// which is the failure [`Fetched::Superseded`](crate::view::detail::Fetched)
+/// exists to prevent, one panel over.
+///
 /// ## Why `Prefix` is separate from `Key`, which the issue did not have
 ///
 /// A prefix is not a key. `Key` heads a causal chain that ends in a
