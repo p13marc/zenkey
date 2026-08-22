@@ -556,6 +556,19 @@ pub(crate) enum Command {
         /// Default: always exit 0 — findings are output, not verdicts.
         #[arg(long, value_enum, value_name = "SEVERITY")]
         fail_on: Option<FailOn>,
+        /// Re-run the checks on an interval and report CHECK-ID TRANSITIONS
+        /// as ndjson (#227): the first run states the baseline (one line per
+        /// stable check id, from null), every later run prints only genuine
+        /// changes — and a run that fails flips every check to
+        /// `unobservable`, never silently to "ok".
+        #[arg(long, conflicts_with = "fail_on")]
+        watch: bool,
+        /// With --watch: seconds between runs.
+        #[arg(long, value_name = "SECS", default_value_t = 10.0, requires = "watch")]
+        every: f64,
+        /// With --watch: stop after N runs (default: run until interrupted).
+        #[arg(long, value_name = "N", requires = "watch")]
+        runs: Option<u64>,
         #[command(flatten)]
         bus: BusArgs,
     },

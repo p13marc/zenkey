@@ -58,8 +58,8 @@ pub use body::{
 };
 #[cfg(feature = "decode")]
 pub use condition::{
-    CondState, Condition, Eval, RuleState, Transition, WatchdogSpec, WatchdogSummary, Window,
-    run_watchdog,
+    CondState, Condition, DoctorWatch, Eval, RuleState, Transition, WatchdogSpec, WatchdogSummary,
+    Window, run_watchdog,
 };
 #[cfg(feature = "decode")]
 pub use decode::{

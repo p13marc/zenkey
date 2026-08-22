@@ -505,6 +505,52 @@ impl RuleState {
     }
 }
 
+/// Run-over-run delta over a doctor report: one [`RuleState`] per stable
+/// check id ([`crate::CHECK_IDS`]), fed by `doctor --watch`. The first run
+/// states the baseline (one transition per check id); every later run yields
+/// only genuine changes. A failed run flips every check to `unobservable` —
+/// a doctor that could not run has not said the fleet is healthy.
+#[derive(Debug, Clone)]
+pub struct DoctorWatch {
+    checks: Vec<(Condition, RuleState)>,
+}
+
+impl DoctorWatch {
+    pub fn new() -> DoctorWatch {
+        DoctorWatch {
+            checks: crate::doctor::CHECK_IDS
+                .iter()
+                .map(|id| {
+                    let condition = Condition::DoctorCheck {
+                        check: id.to_string(),
+                    };
+                    let state = RuleState::new(condition.to_string());
+                    (condition, state)
+                })
+                .collect(),
+        }
+    }
+
+    /// Feed one doctor run (or its failure) and collect the transitions.
+    pub fn observe(&mut self, outcome: Result<&DoctorReport, &str>, at: &str) -> Vec<Transition> {
+        self.checks
+            .iter_mut()
+            .filter_map(|(condition, state)| {
+                let eval = condition
+                    .judge_doctor(outcome)
+                    .expect("doctor conditions judge doctor runs");
+                state.observe(eval, at)
+            })
+            .collect()
+    }
+}
+
+impl Default for DoctorWatch {
+    fn default() -> Self {
+        DoctorWatch::new()
+    }
+}
+
 // ─── the watchdog runner ────────────────────────────────────────────────────
 
 /// What a watchdog run watches, and for how long.
@@ -778,6 +824,31 @@ pub async fn run_watchdog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::{DoctorFinding, DoctorSeverity};
+
+    fn report_with(checks: &[&str]) -> DoctorReport {
+        DoctorReport {
+            findings: checks
+                .iter()
+                .map(|c| DoctorFinding {
+                    severity: DoctorSeverity::Error,
+                    check: c.to_string(),
+                    subject: "s".into(),
+                    evidence: "e".into(),
+                    citation: None,
+                })
+                .collect(),
+            synced: vec![],
+            introspect_answered: 0,
+            live_producers: 0,
+            describe_served: 0,
+            describe_missing: 0,
+            routers: 0,
+            router_version: None,
+            deep: false,
+            observation: None,
+        }
+    }
 
     /// Every variant's canonical spelling parses back to itself, and a rule
     /// outside the vocabulary is an error that names the vocabulary — closed
@@ -956,5 +1027,39 @@ mod tests {
         let json = serde_json::to_value(&t).unwrap();
         assert_eq!(json["from"], "ok");
         assert_eq!(json["to"], "firing");
+    }
+
+    /// `doctor --watch`'s delta: the first run is a full baseline (every
+    /// stable check id, once), an identical second run says nothing, a new
+    /// finding transitions exactly its check — and a failed run flips every
+    /// check to unobservable, never ok.
+    #[test]
+    fn doctor_watch_reports_deltas_not_states() {
+        let mut watch = DoctorWatch::new();
+        let clean = report_with(&[]);
+        let baseline = watch.observe(Ok(&clean), "t0");
+        assert_eq!(baseline.len(), crate::doctor::CHECK_IDS.len());
+        assert!(baseline.iter().all(|t| t.from.is_none()));
+        assert!(baseline.iter().all(|t| t.to == CondState::Ok));
+
+        assert!(
+            watch.observe(Ok(&clean), "t1").is_empty(),
+            "an unchanged run emits nothing"
+        );
+
+        let drifted = report_with(&["schema-drift", "schema-drift"]);
+        let changes = watch.observe(Ok(&drifted), "t2");
+        assert_eq!(changes.len(), 1, "only the changed check transitions");
+        assert_eq!(changes[0].rule, "doctor schema-drift");
+        assert_eq!(changes[0].to, CondState::Firing);
+        assert!(changes[0].evidence.contains("2 finding(s)"));
+
+        let failed = watch.observe(Err("session lost"), "t3");
+        assert_eq!(
+            failed.len(),
+            crate::doctor::CHECK_IDS.len(),
+            "a failed run is unobservable for every check — never ok"
+        );
+        assert!(failed.iter().all(|t| t.to == CondState::Unobservable));
     }
 }
