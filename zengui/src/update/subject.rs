@@ -68,7 +68,7 @@ pub(crate) fn update(
                 // doctor's click-through, where losing the finding list would
                 // cost more than it shows (#71).
                 if work.right_pane != RightPane::Doctor {
-                    work.right_pane = RightPane::Detail;
+                    work.right_pane = RightPane::Inspector;
                 }
             }
             // No decode for a superseded answer: it is work for a rendering

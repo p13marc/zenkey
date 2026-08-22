@@ -56,7 +56,9 @@ pub struct HistoryData<'a> {
     pub watched: bool,
 }
 
-pub fn pane<'a>(data: HistoryData<'a>) -> Element<'a, Message> {
+/// The Inspector's history sections (#182). See [`super::detail::section`]
+/// for why this is a `Column`.
+pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     let Some(key) = data.key else {
         return column![
             kit::section_header("History", None),
@@ -67,8 +69,7 @@ pub fn pane<'a>(data: HistoryData<'a>) -> Element<'a, Message> {
                  earlier samples are never backfilled.",
             ),
         ]
-        .spacing(space::SM)
-        .into();
+        .spacing(space::SM);
     };
 
     let mut col = Column::new().spacing(space::SM);
@@ -95,16 +96,14 @@ pub fn pane<'a>(data: HistoryData<'a>) -> Element<'a, Message> {
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(key.to_string())))
                 .padding(4),
         );
-        return col.into();
+        return col;
     }
 
     let Some(rec) = data.recorder else {
-        return col
-            .push(kit::empty_state(
-                "No recording for this key",
-                "The recorder follows the selection; this one has not started yet.",
-            ))
-            .into();
+        return col.push(kit::empty_state(
+            "No recording for this key",
+            "The recorder follows the selection; this one has not started yet.",
+        ));
     };
 
     col = col.push(kit::muted(format!(
@@ -114,13 +113,11 @@ pub fn pane<'a>(data: HistoryData<'a>) -> Element<'a, Message> {
     )));
 
     if rec.ring.is_empty() {
-        return col
-            .push(kit::empty_state(
-                "No samples yet",
-                "The watch is active and nothing has arrived on this key since it \
-                 was selected. That is not a statement about the bus (RFC 05 §3.1).",
-            ))
-            .into();
+        return col.push(kit::empty_state(
+            "No samples yet",
+            "The watch is active and nothing has arrived on this key since it \
+             was selected. That is not a statement about the bus (RFC 05 §3.1).",
+        ));
     }
 
     col = col.push(kit::muted(
@@ -141,7 +138,7 @@ pub fn pane<'a>(data: HistoryData<'a>) -> Element<'a, Message> {
     );
 
     col = col.push(diff_section(rec, focus));
-    col.into()
+    col
 }
 
 /// One timeline row.

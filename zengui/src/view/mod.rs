@@ -46,6 +46,7 @@ pub mod detail;
 pub mod doctor;
 pub mod echo;
 pub mod history;
+pub mod inspector;
 pub mod kit;
 pub mod media;
 pub mod nodes;

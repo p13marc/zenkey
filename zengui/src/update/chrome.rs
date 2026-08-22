@@ -211,7 +211,7 @@ fn run_palette_row(
     // Jumping to a key also shows it: selecting without switching panes
     // would look like nothing happened.
     if matches!(chrome.palette.overlay, view::palette::Overlay::Keys) {
-        work.right_pane = RightPane::Detail;
+        work.right_pane = RightPane::Inspector;
     }
     chrome.palette.close();
     Task::done(message)

@@ -325,13 +325,14 @@ pub enum PaneMsg {
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).
     Doctor(crate::view::doctor::DoctorMsg),
-    /// History pane interactions (issue #63).
+    /// Inspector history-section interactions (issue #63).
     History(crate::view::history::HistoryMsg),
-    /// Detail pane interactions (issue #64): which numeric leaf is plotted.
+    /// Inspector detail-section interactions (issue #64): which numeric leaf
+    /// is plotted.
     Detail(crate::view::detail::DetailMsg),
-    /// Blob browser interactions (issue #68).
+    /// Inspector `@blob`-section interactions (issue #68).
     Blob(crate::view::blob::BlobMsg),
-    /// Media viewer interactions (issue #69).
+    /// Inspector `@media`-section interactions (issue #69).
     Media(crate::view::media::MediaMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
@@ -348,17 +349,22 @@ impl PaneMsg {
     /// `every_pane_has_a_message_and_every_message_a_pane` is what keeps them
     /// so — the same shape as the palette's and the shortcut map's own coverage
     /// tests.
+    ///
+    /// It is no longer a bijection, and #182 is why: `Detail`, `History`,
+    /// `Blob` and `Media` are four *sections* of one surface now, so four
+    /// variants map to `Inspector`. The relation the test still pins is
+    /// coverage in both directions — every pane owes a message, every message
+    /// names a pane — which is what it was for.
     pub fn pane(&self) -> RightPane {
         match self {
             PaneMsg::Echo(_) => RightPane::Echo,
             PaneMsg::Call(_) => RightPane::Call,
             PaneMsg::Publish(_) => RightPane::Publish,
-            PaneMsg::Detail(_) => RightPane::Detail,
+            PaneMsg::Detail(_) | PaneMsg::History(_) | PaneMsg::Blob(_) | PaneMsg::Media(_) => {
+                RightPane::Inspector
+            }
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Doctor(_) => RightPane::Doctor,
-            PaneMsg::History(_) => RightPane::History,
-            PaneMsg::Blob(_) => RightPane::Blob,
-            PaneMsg::Media(_) => RightPane::Media,
             PaneMsg::Admin(_) => RightPane::Admin,
             PaneMsg::Context(_) => RightPane::Connect,
         }
@@ -417,15 +423,16 @@ pub enum RightPane {
     Echo,
     Call,
     Publish,
-    Detail,
+    /// One surface that follows the subject (#182): the key facts, the value
+    /// and its decode, the history diff, the chart — and the `@blob` or
+    /// `@media` sections when the key is on one of those planes.
+    ///
+    /// It replaces four tabs. `Detail`, `History`, `Blob` and `Media` each
+    /// answered part of one question about one thing, so switching between
+    /// them was the user assembling by hand what the Inspector assembles.
+    Inspector,
     Nodes,
     Doctor,
-    /// Per-key history and payload diff (issue #63).
-    History,
-    /// The `@blob` plane: who serves bulk content, and fetching it (issue #68).
-    Blob,
-    /// The `@media` plane: declared streams, and viewing one (issue #69).
-    Media,
     /// Routers, storages and the state-coverage table (issue #70).
     Admin,
     /// Contexts and endpoints (issue #67).
@@ -435,16 +442,13 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 11] = [
+    pub const ALL: [RightPane; 8] = [
         RightPane::Echo,
         RightPane::Call,
         RightPane::Publish,
-        RightPane::Detail,
+        RightPane::Inspector,
         RightPane::Nodes,
         RightPane::Doctor,
-        RightPane::History,
-        RightPane::Blob,
-        RightPane::Media,
         RightPane::Admin,
         RightPane::Connect,
     ];
@@ -454,12 +458,9 @@ impl RightPane {
             RightPane::Echo => "echo",
             RightPane::Call => "call",
             RightPane::Publish => "publish",
-            RightPane::Detail => "detail",
+            RightPane::Inspector => "inspector",
             RightPane::Nodes => "nodes",
             RightPane::Doctor => "doctor",
-            RightPane::History => "history",
-            RightPane::Blob => "blobs",
-            RightPane::Media => "media",
             RightPane::Admin => "admin",
             RightPane::Connect => "connect",
         }
@@ -573,13 +574,30 @@ mod tests {
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Context(view::contexts::ContextMsg::Load),
         ];
+        // Coverage in both directions, not a bijection — #182 made four
+        // variants sections of the Inspector, so `Detail`, `History`, `Blob`
+        // and `Media` all name it. What must stay true is that no pane in the
+        // strip is unreachable by message, and no message names a pane that
+        // is not in the strip.
         let mut covered: Vec<RightPane> = one_per_pane.iter().map(PaneMsg::pane).collect();
         covered.sort_by_key(|p| p.label());
+        covered.dedup();
         let mut all = RightPane::ALL.to_vec();
         all.sort_by_key(|p| p.label());
         assert_eq!(
             covered, all,
             "every pane in the strip owes `PaneMsg` a variant, and vice versa"
+        );
+
+        // And the folding is itself the claim: exactly four variants name the
+        // Inspector, which is the four tabs it replaced.
+        let folded = one_per_pane
+            .iter()
+            .filter(|m| m.pane() == RightPane::Inspector)
+            .count();
+        assert_eq!(
+            folded, 4,
+            "Detail, History, Blob and Media are the Inspector's sections"
         );
     }
 }

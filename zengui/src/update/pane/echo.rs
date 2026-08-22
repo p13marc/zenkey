@@ -47,7 +47,7 @@ pub(crate) fn update(
         EchoMsg::LineClicked(key) => {
             // Drill-through reuses the selection path rather than being a
             // second way to open the inspector.
-            *pane = RightPane::Detail;
+            *pane = RightPane::Inspector;
             Task::done(Message::Subject(SubjectMsg::Select(Subject::Key(key))))
         }
         EchoMsg::Export => {

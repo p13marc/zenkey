@@ -526,7 +526,7 @@ fn the_publish_pane_bounds_its_log_and_never_invents_a_matcher() {
 #[test]
 fn the_detail_pane_tags_decode_provenance() {
     use std::sync::Arc;
-    use zengui::view::detail::{DetailData, Fetched, pane};
+    use zengui::view::detail::{DetailData, Fetched, section};
     use zenkey_fleet::decode::Rendering;
     use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
 
@@ -550,7 +550,7 @@ fn the_detail_pane_tags_decode_provenance() {
         Some("TelemetryPoint".to_string()),
         Rendering::Structural(r#"{"value":42.0}"#.to_string()),
     );
-    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
         key,
         facts: Some(&facts),
         fetched: Fetched::Landed(&fetched),
@@ -572,7 +572,7 @@ fn the_detail_pane_tags_decode_provenance() {
     let none: Result<Arc<FetchOutcome>, String> = Ok(Arc::new(FetchOutcome::None {
         attempted: ["get", "@adv cache", "subscribe window"],
     }));
-    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
         key,
         facts: Some(&facts),
         fetched: Fetched::Landed(&none),
@@ -599,7 +599,7 @@ fn the_detail_pane_tags_decode_provenance() {
 /// was and was not asked.
 #[test]
 fn the_detail_pane_distinguishes_superseded_from_never_asked() {
-    use zengui::view::detail::{DetailData, Fetched, pane};
+    use zengui::view::detail::{DetailData, Fetched, section};
 
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
     let data = |fetched| DetailData {
@@ -620,14 +620,14 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
                               subject, so nothing here describes this key. \
                               Re-select it to ask again.";
 
-    let mut ui = simulator::<Message, _, _>(pane(data(Fetched::NotAsked)));
+    let mut ui = simulator::<Message, _, _>(section(data(Fetched::NotAsked)));
     assert!(
         ui.find(NOT_ASKED).is_ok(),
         "nothing was asked, and the pane says so"
     );
     assert!(ui.find(SUPERSEDED).is_err());
 
-    let mut ui = simulator::<Message, _, _>(pane(data(Fetched::Superseded)));
+    let mut ui = simulator::<Message, _, _>(section(data(Fetched::Superseded)));
     assert!(
         ui.find(SUPERSEDED).is_ok(),
         "an answer that is real but about something else is its own state"
@@ -635,6 +635,151 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
     assert!(
         ui.find(NOT_ASKED).is_err(),
         "and must not be reported as an unasked question"
+    );
+}
+
+/// The Inspector dispatches on the subject, and the plane sections come from
+/// the classification seam (#182).
+///
+/// The load-bearing assertions are the *negative* ones. A `@blob` key must not
+/// grow a media viewer and an ordinary state key must not grow either, because
+/// the alternative — deciding from `key.contains("@blob")` — is the
+/// string-shaped classifier this crate's key-agnostic-core claim forbids.
+#[test]
+fn the_inspector_follows_the_subject_and_its_plane() {
+    use zengui::blob::BlobState;
+    use zengui::message::Subject;
+    use zengui::nodes::NodeRoster;
+    use zengui::view::detail::Fetched;
+    use zengui::view::inspector::{InspectorData, pane};
+    use zengui::view::media::MediaState;
+    use zengui::view::nodes::DetailState;
+    use zenkey_fleet::facts::KeyFacts;
+
+    let slices = slices();
+    let blob = BlobState::default();
+    let media = MediaState::default();
+    let roster = NodeRoster::default();
+    let node_detail = DetailState::NotAsked;
+
+    let facts_for = |key: &str| {
+        let mut f = KeyFacts::project("", key);
+        f.resolve(&slices);
+        f
+    };
+    fn data<'a>(
+        subject: &'a Subject,
+        facts: Option<&'a KeyFacts>,
+        blob: &'a BlobState,
+        media: &'a MediaState,
+        slices: &'a SliceSet,
+        roster: &'a NodeRoster,
+        node_detail: &'a DetailState,
+    ) -> InspectorData<'a> {
+        InspectorData {
+            subject,
+            facts,
+            fetched: Fetched::NotAsked,
+            decoded: None,
+            series: None,
+            history: None,
+            watched: false,
+            latency: None,
+            blob,
+            media,
+            slices: Some(slices),
+            roster,
+            node_detail,
+        }
+    }
+
+    // Nothing selected: the Inspector holds nothing of its own and says so.
+    let none = Subject::None;
+    let mut ui = simulator::<Message, _, _>(pane(data(
+        &none,
+        None,
+        &blob,
+        &media,
+        &slices,
+        &roster,
+        &node_detail,
+    )));
+    assert!(ui.find("Nothing selected").is_ok());
+    assert!(ui.find("Detail").is_err(), "no subject, no sections");
+
+    // A prefix is a subtree, and the pane says that rather than reporting
+    // "no value fetched" about a key that was never a key (#85).
+    let prefix = Subject::Prefix("v1/h-3fa9c2d41b7e".into());
+    let mut ui = simulator::<Message, _, _>(pane(data(
+        &prefix,
+        None,
+        &blob,
+        &media,
+        &slices,
+        &roster,
+        &node_detail,
+    )));
+    assert!(ui.find("A subtree, not a key").is_ok());
+    assert!(ui.find("History").is_err(), "a subtree records nothing");
+
+    // An ordinary state key: detail and history, and neither plane section.
+    let state_key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+    let state_facts = facts_for(state_key);
+    let key = Subject::Key(state_key.into());
+    let mut ui = simulator::<Message, _, _>(pane(data(
+        &key,
+        Some(&state_facts),
+        &blob,
+        &media,
+        &slices,
+        &roster,
+        &node_detail,
+    )));
+    assert!(ui.find("Detail").is_ok());
+    assert!(
+        ui.find("History").is_ok(),
+        "the timeline is a section now, not another tab"
+    );
+    assert!(ui.find("Blobs").is_err());
+    assert!(ui.find("Media").is_err());
+
+    // A `@blob` key grows the blob sections and only those.
+    let blob_key = "v1/h-3fa9c2d41b7e/@blob/artifact/abc123";
+    let blob_facts = facts_for(blob_key);
+    let key = Subject::Key(blob_key.into());
+    let mut ui = simulator::<Message, _, _>(pane(data(
+        &key,
+        Some(&blob_facts),
+        &blob,
+        &media,
+        &slices,
+        &roster,
+        &node_detail,
+    )));
+    assert!(ui.find("Blobs").is_ok(), "the plane is read off ClassKind");
+    assert!(
+        ui.find("Media").is_err(),
+        "one plane, not every plane the key is not on"
+    );
+
+    // An origin subject: presence, not a value.
+    let origin = Subject::Origin("h-3fa9c2d41b7e".into());
+    let mut ui = simulator::<Message, _, _>(pane(data(
+        &origin,
+        None,
+        &blob,
+        &media,
+        &slices,
+        &roster,
+        &node_detail,
+    )));
+    assert!(
+        ui.find("no liveliness token observed for this origin")
+            .is_ok()
+    );
+    assert!(
+        ui.find("Detail").is_err(),
+        "an origin has no value, no decode and no chart"
     );
 }
 
@@ -1078,10 +1223,10 @@ fn recording(key: &str, max_entries: usize, samples: &[(&[u8], bool)]) -> Histor
 /// "Nothing yet" for a key nobody watches is a verdict never obtained (O4).
 #[test]
 fn the_history_pane_says_why_it_is_empty() {
-    use zengui::view::history::{HistoryData, pane};
+    use zengui::view::history::{HistoryData, section};
 
     // Nothing selected.
-    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
         key: None,
         recorder: None,
         watched: false,
@@ -1090,7 +1235,7 @@ fn the_history_pane_says_why_it_is_empty() {
 
     // Selected, but no watch covers it — the two must not read alike.
     let rec = recording(REGISTERED, 8, &[]);
-    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: false,
@@ -1105,7 +1250,7 @@ fn the_history_pane_says_why_it_is_empty() {
     );
 
     // Watched and genuinely quiet: a different sentence, and not a verdict.
-    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
@@ -1124,7 +1269,7 @@ fn the_history_pane_says_why_it_is_empty() {
 /// The diff names the field that moved, and says which clock stamped the row.
 #[test]
 fn the_history_pane_diffs_consecutive_payloads() {
-    use zengui::view::history::{HistoryData, pane};
+    use zengui::view::history::{HistoryData, section};
 
     let rec = recording(
         REGISTERED,
@@ -1134,7 +1279,7 @@ fn the_history_pane_diffs_consecutive_payloads() {
             (br#"{"value":42.0,"unit":"percent","inodes":1188}"#, false),
         ],
     );
-    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
@@ -1161,7 +1306,7 @@ fn the_history_pane_diffs_consecutive_payloads() {
 /// follows one starts a new value rather than "changing" the deleted one.
 #[test]
 fn the_history_pane_marks_a_tombstone_as_retirement() {
-    use zengui::view::history::{HistoryData, pane};
+    use zengui::view::history::{HistoryData, section};
 
     let script: &[(&[u8], bool)] = &[
         (br#"{"status":"ok"}"#, false),
@@ -1173,7 +1318,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
     let mut rec = recording(REGISTERED, 8, script);
     rec.selected = Some(1);
     {
-        let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+        let mut ui = simulator::<Message, _, _>(section(HistoryData {
             key: Some(REGISTERED),
             recorder: Some(&rec),
             watched: true,
@@ -1192,7 +1337,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
     // Focused on the put after it: a new value, not a change.
     rec.selected = Some(2);
     {
-        let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+        let mut ui = simulator::<Message, _, _>(section(HistoryData {
             key: Some(REGISTERED),
             recorder: Some(&rec),
             watched: true,
@@ -1208,7 +1353,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
 /// so, instead of inventing field names for bytes it cannot read.
 #[test]
 fn the_history_pane_falls_back_to_bytes_and_admits_it() {
-    use zengui::view::history::{HistoryData, pane};
+    use zengui::view::history::{HistoryData, section};
 
     let rec = recording(
         FOREIGN,
@@ -1218,7 +1363,7 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
             (b"just a plain STRING", false),
         ],
     );
-    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
         key: Some(FOREIGN),
         recorder: Some(&rec),
         watched: true,
@@ -1232,7 +1377,7 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
 /// The bound is on screen, not implied by a short list (RFC 09 §5.1 O6).
 #[test]
 fn the_history_pane_counts_what_it_evicted() {
-    use zengui::view::history::{HistoryData, pane};
+    use zengui::view::history::{HistoryData, section};
 
     let script: Vec<(Vec<u8>, bool)> = (0..10)
         .map(|i| (format!(r#"{{"value":{i}}}"#).into_bytes(), false))
@@ -1240,7 +1385,7 @@ fn the_history_pane_counts_what_it_evicted() {
     let borrowed: Vec<(&[u8], bool)> = script.iter().map(|(p, d)| (p.as_slice(), *d)).collect();
     let rec = recording(REGISTERED, 3, &borrowed);
 
-    let mut ui = simulator::<Message, _, _>(pane(HistoryData {
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
@@ -1259,7 +1404,7 @@ fn the_history_pane_counts_what_it_evicted() {
 #[test]
 fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
     use zengui::series::{NumericLeaves, RateSampler, Series};
-    use zengui::view::detail::{DetailData, Fetched, SeriesData, pane};
+    use zengui::view::detail::{DetailData, Fetched, SeriesData, section};
 
     let series = SeriesData {
         leaves: NumericLeaves::default(),
@@ -1269,7 +1414,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         unit: None,
         caches: Default::default(),
     };
-    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
         key: FOREIGN,
         facts: None,
         fetched: Fetched::NotAsked,
@@ -1283,11 +1428,11 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         ui.find("Series").is_err(),
         "a payload with nothing numeric in it must not grow a chart section"
     );
-    // …but the link into the timeline is still there: history is not numeric.
-    assert!(
-        ui.find("history: 3 samples recorded — open (Alt 8)")
-            .is_ok()
-    );
+    // …but the recorded count is still there: history is not numeric. It used
+    // to read "— open (Alt 8)", because the timeline was another tab; since
+    // #182 it is the next section down, so the label is a count and not a
+    // link.
+    assert!(ui.find("history: 3 samples recorded").is_ok());
 }
 
 /// The chart's numbers live in its caption, which is what makes the plot
@@ -1295,7 +1440,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
 #[test]
 fn the_detail_pane_labels_the_series_it_plots() {
     use zengui::series::{Series, numeric_leaves};
-    use zengui::view::detail::{DetailData, Fetched, SeriesData, pane};
+    use zengui::view::detail::{DetailData, Fetched, SeriesData, section};
 
     let mut value = Series::new();
     value.push(41.0);
@@ -1312,7 +1457,7 @@ fn the_detail_pane_labels_the_series_it_plots() {
         unit: Some("percent".to_string()),
         caches: Default::default(),
     };
-    let mut ui = simulator::<Message, _, _>(pane(DetailData {
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
         key: REGISTERED,
         facts: None,
         fetched: Fetched::NotAsked,
@@ -1393,7 +1538,7 @@ mod blob {
     use super::*;
     use std::sync::Arc;
     use zengui::blob::{BlobState, Probe};
-    use zengui::view::blob::pane;
+    use zengui::view::blob::section;
     use zenkey_fleet::report::{
         BlobAvailability, BlobHolder, BlobList, BlobListSource, BlobManifest, BlobProbeReport,
         BlobTierRow,
@@ -1443,7 +1588,7 @@ mod blob {
     #[test]
     fn the_blob_pane_never_reports_what_it_did_not_ask() {
         let state = BlobState::default();
-        let mut ui = simulator::<Message, _, _>(pane(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false));
         assert!(ui.find("no registry loaded").is_ok());
         assert!(ui.find("no probe yet").is_ok());
         assert!(
@@ -1482,7 +1627,7 @@ mod blob {
             }),
             ..Default::default()
         };
-        let mut ui = simulator::<Message, _, _>(pane(&state, true));
+        let mut ui = simulator::<Message, _, _>(section(&state, true));
         assert!(ui.find("netring").is_ok());
         assert!(
             ui.find(
@@ -1515,7 +1660,7 @@ mod blob {
             vec!["ab12".into()],
         );
 
-        let mut ui = simulator::<Message, _, _>(pane(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false));
         assert!(ui.find("h-aaaaaaaaaaaa").is_ok());
         assert!(ui.find("h-bbbbbbbbbbbb").is_ok());
         assert!(
@@ -1532,7 +1677,7 @@ mod blob {
 
         // Chosen: the button names the single origin it will talk to.
         state.holder = Some(1);
-        let mut ui = simulator::<Message, _, _>(pane(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false));
         assert!(
             ui.find("fetch from h-bbbbbbbbbbbb").is_ok(),
             "the control names the one origin, so 'from where?' is never guessed"
@@ -1553,7 +1698,7 @@ mod blob {
             ],
             vec!["ab12".into(), "cd34".into()],
         );
-        let mut ui = simulator::<Message, _, _>(pane(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false));
         assert!(ui.find("2 distinct content roots under one id").is_ok());
         assert!(
             ui.find(
@@ -1584,7 +1729,7 @@ mod blob {
             roots: vec![],
             declared_by: vec!["logs".into()],
         }));
-        let mut ui = simulator::<Message, _, _>(pane(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false));
         assert!(ui.find("not probed").is_ok());
         assert!(
             ui.find("no origin answered").is_err(),
@@ -2080,12 +2225,12 @@ fn the_strip_reports_replay_over_the_link() {
 /// listed as metadata only, and no registry means "not asked" (O4).
 #[test]
 fn the_media_pane_lists_declared_streams_honestly() {
-    use zengui::view::media::{MediaState, pane};
+    use zengui::view::media::{MediaState, section};
 
     let state = MediaState::default();
 
     // Not asked ≠ nothing declared.
-    let mut ui = simulator::<Message, _, _>(pane(&state, None));
+    let mut ui = simulator::<Message, _, _>(section(&state, None));
     assert!(
         ui.find(
             "no registry loaded — declared streams unknown (not asked, O4); \
@@ -2112,7 +2257,7 @@ encoding = "video/*"
     )
     .unwrap();
     let slices = SliceSet::from_slices(vec![slice]);
-    let mut ui = simulator::<Message, _, _>(pane(&state, Some(&slices)));
+    let mut ui = simulator::<Message, _, _>(section(&state, Some(&slices)));
     assert!(ui.find("parallax declares:").is_ok());
     assert!(
         ui.find("  {stream}/preview/png (image/png)").is_ok(),
@@ -2132,7 +2277,7 @@ encoding = "video/*"
 /// frame in a codec we cannot decode is reported, not rendered.
 #[test]
 fn a_media_viewing_reports_what_it_cannot_render() {
-    use zengui::view::media::{MediaState, Viewing, pane};
+    use zengui::view::media::{MediaState, Viewing, section};
 
     let mut viewing = Viewing::new("v1/h-0123456789ab/@media/parallax/cam0/video/h264/hi".into());
     let sample = zenkey_fleet::SampleView {
@@ -2160,7 +2305,7 @@ fn a_media_viewing_reports_what_it_cannot_render() {
         viewing: Some(viewing),
         ..MediaState::default()
     };
-    let mut ui = simulator::<Message, _, _>(pane(&state, None));
+    let mut ui = simulator::<Message, _, _>(section(&state, None));
     assert!(
         ui.find(
             "frame arrived: 4096 B as video/h264 — no decode story for this \

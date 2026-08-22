@@ -16,8 +16,8 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use iced::widget::{button, column, row, text, text_input};
-use iced::{Element, Length};
+use iced::Length;
+use iced::widget::{Column, button, column, row, text, text_input};
 use zenkey_fleet::{SampleView, SliceSet, WatchId};
 
 use super::kit;
@@ -159,7 +159,9 @@ fn msg(m: MediaMsg) -> Message {
     Message::Pane(PaneMsg::Media(m))
 }
 
-pub fn pane<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Element<'a, Message> {
+/// The Inspector's `@media`-plane sections (#182). See
+/// [`super::detail::section`] for why this is a `Column`.
+pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Column<'a, Message> {
     let mut col = column![kit::section_header("Media", None)].spacing(space::SM);
 
     // Declared streams, off the bus (#77): the enumeration RFC 07 §1's
@@ -291,5 +293,5 @@ pub fn pane<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Element<
         }
     }
 
-    iced::widget::scrollable(col).height(Length::Fill).into()
+    col
 }

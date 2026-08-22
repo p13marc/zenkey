@@ -66,9 +66,12 @@ pub fn map() -> Vec<Binding> {
     ];
     // The pane strip, in tab order — so the numbers on screen and the numbers
     // under the fingers are the same list.
-    // Only the first ten panes get a digit (Alt 1..9 then Alt 0) — an
-    // eleventh pane is reachable by tab strip and palette, and `resolve`
-    // below already stops rather than wrapping (issue #69 added the 11th).
+    //
+    // Eight panes, eight digits, since #182 folded four tabs into the
+    // Inspector. There is no longer a pane without a shortcut. The *remap*
+    // this list is heading for — Alt+1/2/3 for saved layouts, Alt+L/I/A to
+    // focus a dock — is #190's, and doing it here would change what every
+    // digit means for the sake of a dock model that has not landed.
     for (i, pane) in RightPane::ALL.into_iter().enumerate().take(PANE_KEYS.len()) {
         out.push(Binding {
             keys: PANE_KEYS[i],
@@ -83,32 +86,28 @@ pub fn map() -> Vec<Binding> {
 /// Alt+1..Alt+9 then Alt+0 for the tenth, one per pane. Parallel arrays rather
 /// than a formatted string because `Binding` holds `&'static str` — and the
 /// length assertion below is what keeps them in step with `RightPane::ALL`.
-const PANE_KEYS: [&str; 10] = [
-    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7", "Alt 8", "Alt 9", "Alt 0",
+const PANE_KEYS: [&str; 8] = [
+    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7", "Alt 8",
 ];
-const PANE_WHAT: [&str; 10] = [
+const PANE_WHAT: [&str; 8] = [
     "echo pane",
     "call pane",
     "publish pane",
-    "detail pane",
+    "inspector",
     "nodes pane",
     "doctor pane",
-    "history pane",
-    "blobs pane",
-    "media pane",
     "admin pane",
+    "connect pane",
 ];
-const PANE_MESSAGES: [fn() -> Message; 10] = [
+const PANE_MESSAGES: [fn() -> Message; 8] = [
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Echo)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Call)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Publish)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Detail)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Inspector)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Nodes)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Doctor)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::History)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Blob)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Media)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Admin)),
+    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Connect)),
 ];
 
 /// A key press → the message it should send, if any.
@@ -155,7 +154,9 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
         // Alt+1..9 are panes 1..9; Alt+0 is the tenth, following the tab-bar
         // convention every browser uses. Beyond ten panes the strip needs a
         // different idea, and this stops rather than wrapping to something
-        // arbitrary.
+        // arbitrary. Since #182 there are eight panes, so Alt+9 and Alt+0 do
+        // nothing — the bound is `RightPane::ALL`, which is the point: the
+        // list shrank and no digit was left pointing at a pane that is gone.
         let n = if digit == 0 { 10 } else { digit };
         if (1..=RightPane::ALL.len()).contains(&n) {
             return Some(Message::Workspace(WorkspaceMsg::PaneSelected(
@@ -218,13 +219,13 @@ mod tests {
     /// come with a key rather than silently falling off the end.
     #[test]
     fn the_pane_bindings_cover_every_pane() {
-        // Ten digits, eleven panes since #69: the arrays stay in positional
-        // step with ALL for the digit-covered prefix, and the overflow is a
-        // deliberate, counted fact — not a wrap.
-        assert_eq!(PANE_KEYS.len(), 10);
+        // Eight panes, eight digits since #182 folded four tabs into the
+        // Inspector. There is no overflow now — which is a temporary state of
+        // affairs, and stated as one: #190 remaps these digits to saved
+        // layouts once there are docks rather than tabs.
+        assert_eq!(PANE_KEYS.len(), RightPane::ALL.len());
         assert_eq!(PANE_WHAT.len(), PANE_KEYS.len());
         assert_eq!(PANE_MESSAGES.len(), PANE_KEYS.len());
-        assert!(RightPane::ALL.len() >= PANE_KEYS.len());
         for (i, pane) in RightPane::ALL.into_iter().take(PANE_KEYS.len()).enumerate() {
             assert_eq!(
                 format!("{:?}", PANE_MESSAGES[i]()),
@@ -274,39 +275,33 @@ mod tests {
     }
 
     /// Alt+N reaches every pane and stops there: the range is `RightPane::ALL`,
-    /// so adding a pane moves the boundary rather than leaving a dead key. With
-    /// ten panes, Alt+0 is the tenth — the tab-bar convention.
+    /// so removing four panes moves the boundary rather than leaving four
+    /// digits pointing at nothing.
     #[test]
     fn alt_digits_cover_the_panes_and_stop() {
         assert!(matches!(
-            press("9", Modifiers::ALT),
+            press("4", Modifiers::ALT),
             Some(Message::Workspace(WorkspaceMsg::PaneSelected(
-                RightPane::Media
+                RightPane::Inspector
             )))
         ));
         assert!(matches!(
-            press("0", Modifiers::ALT),
+            press("8", Modifiers::ALT),
             Some(Message::Workspace(WorkspaceMsg::PaneSelected(
-                RightPane::Admin
+                RightPane::Connect
             )))
         ));
-        // The first ten panes are each reachable by a digit; the eleventh
-        // (Connect) deliberately is not — tab strip and palette reach it,
-        // and resolve() stops rather than wrapping.
-        for pane in RightPane::ALL.into_iter().take(PANE_KEYS.len()) {
+        // Past the end is nothing, not a wrap. Alt+9 used to be the media
+        // pane; the pane is a section of the Inspector now, and the digit
+        // must not quietly become something else.
+        assert!(press("9", Modifiers::ALT).is_none());
+        assert!(press("0", Modifiers::ALT).is_none());
+        for pane in RightPane::ALL {
             assert!(
                 PANE_MESSAGES.iter().any(|m| format!("{:?}", m())
                     == format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))),
                 "{pane:?} has no binding"
             );
         }
-        assert!(
-            !PANE_MESSAGES.iter().any(|m| format!("{:?}", m())
-                == format!(
-                    "{:?}",
-                    Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Connect))
-                )),
-            "the overflow pane is a stated fact, not an accident"
-        );
     }
 }

@@ -1,6 +1,7 @@
 //! The command palette and jump-to-key overlay (issue #75).
 //!
-//! By the end of this epic zengui has seven panes and dozens of actions;
+//! By the end of this epic zengui has a handful of docks and dozens of
+//! actions;
 //! discoverability by toolbar alone stops scaling well before that. zensight
 //! proved the in-family pattern (Ctrl+K search, Ctrl+P palette, `?` help), and
 //! this is the zengui shape of it.
@@ -456,14 +457,14 @@ mod tests {
 
     #[test]
     fn fuzzy_matches_subsequences_and_ranks_tighter_matches_first() {
-        assert!(fuzzy("go to detail pane", "gtd").is_some());
-        assert!(fuzzy("go to detail pane", "detail").is_some());
-        assert!(fuzzy("go to detail pane", "zzz").is_none());
+        assert!(fuzzy("go to inspector pane", "gti").is_some());
+        assert!(fuzzy("go to inspector pane", "inspector").is_some());
+        assert!(fuzzy("go to inspector pane", "zzz").is_none());
         // An empty query matches everything.
         assert_eq!(fuzzy("anything", ""), Some(0));
         // Contiguous beats scattered.
-        let tight = fuzzy("detail", "det").unwrap();
-        let loose = fuzzy("go to detail pane", "det").unwrap();
+        let tight = fuzzy("inspector", "ins").unwrap();
+        let loose = fuzzy("go to inspector pane", "ins").unwrap();
         assert!(tight < loose, "tight {tight} loose {loose}");
     }
 
