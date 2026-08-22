@@ -14,6 +14,7 @@
 pub mod admin;
 pub mod bench;
 pub mod blob;
+pub mod budget;
 pub mod context_store;
 pub mod cutover;
 pub mod diff;
@@ -80,6 +81,7 @@ pub use bench::{BenchSpec, bench_rpc};
 #[cfg(feature = "blob")]
 pub use blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
 pub use blob::{BlobTarget, blob_list, declared_by};
+pub use budget::{BudgetObservation, data_plane_scopes, join_budget};
 pub use context_store::{StoredContext, active_name, cache_dir};
 pub use cutover::run_cutover;
 pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};

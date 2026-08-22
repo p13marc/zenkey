@@ -20,7 +20,7 @@ use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// Every check id `run_doctor` can emit — the stable vocabulary, never
 /// renamed (see the module doc).
-pub const CHECK_IDS: [&str; 17] = [
+pub const CHECK_IDS: [&str; 18] = [
     "slice-parse",
     "slice-sync",
     "introspect-coverage",
@@ -39,6 +39,9 @@ pub const CHECK_IDS: [&str; 17] = [
     "unregistered-traffic",
     "rate-over-declared",
     "timestamp-stamped-elsewhere",
+    // Key-population budgets (#221): declared `cardinality` vs the observed
+    // expansion count, per origin. `{path...}` families are exempt and say so.
+    "cardinality-over-declared",
 ];
 
 /// What a doctor run should cost.
@@ -435,18 +438,9 @@ async fn observe_traffic(
 
     // Scope statement (O5): the three data classes for host origins, plus
     // each declared service origin's three — `*` never matches an `@` chunk
-    // (D4), so the service planes must be named to be seen.
-    let mut scopes = Vec::new();
-    for class in ["telemetry", "state", "events"] {
-        scopes.push(with_base(base, format!("v1/*/{class}/**")));
-    }
-    for slice in slices.slices() {
-        if let Some(origin) = &slice.service_origin {
-            for class in ["telemetry", "state", "events"] {
-                scopes.push(with_base(base, format!("v1/{origin}/{class}/**")));
-            }
-        }
-    }
+    // (D4), so the service planes must be named to be seen. Shared with the
+    // `topic list --budget` observation (#221).
+    let scopes = crate::budget::data_plane_scopes(base, slices);
 
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
@@ -565,6 +559,15 @@ async fn observe_traffic(
     }
     let keys_seen = facts_cache.len();
     monitor.stop();
+
+    // Key-population budgets (#221): the window's distinct keys, grouped
+    // into `{var}` families per origin, judged against each family's
+    // declared `cardinality`.
+    let budgets = crate::budget::BudgetObservation::observe(
+        base,
+        slices,
+        facts_cache.keys().map(String::as_str),
+    );
 
     let window_s = window.as_secs_f64();
     let mut findings = Vec::new();
@@ -688,6 +691,8 @@ async fn observe_traffic(
         }
     }
 
+    findings.extend(judge_cardinality(slices, &budgets, window_s));
+
     Ok((
         findings,
         crate::report::ObservationSummary {
@@ -737,6 +742,107 @@ fn judge_state_samples(
     (findings, unstamped)
 }
 
+/// Judge every declared `{var}` family's key population against its declared
+/// `cardinality` (#221) — pure, so the acceptance case (declared 16, 40
+/// observed) is testable without a bus.
+///
+/// The honesty rules, verbatim from the issue:
+///
+/// - Observed **over** declared is a finding (RFC 04 §1.2's budget is a
+///   MUST); observed **under** declared is **not** — an idle host declares
+///   nothing wrong, and a bounded window proves a lower bound, never the
+///   population (RFC 09 §5.1 O4/O6). The window rides in the evidence.
+/// - `{path...}` rest-variable families are unbounded by construction and
+///   are **exempt and say so** — "exempt: rest-variable", never a silent
+///   skip and never a pass (the RFC 08 §6.1 v1.20 shape for subject checks).
+/// - Judged **per origin**: RFC 04 §1 bounds cardinality per producer, so
+///   one origin over the bound is conclusive and two origins' healthy
+///   populations are never summed into a fake violation.
+fn judge_cardinality(
+    slices: &crate::registry::SliceSet,
+    observed: &crate::budget::BudgetObservation,
+    window_s: f64,
+) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+    let mut over: Vec<DoctorFinding> = Vec::new();
+    for slice in slices.slices() {
+        for s in &slice.subjects {
+            if !s.path.contains('{') {
+                continue; // a literal subject's population is 1 by construction
+            }
+            if s.path.contains("...") {
+                let seen: usize = observed
+                    .family(&slice.name, &s.path)
+                    .map(|origins| origins.values().map(|keys| keys.len()).sum())
+                    .unwrap_or(0);
+                findings.push(finding(
+                    DoctorSeverity::Info,
+                    "cardinality-over-declared",
+                    format!("{}/{}", slice.name, s.path),
+                    format!(
+                        "exempt: rest-variable — a `{{var...}}` family is unbounded by \
+                         construction, so its declared cardinality is not a bound this \
+                         check can pass or fail; {seen} distinct key(s) observed in \
+                         {window_s:.0}s"
+                    ),
+                    Some("RFC 08 §6.1"),
+                ));
+                continue;
+            }
+            let Some(declared) = s.cardinality else {
+                continue; // nothing declared, nothing to judge (the RFC 08 §5
+                // lint that requires the field is the producer build's)
+            };
+            let Some(origins) = observed.family(&slice.name, &s.path) else {
+                continue; // unobserved is not "within budget" — no verdict
+            };
+            for (origin, keys) in origins {
+                if keys.len() as i64 <= declared {
+                    continue; // under/at declared: not a finding (O4)
+                }
+                let examples: Vec<&str> = keys
+                    .iter()
+                    .take(crate::budget::EXAMPLE_CAP)
+                    .map(String::as_str)
+                    .collect();
+                let subject = if origin.starts_with('@') {
+                    format!("{origin}/{}", s.path)
+                } else {
+                    format!("{origin}/{}/{}", slice.name, s.path)
+                };
+                over.push(finding(
+                    DoctorSeverity::Warning,
+                    "cardinality-over-declared",
+                    subject,
+                    format!(
+                        "{} distinct key(s) observed in {window_s:.0}s exceed the \
+                         declared cardinality {declared} — e.g. {}. A bounded window \
+                         observes a lower bound: the population is at least this",
+                        keys.len(),
+                        examples.join(", ")
+                    ),
+                    Some("RFC 04 §1.2"),
+                ));
+            }
+        }
+    }
+    let total = over.len();
+    findings.extend(over.into_iter().take(FINDING_CAP));
+    if total > FINDING_CAP {
+        findings.push(finding(
+            DoctorSeverity::Info,
+            "cardinality-over-declared",
+            "fleet",
+            format!(
+                "… and {} more origin famil(y|ies) over their declared cardinality",
+                total - FINDING_CAP
+            ),
+            None,
+        ));
+    }
+    findings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -766,8 +872,108 @@ mod tests {
                 "rate-over-declared",
                 // #213: appended, as the rule above requires.
                 "timestamp-stamped-elsewhere",
+                // #221: appended likewise.
+                "cardinality-over-declared",
             ]
         );
+    }
+
+    const BOUNDED: &str = r#"
+        [registry]
+        version = "1.0"
+        app = "t"
+        convention = 1
+        [producer]
+        name = "sysinfo"
+        [[subject]]
+        path = "disk/{mount}/used"
+        class = "telemetry"
+        type = "Point"
+        cardinality = 16
+    "#;
+
+    /// The #221 acceptance case: declared 16, 40 observed expansions — the
+    /// finding fires with the count, the declared bound, examples, and the
+    /// window it rests on.
+    #[test]
+    fn cardinality_over_declared_fires_with_count_and_examples() {
+        let slices = crate::registry::SliceSet::from_toml_for_tests(BOUNDED);
+        let keys: Vec<String> = (0..40)
+            .map(|i| format!("v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/m{i:02}/used"))
+            .collect();
+        let obs =
+            crate::budget::BudgetObservation::observe("", &slices, keys.iter().map(String::as_str));
+        let findings = judge_cardinality(&slices, &obs, 10.0);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        let f = &findings[0];
+        assert_eq!(f.check, "cardinality-over-declared");
+        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert_eq!(f.subject, "h-aaaaaaaaaaaa/sysinfo/disk/{mount}/used");
+        assert!(f.evidence.contains("40 distinct key(s)"), "{}", f.evidence);
+        assert!(f.evidence.contains("cardinality 16"), "{}", f.evidence);
+        assert!(f.evidence.contains("10s"), "the window is stated");
+        assert!(
+            f.evidence.contains("disk/m00/used"),
+            "examples are named: {}",
+            f.evidence
+        );
+    }
+
+    /// Under (or at) the declared bound is **not** a finding: an idle host
+    /// declares nothing wrong, and a bounded window proves a lower bound,
+    /// never the population (O4/O6).
+    #[test]
+    fn cardinality_under_declared_is_not_a_finding() {
+        let slices = crate::registry::SliceSet::from_toml_for_tests(BOUNDED);
+        let keys = [
+            "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/root/used",
+            "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/var/used",
+            // Two origins at 15 each must never be summed into a fake 30 > 16.
+            "v1/h-bbbbbbbbbbbb/telemetry/sysinfo/disk/root/used",
+        ];
+        let obs = crate::budget::BudgetObservation::observe("", &slices, keys);
+        assert!(judge_cardinality(&slices, &obs, 5.0).is_empty());
+    }
+
+    /// The other #221 acceptance case: a `{path...}` family yields the
+    /// exemption wording — "exempt: rest-variable" — and never a pass (nor an
+    /// over-finding, however many members it grows).
+    #[test]
+    fn rest_variable_families_are_exempt_and_say_so() {
+        let toml = r#"
+            [registry]
+            version = "1.0"
+            app = "t"
+            convention = 1
+            [producer]
+            name = "gnmi"
+            [[subject]]
+            path = "{device}/{path...}"
+            class = "telemetry"
+            type = "Point"
+            cardinality = 2
+        "#;
+        let slices = crate::registry::SliceSet::from_toml_for_tests(toml);
+        let keys: Vec<String> = (0..5)
+            .map(|i| format!("v1/h-aaaaaaaaaaaa/telemetry/gnmi/sw1/if/eth{i}/rx"))
+            .collect();
+        let obs =
+            crate::budget::BudgetObservation::observe("", &slices, keys.iter().map(String::as_str));
+        let findings = judge_cardinality(&slices, &obs, 5.0);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        let f = &findings[0];
+        assert_eq!(f.severity, DoctorSeverity::Info, "an exemption, not a pass");
+        assert!(
+            f.evidence.starts_with("exempt: rest-variable"),
+            "{}",
+            f.evidence
+        );
+        assert!(f.evidence.contains("5 distinct key(s)"), "{}", f.evidence);
+        // And with nothing observed the family still says so — exempt is a
+        // property of the declaration, not of the traffic.
+        let quiet = judge_cardinality(&slices, &Default::default(), 5.0);
+        assert_eq!(quiet.len(), 1);
+        assert!(quiet[0].evidence.starts_with("exempt: rest-variable"));
     }
 
     /// RFC 04 §1.3's closed vocabulary, as hourly caps — and everything

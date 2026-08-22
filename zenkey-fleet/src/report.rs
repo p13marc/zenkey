@@ -35,11 +35,74 @@ pub struct TopicRow {
     /// The declared replacement subject, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaced_by: Option<String>,
+    /// The declared key-population bound (RFC 08 §2: mandatory on any
+    /// `{var}` pattern; the budget review enforces). Additive (#221) — old
+    /// consumers keep parsing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cardinality: Option<i64>,
+    /// Declared-vs-observed key population — present only under
+    /// `topic list --budget` (#221).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetCell>,
+}
+
+/// One `{var}` row's declared-vs-observed key population (#221).
+///
+/// Judged **per origin**: RFC 04 §1's table bounds cardinality per producer,
+/// so one origin over the bound is conclusive and several origins' healthy
+/// populations are never summed into a fake violation. `over` is the only
+/// verdict this cell carries — observed *under* declared is not one (a
+/// bounded window proves a lower bound, never the population, RFC 09 §5.1
+/// O6), and a `{path...}` family is `exempt` and says so rather than
+/// passing (the RFC 08 §6.1 v1.20 shape).
+#[derive(Debug, Clone, Serialize)]
+pub struct BudgetCell {
+    /// The declared bound, when the subject declares one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declared: Option<i64>,
+    /// Distinct concrete keys observed across all origins over the window.
+    pub observed: usize,
+    /// Origins that expanded this family.
+    pub origins: usize,
+    /// The origin with the most expansions — the one the bound judges.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worst_origin: Option<String>,
+    /// That origin's distinct-key count (0 = family unobserved).
+    pub worst_observed: usize,
+    /// `Some("rest-variable")`: a `{path...}` family, unbounded by
+    /// construction — exempt, and saying so.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exempt: Option<String>,
+    /// The worst origin exceeds the declared bound — the finding.
+    pub over: bool,
+    /// Example expansions from the worst origin (capped).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<String>,
+}
+
+/// What a `--budget` column's numbers rest on (#221) — the O5/O6 coverage
+/// statement: the window, the exact scopes watched, and the observer's
+/// bound. Without it "observed 3" reads as "the population is 3", which a
+/// bounded sweep never established.
+#[derive(Debug, Clone, Serialize)]
+pub struct BudgetWindow {
+    pub window_s: u64,
+    /// The selectors actually watched — coverage is a statement, not a vibe.
+    pub scopes: Vec<String>,
+    /// Distinct keys the bounded observer retained.
+    pub keys: usize,
+    /// Keys the observer retired to stay within its bound; non-zero makes
+    /// every observed count a lower bound twice over.
+    pub evicted: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TopicList {
     pub subjects: Vec<TopicRow>,
+    /// The observation behind the rows' budget cells — present only under
+    /// `topic list --budget` (#221).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetWindow>,
 }
 
 /// One key, described as far as the RFC 09 §5.1 ladder reached.
@@ -162,6 +225,9 @@ impl TopicInfo {
                 info.qos = s.qos.clone();
                 info.encoding = s.encoding.clone();
                 info.ttl_s = s.ttl_s;
+                // Declared since v1.0, dropped on this path until #221 — the
+                // field existed and was never filled.
+                info.cardinality = s.cardinality;
             }
             Registration::Unregistered => {
                 info.verdict = TopicVerdict::Unregistered;

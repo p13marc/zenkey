@@ -932,6 +932,14 @@ pub(crate) enum TopicCmd {
         /// snapshot object per cycle.
         #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
         watch: Option<f64>,
+        /// Observe the bus for SECS seconds (default 10) and add a
+        /// declared-vs-observed key-population column (#221): distinct keys
+        /// per `{var}` family, judged per origin against the declared
+        /// `cardinality` (RFC 08 §2). Over is a finding; under is not — a
+        /// bounded window proves a lower bound, never the population — and
+        /// `{path...}` families are exempt and say so.
+        #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "10", conflicts_with = "watch")]
+        budget: Option<u64>,
         #[command(flatten)]
         bus: BusArgs,
     },
