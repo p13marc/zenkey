@@ -72,6 +72,20 @@ impl Publication {
     /// never schema-encoded). Sets the wire `Encoding` when one was declared
     /// (RFC 04 v1.5's recommendation: publishers say what they carry).
     pub async fn send(&self, payload: Vec<u8>, attachment: Option<Vec<u8>>) -> Result<()> {
+        self.send_stamped(payload, attachment, None).await
+    }
+
+    /// [`send`](Self::send), with an explicit HLC timestamp when the caller
+    /// mints one (`session.new_timestamp()`). `None` leaves stamping to the
+    /// deployment's config — the default put behaviour. The generator uses
+    /// this to stamp state samples for LWW (RFC 04 §4) and, for its
+    /// `unstamped` fault (#163), to deliberately omit the stamp.
+    pub async fn send_stamped(
+        &self,
+        payload: Vec<u8>,
+        attachment: Option<Vec<u8>>,
+        timestamp: Option<zenoh::time::Timestamp>,
+    ) -> Result<()> {
         let put = self.publisher.put(payload);
         let put = match &self.encoding {
             Some(e) => put.encoding(e.as_str()),
@@ -79,6 +93,10 @@ impl Publication {
         };
         let put = match attachment {
             Some(a) => put.attachment(a),
+            None => put,
+        };
+        let put = match timestamp {
+            Some(ts) => put.timestamp(ts),
             None => put,
         };
         put.await

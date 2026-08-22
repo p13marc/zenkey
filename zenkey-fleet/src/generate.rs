@@ -39,6 +39,184 @@ pub fn synthetic_marker(tool: &str, origin: &str, fault: Option<&str>) -> Vec<u8
     serde_json::to_vec(&obj).expect("the marker serializes")
 }
 
+/// A single deliberate deviation from a known-valid synthesized sample (#163).
+///
+/// Fault injection is a *mode of the generator*, not a sibling tool: it reuses
+/// the whole registry walk, synthesis, scheduling, and guard machinery, then
+/// perturbs one dimension of the output **after synthesis** — so the delta
+/// from valid is always known, printable ([`Fault::delta`]), and stamped into
+/// the marker (`"fault": "<kind>"`, RFC 09 §5.3). The point is
+/// consumer-robustness testing: a consumer that crashes on a truncated payload
+/// fails RFC 09 §5.1 O1's spirit — a non-conforming sample is a fact to
+/// report, not an error to die on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Fault {
+    /// Cut the encoded payload to half its bytes — a partial frame the
+    /// decoder meets mid-value.
+    Truncate,
+    /// Replace the body with a JSON value of the wrong shape for the declared
+    /// type (a bare string where a structured type is declared).
+    WrongType,
+    /// Add an undeclared field to the (JSON) body — the extra key a strict
+    /// schema must reject or a lenient one must ignore, never choke on.
+    ExtraField,
+    /// Publish on a key that matches no registered subject (a trailing chunk
+    /// the registry never declared).
+    UnregisteredKey,
+    /// Publish under a QoS profile other than the subject's declared one
+    /// (RFC 04 §3) — the observed-vs-declared mismatch a doctor listen flags.
+    WrongQos,
+    /// Publish with no wire `Encoding` set, though the subject declares one —
+    /// a consumer keyed on the encoding meets a blank.
+    MissingEncoding,
+    /// Publish a state sample carrying no HLC timestamp: LWW cannot order it
+    /// (RFC 04 §4), and freshness is unjudgeable.
+    Unstamped,
+}
+
+impl Fault {
+    /// The kebab-case kind name — the CLI token and the marker's `"fault"`
+    /// value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Fault::Truncate => "truncate",
+            Fault::WrongType => "wrong-type",
+            Fault::ExtraField => "extra-field",
+            Fault::UnregisteredKey => "unregistered-key",
+            Fault::WrongQos => "wrong-qos",
+            Fault::MissingEncoding => "missing-encoding",
+            Fault::Unstamped => "unstamped",
+        }
+    }
+
+    /// Every kind, for a CLI error message and the round-trip test.
+    pub const ALL: [Fault; 7] = [
+        Fault::Truncate,
+        Fault::WrongType,
+        Fault::ExtraField,
+        Fault::UnregisteredKey,
+        Fault::WrongQos,
+        Fault::MissingEncoding,
+        Fault::Unstamped,
+    ];
+
+    /// Parse one kind, naming the vocabulary on a miss (spray's decline
+    /// precedent: an unknown kind is refused, never silently ignored).
+    pub fn parse(s: &str) -> Result<Fault> {
+        Fault::ALL
+            .into_iter()
+            .find(|f| f.as_str() == s)
+            .ok_or_else(|| {
+                let known = Fault::ALL.map(Fault::as_str).join(", ");
+                anyhow!("unknown fault kind {s:?} — known kinds: {known}")
+            })
+    }
+
+    /// Perturb the wire key: only [`Fault::UnregisteredKey`] moves it (a
+    /// trailing chunk the registry never declared). Every other kind leaves
+    /// the declared key untouched and perturbs a different dimension.
+    fn perturb_key(self, key: &str) -> String {
+        match self {
+            Fault::UnregisteredKey => format!("{key}/unregistered"),
+            _ => key.to_string(),
+        }
+    }
+
+    /// Perturb the QoS profile: only [`Fault::WrongQos`] swaps it, to a
+    /// profile deliberately unlike the declared one.
+    fn perturb_qos(self, declared: QosProfile) -> QosProfile {
+        match self {
+            Fault::WrongQos if declared == QosProfile::Sampled => QosProfile::Transition,
+            Fault::WrongQos => QosProfile::Sampled,
+            _ => declared,
+        }
+    }
+
+    /// Whether this fault drops the declared wire encoding.
+    fn drops_encoding(self) -> bool {
+        matches!(self, Fault::MissingEncoding)
+    }
+
+    /// Whether this fault omits the HLC timestamp the valid path stamps.
+    fn drops_timestamp(self) -> bool {
+        matches!(self, Fault::Unstamped)
+    }
+
+    /// Perturb the encoded body bytes, post-synthesis and post-encode — so
+    /// the deviation bypasses the validating encoder that produced the valid
+    /// bytes (that is the whole point: near-valid traffic that violates on
+    /// the wire). Key/QoS/encoding/timestamp faults leave the body alone.
+    fn perturb_body(self, bytes: Vec<u8>) -> Vec<u8> {
+        match self {
+            Fault::Truncate => {
+                let n = bytes.len() / 2;
+                let mut out = bytes;
+                out.truncate(n);
+                out
+            }
+            Fault::WrongType => {
+                // A bare JSON string where a structured type is declared —
+                // built directly, never through the schema-validating encoder.
+                serde_json::to_vec(&serde_json::Value::String("fault:wrong-type".into()))
+                    .expect("a string serializes")
+            }
+            Fault::ExtraField => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(serde_json::Value::Object(mut m)) => {
+                    m.insert("_fault".into(), serde_json::Value::Bool(true));
+                    serde_json::to_vec(&serde_json::Value::Object(m)).expect("object serializes")
+                }
+                Ok(other) => {
+                    // Not an object: wrap it so the extra key still rides.
+                    let wrapped = serde_json::json!({ "_orig": other, "_fault": true });
+                    serde_json::to_vec(&wrapped).expect("object serializes")
+                }
+                Err(_) => {
+                    // Non-JSON body (cdr/protobuf): append the marker bytes —
+                    // still an undeclared trailer the decoder must survive.
+                    let mut out = bytes;
+                    out.extend_from_slice(b"_fault");
+                    out
+                }
+            },
+            _ => bytes,
+        }
+    }
+
+    /// The printable per-key delta from valid — what the plan states before
+    /// anything touches the bus (honesty: the tool says what it will do).
+    /// `valid` is the entry as synthesized, before this fault's perturbation.
+    fn delta(self, valid: &GenPlanEntry) -> String {
+        match self {
+            Fault::Truncate => {
+                "payload truncated to half its encoded bytes — a partial frame".into()
+            }
+            Fault::WrongType => format!(
+                "body replaced with a JSON string where {} is declared",
+                valid.type_name
+            ),
+            Fault::ExtraField => "an undeclared `_fault` field added to the body".into(),
+            Fault::UnregisteredKey => format!(
+                "key → {} (an unregistered subject; RFC 09 §5.1 O1: a fact to report)",
+                self.perturb_key(&valid.key)
+            ),
+            Fault::WrongQos => format!(
+                "qos {} → {} (declared profile not honoured, RFC 04 §3)",
+                valid.qos,
+                self.perturb_qos(QosProfile::from_name(&valid.qos).unwrap_or(QosProfile::Sampled))
+                    .name()
+            ),
+            Fault::MissingEncoding => match &valid.encoding {
+                Some(e) => format!("wire encoding {e} omitted"),
+                None => "no wire encoding set (none was declared either)".into(),
+            },
+            Fault::Unstamped => {
+                "no HLC timestamp — state LWW cannot order it (RFC 04 §4)".into()
+            }
+        }
+    }
+}
+
 /// The send-timing shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenPattern {
@@ -76,6 +254,11 @@ pub struct GenSpec {
     pub seed: u64,
     /// The tool name stamped into the marker.
     pub tool: String,
+    /// Fault kinds to inject (#163). Empty = conforming traffic. Non-empty
+    /// expands the plan to one variant per (subject × fault), each carrying a
+    /// single `fault=<kind>` marker and a printable delta — double-guarded at
+    /// the CLI edge (`--i-know` plus an explicit endpoint/`--base`).
+    pub faults: Vec<Fault>,
 }
 
 /// One subject the run will publish, fully resolved — the plan is printed
@@ -103,6 +286,14 @@ pub struct GenPlanEntry {
     pub events_cap: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The fault this entry injects (#163), `None` for a conforming entry —
+    /// stamped into every one of its samples' markers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fault: Option<Fault>,
+    /// The printable delta from valid this fault introduces (#163) — stated
+    /// in the plan before a byte moves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fault_delta: Option<String>,
     #[serde(skip)]
     pub schema: Option<TypeSchema>,
     /// Absolute chunk index (into the full wire key) of the per-send unique
@@ -285,7 +476,7 @@ pub async fn build_plan(
             let encoding =
                 crate::body::encode_encoding(None, subject.encoding.as_deref(), schema.as_ref());
 
-            plan.push(GenPlanEntry {
+            let valid = GenPlanEntry {
                 key,
                 class: subject.class.clone(),
                 producer: slice.name.clone(),
@@ -297,9 +488,35 @@ pub async fn build_plan(
                 encoding,
                 events_cap,
                 note,
+                fault: None,
+                fault_delta: None,
                 schema,
                 unique_chunk,
-            });
+            };
+
+            if spec.faults.is_empty() {
+                plan.push(valid);
+                continue;
+            }
+            // One variant per fault kind: the delta is computed against the
+            // valid entry, then the static perturbations (key/QoS/encoding)
+            // are baked into the variant's fields — the body/timestamp faults
+            // ride at send time off `fault` (see `run_gen`). Every variant
+            // carries a single `fault=<kind>` marker.
+            for &fault in &spec.faults {
+                let mut variant = valid.clone();
+                variant.fault_delta = Some(fault.delta(&valid));
+                variant.key = fault.perturb_key(&valid.key);
+                variant.qos = fault
+                    .perturb_qos(QosProfile::from_name(&valid.qos).unwrap_or(QosProfile::Sampled))
+                    .name()
+                    .to_string();
+                if fault.drops_encoding() {
+                    variant.encoding = None;
+                }
+                variant.fault = Some(fault);
+                plan.push(variant);
+            }
         }
     }
     Ok(plan)
@@ -383,7 +600,6 @@ pub async fn run_gen(
     spec: &GenSpec,
 ) -> Result<GenReport> {
     let _ = store; // encode rides a per-task registry; the store fetched schemas at plan time
-    let marker = synthetic_marker(&spec.tool, &spec.origin, None);
     let synth = Synth::new(spec.seed);
     let deadline = tokio::time::Instant::now() + spec.duration;
     let total_s = spec.duration.as_secs_f64();
@@ -392,7 +608,10 @@ pub async fn run_gen(
     for (i, entry) in plan.iter().enumerate() {
         let entry = entry.clone();
         let session = session.clone();
-        let marker = marker.clone();
+        // Per-entry marker: a faulted sample additionally carries
+        // `fault=<kind>` (RFC 09 §5.3), so a capture or doctor listen can
+        // attribute exactly which deviation it saw.
+        let marker = synthetic_marker(&spec.tool, &spec.origin, entry.fault.map(Fault::as_str));
         let store_encoding = entry.encoding.clone();
         let pattern = spec.pattern;
         let seed = spec.seed;
@@ -463,8 +682,24 @@ pub async fn run_gen(
                     },
                     None => b"{}".to_vec(),
                 };
+                // The fault (if any) perturbs the valid bytes post-encode, so
+                // the deviation bypasses the validating encoder that made them
+                // (#163). Key/QoS/encoding faults were already baked into the
+                // entry at plan time; here ride the body and timestamp faults.
+                let bytes = match entry.fault {
+                    Some(f) => f.perturb_body(bytes),
+                    None => bytes,
+                };
+                // Valid samples carry an HLC timestamp (state LWW, RFC 04 §4);
+                // the `unstamped` fault omits it, the one deviation a doctor
+                // freshness check can then catch.
+                let stamp = if entry.fault.map(Fault::drops_timestamp).unwrap_or(false) {
+                    None
+                } else {
+                    Some(session.new_timestamp())
+                };
                 let outcome = match &publication {
-                    Some(p) => p.send(bytes, Some(marker.clone())).await,
+                    Some(p) => p.send_stamped(bytes, Some(marker.clone()), stamp).await,
                     None => {
                         // Events: a fresh write-once key per send.
                         let key = unique_key(&entry, seed, sent);
@@ -477,7 +712,7 @@ pub async fn run_gen(
                         .await
                         {
                             Ok(p) => {
-                                let r = p.send(bytes, Some(marker.clone())).await;
+                                let r = p.send_stamped(bytes, Some(marker.clone()), stamp).await;
                                 let _ = p.undeclare().await;
                                 r
                             }
@@ -620,6 +855,7 @@ rate = "rare"
             duration: Duration::from_secs(10),
             seed: 42,
             tool: "zenctl gen".into(),
+            faults: vec![],
         }
     }
 
@@ -716,5 +952,94 @@ rate = "rare"
         let f = synthetic_marker("zenctl gen", "h-abababababab", Some("truncate"));
         let v: serde_json::Value = serde_json::from_slice(&f).unwrap();
         assert_eq!(v["fault"], "truncate");
+    }
+
+    /// Every kind's CLI token round-trips, and an unknown kind is refused with
+    /// the vocabulary named (spray's decline precedent, applied to a flag).
+    #[test]
+    fn fault_kinds_parse_and_an_unknown_is_refused() {
+        for f in Fault::ALL {
+            assert_eq!(Fault::parse(f.as_str()).unwrap(), f);
+        }
+        let err = Fault::parse("scramble").unwrap_err().to_string();
+        assert!(err.contains("unknown fault kind"), "{err}");
+        assert!(err.contains("truncate"), "the vocabulary is named: {err}");
+    }
+
+    /// With faults requested the plan expands to one variant per (subject ×
+    /// fault); each states its printable delta and bakes the static
+    /// perturbations (key/QoS/encoding) into its fields, leaving the body and
+    /// timestamp faults for send time.
+    #[tokio::test]
+    async fn faults_expand_the_plan_one_variant_per_kind_with_a_stated_delta() {
+        let slices =
+            SliceSet::from_slices(vec![zenkey::parse_slice(SLICES).expect("fixture parses")]);
+        let store = SchemaStore::new("", Duration::from_millis(100));
+        let mut spec = spec();
+        spec.faults = Fault::ALL.to_vec();
+        let plan = build_plan(None, &store, &slices, "", None, &spec)
+            .await
+            .expect("plan builds");
+        // Three subjects × seven faults.
+        assert_eq!(plan.len(), 3 * 7);
+        assert!(
+            plan.iter().all(|e| e.fault.is_some() && e.fault_delta.is_some()),
+            "every faulted entry names its kind and delta"
+        );
+
+        // The `health` state subject, one variant per kind — the static
+        // perturbations are visible in the fields.
+        let health: Vec<&GenPlanEntry> = plan
+            .iter()
+            .filter(|e| e.key.starts_with("v1/h-abababababab/state/demo/health"))
+            .collect();
+        assert_eq!(health.len(), 7);
+
+        let unregistered = health
+            .iter()
+            .find(|e| e.fault == Some(Fault::UnregisteredKey))
+            .unwrap();
+        assert_eq!(unregistered.key, "v1/h-abababababab/state/demo/health/unregistered");
+
+        let wrong_qos = health
+            .iter()
+            .find(|e| e.fault == Some(Fault::WrongQos))
+            .unwrap();
+        assert_ne!(wrong_qos.qos, "transition", "the declared profile is not honoured");
+
+        let missing_enc = health
+            .iter()
+            .find(|e| e.fault == Some(Fault::MissingEncoding))
+            .unwrap();
+        assert!(missing_enc.encoding.is_none(), "the wire encoding is dropped");
+
+        // The body/timestamp faults leave the entry's fields at the valid
+        // resolution — they ride at send time.
+        let truncate = health
+            .iter()
+            .find(|e| e.fault == Some(Fault::Truncate))
+            .unwrap();
+        assert_eq!(truncate.qos, "transition");
+        assert!(truncate.key.ends_with("/health"));
+    }
+
+    /// The post-encode body perturbations produce exactly the deviation each
+    /// kind names — and never route through the validating encoder (that is
+    /// why they can violate the schema at all).
+    #[test]
+    fn body_faults_perturb_the_encoded_bytes() {
+        let valid = br#"{"ok":true,"load":3}"#.to_vec();
+
+        let truncated = Fault::Truncate.perturb_body(valid.clone());
+        assert_eq!(truncated.len(), valid.len() / 2, "half the bytes survive");
+
+        let wrong = Fault::WrongType.perturb_body(valid.clone());
+        let v: serde_json::Value = serde_json::from_slice(&wrong).unwrap();
+        assert!(v.is_string(), "a bare string where an object was declared");
+
+        let extra = Fault::ExtraField.perturb_body(valid.clone());
+        let v: serde_json::Value = serde_json::from_slice(&extra).unwrap();
+        assert_eq!(v["_fault"], true, "the undeclared field rides");
+        assert_eq!(v["ok"], true, "the valid fields survive alongside it");
     }
 }
