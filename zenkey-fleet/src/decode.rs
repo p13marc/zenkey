@@ -366,10 +366,15 @@ fn schema_document(schema: &TypeSchema) -> serde_json::Value {
 /// A producer serving no `describe` yields `served: false` — the honest
 /// degradation, never an error: §7 is a SHOULD, and silence about a type is
 /// not a claim about it.
+///
+/// `slices: None` means no registry was loaded, and `missing` comes back
+/// `None` with it: a totality gap computed against nothing is vacuously
+/// empty, and rendering that as "nothing missing" would report a verdict
+/// never obtained (RFC 09 §5.1 O4; #246).
 pub async fn schema_dump(
     store: &SchemaStore,
     session: &Session,
-    slices: &SliceSet,
+    slices: Option<&SliceSet>,
     producer: &str,
     type_filter: Option<&str>,
     full: bool,
@@ -381,7 +386,9 @@ pub async fn schema_dump(
             served: false,
             app: None,
             types: Vec::new(),
-            missing: Vec::new(),
+            // No served set to check against — totality is unaskable here,
+            // not clean.
+            missing: None,
         };
     };
     let types: Vec<crate::report::SchemaRow> = set
@@ -389,15 +396,20 @@ pub async fn schema_dump(
         .filter(|(name, _)| type_filter.is_none_or(|f| f == *name))
         .map(|(name, schema)| row(producer, name, schema, full || type_filter.is_some()))
         .collect();
-    let missing = slices
-        .get(producer)
-        .map(|slice| {
-            referenced_types(slice)
-                .into_iter()
-                .filter(|n| set.get(n).is_none())
-                .collect()
-        })
-        .unwrap_or_default();
+    // Checked only when a registry answered: a loaded registry with no slice
+    // for this producer declares nothing, so `Some(vec![])` is a real clean
+    // bill; no registry at all stays `None` (RFC 09 §5.1 O4).
+    let missing = slices.map(|slices| {
+        slices
+            .get(producer)
+            .map(|slice| {
+                referenced_types(slice)
+                    .into_iter()
+                    .filter(|n| set.get(n).is_none())
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
     crate::report::SchemaDump {
         producer: producer.to_string(),
         served: true,

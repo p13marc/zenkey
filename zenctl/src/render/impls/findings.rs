@@ -191,8 +191,10 @@ impl Render for SchemaDump {
         if let Some(app) = &self.app {
             e.insert("app".into(), app.clone().into());
         }
-        if !self.missing.is_empty() {
-            e.insert("missing".into(), serde_json::json!(self.missing));
+        // Present exactly when totality was checked — `[]` is the clean
+        // bill, absence is "not asked" (RFC 09 §5.1 O4).
+        if let Some(missing) = &self.missing {
+            e.insert("missing".into(), serde_json::json!(missing));
         }
         e
     }
@@ -254,18 +256,34 @@ impl Render for SchemaDump {
         if self.types.is_empty() {
             notes.push(Note::coverage("the served set declares no matching types"));
         }
-        if !self.missing.is_empty() {
-            // §7's totality clause, checked where the user is already looking
-            // rather than only in `doctor`.
-            notes.push(
-                Note::coverage(format!(
-                    "⚠ the registry references {} type(s) this set does not cover: {} \
-                     — the set MUST cover every referenced name",
-                    self.missing.len(),
-                    self.missing.join(", ")
-                ))
-                .cite("RFC 08 §7"),
-            );
+        match &self.missing {
+            // Not asked is not answered no: with no registry loaded, an
+            // empty gap would be vacuous, so the sentence says what was
+            // not checked instead (#246).
+            None => notes.push(
+                Note::coverage(
+                    "totality not checked — no registry loaded, so whether this set \
+                     covers every declared name is unknown, which is not the same \
+                     as nothing missing",
+                )
+                .cite("RFC 09 §5.1 O4"),
+            ),
+            Some(missing) if !missing.is_empty() => {
+                // §7's totality clause, checked where the user is already
+                // looking rather than only in `doctor`.
+                notes.push(
+                    Note::coverage(format!(
+                        "⚠ the registry references {} type(s) this set does not cover: {} \
+                         — the set MUST cover every referenced name",
+                        missing.len(),
+                        missing.join(", ")
+                    ))
+                    .cite("RFC 08 §7"),
+                );
+            }
+            // Checked, and every referenced name is covered — silence here
+            // is the clean bill, and the envelope's `[]` carries it.
+            Some(_) => {}
         }
         notes
     }

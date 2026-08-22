@@ -238,24 +238,48 @@ async fn row(
                 no_decode,
             )
             .await;
-            let v = sample::value_of(&d.rendering);
-            let mut obj = serde_json::json!({
-                "key": a.key,
-                "origin": a.origin,
-                "type": d.type_name,
-                "typed": v.typed,
-                "encoding": a.encoding,
-                "value": serde_json::from_str::<serde_json::Value>(&v.text)
-                    .unwrap_or(serde_json::Value::String(v.text)),
-            });
-            // Present only when the wire carried one (#117).
-            if let Some(att) = &a.attachment {
-                obj["attachment"] = attachment_json(att);
-                obj["attachment_bytes"] = att.len().into();
-            }
-            obj
+            value_row(a, &d)
         }
     }
+}
+
+/// The decoded half of `row`, pure so the verdict terms are testable: which
+/// fields exist is the report's honesty contract, not a rendering detail.
+fn value_row(a: &FleetAnswer, d: &sample::Decoded) -> serde_json::Value {
+    let v = sample::value_of(&d.rendering);
+    let mut obj = serde_json::json!({
+        "key": a.key,
+        "origin": a.origin,
+        "type": d.type_name,
+        "typed": v.typed,
+        "encoding": a.encoding,
+        "value": serde_json::from_str::<serde_json::Value>(&v.text)
+            .unwrap_or(serde_json::Value::String(v.text)),
+    });
+    // Present only when the wire carried one (#117).
+    if let Some(att) = &a.attachment {
+        obj["attachment"] = attachment_json(att);
+        obj["attachment_bytes"] = att.len().into();
+    }
+    // #159's rule, applied to this verb too (#246): present only when the
+    // pipeline was asked (`--no-decode` never asks) — and then always, so
+    // "valid" and "not checked" cannot be confused by their shared absence
+    // (RFC 09 §5.1 O4). The same terms as `topic echo`'s ndjson row — one
+    // decode ladder, two verbs, both honest about it.
+    if let Some(verdict) = &d.verdict {
+        obj["verdict"] = match verdict {
+            zenkey_fleet::Verdict::Valid => "valid".into(),
+            zenkey_fleet::Verdict::Invalid(errors) => {
+                obj["violations"] = serde_json::json!(errors);
+                "invalid".into()
+            }
+            zenkey_fleet::Verdict::NotValidated(r) => format!("not-validated: {r}").into(),
+        };
+        if let Some(e) = &d.decode_error {
+            obj["decode_error"] = serde_json::Value::String(e.clone());
+        }
+    }
+    obj
 }
 
 #[cfg(test)]
@@ -292,5 +316,48 @@ mod tests {
         assert_eq!(exit_code(&[]), 2);
         assert_eq!(exit_code(&[value("a"), value("b")]), 0);
         assert_eq!(exit_code(&[value("a"), error("b")]), 1);
+    }
+
+    fn decoded(
+        verdict: Option<zenkey_fleet::Verdict>,
+        decode_error: Option<String>,
+    ) -> sample::Decoded {
+        sample::Decoded {
+            type_name: None,
+            rendering: zenkey_fleet::decode::Rendering::Structural(zenkey_fleet::decode::structural(
+                b"1",
+            )),
+            verdict,
+            decode_error,
+        }
+    }
+
+    /// #246: the row carries the verdict on #159's terms — absent when the
+    /// pipeline was never asked (`--no-decode`), always present when it was,
+    /// so "valid" and "not checked" cannot be confused by a shared absence
+    /// (RFC 09 §5.1 O4).
+    #[test]
+    fn a_get_row_carries_the_verdict_only_when_asked() {
+        let a = value("acme");
+
+        let not_asked = value_row(&a, &decoded(None, None));
+        assert!(not_asked.get("verdict").is_none());
+        assert!(not_asked.get("violations").is_none());
+        assert!(not_asked.get("decode_error").is_none());
+
+        let valid = value_row(&a, &decoded(Some(zenkey_fleet::Verdict::Valid), None));
+        assert_eq!(valid["verdict"], "valid");
+        assert!(valid.get("violations").is_none());
+
+        let invalid = value_row(
+            &a,
+            &decoded(
+                Some(zenkey_fleet::Verdict::Invalid(vec!["f: not a u64".into()])),
+                Some("boom".into()),
+            ),
+        );
+        assert_eq!(invalid["verdict"], "invalid");
+        assert_eq!(invalid["violations"], serde_json::json!(["f: not a u64"]));
+        assert_eq!(invalid["decode_error"], "boom");
     }
 }
