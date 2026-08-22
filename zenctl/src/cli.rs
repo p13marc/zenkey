@@ -104,6 +104,71 @@ pub struct Cli {
     pub(crate) command: Command,
 }
 
+/// The `gen` verb's flags (#162/#163) — one struct so the verb's whole body,
+/// the fault double-guard included, lives in `cmd/generate.rs` (#209's rule:
+/// `run()` dispatches, it does not compute).
+#[derive(clap::Args)]
+pub(crate) struct GenArgs {
+    /// Only this producer's subjects.
+    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: Option<String>,
+    /// Only subjects whose declared path contains this.
+    #[arg(long)]
+    pub(crate) subject: Option<String>,
+    /// Value for a `{var}` in a declared path (repeatable, k=v).
+    /// Unnamed vars get deterministic synthetic values, stated in the
+    /// plan.
+    #[arg(long = "var", value_name = "K=V")]
+    pub(crate) vars: Vec<String>,
+    /// Origin the generated keys claim (h-<12 hex>). Default: derived
+    /// from this session's zid — printed either way, and stamped into
+    /// the marker.
+    #[arg(long)]
+    pub(crate) origin: Option<String>,
+    /// Override every entry's rate (Hz). Default: registry-driven —
+    /// telemetry 1 Hz, state refreshes at ttl/2, events inside their
+    /// declared budget.
+    #[arg(long, value_name = "HZ")]
+    pub(crate) rate: Option<f64>,
+    /// Send-timing shape (all deterministic under --seed).
+    #[arg(long, value_enum, default_value = "steady")]
+    pub(crate) pattern: Pattern,
+    /// Run length, seconds.
+    #[arg(long, default_value_t = 10.0)]
+    pub(crate) duration: f64,
+    /// Synthesis/jitter seed — same seed, same run.
+    #[arg(long, default_value_t = 42)]
+    pub(crate) seed: u64,
+    /// Inject fault(s) into otherwise-valid samples (#163) for
+    /// consumer-robustness testing on a bus you own. Comma-separated
+    /// kinds: truncate, wrong-type, extra-field, unregistered-key,
+    /// wrong-qos, missing-encoding, unstamped. Each perturbs one dimension
+    /// post-synthesis; the plan states the delta per key, and every
+    /// faulted sample's marker carries fault=<kind> (RFC 09 §5.3).
+    /// DOUBLE-GUARDED: requires --i-know AND an explicit endpoint or
+    /// --base — faults must never land on the ambient context default.
+    #[arg(long = "fault", value_name = "KIND", value_delimiter = ',')]
+    pub(crate) fault: Vec<String>,
+    /// SchemaSet JSON document (RFC 08 §7) for payload shapes when the
+    /// bus serves no describe (the registry carries type names, not
+    /// shapes).
+    #[arg(long, value_name = "FILE")]
+    pub(crate) schema_set: Option<PathBuf>,
+    /// Also answer introspect (and describe, with --schema-set) for the
+    /// impersonated producers — a complete mock producer, not just a
+    /// firehose.
+    #[arg(long)]
+    pub(crate) serve_describe: bool,
+    /// Print the plan and publish nothing.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Acknowledge a run wider than 10 subjects.
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
 #[derive(Subcommand)]
 pub(crate) enum Command {
     /// Subjects: what data exists, and what it means.
@@ -255,66 +320,7 @@ pub(crate) enum Command {
     /// or a capture can tell this traffic from real. Events stay inside
     /// their declared rate budget on write-once keys. A run wider than 10
     /// subjects needs --i-know.
-    Gen {
-        /// Only this producer's subjects.
-        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
-        producer: Option<String>,
-        /// Only subjects whose declared path contains this.
-        #[arg(long)]
-        subject: Option<String>,
-        /// Value for a `{var}` in a declared path (repeatable, k=v).
-        /// Unnamed vars get deterministic synthetic values, stated in the
-        /// plan.
-        #[arg(long = "var", value_name = "K=V")]
-        vars: Vec<String>,
-        /// Origin the generated keys claim (h-<12 hex>). Default: derived
-        /// from this session's zid — printed either way, and stamped into
-        /// the marker.
-        #[arg(long)]
-        origin: Option<String>,
-        /// Override every entry's rate (Hz). Default: registry-driven —
-        /// telemetry 1 Hz, state refreshes at ttl/2, events inside their
-        /// declared budget.
-        #[arg(long, value_name = "HZ")]
-        rate: Option<f64>,
-        /// Send-timing shape (all deterministic under --seed).
-        #[arg(long, value_enum, default_value = "steady")]
-        pattern: Pattern,
-        /// Run length, seconds.
-        #[arg(long, default_value_t = 10.0)]
-        duration: f64,
-        /// Synthesis/jitter seed — same seed, same run.
-        #[arg(long, default_value_t = 42)]
-        seed: u64,
-        /// Inject fault(s) into otherwise-valid samples (#163) for
-        /// consumer-robustness testing on a bus you own. Comma-separated
-        /// kinds: truncate, wrong-type, extra-field, unregistered-key,
-        /// wrong-qos, missing-encoding, unstamped. Each perturbs one dimension
-        /// post-synthesis; the plan states the delta per key, and every
-        /// faulted sample's marker carries fault=<kind> (RFC 09 §5.3).
-        /// DOUBLE-GUARDED: requires --i-know AND an explicit endpoint or
-        /// --base — faults must never land on the ambient context default.
-        #[arg(long = "fault", value_name = "KIND", value_delimiter = ',')]
-        fault: Vec<String>,
-        /// SchemaSet JSON document (RFC 08 §7) for payload shapes when the
-        /// bus serves no describe (the registry carries type names, not
-        /// shapes).
-        #[arg(long, value_name = "FILE")]
-        schema_set: Option<PathBuf>,
-        /// Also answer introspect (and describe, with --schema-set) for the
-        /// impersonated producers — a complete mock producer, not just a
-        /// firehose.
-        #[arg(long)]
-        serve_describe: bool,
-        /// Print the plan and publish nothing.
-        #[arg(long)]
-        dry_run: bool,
-        /// Acknowledge a run wider than 10 subjects.
-        #[arg(long = "i-know")]
-        i_know: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Gen(GenArgs),
     /// Await an expectation on the bus, exit-coded for CI (#160).
     ///
     /// The subscriber is declared BEFORE the window opens (not-asked is not

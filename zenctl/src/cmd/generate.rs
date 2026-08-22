@@ -38,28 +38,43 @@ impl From<Pattern> for GenPattern {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    producer: Option<&str>,
-    subject: Option<&str>,
-    vars: &[String],
-    origin: Option<&str>,
-    rate: Option<f64>,
-    pattern: Pattern,
-    duration: f64,
-    seed: u64,
-    fault: &[String],
-    explicit_target: bool,
-    schema_set: Option<&std::path::Path>,
-    serve_describe: bool,
-    dry_run: bool,
-    i_know: bool,
-    args: &Bus,
-) -> Result<()> {
+pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
+    // The fault-injection double-guard's second half (#163): an explicit
+    // endpoint or an explicit --base/ZENCTL_BASE, never the ambient named
+    // context. Computed on the raw flags, because the resolved `Bus` has
+    // already folded the context in and can no longer tell "you asked for
+    // this bus" from "your shell was pointed at it".
+    let explicit_target = cli.bus.base.is_some()
+        || !cli.bus.connect.is_empty()
+        || !cli.bus.listen.is_empty()
+        || cli.bus.zenoh_config.is_some();
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::GenArgs {
+        producer,
+        subject,
+        vars,
+        origin,
+        rate,
+        pattern,
+        duration,
+        seed,
+        fault,
+        schema_set,
+        serve_describe,
+        dry_run,
+        i_know,
+        bus: _,
+    } = cli;
+    let (producer, subject, origin) = (producer.as_deref(), subject.as_deref(), origin.as_deref());
+    let (vars, fault, schema_set) = (&vars[..], &fault[..], schema_set.as_deref());
     // Fault injection is double-guarded (#163): it produces deliberately
     // near-valid traffic, so it may only ever run knowingly, and only against
     // a bus the operator named — never the ambient context default.
-    let faults: Vec<Fault> = fault.iter().map(|s| Fault::parse(s)).collect::<Result<_>>()?;
+    let faults: Vec<Fault> = fault
+        .iter()
+        .map(|s| Fault::parse(s))
+        .collect::<Result<_>>()?;
     if !faults.is_empty() {
         if !i_know {
             anyhow::bail!(
