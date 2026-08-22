@@ -16,12 +16,23 @@
 //! The semantic core is three tiny rules — [`judge_shortfall`],
 //! [`judge_excess`], [`judge_silence`] — shared with [`crate::expect`], so
 //! the watchdog and the CI assertion cannot drift about what a drop means.
+//!
+//! [`run_watchdog`] is the continuous observer over the vocabulary:
+//! **foreground, explicitly launched, single-purpose, one process per
+//! invocation, no shared state** — not the hidden, auto-started,
+//! discovery-caching daemon the redesign ledger rejected
+//! (`docs/redesign-2026-07.md` §6.1). It emits [`Transition`]s: one per
+//! genuine state change, none per unchanged tick.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 use serde::Serialize;
+use zenoh::Session;
 
+use crate::decode::SchemaStore;
+use crate::registry::SliceSet;
 use crate::report::DoctorReport;
 
 /// One condition's evaluation state. Three, not two (RFC 09 §5.1 O4/O6):
@@ -492,6 +503,276 @@ impl RuleState {
             evidence: eval.evidence,
         })
     }
+}
+
+// ─── the watchdog runner ────────────────────────────────────────────────────
+
+/// What a watchdog run watches, and for how long.
+#[derive(Debug, Clone)]
+pub struct WatchdogSpec {
+    /// The rules, evaluated every tick.
+    pub rules: Vec<Condition>,
+    /// Evaluation cadence. A tick that runs long (a doctor rule's fan-in)
+    /// slides rather than backlogs; windows are measured, not nominal.
+    pub tick: Duration,
+    /// Stop after this many ticks; `None` = run until the caller stops it.
+    pub ticks: Option<u64>,
+    /// Per-ask timeout for the roster and doctor conditions.
+    pub timeout: Duration,
+}
+
+/// What a bounded watchdog run cost and said.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct WatchdogSummary {
+    pub ticks: u64,
+    pub transitions: u64,
+}
+
+/// How many decode attempts each key gets per tick under an
+/// `invalid-payload` rule — the same budget the doctor listen phase runs,
+/// for the same reason: a watchdog must not become a load test.
+const DECODE_BUDGET: u8 = 2;
+
+/// Watch the rules and emit one [`Transition`] per genuine change, none per
+/// unchanged tick. The subscriber set is declared before the first window
+/// opens (O4); every selector rule is judged per tick over the measured
+/// window, doctor and roster rules by one ask per tick each.
+pub async fn run_watchdog(
+    session: &Session,
+    base: &str,
+    slices: &SliceSet,
+    store: &SchemaStore,
+    spec: &WatchdogSpec,
+    emit: &mut (dyn FnMut(&Transition) + Send),
+) -> Result<WatchdogSummary> {
+    use crate::{FleetEvent, StreamItem};
+
+    #[derive(Default, Clone, Copy)]
+    struct TickCounters {
+        samples: u64,
+        invalid: u64,
+        checked: u64,
+        qos_mismatched: u64,
+        qos_judged: u64,
+        synthetic: u64,
+    }
+
+    let mut states: Vec<RuleState> = spec
+        .rules
+        .iter()
+        .map(|c| RuleState::new(c.to_string()))
+        .collect();
+
+    // Declared before the window opens — not-asked must never read as "no".
+    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+    let mut events = monitor.events();
+    let mut watched: Vec<&str> = Vec::new();
+    for rule in &spec.rules {
+        if let Some(sel) = rule.selector()
+            && !watched.contains(&sel)
+        {
+            monitor.watch(sel).await?;
+            watched.push(sel);
+        }
+    }
+    // Per-rule selector, compiled once for sample attribution.
+    let keyexprs: Vec<Option<zenoh::key_expr::KeyExpr<'static>>> = spec
+        .rules
+        .iter()
+        .map(|rule| {
+            rule.selector()
+                .map(|sel| {
+                    zenoh::key_expr::KeyExpr::try_from(sel.to_string())
+                        .map_err(|e| anyhow::anyhow!("{sel:?} is not a key expression: {e}"))
+                })
+                .transpose()
+        })
+        .collect::<Result<_>>()?;
+    let wants_doctor = spec
+        .rules
+        .iter()
+        .any(|r| matches!(r, Condition::DoctorCheck { .. }));
+    let wants_roster = spec
+        .rules
+        .iter()
+        .any(|r| matches!(r, Condition::OriginDown { .. }));
+    let locals: Vec<zenkey::RegistrySlice> = slices.slices().to_vec();
+
+    let started = tokio::time::Instant::now();
+    let mut counters: Vec<TickCounters> = vec![TickCounters::default(); spec.rules.len()];
+    let mut last_sample: Vec<Option<tokio::time::Instant>> = vec![None; spec.rules.len()];
+    let mut last_drop: Option<tokio::time::Instant> = None;
+    let mut dropped_tick: u64 = 0;
+    let mut facts_cache: BTreeMap<String, crate::facts::KeyFacts> = BTreeMap::new();
+    let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
+
+    let mut summary = WatchdogSummary {
+        ticks: 0,
+        transitions: 0,
+    };
+    let mut last_eval = started;
+    let mut closed = false;
+    loop {
+        let deadline = last_eval + spec.tick;
+        while !closed {
+            let item = tokio::select! {
+                item = events.recv() => item,
+                _ = tokio::time::sleep_until(deadline) => break,
+            };
+            match item {
+                Some(StreamItem::Event(FleetEvent::Sample(s))) => {
+                    let Ok(key) = zenoh::key_expr::KeyExpr::try_from(s.key.as_str()) else {
+                        continue;
+                    };
+                    let synthetic = s
+                        .attachment
+                        .as_ref()
+                        .is_some_and(|a| crate::doctor::is_synthetic_marker(&a.to_bytes()));
+                    // Decode once per sample (budgeted per key per tick),
+                    // shared by every invalid-payload rule the key matches.
+                    let mut verdict: Option<crate::Verdict> = None;
+                    for (i, rule) in spec.rules.iter().enumerate() {
+                        let Some(sel) = &keyexprs[i] else { continue };
+                        if !sel.intersects(&key) {
+                            continue;
+                        }
+                        counters[i].samples += 1;
+                        if synthetic {
+                            counters[i].synthetic += 1;
+                        }
+                        last_sample[i] = Some(tokio::time::Instant::now());
+                        match rule {
+                            Condition::InvalidPayload { .. } => {
+                                if verdict.is_none() {
+                                    let budget = decode_budget.entry(s.key.clone()).or_default();
+                                    if *budget < DECODE_BUDGET {
+                                        *budget += 1;
+                                        let d = crate::decode::decode_sample(
+                                            store,
+                                            session,
+                                            slices,
+                                            base,
+                                            &s.key,
+                                            Some(&s.encoding),
+                                            &s.payload.to_bytes(),
+                                        )
+                                        .await;
+                                        verdict = Some(d.verdict);
+                                    }
+                                }
+                                if let Some(v) = &verdict {
+                                    counters[i].checked += 1;
+                                    if !matches!(v, crate::Verdict::Valid) {
+                                        counters[i].invalid += 1;
+                                    }
+                                }
+                            }
+                            Condition::QosMismatch { .. } => {
+                                let facts = facts_cache.entry(s.key.clone()).or_insert_with(|| {
+                                    let mut f = crate::facts::KeyFacts::project(base, &s.key);
+                                    f.resolve(slices);
+                                    f
+                                });
+                                if let crate::facts::Registration::Registered(sf) =
+                                    &facts.registration
+                                    && let Some(profile) = sf.declared_qos()
+                                {
+                                    counters[i].qos_judged += 1;
+                                    if !s.qos_matches(profile) {
+                                        counters[i].qos_mismatched += 1;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Some(StreamItem::Dropped(n)) => {
+                    dropped_tick += n;
+                    last_drop = Some(tokio::time::Instant::now());
+                }
+                Some(_) => {}
+                None => closed = true,
+            }
+        }
+
+        // Evaluate the tick over the measured window, then say only what
+        // changed.
+        let now = tokio::time::Instant::now();
+        let at = crate::record::rfc3339_now();
+        let doctor_outcome = if wants_doctor {
+            Some(
+                crate::doctor::run_doctor(
+                    session,
+                    base,
+                    &locals,
+                    &crate::doctor::DoctorSpec {
+                        deep: false,
+                        sample: None,
+                        timeout: spec.timeout,
+                        listen: None,
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string()),
+            )
+        } else {
+            None
+        };
+        let roster_outcome = if wants_roster {
+            Some(
+                crate::roster(session, base, spec.timeout)
+                    .await
+                    .map_err(|e| e.to_string()),
+            )
+        } else {
+            None
+        };
+        for (i, rule) in spec.rules.iter().enumerate() {
+            let eval = match rule {
+                Condition::DoctorCheck { .. } => {
+                    let outcome = doctor_outcome
+                        .as_ref()
+                        .expect("a doctor rule ran the doctor");
+                    rule.judge_doctor(outcome.as_ref().map_err(String::as_str))
+                }
+                Condition::OriginDown { .. } => {
+                    let outcome = roster_outcome
+                        .as_ref()
+                        .expect("an origin rule asked the roster");
+                    rule.judge_roster(outcome.as_ref().map_err(String::as_str))
+                }
+                _ => rule.judge_window(&Window {
+                    window_s: (now - last_eval).as_secs_f64(),
+                    observed_s: (now - started).as_secs_f64(),
+                    samples: counters[i].samples,
+                    dropped: dropped_tick,
+                    last_sample_ago_s: last_sample[i].map(|t| (now - t).as_secs_f64()),
+                    last_drop_ago_s: last_drop.map(|t| (now - t).as_secs_f64()),
+                    invalid: counters[i].invalid,
+                    checked: counters[i].checked,
+                    qos_mismatched: counters[i].qos_mismatched,
+                    qos_judged: counters[i].qos_judged,
+                    synthetic: counters[i].synthetic,
+                }),
+            }
+            .expect("every rule kind has a judge");
+            if let Some(transition) = states[i].observe(eval, &at) {
+                summary.transitions += 1;
+                emit(&transition);
+            }
+        }
+        counters.fill(TickCounters::default());
+        dropped_tick = 0;
+        decode_budget.clear();
+        summary.ticks += 1;
+        if closed || spec.ticks.is_some_and(|n| summary.ticks >= n) {
+            break;
+        }
+        last_eval = now;
+    }
+    monitor.stop();
+    Ok(summary)
 }
 
 #[cfg(test)]

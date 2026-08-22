@@ -599,6 +599,15 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
+        Command::Watchdog {
+            rules,
+            tick,
+            ticks,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::watchdog::run(&rules, tick, ticks, &bus).await
+        }
         Command::Probe {
             target,
             producer,

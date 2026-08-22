@@ -42,6 +42,7 @@ pub mod scout;
 pub mod serve;
 pub mod storage;
 pub mod watch;
+pub mod watchdog;
 
 use anyhow::{Result, anyhow};
 

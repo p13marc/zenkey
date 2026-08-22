@@ -57,7 +57,10 @@ pub use body::{
     BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
 };
 #[cfg(feature = "decode")]
-pub use condition::{CondState, Condition, Eval, RuleState, Transition, Window};
+pub use condition::{
+    CondState, Condition, Eval, RuleState, Transition, WatchdogSpec, WatchdogSummary, Window,
+    run_watchdog,
+};
 #[cfg(feature = "decode")]
 pub use decode::{
     DecodedSample, SchemaDrift, TotalityGap, schema_drift, schema_dump, schemas_for_type,

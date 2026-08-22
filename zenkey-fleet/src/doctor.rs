@@ -415,8 +415,9 @@ pub(crate) fn rate_cap_per_hour(rate: &str) -> Option<u64> {
 
 /// Does an attachment carry the RFC 09 §5.2 synthetic-traffic marker
 /// (`{"synthetic": true, …}`, #162)? Generated traffic judged as real would
-/// be a self-inflicted finding, so the observation counts it separately.
-fn is_synthetic_marker(attachment: &[u8]) -> bool {
+/// be a self-inflicted finding, so the observation counts it separately —
+/// here and in the watchdog's windows (`condition`, #227).
+pub(crate) fn is_synthetic_marker(attachment: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(attachment)
         .ok()
         .and_then(|v| v.get("synthetic").and_then(serde_json::Value::as_bool))
