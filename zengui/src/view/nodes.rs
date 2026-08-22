@@ -13,7 +13,7 @@ use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
 use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
 use crate::view::kit;
 use crate::view::theme::{PresenceTone, colors};
-use crate::view::tokens::{font, space};
+use crate::view::tokens::space;
 
 /// The pane's interactions, nested per the `CallMsg` precedent.
 #[derive(Debug, Clone)]
@@ -99,25 +99,21 @@ fn origin_card<'a>(
     let mut body = column![].spacing(space::XS);
 
     let header = row![
-        iced::widget::button(
-            text(origin)
-                .size(font::EMPHASIS)
-                .font(iced::Font::MONOSPACE)
-        )
-        .style(iced::widget::button::text)
-        .padding(0)
-        // Straight to the workspace's subject rather than to this pane
-        // (#181): a card is one of several ways to point the window at an
-        // origin, and the pane is not the owner of what is being looked at.
-        // Re-click deselects, and the pane knows that because it is told
-        // which card is current.
-        .on_press(Message::Subject(SubjectMsg::Select(if selected {
-            Subject::None
-        } else {
-            Subject::Origin(origin.to_string())
-        }))),
+        iced::widget::button(kit::emphasis(origin).font(iced::Font::MONOSPACE))
+            .style(iced::widget::button::text)
+            .padding(0)
+            // Straight to the workspace's subject rather than to this pane
+            // (#181): a card is one of several ways to point the window at an
+            // origin, and the pane is not the owner of what is being looked at.
+            // Re-click deselects, and the pane knows that because it is told
+            // which card is current.
+            .on_press(Message::Subject(SubjectMsg::Select(if selected {
+                Subject::None
+            } else {
+                Subject::Origin(origin.to_string())
+            }))),
         iced::widget::space::horizontal(),
-        iced::widget::button(text("show in tree").size(font::CAPTION))
+        iced::widget::button(kit::caption("show in tree"))
             .padding(2)
             .on_press(msg(NodesMsg::ShowInTree(origin.to_string()))),
     ]
@@ -200,8 +196,7 @@ pub fn detail_section(detail: &DetailState) -> Element<'_, Message> {
     match detail {
         DetailState::NotAsked => kit::muted("select to ask node_info"),
         DetailState::Loading(origin) => kit::muted(format!("asking node_info for {origin}…")),
-        DetailState::Loaded(_, Err(e)) => text(format!("node_info failed: {e}"))
-            .size(font::CAPTION)
+        DetailState::Loaded(_, Err(e)) => kit::body(format!("node_info failed: {e}"))
             .style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).danger()),
             })
@@ -266,11 +261,10 @@ pub fn detail_section(detail: &DetailState) -> Element<'_, Message> {
                         if f.stale { "  STALE" } else { "" }
                     );
                     if f.stale {
-                        col = col.push(text(line).size(font::CAPTION).style(
-                            |theme: &iced::Theme| text::Style {
+                        col =
+                            col.push(kit::caption(line).style(|theme: &iced::Theme| text::Style {
                                 color: Some(colors(theme).danger()),
-                            },
-                        ));
+                            }));
                     } else {
                         col = col.push(kit::muted(line));
                     }

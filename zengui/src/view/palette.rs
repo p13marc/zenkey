@@ -18,7 +18,7 @@
 //! nothing it has not seen, which keeps the overlay from inventing a keyspace (O4 — a suggestion is not an observation,
 //! and these are only ever the latter).
 
-use iced::widget::{Column, column, container, row, text, text_input};
+use iced::widget::{Column, column, container, row, text_input};
 use iced::{Element, Length};
 
 use crate::message::{
@@ -297,10 +297,8 @@ fn list<'a>(
         body = body.push(
             iced::widget::button(
                 row![
-                    text(if selected { "›" } else { " " }).size(font::CAPTION),
-                    text(label.clone())
-                        .size(font::CAPTION)
-                        .font(iced::Font::MONOSPACE),
+                    kit::caption(if selected { "›" } else { " " }),
+                    kit::caption(label.clone()).font(iced::Font::MONOSPACE),
                 ]
                 .spacing(space::SM),
             )
@@ -345,8 +343,7 @@ fn help<'a>() -> Element<'a, Message> {
     for b in crate::shortcuts::map() {
         body = body.push(
             row![
-                text(b.keys)
-                    .size(font::CAPTION)
+                kit::caption(b.keys)
                     .font(iced::Font::MONOSPACE)
                     .width(Length::Fixed(90.0)),
                 kit::muted(b.what),

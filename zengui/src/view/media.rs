@@ -200,7 +200,7 @@ pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Colum
                     );
                     if decodable(&m.encoding) {
                         col = col.push(
-                            button(text(label).size(font::CAPTION))
+                            button(kit::caption(label))
                                 .on_press(msg(MediaMsg::DeclPicked {
                                     producer: slice.name.clone(),
                                     path: m.path.clone(),
@@ -232,10 +232,10 @@ pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Colum
         producer,
         subpath,
         match &state.viewing {
-            None => button(text("view").size(font::CAPTION))
+            None => button(kit::caption("view"))
                 .on_press(msg(MediaMsg::View))
                 .padding(4),
-            Some(_) => button(text("stop").size(font::CAPTION))
+            Some(_) => button(kit::caption("stop"))
                 .on_press(msg(MediaMsg::Stop))
                 .padding(4),
         },
@@ -246,11 +246,9 @@ pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Colum
 
     if let Some(e) = &state.error {
         col = col.push(
-            text(e.clone())
-                .size(font::CAPTION)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(super::theme::colors(theme).danger()),
-                }),
+            kit::body(e.clone()).style(|theme: &iced::Theme| text::Style {
+                color: Some(super::theme::colors(theme).danger()),
+            }),
         );
     }
 

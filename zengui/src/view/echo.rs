@@ -284,25 +284,26 @@ pub fn section<'a>(
             .on_input(|t| msg(EchoMsg::KeyFilterChanged(t)))
             .size(font::CAPTION)
             .width(Length::Fixed(190.0)),
-        button(text(if view.following { "pause" } else { "follow" }).size(font::CAPTION))
-            .on_press(msg(EchoMsg::FollowToggled))
-            .padding(4),
+        button(kit::caption(if view.following {
+            "pause"
+        } else {
+            "follow"
+        }))
+        .on_press(msg(EchoMsg::FollowToggled))
+        .padding(4),
         // The publish-verification loop in one control (#183): pin the stream
         // to whatever the window is looking at, or read the whole scope.
-        button(
-            text(if view.follow_subject {
-                "pinned to subject"
-            } else {
-                "pin to subject"
-            })
-            .size(font::CAPTION),
-        )
+        button(kit::caption(if view.follow_subject {
+            "pinned to subject"
+        } else {
+            "pin to subject"
+        }),)
         .on_press(msg(EchoMsg::FollowSubjectToggled))
         .padding(4),
-        button(text("ndjson").size(font::CAPTION))
+        button(kit::caption("ndjson"))
             .on_press(msg(EchoMsg::Export))
             .padding(4),
-        button(text("clear").size(font::CAPTION))
+        button(kit::caption("clear"))
             .on_press(msg(EchoMsg::Clear))
             .padding(4),
     ]
@@ -355,13 +356,11 @@ pub fn section<'a>(
 
     let mut col = column![header];
     if let Some(err) = &view.key_filter_error {
-        col = col.push(
-            text(format!("key filter not applied: {err}"))
-                .size(font::CAPTION)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                }),
-        );
+        col = col.push(kit::body(format!("key filter not applied: {err}")).style(
+            |theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).danger()),
+            },
+        ));
     }
     col = col.push(state_strip(ring, view, matched, drawn, next_seq));
     col = col.push(loss_strip(ring));
@@ -393,8 +392,7 @@ fn state_strip<'a>(
         parts.push(format!("resumed — {gap} arrived while paused"));
     }
     let paused = view.paused_at.is_some();
-    text(parts.join(" · "))
-        .size(font::CAPTION)
+    kit::caption(parts.join(" · "))
         .style(move |theme: &iced::Theme| text::Style {
             color: Some(if paused {
                 colors(theme).warning()
@@ -422,8 +420,7 @@ fn loss_strip<'a>(ring: &EchoRing) -> Element<'a, Message> {
         ring.coalesced(),
         ring.evicted(),
     );
-    text(msg)
-        .size(font::CAPTION)
+    kit::caption(msg)
         .style(|theme: &iced::Theme| text::Style {
             color: Some(colors(theme).warning()),
         })
@@ -435,8 +432,7 @@ fn line_view(line: &EchoLine) -> Element<'_, Message> {
     // Up to 300 rows are drawn per frame and each was cloning two `String`s
     // for a rendering identical to the last one's; `on_press_with` moves the
     // third clone from every frame to the one frame somebody actually clicks.
-    let key = text(line.key.as_str())
-        .size(font::CAPTION)
+    let key = kit::body(line.key.as_str())
         .font(iced::Font::MONOSPACE)
         .style(|theme: &iced::Theme| text::Style {
             color: Some(colors(theme).text()),
@@ -445,8 +441,7 @@ fn line_view(line: &EchoLine) -> Element<'_, Message> {
     // A tombstone is authoritative retirement, not an empty value
     // (RFC 04 §1.2) — so it must not look like a put with no payload.
     let is_delete = line.is_delete;
-    let preview = text(line.preview.as_str())
-        .size(font::CAPTION)
+    let preview = kit::body(line.preview.as_str())
         .font(iced::Font::MONOSPACE)
         .style(move |theme: &iced::Theme| text::Style {
             color: Some(if is_delete {

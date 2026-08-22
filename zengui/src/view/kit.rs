@@ -1,13 +1,47 @@
 //! Small shared widgets.
 //!
 //! Together with [`super::theme`] this is the only other place allowed to name
-//! a color.
+//! a color — and the only place allowed to call `text(` at all (#191): every
+//! view builds its text through the five role constructors below, so the type
+//! scale is assigned by role, not by taste, and a grep can enforce it.
 
-use iced::widget::{column, container, row, text};
+use iced::widget::text::IntoFragment;
+use iced::widget::{Text, column, container, row, text};
 use iced::{Border, Color, Element, Length};
 
 use super::theme::colors;
 use super::tokens::{font, space};
+
+/// The subject (`font::TITLE`). One per window: the selected key or producer
+/// in the location bar. If two of these are visible, one of them is lying
+/// about being the subject.
+pub fn title<'a>(s: impl IntoFragment<'a>) -> Text<'a> {
+    text(s).size(font::TITLE)
+}
+
+/// A dock or pane header (`font::SECTION`). See also [`section_header`],
+/// which pairs one of these with trailing controls.
+pub fn section<'a>(s: impl IntoFragment<'a>) -> Text<'a> {
+    text(s).size(font::SECTION)
+}
+
+/// Emphasis (`font::EMPHASIS`): card titles, key values, the number in a
+/// stat tile, the roster origin.
+pub fn emphasis<'a>(s: impl IntoFragment<'a>) -> Text<'a> {
+    text(s).size(font::EMPHASIS)
+}
+
+/// Prose (`font::BODY`): empty-state explanations, echo lines, log lines,
+/// help text — anything meant to be *read* rather than scanned.
+pub fn body<'a>(s: impl IntoFragment<'a>) -> Text<'a> {
+    text(s).size(font::BODY)
+}
+
+/// Metadata (`font::CAPTION`): table cells, badges, timestamps, byte counts.
+/// The dense stuff — which is exactly why it must not be the whole app.
+pub fn caption<'a>(s: impl IntoFragment<'a>) -> Text<'a> {
+    text(s).size(font::CAPTION)
+}
 
 /// A bordered panel.
 pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
@@ -36,7 +70,7 @@ pub fn tab<'a, M: Clone + 'a>(
     active: bool,
     on_press: M,
 ) -> Element<'a, M> {
-    iced::widget::button(text(label.into()).size(font::CAPTION))
+    iced::widget::button(caption(label.into()))
         .padding([2, 8])
         .style(move |theme: &iced::Theme, _status| {
             let c = colors(theme);
@@ -65,11 +99,9 @@ pub fn section_header<'a, M: 'a>(
     trailing: Option<Element<'a, M>>,
 ) -> Element<'a, M> {
     let mut r = row![
-        text(title.into())
-            .size(font::SECTION)
-            .style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).text()),
-            })
+        section(title.into()).style(|theme: &iced::Theme| text::Style {
+            color: Some(colors(theme).text()),
+        })
     ]
     .spacing(space::SM)
     .align_y(iced::Alignment::Center);
@@ -87,12 +119,8 @@ pub fn section_header<'a, M: 'a>(
 /// colorblind user would otherwise have to guess at.
 pub fn badge<'a, M: 'a>(color: Color, label: impl Into<String>) -> Element<'a, M> {
     row![
-        text("●")
-            .size(font::CAPTION)
-            .style(move |_: &iced::Theme| text::Style { color: Some(color) }),
-        text(label.into())
-            .size(font::CAPTION)
-            .style(move |_: &iced::Theme| text::Style { color: Some(color) }),
+        caption("●").style(move |_: &iced::Theme| text::Style { color: Some(color) }),
+        caption(label.into()).style(move |_: &iced::Theme| text::Style { color: Some(color) }),
     ]
     .spacing(space::XS)
     .align_y(iced::Alignment::Center)
@@ -111,8 +139,8 @@ pub fn tone_badge<'a, M: 'a>(
         color: Some(colors(theme).registration(tone)),
     };
     row![
-        text("●").size(font::CAPTION).style(style),
-        text(label.into()).size(font::CAPTION).style(style),
+        caption("●").style(style),
+        caption(label.into()).style(style),
     ]
     .spacing(space::XS)
     .align_y(iced::Alignment::Center)
@@ -128,8 +156,8 @@ pub fn badge_presence<'a, M: 'a>(
         color: Some(colors(theme).presence(tone)),
     };
     row![
-        text("●").size(font::CAPTION).style(style),
-        text(label.into()).size(font::CAPTION).style(style),
+        caption("●").style(style),
+        caption(label.into()).style(style),
     ]
     .spacing(space::XS)
     .align_y(iced::Alignment::Center)
@@ -151,8 +179,8 @@ pub fn badge_severity<'a, M: 'a>(
         super::theme::SeverityTone::Info => "·",
     };
     row![
-        text(mark).size(font::CAPTION).style(style),
-        text(label.into()).size(font::CAPTION).style(style),
+        caption(mark).style(style),
+        caption(label.into()).style(style),
     ]
     .spacing(space::XS)
     .align_y(iced::Alignment::Center)
@@ -175,8 +203,8 @@ pub fn badge_coverage<'a, M: 'a>(
         super::theme::CoverageTone::Uncovered => "·",
     };
     row![
-        text(mark).size(font::CAPTION).style(style),
-        text(label.into()).size(font::CAPTION).style(style),
+        caption(mark).style(style),
+        caption(label.into()).style(style),
     ]
     .spacing(space::XS)
     .align_y(iced::Alignment::Center)
@@ -185,20 +213,16 @@ pub fn badge_coverage<'a, M: 'a>(
 
 /// Dimmed caption text.
 pub fn muted<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
-    text(s.into())
-        .size(font::CAPTION)
+    caption(s.into())
         .style(|theme: &iced::Theme| text::Style {
             color: Some(colors(theme).text_muted()),
         })
         .into()
 }
 
-/// Monospaced body text — keys, payload previews.
+/// Monospaced caption text — keys, payload previews, dense table cells.
 pub fn mono<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
-    text(s.into())
-        .size(font::CAPTION)
-        .font(iced::Font::MONOSPACE)
-        .into()
+    caption(s.into()).font(iced::Font::MONOSPACE).into()
 }
 
 /// A placeholder for a pane with nothing to show.
@@ -212,12 +236,12 @@ pub fn empty_state<'a, M: 'a>(
 ) -> Element<'a, M> {
     container(
         column![
-            text(headline.into())
-                .size(font::BODY)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).text_muted()),
-                }),
-            muted(why.into()),
+            emphasis(headline.into()).style(|theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).text_muted()),
+            }),
+            body(why.into()).style(|theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).text_muted()),
+            }),
         ]
         .spacing(space::SM)
         .align_x(iced::Alignment::Center),

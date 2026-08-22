@@ -63,7 +63,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message
     } else {
         "run doctor"
     };
-    let mut run = iced::widget::button(text(run_label).size(font::CAPTION)).padding(4);
+    let mut run = iced::widget::button(kit::caption(run_label)).padding(4);
     if !state.in_flight {
         run = run.on_press(msg(DoctorMsg::Run));
     }
@@ -81,7 +81,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message
 
     // The schema cache's escape hatch lives here because it is the same kind
     // of thing as the run button: an explicit, costed re-ask, never ambient.
-    let reask = iced::widget::button(text("re-ask schemas").size(font::CAPTION))
+    let reask = iced::widget::button(kit::caption("re-ask schemas"))
         .padding(4)
         .on_press(msg(DoctorMsg::ReaskSchemas));
 
@@ -108,13 +108,11 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message
     .spacing(space::SM);
 
     if let Some(e) = &state.error {
-        col = col.push(
-            text(format!("doctor run failed: {e}"))
-                .size(font::CAPTION)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                }),
-        );
+        col = col.push(kit::body(format!("doctor run failed: {e}")).style(
+            |theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).danger()),
+            },
+        ));
     }
 
     let Some(report) = state.current.as_deref() else {
@@ -235,7 +233,7 @@ fn finding_row<'a>(
     let mut body = column![header, kit::muted(f.evidence.clone())].spacing(space::XS);
     if finding_target(f, base).is_some() {
         body = body.push(
-            iced::widget::button(text("go to subject").size(font::CAPTION))
+            iced::widget::button(kit::caption("go to subject"))
                 .padding(2)
                 .on_press(msg(DoctorMsg::FindingClicked(index))),
         );

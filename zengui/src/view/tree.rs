@@ -1330,7 +1330,7 @@ fn row_view<'a>(
     // The expand marker is its own affordance (issue #93): a concrete key
     // that is also a prefix of deeper keys keeps body-click = select.
     let marker: Element<'a, Message> = match marker_press(shape) {
-        Some(msg) => button(text(if r.expanded { "▾" } else { "▸" }).size(font::CAPTION))
+        Some(msg) => button(kit::caption(if r.expanded { "▾" } else { "▸" }))
             .padding(2)
             .style(button::text)
             .on_press(msg)
@@ -1339,8 +1339,7 @@ fn row_view<'a>(
     };
 
     let is_selected = r.target.is_some() && selected == r.target.as_deref();
-    let name = text(r.chunk.clone())
-        .size(font::CAPTION)
+    let name = kit::caption(r.chunk.clone())
         .font(iced::Font::MONOSPACE)
         .style(move |theme: &iced::Theme| text::Style {
             color: Some(if is_selected {
@@ -1357,17 +1356,15 @@ fn row_view<'a>(
     // Freshness dot (issue #65): green = seen just now, fades to dim.
     if let Some(age) = r.age_s {
         line = line.push(
-            text("●")
-                .size(font::CAPTION)
-                .style(move |theme: &iced::Theme| text::Style {
-                    color: Some(if age < 3.0 {
-                        colors(theme).success()
-                    } else if age < 30.0 {
-                        colors(theme).warning()
-                    } else {
-                        colors(theme).text_dim()
-                    }),
+            kit::caption("●").style(move |theme: &iced::Theme| text::Style {
+                color: Some(if age < 3.0 {
+                    colors(theme).success()
+                } else if age < 30.0 {
+                    colors(theme).warning()
+                } else {
+                    colors(theme).text_dim()
                 }),
+            }),
         );
     }
 
@@ -1447,7 +1444,7 @@ fn row_view<'a>(
             } else {
                 "○"
             };
-            button(text(watch_label).size(font::CAPTION))
+            button(kit::caption(watch_label))
                 .padding(2)
                 .style(button::text)
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(t.clone())))

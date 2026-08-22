@@ -160,13 +160,10 @@ fn target_row(state: &BlobState) -> Element<'_, Message> {
     .on_input(|t| msg(BlobMsg::TargetChanged(t)))
     .size(font::CAPTION);
 
-    let mut probe = button(
-        text(match state.probe {
-            Probe::InFlight => "probing…",
-            _ => "probe",
-        })
-        .size(font::CAPTION),
-    )
+    let mut probe = button(kit::caption(match state.probe {
+        Probe::InFlight => "probing…",
+        _ => "probe",
+    }))
     .padding(4);
     let can_probe = matches!(state.target, Some(Ok(_))) && !matches!(state.probe, Probe::InFlight);
     if can_probe {
@@ -178,11 +175,9 @@ fn target_row(state: &BlobState) -> Element<'_, Message> {
     match &state.target {
         Some(Err(e)) => {
             col = col.push(
-                text(e.clone())
-                    .size(font::CAPTION)
-                    .style(|theme: &iced::Theme| text::Style {
-                        color: Some(colors(theme).danger()),
-                    }),
+                kit::body(e.clone()).style(|theme: &iced::Theme| text::Style {
+                    color: Some(colors(theme).danger()),
+                }),
             );
         }
         Some(Ok(t)) => {
@@ -211,8 +206,7 @@ fn holders(state: &BlobState) -> Element<'_, Message> {
             "nothing has been asked — this is \"not asked\", not \"nobody holds it\"",
         ),
         Probe::InFlight => kit::muted("probing every origin…"),
-        Probe::Failed(e) => text(format!("probe failed: {e}"))
-            .size(font::CAPTION)
+        Probe::Failed(e) => kit::body(format!("probe failed: {e}"))
             .style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).danger()),
             })
@@ -296,14 +290,11 @@ fn holder_row(h: &BlobHolder, index: usize, selected: bool, tier1: bool) -> Elem
 
     let mut body = column![
         row![
-            button(
-                text(if selected {
-                    "● selected"
-                } else {
-                    "○ choose"
-                })
-                .size(font::CAPTION)
-            )
+            button(kit::caption(if selected {
+                "● selected"
+            } else {
+                "○ choose"
+            }))
             .padding(2)
             .on_press(msg(BlobMsg::HolderPicked(index))),
             kit::mono(h.origin.clone()),
@@ -347,7 +338,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
         .is_some()
     {
         dest_row = dest_row.push(
-            button(text("use suggested name").size(font::CAPTION))
+            button(kit::caption("use suggested name"))
                 .padding(2)
                 .on_press(msg(BlobMsg::UseSuggestedName)),
         );
@@ -378,7 +369,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
         Some(h) => format!("fetch from {}", h.origin),
         None => "fetch".to_string(),
     };
-    let mut go = button(text(label).size(font::CAPTION)).padding(4);
+    let mut go = button(kit::caption(label)).padding(4);
     match state.fetch_ready() {
         Ok(()) => go = go.on_press(msg(BlobMsg::Fetch)),
         Err(why) => col = col.push(kit::muted(why)),
@@ -386,7 +377,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
     let mut controls = row![go].spacing(space::SM);
     if matches!(state.fetch, Fetch::InFlight { .. }) {
         controls = controls.push(
-            button(text("stop").size(font::CAPTION))
+            button(kit::caption("stop"))
                 .padding(4)
                 .on_press(msg(BlobMsg::Cancel)),
         );
@@ -407,11 +398,9 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
         }
         Fetch::Failed(e) => {
             col = col.push(
-                text(format!("fetch failed: {e}"))
-                    .size(font::CAPTION)
-                    .style(|theme: &iced::Theme| text::Style {
-                        color: Some(colors(theme).danger()),
-                    }),
+                kit::body(format!("fetch failed: {e}")).style(|theme: &iced::Theme| text::Style {
+                    color: Some(colors(theme).danger()),
+                }),
             );
         }
         Fetch::Inspecting => {

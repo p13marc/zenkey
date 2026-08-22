@@ -127,7 +127,8 @@ fn nothing_selected<'a>() -> Column<'a, Message> {
 fn prefix_sections<'a>(prefix: &'a str) -> Column<'a, Message> {
     column![
         kit::section_header("Inspector", None),
-        kit::mono(prefix.to_string()),
+        // The subject — the one TITLE in the window (#191).
+        kit::title(prefix).font(iced::Font::MONOSPACE),
         kit::empty_state(
             "A subtree, not a key",
             "Nothing was fetched, because a prefix names no value any producer \
@@ -171,7 +172,8 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
 fn origin_sections<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
     column![
         kit::section_header("Inspector", None),
-        kit::mono(origin.to_string()),
+        // The subject — the one TITLE in the window (#191).
+        kit::title(origin).font(iced::Font::MONOSPACE),
         nodes::presence_section(d.roster, origin),
         nodes::detail_section(d.node_detail),
     ]

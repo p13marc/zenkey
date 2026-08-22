@@ -209,18 +209,21 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     let mut col = column![
         kit::section_header("Connection", None),
         row![
-            text("context").size(font::CAPTION),
+            kit::caption("context"),
             picker,
-            button(text("load into editor").size(font::CAPTION))
+            button(kit::caption("load into editor"))
                 .on_press(msg(ContextMsg::Load))
                 .padding(4),
         ]
         .spacing(space::SM)
         .align_y(iced::Alignment::Center),
-        kit::muted(
+        kit::body(
             "Contexts are shared with zenctl — one file, two explorers \
              (~/.config/zenkey-explorer/config.toml)."
-        ),
+        )
+        .style(|theme: &iced::Theme| text::Style {
+            color: Some(colors(theme).text_muted()),
+        }),
     ]
     .spacing(space::SM);
 
@@ -228,11 +231,10 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         // The same warning the status strip carries, repeated where the fix
         // is: an empty tree and a session that reaches nothing look identical.
         col = col.push(
-            text(
+            kit::body(
                 "this session has no endpoints and multicast scouting is off — \
                  it reaches nothing",
             )
-            .size(font::CAPTION)
             .style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).danger()),
             }),
@@ -290,13 +292,13 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     col = col.push(scouting_help());
     col = col.push(
         row![
-            button(text("save").size(font::CAPTION))
+            button(kit::caption("save"))
                 .on_press(msg(ContextMsg::Save))
                 .padding(4),
-            button(text("save + switch to it").size(font::CAPTION))
+            button(kit::caption("save + switch to it"))
                 .on_press(msg(ContextMsg::SaveAndSelect))
                 .padding(4),
-            button(text("isolated-verification preset").size(font::CAPTION))
+            button(kit::caption("isolated-verification preset"))
                 .on_press(msg(ContextMsg::Isolate))
                 .padding(4),
         ]
@@ -306,8 +308,7 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     if let Some(status) = &form.status {
         col = col.push(match status {
             Ok(s) => kit::muted(s.clone()),
-            Err(e) => text(e.clone())
-                .size(font::CAPTION)
+            Err(e) => kit::body(e.clone())
                 .style(|theme: &iced::Theme| text::Style {
                     color: Some(colors(theme).danger()),
                 })
@@ -322,19 +323,26 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
 /// sentence that keeps somebody from misreading an isolated session as a dead
 /// fleet.
 fn scouting_help<'a>() -> Element<'a, Message> {
+    let muted = |theme: &iced::Theme| text::Style {
+        color: Some(colors(theme).text_muted()),
+    };
     Column::with_children(vec![
-        kit::muted(
+        kit::body(
             "RFC 09 §0.1: multicast scouting and gossip are independent. This \
              toggle is the multicast half only — with it off, a peer still \
              learns about others through gossip over an established link.",
-        ),
-        kit::muted(
+        )
+        .style(muted)
+        .into(),
+        kit::body(
             "Off is the default on purpose: an explorer that multicast-scouts \
              joins whatever mesh it can reach. For isolated verification use \
              the preset — multicast off, explicit endpoints — and read an empty \
              result as \"nothing on these endpoints\", never as \"nothing on the \
              network\".",
-        ),
+        )
+        .style(muted)
+        .into(),
     ])
     .spacing(2)
     .into()

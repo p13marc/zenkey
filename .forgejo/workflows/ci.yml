@@ -43,6 +43,16 @@ jobs:
       # single-line grep the issue proposed passes straight over `service info`.
       - run: ./scripts/check-degradation.sh
 
+  # The type scale, by role (#191): `.size(` outside `kit.rs`/`tokens.rs`
+  # must take a `font::` constant, and a bare `text(` must not appear outside
+  # `kit.rs` — the same greppable discipline as "no raw Color outside
+  # theme.rs/kit.rs", extended to typography.
+  type-scale:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v7
+      - run: ./scripts/check-type-scale.sh
+
   clippy:
     runs-on: ubuntu-24.04
     steps:
