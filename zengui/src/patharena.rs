@@ -114,7 +114,9 @@ impl PathArena {
         let mut depth = self.len_of(id);
         let mut cur = id;
         while depth > len.max(1) {
-            cur = self.nodes[cur.0 as usize].parent.expect("len_of counted this link");
+            cur = self.nodes[cur.0 as usize]
+                .parent
+                .expect("len_of counted this link");
             depth -= 1;
         }
         cur
@@ -195,10 +197,16 @@ mod tests {
     fn ancestors_spell_the_old_prefix_joins() {
         let mut arena = PathArena::new();
         let id = intern(&mut arena, "zs/v1/h-3fa9c2d41b7e/telemetry");
-        assert_eq!(arena.display(arena.ancestor_at(id, 3)), "zs/v1/h-3fa9c2d41b7e");
+        assert_eq!(
+            arena.display(arena.ancestor_at(id, 3)),
+            "zs/v1/h-3fa9c2d41b7e"
+        );
         assert_eq!(arena.display(arena.ancestor_at(id, 1)), "zs");
         // Clamped, exactly as the slice's `.min(real.len())` was.
-        assert_eq!(arena.display(arena.ancestor_at(id, 99)), "zs/v1/h-3fa9c2d41b7e/telemetry");
+        assert_eq!(
+            arena.display(arena.ancestor_at(id, 99)),
+            "zs/v1/h-3fa9c2d41b7e/telemetry"
+        );
     }
 
     /// A pivot's synthetic first level is one chunk containing colons; the

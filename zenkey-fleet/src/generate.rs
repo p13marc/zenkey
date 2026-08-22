@@ -210,9 +210,7 @@ impl Fault {
                 Some(e) => format!("wire encoding {e} omitted"),
                 None => "no wire encoding set (none was declared either)".into(),
             },
-            Fault::Unstamped => {
-                "no HLC timestamp — state LWW cannot order it (RFC 04 §4)".into()
-            }
+            Fault::Unstamped => "no HLC timestamp — state LWW cannot order it (RFC 04 §4)".into(),
         }
     }
 }
@@ -983,7 +981,8 @@ rate = "rare"
         // Three subjects × seven faults.
         assert_eq!(plan.len(), 3 * 7);
         assert!(
-            plan.iter().all(|e| e.fault.is_some() && e.fault_delta.is_some()),
+            plan.iter()
+                .all(|e| e.fault.is_some() && e.fault_delta.is_some()),
             "every faulted entry names its kind and delta"
         );
 
@@ -999,19 +998,28 @@ rate = "rare"
             .iter()
             .find(|e| e.fault == Some(Fault::UnregisteredKey))
             .unwrap();
-        assert_eq!(unregistered.key, "v1/h-abababababab/state/demo/health/unregistered");
+        assert_eq!(
+            unregistered.key,
+            "v1/h-abababababab/state/demo/health/unregistered"
+        );
 
         let wrong_qos = health
             .iter()
             .find(|e| e.fault == Some(Fault::WrongQos))
             .unwrap();
-        assert_ne!(wrong_qos.qos, "transition", "the declared profile is not honoured");
+        assert_ne!(
+            wrong_qos.qos, "transition",
+            "the declared profile is not honoured"
+        );
 
         let missing_enc = health
             .iter()
             .find(|e| e.fault == Some(Fault::MissingEncoding))
             .unwrap();
-        assert!(missing_enc.encoding.is_none(), "the wire encoding is dropped");
+        assert!(
+            missing_enc.encoding.is_none(),
+            "the wire encoding is dropped"
+        );
 
         // The body/timestamp faults leave the entry's fields at the valid
         // resolution — they ride at send time.

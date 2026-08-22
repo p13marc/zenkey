@@ -314,9 +314,7 @@ impl Flattened {
             subtree_rate_hz: stats.map(|s| s.subtree_rate_hz).unwrap_or(0.0),
             age_s: age_of(stats.as_ref(), self.now),
             role: shape.role,
-            decl_type: shape
-                .decl_type
-                .map(|t| self.arena.chunk_str(t).to_string()),
+            decl_type: shape.decl_type.map(|t| self.arena.chunk_str(t).to_string()),
         }
     }
 
@@ -472,7 +470,13 @@ enum Expect {
     Foreign,
 }
 
-fn walk(node: &MergedNode, ctx: &mut Ctx<'_>, parent: Option<PathId>, depth: usize, expect: Expect) {
+fn walk(
+    node: &MergedNode,
+    ctx: &mut Ctx<'_>,
+    parent: Option<PathId>,
+    depth: usize,
+    expect: Expect,
+) {
     for (chunk, child) in &node.children {
         let probe_len = ctx.probe.len();
         if probe_len > 0 {
@@ -1371,8 +1375,15 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
         let shape = &flat.rows[i];
         let r = flat.row(i);
         col = col.push(
-            iced::widget::container(row_view(shape, &r, &flat.arena, d.facts, d.selected, d.watches))
-                .height(Length::Fixed(ROW_HEIGHT)),
+            iced::widget::container(row_view(
+                shape,
+                &r,
+                &flat.arena,
+                d.facts,
+                d.selected,
+                d.watches,
+            ))
+            .height(Length::Fixed(ROW_HEIGHT)),
         );
     }
     if last < flat.rows.len() {

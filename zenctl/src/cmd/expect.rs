@@ -57,23 +57,17 @@ pub async fn run(
         "expect: watching {selector} for {within}s — subscriber declared before \
          the window opened (RFC 09 §5.1 O4)"
     );
-    let report = match zenkey_fleet::run_expect(
-        &session,
-        args.base(),
-        slices.as_ref(),
-        &store,
-        &spec,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            // The observation never stood up — that is the impaired exit,
-            // never "not met".
-            eprintln!("expect: observation could not be established: {e}");
-            std::process::exit(2);
-        }
-    };
+    let report =
+        match zenkey_fleet::run_expect(&session, args.base(), slices.as_ref(), &store, &spec).await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                // The observation never stood up — that is the impaired exit,
+                // never "not met".
+                eprintln!("expect: observation could not be established: {e}");
+                std::process::exit(2);
+            }
+        };
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     match report.verdict {
         zenkey_fleet::report::ExpectVerdict::Met => Ok(()),

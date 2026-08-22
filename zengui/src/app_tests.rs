@@ -418,32 +418,61 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
 fn traffic(epoch: std::time::Instant) -> Vec<zenkey_fleet::SampleView> {
     use std::time::Duration;
     use zenoh::sample::SampleKind;
-    let view = |t_s: u64, key: &str, payload: &[u8], encoding: &str, kind, attachment: Option<&[u8]>| {
-        zenkey_fleet::SampleView {
-            key: key.to_string(),
-            payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
-            encoding: encoding.to_string(),
-            kind,
-            timestamp: None,
-            stamped_by: None,
-            attachment: attachment.map(|a| zenoh::bytes::ZBytes::from(a.to_vec())),
-            priority: zenoh::qos::Priority::DEFAULT,
-            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
-            reliability: zenoh::qos::Reliability::DEFAULT,
-            express: false,
-            source: None,
-            received: epoch + Duration::from_secs(t_s),
-        }
-    };
+    let view =
+        |t_s: u64, key: &str, payload: &[u8], encoding: &str, kind, attachment: Option<&[u8]>| {
+            zenkey_fleet::SampleView {
+                key: key.to_string(),
+                payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
+                encoding: encoding.to_string(),
+                kind,
+                timestamp: None,
+                stamped_by: None,
+                attachment: attachment.map(|a| zenoh::bytes::ZBytes::from(a.to_vec())),
+                priority: zenoh::qos::Priority::DEFAULT,
+                congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+                reliability: zenoh::qos::Reliability::DEFAULT,
+                express: false,
+                source: None,
+                received: epoch + Duration::from_secs(t_s),
+            }
+        };
     let put = SampleKind::Put;
     vec![
         view(0, "v1/h-0123456789ab/state/p/a", b"1", "", put, None),
-        view(5, "v1/h-0123456789ab/state/p/b", br#"{"ok":true}"#, "application/json", put, None),
-        view(20, "v1/h-0123456789ab/telemetry/x/m", b"12345678", "", put, None),
+        view(
+            5,
+            "v1/h-0123456789ab/state/p/b",
+            br#"{"ok":true}"#,
+            "application/json",
+            put,
+            None,
+        ),
+        view(
+            20,
+            "v1/h-0123456789ab/telemetry/x/m",
+            b"12345678",
+            "",
+            put,
+            None,
+        ),
         view(30, "v1/h-0123456789ab/state/p/a", b"2", "", put, None),
         view(40, "not/this/convention", b"x", "", put, None),
-        view(55, "v1/h-0123456789ab/state/p/b", b"", "", SampleKind::Delete, None),
-        view(60, "v1/h-0123456789ab/telemetry/x/m", b"87654321", "", put, Some(b"meta")),
+        view(
+            55,
+            "v1/h-0123456789ab/state/p/b",
+            b"",
+            "",
+            SampleKind::Delete,
+            None,
+        ),
+        view(
+            60,
+            "v1/h-0123456789ab/telemetry/x/m",
+            b"87654321",
+            "",
+            put,
+            Some(b"meta"),
+        ),
         view(75, "v1/h-0123456789ab/state/p/a", b"3", "", put, None),
         view(88, "v1/h-0123456789ab/state/p/c", b"zzz", "", put, None),
     ]
@@ -555,7 +584,10 @@ fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
         let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(m)));
     };
     open(&mut app_b, ReplayMsg::OpenToggled);
-    open(&mut app_b, ReplayMsg::PathChanged(path.display().to_string()));
+    open(
+        &mut app_b,
+        ReplayMsg::PathChanged(path.display().to_string()),
+    );
     open(&mut app_b, ReplayMsg::Open);
     let _ = std::fs::remove_file(&path);
 
