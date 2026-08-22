@@ -17,6 +17,15 @@
 //!
 //! The subscriber is declared **before** the window opens — a window that
 //! starts counting before anyone listens converts "not asked" into "no".
+//!
+//! Since #227 the three-state judgement is spelled in the closed condition
+//! vocabulary ([`crate::condition`]): the count and rate floors ride
+//! [`condition::judge_shortfall`](crate::condition::judge_shortfall)
+//! (`rate-below`'s rule), the rate ceiling rides
+//! [`condition::judge_excess`](crate::condition::judge_excess)
+//! (`rate-above`'s), and `--absent` is `silent-for` over the whole window
+//! ([`condition::judge_silence`](crate::condition::judge_silence)) — so
+//! `expect` and `zenctl watchdog` cannot drift about what a drop means.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -24,6 +33,7 @@ use std::time::Duration;
 use anyhow::Result;
 use zenoh::Session;
 
+use crate::condition::{self, CondState};
 use crate::decode::SchemaStore;
 use crate::registry::SliceSet;
 use crate::report::{ExpectReport, ExpectVerdict};
@@ -216,8 +226,10 @@ pub async fn run_expect(
     let rate_hz = (spec.rate_min.is_some() || spec.rate_max.is_some())
         .then(|| samples as f64 / spec.within.as_secs_f64());
 
-    // Judge. `positive` marks conclusive evidence (NotMet even under drops);
-    // the rest is a shortfall that dropped samples could have filled.
+    // Judge, in the #227 condition vocabulary. `positive` marks conclusive
+    // evidence — a per-sample violation, a sample where none may be, an
+    // excess firing — which stays NotMet even under drops; the shortfalls
+    // ride `judge_shortfall`, whose drops make them unobservable instead.
     let mut unmet: Vec<String> = Vec::new();
     let mut positive = false;
     if violations_total > 0 {
@@ -228,12 +240,15 @@ pub async fn run_expect(
             format!("{violations_total} sample(s) violated a per-sample requirement")
         });
     }
-    if !spec.absent && samples < need {
+    let count_short = !spec.absent && samples < need;
+    if count_short {
         unmet.push(format!("{samples} sample(s) observed, {need} required"));
     }
+    let mut rate_short = false;
     if let (Some(min), Some(r)) = (spec.rate_min, rate_hz)
         && r < min
     {
+        rate_short = true;
         unmet.push(format!("rate {r:.2} Hz below the {min:.2} Hz floor"));
     }
     if let (Some(max), Some(r)) = (spec.rate_max, rate_hz)
@@ -243,11 +258,20 @@ pub async fn run_expect(
         unmet.push(format!("rate {r:.2} Hz above the {max:.2} Hz ceiling"));
     }
 
-    // A met claim that needed completeness is tainted by drops: absence and
-    // rate ceilings count what did NOT happen, and a lagging observer cannot.
-    let completeness_claim = spec.absent || spec.rate_max.is_some();
     let verdict = if unmet.is_empty() {
-        if dropped > 0 && completeness_claim {
+        // Every claim held on its face — but a met completeness claim under
+        // drops is unobservable, never ok (O6): `--absent` is `silent-for`
+        // over the whole window, the ceiling is `rate-above` asserted quiet.
+        let met_states = [
+            spec.absent
+                .then(|| condition::judge_silence(false, true, dropped == 0)),
+            spec.rate_max.map(|_| condition::judge_excess(false, dropped)),
+        ];
+        if met_states
+            .into_iter()
+            .flatten()
+            .any(|s| s == CondState::Unobservable)
+        {
             unmet.push(format!(
                 "{dropped} sample(s) dropped while the claim needs completeness (O6)"
             ));
@@ -257,7 +281,9 @@ pub async fn run_expect(
         }
     } else if positive {
         ExpectVerdict::NotMet
-    } else if dropped > 0 {
+    } else if condition::judge_shortfall(count_short || rate_short, dropped)
+        == CondState::Unobservable
+    {
         unmet.push(format!(
             "{dropped} sample(s) dropped — the shortfall may not be real (O6)"
         ));
