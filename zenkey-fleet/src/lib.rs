@@ -82,8 +82,8 @@ pub use admin::{
 };
 pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
 pub use admin::{
-    MeshLink, OriginAttachment, TopologyEdge, TopologyNode, TopologyReport, mesh_links,
-    origin_attachments, render_dot, topology,
+    MeshLink, OriginAttachment, TopologyEdge, TopologyNode, TopologyReport,
+    admin_doc_omits_loopback, mesh_links, origin_attachments, render_dot, topology,
 };
 pub use bench::{BenchSpec, bench_rpc};
 #[cfg(feature = "blob")]

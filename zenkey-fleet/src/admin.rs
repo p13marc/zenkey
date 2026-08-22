@@ -735,6 +735,7 @@ mod tests {
                     whatami: "router".into(),
                     version: Some("1.9.0".into()),
                     locators: vec!["tcp/10.0.0.1:7447".into()],
+                    locators_via_links: vec![],
                     answered: true,
                 },
                 TopologyNode {
@@ -742,6 +743,7 @@ mod tests {
                     whatami: "peer".into(),
                     version: None,
                     locators: vec![],
+                    locators_via_links: vec![],
                     answered: false,
                 },
             ],
@@ -750,12 +752,14 @@ mod tests {
                     reporter: "aaa".into(),
                     peer: "bbb".into(),
                     whatami: "peer".into(),
+                    region: None,
                     links: vec!["tcp/10.0.0.1:7447 -> tcp/10.0.0.2:53210".into()],
                 },
                 TopologyEdge {
                     reporter: "bbb".into(),
                     peer: "aaa".into(),
                     whatami: "router".into(),
+                    region: None,
                     links: vec![],
                 },
             ],
@@ -763,6 +767,21 @@ mod tests {
             answered: 1,
             self_zid: "bbb".into(),
         }
+    }
+
+    /// The version gate for the 1.10 loopback filter: judged from the
+    /// doc's own version string, and an unparseable one answers "cannot
+    /// say" — false — never a claim either way.
+    #[test]
+    fn the_loopback_filter_is_judged_from_the_docs_own_version() {
+        assert!(admin_doc_omits_loopback("1.10.0"));
+        assert!(admin_doc_omits_loopback("v1.10.0-12-gabcdef built with rustc"));
+        assert!(admin_doc_omits_loopback("1.11.2"));
+        assert!(admin_doc_omits_loopback("2.0.0"));
+        assert!(!admin_doc_omits_loopback("1.9.0"));
+        assert!(!admin_doc_omits_loopback("0.11.0-dev"));
+        assert!(!admin_doc_omits_loopback("unknown"));
+        assert!(!admin_doc_omits_loopback(""));
     }
 
     /// Reciprocal reports collapse to one undirected edge, marked as
@@ -920,12 +939,43 @@ pub struct TopologyNode {
     pub whatami: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Locators as the node's own root doc declares them. Since zenoh
+    /// 1.10.0 the root doc filters loopback endpoints out of this list
+    /// (upstream eclipse-zenoh/zenoh#2671, the loopback scouting fix:
+    /// `get_locators()` → `get_locators_noloopback()`) — deliberate, so a
+    /// loopback-only node honestly declares `[]` here.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub locators: Vec<String>,
+    /// Endpoints corroborated from session links when the root doc
+    /// declares no locators: addresses a live link actually used on this
+    /// node's side (#155). Evidence of reachability, **not** a
+    /// listen-endpoint claim — renderers label the provenance ("via
+    /// session link") rather than folding these into `locators`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub locators_via_links: Vec<String>,
     /// `true` = this node's own admin space answered; `false` = only heard
     /// of via a neighbour's session list — "heard of, not queryable",
     /// rendered as such rather than omitted (the issue's honesty rule).
     pub answered: bool,
+}
+
+/// Whether a node's admin root doc filters loopback endpoints out of its
+/// `locators` — true from zenoh 1.10.0 (eclipse-zenoh/zenoh#2671, the
+/// loopback scouting fix: the root doc switched to
+/// `get_locators_noloopback()`). Judged from the leading `major.minor`
+/// of the version string the doc itself declares; a version that does
+/// not parse answers `false` — "cannot say", never a claim (O4).
+///
+/// One definition, used by both renderers, so the two tools explain an
+/// empty locator column with one voice (#155).
+pub fn admin_doc_omits_loopback(version: &str) -> bool {
+    let nums: Vec<u64> = version
+        .trim_start_matches(|c: char| !c.is_ascii_digit())
+        .split(|c: char| !c.is_ascii_digit())
+        .take(2)
+        .map_while(|p| p.parse().ok())
+        .collect();
+    matches!(nums.as_slice(), [maj, min] if (*maj, *min) >= (1, 10))
 }
 
 /// One reported link. Kept per-reporter — a renderer that wants an
@@ -939,6 +989,12 @@ pub struct TopologyEdge {
     pub peer: String,
     /// The far end's whatami, as the reporter says it.
     pub whatami: String,
+    /// The session's region, verbatim as the reporter's admin doc states
+    /// it (zenoh 1.10 session entries carry one, `"unknown"` included —
+    /// the regions rework that landed over 1.9 "Longwang"). Absent on
+    /// older fleets whose docs have no such field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
     /// Link endpoints, `src -> dst`, protocol included.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<String>,
@@ -963,6 +1019,14 @@ pub struct TopologyReport {
 /// answering node with its locators and version, every session it reports
 /// as an edge, and every zid that is *only* mentioned as a
 /// heard-of-not-queryable node.
+///
+/// Where a root doc declares no locators — since zenoh 1.10.0 that is the
+/// normal answer for a loopback-only node (eclipse-zenoh/zenoh#2671
+/// filters loopback endpoints from the root doc) — the join corroborates
+/// from session links instead: the node-side endpoint of each reported
+/// link lands in [`TopologyNode::locators_via_links`], kept apart from
+/// `locators` because it is link evidence, not a listen-endpoint claim.
+/// Nothing is invented: a node no link names stays honestly empty.
 pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyReport> {
     const ASKED: &str = "@/*/*";
     let entries = admin_get(session, ASKED, timeout).await?;
@@ -998,6 +1062,7 @@ pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyRe
                         .collect()
                 })
                 .unwrap_or_default(),
+            locators_via_links: Vec::new(),
             answered: true,
         });
         for s in doc
@@ -1017,6 +1082,10 @@ pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyRe
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string(),
+                region: s
+                    .get("region")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
                 links: s
                     .get("links")
                     .and_then(|v| v.as_array())
@@ -1045,12 +1114,38 @@ pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyRe
                 whatami: e.whatami.clone(),
                 version: None,
                 locators: Vec::new(),
+                locators_via_links: Vec::new(),
                 answered: false,
             });
         }
     }
     nodes.sort_by(|a, b| a.zid.cmp(&b.zid));
     nodes.dedup_by(|a, b| a.zid == b.zid);
+    // Corroborate where the root doc declared nothing (see the fn doc):
+    // for each link `src -> dst`, `src` is an address on the reporter's
+    // side and `dst` one on the peer's. That is what a link *used*, no
+    // more — kept out of `locators` and labelled by the renderers.
+    for n in nodes.iter_mut().filter(|n| n.locators.is_empty()) {
+        for e in &edges {
+            let reporter_side = if e.reporter == n.zid {
+                true
+            } else if e.peer == n.zid {
+                false
+            } else {
+                continue;
+            };
+            for l in &e.links {
+                let mut parts = l.splitn(2, " -> ");
+                let (Some(src), Some(dst)) = (parts.next(), parts.next()) else {
+                    continue;
+                };
+                let end = if reporter_side { src } else { dst };
+                if !n.locators_via_links.iter().any(|x| x == end) {
+                    n.locators_via_links.push(end.to_string());
+                }
+            }
+        }
+    }
     Ok(TopologyReport {
         nodes,
         edges,

@@ -1009,6 +1009,7 @@ pub fn topology() -> zenkey_fleet::TopologyReport {
                 whatami: "router".into(),
                 version: Some("1.9.0".into()),
                 locators: vec!["tcp/10.0.0.1:7447".into()],
+                locators_via_links: vec![],
                 answered: true,
             },
             zenkey_fleet::TopologyNode {
@@ -1016,6 +1017,7 @@ pub fn topology() -> zenkey_fleet::TopologyReport {
                 whatami: "peer".into(),
                 version: None,
                 locators: vec![],
+                locators_via_links: vec![],
                 answered: false,
             },
         ],
@@ -1023,6 +1025,7 @@ pub fn topology() -> zenkey_fleet::TopologyReport {
             reporter: "aabbccdd".into(),
             peer: "eeff0011".into(),
             whatami: "peer".into(),
+            region: None,
             links: vec!["tcp".into()],
         }],
     }
