@@ -83,6 +83,59 @@ fn a_topic_lists_ndjson_leads_with_the_envelope_then_tags_every_row() {
     );
 }
 
+/// `--budget` (#221): the declared-vs-observed column says "saw", never
+/// "has" — an over-bound row is the finding, a rest-variable row is exempt
+/// and says so, a literal row claims nothing — and the coverage note states
+/// the window the numbers rest on.
+#[test]
+fn a_budgeted_topic_list_judges_over_exempts_rest_and_states_its_window() {
+    assert_data_eq!(
+        table(&fx::topic_list_budget()),
+        str![[r#"
+sysinfo  (registry 1.0)
+  telemetry  disk/{mount}/used              TelemetryPoint                OVER declared 16: saw 40 on h-3fa9c2d41b7e (max of 2 origins)
+  state      health                         HealthSnapshot
+
+logs  (registry 2.0)
+  telemetry  by_unit/{unit}/messages_total  TelemetryPoint  [open-ended]  exempt: rest-variable (saw 3)
+  telemetry  ingest/legacy_total            TelemetryPoint  [open-ended]                                                                 DEPRECATED since 2.0 → disk/{mount}/bytes_used
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&fx::topic_list_budget()),
+        str![[r#"
+4 registered subject(s).
+2 are open-ended ({var...}): the registry fixes their shape, not their members. Use `zenctl topic echo` to see what a live fleet actually publishes
+budget: observed for 10s over 2 scope(s), 44 distinct key(s) retained; counts are lower bounds on the population, so under the declared cardinality is not a verdict — only over is (RFC 04 §1.2), and {var...} families are exempt: rest-variable (RFC 08 §6.1)
+
+"#]]
+    );
+}
+
+/// The budgeted ndjson stream: the coverage statement rides the envelope —
+/// a fact about the observation, not about any row — and each judged row
+/// carries its cell, examples included.
+#[test]
+fn a_budgeted_topic_list_ndjson_carries_the_window_in_the_envelope() {
+    let out = ndjson(&fx::topic_list_budget());
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["budget"]["window_s"], 10);
+    assert_eq!(envelope["budget"]["scopes"][0], "v1/*/telemetry/**");
+    assert_eq!(envelope["budget"]["evicted"], 0);
+    let over: serde_json::Value = serde_json::from_str(out.lines().nth(1).unwrap()).unwrap();
+    assert_eq!(over["budget"]["declared"], 16);
+    assert_eq!(over["budget"]["worst_observed"], 40);
+    assert_eq!(over["budget"]["over"], true);
+    assert_eq!(
+        over["budget"]["examples"][0],
+        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/m00/used"
+    );
+    let exempt: serde_json::Value = serde_json::from_str(out.lines().nth(3).unwrap()).unwrap();
+    assert_eq!(exempt["budget"]["exempt"], "rest-variable");
+    assert_eq!(exempt["budget"]["over"], false);
+}
+
 /// The O4 distinction, drawn: a producer whose slice was read and said nothing
 /// reads "(no served slice)"; one nobody asked about reads `—`. The two used
 /// to be the same blank.

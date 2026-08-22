@@ -7,6 +7,20 @@ use crate::render::{Cell, Grid, Note, Render, Row, Table};
 impl Render for TopicList {
     const FAMILY: &'static str = "topic-list";
 
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = serde_json::Map::new();
+        // The `--budget` coverage statement (#221) is a fact about the whole
+        // observation, not about any row — without it in the stream,
+        // "observed 3" reads as "the population is 3" (O5/O6).
+        if let Some(window) = &self.budget {
+            e.insert(
+                "budget".into(),
+                serde_json::to_value(window).expect("a BudgetWindow serializes"),
+            );
+        }
+        e
+    }
+
     fn rows(&self, out: &mut dyn FnMut(Row)) {
         for s in &self.subjects {
             out(Row::of("subject", s));
@@ -14,8 +28,9 @@ impl Render for TopicList {
     }
 
     fn table(&self, t: &mut Table) {
+        let budgeted = self.budget.is_some();
         let mut current: Option<&String> = None;
-        let mut grid = Grid::unheaded(4).max(1, 44);
+        let mut grid = Grid::unheaded(if budgeted { 5 } else { 4 }).max(1, 44);
         for s in &self.subjects {
             if current != Some(&s.producer) {
                 grid.group(format!("{}  (registry {})", s.producer, s.registry_version));
@@ -38,14 +53,17 @@ impl Render for TopicList {
                     retired.push_str(&format!(" → {r}"));
                 }
             }
+            let class = Cell::text(format!("  {}", s.class));
+            let path = Cell::text(&s.path);
+            let tail = Cell::text(tail);
+            let retired = Cell::styled(retired, crate::render::style::DEPRECATED);
             // Indented under the group heading, which is what tells a row
             // from a producer name at a glance.
-            grid.row([
-                Cell::text(format!("  {}", s.class)),
-                Cell::text(&s.path),
-                Cell::text(tail),
-                Cell::styled(retired, crate::render::style::DEPRECATED),
-            ]);
+            if budgeted {
+                grid.row([class, path, tail, budget_cell(s.budget.as_ref()), retired]);
+            } else {
+                grid.row([class, path, tail, retired]);
+            }
         }
         t.grid(grid);
     }
@@ -73,8 +91,65 @@ impl Render for TopicList {
                  fleet actually publishes"
             )));
         }
+        if let Some(w) = &self.budget {
+            // The coverage statement the column's numbers rest on (#221):
+            // what was watched, for how long, under what bound (O5/O6) —
+            // and the O4 rule that keeps "saw 3" from reading as "is 3".
+            let mut coverage = format!(
+                "budget: observed for {}s over {} scope(s), {} distinct key(s) \
+                 retained; counts are lower bounds on the population, so under \
+                 the declared cardinality is not a verdict — only over is \
+                 (RFC 04 §1.2), and {{var...}} families are exempt: rest-variable \
+                 (RFC 08 §6.1)",
+                w.window_s,
+                w.scopes.len(),
+                w.keys,
+            );
+            if w.evicted > 0 {
+                coverage.push_str(&format!(
+                    ". {} key(s) were evicted by the observer's bound — every \
+                     count above is weakened by that",
+                    w.evicted
+                ));
+            }
+            notes.push(Note::coverage(coverage));
+        }
         notes
     }
+}
+
+/// Draw one row's [`BudgetCell`] (#221). The wording is the honesty rule:
+/// "saw", never "has" — and an empty cell for a literal row claims nothing,
+/// which is not a pass.
+fn budget_cell(budget: Option<&zenkey_fleet::report::BudgetCell>) -> Cell {
+    let Some(b) = budget else {
+        return Cell::text(String::new());
+    };
+    if b.exempt.is_some() {
+        return Cell::text(format!("exempt: rest-variable (saw {})", b.observed));
+    }
+    let Some(declared) = b.declared else {
+        return Cell::text(format!("no declared bound, saw {}", b.worst_observed));
+    };
+    let spread = if b.origins > 1 {
+        format!(" (max of {} origins)", b.origins)
+    } else {
+        String::new()
+    };
+    if b.over {
+        let origin = b.worst_origin.as_deref().unwrap_or("?");
+        return Cell::styled(
+            format!(
+                "OVER declared {declared}: saw {} on {origin}{spread}",
+                b.worst_observed
+            ),
+            crate::render::style::WARNING,
+        );
+    }
+    Cell::text(format!(
+        "declared {declared}, saw {}{spread}",
+        b.worst_observed
+    ))
 }
 
 impl Render for NodeList {

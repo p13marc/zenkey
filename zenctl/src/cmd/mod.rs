@@ -18,6 +18,7 @@ pub mod admin;
 pub mod base;
 pub mod bench;
 pub mod blob;
+pub mod budget;
 pub mod cache;
 pub mod call;
 pub mod cutover;

@@ -44,6 +44,9 @@ Options:
       --watch [<SECS>]
           Re-render on change every SECS seconds (default 2). Appeared and disappeared subjects are marked for one cycle; ndjson streams one snapshot object per cycle
 
+      --budget [<SECS>]
+          Observe the bus for SECS seconds (default 10) and add a declared-vs-observed key-population column (#221): distinct keys per `{var}` family, judged per origin against the declared `cardinality` (RFC 08 §2). Over is a finding; under is not — a bounded window proves a lower bound, never the population — and `{path...}` families are exempt and say so
+
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.
           

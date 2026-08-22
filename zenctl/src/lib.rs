@@ -89,6 +89,7 @@ pub async fn run() -> Result<()> {
             r#type,
             deprecated,
             watch,
+            budget,
             bus,
         }) => {
             let bus = Bus::resolve(&bus)?;
@@ -100,6 +101,9 @@ pub async fn run() -> Result<()> {
             };
             if let Some(secs) = watch {
                 return cmd::watch::topic_list(secs, &filter, &bus).await;
+            }
+            if let Some(secs) = budget {
+                return cmd::budget::topic_list_budget(&filter, secs, &bus).await;
             }
             let report = filter.apply(&bus.slice_set().await?)?;
             crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
