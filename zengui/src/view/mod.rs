@@ -92,6 +92,7 @@ pub mod palette;
 pub mod panes;
 pub mod publish;
 pub mod replay;
+pub mod scope_editor;
 pub mod spark;
 pub mod status;
 pub mod theme;

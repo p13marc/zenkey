@@ -236,6 +236,8 @@ sub_state! {
     pub(crate) struct Workbench {
         /// The connection pane's state (issue #67): contexts and endpoints.
         pub(crate) context_form: view::contexts::ContextForm,
+        /// The key-expression editor's draft (#187) — the Selectors overlay.
+        pub(crate) scope_form: view::scope_editor::ScopeForm,
 
         pub(crate) call_form: view::call::CallForm,
         pub(crate) publish_form: view::publish::PublishForm,

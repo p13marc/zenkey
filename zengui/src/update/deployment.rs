@@ -76,10 +76,45 @@ pub(crate) fn update(
             if scope == dep.settings.scope {
                 return Task::none();
             }
+            // Picking custom with nothing typed yet forks the selectors the
+            // window is already using (#187): the preset's resolved set, via
+            // `scope::selectors` — the one place selectors are built, so the
+            // Deployment preset's explicit @catalog line (RFC 03 §4 D4)
+            // survives the fork.
+            if scope == crate::scope::ScopePreset::Custom && dep.settings.selectors.is_empty() {
+                dep.settings.selectors = dep.settings.scope.selectors(dep.base(), &[]);
+            }
             dep.settings.scope = scope;
-            // Remembered for the next launch (issue #73).
+            // Remembered for the next launch (issue #73; selectors too, #187).
             super::chrome::remember(chrome, dep, work);
+            let mut tasks = Vec::new();
             // If the scope is being observed, re-point the observation.
+            if !obs.scope_watches.is_empty() {
+                tasks.push(unwatch_scope(obs));
+                tasks.push(watch_scope(dep, obs));
+            }
+            // A custom scope is the user's own key expressions, so picking it
+            // opens the editor on them — through the same Open message the
+            // location bar's chip sends, which is what seeds the draft.
+            if scope == crate::scope::ScopePreset::Custom {
+                tasks.push(Task::done(Message::Chrome(
+                    crate::message::ChromeMsg::Palette(crate::view::palette::PaletteMsg::Open(
+                        crate::view::palette::Overlay::Selectors,
+                    )),
+                )));
+            }
+            Task::batch(tasks)
+        }
+        DeploymentMsg::CustomSelectorsApplied(rows) => {
+            work.bench.scope_form.status = Some(Ok(format!(
+                "{} applied — the scope is custom, and it survives a restart",
+                crate::view::kit::plural(rows.len(), "selector"),
+            )));
+            dep.settings.scope = crate::scope::ScopePreset::Custom;
+            dep.settings.selectors = rows;
+            super::chrome::remember(chrome, dep, work);
+            // If the scope is being observed, re-point the observation at
+            // the new selectors — the tail `ScopeSelected` shares.
             if !obs.scope_watches.is_empty() {
                 let release = unwatch_scope(obs);
                 let acquire = watch_scope(dep, obs);

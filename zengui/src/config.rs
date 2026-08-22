@@ -160,23 +160,41 @@ impl Cli {
         prefs: &crate::prefs::Prefs,
     ) -> anyhow::Result<Settings> {
         let context = context.unwrap_or_default();
+        // A typed `--selector` is validated hard: the user just wrote it, and
+        // a bad one is an error, not a preference to shrug off.
+        for sel in &self.selector {
+            crate::scope::validate_selector(sel)?;
+        }
+        // A remembered selector is filtered soft (the counterpart of
+        // `Prefs::sanitised`, for a `Prefs` handed in directly): a stale or
+        // hand-edited row must not refuse to start.
+        let selectors: Vec<String> = if self.selector.is_empty() {
+            prefs
+                .selectors
+                .iter()
+                .filter(|s| crate::scope::validate_selector(s).is_ok())
+                .cloned()
+                .collect()
+        } else {
+            self.selector.clone()
+        };
         // A `--selector` implies custom whatever else was asked for; then the
-        // flag; then what the window had last time. A *remembered* `custom` is
-        // dropped rather than restored, because the selectors that made it
-        // meaningful are session state and are not persisted — restoring it
-        // alone would refuse to start (issue #189).
+        // flag; then what the window had last time. Since #187 the selectors
+        // persist beside the scope, so a remembered `custom` restores — it is
+        // dropped only when nothing survived to give it meaning, because
+        // refusing to start over a stale preference would be the worst kind
+        // of persistence (issue #189).
         let scope = if !self.selector.is_empty() {
             ScopePreset::Custom
         } else {
             self.scope
-                .or_else(|| Some(prefs.scope).filter(|s| *s != ScopePreset::Custom))
+                .or_else(|| {
+                    Some(prefs.scope).filter(|s| *s != ScopePreset::Custom || !selectors.is_empty())
+                })
                 .unwrap_or(ScopePreset::Everything)
         };
-        if scope == ScopePreset::Custom && self.selector.is_empty() {
+        if scope == ScopePreset::Custom && selectors.is_empty() {
             anyhow::bail!("--scope custom needs at least one --selector");
-        }
-        for sel in &self.selector {
-            crate::scope::validate_selector(sel)?;
         }
         if self.echo_lines == 0 {
             anyhow::bail!("--echo-lines must be at least 1");
@@ -214,7 +232,7 @@ impl Cli {
             },
             timeout_secs: self.timeout.or(context.timeout).unwrap_or(5),
             scope,
-            selectors: self.selector,
+            selectors,
             eager: self.eager,
             echo_lines: self.echo_lines,
             history_entries: self.history_entries,
@@ -487,9 +505,52 @@ mod tests {
         );
     }
 
-    /// A remembered `custom` is dropped rather than restored: the selectors
-    /// that gave it meaning are session state and are not persisted, so
-    /// restoring it alone would refuse to start (issue #189).
+    /// A remembered `custom` restores with its selectors (#187) — the
+    /// acceptance that a custom selector set survives restart — and a typed
+    /// flag still wins over every remembered value.
+    #[test]
+    fn a_remembered_custom_scope_restores_with_its_selectors() {
+        let remembered = Prefs {
+            scope: ScopePreset::Custom,
+            selectors: vec!["demo/**".into()],
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &remembered).unwrap();
+        assert_eq!(s.scope, ScopePreset::Custom);
+        assert_eq!(s.selectors, ["demo/**"]);
+
+        // An explicit `--scope custom` rides the remembered selectors too —
+        // it used to refuse to start without a `--selector` beside it.
+        let s = parse_remembering(&["--scope", "custom"], &remembered).unwrap();
+        assert_eq!(s.selectors, ["demo/**"]);
+
+        // A typed `--selector` replaces the remembered set outright.
+        let s = parse_remembering(&["--selector", "acme/**"], &remembered).unwrap();
+        assert_eq!(s.scope, ScopePreset::Custom);
+        assert_eq!(s.selectors, ["acme/**"]);
+
+        // A preset flag wins the scope, and the selectors stay remembered
+        // for the next switch back to custom.
+        let s = parse_remembering(&["--scope", "state"], &remembered).unwrap();
+        assert_eq!(s.scope, ScopePreset::State);
+        assert_eq!(s.selectors, ["demo/**"]);
+
+        // A remembered row that no longer validates is filtered soft — a
+        // stale preference must never refuse a launch (a *typed* bad
+        // selector stays fatal, `a_bad_selector_is_rejected_at_the_boundary`).
+        let stale = Prefs {
+            scope: ScopePreset::Custom,
+            selectors: vec!["demo/$*/x".into(), "ok/**".into()],
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &stale).unwrap();
+        assert_eq!(s.scope, ScopePreset::Custom);
+        assert_eq!(s.selectors, ["ok/**"]);
+    }
+
+    /// A remembered `custom` with nothing left to give it meaning is dropped
+    /// rather than restored — refusing to start over a stale preference
+    /// would be the worst kind of persistence (issue #189).
     #[test]
     fn a_remembered_custom_scope_does_not_strand_the_next_launch() {
         let stranded = Prefs {

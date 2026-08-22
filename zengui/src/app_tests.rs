@@ -773,3 +773,56 @@ fn pane_selection_is_dock_reveal_not_a_tab_swap() {
     );
     assert!(app.work.docks.is_open(DockRole::Inspector));
 }
+
+/// The key-expression editor's chain (#187), driven through `update`:
+/// opening seeds the draft from the deployment's truth, a fork copies the
+/// resolved selectors through `scope::selectors`, and an invalid draft is
+/// refused with the validator's own words while the deployment stays
+/// untouched.
+#[test]
+fn the_selector_editor_seeds_forks_and_refuses_invalid_drafts() {
+    use crate::message::{ChromeMsg, PaneMsg};
+    use crate::view::palette::{Overlay, PaletteMsg};
+    use crate::view::scope_editor::ScopeMsg;
+
+    let mut app = test_app();
+    // Open: the draft is the deployment's current truth — Everything, so
+    // read-only with no custom rows.
+    let _ = app.update(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+        Overlay::Selectors,
+    ))));
+    assert!(!app.work.bench.scope_form.editing);
+    assert!(app.work.bench.scope_form.rows.is_empty());
+
+    // Fork: the resolved selectors of the current scope — for Everything,
+    // the raw `**` sweep, never a hand-formatted string.
+    let _ = app.update(Message::Pane(PaneMsg::Scope(ScopeMsg::Fork)));
+    assert!(app.work.bench.scope_form.editing);
+    assert_eq!(app.work.bench.scope_form.rows, ["**"]);
+
+    // An invalid draft is refused where it is displayed; nothing moves.
+    let _ = app.update(Message::Pane(PaneMsg::Scope(ScopeMsg::RowChanged(
+        0,
+        "demo/$*/x".into(),
+    ))));
+    let _ = app.update(Message::Pane(PaneMsg::Scope(ScopeMsg::Apply)));
+    let status = app.work.bench.scope_form.status.clone().expect("a verdict");
+    assert!(
+        status.expect_err("must refuse").contains("RFC 03 §2"),
+        "the refusal carries the validator's own words"
+    );
+    assert_eq!(
+        app.dep.settings.scope,
+        crate::scope::ScopePreset::Everything
+    );
+    assert!(
+        app.dep.settings.selectors.is_empty(),
+        "a refused draft must not half-write the scope"
+    );
+
+    // An empty draft is refused too — a custom scope needs at least one.
+    let _ = app.update(Message::Pane(PaneMsg::Scope(ScopeMsg::RowRemoved(0))));
+    let _ = app.update(Message::Pane(PaneMsg::Scope(ScopeMsg::Apply)));
+    let status = app.work.bench.scope_form.status.clone().expect("a verdict");
+    assert!(status.expect_err("must refuse").contains("at least one"));
+}

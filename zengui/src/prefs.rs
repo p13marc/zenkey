@@ -323,6 +323,10 @@ pub struct Prefs {
     pub context: Option<String>,
     /// The scope preset last selected.
     pub scope: ScopePreset,
+    /// The custom selectors last applied (#187) — what makes a remembered
+    /// `custom` scope restorable rather than dropped. Kept even while a
+    /// preset is selected, so switching back to custom recovers them.
+    pub selectors: Vec<String>,
     /// The workspace grid (#180), superseding the scalar `split`.
     pub layout: WorkspaceLayout,
 }
@@ -335,6 +339,7 @@ impl Default for Prefs {
             window: None,
             context: None,
             scope: ScopePreset::Everything,
+            selectors: Vec::new(),
             layout: WorkspaceLayout::default(),
         }
     }
@@ -408,6 +413,12 @@ impl Prefs {
         self.window = self
             .window
             .filter(|(w, h)| w.is_finite() && h.is_finite() && *w >= 320.0 && *h >= 240.0);
+        // A hand-edited selector that no longer validates (empty, `$*`, not a
+        // key expression) is dropped rather than allowed to refuse the next
+        // launch — the same field-by-field posture as the zoom clamp. What
+        // that leaves of a remembered custom scope is `config.rs`'s question.
+        self.selectors
+            .retain(|s| crate::scope::validate_selector(s).is_ok());
         self
     }
 
@@ -458,6 +469,7 @@ mod tests {
             window: Some((1440.0, 900.0)),
             context: Some("lab".into()),
             scope: ScopePreset::Deployment,
+            selectors: vec!["demo/**".into(), "v1/*/state/**".into()],
             layout: LayoutPreset::Watch.layout(),
         };
         prefs.save_to(&path).unwrap();
@@ -584,6 +596,27 @@ mod tests {
         let (prefs, note) = Prefs::load_from(&path);
         assert!(note.is_none());
         assert_eq!(prefs.layout, LayoutPreset::Watch.layout());
+    }
+
+    /// A remembered selector that no longer validates is dropped on load,
+    /// field by field (#187) — like the zoom clamp, a typo in one row must
+    /// not discard the valid rows beside it, and must never refuse a launch.
+    #[test]
+    fn an_invalid_remembered_selector_is_dropped_not_fatal() {
+        let path = tmp("bad-selector.toml");
+        std::fs::write(
+            &path,
+            "scope = \"custom\"\nselectors = [\"demo/**\", \"demo/$*/x\", \"\"]\n",
+        )
+        .unwrap();
+        let (prefs, note) = Prefs::load_from(&path);
+        assert!(note.is_none(), "it parsed; one row was just wrong");
+        assert_eq!(prefs.scope, ScopePreset::Custom);
+        assert_eq!(
+            prefs.selectors,
+            ["demo/**"],
+            "the `$*` row (RFC 03 §2) and the empty row are dropped"
+        );
     }
 
     #[test]

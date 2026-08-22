@@ -60,6 +60,20 @@ impl std::fmt::Display for ScopePreset {
 }
 
 impl ScopePreset {
+    /// Every preset, in menu order — the scope picker and the palette both
+    /// iterate this, so the option list can never exclude a variant. That is
+    /// the #187 defect: the picker hardcoded five presets, so launching with
+    /// `--scope custom` produced a `pick_list` whose selected value was not
+    /// among its own options.
+    pub const ALL: [ScopePreset; 6] = [
+        ScopePreset::Everything,
+        ScopePreset::Deployment,
+        ScopePreset::Telemetry,
+        ScopePreset::State,
+        ScopePreset::Events,
+        ScopePreset::Custom,
+    ];
+
     /// The short name, for places too narrow for [`Self::label`].
     pub fn short(self) -> &'static str {
         match self {
@@ -179,6 +193,36 @@ pub fn subtree_selector(display_path: &str) -> String {
         chunks.push("**".to_string());
     }
     chunks.join("/")
+}
+
+/// What one selector **cannot** see — the per-selector honesty line the
+/// key-expression editor renders (#187).
+///
+/// The rule users get wrong is RFC 03 §4 D2: `*` and `**` never cross a chunk
+/// beginning with `@`. So a wildcarded selector is media-safe by key algebra —
+/// and equally blind to `@catalog`; it is not "everything" and must never be
+/// labelled so. A verbatim `@` chunk is reached only by being spelled, and
+/// spelling one does not lend the selector's wildcards any reach into the
+/// *other* verbatim planes.
+pub fn blind_spot(sel: &str) -> String {
+    let has_wildcard = sel.split('/').any(|c| c.contains('*'));
+    let named: Vec<&str> = sel
+        .split('/')
+        .filter(|c| c.starts_with('@') && !c.contains('*'))
+        .collect();
+    if !has_wildcard {
+        "literal — matches exactly the keys it spells, and nothing else".to_string()
+    } else if named.is_empty() {
+        "wildcards never cross an @ chunk (RFC 03 §4 D2) — \
+         cannot see @rpc, @media, @blob, @adv or @catalog"
+            .to_string()
+    } else {
+        format!(
+            "names {} explicitly; its wildcards still cannot cross any other \
+             @ chunk (RFC 03 §4 D2)",
+            named.join(", ")
+        )
+    }
 }
 
 /// Validate a user-supplied key expression.
@@ -368,6 +412,53 @@ mod tests {
                 assert_eq!(intersects(&sa[0], &sb[0]), i == j, "{a} vs {b}");
             }
         }
+    }
+
+    /// `ALL` is the whole vocabulary: a variant added to the enum must reach
+    /// the picker and the palette without anyone remembering to add it (#187).
+    #[test]
+    fn every_preset_is_in_the_option_list() {
+        for preset in [
+            ScopePreset::Everything,
+            ScopePreset::Deployment,
+            ScopePreset::Telemetry,
+            ScopePreset::State,
+            ScopePreset::Events,
+            ScopePreset::Custom,
+        ] {
+            // The match is the exhaustiveness proof: a new variant fails to
+            // compile here until it is listed, and the assert then pins it
+            // into `ALL`.
+            match preset {
+                ScopePreset::Everything
+                | ScopePreset::Deployment
+                | ScopePreset::Telemetry
+                | ScopePreset::State
+                | ScopePreset::Events
+                | ScopePreset::Custom => {}
+            }
+            assert!(ScopePreset::ALL.contains(&preset), "{preset} not offered");
+        }
+    }
+
+    /// The editor's per-selector honesty line (#187): a wildcard scope names
+    /// what it cannot see, a literal admits it sees only itself, and a spelled
+    /// verbatim chunk does not launder the rest of the planes in.
+    #[test]
+    fn a_blind_spot_line_names_what_the_selector_cannot_see() {
+        let raw = blind_spot("**");
+        assert!(raw.contains("D2"), "{raw}");
+        assert!(raw.contains("@catalog"), "{raw}");
+        assert!(raw.contains("@media"), "{raw}");
+
+        let literal = blind_spot("zensight/v1/h-a/state/sysinfo/health");
+        assert!(literal.contains("exactly"), "{literal}");
+        assert!(!literal.contains("D2"), "{literal}");
+
+        let named = blind_spot("v1/@catalog/state/**");
+        assert!(named.contains("@catalog"), "{named}");
+        assert!(named.contains("explicitly"), "{named}");
+        assert!(named.contains("D2"), "{named}");
     }
 
     #[test]

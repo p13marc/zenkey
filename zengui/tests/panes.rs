@@ -1182,11 +1182,21 @@ fn the_connect_pane_states_what_scouting_means() {
 fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     use zengui::view::contexts::ContextForm;
     use zengui::view::palette::{Overlay, PaletteState, overlay};
+    use zengui::view::scope_editor::{ScopeEditorData, ScopeForm};
 
     let form = ContextForm {
         known: vec!["lab".to_string()],
         ..ContextForm::default()
     };
+    let scope_form = ScopeForm::default();
+    fn scope(form: &ScopeForm) -> ScopeEditorData<'_> {
+        ScopeEditorData {
+            scope: zengui::scope::ScopePreset::Everything,
+            base: "",
+            selectors: &[],
+            form,
+        }
+    }
     let keys = [
         "v1/h-3fa9c2d41b7e/state/sysinfo/health".to_string(),
         "demo/example/foo".to_string(),
@@ -1195,8 +1205,14 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     let mut state = PaletteState::default();
     state.open(Overlay::Commands);
     {
-        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
-            .expect("commands overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
         // The doctor stopped being a place and became an action (#183): its run
         // is a palette command and its verdict lands in the Activity dock.
@@ -1217,8 +1233,14 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // what typing is for — which is also the fuzzy match's real workload.
     state.query = "ndjson".into();
     {
-        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
-            .expect("commands overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("export echo as ndjson").is_ok());
         assert!(
@@ -1232,8 +1254,14 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // as an inventory of the keyspace (O4).
     state.open(Overlay::Keys);
     {
-        let element =
-            overlay(&state, &form, false, keys.iter().map(String::as_str)).expect("keys overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("keys overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("v1/h-3fa9c2d41b7e/state/sysinfo/health").is_ok());
         assert!(
@@ -1246,8 +1274,14 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // from what `resolve` dispatches.
     state.open(Overlay::Help);
     {
-        let element =
-            overlay(&state, &form, false, keys.iter().map(String::as_str)).expect("help overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("help overlay");
         let mut ui = simulator::<Message, _, _>(element);
         for binding in zengui::shortcuts::map() {
             assert!(
@@ -1263,8 +1297,14 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // form state, same messages, a different surface.
     state.open(Overlay::Connect);
     {
-        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
-            .expect("connect overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("connect overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("Connection").is_ok(), "the pane renders inside it");
         assert!(
@@ -1275,7 +1315,16 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
 
     // Closed means nothing renders.
     state.close();
-    assert!(overlay(&state, &form, false, keys.iter().map(String::as_str)).is_none());
+    assert!(
+        overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            keys.iter().map(String::as_str)
+        )
+        .is_none()
+    );
 }
 
 // ── History pane (#63) ───────────────────────────────────────────────────
@@ -2514,5 +2563,104 @@ fn the_location_bar_renders_the_trail_and_an_ancestor_click_selects_its_subtree(
     assert!(
         messages.contains(&want),
         "clicking an ancestor selects that subtree, got: {messages:?}"
+    );
+}
+
+// ── The key-expression editor (#187) ─────────────────────────────────────
+
+/// On a preset the editor is read-only truth: the selectors actually
+/// resolved by `scope::selectors` — the Deployment preset's explicit
+/// @catalog line included (RFC 03 §4 D4) — each with what it cannot see,
+/// under the D2 statement, with the fork as the only way to edit.
+#[test]
+fn the_selector_editor_shows_the_resolved_truth_and_its_blind_spots() {
+    use zengui::scope::ScopePreset;
+    use zengui::view::scope_editor::{self, ScopeEditorData, ScopeForm};
+
+    let form = ScopeForm::default();
+    let mut ui = simulator::<Message, _, _>(scope_editor::pane(ScopeEditorData {
+        scope: ScopePreset::Deployment,
+        base: "zensight",
+        selectors: &[],
+        form: &form,
+    }));
+
+    // The D2 rule is stated inline — the exact wording, pinned.
+    assert!(
+        ui.find(scope_editor::D2_RULE).is_ok(),
+        "the D2 rule is on screen"
+    );
+
+    // The resolved selectors are the ones `scope::selectors` builds — the
+    // catalog subtree spelled explicitly, never reachable by the fleet
+    // wildcards (D4).
+    for sel in ScopePreset::Deployment.selectors("zensight", &[]) {
+        assert!(
+            ui.find(sel.as_str()).is_ok(),
+            "resolved selector {sel:?} not shown"
+        );
+    }
+    assert!(
+        ui.find("zensight/v1/@catalog/state/**").is_ok(),
+        "the Deployment preset must keep naming the catalog subtree"
+    );
+
+    // Every selector names what it cannot see.
+    assert!(
+        ui.find(format!(
+            "  cannot see: {}",
+            zengui::scope::blind_spot("zensight/v1/*/telemetry/**")
+        ))
+        .is_ok(),
+        "a fleet selector's blind spot is on screen"
+    );
+    assert!(ui.find("fork into custom and edit").is_ok());
+    assert!(
+        ui.find("apply — the scope becomes custom").is_err(),
+        "a preset is read-only until forked"
+    );
+}
+
+/// In custom mode the editor validates per keystroke: an invalid row shows
+/// the validator's own words (`$*` names RFC 03 §2), a valid row shows its
+/// blind spot, and the apply row is offered.
+#[test]
+fn the_selector_editor_validates_each_row_as_typed() {
+    use zengui::scope::ScopePreset;
+    use zengui::view::scope_editor::{self, ScopeEditorData, ScopeForm};
+
+    let form = ScopeForm {
+        editing: true,
+        rows: vec!["demo/**".into(), "demo/$*/x".into()],
+        status: None,
+    };
+    let active = ["demo/**".to_string()];
+    let mut ui = simulator::<Message, _, _>(scope_editor::pane(ScopeEditorData {
+        scope: ScopePreset::Custom,
+        base: "",
+        selectors: &active,
+        form: &form,
+    }));
+
+    // The valid row carries its blind spot…
+    assert!(
+        ui.find(format!(
+            "  cannot see: {}",
+            zengui::scope::blind_spot("demo/**")
+        ))
+        .is_ok()
+    );
+    // …and the invalid row carries the validator's verdict, verbatim —
+    // which is where RFC 03 §2 reaches the screen.
+    let err = zengui::scope::validate_selector("demo/$*/x").unwrap_err();
+    assert!(
+        ui.find(format!("  {err}")).is_ok(),
+        "the row's own error must be beside it"
+    );
+    assert!(ui.find("apply — the scope becomes custom").is_ok());
+    assert!(ui.find("add selector").is_ok());
+    assert!(
+        ui.find("fork into custom and edit").is_err(),
+        "already editing — nothing to fork"
     );
 }

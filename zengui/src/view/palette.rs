@@ -55,6 +55,10 @@ pub enum Overlay {
     /// not a pane: it is about how the window reaches a bus, never about the
     /// subject.
     Connect,
+    /// The key-expression editor (#187), behind the location bar's scope
+    /// chip: the resolved selectors of the current scope, and the way to
+    /// fork them into a custom set.
+    Selectors,
 }
 
 /// The overlay's state (owned by the app).
@@ -131,13 +135,10 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         });
     }
 
-    for scope in [
-        crate::scope::ScopePreset::Everything,
-        crate::scope::ScopePreset::Deployment,
-        crate::scope::ScopePreset::Telemetry,
-        crate::scope::ScopePreset::State,
-        crate::scope::ScopePreset::Events,
-    ] {
+    // `ScopePreset::ALL`, custom included (#187): the palette must not
+    // re-create the defect the picker had — an option list that excludes a
+    // scope the window can be in.
+    for scope in crate::scope::ScopePreset::ALL {
         out.push(Action {
             label: format!("scope: {}", scope.short()),
             message: Message::Deployment(DeploymentMsg::ScopeSelected(scope)),
@@ -160,6 +161,12 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         Action {
             label: "connect — contexts and endpoints".into(),
             message: Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Connect))),
+        },
+        // The key-expression editor (#187): the same message the location
+        // bar's selectors chip sends.
+        Action {
+            label: "edit scope selectors".into(),
+            message: Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Selectors))),
         },
         Action {
             label: "observe scope (start/stop)".into(),
@@ -276,12 +283,14 @@ pub fn overlay<'a>(
     state: &'a PaletteState,
     form: &'a crate::view::contexts::ContextForm,
     unreachable: bool,
+    scope: crate::view::scope_editor::ScopeEditorData<'a>,
     keys: impl Iterator<Item = &'a str>,
 ) -> Option<Element<'a, Message>> {
     match state.overlay {
         Overlay::None => None,
         Overlay::Help => Some(help()),
         Overlay::Connect => Some(connect(form, unreachable)),
+        Overlay::Selectors => Some(selectors(scope)),
         Overlay::Commands => {
             let items = actions(&form.known);
             let order = rank(&items, &state.query, |a| a.label.as_str());
@@ -399,6 +408,32 @@ fn connect<'a>(
     .into()
 }
 
+/// The Selectors overlay (#187): [`crate::view::scope_editor::pane`],
+/// floated the same way Connect is — the scope is about what the window
+/// watches, not about the subject, so it is a session-scoped modal too.
+fn selectors(scope: crate::view::scope_editor::ScopeEditorData<'_>) -> Element<'_, Message> {
+    container(
+        column![
+            kit::muted("scope selectors — Esc closes"),
+            iced::widget::scrollable(crate::view::scope_editor::pane(scope)).height(Length::Fill),
+        ]
+        .spacing(space::SM),
+    )
+    .padding(space::MD)
+    .width(Length::Fixed(640.0))
+    .height(Length::Fixed(560.0))
+    .style(|theme: &iced::Theme| container::Style {
+        background: Some(colors(theme).surface().into()),
+        border: iced::Border {
+            color: colors(theme).border(),
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..container::Style::default()
+    })
+    .into()
+}
+
 /// The `?` overlay — rendered from [`crate::shortcuts::map`], which is also
 /// what dispatches. There is no second list to keep in step.
 fn help<'a>() -> Element<'a, Message> {
@@ -437,9 +472,22 @@ fn help<'a>() -> Element<'a, Message> {
 mod tests {
     use super::*;
 
+    /// A scope-editor data set over defaults, for the tests that need the
+    /// overlay signature satisfied and nothing more.
+    fn scope_data(
+        form: &crate::view::scope_editor::ScopeForm,
+    ) -> crate::view::scope_editor::ScopeEditorData<'_> {
+        crate::view::scope_editor::ScopeEditorData {
+            scope: crate::scope::ScopePreset::Everything,
+            base: "",
+            selectors: &[],
+            form,
+        }
+    }
+
     /// #110: only the jump-to overlay may read the key iterator — a closed
-    /// palette, the command list and the help sheet must cost the cache
-    /// nothing. The iterator panics on first pull to prove it.
+    /// palette, the command list, the help sheet and the modals must cost the
+    /// cache nothing. The iterator panics on first pull to prove it.
     #[test]
     fn only_the_keys_overlay_reads_the_keys() {
         for open in [
@@ -447,6 +495,7 @@ mod tests {
             Some(Overlay::Commands),
             Some(Overlay::Help),
             Some(Overlay::Connect),
+            Some(Overlay::Selectors),
         ] {
             let mut state = PaletteState::default();
             if let Some(o) = open {
@@ -456,7 +505,8 @@ mod tests {
                 panic!("this overlay must not read the keys")
             });
             let form = crate::view::contexts::ContextForm::default();
-            let _ = overlay(&state, &form, false, poisoned);
+            let scope_form = crate::view::scope_editor::ScopeForm::default();
+            let _ = overlay(&state, &form, false, scope_data(&scope_form), poisoned);
         }
     }
 
@@ -480,17 +530,25 @@ mod tests {
                 format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))
             );
         }
-        // Scope: the same message the location bar's picker sends.
+        // Scope: the same message the location bar's picker sends — every
+        // preset, custom included (#187): an option list that excludes a
+        // scope the window can be in is the defect that issue names.
+        for scope in crate::scope::ScopePreset::ALL {
+            assert_eq!(
+                find(&format!("scope: {}", scope.short())),
+                format!(
+                    "{:?}",
+                    Message::Deployment(DeploymentMsg::ScopeSelected(scope))
+                )
+            );
+        }
+        // The key-expression editor: the same message the location bar's
+        // selectors chip sends (#187).
         assert_eq!(
-            find(&format!(
-                "scope: {}",
-                crate::scope::ScopePreset::Everything.short()
-            )),
+            find("edit scope selectors"),
             format!(
                 "{:?}",
-                Message::Deployment(DeploymentMsg::ScopeSelected(
-                    crate::scope::ScopePreset::Everything
-                ))
+                Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Selectors)))
             )
         );
         // Context: the same message the connect pane's picker sends.

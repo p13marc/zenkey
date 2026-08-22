@@ -222,6 +222,12 @@ impl Zengui {
             &self.chrome.palette,
             &self.work.bench.context_form,
             self.dep.settings.is_unreachable(),
+            view::scope_editor::ScopeEditorData {
+                scope: self.dep.settings.scope,
+                base: self.dep.base(),
+                selectors: &self.dep.settings.selectors,
+                form: &self.work.bench.scope_form,
+            },
             self.dep.facts.keys(),
         ) {
             None => layout.into(),

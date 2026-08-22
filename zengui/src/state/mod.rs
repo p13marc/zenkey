@@ -204,6 +204,11 @@ mod tests {
                 "work.bench",
                 &[
                     "context_form",
+                    // The key-expression editor's draft (#187): what the
+                    // user typed, like every other form here — a base change
+                    // owes it nothing, and applying it is a Deployment
+                    // message.
+                    "scope_form",
                     "call_form",
                     "publish_form",
                     "publication",
@@ -250,7 +255,8 @@ mod tests {
             .iter()
             .map(|(g, f)| if *g == "work" { 1 } else { f.len() })
             .sum();
-        // …plus `obs.retention`, the retained window's account (#217).
-        assert_eq!(leaves, 66, "the split must place every field exactly once");
+        // …plus `obs.retention`, the retained window's account (#217), plus
+        // `work.bench.scope_form`, the key-expression editor's draft (#187).
+        assert_eq!(leaves, 67, "the split must place every field exactly once");
     }
 }
