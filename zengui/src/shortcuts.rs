@@ -63,14 +63,22 @@ pub fn map() -> Vec<Binding> {
             what: "jump to an observed key",
             message: || Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Keys))),
         },
+        // Connect finally has a keyboard route (#185): it used to be the one
+        // pane without one, and it is the surface a lost user most needs.
+        Binding {
+            keys: "Ctrl Shift C",
+            what: "connect — contexts and endpoints",
+            message: || Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Connect))),
+        },
     ];
     // The pane strip, in tab order — so the numbers on screen and the numbers
     // under the fingers are the same list.
     //
-    // Six panes, six digits: #182 folded four tabs into the Inspector and
-    // #183 moved Echo and Doctor into the Activity dock. The *remap* this
-    // list is heading for — Alt+1/2/3 for saved layouts, Alt+L/I/A to focus a
-    // dock — is #190's.
+    // Five panes, five digits: #182 folded four tabs into the Inspector,
+    // #183 moved Echo and Doctor into the Activity dock, and #185 made
+    // Connect an overlay with a chord of its own. The *remap* this list is
+    // heading for — Alt+1/2/3 for saved layouts, Alt+L/I/A to focus a dock —
+    // is #190's.
     for (i, pane) in RightPane::ALL.into_iter().enumerate().take(PANE_KEYS.len()) {
         out.push(Binding {
             keys: PANE_KEYS[i],
@@ -85,22 +93,20 @@ pub fn map() -> Vec<Binding> {
 /// Alt+1..Alt+9 then Alt+0 for the tenth, one per pane. Parallel arrays rather
 /// than a formatted string because `Binding` holds `&'static str` — and the
 /// length assertion below is what keeps them in step with `RightPane::ALL`.
-const PANE_KEYS: [&str; 6] = ["Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6"];
-const PANE_WHAT: [&str; 6] = [
+const PANE_KEYS: [&str; 5] = ["Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5"];
+const PANE_WHAT: [&str; 5] = [
     "call pane",
     "publish pane",
     "inspector",
     "nodes pane",
     "admin pane",
-    "connect pane",
 ];
-const PANE_MESSAGES: [fn() -> Message; 6] = [
+const PANE_MESSAGES: [fn() -> Message; 5] = [
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Call)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Publish)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Inspector)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Nodes)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Admin)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Connect)),
 ];
 
 /// A key press → the message it should send, if any.
@@ -114,6 +120,11 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
     let ctrl = mods.command() || mods.control();
     if ctrl && let Key::Character(c) = key {
         return match c.as_str() {
+            // Shifted first: Ctrl+Shift+C opens Connect (#185). A plain
+            // Ctrl+C stays unbound — it is copy in every text box.
+            "c" | "C" if mods.shift() => Some(Message::Chrome(ChromeMsg::Palette(
+                PaletteMsg::Open(Overlay::Connect),
+            ))),
             // `+` normally needs Shift on `=`; accept both spellings rather
             // than making the user find the numpad.
             "+" | "=" => Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn))),
@@ -147,7 +158,7 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
         // Alt+1..9 are panes 1..9; Alt+0 is the tenth, following the tab-bar
         // convention every browser uses. Beyond ten panes the strip needs a
         // different idea, and this stops rather than wrapping to something
-        // arbitrary. Since #182 there are eight panes, so Alt+9 and Alt+0 do
+        // arbitrary. Since #185 there are five panes, so Alt+6 and up do
         // nothing — the bound is `RightPane::ALL`, which is the point: the
         // list shrank and no digit was left pointing at a pane that is gone.
         let n = if digit == 0 { 10 } else { digit };
@@ -199,12 +210,18 @@ mod tests {
     /// Parse a help-text spelling back into the press it describes — which is
     /// what makes the test above a real check rather than a restatement.
     fn spelling(keys: &str) -> (Modifiers, String) {
-        let (mods, ch) = keys.split_once(' ').expect("every binding has a modifier");
-        let mods = match mods {
-            "Ctrl" => Modifiers::CTRL,
-            "Alt" => Modifiers::ALT,
-            other => panic!("unknown modifier {other:?}"),
-        };
+        let mut words: Vec<&str> = keys.split(' ').collect();
+        let ch = words.pop().expect("every binding names a key");
+        assert!(!words.is_empty(), "every binding has a modifier");
+        let mut mods = Modifiers::empty();
+        for word in words {
+            mods |= match word {
+                "Ctrl" => Modifiers::CTRL,
+                "Alt" => Modifiers::ALT,
+                "Shift" => Modifiers::SHIFT,
+                other => panic!("unknown modifier {other:?}"),
+            };
+        }
         (mods, ch.to_lowercase())
     }
 
@@ -212,10 +229,11 @@ mod tests {
     /// come with a key rather than silently falling off the end.
     #[test]
     fn the_pane_bindings_cover_every_pane() {
-        // Eight panes, eight digits since #182 folded four tabs into the
-        // Inspector. There is no overflow now — which is a temporary state of
-        // affairs, and stated as one: #190 remaps these digits to saved
-        // layouts once there are docks rather than tabs.
+        // Five panes, five digits: #182 folded four tabs into the Inspector,
+        // #183 docked two streams, #185 made Connect an overlay. There is no
+        // overflow now — which is a temporary state of affairs, and stated as
+        // one: #190 remaps these digits to saved layouts once there are docks
+        // rather than tabs.
         assert_eq!(PANE_KEYS.len(), RightPane::ALL.len());
         assert_eq!(PANE_WHAT.len(), PANE_KEYS.len());
         assert_eq!(PANE_MESSAGES.len(), PANE_KEYS.len());
@@ -254,6 +272,22 @@ mod tests {
         }
     }
 
+    /// Ctrl+Shift+C opens the Connect overlay (#185) — Connect used to be the
+    /// one pane with no keyboard route, and it is the surface a lost user
+    /// most needs. Plain Ctrl+C stays unbound: it is copy in every text box.
+    #[test]
+    fn connect_answers_the_shifted_chord_and_leaves_copy_alone() {
+        for c in ["c", "C"] {
+            assert!(matches!(
+                press(c, Modifiers::CTRL | Modifiers::SHIFT),
+                Some(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+                    Overlay::Connect
+                ))))
+            ));
+            assert!(press(c, ctrl()).is_none(), "Ctrl+{c} must stay copy");
+        }
+    }
+
     /// `?` is the one binding without a modifier, because it is the key every
     /// tool in this family answers with its help. It still only fires when no
     /// text input consumed the keystroke.
@@ -279,15 +313,16 @@ mod tests {
             )))
         ));
         assert!(matches!(
-            press("6", Modifiers::ALT),
+            press("5", Modifiers::ALT),
             Some(Message::Workspace(WorkspaceMsg::PaneSelected(
-                RightPane::Connect
+                RightPane::Admin
             )))
         ));
         // Past the end is nothing, not a wrap. Alt+9 used to be the media
-        // pane and Alt+7 the history pane; both are sections of other
-        // surfaces now, and the digits must not quietly become something
-        // else on the way.
+        // pane, Alt+7 the history pane and Alt+6 the connect pane; all are
+        // sections or overlays of other surfaces now, and the digits must
+        // not quietly become something else on the way.
+        assert!(press("6", Modifiers::ALT).is_none());
         assert!(press("7", Modifiers::ALT).is_none());
         assert!(press("9", Modifiers::ALT).is_none());
         assert!(press("0", Modifiers::ALT).is_none());

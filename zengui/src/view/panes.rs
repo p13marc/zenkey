@@ -3,7 +3,7 @@
 //!
 //! One `match` over [`RightPane`], and it is the only place in the crate that
 //! knows the mapping from a tab to a pane function. That is why it is here
-//! rather than inline in `app.rs`: `view` is now the layout — toolbar, replay
+//! rather than inline in `app.rs`: `view` is now the layout — location bar, replay
 //! surfaces, panes, status strip, overlay — and each of those is one call.
 //!
 //! Every argument is shared. `view` takes `&self`, so the six sub-states are
@@ -98,8 +98,9 @@ pub(crate) fn split<'a>(
                 detail: &work.verdicts.node_detail,
             }),
             RightPane::Admin => view::admin::pane(&work.verdicts.admin),
-            RightPane::Connect =>
-                view::contexts::pane(&work.bench.context_form, dep.settings.is_unreachable(),),
+            // Connect is no pane since #185: contexts and endpoints are the
+            // Connect overlay, reached from the location bar's context chip
+            // or Ctrl+Shift+C.
         })
         .width(Length::FillPortion(chrome.prefs.split_portions().1))
         .height(Length::Fill),

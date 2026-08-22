@@ -325,9 +325,73 @@ pub(crate) fn reresolve_registrations(dep: &mut Deployment) {
 }
 
 /// The base picker's options, after a discovery sweep landed.
+///
+/// The bus root leads — a deployment, not a placeholder — and every option is
+/// a [`BaseChoice`](crate::config::BaseChoice), so the empty base renders as
+/// its label rather than as a blank row (#185). Dedup is set-semantics: this
+/// used `.dedup()`, which only removes *adjacent* duplicates, so a non-sorted
+/// discovery order left repeats in the list.
 pub(crate) fn rebuild_base_options(dep: &mut Deployment) {
-    dep.base_options = vec![String::new()];
-    dep.base_options
-        .extend(dep.bases.iter().map(|b| b.base.clone()));
-    dep.base_options.dedup();
+    let mut seen = std::collections::BTreeSet::new();
+    dep.base_options = std::iter::once(String::new())
+        .chain(dep.bases.iter().map(|b| b.base.clone()))
+        .filter(|b| seen.insert(b.clone()))
+        .map(crate::config::BaseChoice::new)
+        .collect();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::BaseChoice;
+
+    /// Both #185 defects, pinned: the empty base is a labelled first-class
+    /// option, and duplicates are removed whatever order discovery answered
+    /// in — `.dedup()` only ever removed adjacent ones.
+    #[test]
+    fn base_options_are_set_deduped_and_lead_with_the_labelled_bus_root() {
+        let mut dep = Deployment::new(crate::config::Settings {
+            base: String::new(),
+            connect: vec![],
+            listen: vec![],
+            scouting: None,
+            zenoh_config: None,
+            registry: vec![],
+            timeout_secs: 5,
+            scope: crate::scope::ScopePreset::Everything,
+            selectors: vec![],
+            eager: false,
+            echo_lines: 100,
+            history_entries: 10,
+            max_keys: 1000,
+        });
+        let discovered = |base: &str| zenkey_fleet::DiscoveredBase {
+            base: base.into(),
+            origins: Default::default(),
+            producers: Default::default(),
+            storages: Vec::new(),
+        };
+        // Non-adjacent duplicates, and the bus root discovered explicitly.
+        dep.bases = vec![
+            discovered("acme"),
+            discovered("zensight"),
+            discovered("acme"),
+            discovered(""),
+        ];
+        rebuild_base_options(&mut dep);
+        assert_eq!(
+            dep.base_options,
+            [
+                BaseChoice::bus_root(),
+                BaseChoice::new("acme"),
+                BaseChoice::new("zensight"),
+            ],
+            "one row per base, discovery order kept, the bus root first"
+        );
+        assert_eq!(
+            dep.base_options[0].to_string(),
+            "(empty — keys start at v1/)",
+            "the empty base is a labelled deployment, never a blank row"
+        );
+    }
 }

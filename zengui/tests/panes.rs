@@ -1122,9 +1122,13 @@ fn the_connect_pane_states_what_scouting_means() {
 /// palette from becoming a second implementation of the app.
 #[test]
 fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
+    use zengui::view::contexts::ContextForm;
     use zengui::view::palette::{Overlay, PaletteState, overlay};
 
-    let contexts = vec!["lab".to_string()];
+    let form = ContextForm {
+        known: vec!["lab".to_string()],
+        ..ContextForm::default()
+    };
     let keys = [
         "v1/h-3fa9c2d41b7e/state/sysinfo/health".to_string(),
         "demo/example/foo".to_string(),
@@ -1133,8 +1137,8 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     let mut state = PaletteState::default();
     state.open(Overlay::Commands);
     {
-        let element =
-            overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("commands overlay");
+        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
+            .expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
         // The doctor stopped being a place and became an action (#183): its run
         // is a palette command and its verdict lands in the Activity dock.
@@ -1145,14 +1149,18 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
         );
         assert!(ui.find("activity: doctor").is_ok());
         assert!(ui.find("context: lab").is_ok(), "contexts are offered");
+        // Connect stopped being a pane too (#185): the overlay is offered
+        // instead, and a tab that is gone must not still be spoken of.
+        assert!(ui.find("connect — contexts and endpoints").is_ok());
+        assert!(ui.find("go to connect pane").is_err());
     }
 
     // The list is bounded, so reaching an action past the first screenful is
     // what typing is for — which is also the fuzzy match's real workload.
     state.query = "ndjson".into();
     {
-        let element =
-            overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("commands overlay");
+        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
+            .expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("export echo as ndjson").is_ok());
         assert!(
@@ -1167,7 +1175,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     state.open(Overlay::Keys);
     {
         let element =
-            overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("keys overlay");
+            overlay(&state, &form, false, keys.iter().map(String::as_str)).expect("keys overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("v1/h-3fa9c2d41b7e/state/sysinfo/health").is_ok());
         assert!(
@@ -1181,7 +1189,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     state.open(Overlay::Help);
     {
         let element =
-            overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("help overlay");
+            overlay(&state, &form, false, keys.iter().map(String::as_str)).expect("help overlay");
         let mut ui = simulator::<Message, _, _>(element);
         for binding in zengui::shortcuts::map() {
             assert!(
@@ -1193,9 +1201,23 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
         }
     }
 
+    // The Connect overlay is the connection pane, floated (#185) — same
+    // form state, same messages, a different surface.
+    state.open(Overlay::Connect);
+    {
+        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
+            .expect("connect overlay");
+        let mut ui = simulator::<Message, _, _>(element);
+        assert!(ui.find("Connection").is_ok(), "the pane renders inside it");
+        assert!(
+            ui.find("session setup — Esc closes").is_ok(),
+            "a modal says how to leave it"
+        );
+    }
+
     // Closed means nothing renders.
     state.close();
-    assert!(overlay(&state, &contexts, keys.iter().map(String::as_str)).is_none());
+    assert!(overlay(&state, &form, false, keys.iter().map(String::as_str)).is_none());
 }
 
 // ── History pane (#63) ───────────────────────────────────────────────────
@@ -2343,5 +2365,90 @@ fn a_media_viewing_reports_what_it_cannot_render() {
         ui.find(r#"frame meta (attachment): {"keyframe":true,"seq":7}"#)
             .is_ok(),
         "the attachment metadata reaches the screen"
+    );
+}
+
+// ── Location bar (#185) ──────────────────────────────────────────────────
+
+/// The location bar names the empty base — the RFC v1.6 bus-root deployment
+/// is a first-class value, not a missing one — and says when nothing is
+/// selected rather than rendering a gap.
+#[test]
+fn the_location_bar_names_the_empty_base_and_the_empty_selection() {
+    use zengui::config::BaseChoice;
+    use zengui::message::Subject;
+    use zengui::view::location::{self, LocationData};
+
+    let options = [BaseChoice::bus_root(), BaseChoice::new("acme")];
+    // The picker's closed face and its rows both draw `BaseChoice`'s
+    // `Display`, and a `pick_list` draws that text itself — it is not a
+    // `Text` widget, so `iced_test`'s text selector cannot see inside it.
+    // The label is pinned at the seam the picker draws from instead; that
+    // this is the picker's row type is what `location::breadcrumb`'s
+    // signature enforces.
+    assert_eq!(
+        options[0].to_string(),
+        "(empty — keys start at v1/)",
+        "the empty base renders its label, never a blank row"
+    );
+    let mut ui = simulator::<Message, _, _>(location::breadcrumb(LocationData {
+        context: None,
+        base: "",
+        base_options: &options,
+        scope: zengui::scope::ScopePreset::Everything,
+        observing: false,
+        subject: &Subject::None,
+    }));
+    assert!(
+        ui.find("no context").is_ok(),
+        "an unnamed context is a state, not an omission"
+    );
+    assert!(
+        ui.find("nothing selected — pick a key in the tree").is_ok(),
+        "an empty key trail explains itself"
+    );
+}
+
+/// Every chunk of the subject reaches the screen, and clicking an ancestor
+/// selects that subtree — the acceptance the bar exists for (#185).
+#[test]
+fn the_location_bar_renders_the_trail_and_an_ancestor_click_selects_its_subtree() {
+    use zengui::config::BaseChoice;
+    use zengui::message::{Subject, SubjectMsg};
+    use zengui::view::location::{self, LocationData};
+
+    let subject = Subject::Key("v1/h-a/telemetry/sysinfo/disk".into());
+    let options = [BaseChoice::bus_root()];
+    let mut ui = simulator::<Message, _, _>(location::breadcrumb(LocationData {
+        context: Some("lab"),
+        base: "",
+        base_options: &options,
+        scope: zengui::scope::ScopePreset::Telemetry,
+        observing: false,
+        subject: &subject,
+    }));
+    for chunk in ["v1", "h-a", "telemetry", "sysinfo", "disk"] {
+        assert!(
+            ui.find(chunk).is_ok(),
+            "chunk {chunk:?} should be on screen"
+        );
+    }
+    assert!(
+        ui.find("context: lab").is_ok(),
+        "the active context is display as well as control"
+    );
+
+    ui.click("telemetry")
+        .expect("an ancestor chunk is a button");
+    let messages: Vec<String> = ui.into_messages().map(|m| format!("{m:?}")).collect();
+    let want = format!(
+        "{:?}",
+        Message::Subject(SubjectMsg::Select(Subject::Prefix(
+            "v1/h-a/telemetry".into()
+        )))
+    );
+    assert!(
+        messages.contains(&want),
+        "clicking an ancestor selects that subtree, got: {messages:?}"
     );
 }

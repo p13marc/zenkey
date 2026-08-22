@@ -1,9 +1,11 @@
-//! One module per pane (#175), each taking the state it can move.
+//! One module per pane-shaped surface (#175), each taking the state it can
+//! move — the right-hand panes, the Inspector's sections (#182), the dock's
+//! streams (#183), and the Connect overlay (#185).
 //!
-//! Nine of the eleven panes have state of their own. Detail and History do
-//! not: they are windows onto the selected key, so they take `&mut Subject`
-//! and nothing else. That is worth knowing before #180 docks the panes — two
-//! of the eleven docks have nothing to dock.
+//! Most surfaces have state of their own. Detail and History do not: they
+//! are windows onto the selected key, so they take `&mut Subject` and
+//! nothing else. That is worth knowing before #180 docks the panes — two of
+//! the docks have nothing to dock.
 
 use iced::Task;
 
@@ -23,7 +25,7 @@ pub(crate) mod nodes;
 pub(crate) mod publish;
 pub(crate) mod replay;
 
-/// One of the eleven right-hand panes.
+/// One pane-shaped surface.
 pub(crate) fn update(
     dep: &mut Deployment,
     obs: &Observation,

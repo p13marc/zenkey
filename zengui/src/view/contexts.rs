@@ -1,5 +1,9 @@
-//! The connection pane (issue #67) — contexts, endpoints, and what scouting
-//! actually means.
+//! The Connect surface (issue #67) — contexts, endpoints, and what scouting
+//! actually means. An **overlay** since #185
+//! ([`Overlay::Connect`](crate::view::palette::Overlay)), reached from the
+//! location bar's context chip, Ctrl+Shift+C, or the palette: it is about how
+//! the window reaches a bus, never about the subject, so it stopped being a
+//! tab in the pane strip.
 //!
 //! The connect flow was command-line-only: endpoints, scouting and registry
 //! dirs were fixed at launch, and the only in-app control was the base picker.

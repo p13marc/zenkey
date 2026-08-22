@@ -2,7 +2,7 @@
 //!
 //! By the end of this epic zengui has a handful of docks and dozens of
 //! actions;
-//! discoverability by toolbar alone stops scaling well before that. zensight
+//! discoverability by location bar alone stops scaling well before that. zensight
 //! proved the in-family pattern (Ctrl+K search, Ctrl+P palette, `?` help), and
 //! this is the zengui shape of it.
 //!
@@ -38,7 +38,9 @@ use crate::view::tokens::{font, space};
 const MAX_ROWS: usize = 20;
 
 /// Which overlay is open, if any. One field rather than three booleans, so
-/// "two overlays at once" has no representation.
+/// "two overlays at once" has no representation — which is also the layering
+/// answer for Connect (#185): the palette and the Connect overlay cannot be
+/// open together, and Esc peels whichever one is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Overlay {
     #[default]
@@ -49,6 +51,10 @@ pub enum Overlay {
     Keys,
     /// `?` — the shortcut map.
     Help,
+    /// Ctrl+Shift+C — contexts and endpoints (#185). A session-scoped modal,
+    /// not a pane: it is about how the window reaches a bus, never about the
+    /// subject.
+    Connect,
 }
 
 /// The overlay's state (owned by the app).
@@ -148,6 +154,13 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
     }
 
     out.extend([
+        // Connect stopped being a pane (#185), so it is not in the generated
+        // pane list any more — the overlay gets its own entry, sending the
+        // same message the location bar's context chip and Ctrl+Shift+C send.
+        Action {
+            label: "connect — contexts and endpoints".into(),
+            message: Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Connect))),
+        },
         Action {
             label: "observe scope (start/stop)".into(),
             message: Message::Deployment(DeploymentMsg::ScopeWatchToggled),
@@ -241,14 +254,16 @@ pub fn rank<T>(items: &[T], query: &str, label: impl Fn(&T) -> &str) -> Vec<usiz
 /// cosmetic.
 pub fn overlay<'a>(
     state: &'a PaletteState,
-    contexts: &[String],
+    form: &'a crate::view::contexts::ContextForm,
+    unreachable: bool,
     keys: impl Iterator<Item = &'a str>,
 ) -> Option<Element<'a, Message>> {
     match state.overlay {
         Overlay::None => None,
         Overlay::Help => Some(help()),
+        Overlay::Connect => Some(connect(form, unreachable)),
         Overlay::Commands => {
-            let items = actions(contexts);
+            let items = actions(&form.known);
             let order = rank(&items, &state.query, |a| a.label.as_str());
             Some(list(
                 state,
@@ -336,6 +351,39 @@ fn list<'a>(
     .into()
 }
 
+/// The Connect overlay (#185): [`crate::view::contexts::pane`], floated.
+///
+/// The pane itself is unchanged — its form state still lives in the
+/// workbench and its messages still route through `PaneMsg::Context` — only
+/// the surface moved: contexts and endpoints are about how the window
+/// reaches a bus, not about the subject, so they stopped being a tab a lost
+/// user had to find.
+fn connect<'a>(
+    form: &'a crate::view::contexts::ContextForm,
+    unreachable: bool,
+) -> Element<'a, Message> {
+    container(
+        column![
+            kit::muted("session setup — Esc closes"),
+            crate::view::contexts::pane(form, unreachable),
+        ]
+        .spacing(space::SM),
+    )
+    .padding(space::MD)
+    .width(Length::Fixed(640.0))
+    .height(Length::Fixed(560.0))
+    .style(|theme: &iced::Theme| container::Style {
+        background: Some(colors(theme).surface().into()),
+        border: iced::Border {
+            color: colors(theme).border(),
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..container::Style::default()
+    })
+    .into()
+}
+
 /// The `?` overlay — rendered from [`crate::shortcuts::map`], which is also
 /// what dispatches. There is no second list to keep in step.
 fn help<'a>() -> Element<'a, Message> {
@@ -379,7 +427,12 @@ mod tests {
     /// nothing. The iterator panics on first pull to prove it.
     #[test]
     fn only_the_keys_overlay_reads_the_keys() {
-        for open in [None, Some(Overlay::Commands), Some(Overlay::Help)] {
+        for open in [
+            None,
+            Some(Overlay::Commands),
+            Some(Overlay::Help),
+            Some(Overlay::Connect),
+        ] {
             let mut state = PaletteState::default();
             if let Some(o) = open {
                 state.open(o);
@@ -387,7 +440,8 @@ mod tests {
             let poisoned = std::iter::from_fn(|| -> Option<&str> {
                 panic!("this overlay must not read the keys")
             });
-            let _ = overlay(&state, &[], poisoned);
+            let form = crate::view::contexts::ContextForm::default();
+            let _ = overlay(&state, &form, false, poisoned);
         }
     }
 
@@ -411,7 +465,7 @@ mod tests {
                 format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))
             );
         }
-        // Scope: the same message the toolbar picker sends.
+        // Scope: the same message the location bar's picker sends.
         assert_eq!(
             find(&format!(
                 "scope: {}",

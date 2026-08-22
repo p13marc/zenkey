@@ -54,8 +54,9 @@ impl Default for ActivityDock {
     }
 }
 
-/// A running toolbar capture (#74): dropping the notify without firing it
-/// would leak the task, so `stop` is fired on toggle-off and on exit.
+/// A running capture (#74, started from the location bar): dropping the
+/// notify without firing it would leak the task, so `stop` is fired on
+/// toggle-off and on exit.
 pub(crate) struct RecordingHandle {
     pub(crate) stop: Arc<tokio::sync::Notify>,
     pub(crate) path: String,
@@ -139,7 +140,7 @@ sub_state! {
         pub(crate) replay_open: Option<String>,
         /// Why the last open failed, shown beside the path box.
         pub(crate) replay_note: Option<String>,
-        /// A capture in flight (the toolbar's record toggle): the stop signal
+        /// A capture in flight (the location bar's record toggle): the stop signal
         /// and where it is writing.
         pub(crate) recording: Option<RecordingHandle>,
         /// The last finished capture, for the status strip: (samples, dropped,

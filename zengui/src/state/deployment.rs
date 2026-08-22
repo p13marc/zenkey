@@ -36,9 +36,10 @@ sub_state! {
         pub(crate) bases: Vec<DiscoveredBase>,
 
         /// The base picker's option list, rebuilt when `bases` changes rather
-        /// than on every frame (#178). The empty string leads: it is a
-        /// deployment — the bus root — not a "no selection" placeholder.
-        pub(crate) base_options: Vec<String>,
+        /// than on every frame (#178). The bus root leads: it is a
+        /// deployment — displayed by its label, never as a blank row (#185) —
+        /// not a "no selection" placeholder.
+        pub(crate) base_options: Vec<crate::config::BaseChoice>,
         /// Bounded, and it says what the bound costs (#107).
         pub(crate) facts: zenkey_fleet::FactsCache,
     }
@@ -55,9 +56,9 @@ impl Deployment {
             slices: None,
             slice_source: SliceSource::None,
             bases: Vec::new(),
-            // The empty string leads: it is a deployment — the bus root — not
-            // a "no selection" placeholder.
-            base_options: vec![String::new()],
+            // The bus root leads: it is a deployment — not a "no selection"
+            // placeholder — and it renders as its label (#185).
+            base_options: vec![crate::config::BaseChoice::bus_root()],
             // The projection cache takes the *same* bound as the engine's key
             // table: it cannot usefully outgrow the table it shadows, and one
             // number keeps that one sentence (#107).

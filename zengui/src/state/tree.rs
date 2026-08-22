@@ -1,7 +1,7 @@
 //! The key tree: its rows, how they are grouped, and what is open.
 //!
 //! `pivot`, `tree_search` and `tree_scroll` are the tree by nature and the
-//! shell by writer — the toolbar's pivot picker and find box write them.
+//! shell by writer — the tree pane's pivot picker and find box write them.
 //! Resolved **by nature**: `update_workspace` takes `&mut TreeState`, which is
 //! the honest statement that the shell owns the tree\'s chrome while the tree
 //! owns its rows.
