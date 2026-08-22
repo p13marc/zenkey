@@ -316,3 +316,37 @@ grouping no snapshot can be asked about. 83 ms every tick is what #251 is for.
 
 The frame gained 12.57 µs of join — 0.08% of a 16 ms budget — in exchange for the
 tick losing 47 ms. That is the whole trade.
+
+### After the PathArena (#251)
+
+- Date: 2026-08-22, same box — but shared with concurrent builds this session
+  (load average 2.6–5.6 during the runs), so every row below carries a control.
+- Two solo runs each at `sample_size(10)`, per the re-run rule above;
+  criterion's [low, high] interval in brackets.
+
+| Bench | After #249 | After #251, run 1 | run 2 |
+|---|---|---|---|
+| tree/pivot_50k_producer | 83.45 ms | 41.10 ms [40.2, 42.2] | 44.27 ms [43.6, 45.4] |
+| tree/flatten_50k_expanded | 22.08 ms | 25.45 ms [24.6, 26.0] | 25.53 ms [24.1, 26.2] |
+| tree/search_50k_no_match *(control)* | 24.06 ms | 30.38 ms [29.7, 30.9] | 33.61 ms [30.7, 36.1] |
+
+The control row is the point: #251 left the no-match search's pass one alone —
+the issue scoped it out by name — yet it read 26–40% above its own baseline in
+the same session. That is the ambient multiplier of a shared box, and the other
+rows must be read against it, not against the quiet-box baselines directly.
+
+So read: **the pivot roughly halves even before adjustment** (−47% to −51% raw;
+against the control's multiplier, ~2.4× faster) — `collect_entries`' per-node
+`Vec<String>` deep-clone became a memcpy of `u32`s, `PNode` re-keys on ids, and
+group targets fall out of the ancestor chain instead of a `join("/")` per level.
+The cold flatten reads +15% raw, which against a +26–40% control is at par to
+modestly better; its remaining cost is dominated by the `expanded` membership
+checks against a 50,000-entry `BTreeSet<String>` — kept by design, because the
+expansion set outlives every arena and its subtree pruning is a string-range
+trick ids cannot spell (`expansion.rs`, #179).
+
+What the table cannot show, per the honesty note above: the walks' allocations
+are simply gone — `walk` spelled four owned `String`s per node (a `format!`, a
+chunk clone, the same path cloned twice into `RowShape`), and now spells none;
+a display string exists only for the ~40 rows a frame draws and the one row a
+click names. Criterion cannot count allocations; the type change is the proof.
