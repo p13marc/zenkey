@@ -441,6 +441,10 @@ pub async fn run() -> Result<()> {
             let bus = Bus::resolve(&bus)?;
             cmd::registry::diff(&bus).await
         }
+        Command::Registry(RegistryCmd::Retired { listen, bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::registry::retired(listen, &bus).await
+        }
         Command::Registry(RegistryCmd::Lint { dir, ledger, out }) => {
             cmd::registry::lint(&dir, ledger.as_ref(), out)
         }

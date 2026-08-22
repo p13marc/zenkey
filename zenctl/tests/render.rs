@@ -554,6 +554,42 @@ FAIL
     assert!(notes(&fx::cutover_report()).contains("still speaks"));
 }
 
+/// The burn-down (#226): each ledger entry carries its four facts, each fact
+/// honest about whether it was even asked, and the verdict word closes the
+/// table exactly as `cutover`'s does — same vocabulary, same exit discipline.
+#[test]
+fn a_retired_report_puts_four_facts_beside_each_ledger_entry() {
+    assert_data_eq!(
+        table(&fx::retired_report()),
+        str![[r#"
+✗  logs: logs/errors_total              wire 3 sample(s) · STILL SERVED · 1 subscriber(s) · → logs/journald/errors_total: 480 sample(s)
+✓  logs: logs/by_unit/{unit}/burn_rate  wire silent · not served · 0 subscriber(s) · → logs/journald/burn_rate: 120 sample(s)
+?  logs: logs/units_in_failure          wire silent · not served · 0 subscriber(s) · → logs/journald/units_in_failure: 0 sample(s)
+FAIL
+
+"#]]
+    );
+    let notes = notes(&fx::retired_report());
+    assert!(
+        notes.contains("one checkout's slice"),
+        "the report must state which registries it read: {notes}"
+    );
+    // The envelope leads the ndjson, with the coverage claim intact and the
+    // entries reduced to a count (the rows carry them).
+    let first = ndjson(&fx::retired_report())
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    let envelope: serde_json::Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(envelope["report"], "registry-retired");
+    assert_eq!(envelope["entries"], 3);
+    assert_eq!(
+        envelope["registries"][0],
+        "../zensight/zensight-common/registry"
+    );
+}
+
 /// `IMPAIRED` is the absence of a verdict, and the note says so in every
 /// format.
 #[test]
@@ -931,6 +967,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "registry-diff",
         "registry-lint",
         "registry-lock",
+        "registry-retired",
         "replay",
         "schema-check",
         "schema-dump",

@@ -177,7 +177,7 @@ pub(crate) enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
-    /// The registry as a document: export it, diff it, lint it.
+    /// The registry as a document: export it, diff it, lint it, burn it down.
     #[command(subcommand)]
     Registry(RegistryCmd),
     /// Measure the fleet.
@@ -670,6 +670,28 @@ pub(crate) enum RegistryCmd {
     /// RFC 08 §6: a disagreement is a finding, not an ambiguity. `doctor`
     /// judges a deployment; this just shows the two registries side by side.
     Diff {
+        #[command(flatten)]
+        bus: BusArgs,
+    },
+    /// The deprecation burn-down: which `[[deprecated]]` entries are actually
+    /// finished. Exit 0 = every entry passes, 1 = a retired subject still
+    /// speaks, 2 = unproven — silence is not a pass (RFC 05 §3.1).
+    ///
+    /// For each ledger entry of the `--registry` dirs, four facts: still on
+    /// the wire (`--listen-for`), still declared active by a served
+    /// introspect slice (the RFC 08 §6.1 lie), still subscribed to by any
+    /// session (admin space), and whether `replaced_by` carries traffic —
+    /// the cutover pair, per entry. Without `--listen-for`, wire facts read
+    /// "not listened", never "absent" (RFC 09 §5.1 O4).
+    Retired {
+        /// Listen passively for this many seconds to hear the retired
+        /// families and their replacements. No window = no wire facts.
+        //
+        // `--listen-for`, not `--listen`, for `doctor`'s reason (#239):
+        // `-l/--listen` is the endpoint flag on every verb, and clap derives
+        // the id from the field name, so both are spelled out.
+        #[arg(id = "listen_for", long = "listen-for", value_name = "SECS")]
+        listen: Option<u64>,
         #[command(flatten)]
         bus: BusArgs,
     },
