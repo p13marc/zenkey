@@ -37,6 +37,14 @@ sub_state! {
         pub(crate) fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
         /// The decode of the last fetched value.
         pub(crate) decoded: Option<(Option<String>, zenkey_fleet::decode::Rendering)>,
+        /// The timeline's scroll position + viewport height, driving its
+        /// virtual window (#183).
+        ///
+        /// It lives with the recorder rather than in the workspace's chrome,
+        /// and that placement is the behaviour: a new subject is a new
+        /// timeline, so it starts at the top rather than wherever the last
+        /// key's list happened to be.
+        pub(crate) history_scroll: (f32, f32),
         /// The selected key's history recording (issue #63). Created on selection,
         /// dropped on the next one — which is what makes deselecting stop the
         /// cost, since there is then nothing left to feed.

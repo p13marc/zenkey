@@ -683,6 +683,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             decoded: None,
             series: None,
             history: None,
+            history_scroll: (0.0, 600.0),
             watched: false,
             latency: None,
             blob,
@@ -899,11 +900,11 @@ fn the_node_detail_reports_freshness_honestly() {
 fn the_doctor_pane_never_invents_a_verdict() {
     use std::sync::Arc;
     use zengui::doctor::DoctorState;
-    use zengui::view::doctor::pane;
+    use zengui::view::doctor::section;
     use zenkey_fleet::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
     let state = DoctorState::default();
-    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    let mut ui = simulator::<Message, _, _>(section(&state, ""));
     assert!(
         ui.find("no doctor run yet").is_ok(),
         "never-run must not read as a clean fleet (O4)"
@@ -935,7 +936,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
         }),
         "",
     );
-    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    let mut ui = simulator::<Message, _, _>(section(&state, ""));
     assert!(ui.find("slice-sync").is_ok(), "the stable check id renders");
     assert!(ui.find("RFC 08 §6").is_ok(), "the citation renders");
     assert!(
@@ -969,7 +970,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
         }),
         "",
     );
-    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    let mut ui = simulator::<Message, _, _>(section(&state, ""));
     assert!(
         ui.find("vs previous run: 1 new · 1 fixed · 0 unchanged")
             .is_ok(),
@@ -988,7 +989,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
 fn the_doctor_pane_states_what_the_listen_phase_observed() {
     use std::sync::Arc;
     use zengui::doctor::DoctorState;
-    use zengui::view::doctor::pane;
+    use zengui::view::doctor::section;
     use zenkey_fleet::report::{DoctorReport, ObservationSummary};
 
     let report = DoctorReport {
@@ -1018,7 +1019,7 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
         }),
         "",
     );
-    let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+    let mut ui = simulator::<Message, _, _>(section(&state, ""));
     assert!(
         ui.find(
             "listened 10s over 2 scopes: 42 samples on 7 keys, 3 dropped \
@@ -1135,7 +1136,14 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
         let element =
             overlay(&state, &contexts, keys.iter().map(String::as_str)).expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
-        assert!(ui.find("go to doctor pane").is_ok());
+        // The doctor stopped being a place and became an action (#183): its run
+        // is a palette command and its verdict lands in the Activity dock.
+        assert!(ui.find("run doctor").is_ok());
+        assert!(
+            ui.find("go to doctor pane").is_err(),
+            "a pane that no longer exists must not still be offered"
+        );
+        assert!(ui.find("activity: doctor").is_ok());
         assert!(ui.find("context: lab").is_ok(), "contexts are offered");
     }
 
@@ -1230,6 +1238,7 @@ fn the_history_pane_says_why_it_is_empty() {
         key: None,
         recorder: None,
         watched: false,
+        scroll: (0.0, 600.0),
     }));
     assert!(ui.find("Nothing selected").is_ok());
 
@@ -1239,6 +1248,7 @@ fn the_history_pane_says_why_it_is_empty() {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: false,
+        scroll: (0.0, 600.0),
     }));
     assert!(
         ui.find("Not watched — nothing is being recorded").is_ok(),
@@ -1254,6 +1264,7 @@ fn the_history_pane_says_why_it_is_empty() {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
+        scroll: (0.0, 600.0),
     }));
     assert!(ui.find("No samples yet").is_ok());
     assert!(
@@ -1283,6 +1294,7 @@ fn the_history_pane_diffs_consecutive_payloads() {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
+        scroll: (0.0, 600.0),
     }));
     assert!(
         ui.find("~ value  41.0 → 42.0").is_ok(),
@@ -1322,6 +1334,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
             key: Some(REGISTERED),
             recorder: Some(&rec),
             watched: true,
+            scroll: (0.0, 600.0),
         }));
         assert!(ui.find("▸ t-1").is_ok(), "the focused row is marked");
         assert!(
@@ -1341,6 +1354,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
             key: Some(REGISTERED),
             recorder: Some(&rec),
             watched: true,
+            scroll: (0.0, 600.0),
         }));
         assert!(
             ui.find("new value after retirement — not a change to the previous value")
@@ -1367,6 +1381,7 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
         key: Some(FOREIGN),
         recorder: Some(&rec),
         watched: true,
+        scroll: (0.0, 600.0),
     }));
     assert!(
         ui.find("neither sample has a structural form — compared as bytes, not as fields")
@@ -1389,6 +1404,7 @@ fn the_history_pane_counts_what_it_evicted() {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
+        scroll: (0.0, 600.0),
     }));
     assert!(
         ui.find("recording since selection · 3 retained · 7 evicted (ring full)")
@@ -1497,11 +1513,11 @@ fn the_detail_pane_labels_the_series_it_plots() {
 #[test]
 fn the_doctor_pane_offers_the_schema_re_ask_and_reports_it() {
     use zengui::doctor::DoctorState;
-    use zengui::view::doctor::pane;
+    use zengui::view::doctor::section;
 
     let mut state = DoctorState::default();
     {
-        let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+        let mut ui = simulator::<Message, _, _>(section(&state, ""));
         assert!(ui.find("re-ask schemas").is_ok());
         assert!(
             ui.find(
@@ -1515,7 +1531,7 @@ fn the_doctor_pane_offers_the_schema_re_ask_and_reports_it() {
 
     state.schemas_forgotten = 1;
     {
-        let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+        let mut ui = simulator::<Message, _, _>(section(&state, ""));
         assert!(
             ui.find("schema cache cleared 1 time — the next decode asks the bus again")
                 .is_ok()
@@ -1523,7 +1539,7 @@ fn the_doctor_pane_offers_the_schema_re_ask_and_reports_it() {
     }
     state.schemas_forgotten = 3;
     {
-        let mut ui = simulator::<Message, _, _>(pane(&state, ""));
+        let mut ui = simulator::<Message, _, _>(section(&state, ""));
         assert!(
             ui.find("schema cache cleared 3 times — the next decode asks the bus again")
                 .is_ok()
@@ -2174,13 +2190,22 @@ fn the_replay_banner_says_everything() {
             .is_ok(),
         "the drop ledger must reach the banner (O6)"
     );
+    assert!(ui.find("exit replay").is_ok());
+    assert!(ui.find("live link off").is_ok());
+    // The transport moved to the Activity dock's Replay tab (#183). The
+    // banner stayed put, and it stayed put for a reason — a mode indicator
+    // behind a tab is one that can lie about what the panes are showing.
+    assert!(
+        ui.find("0.6s / 2.0s (capture clock t)").is_err(),
+        "the scrubber is a stream control, not part of the mode banner"
+    );
+
+    let mut ui = simulator::<Message, _, _>(zengui::view::replay::scrubber(&state));
     assert!(
         ui.find("0.6s / 2.0s (capture clock t)").is_ok(),
         "the scrubber axis names which clock it plots"
     );
     assert!(ui.find("play").is_ok(), "paused replay offers play");
-    assert!(ui.find("exit replay").is_ok());
-    assert!(ui.find("live link off").is_ok());
 }
 
 /// While replaying, the status strip must not describe the link it is not

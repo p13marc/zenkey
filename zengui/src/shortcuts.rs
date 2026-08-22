@@ -67,11 +67,10 @@ pub fn map() -> Vec<Binding> {
     // The pane strip, in tab order — so the numbers on screen and the numbers
     // under the fingers are the same list.
     //
-    // Eight panes, eight digits, since #182 folded four tabs into the
-    // Inspector. There is no longer a pane without a shortcut. The *remap*
-    // this list is heading for — Alt+1/2/3 for saved layouts, Alt+L/I/A to
-    // focus a dock — is #190's, and doing it here would change what every
-    // digit means for the sake of a dock model that has not landed.
+    // Six panes, six digits: #182 folded four tabs into the Inspector and
+    // #183 moved Echo and Doctor into the Activity dock. The *remap* this
+    // list is heading for — Alt+1/2/3 for saved layouts, Alt+L/I/A to focus a
+    // dock — is #190's.
     for (i, pane) in RightPane::ALL.into_iter().enumerate().take(PANE_KEYS.len()) {
         out.push(Binding {
             keys: PANE_KEYS[i],
@@ -86,26 +85,20 @@ pub fn map() -> Vec<Binding> {
 /// Alt+1..Alt+9 then Alt+0 for the tenth, one per pane. Parallel arrays rather
 /// than a formatted string because `Binding` holds `&'static str` — and the
 /// length assertion below is what keeps them in step with `RightPane::ALL`.
-const PANE_KEYS: [&str; 8] = [
-    "Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6", "Alt 7", "Alt 8",
-];
-const PANE_WHAT: [&str; 8] = [
-    "echo pane",
+const PANE_KEYS: [&str; 6] = ["Alt 1", "Alt 2", "Alt 3", "Alt 4", "Alt 5", "Alt 6"];
+const PANE_WHAT: [&str; 6] = [
     "call pane",
     "publish pane",
     "inspector",
     "nodes pane",
-    "doctor pane",
     "admin pane",
     "connect pane",
 ];
-const PANE_MESSAGES: [fn() -> Message; 8] = [
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Echo)),
+const PANE_MESSAGES: [fn() -> Message; 6] = [
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Call)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Publish)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Inspector)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Nodes)),
-    || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Doctor)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Admin)),
     || Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Connect)),
 ];
@@ -280,20 +273,22 @@ mod tests {
     #[test]
     fn alt_digits_cover_the_panes_and_stop() {
         assert!(matches!(
-            press("4", Modifiers::ALT),
+            press("3", Modifiers::ALT),
             Some(Message::Workspace(WorkspaceMsg::PaneSelected(
                 RightPane::Inspector
             )))
         ));
         assert!(matches!(
-            press("8", Modifiers::ALT),
+            press("6", Modifiers::ALT),
             Some(Message::Workspace(WorkspaceMsg::PaneSelected(
                 RightPane::Connect
             )))
         ));
         // Past the end is nothing, not a wrap. Alt+9 used to be the media
-        // pane; the pane is a section of the Inspector now, and the digit
-        // must not quietly become something else.
+        // pane and Alt+7 the history pane; both are sections of other
+        // surfaces now, and the digits must not quietly become something
+        // else on the way.
+        assert!(press("7", Modifiers::ALT).is_none());
         assert!(press("9", Modifiers::ALT).is_none());
         assert!(press("0", Modifiers::ALT).is_none());
         for pane in RightPane::ALL {

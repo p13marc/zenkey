@@ -33,12 +33,15 @@ const MAX_CHANGES: usize = 50;
 const STAMP_CHARS: usize = 34;
 
 /// Messages the pane emits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HistoryMsg {
     /// A timeline row was clicked — its diff opens.
     Select(u64),
     /// Forget the retained entries (the eviction count survives).
     Clear,
+    /// The timeline scrolled: (absolute y offset, viewport height) — what the
+    /// virtualized window renders against (#183).
+    Scrolled(f32, f32),
 }
 
 fn msg(m: HistoryMsg) -> Message {
@@ -54,7 +57,18 @@ pub struct HistoryData<'a> {
     /// Whether an active watch covers the key. `false` means no sample can
     /// reach the recorder — the load-bearing distinction of this pane.
     pub watched: bool,
+    /// Scroll position + viewport height, driving the virtual window (#183).
+    pub scroll: (f32, f32),
 }
+
+/// One timeline row's height. Two lines — the head and the payload preview —
+/// so a row is taller than a tree row and the window must say so.
+///
+/// The rows are fixed-height by *construction*, not by hope: `row_view` builds
+/// a two-line button and the container below pins it. A preview that wrapped
+/// would silently break the window's arithmetic, which is why the preview is
+/// pre-truncated by the recorder rather than by the layout.
+pub const ROW_HEIGHT: f32 = 34.0;
 
 /// The Inspector's history sections (#182). See [`super::detail::section`]
 /// for why this is a `Column`.
@@ -127,14 +141,39 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
 
     let focus = rec.focus();
     let newest = rec.ring.newest().map(|e| e.seq).unwrap_or(0);
-    let mut rows = Column::new().spacing(1);
-    for entry in rec.ring.iter() {
-        rows = rows.push(row_view(entry, newest, Some(entry.seq) == focus, rec));
+    // O(visible), like the tree (#183). This drew every retained entry — up to
+    // 200 buttons, each with a preview — on every frame, for a list of which
+    // the viewport shows perhaps a dozen. The tree has had the fix since #65;
+    // History never got it, and the asymmetry was invisible because both
+    // *bounds* were honest and neither said what drawing cost.
+    let total = rec.ring.len();
+    let (first, last) = kit::window(total, data.scroll.0, data.scroll.1, ROW_HEIGHT);
+    let mut rows = Column::new();
+    if first > 0 {
+        rows =
+            rows.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * ROW_HEIGHT)));
+    }
+    for entry in rec.ring.iter().skip(first).take(last - first) {
+        rows = rows.push(
+            iced::widget::container(row_view(entry, newest, Some(entry.seq) == focus, rec))
+                .height(Length::Fixed(ROW_HEIGHT)),
+        );
+    }
+    if last < total {
+        rows = rows.push(
+            iced::widget::Space::new().height(Length::Fixed((total - last) as f32 * ROW_HEIGHT)),
+        );
     }
     col = col.push(
         iced::widget::scrollable(rows)
             .height(Length::FillPortion(3))
-            .width(Length::Fill),
+            .width(Length::Fill)
+            .on_scroll(|viewport| {
+                msg(HistoryMsg::Scrolled(
+                    viewport.absolute_offset().y,
+                    viewport.bounds().height,
+                ))
+            }),
     );
 
     col = col.push(diff_section(rec, focus));

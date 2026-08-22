@@ -54,6 +54,7 @@
 //! struct instead. A contract nobody reads against the code is the failure this
 //! crate keeps finding (#178, #250).
 
+pub mod activity;
 pub mod admin;
 pub mod blob;
 pub mod call;

@@ -118,6 +118,16 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
             .padding(4),
     );
 
+    iced::widget::column![meta].spacing(space::XS).into()
+}
+
+/// The transport: play/pause, speed, and the scrubber.
+///
+/// Split from [`banner`] for the Activity dock (#183). The banner is a *mode*
+/// indicator and stays between the toolbar and the panes, where it cannot be
+/// put away; the transport is a stream control and lives in the dock's Replay
+/// tab.
+pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
     let (pos, span) = state.clock();
     let transport = row![
         button(text(if state.playing { "pause" } else { "play" }).size(font::CAPTION))
@@ -141,9 +151,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     .spacing(space::SM)
     .align_y(iced::Alignment::Center);
 
-    iced::widget::column![meta, transport]
-        .spacing(space::XS)
-        .into()
+    transport.into()
 }
 
 /// The open row: a path box, shown on demand from the toolbar.
@@ -169,33 +177,18 @@ pub fn open_row(path: &str) -> Element<'_, Message> {
 
 /// Everything replay mode puts between the toolbar and the panes (#74).
 ///
+/// Since #183 that is the banner and nothing else. The open row, the scrubber
+/// and the capture line moved into the Activity dock's Replay tab, because
+/// they are stream controls. The banner did not, because it is a *mode*
+/// indicator, and one you can put away behind a tab is one that can lie about
+/// what the panes are showing.
+///
 /// A `Vec` rather than one composed element: the shell stacks them into its
-/// own column, and each is independently absent. Returning an empty `Vec` is
-/// the ordinary case, and it allocates nothing.
+/// own column, and it is empty on the ordinary path.
 pub(crate) fn surfaces(replay: &ReplayMode) -> Vec<Element<'_, Message>> {
     let mut out: Vec<Element<'_, Message>> = Vec::new();
-    if let Some(path) = &replay.replay_open {
-        out.push(open_row(path));
-        if let Some(note) = &replay.replay_note {
-            out.push(crate::view::kit::muted(format!("could not open: {note}")));
-        }
-    }
     if let Some(state) = &replay.replay {
         out.push(banner(state));
-    }
-    if let Some(rec) = &replay.recording {
-        out.push(crate::view::kit::muted(format!(
-            "● recording current watches to {} — toolbar 'stop recording' finishes the file",
-            rec.path
-        )));
-    }
-    if let Some(done) = &replay.recorded {
-        out.push(crate::view::kit::muted(match done {
-            Ok((samples, dropped, path)) => format!(
-                "recorded {samples} sample(s) to {path} ({dropped} dropped — in-file ledger)"
-            ),
-            Err(e) => format!("recording failed: {e}"),
-        }));
     }
     out
 }

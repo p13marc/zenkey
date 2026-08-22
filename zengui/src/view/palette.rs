@@ -114,6 +114,17 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         })
         .collect();
 
+    // The Activity dock's streams (#183). They lost their tab-strip entries
+    // when they stopped being right-hand panes, and a stream you can only
+    // reach by clicking the right tab is one the palette has stopped
+    // covering.
+    for t in crate::message::ActivityTab::ALL {
+        out.push(Action {
+            label: format!("activity: {}", t.label()),
+            message: Message::Workspace(WorkspaceMsg::ActivityTab(t)),
+        });
+    }
+
     for scope in [
         crate::scope::ScopePreset::Everything,
         crate::scope::ScopePreset::Deployment,

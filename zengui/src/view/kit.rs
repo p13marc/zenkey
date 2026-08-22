@@ -265,9 +265,62 @@ pub fn human_rate(hz: f64) -> String {
     }
 }
 
+/// Rows rendered beyond each window edge, so scrolling never shows a gap.
+pub(crate) const OVERSCAN: usize = 8;
+
+/// The visible row window for a scroll position: `(first, last)` indices into
+/// a fixed-height row list, with overscan.
+///
+/// Pure, so it is testable without a renderer — and shared, so the three
+/// virtualized lists cannot drift into three different ideas of "visible".
+/// The tree had this and nothing else did: Echo capped *drawing* at 300 rows
+/// with no window, and History drew every retained entry (#183).
+///
+/// A list of `rows` rows is `rows * row_height` tall whether it is drawn or
+/// not, which is what the spacers above and below the window are for. Callers
+/// that forget them get a window that scrolls against the wrong extent.
+pub fn window(rows: usize, scroll_y: f32, viewport_h: f32, row_height: f32) -> (usize, usize) {
+    let first = (scroll_y / row_height).floor() as usize;
+    let visible = (viewport_h / row_height).ceil() as usize + 1;
+    let first = first.saturating_sub(OVERSCAN);
+    let last = (first + visible + 2 * OVERSCAN).min(rows);
+    (first.min(rows), last)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window is O(visible) and covers the viewport, at any offset.
+    ///
+    /// This lived in `tree.rs` and was the tree's alone; History drew all 200
+    /// of its rows and Echo capped drawing at 300 with no window at all
+    /// (#183). Three lists, one window, one test.
+    #[test]
+    fn the_window_is_bounded_and_covers_the_viewport_at_every_height() {
+        for row_height in [20.0_f32, 24.0, 34.0] {
+            let rows = 50_000;
+            let viewport = 600.0;
+            let expected = (viewport / row_height).ceil() as usize + 1 + 2 * OVERSCAN;
+
+            let (first, last) = window(rows, 0.0, viewport, row_height);
+            assert_eq!(first, 0);
+            assert!(last - first <= expected, "top: {} rows", last - first);
+
+            let mid = 25_000.0 * row_height;
+            let (first, last) = window(rows, mid, viewport, row_height);
+            assert!((25_000 - OVERSCAN..=25_000).contains(&first));
+            assert!(last - first <= expected, "middle: {} rows", last - first);
+            assert!(
+                (last - first) as f32 * row_height >= viewport,
+                "the window must cover the viewport it was asked about"
+            );
+
+            // Past the end clamps rather than panicking on the slice.
+            let (first, last) = window(10, 1_000_000.0, viewport, row_height);
+            assert!(first <= 10 && last <= 10 && first <= last);
+        }
+    }
 
     #[test]
     fn bytes_render_in_the_right_unit() {

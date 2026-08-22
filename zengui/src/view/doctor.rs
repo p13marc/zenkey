@@ -51,7 +51,13 @@ fn msg(m: DoctorMsg) -> Message {
     Message::Pane(PaneMsg::Doctor(m))
 }
 
-pub fn pane<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
+/// The doctor's results — the Activity dock's Doctor stream (#183).
+///
+/// It stopped being a *place* and became an action: the run is a palette
+/// command, and this is where its verdict lands. That is the honest shape,
+/// because a doctor run is a thing you do to a session, not a view of the
+/// subject.
+pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
     let run_label = if state.in_flight {
         "running…"
     } else {

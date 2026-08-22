@@ -410,6 +410,15 @@ fn matching_sentence(matching: Option<bool>) -> String {
     }
 }
 
+/// The send log, on its own — the Activity dock's Publish stream (#183).
+///
+/// Split out of the pane so verifying a publish does not mean leaving the
+/// form. The form asks a question; the log is what came back, and those are
+/// two different regions of the workspace.
+pub fn log_section(form: &PublishForm) -> Element<'_, Message> {
+    log_view(form)
+}
+
 fn log_view(form: &PublishForm) -> Element<'_, Message> {
     let mut col = Column::new().spacing(2);
     if form.log.is_empty() {

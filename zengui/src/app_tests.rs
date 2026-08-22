@@ -378,7 +378,7 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
         current.to_string(),
     ))));
     app.sub.decoded = None;
-    app.work.right_pane = RightPane::Echo;
+    app.work.right_pane = RightPane::Nodes;
 
     let late = Arc::new(FetchOutcome::None {
         attempted: ["storage", "cache", "window"],
@@ -390,7 +390,7 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
 
     assert_eq!(
         app.work.right_pane,
-        RightPane::Echo,
+        RightPane::Nodes,
         "a superseded answer must not steal the pane"
     );
     assert!(
