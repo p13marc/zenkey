@@ -41,6 +41,8 @@ pub mod write;
 #[cfg(feature = "decode")]
 pub mod body;
 #[cfg(feature = "decode")]
+pub mod condition;
+#[cfg(feature = "decode")]
 pub mod decode;
 #[cfg(feature = "decode")]
 pub mod doctor;
@@ -54,6 +56,8 @@ pub mod synth;
 pub use body::{
     BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
 };
+#[cfg(feature = "decode")]
+pub use condition::{CondState, Condition, Eval, RuleState, Transition, Window};
 #[cfg(feature = "decode")]
 pub use decode::{
     DecodedSample, SchemaDrift, TotalityGap, schema_drift, schema_dump, schemas_for_type,
