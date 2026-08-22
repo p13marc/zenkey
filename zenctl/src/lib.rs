@@ -485,10 +485,13 @@ pub async fn run() -> Result<()> {
             sample,
             listen,
             fail_on,
+            watch,
+            every,
+            runs,
             bus,
         } => {
             let bus = Bus::resolve(&bus)?;
-            cmd::doctor::run(deep, sample, listen, fail_on, &bus).await
+            cmd::doctor::run(deep, sample, listen, fail_on, watch, every, runs, &bus).await
         }
         Command::Serve {
             keyexpr,
@@ -598,6 +601,15 @@ pub async fn run() -> Result<()> {
                 &bus,
             )
             .await
+        }
+        Command::Watchdog {
+            rules,
+            tick,
+            ticks,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::watchdog::run(&rules, tick, ticks, &bus).await
         }
         Command::Probe {
             target,

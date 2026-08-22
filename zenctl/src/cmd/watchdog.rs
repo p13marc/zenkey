@@ -1,0 +1,68 @@
+//! `zenctl watchdog` (#227) — transitions, not states.
+//!
+//! The continuous observer over the engine's closed condition vocabulary
+//! (`zenkey_fleet::condition`): every genuine state change is one ndjson
+//! line on stdout, an unchanged tick prints nothing. A **foreground**
+//! process, explicitly launched, one per invocation, no shared state — the
+//! redesign ledger's "no daemon" decision rejected a hidden discovery-caching
+//! server, not this (`docs/redesign-2026-07.md` §6.1).
+//!
+//! Output is ndjson regardless of `--format`: a stream of transitions has
+//! one honest encoding — a table redraw would be a state display, which is
+//! exactly what this verb exists not to be.
+
+use std::io::Write as _;
+
+use anyhow::Result;
+use zenkey_fleet::condition::{Condition, Transition, WatchdogSpec, run_watchdog};
+
+use crate::Bus;
+
+pub async fn run(rules: &[String], tick: f64, ticks: Option<u64>, args: &Bus) -> Result<()> {
+    if tick <= 0.0 {
+        anyhow::bail!("--tick must be a positive number of seconds");
+    }
+    let rules: Vec<Condition> = rules
+        .iter()
+        .map(|r| Condition::parse(r))
+        .collect::<Result<_>>()?;
+
+    let session = args.session().await?;
+    // Slices enrich: `qos-mismatch` and `invalid-payload` judge against the
+    // registry; with none loaded they observe and say what they could not
+    // judge (O4), and doctor rules run their own asks.
+    let slices = args.slices_optional().await?.unwrap_or_default();
+    let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+    let spec = WatchdogSpec {
+        rules,
+        tick: std::time::Duration::from_secs_f64(tick),
+        ticks,
+        timeout: args.timeout(),
+    };
+
+    eprintln!(
+        "watchdog: {} rule(s), tick {tick}s — one ndjson line per genuine state \
+         change, none per unchanged tick; three states, ok/firing/unobservable \
+         (RFC 09 §5.1 O4/O6)",
+        spec.rules.len()
+    );
+    let mut out = std::io::stdout();
+    let mut emit = |t: &Transition| {
+        if let Ok(line) = serde_json::to_string(t) {
+            let _ = writeln!(out, "{line}");
+            let _ = out.flush();
+        }
+    };
+    let summary = tokio::select! {
+        r = run_watchdog(&session, args.base(), &slices, &store, &spec, &mut emit) => r?,
+        _ = tokio::signal::ctrl_c() => {
+            eprintln!("watchdog: interrupted");
+            return Ok(());
+        }
+    };
+    eprintln!(
+        "watchdog: {} tick(s), {} transition(s)",
+        summary.ticks, summary.transitions
+    );
+    Ok(())
+}

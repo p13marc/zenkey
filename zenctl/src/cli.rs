@@ -356,6 +356,35 @@ pub(crate) enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Watch conditions on the bus and emit TRANSITIONS as ndjson (#227).
+    ///
+    /// A foreground observer — explicitly launched, one process per
+    /// invocation, no shared state; not a daemon. Each --rule is one
+    /// condition from a CLOSED vocabulary (no expressions, no templating);
+    /// every genuine state change prints one line
+    /// {"rule":…,"from":…,"to":…,"at":…,"evidence":…} and an unchanged tick
+    /// prints nothing. Three states, not two (RFC 09 §5.1 O4/O6):
+    /// ok / firing / unobservable — a drop under a completeness claim is
+    /// "could not tell", never "ok", which is what keeps a 3am page honest.
+    /// The first evaluation states each rule's baseline once, from null.
+    Watchdog {
+        /// One rule (repeatable): `rate-above <SEL> <HZ>`,
+        /// `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
+        /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`,
+        /// `doctor <CHECK-ID>`, `origin-down <ORIGIN>`, `dropped`.
+        /// Selectors are full wire form (this session is un-namespaced,
+        /// RFC 09 §5); a doctor rule runs the doctor once per tick.
+        #[arg(long = "rule", value_name = "RULE", required = true)]
+        rules: Vec<String>,
+        /// Evaluation tick, seconds.
+        #[arg(long, default_value_t = 5.0)]
+        tick: f64,
+        /// Stop after N ticks (default: run until interrupted).
+        #[arg(long, value_name = "N")]
+        ticks: Option<u64>,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Cutover acceptance, half two (RFC 09 §6): a consumer-shaped,
     /// CONCRETE-KEY probe.
     ///
@@ -527,6 +556,19 @@ pub(crate) enum Command {
         /// Default: always exit 0 — findings are output, not verdicts.
         #[arg(long, value_enum, value_name = "SEVERITY")]
         fail_on: Option<FailOn>,
+        /// Re-run the checks on an interval and report CHECK-ID TRANSITIONS
+        /// as ndjson (#227): the first run states the baseline (one line per
+        /// stable check id, from null), every later run prints only genuine
+        /// changes — and a run that fails flips every check to
+        /// `unobservable`, never silently to "ok".
+        #[arg(long, conflicts_with = "fail_on")]
+        watch: bool,
+        /// With --watch: seconds between runs.
+        #[arg(long, value_name = "SECS", default_value_t = 10.0, requires = "watch")]
+        every: f64,
+        /// With --watch: stop after N runs (default: run until interrupted).
+        #[arg(long, value_name = "N", requires = "watch")]
+        runs: Option<u64>,
         #[command(flatten)]
         bus: BusArgs,
     },

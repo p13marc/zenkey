@@ -30,6 +30,7 @@ Commands:
   cutover      Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic
   gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
   expect       Await an expectation on the bus, exit-coded for CI (#160)
+  watchdog     Watch conditions on the bus and emit TRANSITIONS as ndjson (#227)
   probe        Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe
   record       Capture a selector's traffic to a .zrec file (RFC 09 §5.2)
   replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
@@ -77,6 +78,7 @@ Commands:
   cutover      Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic
   gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
   expect       Await an expectation on the bus, exit-coded for CI (#160)
+  watchdog     Watch conditions on the bus and emit TRANSITIONS as ndjson (#227)
   probe        Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe
   record       Capture a selector's traffic to a .zrec file (RFC 09 §5.2)
   replay       Replay a .zrec capture onto the bus — replay is PUBLISHING

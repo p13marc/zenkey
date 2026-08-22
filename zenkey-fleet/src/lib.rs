@@ -41,6 +41,8 @@ pub mod write;
 #[cfg(feature = "decode")]
 pub mod body;
 #[cfg(feature = "decode")]
+pub mod condition;
+#[cfg(feature = "decode")]
 pub mod decode;
 #[cfg(feature = "decode")]
 pub mod doctor;
@@ -53,6 +55,11 @@ pub mod synth;
 #[cfg(feature = "decode")]
 pub use body::{
     BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
+};
+#[cfg(feature = "decode")]
+pub use condition::{
+    CondState, Condition, DoctorWatch, Eval, RuleState, Transition, WatchdogSpec, WatchdogSummary,
+    Window, run_watchdog,
 };
 #[cfg(feature = "decode")]
 pub use decode::{
