@@ -8,14 +8,15 @@
 //! set of sub-states it can move — and reads the rest through [`Ctx`], which
 //! is shared.
 //!
-//! The count, honestly: [`deployment`] names **all six** — a base change
-//! clears four, remembers a preference in `chrome`, and drops the selected
-//! key's decode in `sub`. [`bus`], [`subject`] and [`workspace`] name five,
-//! each for a traceable reason: a tick moves everything the bus can move; a
-//! selection is a causal chain that ends in a fetch; and the workspace has one
-//! arm that hands to [`pane::replay`], which is a bus in disguise. [`chrome`]
-//! names four and cannot move a row or a watch, and [`pane`] hands each pane
-//! only its own state.
+//! The count, honestly: [`deployment`] and [`workspace`] name **all six** —
+//! a base change clears four, remembers a preference in `chrome`, and drops
+//! the selected key's decode in `sub`; the workspace has one arm that hands
+//! to [`pane::replay`], which is a bus in disguise, and since #180 it writes
+//! `chrome.prefs.layout`, the dock grid's persisted form. [`bus`] and
+//! [`subject`] name five, each for a traceable reason: a tick moves
+//! everything the bus can move; a selection is a causal chain that ends in a
+//! fetch. The two that stay narrow are [`chrome`], which cannot move a row
+//! or a watch, and [`pane`], which hands each pane only its own state.
 //!
 //! Five is not a failure to decompose. `&mut Zengui` said *nothing*;
 //! `(dep, obs, sub, tree, work)` says five-of-six, and `(&mut CallForm, Ctx)`

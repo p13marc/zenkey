@@ -21,9 +21,8 @@ use iced::Element;
 use iced::widget::{button, column, pick_list, row};
 
 use crate::config::BaseChoice;
-use crate::message::{
-    ChromeMsg, DeploymentMsg, Message, RightPane, Subject, SubjectMsg, WorkspaceMsg,
-};
+use crate::message::{ChromeMsg, DeploymentMsg, Message, Subject, SubjectMsg, WorkspaceMsg};
+use crate::prefs::DockRole;
 use crate::scope::ScopePreset;
 use crate::state::{Chrome, Deployment, Observation, SubjectState, Workspace};
 use crate::view::palette::{Overlay, PaletteMsg};
@@ -190,19 +189,25 @@ pub(crate) fn bar<'a>(
     .into()
 }
 
-/// The window's own controls: the pane strip, capture/replay, theme, zoom,
+/// The window's own controls: the dock strip, capture/replay, theme, zoom,
 /// reconnect — everything that is about the window rather than the place.
+///
+/// The dock strip replaced the eleven-tab pane strip (#180): four toggles,
+/// one per [`DockRole`], where lit means *open in the grid* — not "the one
+/// pane showing". Clicking closes an open dock or restores a closed one; it
+/// is the same [`WorkspaceMsg::DockToggled`] each dock's title-bar `×`
+/// sends, and the way back once one is closed.
 fn controls<'a>(
     chrome: &'a Chrome,
     dep: &'a Deployment,
     work: &'a Workspace,
 ) -> Element<'a, Message> {
     row![
-        iced::widget::Row::from_iter(RightPane::ALL.into_iter().map(|p| {
+        iced::widget::Row::from_iter(DockRole::ALL.into_iter().map(|role| {
             kit::tab(
-                p.label(),
-                work.right_pane == p,
-                Message::Workspace(WorkspaceMsg::PaneSelected(p)),
+                role.label(),
+                work.docks.is_open(role),
+                Message::Workspace(WorkspaceMsg::DockToggled(role)),
             )
         }))
         .spacing(space::XS),

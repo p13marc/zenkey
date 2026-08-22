@@ -56,13 +56,16 @@ impl Zengui {
         let listen = settings.listen.clone();
         let scouting = settings.scouting;
         let zenoh_config = settings.zenoh_config.clone();
+        // The persisted layout is what the grid is rebuilt from (#180); read
+        // before `prefs` moves into the chrome.
+        let work = Workspace::new(echo_lines, &prefs.layout.root);
         let app = Zengui {
             chrome: Chrome::new(prefs, prefs_note),
             dep: Deployment::new(settings),
             obs: Observation::default(),
             sub: SubjectState::default(),
             tree: TreeState::default(),
-            work: Workspace::new(echo_lines),
+            work,
         };
         (
             app,
@@ -88,11 +91,11 @@ impl Zengui {
     ///
     /// It destructures immediately, so what each group can move is its
     /// parameter list rather than a promise. The honest count: `deployment`
-    /// names all six, and `bus`, `subject` and `workspace` name five —
-    /// `subject` through the causal chain from `Select`, `workspace`
-    /// through the one arm that hands to replay. The two that stay narrow are
-    /// `chrome`, which cannot move a row or a watch, and `pane`, which hands
-    /// each pane only its own state.
+    /// and `workspace` name all six — `workspace` gained `chrome` with #180,
+    /// because the dock grid's persisted form is a preference — and `bus` and
+    /// `subject` name five, `subject` through the causal chain from `Select`.
+    /// The two that stay narrow are `chrome`, which cannot move a row or a
+    /// watch, and `pane`, which hands each pane only its own state.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let Zengui {
             chrome,
@@ -108,7 +111,9 @@ impl Zengui {
             Message::Deployment(m) => {
                 update::deployment::update(chrome, dep, obs, sub, tree, work, m)
             }
-            Message::Workspace(m) => update::workspace::update(dep, obs, sub, tree, work, m),
+            Message::Workspace(m) => {
+                update::workspace::update(chrome, dep, obs, sub, tree, work, m)
+            }
             Message::Pane(m) => update::pane::update(dep, obs, sub, work, m),
             Message::Chrome(m) => update::chrome::update(chrome, dep, sub, work, m),
         }
@@ -153,9 +158,10 @@ impl Zengui {
             }),
         );
         // …and the settle timer that actually writes it, which exists only
-        // while a resize is outstanding (issue #189). One file write per drag
-        // rather than per pixel, and none at all while the window is still.
-        if self.chrome.window_dirty {
+        // while a resize — of the window (#189) or of a dock splitter
+        // (#180) — is outstanding. One file write per drag rather than per
+        // pixel, and none at all while the window is still.
+        if self.chrome.prefs_dirty {
             subs.push(
                 iced::time::every(std::time::Duration::from_millis(700))
                     .map(|_| Message::Chrome(ChromeMsg::WindowSettled)),
@@ -178,14 +184,11 @@ impl Zengui {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let panes = view::panes::split(
-            &self.chrome,
-            &self.dep,
-            &self.obs,
-            &self.sub,
-            &self.tree,
-            &self.work,
-        );
+        // The workspace is the dock grid (#180): every region — the locator,
+        // the Inspector, the Activity dock (#183), the workbench — is a pane
+        // of it, resizable and rearrangeable, and a closed dock gives its
+        // space back structurally.
+        let workspace = view::panes::grid(&self.dep, &self.obs, &self.sub, &self.tree, &self.work);
 
         let mut layout = column![view::location::bar(
             &self.chrome,
@@ -201,39 +204,13 @@ impl Zengui {
         for surface in view::replay::surfaces(&self.work.replay) {
             layout = layout.push(surface);
         }
-        // The Activity dock (#183): the session's parallel streams, below the
-        // subject-scoped panes because that is what they are about. `panes`
-        // takes what is left after the dock and the strips, so putting the
-        // dock away gives the space back rather than leaving a hole.
-        let layout = layout
-            .push(panes)
-            .push(view::activity::dock(view::activity::ActivityData {
-                dock: &self.work.activity,
-                echo: &self.work.echo.echo,
-                echo_view: &self.work.echo.echo_view,
-                echo_scroll: self.work.echo.echo_scroll,
-                follow: self
-                    .work
-                    .echo
-                    .echo_view
-                    .follow_subject
-                    .then(|| self.sub.current.key())
-                    .flatten(),
-                next_seq: self.work.echo.echo.next_seq(),
-                publish: &self.work.bench.publish_form,
-                doctor: &self.work.verdicts.doctor,
-                base: self.dep.base(),
-                replay: &self.work.replay,
-                slices: self.dep.slices.as_deref(),
-                retention: self.obs.retention,
-            }))
-            .push(view::status::strip(Status::of(
-                &self.chrome,
-                &self.dep,
-                &self.obs,
-                &self.sub,
-                &self.work,
-            )));
+        let layout = layout.push(workspace).push(view::status::strip(Status::of(
+            &self.chrome,
+            &self.dep,
+            &self.obs,
+            &self.sub,
+            &self.work,
+        )));
 
         // The overlay floats above everything (#75). `stack` rather than a
         // modal widget because the layering rule is ours — palette above

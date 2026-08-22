@@ -65,11 +65,251 @@ impl ThemeChoice {
     }
 }
 
+/// The four dock roles the workspace grid arranges (#180, epic #172).
+///
+/// A role, not a pane: the Workbench shows whichever tool `right_pane`
+/// selects, and the Activity dock holds its own tab strip. The grid decides
+/// *where* each region is and how much of the window it gets — never what is
+/// inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DockRole {
+    /// The key tree, find and pivot — the left dock of every preset.
+    Locator,
+    /// The one surface that follows the subject (#182).
+    Inspector,
+    /// The session's parallel streams (#183): echo, publish log, doctor,
+    /// replay.
+    Activity,
+    /// The tools: call, publish, nodes, admin — until #184 merges the first
+    /// two into Send.
+    Workbench,
+}
+
+impl DockRole {
+    pub const ALL: [DockRole; 4] = [
+        DockRole::Locator,
+        DockRole::Inspector,
+        DockRole::Activity,
+        DockRole::Workbench,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DockRole::Locator => "locator",
+            DockRole::Inspector => "inspector",
+            DockRole::Activity => "activity",
+            DockRole::Workbench => "workbench",
+        }
+    }
+}
+
+/// A split's direction, as persisted. Mirrors `pane_grid::Axis`, and spelled
+/// out here so the prefs file never depends on a widget crate's serde story:
+/// `horizontal` is a horizontal split *line* — `a` above `b`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LayoutAxis {
+    /// `a` over `b`.
+    Horizontal,
+    /// `a` left of `b`.
+    Vertical,
+}
+
+/// The persisted shape of the workspace grid (#180): the same binary tree
+/// `pane_grid::State` keeps, minus the widget-internal ids — which is exactly
+/// the part that cannot be serialized and does not need to be. The grid is
+/// rebuilt from this on launch and captured back into it on every layout
+/// change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LayoutNode {
+    /// A split of the available space, `ratio` to `a`.
+    Split {
+        axis: LayoutAxis,
+        ratio: f32,
+        a: Box<LayoutNode>,
+        b: Box<LayoutNode>,
+    },
+    /// A dock.
+    Dock(DockRole),
+}
+
+impl LayoutNode {
+    fn collect(&self, out: &mut Vec<DockRole>) {
+        match self {
+            LayoutNode::Split { a, b, .. } => {
+                a.collect(out);
+                b.collect(out);
+            }
+            LayoutNode::Dock(role) => out.push(*role),
+        }
+    }
+
+    /// The docks this layout shows, in tree order.
+    pub fn roles(&self) -> Vec<DockRole> {
+        let mut out = Vec::new();
+        self.collect(&mut out);
+        out
+    }
+
+    /// A hand-editable tree can say anything; a *sane* one names each dock at
+    /// most once. (At least one is structural: a `LayoutNode` cannot be
+    /// empty.) A duplicate would make "close the locator" ambiguous, so the
+    /// whole layout degrades to the default rather than guessing.
+    pub fn is_sane(&self) -> bool {
+        let mut roles = self.roles();
+        roles.sort_by_key(|r| r.label());
+        let len = roles.len();
+        roles.dedup();
+        roles.len() == len
+    }
+
+    /// Clamp every ratio a hand edit may have pushed out of range. The bounds
+    /// are looser than the old `split`'s 0.15..0.85 because a grid pane has a
+    /// minimum pixel size of its own; the clamp only has to keep a dock from
+    /// vanishing entirely.
+    fn clamped(self) -> LayoutNode {
+        match self {
+            LayoutNode::Split { axis, ratio, a, b } => LayoutNode::Split {
+                axis,
+                ratio: if ratio.is_finite() {
+                    ratio.clamp(0.05, 0.95)
+                } else {
+                    0.5
+                },
+                a: Box::new(a.clamped()),
+                b: Box::new(b.clamped()),
+            },
+            dock => dock,
+        }
+    }
+}
+
+/// The three saved layouts (epic #172), on Alt+1/2/3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LayoutPreset {
+    /// Locator 30% + Inspector 70% — reading one bus, one key at a time.
+    Explore,
+    /// Locator + Inspector over a tall Activity dock (40% height) — watching
+    /// the streams while the subject stays on screen.
+    Watch,
+    /// Like Watch, but the Locator pivots by origin and the Activity dock
+    /// opens on the doctor — "why is this node silent?".
+    Diagnose,
+}
+
+impl LayoutPreset {
+    pub const ALL: [LayoutPreset; 3] = [
+        LayoutPreset::Explore,
+        LayoutPreset::Watch,
+        LayoutPreset::Diagnose,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LayoutPreset::Explore => "explore",
+            LayoutPreset::Watch => "watch",
+            LayoutPreset::Diagnose => "diagnose",
+        }
+    }
+
+    /// The preset's tree. The Workbench is deliberately in none of them: the
+    /// send/nodes/admin tools are opened when wanted (the dock strip, the
+    /// palette, or any `PaneSelected`), not paid for by default.
+    pub fn root(self) -> LayoutNode {
+        let dock = |r| Box::new(LayoutNode::Dock(r));
+        let split = |axis, ratio, a, b| LayoutNode::Split { axis, ratio, a, b };
+        match self {
+            LayoutPreset::Explore => split(
+                LayoutAxis::Vertical,
+                0.30,
+                dock(DockRole::Locator),
+                dock(DockRole::Inspector),
+            ),
+            // Locator 25% + Inspector 35% of the window, Activity 40% height:
+            // a 60% top row split 25:35, over a full-width Activity dock.
+            LayoutPreset::Watch => split(
+                LayoutAxis::Horizontal,
+                0.60,
+                Box::new(split(
+                    LayoutAxis::Vertical,
+                    0.42,
+                    dock(DockRole::Locator),
+                    dock(DockRole::Inspector),
+                )),
+                dock(DockRole::Activity),
+            ),
+            // Locator 30% + Inspector 35%, Activity 35% height.
+            LayoutPreset::Diagnose => split(
+                LayoutAxis::Horizontal,
+                0.65,
+                Box::new(split(
+                    LayoutAxis::Vertical,
+                    0.46,
+                    dock(DockRole::Locator),
+                    dock(DockRole::Inspector),
+                )),
+                dock(DockRole::Activity),
+            ),
+        }
+    }
+
+    pub fn layout(self) -> WorkspaceLayout {
+        WorkspaceLayout {
+            preset: Some(self),
+            root: self.root(),
+        }
+    }
+}
+
+/// The named workspace layout (#180) — what superseded the scalar `split`,
+/// which was stored, clamped, round-trip tested and read by nothing.
+///
+/// `preset` is the name while the layout still *is* that preset; the first
+/// drag, close or restore clears it, because a layout the user has bent is no
+/// longer Explore however it started.
+///
+/// The defaults are per-field, **not** the struct-level `#[serde(default)]`
+/// the rest of the file uses: that would fill a missing `preset` from
+/// `Default::default()` — `Some(Explore)` — and a custom tree saved without a
+/// name would load renamed Explore and be regenerated out of existence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceLayout {
+    /// Absent means custom, not "the default preset".
+    #[serde(default)]
+    pub preset: Option<LayoutPreset>,
+    /// Absent (a hand-written `preset = "…"`-only table) is filled from the
+    /// preset by `sanitised`, which regenerates a named layout's tree anyway.
+    #[serde(default = "explore_root")]
+    pub root: LayoutNode,
+}
+
+fn explore_root() -> LayoutNode {
+    LayoutPreset::Explore.root()
+}
+
+impl Default for WorkspaceLayout {
+    fn default() -> Self {
+        LayoutPreset::Explore.layout()
+    }
+}
+
+impl WorkspaceLayout {
+    /// A layout that is no preset any more.
+    pub fn custom(root: LayoutNode) -> WorkspaceLayout {
+        WorkspaceLayout { preset: None, root }
+    }
+}
+
 /// The persisted document.
 ///
 /// Every field is `#[serde(default)]`-shaped so a file written by an older
 /// build, or hand-edited down to two lines, still loads — the same
 /// forward/backward tolerance the slice parser has, for the same reason.
+/// (That is also how the retired `split` key ages out: an old file's value is
+/// simply not a field any more, and is ignored.)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
@@ -83,8 +323,8 @@ pub struct Prefs {
     pub context: Option<String>,
     /// The scope preset last selected.
     pub scope: ScopePreset,
-    /// Left/right split ratio, 0..1.
-    pub split: f32,
+    /// The workspace grid (#180), superseding the scalar `split`.
+    pub layout: WorkspaceLayout,
 }
 
 impl Default for Prefs {
@@ -95,7 +335,7 @@ impl Default for Prefs {
             window: None,
             context: None,
             scope: ScopePreset::Everything,
-            split: 0.5,
+            layout: WorkspaceLayout::default(),
         }
     }
 }
@@ -153,10 +393,18 @@ impl Prefs {
         if !self.zoom.is_finite() {
             self.zoom = 1.0;
         }
-        self.split = self.split.clamp(0.15, 0.85);
-        if !self.split.is_finite() {
-            self.split = 0.5;
-        }
+        // A named preset regenerates its tree: the name is the claim, and a
+        // hand-edited `preset = "watch"` should *be* Watch rather than
+        // whatever tree happened to sit beside it.
+        self.layout = match self.layout.preset {
+            Some(preset) => preset.layout(),
+            None if self.layout.root.is_sane() => {
+                WorkspaceLayout::custom(self.layout.root.clamped())
+            }
+            // A tree naming one dock twice cannot be closed or restored
+            // coherently — degrade to the default, like a broken file does.
+            None => WorkspaceLayout::default(),
+        };
         self.window = self
             .window
             .filter(|(w, h)| w.is_finite() && h.is_finite() && *w >= 320.0 && *h >= 240.0);
@@ -176,17 +424,6 @@ impl Prefs {
         let text = toml::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, text)
-    }
-
-    /// The left/right split as iced fill portions.
-    ///
-    /// `split` was stored, clamped and round-trip tested from the start and
-    /// then read by nothing — the layout was hardcoded to an even split
-    /// (issue #189). Reading it here means a value edited in the file takes
-    /// effect; a *draggable* splitter is the workspace's job (issue #180).
-    pub fn split_portions(&self) -> (u16, u16) {
-        let left = (self.split * 100.0).round().clamp(1.0, 99.0) as u16;
-        (left, 100 - left)
     }
 
     pub fn zoom_in(&mut self) {
@@ -221,12 +458,40 @@ mod tests {
             window: Some((1440.0, 900.0)),
             context: Some("lab".into()),
             scope: ScopePreset::Deployment,
-            split: 0.4,
+            layout: LayoutPreset::Watch.layout(),
         };
         prefs.save_to(&path).unwrap();
         let (back, note) = Prefs::load_from(&path);
         assert_eq!(back, prefs);
         assert!(note.is_none());
+    }
+
+    /// The layout the acceptance is about: a *dragged* (custom) tree — nested
+    /// splits, odd ratios — comes back exactly, which is the half of "a drag
+    /// survives restart" that the file is responsible for.
+    #[test]
+    fn a_custom_layout_tree_round_trips_exactly() {
+        let path = tmp("layout-round-trip.toml");
+        let root = LayoutNode::Split {
+            axis: LayoutAxis::Horizontal,
+            ratio: 0.42,
+            a: Box::new(LayoutNode::Split {
+                axis: LayoutAxis::Vertical,
+                ratio: 0.27,
+                a: Box::new(LayoutNode::Dock(DockRole::Locator)),
+                b: Box::new(LayoutNode::Dock(DockRole::Workbench)),
+            }),
+            b: Box::new(LayoutNode::Dock(DockRole::Activity)),
+        };
+        let prefs = Prefs {
+            layout: WorkspaceLayout::custom(root.clone()),
+            ..Prefs::default()
+        };
+        prefs.save_to(&path).unwrap();
+        let (back, note) = Prefs::load_from(&path);
+        assert!(note.is_none());
+        assert_eq!(back.layout.preset, None, "a bent layout is no preset");
+        assert_eq!(back.layout.root, root);
     }
 
     /// First run is silent: an absent file is the normal case, not a problem
@@ -268,21 +533,57 @@ mod tests {
     }
 
     /// Out-of-range values are clamped, not rejected — a bad `zoom` must not
-    /// discard the `theme` sitting next to it.
+    /// discard the `theme` sitting next to it. The retired `split` key (an
+    /// older build's file) is ignored rather than a parse error.
     #[test]
     fn hand_edited_nonsense_is_clamped_field_by_field() {
         let path = tmp("nonsense.toml");
         std::fs::write(
             &path,
-            "theme = \"light\"\nzoom = 99.0\nsplit = -3.0\nwindow = [1.0, 1.0]\n",
+            "theme = \"light\"\nzoom = 99.0\nsplit = -3.0\nwindow = [1.0, 1.0]\n\
+             [layout]\n[layout.root.split]\naxis = \"vertical\"\nratio = 7.0\n\
+             [layout.root.split.a]\ndock = \"locator\"\n\
+             [layout.root.split.b]\ndock = \"inspector\"\n",
         )
         .unwrap();
         let (prefs, note) = Prefs::load_from(&path);
         assert!(note.is_none(), "it parsed; the values were just silly");
         assert_eq!(prefs.theme, ThemeChoice::Light, "the good field survives");
         assert_eq!(prefs.zoom, MAX_ZOOM);
-        assert_eq!(prefs.split, 0.15);
         assert!(prefs.window.is_none(), "a 1x1 window is dropped, not kept");
+        let LayoutNode::Split { ratio, .. } = prefs.layout.root else {
+            panic!("the edited tree survives, clamped");
+        };
+        assert_eq!(ratio, 0.95, "a ratio of 7.0 is a clamp, not a rejection");
+    }
+
+    /// A layout naming one dock twice cannot be closed or restored
+    /// coherently, so the whole layout — and only the layout — degrades.
+    #[test]
+    fn a_duplicate_dock_degrades_the_layout_to_the_default() {
+        let path = tmp("duplicate-dock.toml");
+        std::fs::write(
+            &path,
+            "theme = \"light\"\n\
+             [layout]\n[layout.root.split]\naxis = \"vertical\"\nratio = 0.5\n\
+             [layout.root.split.a]\ndock = \"locator\"\n\
+             [layout.root.split.b]\ndock = \"locator\"\n",
+        )
+        .unwrap();
+        let (prefs, _) = Prefs::load_from(&path);
+        assert_eq!(prefs.theme, ThemeChoice::Light, "the good field survives");
+        assert_eq!(prefs.layout, WorkspaceLayout::default());
+    }
+
+    /// `preset = "watch"` *is* Watch: the name regenerates the tree, so a
+    /// hand-edited name never ships with a stale tree beside it.
+    #[test]
+    fn a_named_preset_regenerates_its_tree_on_load() {
+        let path = tmp("named-preset.toml");
+        std::fs::write(&path, "[layout]\npreset = \"watch\"\n").unwrap();
+        let (prefs, note) = Prefs::load_from(&path);
+        assert!(note.is_none());
+        assert_eq!(prefs.layout, LayoutPreset::Watch.layout());
     }
 
     #[test]
@@ -307,28 +608,24 @@ mod tests {
         }
     }
 
-    /// The stored ratio has to actually reach the layout: it was clamped and
-    /// round-tripped from the start, and read by nothing (issue #189).
+    /// Each preset is sane, and the three trees are three different layouts —
+    /// a copy-paste that made Watch and Diagnose the same tree would make
+    /// Alt+2 and Alt+3 the same key.
     #[test]
-    fn the_stored_split_reaches_the_layout() {
-        let even = Prefs::default();
-        assert_eq!(even.split_portions(), (50, 50));
-
-        let wide_tree = Prefs {
-            split: 0.7,
-            ..Prefs::default()
-        };
-        let (left, right) = wide_tree.split_portions();
-        assert_eq!((left, right), (70, 30));
-        assert_eq!(left + right, 100, "the two halves are the whole window");
-
-        // The clamp on load already bounds this; the portions stay legal even
-        // if it ever does not, because a zero portion renders nothing at all.
-        let silly = Prefs {
-            split: 0.0,
-            ..Prefs::default()
-        };
-        let (l, r) = silly.split_portions();
-        assert!(l >= 1 && r >= 1, "neither pane can vanish: {l}/{r}");
+    fn the_three_presets_are_sane_and_distinct() {
+        for p in LayoutPreset::ALL {
+            let layout = p.layout();
+            assert_eq!(layout.preset, Some(p));
+            assert!(layout.root.is_sane(), "{} names a dock twice", p.label());
+            let roles = layout.root.roles();
+            assert!(
+                roles.contains(&DockRole::Locator) && roles.contains(&DockRole::Inspector),
+                "{}: every preset shows the locator and the inspector",
+                p.label()
+            );
+        }
+        assert_ne!(LayoutPreset::Explore.root(), LayoutPreset::Watch.root());
+        assert_ne!(LayoutPreset::Watch.root(), LayoutPreset::Diagnose.root());
+        assert_ne!(LayoutPreset::Explore.root(), LayoutPreset::Diagnose.root());
     }
 }

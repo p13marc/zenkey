@@ -1,9 +1,10 @@
 //! The doctor panel (#71, #109): run on demand, and never invent a verdict.
 //!
-//! It writes `right_pane` — clicking a finding lands the user where the
-//! finding is about — so the tab strip is in its signature. That is the whole
-//! reason the parameter exists, and the reason it is a `&mut RightPane` rather
-//! than the whole workspace.
+//! It used to write `right_pane` directly — clicking a finding lands the user
+//! where the finding is about — and stopped when #180 made pane-landing a
+//! `PaneSelected` message: the jump now travels the same path the palette
+//! and the workbench strip use, which also restores the workbench dock if
+//! the user closed it.
 
 use iced::Task;
 
@@ -13,12 +14,7 @@ use crate::state::workspace::Verdicts;
 use crate::update::Ctx;
 use crate::view::doctor::DoctorMsg;
 
-pub(crate) fn update(
-    v: &mut Verdicts,
-    pane: &mut RightPane,
-    msg: DoctorMsg,
-    cx: Ctx,
-) -> Task<Message> {
+pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message> {
     match msg {
         DoctorMsg::DeepToggled(deep) => {
             v.doctor.deep = deep;
@@ -91,13 +87,13 @@ pub(crate) fn update(
                     Task::done(Message::Subject(SubjectMsg::Select(Subject::Key(key)))),
                 ]),
                 // An origin subject: point the workspace at it and land on
-                // the nodes pane, which is where an origin is legible.
-                Some(crate::doctor::Target::Node(origin)) => {
-                    *pane = RightPane::Nodes;
-                    Task::done(Message::Subject(SubjectMsg::Select(Subject::Origin(
-                        origin,
-                    ))))
-                }
+                // the nodes tool, which is where an origin is legible.
+                Some(crate::doctor::Target::Node(origin)) => Task::done(Message::Workspace(
+                    WorkspaceMsg::PaneSelected(RightPane::Nodes),
+                ))
+                .chain(Task::done(Message::Subject(SubjectMsg::Select(
+                    Subject::Origin(origin),
+                )))),
                 None => Task::none(),
             }
         }

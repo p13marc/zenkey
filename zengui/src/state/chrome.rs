@@ -12,9 +12,10 @@ sub_state! {
         /// Persisted UI preferences (issue #73) — theme, zoom, geometry, and the
         /// scope/context the window was last on.
         pub(crate) prefs: crate::prefs::Prefs,
-        /// Geometry changed and has not been written yet (issue #189). Drives the
-        /// settle timer, so a drag writes the file once rather than per pixel.
-        pub(crate) window_dirty: bool,
+        /// A per-pixel preference — window geometry (#189) or a splitter drag
+        /// (#180) — changed and has not been written yet. Drives the settle
+        /// timer, so a drag writes the file once rather than per pixel.
+        pub(crate) prefs_dirty: bool,
         /// Why the defaults are in force, when a prefs file could not be read.
         /// Rendered once in the status strip; never a reason to refuse to open.
         pub(crate) prefs_note: Option<String>,
@@ -27,7 +28,7 @@ impl Chrome {
     pub(crate) fn new(prefs: crate::prefs::Prefs, prefs_note: Option<String>) -> Chrome {
         Chrome {
             prefs,
-            window_dirty: false,
+            prefs_dirty: false,
             prefs_note,
             palette: view::palette::PaletteState::default(),
         }
