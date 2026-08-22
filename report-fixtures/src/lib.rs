@@ -36,6 +36,8 @@ pub fn topic_row() -> TopicRow {
         deprecated: false,
         deprecated_since: None,
         replaced_by: None,
+        cardinality: None,
+        budget: None,
     }
 }
 
@@ -77,7 +79,49 @@ pub fn topic_list() -> TopicList {
                 ..topic_row_retired()
             },
         ],
+        budget: None,
     }
+}
+
+/// The same list under `--budget` (#221): a declared bound that held, one
+/// that was exceeded, and a rest-variable exemption — plus the window
+/// statement that keeps every number honest.
+pub fn topic_list_budget() -> TopicList {
+    let mut list = topic_list();
+    list.budget = Some(BudgetWindow {
+        window_s: 10,
+        scopes: vec!["v1/*/telemetry/**".into(), "v1/*/state/**".into()],
+        keys: 44,
+        evicted: 0,
+    });
+    // disk/{mount}/used: declared 16, one origin at 40 — the finding.
+    list.subjects[0].cardinality = Some(16);
+    list.subjects[0].budget = Some(BudgetCell {
+        declared: Some(16),
+        observed: 41,
+        origins: 2,
+        worst_origin: Some(ORIGIN.into()),
+        worst_observed: 40,
+        exempt: None,
+        over: true,
+        examples: vec![
+            format!("v1/{ORIGIN}/telemetry/sysinfo/disk/m00/used"),
+            format!("v1/{ORIGIN}/telemetry/sysinfo/disk/m01/used"),
+        ],
+    });
+    // by_unit/{unit}/messages_total: a rest family — exempt, and saying so.
+    list.subjects[2].cardinality = Some(500);
+    list.subjects[2].budget = Some(BudgetCell {
+        declared: Some(500),
+        observed: 3,
+        origins: 1,
+        worst_origin: Some(ORIGIN.into()),
+        worst_observed: 3,
+        exempt: Some("rest-variable".into()),
+        over: false,
+        examples: vec![],
+    });
+    list
 }
 
 /// A roster where the slice join **was** attempted and one producer answered

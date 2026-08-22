@@ -124,6 +124,9 @@ pub struct SubjectFacts {
     /// The declared events rate class (`rare` | `low` | `burst(n/h)`,
     /// RFC 04 §1.3) — carried so observers can judge over-rate (#161).
     pub rate: Option<String>,
+    /// The declared key-population bound (RFC 08 §2) — carried so observers
+    /// can judge over-declared cardinality (#221).
+    pub cardinality: Option<i64>,
 }
 
 impl SubjectFacts {
@@ -217,6 +220,7 @@ impl KeyFacts {
                 encoding: decl.encoding.clone(),
                 ttl_s: decl.ttl_s,
                 rate: decl.rate.clone(),
+                cardinality: decl.cardinality,
             })),
             None => Registration::Unregistered,
         };
@@ -703,6 +707,7 @@ mod tests {
             encoding: None,
             ttl_s: None,
             rate: None,
+            cardinality: None,
         };
         assert_eq!(
             facts(Some("transition")).declared_qos(),

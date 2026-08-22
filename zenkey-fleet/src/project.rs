@@ -66,6 +66,8 @@ impl SliceSet {
                     deprecated: false,
                     deprecated_since: None,
                     replaced_by: None,
+                    cardinality: s.cardinality,
+                    budget: None,
                 });
             }
             // --deprecated: the ledger-backed retirements this build still
@@ -85,11 +87,16 @@ impl SliceSet {
                         deprecated: true,
                         deprecated_since: d.since.clone(),
                         replaced_by: d.replaced_by.clone(),
+                        cardinality: None,
+                        budget: None,
                     });
                 }
             }
         }
-        Ok(TopicList { subjects })
+        Ok(TopicList {
+            subjects,
+            budget: None,
+        })
     }
 
     /// `topic info` — refine one concrete wire key against the registry slices.
