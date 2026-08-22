@@ -411,3 +411,222 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
     };
     assert_eq!(data(&app.sub), "superseded");
 }
+
+/// Synthetic traffic for the retained-window tests (#217): ~88 s of
+/// watched keys with an LWW update, a tombstone, an attachment and one
+/// key that is not this convention at all (O1 — a window curates nothing).
+fn traffic(epoch: std::time::Instant) -> Vec<zenkey_fleet::SampleView> {
+    use std::time::Duration;
+    use zenoh::sample::SampleKind;
+    let view = |t_s: u64, key: &str, payload: &[u8], encoding: &str, kind, attachment: Option<&[u8]>| {
+        zenkey_fleet::SampleView {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
+            encoding: encoding.to_string(),
+            kind,
+            timestamp: None,
+            stamped_by: None,
+            attachment: attachment.map(|a| zenoh::bytes::ZBytes::from(a.to_vec())),
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: epoch + Duration::from_secs(t_s),
+        }
+    };
+    let put = SampleKind::Put;
+    vec![
+        view(0, "v1/h-0123456789ab/state/p/a", b"1", "", put, None),
+        view(5, "v1/h-0123456789ab/state/p/b", br#"{"ok":true}"#, "application/json", put, None),
+        view(20, "v1/h-0123456789ab/telemetry/x/m", b"12345678", "", put, None),
+        view(30, "v1/h-0123456789ab/state/p/a", b"2", "", put, None),
+        view(40, "not/this/convention", b"x", "", put, None),
+        view(55, "v1/h-0123456789ab/state/p/b", b"", "", SampleKind::Delete, None),
+        view(60, "v1/h-0123456789ab/telemetry/x/m", b"87654321", "", put, Some(b"meta")),
+        view(75, "v1/h-0123456789ab/state/p/a", b"3", "", put, None),
+        view(88, "v1/h-0123456789ab/state/p/c", b"zzz", "", put, None),
+    ]
+}
+
+/// Everything the panes fold from, as bytes.
+///
+/// What is in: the whole observed tree (counts, bytes, EWMA rates —
+/// `to_bits`, so a rate matches or the dump does not), the O6 counters,
+/// the totals, the coverage statement, and every echo line verbatim
+/// (`Debug` includes its seq, preview, encoding, tombstone flag and
+/// attachment preview).
+///
+/// What is out, and why: arrival `Instant`s. A `.zrec` reader and the
+/// ring are two observers, and RFC 09 §5.2's two-clocks rule is exactly
+/// that they share offsets (`t`, which *is* compared, through every rate
+/// and every fold) but not absolute clocks — the panes render those only
+/// as ages against the frame's own "now", which no two runs share either.
+fn canonical(app: &Zengui) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    fn node(out: &mut String, path: &str, n: &zenkey_fleet::tree::TreeNode) {
+        writeln!(
+            out,
+            "{path} c={} b={} r={:016x} sc={} sb={} sr={:016x} sk={}",
+            n.count,
+            n.bytes,
+            n.rate_hz.to_bits(),
+            n.subtree_count,
+            n.subtree_bytes,
+            n.subtree_rate_hz.to_bits(),
+            n.subtree_keys,
+        )
+        .expect("write to string");
+        for (chunk, child) in &n.children {
+            node(out, &format!("{path}/{chunk}"), child);
+        }
+    }
+    node(&mut out, "", &app.obs.observed.root);
+    writeln!(
+        out,
+        "keys={} evicted={} unwatched={} totals=({},{},{:016x}) watched={:?}",
+        app.obs.keys,
+        app.obs.keys_evicted,
+        app.obs.keys_unwatched,
+        app.obs.totals.0,
+        app.obs.totals.1,
+        app.obs.totals.2.to_bits(),
+        app.obs.watched,
+    )
+    .expect("write to string");
+    for line in app.work.echo.echo.iter() {
+        writeln!(out, "{line:?}").expect("write to string");
+    }
+    out
+}
+
+/// #217's acceptance: a headless sim scrubs the retained window back 60 s
+/// and the panes are **byte-identical** to a `.zrec` replay of the same
+/// traffic at the same playhead — the ring and the file are two routes to
+/// one window, not two windows.
+///
+/// The file half really is the retained window's save path: the bytes go
+/// through [`crate::services::record::write_window`], i.e. "save window as
+/// `.zrec`", and both apps are driven through the same `update()` messages
+/// iced would deliver.
+#[test]
+fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
+    use crate::view::replay::ReplayMsg;
+    use std::sync::Arc as StdArc;
+
+    let epoch = std::time::Instant::now();
+    let views = traffic(epoch);
+    let watched: StdArc<[String]> = StdArc::from(["v1/**".to_string()]);
+
+    // Route one: the live monitor's ring, entered through the toggle's seam.
+    let core = zenkey_fleet::MonitorCore::new(1024);
+    for v in &views {
+        core.ingest(v.clone(), None);
+    }
+    let mut app_a = test_app();
+    app_a.obs.watched = StdArc::clone(&watched);
+    update::pane::replay::enter_retained(
+        &mut app_a.dep,
+        &mut app_a.obs,
+        &mut app_a.sub,
+        &mut app_a.tree,
+        &mut app_a.work,
+        &core,
+    );
+
+    // Route two: the same window saved as a `.zrec` and opened from disk.
+    let rows: Vec<StdArc<zenkey_fleet::SampleView>> =
+        views.iter().cloned().map(StdArc::new).collect();
+    let mut bytes = Vec::new();
+    let samples = crate::services::record::write_window(
+        &rows,
+        epoch,
+        vec!["v1/**".to_string()],
+        String::new(),
+        &mut bytes,
+    )
+    .expect("the window writes");
+    assert_eq!(samples, views.len() as u64);
+    let path = std::env::temp_dir().join(format!("zengui-217-{}.zrec", std::process::id()));
+    std::fs::write(&path, &bytes).expect("temp .zrec");
+    let mut app_b = test_app();
+    let open = |app: &mut Zengui, m: ReplayMsg| {
+        let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(m)));
+    };
+    open(&mut app_b, ReplayMsg::OpenToggled);
+    open(&mut app_b, ReplayMsg::PathChanged(path.display().to_string()));
+    open(&mut app_b, ReplayMsg::Open);
+    let _ = std::fs::remove_file(&path);
+
+    // The two windows agree about their own extent before any scrubbing.
+    let span_us = app_a.work.replay.replay.as_ref().expect("retained").span_us;
+    assert_eq!(
+        span_us,
+        app_b.work.replay.replay.as_ref().expect("file").span_us,
+        "one window, two routes, one span"
+    );
+    assert_eq!(span_us, 88_000_000);
+
+    // Scrub both to the newest edge, then back 60 s — the gesture the
+    // feature exists for — through the same messages iced would deliver.
+    for app in [&mut app_a, &mut app_b] {
+        open(app, ReplayMsg::Scrubbed(span_us));
+        open(app, ReplayMsg::Scrubbed(span_us - 60_000_000));
+    }
+
+    // 28 s in: the tombstoned key is still alive, the late keys not yet
+    // seen — the panes show *then*, not a filtered now.
+    assert_eq!(app_a.obs.keys, 3);
+    assert_eq!(canonical(&app_a), canonical(&app_b), "byte-identical panes");
+
+    // And forward again lands on the same folds too — a rebuild, not a
+    // one-shot coincidence.
+    for app in [&mut app_a, &mut app_b] {
+        open(app, ReplayMsg::Scrubbed(span_us));
+    }
+    assert_eq!(app_a.obs.keys, 5, "a, b, c, m and the foreign key");
+    assert_eq!(canonical(&app_a), canonical(&app_b));
+}
+
+/// The retained window keeps replay mode's whole posture (#217): while it
+/// feeds the panes the live pump is not built, a capture cannot start —
+/// there is nothing live to capture — and the toggle is the way back.
+#[test]
+fn the_retained_window_is_replay_mode_with_all_its_locks() {
+    use crate::replay::ReplaySource;
+    use crate::view::replay::ReplayMsg;
+
+    let epoch = std::time::Instant::now();
+    let core = zenkey_fleet::MonitorCore::new(64);
+    for v in traffic(epoch) {
+        core.ingest(v, None);
+    }
+    let mut app = test_app();
+    update::pane::replay::enter_retained(
+        &mut app.dep,
+        &mut app.obs,
+        &mut app.sub,
+        &mut app.tree,
+        &mut app.work,
+        &core,
+    );
+    let state = app.work.replay.replay.as_ref().expect("in the window");
+    assert!(matches!(state.source, ReplaySource::Retained { .. }));
+
+    // `subscription()` gates the live pump on `replay.is_none()` — being
+    // `Some` *is* the lock, the same one a `.zrec` holds (#74).
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::RecordToggled,
+    )));
+    assert!(
+        app.work.replay.recording.is_none(),
+        "a window is not live traffic: recording must refuse to start"
+    );
+
+    // The toggle is its own exit.
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::RetainedToggled,
+    )));
+    assert!(app.work.replay.replay.is_none(), "back to live");
+}

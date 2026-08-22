@@ -101,6 +101,12 @@ pub struct Status<'a> {
     /// Replay mode (issue #74): the panes are fed from a file and the live
     /// link is off — the strip must not describe a link nobody is pumping.
     pub replaying: bool,
+    /// The monitor's retained window (#217): the budget is deliberately
+    /// visible here, in the resting state — an operator should not discover
+    /// the bound by hitting it. `None` before a monitor exists (O4), and
+    /// suppressed while replaying (the ring describes a bus the panes are
+    /// not showing).
+    pub retention: Option<zenkey_fleet::RetentionStats>,
 }
 
 impl<'a> Status<'a> {
@@ -139,6 +145,7 @@ impl<'a> Status<'a> {
             unreachable: dep.settings.is_unreachable(),
             prefs_note: chrome.prefs_note.as_deref(),
             replaying: work.replay.replay.is_some(),
+            retention: obs.retention,
         }
     }
 }
@@ -181,6 +188,23 @@ pub fn keys_text(keys: usize, evicted: u64) -> String {
 /// what each bound cost, not what the bounds cost between them.
 pub fn facts_text(cached: usize, evicted: u64) -> String {
     format!("facts: {cached} cached (+{evicted} projections retired — cache bound reached)")
+}
+
+/// The retained window's strip line (#217): the budget stated in the
+/// resting state, the span actually held, and — only once the byte bound
+/// has bitten — its own eviction count. A **fourth** number beside
+/// [`keys_text`], `facts_text` and the unwatch line, never folded into any
+/// of them: each bound reports its own cost (RFC 09 §5.1 O6; v1.18 R1).
+pub fn retention_text(r: &zenkey_fleet::RetentionStats) -> String {
+    let mut label = format!(
+        "retained: {:.0}s held · budget {}",
+        r.span.as_secs_f64(),
+        crate::view::replay::budget_label(r.budget),
+    );
+    if r.evicted > 0 {
+        label.push_str(&format!(" (+{} evicted by the byte budget)", r.evicted));
+    }
+    label
 }
 
 pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
@@ -261,6 +285,21 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             s.keys_unwatched
         )));
     }
+    // The retained window (#217): stated while live, warning-toned once its
+    // byte bound has cost something — like every other bound on this strip,
+    // and always as its own number.
+    if let Some(ret) = s.retention.as_ref().filter(|_| !s.replaying) {
+        let label = retention_text(ret);
+        r = r.push(if ret.evicted > 0 {
+            kit::caption(label)
+                .style(|theme: &iced::Theme| text::Style {
+                    color: Some(colors(theme).warning()),
+                })
+                .into()
+        } else {
+            kit::muted(label)
+        });
+    }
     // Only once the bound has actually bitten: the key count already states
     // the population, so a quiet cache has nothing to disclose. Warning tone,
     // like every other bound that is costing something.
@@ -337,6 +376,33 @@ mod tests {
         assert!(SliceSource::Bus { count: 3 }.label().contains('3'));
         assert!(SliceSource::Dirs { count: 7 }.label().contains("dirs"));
         assert!(SliceSource::Failed("boom".into()).label().contains("boom"));
+    }
+
+    /// #217: the budget is visible in the resting state — an operator should
+    /// not discover the bound by hitting it — and the ring's eviction count
+    /// appears as its own number, never inside the key count's (O6).
+    #[test]
+    fn the_retained_window_states_its_budget_and_its_own_cost() {
+        let mut r = zenkey_fleet::RetentionStats {
+            budget: zenkey_fleet::RetentionBudget::default(),
+            retained: 10,
+            retained_bytes: 4096,
+            span: std::time::Duration::from_secs(85),
+            evicted: 0,
+            expired: 3,
+        };
+        let quiet = retention_text(&r);
+        assert!(quiet.contains("85s held"), "{quiet}");
+        assert!(quiet.contains("2 min"), "{quiet}");
+        assert!(!quiet.contains("evicted"), "no cost yet: {quiet}");
+
+        r.evicted = 12;
+        let costly = retention_text(&r);
+        assert!(costly.contains("+12 evicted by the byte budget"), "{costly}");
+        assert!(
+            !costly.contains("retired"),
+            "the stats table's word stays the stats table's: {costly}"
+        );
     }
 
     /// RFC 09 §5.1 O6: a bounded observer reports what its bound cost. Without

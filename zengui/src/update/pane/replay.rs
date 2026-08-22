@@ -142,14 +142,16 @@ pub(crate) fn update(
                 handle.stop.notify_waiters();
                 return Task::none();
             }
+            if work.replay.replay.is_some() {
+                // Recording captures the live monitor; replay mode — a file
+                // or the retained window (#217) — has nothing live to
+                // capture. Checked before the monitor, because it holds even
+                // when one exists.
+                return Task::none();
+            }
             let Some(monitor) = obs.monitor.clone() else {
                 return Task::none();
             };
-            if work.replay.replay.is_some() {
-                // Recording captures the live monitor; replay mode has
-                // nothing live to capture.
-                return Task::none();
-            }
             let stop = Arc::new(tokio::sync::Notify::new());
             let path = format!(
                 "zengui-{}.zrec",
@@ -168,5 +170,85 @@ pub(crate) fn update(
             work.replay.recorded = Some(result);
             Task::none()
         }
+        ReplayMsg::RetainedToggled => {
+            match &work.replay.replay {
+                // Back to live: identical to Exit, and routed through it so
+                // the two ways out cannot drift apart.
+                Some(state) if matches!(state.source, crate::replay::ReplaySource::Retained { .. }) => {
+                    update(dep, obs, sub, tree, work, ReplayMsg::Exit)
+                }
+                // A file replay owns the scrubber; the toggle does nothing
+                // until it is exited explicitly.
+                Some(_) => Task::none(),
+                None => {
+                    let Some(core) = obs.monitor.as_ref().map(|m| Arc::clone(m.core())) else {
+                        return Task::none();
+                    };
+                    enter_retained(dep, obs, sub, tree, work, &core);
+                    Task::none()
+                }
+            }
+        }
+        ReplayMsg::SaveWindow => {
+            let Some(state) = &work.replay.replay else {
+                return Task::none();
+            };
+            // Only a retained window saves: a file replay already *is* the
+            // file, and re-writing it would launder its drop ledger away.
+            if !matches!(state.source, crate::replay::ReplaySource::Retained { .. }) {
+                return Task::none();
+            }
+            let rows: Vec<Arc<zenkey_fleet::SampleView>> = state
+                .rows
+                .iter()
+                .map(|r| Arc::clone(&r.view))
+                .collect();
+            let path = format!(
+                "zengui-window-{}.zrec",
+                zenkey_fleet::record::rfc3339_now().replace(':', "-")
+            );
+            work.replay.recorded = None;
+            services::record::save_window(
+                rows,
+                state.fold_epoch,
+                state.watched.to_vec(),
+                dep.base().to_string(),
+                path,
+            )
+        }
     }
+}
+
+/// Enter the retained window (#217): snapshot the ring and its own account
+/// of itself, then drive the panes through the exact machinery a `.zrec`
+/// gets — `scrub_to` + [`apply_tick`](bus::apply_tick). Entered at the
+/// window's newest edge, because the gesture is "scrub *back* to before
+/// you noticed".
+///
+/// Takes the core rather than the monitor so a headless test can drive it
+/// with a session-less [`zenkey_fleet::MonitorCore`] — the same posture as
+/// replay itself, and the seam #217's acceptance simulation enters through.
+pub(crate) fn enter_retained(
+    dep: &mut Deployment,
+    obs: &mut Observation,
+    sub: &mut SubjectState,
+    tree: &mut TreeState,
+    work: &mut Workspace,
+    core: &Arc<zenkey_fleet::MonitorCore>,
+) {
+    let taken = core.retention();
+    let window = core.retained();
+    let mut state = crate::replay::ReplayState::from_retained(
+        window,
+        Arc::clone(&obs.watched),
+        taken,
+    );
+    // Mode honesty, exactly as opening a file: the panes now show the
+    // window — nothing live bleeds through, and the scrollback restarts.
+    work.echo.echo.clear();
+    sub.history = None;
+    sub.refresh_series(dep);
+    let tick = state.scrub_to(state.span_us);
+    work.replay.replay = Some(state);
+    bus::apply_tick(dep, obs, sub, tree, work, &tick);
 }

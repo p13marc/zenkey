@@ -25,6 +25,7 @@ pub mod project;
 pub mod query;
 pub mod record;
 pub mod registry;
+pub mod retain;
 pub mod report;
 pub mod retired;
 pub mod roster;
@@ -105,6 +106,7 @@ pub use record::{
     ZrecItem, ZrecReader, ZrecWriter, record, replay,
 };
 pub use registry::SliceSet;
+pub use retain::{RetentionBudget, RetentionStats};
 pub use retired::run_retired;
 pub use roster::{
     BridgeMatch, Freshness, NodeInfo, ProducerInfo, RosterChange, RosterWatch, apply_token,

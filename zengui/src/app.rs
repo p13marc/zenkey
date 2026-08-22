@@ -225,6 +225,7 @@ impl Zengui {
                 base: self.dep.base(),
                 replay: &self.work.replay,
                 slices: self.dep.slices.as_deref(),
+                retention: self.obs.retention,
             }))
             .push(view::status::strip(Status::of(
                 &self.chrome,

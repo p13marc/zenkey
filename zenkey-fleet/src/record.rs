@@ -103,12 +103,25 @@ pub struct ZrecWriter<W: Write> {
 
 impl<W: Write> ZrecWriter<W> {
     /// Write the header line and hand back a row writer.
-    pub fn new(mut out: W, header: &ZrecHeader) -> Result<Self> {
+    pub fn new(out: W, header: &ZrecHeader) -> Result<Self> {
+        ZrecWriter::new_at(out, header, Instant::now())
+    }
+
+    /// [`ZrecWriter::new`] with the capture epoch injected (#217).
+    ///
+    /// A live capture's epoch is "now" — nothing precedes the writer. A
+    /// **retained window** is the opposite: every sample was received before
+    /// the writer existed, and under `new` they would all saturate to `t: 0`,
+    /// erasing the pacing the ring preserved. Passing the window's own start
+    /// (its oldest sample's arrival) keeps each row's `t` the offset it
+    /// really had, so the file is indistinguishable from one recorded
+    /// deliberately at that moment.
+    pub fn new_at(mut out: W, header: &ZrecHeader, epoch: Instant) -> Result<Self> {
         serde_json::to_writer(&mut out, header).context("write .zrec header")?;
         out.write_all(b"\n").context("write .zrec header")?;
         Ok(ZrecWriter {
             out,
-            epoch: Instant::now(),
+            epoch,
             samples: 0,
             dropped: 0,
         })
@@ -598,6 +611,46 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(err.contains("header"), "{err}");
+    }
+
+    /// A retained window written through `new_at` keeps its real pacing
+    /// (#217): rows received *before* the writer existed carry their true
+    /// offsets from the injected epoch instead of saturating to `t: 0`.
+    #[test]
+    fn an_injected_epoch_preserves_a_window_written_after_the_fact() {
+        let epoch = Instant::now();
+        let view = |t_ms: u64| crate::sub::SampleView {
+            key: "v1/h-0123456789ab/state/p/a".into(),
+            payload: zenoh::bytes::ZBytes::from(vec![1u8]),
+            encoding: String::new(),
+            kind: SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: epoch + Duration::from_millis(t_ms),
+        };
+        let mut sink = Vec::new();
+        let mut w = ZrecWriter::new_at(&mut sink, &header(), epoch).unwrap();
+        w.write_sample(&view(0)).unwrap();
+        w.write_sample(&view(1500)).unwrap();
+        let _ = w.finish().unwrap();
+
+        let mut reader = ZrecReader::new(sink.as_slice()).unwrap();
+        let t_of = |item| match item {
+            Some(Ok(ZrecItem::Sample { t_us, .. })) => t_us,
+            other => panic!("expected a sample, got {other:?}"),
+        };
+        assert_eq!(t_of(reader.next()), Some(0));
+        assert_eq!(
+            t_of(reader.next()),
+            Some(1_500_000),
+            "the offset the ring preserved, not a saturated zero"
+        );
     }
 
     /// Drop records read back as drops, at their position (O6): the gap is
