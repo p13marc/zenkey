@@ -18,8 +18,8 @@
 //! choose where our bytes land. The suggested-name button fills the *field*,
 //! and the user still owns what is in it.
 
-use iced::widget::{button, checkbox, column, row, scrollable, text, text_input};
-use iced::{Element, Length};
+use iced::Element;
+use iced::widget::{Column, button, checkbox, column, row, text, text_input};
 use zenkey_fleet::report::{BlobHolder, BlobList, BlobProbeReport};
 
 use crate::blob::{BlobState, Fetch, Probe};
@@ -62,7 +62,9 @@ fn msg(m: BlobMsg) -> Message {
     Message::Pane(PaneMsg::Blob(m))
 }
 
-pub fn pane<'a>(state: &'a BlobState, slices_loaded: bool) -> Element<'a, Message> {
+/// The Inspector's `@blob`-plane sections (#182). See
+/// [`super::detail::section`] for why this is a `Column`.
+pub fn section<'a>(state: &'a BlobState, slices_loaded: bool) -> Column<'a, Message> {
     let mut col = column![kit::section_header("Blobs", None)].spacing(space::SM);
 
     col = col.push(tier_matrix(state.list.as_ref(), slices_loaded));
@@ -71,9 +73,7 @@ pub fn pane<'a>(state: &'a BlobState, slices_loaded: bool) -> Element<'a, Messag
     col = col.push(holders(state));
     col = col.push(fetch_form(state));
 
-    scrollable(col.padding(space::SM))
-        .height(Length::Fill)
-        .into()
+    col
 }
 
 /// What the registry says: which producers serve which tiers. A capability

@@ -73,8 +73,8 @@ pub(crate) fn split<'a>(
             ),
             RightPane::Publish =>
                 view::publish::pane(&work.bench.publish_form, dep.slices.is_some()),
-            RightPane::Detail => view::detail::pane(view::detail::DetailData {
-                key: sub.current.key().unwrap_or("(nothing selected)"),
+            RightPane::Inspector => view::inspector::pane(view::inspector::InspectorData {
+                subject: &sub.current,
                 facts: sub.current.key().and_then(|k| dep.facts.get(k)),
                 fetched: match sub.fetched.as_ref() {
                     None => view::detail::Fetched::NotAsked,
@@ -85,9 +85,17 @@ pub(crate) fn split<'a>(
                 },
                 decoded: sub.decoded.as_ref(),
                 series: sub.series.as_ref(),
-                history_entries: sub.history.as_ref().map(|r| r.ring.len()),
-                observed: sub.history.as_ref().and_then(|r| r.ring.newest()),
+                history: sub.history.as_ref(),
+                watched: sub
+                    .current
+                    .key()
+                    .is_some_and(|k| key_is_watched(&obs.watched, k)),
                 latency: sub.selected_latency.clone(),
+                blob: &work.verdicts.blob,
+                media: &work.bench.media,
+                slices: dep.slices.as_deref(),
+                roster: &work.verdicts.roster,
+                node_detail: &work.verdicts.node_detail,
             }),
             RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
                 roster: &work.verdicts.roster,
@@ -95,17 +103,7 @@ pub(crate) fn split<'a>(
                 detail: &work.verdicts.node_detail,
             }),
             RightPane::Doctor => view::doctor::pane(&work.verdicts.doctor, dep.base()),
-            RightPane::Blob => view::blob::pane(&work.verdicts.blob, dep.slices.is_some()),
-            RightPane::Media => view::media::pane(&work.bench.media, dep.slices.as_deref()),
             RightPane::Admin => view::admin::pane(&work.verdicts.admin),
-            RightPane::History => view::history::pane(view::history::HistoryData {
-                key: sub.current.key(),
-                recorder: sub.history.as_ref(),
-                watched: sub
-                    .current
-                    .key()
-                    .is_some_and(|k| key_is_watched(&obs.watched, k)),
-            }),
             RightPane::Connect =>
                 view::contexts::pane(&work.bench.context_form, dep.settings.is_unreachable(),),
         })

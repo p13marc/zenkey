@@ -125,42 +125,78 @@ fn origin_card<'a>(
     .align_y(iced::Alignment::Center);
     body = body.push(header);
 
-    for (producer, p) in producers {
-        let (tone, presence_label) = if p.alive {
-            (PresenceTone::Alive, "alive".to_string())
-        } else {
-            let since = p
-                .suspect_since
-                .map(|t| format!(" since {}s", t.elapsed().as_secs()))
-                .unwrap_or_default();
-            (
-                PresenceTone::Suspect,
-                format!("suspect{since} (token retracted)"),
-            )
-        };
-        let freshness = match (p.watched, p.last_state_age) {
-            (true, Some(age)) => format!("last state sample {}s ago", age.as_secs()),
-            (true, None) => "watched — no state sample seen".to_string(),
-            (false, _) => "not watched — freshness unknown".to_string(),
-        };
-        body = body.push(
+    for row in presence_rows(producers) {
+        body = body.push(row);
+    }
+
+    if selected {
+        body = body.push(detail_section(detail));
+    }
+    kit::card(body)
+}
+
+/// One row per producer: presence, why, and how fresh its state is.
+///
+/// Shared between the dashboard card and the Inspector's origin sections
+/// (#182) — the same sentences in both places, because they are the same
+/// claim and a second wording would be a second answer.
+fn presence_rows<'a>(
+    producers: &'a std::collections::BTreeMap<String, ProducerPresence>,
+) -> Vec<Element<'a, Message>> {
+    producers
+        .iter()
+        .map(|(producer, p)| {
+            let (tone, presence_label) = if p.alive {
+                (PresenceTone::Alive, "alive".to_string())
+            } else {
+                let since = p
+                    .suspect_since
+                    .map(|t| format!(" since {}s", t.elapsed().as_secs()))
+                    .unwrap_or_default();
+                (
+                    PresenceTone::Suspect,
+                    format!("suspect{since} (token retracted)"),
+                )
+            };
+            let freshness = match (p.watched, p.last_state_age) {
+                (true, Some(age)) => format!("last state sample {}s ago", age.as_secs()),
+                (true, None) => "watched — no state sample seen".to_string(),
+                (false, _) => "not watched — freshness unknown".to_string(),
+            };
             row![
                 kit::badge_presence(tone, format!("{producer}: {presence_label}")),
                 iced::widget::space::horizontal(),
                 kit::muted(freshness),
             ]
             .spacing(space::SM)
-            .align_y(iced::Alignment::Center),
-        );
-    }
-
-    if selected {
-        body = body.push(detail_view(detail));
-    }
-    kit::card(body)
+            .align_y(iced::Alignment::Center)
+            .into()
+        })
+        .collect()
 }
 
-fn detail_view(detail: &DetailState) -> Element<'_, Message> {
+/// The Inspector's presence sections for one origin (#182).
+///
+/// An origin the roster has never seen is a *fact* and says so — it is not
+/// rendered as an empty card, which would read as "this node has no
+/// producers".
+pub fn presence_section<'a>(roster: &'a NodeRoster, origin: &'a str) -> Element<'a, Message> {
+    let Some((_, producers)) = roster.iter().find(|(o, _)| o.as_str() == origin) else {
+        return kit::empty_state(
+            "no liveliness token observed for this origin",
+            "it may be down, unreachable, or holding no tokens — silence is not \
+             a verdict (RFC 05 §3.1)",
+        );
+    };
+    let mut col = column![].spacing(space::XS);
+    for row in presence_rows(producers) {
+        col = col.push(row);
+    }
+    col.into()
+}
+
+/// The `node_info` one-shot, rendered — the pane's only data-plane cost.
+pub fn detail_section(detail: &DetailState) -> Element<'_, Message> {
     match detail {
         DetailState::NotAsked => kit::muted("select to ask node_info"),
         DetailState::Loading(origin) => kit::muted(format!("asking node_info for {origin}…")),

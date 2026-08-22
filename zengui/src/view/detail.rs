@@ -17,12 +17,12 @@
 //!   explorer that renders an empty chart for a string payload has invented an
 //!   error state out of an ordinary fact.
 
-use iced::widget::{Column, button, row, text};
+use iced::widget::{Column, row, text};
 use iced::{Element, Length};
 use zenkey_fleet::decode::Rendering;
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
-use crate::message::{Message, PaneMsg, RightPane, WorkspaceMsg};
+use crate::message::{Message, PaneMsg};
 use crate::series::{NumericLeaves, Series};
 use crate::view::kit;
 use crate::view::spark;
@@ -228,7 +228,12 @@ fn msg(m: DetailMsg) -> Message {
     Message::Pane(PaneMsg::Detail(m))
 }
 
-pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
+/// The Inspector's key sections, as a column the caller scrolls (#182).
+///
+/// It returns a `Column` rather than an `Element` because it is now composed
+/// with other sections into one surface: a scrollable nested inside a
+/// scrollable is a layout bug, so exactly one caller owns the scroll.
+pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
     let mut col = Column::new().spacing(space::SM);
     col = col.push(kit::section_header("Detail", None));
     col = col.push(kit::mono(data.key.to_string()));
@@ -346,25 +351,17 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
         col = col.push(section);
     }
 
-    // — The link into the timeline, so the two panes are not two islands.
+    // The count, and no longer a link: the timeline is the next section down
+    // rather than another tab (#182). It used to read "open (Alt 8)", which
+    // was the two-islands problem stated in its own label.
     if let Some(n) = data.history_entries {
-        col = col.push(
-            button(
-                text(format!(
-                    "history: {} recorded — open (Alt 8)",
-                    kit::plural(n, "sample")
-                ))
-                .size(font::CAPTION),
-            )
-            .on_press(Message::Workspace(WorkspaceMsg::PaneSelected(
-                RightPane::History,
-            )))
-            .style(iced::widget::button::text)
-            .padding(0),
-        );
+        col = col.push(kit::muted(format!(
+            "history: {} recorded",
+            kit::plural(n, "sample")
+        )));
     }
 
-    iced::widget::scrollable(col).height(Length::Fill).into()
+    col
 }
 
 /// The sparkline section, or `None` when there is nothing numeric to plot.
