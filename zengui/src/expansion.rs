@@ -21,9 +21,12 @@
 //! indistinguishable from a leaked one. #179 asks for a set that is
 //! O(currently-open), and this is what makes it one.
 //!
-//! Interning the paths is **not** here: `HashSet<PathId>` over a `PathArena`
-//! is #177's, and it is a much larger change. This is the part that needs none
-//! of it.
+//! Interning the paths is **not** here, and now deliberately so: the
+//! `PathArena` landed as #251, but its ids are minted per flatten and mean
+//! nothing across rebuilds, while this set outlives every arena — and its
+//! subtree pruning below is a string-range trick ids cannot spell. The
+//! flatten walks check membership through one reusable path buffer instead,
+//! so keeping strings here costs the hot paths nothing.
 
 use std::collections::BTreeSet;
 

@@ -35,6 +35,7 @@ use zenkey_fleet::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
 use crate::keyfacts::Registration;
 use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
+use crate::patharena::{ChunkId, PathArena, PathId};
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::{RegistrationTone, colors};
 use crate::view::tokens::{font, space};
@@ -131,17 +132,31 @@ impl std::fmt::Display for Pivot {
 ///
 /// The same argument covers `is_entry`, and therefore `shown_keys` and
 /// `total_keys`.
+///
+/// ## Ids, not strings (#251)
+///
+/// Every path-shaped field is an id into [`Flattened::arena`]. A shape used to
+/// own four `String`s — and in the non-pivot walk `path` and `target` were
+/// byte-identical duplicates, so a 50,000-row flatten allocated 150,000–
+/// 200,000 strings to feed a window that draws forty. Display strings are
+/// materialised in [`Flattened::row`] and in the press builders, never here.
+///
+/// Ids are minted in walk order, so two shapes from the *same walk over the
+/// same tree* still compare equal across `Flattened`s — what the cap-prefix
+/// test relies on. An id means nothing against any other arena.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowShape {
     pub depth: usize,
     /// Display chunk — a symbolic skeleton position renders as `{var}`.
-    pub chunk: String,
+    pub chunk: ChunkId,
     /// The display-path prefix this row stands for (pivot paths in pivot
     /// mode — an expansion key, not necessarily a wire path).
-    pub path: String,
+    pub path: PathId,
     /// The *real* display path select/watch should act on. `None` on pivot
     /// group rows, whose synthetic grouping has no contiguous wire subtree.
-    pub target: Option<String>,
+    /// In the non-pivot walk this is `path` itself — one copied `u32`, where
+    /// it used to be the row's second allocation of the same string.
+    pub target: Option<PathId>,
     pub has_children: bool,
     pub expanded: bool,
     /// The declared/observed state (issue #85's typed acceptance criterion).
@@ -152,7 +167,8 @@ pub struct RowShape {
     /// `None` for any chunk outside a recognised v1 subtree.
     pub role: Option<Role>,
     /// The registry-declared payload type, when the skeleton knows one.
-    pub decl_type: Option<String>,
+    /// Interned like a chunk: type names repeat across every row of a slice.
+    pub decl_type: Option<ChunkId>,
 }
 
 /// Where a drawn row's numbers come from (#177).
@@ -160,8 +176,9 @@ pub struct RowShape {
 enum Numbers {
     /// This tick's snapshot, held by `Arc` so the frame's read cannot be
     /// swapped out from under it by the engine's `ArcSwap`. A drawn row looks
-    /// itself up by wire path — O(depth) for the ~40 rows in the window, and
-    /// nothing at all for the 49,960 nobody can see.
+    /// itself up by wire path — the arena's parent chain, root-first, since
+    /// #251 — O(depth) for the ~40 rows in the window, and nothing at all for
+    /// the 49,960 nobody can see.
     Live(Arc<KeyTreeSnapshot>),
     /// Numbers taken when the shape was built, index-parallel to `rows`. What
     /// a bare `flatten` returns, since it has no snapshot to point at.
@@ -227,6 +244,9 @@ pub struct TreeRow {
 #[derive(Debug, Clone)]
 pub struct Flattened {
     pub rows: Vec<RowShape>,
+    /// What every id in `rows` resolves against (#251). Rebuilt with the
+    /// rows; an id from one flatten means nothing to another's arena.
+    pub arena: PathArena,
     /// Rows beyond the cap. Reported, never silently dropped.
     pub truncated: usize,
     /// Concrete entries surviving the filter (== `total_keys` unfiltered).
@@ -248,6 +268,7 @@ impl Flattened {
     pub fn empty() -> Flattened {
         Flattened {
             rows: Vec::new(),
+            arena: PathArena::new(),
             truncated: 0,
             shown_keys: 0,
             total_keys: 0,
@@ -258,7 +279,9 @@ impl Flattened {
         }
     }
 
-    /// One drawn row: shape joined to whatever numbers are current (#177).
+    /// One drawn row: shape joined to whatever numbers are current (#177),
+    /// with the display strings materialised from the arena (#251) — the one
+    /// per-frame place a path becomes a `String` again, ~40 times.
     ///
     /// Panics on an out-of-range index, like the slice indexing it replaced.
     pub fn row(&self, i: usize) -> TreeRow {
@@ -269,15 +292,15 @@ impl Flattened {
             // match an observed child, so it reads `None` — which is exactly
             // what the merge gave it.
             Numbers::Live(tree) => {
-                let chunks: Vec<&str> = shape.path.split('/').collect();
+                let chunks = self.arena.chunks_of(shape.path);
                 tree.node(&chunks).map(NodeStats::from_tree)
             }
         };
         TreeRow {
             depth: shape.depth,
-            chunk: shape.chunk.clone(),
-            path: shape.path.clone(),
-            target: shape.target.clone(),
+            chunk: self.arena.chunk_str(shape.chunk).to_string(),
+            path: self.arena.display(shape.path),
+            target: shape.target.map(|t| self.arena.display(t)),
             has_children: shape.has_children,
             expanded: shape.expanded,
             status: shape.status,
@@ -291,7 +314,9 @@ impl Flattened {
             subtree_rate_hz: stats.map(|s| s.subtree_rate_hz).unwrap_or(0.0),
             age_s: age_of(stats.as_ref(), self.now),
             role: shape.role,
-            decl_type: shape.decl_type.clone(),
+            decl_type: shape
+                .decl_type
+                .map(|t| self.arena.chunk_str(t).to_string()),
         }
     }
 
@@ -359,6 +384,8 @@ pub fn flatten(
 ) -> Flattened {
     let mut rows = Vec::new();
     let mut stats = Vec::new();
+    let mut arena = PathArena::new();
+    let mut probe = String::new();
     let mut truncated = 0;
     let mut total_keys = 0;
     walk(
@@ -368,15 +395,18 @@ pub fn flatten(
             max_rows,
             rows: &mut rows,
             stats: &mut stats,
+            arena: &mut arena,
+            probe: &mut probe,
             truncated: &mut truncated,
             total_keys: &mut total_keys,
         },
-        String::new(),
+        None,
         0,
         start_expect(base),
     );
     Flattened {
         rows,
+        arena,
         truncated,
         shown_keys: total_keys,
         total_keys,
@@ -406,6 +436,13 @@ struct Ctx<'a> {
     /// Index-parallel to `rows` — the numbers as of this walk, for a caller
     /// that never retargets (#177).
     stats: &'a mut Vec<Option<NodeStats>>,
+    /// Where the walk interns its paths (#251).
+    arena: &'a mut PathArena,
+    /// The current display path, one buffer for the whole descent — the
+    /// `search_mark` trick. `expanded` is a set of `String`s that outlives
+    /// every arena, so its lookups still need a spelled path; this is the
+    /// only string the walk maintains, and it never allocates per node.
+    probe: &'a mut String,
     truncated: &'a mut usize,
     total_keys: &'a mut usize,
 }
@@ -435,46 +472,51 @@ enum Expect {
     Foreign,
 }
 
-fn walk(node: &MergedNode, ctx: &mut Ctx<'_>, path: String, depth: usize, expect: Expect) {
+fn walk(node: &MergedNode, ctx: &mut Ctx<'_>, parent: Option<PathId>, depth: usize, expect: Expect) {
     for (chunk, child) in &node.children {
-        let child_path = if path.is_empty() {
-            chunk.clone()
-        } else {
-            format!("{path}/{chunk}")
-        };
+        let probe_len = ctx.probe.len();
+        if probe_len > 0 {
+            ctx.probe.push('/');
+        }
+        ctx.probe.push_str(chunk);
         let (role, next_expect) = classify(chunk, expect);
         if is_entry(child) {
             *ctx.total_keys += 1;
         }
 
+        let mut walked = false;
         if ctx.rows.len() >= ctx.max_rows {
             *ctx.truncated += 1;
         } else {
-            let expanded = ctx.expanded.contains(&child_path);
+            let expanded = ctx.expanded.contains(ctx.probe.as_str());
             let stats = child.stats;
+            let chunk_id = ctx.arena.chunk(chunk);
+            let path = ctx.arena.node(parent, chunk_id);
             ctx.rows.push(RowShape {
                 depth,
-                chunk: chunk.clone(),
-                path: child_path.clone(),
-                target: Some(child_path.clone()),
+                chunk: chunk_id,
+                // One id, twice: a wire row's target *is* its path (#251).
+                path,
+                target: Some(path),
                 has_children: !child.children.is_empty(),
                 expanded,
                 status: child.status,
                 is_leaf: stats.map(|s| s.count > 0).unwrap_or(false),
                 role,
-                decl_type: child.decl.as_ref().map(|d| d.type_name.clone()),
+                decl_type: child.decl.as_ref().map(|d| ctx.arena.chunk(&d.type_name)),
             });
             ctx.stats.push(stats);
             if expanded {
-                walk(child, ctx, child_path, depth + 1, next_expect);
-                continue;
+                walk(child, ctx, Some(path), depth + 1, next_expect);
+                walked = true;
             }
         }
         // Even truncated/collapsed branches count their entries, or the
         // "N of M" denominator would understate the bus.
-        if !child.children.is_empty() {
+        if !walked && !child.children.is_empty() {
             count_entries(child, ctx.total_keys);
         }
+        ctx.probe.truncate(probe_len);
     }
 }
 
@@ -574,11 +616,12 @@ pub fn search_flatten(
 
     let mut rows = Vec::new();
     let mut stats = Vec::new();
+    let mut arena = PathArena::new();
     let mut truncated = 0usize;
     let mut at = 0usize;
     search_emit(
         merged,
-        String::new(),
+        None,
         0,
         start_expect(base),
         &keep,
@@ -587,11 +630,13 @@ pub fn search_flatten(
             max_rows,
             rows: &mut rows,
             stats: &mut stats,
+            arena: &mut arena,
             truncated: &mut truncated,
         },
     );
     Flattened {
         rows,
+        arena,
         truncated,
         shown_keys: shown,
         total_keys: total,
@@ -624,6 +669,8 @@ struct Emit<'a> {
     max_rows: usize,
     rows: &'a mut Vec<RowShape>,
     stats: &'a mut Vec<Option<NodeStats>>,
+    /// Where an emitting pass interns its paths (#251).
+    arena: &'a mut PathArena,
     truncated: &'a mut usize,
 }
 
@@ -680,7 +727,7 @@ fn search_mark(
 /// deterministic — so one counter keeps the two in lockstep.
 fn search_emit(
     node: &MergedNode,
-    path: String,
+    parent: Option<PathId>,
     depth: usize,
     expect: Expect,
     keep: &[Mark],
@@ -699,19 +746,16 @@ fn search_emit(
             *at += mark.slots;
             continue;
         }
-        let child_path = if path.is_empty() {
-            chunk.clone()
-        } else {
-            format!("{path}/{chunk}")
-        };
+        let chunk_id = ctx.arena.chunk(chunk);
+        let path = ctx.arena.node(parent, chunk_id);
         if ctx.rows.len() >= ctx.max_rows {
             *ctx.truncated += 1;
         } else {
             ctx.rows.push(RowShape {
                 depth,
-                chunk: chunk.clone(),
-                path: child_path.clone(),
-                target: Some(child_path.clone()),
+                chunk: chunk_id,
+                path,
+                target: Some(path),
                 has_children: !child.children.is_empty(),
                 // A search shows the chain to every match, so an ancestor of a
                 // match is open by definition.
@@ -719,11 +763,11 @@ fn search_emit(
                 status: child.status,
                 is_leaf: child.stats.map(|s| s.count > 0).unwrap_or(false),
                 role,
-                decl_type: child.decl.as_ref().map(|d| d.type_name.clone()),
+                decl_type: child.decl.as_ref().map(|d| ctx.arena.chunk(&d.type_name)),
             });
             ctx.stats.push(child.stats);
         }
-        search_emit(child, child_path, depth + 1, next_expect, keep, at, ctx);
+        search_emit(child, Some(path), depth + 1, next_expect, keep, at, ctx);
     }
 }
 
@@ -732,14 +776,18 @@ fn search_emit(
 // ---------------------------------------------------------------------------
 
 /// One concrete entry, with its grammar coordinates extracted.
+///
+/// All ids into the pivot's arena (#251): the walk that collects 50,000 of
+/// these used to spell a `String` path, up to three coordinate `String`s and
+/// a `Vec<String>` tail for every one.
 struct PivotEntry {
-    real_path: String,
-    origin: Option<String>,
-    class: Option<String>,
-    producer: Option<String>,
+    real_path: PathId,
+    origin: Option<ChunkId>,
+    class: Option<ChunkId>,
+    producer: Option<ChunkId>,
     /// Everything after the extracted coordinates (subject chunks, blob
     /// tiers…) — or the whole path for foreign keys.
-    tail: Vec<String>,
+    tail: Vec<ChunkId>,
     status: NodeStatus,
     stats: Option<NodeStats>,
     decl: Option<DeclRef>,
@@ -747,35 +795,36 @@ struct PivotEntry {
 
 fn collect_entries(
     node: &MergedNode,
-    path: &str,
+    parent: Option<PathId>,
     expect: Expect,
-    coords: (Option<&str>, Option<&str>, Option<&str>),
-    tail: &[String],
+    coords: (Option<ChunkId>, Option<ChunkId>, Option<ChunkId>),
+    tail: &[ChunkId],
+    arena: &mut PathArena,
     out: &mut Vec<PivotEntry>,
 ) {
     for (chunk, child) in &node.children {
-        let child_path = if path.is_empty() {
-            chunk.clone()
-        } else {
-            format!("{path}/{chunk}")
-        };
+        let chunk_id = arena.chunk(chunk);
+        let child_path = arena.node(parent, chunk_id);
         let (role, next_expect) = classify(chunk, expect);
         let (mut origin, mut class, mut producer) = coords;
+        // The per-node cost this walk was indicted for (#251): a `Vec`
+        // allocation plus a deep clone of every `String` in it, at every
+        // child, before knowing whether the chunk contributes. Ids make the
+        // copy a memcpy of `u32`s.
         let mut next_tail = tail.to_vec();
         match role {
-            Some(Role::Origin) => origin = Some(chunk.as_str()),
-            Some(Role::Class) => class = Some(chunk.as_str()),
-            Some(Role::Producer) => producer = Some(chunk.as_str()),
+            Some(Role::Origin) => origin = Some(chunk_id),
+            Some(Role::Class) => class = Some(chunk_id),
+            Some(Role::Producer) => producer = Some(chunk_id),
             Some(Role::Version) => {}
-            Some(Role::Subject) | Some(Role::BlobTier) => next_tail.push(chunk.clone()),
-            None => next_tail.push(chunk.clone()),
+            Some(Role::Subject) | Some(Role::BlobTier) | None => next_tail.push(chunk_id),
         }
         if is_entry(child) {
             out.push(PivotEntry {
-                real_path: child_path.clone(),
-                origin: origin.map(str::to_string),
-                class: class.map(str::to_string),
-                producer: producer.map(str::to_string),
+                real_path: child_path,
+                origin,
+                class,
+                producer,
                 tail: next_tail.clone(),
                 status: child.status,
                 stats: child.stats,
@@ -784,25 +833,32 @@ fn collect_entries(
         }
         collect_entries(
             child,
-            &child_path,
+            Some(child_path),
             next_expect,
             (origin, class, producer),
             &next_tail,
+            arena,
             out,
         );
     }
 }
 
 /// The synthetic grouping tree a pivot builds from entries.
+///
+/// Keyed by [`ChunkId`] (#251): re-keying an entry is `entry(id)` on a `u32`
+/// where it was `entry(chunk.clone())` per chunk per level. The id order is
+/// intern order, not name order, so [`flatten_pnode`] sorts each level by
+/// spelling as it walks — a small per-level sort against the wholesale
+/// re-keying this tree exists for.
 #[derive(Default)]
 struct PNode {
-    children: std::collections::BTreeMap<String, PNode>,
+    children: std::collections::BTreeMap<ChunkId, PNode>,
     role: Option<Role>,
     /// Set when an entry terminates here: (real path, own stats, decl).
-    leaf: Option<(String, Option<NodeStats>, Option<DeclRef>)>,
+    leaf: Option<(PathId, Option<NodeStats>, Option<DeclRef>)>,
     /// The real wire-path prefix this group stands for, when its constraint
     /// set is exactly contiguous (issue #93) — what watch/select act on.
-    target: Option<String>,
+    target: Option<PathId>,
     status: Option<NodeStatus>,
     agg_count: u64,
     agg_bytes: u64,
@@ -844,19 +900,27 @@ pub fn pivot_flatten(
     max_rows: usize,
     now: Instant,
 ) -> Flattened {
+    let mut arena = PathArena::new();
     let mut entries = Vec::new();
     collect_entries(
         merged,
-        "",
+        None,
         start_expect(base),
         (None, None, None),
         &[],
+        &mut arena,
         &mut entries,
     );
     let total_keys = entries.len();
     let filtered = !query.is_empty();
     if filtered {
-        entries.retain(|e| fuzzy_match(&e.real_path, query));
+        // The filter needs a spelled path; one buffer serves every entry.
+        let mut probe = String::new();
+        entries.retain(|e| {
+            probe.clear();
+            arena.write_display(e.real_path, &mut probe);
+            fuzzy_match(&probe, query)
+        });
     }
     let shown_keys = entries.len();
 
@@ -869,13 +933,13 @@ pub fn pivot_flatten(
     };
     let mut root = PNode::default();
     for e in &entries {
-        let chunks = pivot_chunks(e, pivot, skip);
+        let chunks = pivot_chunks(e, pivot, skip, &mut arena);
         let mut node = &mut root;
         for (chunk, role, target) in &chunks {
-            node = node.children.entry(chunk.clone()).or_default();
+            node = node.children.entry(*chunk).or_default();
             node.role = *role;
             if node.target.is_none() {
-                node.target = target.clone();
+                node.target = *target;
             }
             node.status = Some(fold_status(node.status, e.status));
             if let Some(s) = &e.stats {
@@ -886,11 +950,12 @@ pub fn pivot_flatten(
                 node.agg_last = node.agg_last.max(s.subtree_last_seen);
             }
         }
-        node.leaf = Some((e.real_path.clone(), e.stats, e.decl.clone()));
+        node.leaf = Some((e.real_path, e.stats, e.decl.clone()));
     }
 
     let mut rows = Vec::new();
     let mut stats = Vec::new();
+    let mut probe = String::new();
     let mut truncated = 0usize;
     flatten_pnode(
         &root,
@@ -898,18 +963,21 @@ pub fn pivot_flatten(
             expanded,
             auto_expand: filtered,
             pivot_key: pivot.key(),
+            probe: &mut probe,
             emit: Emit {
                 max_rows,
                 rows: &mut rows,
                 stats: &mut stats,
+                arena: &mut arena,
                 truncated: &mut truncated,
             },
         },
-        String::new(),
+        None,
         0,
     );
     Flattened {
         rows,
+        arena,
         truncated,
         shown_keys,
         total_keys,
@@ -935,32 +1003,30 @@ fn pivot_chunks(
     e: &PivotEntry,
     pivot: Pivot,
     skip: usize,
-) -> Vec<(String, Option<Role>, Option<String>)> {
-    let real: Vec<&str> = e.real_path.split('/').collect();
-    let origin = e.origin.as_deref();
-    let class = e.class.as_deref();
-    let producer = e.producer.as_deref();
+    arena: &mut PathArena,
+) -> Vec<(ChunkId, Option<Role>, Option<PathId>)> {
+    let (origin, class, producer) = (e.origin, e.class, e.producer);
     let foreign = origin.is_none() && class.is_none();
     if foreign {
         // Foreign keys keep their raw order, so every level below the
-        // "(foreign)" group is a real prefix.
-        let mut out: Vec<(String, Option<Role>, Option<String>)> =
-            vec![("(foreign)".to_string(), None, None)];
-        out.extend(e.tail.iter().enumerate().map(|(i, c)| {
-            (
-                c.clone(),
-                None,
-                Some(real[..(i + 1).min(real.len())].join("/")),
-            )
-        }));
+        // "(foreign)" group is a real prefix — the ancestor chain of the
+        // real path, which the arena already holds (#251).
+        let mut out: Vec<(ChunkId, Option<Role>, Option<PathId>)> =
+            vec![(arena.chunk("(foreign)"), None, None)];
+        out.extend(
+            e.tail
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (*c, None, Some(arena.ancestor_at(e.real_path, i + 1)))),
+        );
         return out;
     }
 
     // (chunk, role) first, targets derived below from the constraint chain.
-    let mut chunks: Vec<(String, Option<Role>)> = Vec::new();
-    let push = |out: &mut Vec<(String, Option<Role>)>, v: Option<&str>, role: Role| {
+    let mut chunks: Vec<(ChunkId, Option<Role>)> = Vec::new();
+    let push = |out: &mut Vec<(ChunkId, Option<Role>)>, v: Option<ChunkId>, role: Role| {
         if let Some(v) = v {
-            out.push((v.to_string(), Some(role)));
+            out.push((v, Some(role)));
         }
     };
     match pivot {
@@ -974,9 +1040,9 @@ fn pivot_chunks(
             // The producer when there is one; the service origin otherwise —
             // for a service origin the service IS the producer (RFC 03 §1.5).
             match (producer, origin) {
-                (Some(p), _) => chunks.push((p.to_string(), Some(Role::Producer))),
-                (None, Some(o)) => chunks.push((o.to_string(), Some(Role::Origin))),
-                (None, None) => chunks.push(("(no producer)".to_string(), None)),
+                (Some(p), _) => chunks.push((p, Some(Role::Producer))),
+                (None, Some(o)) => chunks.push((o, Some(Role::Origin))),
+                (None, None) => chunks.push((arena.chunk("(no producer)"), None)),
             }
             if producer.is_some() {
                 push(&mut chunks, origin, Role::Origin);
@@ -989,11 +1055,11 @@ fn pivot_chunks(
             push(&mut chunks, producer, Role::Producer);
         }
     }
-    chunks.extend(e.tail.iter().map(|c| (c.clone(), Some(Role::Subject))));
+    chunks.extend(e.tail.iter().map(|c| (*c, Some(Role::Subject))));
     if chunks.is_empty() {
         // An entry that *is* one of the coordinates (e.g. a declared class
         // position with no subject below it yet).
-        chunks.push(("(…)".to_string(), None));
+        chunks.push((arena.chunk("(…)"), None));
     }
 
     // Constraint chain → target per level.
@@ -1017,8 +1083,10 @@ fn pivot_chunks(
             } else {
                 has_o && (!has_c || has_o) && (!has_p || has_c)
             };
+            // The prefix `real[..n].join("/")` used to allocate; `ancestor_at`
+            // clamps to the path's length exactly as the slice did (#251).
             let target = (contiguous && present > 0)
-                .then(|| real[..(skip + present + tail_len).min(real.len())].join("/"));
+                .then(|| arena.ancestor_at(e.real_path, skip + present + tail_len));
             (chunk, role, target)
         })
         .collect()
@@ -1048,6 +1116,9 @@ struct PivotCtx<'a> {
     auto_expand: bool,
     /// The active pivot's key, which prefixes every synthetic path.
     pivot_key: &'a str,
+    /// The current synthetic display path, one buffer for the descent —
+    /// `expanded` is a string set, so its lookups need a spelling (#251).
+    probe: &'a mut String,
     emit: Emit<'a>,
 }
 
@@ -1059,35 +1130,49 @@ struct PivotCtx<'a> {
 /// entry per concrete key, and that population is bounded by the key table,
 /// which the status strip already reports as `keys_evicted`. Two bounds, two
 /// counters, two sentences.
-fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, path: String, depth: usize) {
-    for (chunk, child) in &node.children {
-        let child_path = if path.is_empty() {
-            format!("pivot:{}:{chunk}", ctx.pivot_key)
+fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, parent: Option<PathId>, depth: usize) {
+    // `PNode.children` is keyed by intern order, not spelling (#251); the
+    // display order is restored here, level by level, on interned `&str`s.
+    let mut kids: Vec<(&ChunkId, &PNode)> = node.children.iter().collect();
+    kids.sort_unstable_by_key(|(id, _)| ctx.emit.arena.chunk_str(**id));
+    for (chunk, child) in kids {
+        let chunk = *chunk;
+        let probe_len = ctx.probe.len();
+        // The synthetic first level is one chunk spelling `pivot:<key>:<top>`,
+        // so its expansion path never collides with another pivot's — or with
+        // a wire path (issue #93's namespacing, kept verbatim).
+        let path_chunk = if probe_len == 0 {
+            ctx.probe.push_str("pivot:");
+            ctx.probe.push_str(ctx.pivot_key);
+            ctx.probe.push(':');
+            ctx.probe.push_str(ctx.emit.arena.chunk_str(chunk));
+            let synthetic = &ctx.probe[..];
+            ctx.emit.arena.chunk(synthetic)
         } else {
-            format!("{path}/{chunk}")
+            ctx.probe.push('/');
+            ctx.probe.push_str(ctx.emit.arena.chunk_str(chunk));
+            chunk
         };
-        let is_open = ctx.auto_expand || ctx.expanded.contains(&child_path);
+        let child_path = ctx.emit.arena.node(parent, path_chunk);
+        let is_open = ctx.auto_expand || ctx.expanded.contains(ctx.probe.as_str());
         let own = child.leaf.as_ref().and_then(|(_, s, _)| *s);
         if ctx.emit.rows.len() >= ctx.emit.max_rows {
             *ctx.emit.truncated += 1;
             // Still descend: a collapsed count would understate the tree, and
             // the rows below are counted the same way.
             if is_open {
-                flatten_pnode(child, ctx, child_path, depth + 1);
+                flatten_pnode(child, ctx, Some(child_path), depth + 1);
             }
+            ctx.probe.truncate(probe_len);
             continue;
         }
         ctx.emit.rows.push(RowShape {
             depth,
-            chunk: chunk.clone(),
-            path: child_path.clone(),
+            chunk,
+            path: child_path,
             // A concrete entry acts on its real path; a group acts on its
             // contiguous wire prefix when it has one (issue #93).
-            target: child
-                .leaf
-                .as_ref()
-                .map(|(p, _, _)| p.clone())
-                .or_else(|| child.target.clone()),
+            target: child.leaf.as_ref().map(|(p, _, _)| *p).or(child.target),
             has_children: !child.children.is_empty(),
             expanded: is_open,
             status: child
@@ -1098,7 +1183,8 @@ fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, path: String, depth: usiz
             decl_type: child
                 .leaf
                 .as_ref()
-                .and_then(|(_, _, d)| d.as_ref().map(|d| d.type_name.clone())),
+                .and_then(|(_, _, d)| d.as_ref())
+                .map(|d| ctx.emit.arena.chunk(&d.type_name)),
         });
         // The row's own numbers are the group's *aggregates*, which is why
         // these can never be retargeted: `agg_*` sums a synthetic membership,
@@ -1114,8 +1200,9 @@ fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, path: String, depth: usiz
             subtree_last_seen: child.agg_last,
         }));
         if is_open {
-            flatten_pnode(child, ctx, child_path, depth + 1);
+            flatten_pnode(child, ctx, Some(child_path), depth + 1);
         }
+        ctx.probe.truncate(probe_len);
     }
 }
 
@@ -1215,18 +1302,21 @@ pub struct TreeData<'a> {
 /// Takes the **shape**, not the row: what a click means must not depend on a
 /// number that moved this tick (#177). `is_leaf` is structural for exactly
 /// that reason — see [`RowShape`].
-pub fn row_press(r: &RowShape) -> Message {
-    match (&r.target, r.is_leaf || !r.has_children) {
-        (Some(t), true) => Message::Subject(SubjectMsg::Select(Subject::Key(t.clone()))),
-        _ => Message::Workspace(WorkspaceMsg::ToggleNode(r.path.clone())),
+///
+/// The `arena` is the shape's own (`Flattened::arena`): the message carries a
+/// spelled path, materialised here — once per click, never per row (#251).
+pub fn row_press(r: &RowShape, arena: &PathArena) -> Message {
+    match (r.target, r.is_leaf || !r.has_children) {
+        (Some(t), true) => Message::Subject(SubjectMsg::Select(Subject::Key(arena.display(t)))),
+        _ => Message::Workspace(WorkspaceMsg::ToggleNode(arena.display(r.path))),
     }
 }
 
 /// What clicking the expand marker does — its own affordance, so a concrete
 /// key that is also a prefix of deeper keys stays selectable (issue #93).
-pub fn marker_press(r: &RowShape) -> Option<Message> {
+pub fn marker_press(r: &RowShape, arena: &PathArena) -> Option<Message> {
     r.has_children
-        .then(|| Message::Workspace(WorkspaceMsg::ToggleNode(r.path.clone())))
+        .then(|| Message::Workspace(WorkspaceMsg::ToggleNode(arena.display(r.path))))
 }
 
 /// Whether a row sits at or under one of the still-seeding watch paths.
@@ -1281,7 +1371,7 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
         let shape = &flat.rows[i];
         let r = flat.row(i);
         col = col.push(
-            iced::widget::container(row_view(shape, &r, d.facts, d.selected, d.watches))
+            iced::widget::container(row_view(shape, &r, &flat.arena, d.facts, d.selected, d.watches))
                 .height(Length::Fixed(ROW_HEIGHT)),
         );
     }
@@ -1321,6 +1411,7 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
 fn row_view<'a>(
     shape: &RowShape,
     r: &TreeRow,
+    arena: &PathArena,
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
     watches: Watches<'a>,
@@ -1329,7 +1420,7 @@ fn row_view<'a>(
 
     // The expand marker is its own affordance (issue #93): a concrete key
     // that is also a prefix of deeper keys keeps body-click = select.
-    let marker: Element<'a, Message> = match marker_press(shape) {
+    let marker: Element<'a, Message> = match marker_press(shape, arena) {
         Some(msg) => button(kit::caption(if r.expanded { "▾" } else { "▸" }))
             .padding(2)
             .style(button::text)
@@ -1461,7 +1552,7 @@ fn row_view<'a>(
             text_color: colors(theme).text(),
             ..Default::default()
         })
-        .on_press(row_press(shape));
+        .on_press(row_press(shape, arena));
     row![watch, indent, marker, body]
         .spacing(space::XS)
         .align_y(iced::Alignment::Center)
@@ -1529,11 +1620,26 @@ mod tests {
         flatten(snap, base, expanded, max, Instant::now())
     }
 
+    // Shapes carry ids (#251); tests that reason about spellings resolve
+    // them against the flatten's own arena through these four.
+    fn path_of(flat: &Flattened, r: &RowShape) -> String {
+        flat.arena.display(r.path)
+    }
+
+    fn chunk_of<'a>(flat: &'a Flattened, r: &RowShape) -> &'a str {
+        flat.arena.chunk_str(r.chunk)
+    }
+
+    fn target_of(flat: &Flattened, r: &RowShape) -> Option<String> {
+        r.target.map(|t| flat.arena.display(t))
+    }
+
+    fn find_path<'a>(flat: &'a Flattened, path: &str) -> Option<&'a RowShape> {
+        flat.rows.iter().find(|r| path_of(flat, r) == path)
+    }
+
     fn role_of(flat: &Flattened, path: &str) -> Option<Role> {
-        flat.rows
-            .iter()
-            .find(|r| r.path == path)
-            .and_then(|r| r.role)
+        find_path(flat, path).and_then(|r| r.role)
     }
 
     #[test]
@@ -1541,12 +1647,12 @@ mod tests {
         let snap = snapshot(&["v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage"]);
         let flat = flat_now(&snap, "", &BTreeSet::new(), 100);
         assert_eq!(flat.rows.len(), 1, "only the root chunk shows");
-        assert_eq!(flat.rows[0].chunk, "v1");
+        assert_eq!(chunk_of(&flat, &flat.rows[0]), "v1");
         assert!(flat.rows[0].has_children);
 
         let flat = flat_now(&snap, "", &expand(&["v1"]), 100);
         assert_eq!(flat.rows.len(), 2);
-        assert_eq!(flat.rows[1].chunk, "h-3fa9c2d41b7e");
+        assert_eq!(chunk_of(&flat, &flat.rows[1]), "h-3fa9c2d41b7e");
     }
 
     /// RFC 03 §1.1: the overlay is resolved relative to the base. The same
@@ -1646,13 +1752,13 @@ mod tests {
         let flat = flat_now(&snap, "", &set, 100);
         assert_eq!(flat.rows.len(), 3);
         for r in &flat.rows {
-            assert_eq!(r.role, None, "{} must not be labelled", r.path);
+            assert_eq!(r.role, None, "{} must not be labelled", path_of(&flat, r));
         }
         // …and it still carries its traffic.
         let i = flat
             .rows
             .iter()
-            .position(|r| r.path == "demo/example/foo")
+            .position(|r| path_of(&flat, r) == "demo/example/foo")
             .unwrap();
         assert!(flat.rows[i].is_leaf);
         assert_eq!(flat.row(i).count, 1);
@@ -1666,7 +1772,7 @@ mod tests {
         let set = expand(&["v2", "v2/h-3fa9c2d41b7e", "v2/h-3fa9c2d41b7e/telemetry"]);
         let flat = flat_now(&snap, "", &set, 100);
         for r in &flat.rows {
-            assert_eq!(r.role, None, "{} must not be labelled", r.path);
+            assert_eq!(r.role, None, "{} must not be labelled", path_of(&flat, r));
         }
     }
 
@@ -1680,7 +1786,7 @@ mod tests {
             "v1/h-3fa9c2d41b7e/state/sysinfo/health",
         ]);
         let flat = flat_now(&snap, "", &BTreeSet::new(), 100);
-        assert_eq!(flat.rows[0].chunk, "v1");
+        assert_eq!(chunk_of(&flat, &flat.rows[0]), "v1");
         assert!(!flat.rows[0].expanded);
         let root = flat.row(0);
         assert_eq!(root.subtree_count, 3);
@@ -1749,7 +1855,7 @@ mod tests {
         assert!(flat.filtered);
         assert_eq!(flat.shown_keys, 1);
         assert_eq!(flat.total_keys, 3);
-        let paths: Vec<&str> = flat.rows.iter().map(|r| r.path.as_str()).collect();
+        let paths: Vec<String> = flat.rows.iter().map(|r| path_of(&flat, r)).collect();
         assert_eq!(
             paths,
             [
@@ -1887,11 +1993,15 @@ mod tests {
             .rows
             .iter()
             .filter(|r| r.depth == 0)
-            .map(|r| r.chunk.as_str())
+            .map(|r| chunk_of(&flat, r))
             .collect();
         assert_eq!(tops, ["(foreign)", "@catalog", "sysinfo"]);
         // The sysinfo group aggregates both origins' traffic.
-        let i = flat.rows.iter().position(|r| r.chunk == "sysinfo").unwrap();
+        let i = flat
+            .rows
+            .iter()
+            .position(|r| chunk_of(&flat, r) == "sysinfo")
+            .unwrap();
         let sysinfo = flat.row(i);
         assert_eq!(sysinfo.subtree_count, 2);
         assert_eq!(sysinfo.subtree_keys, 2);
@@ -1923,7 +2033,7 @@ mod tests {
             .rows
             .iter()
             .filter(|r| r.depth == 0)
-            .map(|r| r.chunk.as_str())
+            .map(|r| chunk_of(&flat, r))
             .collect();
         assert_eq!(tops, ["@catalog", "h-3fa9c2d41b7e"]);
         assert_eq!(
@@ -1950,9 +2060,13 @@ mod tests {
             10_000,
             Instant::now(),
         );
-        let leaf = flat.rows.iter().find(|r| r.chunk == "cpu").expect("leaf");
+        let leaf = flat
+            .rows
+            .iter()
+            .find(|r| chunk_of(&flat, r) == "cpu")
+            .expect("leaf");
         assert_eq!(
-            leaf.target.as_deref(),
+            target_of(&flat, leaf).as_deref(),
             Some("v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu")
         );
         assert_eq!((flat.shown_keys, flat.total_keys), (1, 1));
@@ -2000,10 +2114,13 @@ mod tests {
         let by_chunk = |c: &str| {
             flat.rows
                 .iter()
-                .find(|r| r.chunk == c)
+                .find(|r| chunk_of(&flat, r) == c)
                 .unwrap_or_else(|| panic!("row {c}"))
         };
-        assert_eq!(by_chunk("@catalog").target.as_deref(), Some("v1/@catalog"));
+        assert_eq!(
+            target_of(&flat, by_chunk("@catalog")).as_deref(),
+            Some("v1/@catalog")
+        );
         let host = pivot_flatten(
             &snap,
             "",
@@ -2016,20 +2133,24 @@ mod tests {
         let origin = host
             .rows
             .iter()
-            .find(|r| r.chunk == "h-3fa9c2d41b7e")
+            .find(|r| chunk_of(&host, r) == "h-3fa9c2d41b7e")
             .expect("origin group");
-        assert_eq!(origin.target.as_deref(), Some("v1/h-3fa9c2d41b7e"));
+        let origin_target = target_of(&host, origin);
+        assert_eq!(origin_target.as_deref(), Some("v1/h-3fa9c2d41b7e"));
         assert_eq!(
-            crate::scope::subtree_selector(origin.target.as_deref().unwrap()),
+            crate::scope::subtree_selector(origin_target.as_deref().unwrap()),
             "v1/h-3fa9c2d41b7e/**",
             "watching the group declares exactly the origin subtree"
         );
         let class = host
             .rows
             .iter()
-            .find(|r| r.chunk == "telemetry")
+            .find(|r| chunk_of(&host, r) == "telemetry")
             .expect("class group");
-        assert_eq!(class.target.as_deref(), Some("v1/h-3fa9c2d41b7e/telemetry"));
+        assert_eq!(
+            target_of(&host, class).as_deref(),
+            Some("v1/h-3fa9c2d41b7e/telemetry")
+        );
     }
 
     /// Issue #93: a base-relative deployment keeps the base in the target —
@@ -2049,9 +2170,12 @@ mod tests {
         let origin = flat
             .rows
             .iter()
-            .find(|r| r.chunk == "h-3fa9c2d41b7e")
+            .find(|r| chunk_of(&flat, r) == "h-3fa9c2d41b7e")
             .expect("origin group");
-        assert_eq!(origin.target.as_deref(), Some("zs/v1/h-3fa9c2d41b7e"));
+        assert_eq!(
+            target_of(&flat, origin).as_deref(),
+            Some("zs/v1/h-3fa9c2d41b7e")
+        );
     }
 
     /// Issue #93: groups that genuinely span a wildcard stay untargeted —
@@ -2071,7 +2195,11 @@ mod tests {
             10_000,
             Instant::now(),
         );
-        let group = prod.rows.iter().find(|r| r.chunk == "sysinfo").unwrap();
+        let group = prod
+            .rows
+            .iter()
+            .find(|r| chunk_of(&prod, r) == "sysinfo")
+            .unwrap();
         assert!(group.target.is_none(), "spans origins — no one-click watch");
         // …but one level down the constraint chain closes: origin under
         // producer means v1/<origin>/<class>/<producer> is NOT contiguous
@@ -2079,7 +2207,7 @@ mod tests {
         let origin = prod
             .rows
             .iter()
-            .find(|r| r.chunk == "h-3fa9c2d41b7e")
+            .find(|r| chunk_of(&prod, r) == "h-3fa9c2d41b7e")
             .unwrap();
         assert!(origin.target.is_none(), "class position still wildcarded");
         // …and the class level (origin+class+producer all fixed) targets
@@ -2088,11 +2216,11 @@ mod tests {
         let class = prod
             .rows
             .iter()
-            .filter(|r| r.chunk == "telemetry")
+            .filter(|r| chunk_of(&prod, r) == "telemetry")
             .find(|r| r.target.is_some())
             .expect("a targeted class row");
         assert_eq!(
-            class.target.as_deref(),
+            target_of(&prod, class).as_deref(),
             Some("v1/h-3fa9c2d41b7e/telemetry/sysinfo")
         );
 
@@ -2106,7 +2234,7 @@ mod tests {
             Instant::now(),
         );
         let top = by_class.rows.iter().find(|r| r.depth == 0).unwrap();
-        assert_eq!(top.chunk, "telemetry");
+        assert_eq!(chunk_of(&by_class, top), "telemetry");
         assert!(top.target.is_none(), "spans origins");
     }
 
@@ -2125,13 +2253,9 @@ mod tests {
             "v1/h-3fa9c2d41b7e/state/tc",
         ]);
         let flat = flat_now(&snap, "", &set, 100);
-        let prefix = flat
-            .rows
-            .iter()
-            .find(|r| r.path == "v1/h-3fa9c2d41b7e/state/tc/iface")
-            .expect("prefix row");
+        let prefix = find_path(&flat, "v1/h-3fa9c2d41b7e/state/tc/iface").expect("prefix row");
         assert!(prefix.is_leaf && prefix.has_children);
-        match row_press(prefix) {
+        match row_press(prefix, &flat.arena) {
             Message::Subject(SubjectMsg::Select(Subject::Key(k))) => {
                 assert_eq!(k, "v1/h-3fa9c2d41b7e/state/tc/iface")
             }
@@ -2139,19 +2263,15 @@ mod tests {
         }
         assert!(
             matches!(
-                marker_press(prefix),
+                marker_press(prefix, &flat.arena),
                 Some(Message::Workspace(WorkspaceMsg::ToggleNode(_)))
             ),
             "the marker is the expand affordance"
         );
         // A plain group row still toggles on body click.
-        let group = flat
-            .rows
-            .iter()
-            .find(|r| r.path == "v1/h-3fa9c2d41b7e/state")
-            .expect("group row");
+        let group = find_path(&flat, "v1/h-3fa9c2d41b7e/state").expect("group row");
         assert!(matches!(
-            row_press(group),
+            row_press(group, &flat.arena),
             Message::Workspace(WorkspaceMsg::ToggleNode(_))
         ));
     }
@@ -2179,8 +2299,8 @@ mod tests {
             10_000,
             Instant::now(),
         );
-        assert!(by_origin.rows[0].path.starts_with("pivot:origin:"));
-        assert!(by_producer.rows[0].path.starts_with("pivot:producer:"));
+        assert!(path_of(&by_origin, &by_origin.rows[0]).starts_with("pivot:origin:"));
+        assert!(path_of(&by_producer, &by_producer.rows[0]).starts_with("pivot:producer:"));
     }
 
     /// The soak numbers behind issue #65's acceptance: flatten, search and
