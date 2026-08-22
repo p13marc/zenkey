@@ -70,7 +70,7 @@ pub const SPEEDS: [Speed; 6] = [
 ];
 
 /// The REPLAY banner plus the transport row. Rendered only in replay mode,
-/// directly under the toolbar — the panes below it are showing the file.
+/// directly under the location bar — the panes below it are showing the file.
 pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     // The mode indicator is the loudest claim on this row: EMPHASIS, in the
     // danger tone — everything else in the banner is metadata about it.
@@ -122,7 +122,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
 /// The transport: play/pause, speed, and the scrubber.
 ///
 /// Split from [`banner`] for the Activity dock (#183). The banner is a *mode*
-/// indicator and stays between the toolbar and the panes, where it cannot be
+/// indicator and stays between the location bar and the panes, where it cannot be
 /// put away; the transport is a stream control and lives in the dock's Replay
 /// tab.
 pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
@@ -152,7 +152,7 @@ pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
     transport.into()
 }
 
-/// The open row: a path box, shown on demand from the toolbar.
+/// The open row: a path box, shown on demand from the location bar.
 pub fn open_row(path: &str) -> Element<'_, Message> {
     row![
         kit::caption("replay file"),
@@ -173,7 +173,7 @@ pub fn open_row(path: &str) -> Element<'_, Message> {
     .into()
 }
 
-/// Everything replay mode puts between the toolbar and the panes (#74).
+/// Everything replay mode puts between the location bar and the panes (#74).
 ///
 /// Since #183 that is the banner and nothing else. The open row, the scrubber
 /// and the capture line moved into the Activity dock's Replay tab, because

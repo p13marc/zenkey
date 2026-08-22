@@ -2,7 +2,7 @@
 //!
 //! By the end of this epic zengui has a handful of docks and dozens of
 //! actions;
-//! discoverability by toolbar alone stops scaling well before that. zensight
+//! discoverability by location bar alone stops scaling well before that. zensight
 //! proved the in-family pattern (Ctrl+K search, Ctrl+P palette, `?` help), and
 //! this is the zengui shape of it.
 //!
@@ -465,7 +465,7 @@ mod tests {
                 format!("{:?}", Message::Workspace(WorkspaceMsg::PaneSelected(pane)))
             );
         }
-        // Scope: the same message the toolbar picker sends.
+        // Scope: the same message the location bar's picker sends.
         assert_eq!(
             find(&format!(
                 "scope: {}",

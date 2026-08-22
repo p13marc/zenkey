@@ -236,10 +236,10 @@ fn msg(m: DetailMsg) -> Message {
 pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
     let mut col = Column::new().spacing(space::SM);
     col = col.push(kit::section_header("Detail", None));
-    // The subject — the one TITLE in the window (#191). The Inspector is the
-    // surface that follows what the window is looking at, so the key it names
-    // is the page title, not another table cell.
-    col = col.push(kit::title(data.key).font(iced::Font::MONOSPACE));
+    // The subject's key, restated where its facts are. The window's one
+    // TITLE moved to the location bar (#185) — the bar is where "where am I"
+    // is answered now — so this line is a key value, not a page title.
+    col = col.push(kit::emphasis(data.key).font(iced::Font::MONOSPACE));
 
     // — Key facts: the ladder verdict, worded per rung.
     match data.facts {

@@ -3,8 +3,8 @@
 //! **Lazy by default** (issue #85): connecting builds the *skeleton* — the
 //! declared keyspace from registry + liveliness + admin metadata — and starts
 //! a monitor with **zero data-plane watches**. Observation is opt-in per
-//! subtree (the tree's watch toggles) or per scope (the toolbar's "observe
-//! scope" toggle — the old eager mode made explicit); a selection fetches one
+//! subtree (the tree's watch toggles) or per scope (the location bar's
+//! "observe scope" toggle — the old eager mode made explicit); a selection fetches one
 //! value on demand. `--eager` restores the bootstrap behavior from the
 //! command line, labelled by its cost.
 //!
@@ -187,16 +187,17 @@ impl Zengui {
             &self.work,
         );
 
-        let mut layout = column![view::toolbar::strip(
+        let mut layout = column![view::location::bar(
             &self.chrome,
             &self.dep,
             &self.obs,
+            &self.sub,
             &self.work
         )]
         .spacing(space::MD)
         .padding(space::MD);
-        // Replay-mode surfaces (#74) sit between the toolbar and the panes,
-        // so the mode is unmistakable.
+        // Replay-mode surfaces (#74) sit between the location bar and the
+        // panes, so the mode is unmistakable.
         for surface in view::replay::surfaces(&self.work.replay) {
             layout = layout.push(surface);
         }

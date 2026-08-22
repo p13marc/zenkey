@@ -3,7 +3,7 @@
 //!
 //! One `match` over [`RightPane`], and it is the only place in the crate that
 //! knows the mapping from a tab to a pane function. That is why it is here
-//! rather than inline in `app.rs`: `view` is now the layout — toolbar, replay
+//! rather than inline in `app.rs`: `view` is now the layout — location bar, replay
 //! surfaces, panes, status strip, overlay — and each of those is one call.
 //!
 //! Every argument is shared. `view` takes `&self`, so the six sub-states are

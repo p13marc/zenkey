@@ -72,7 +72,7 @@ pub struct Status<'a> {
         String,
         Result<std::sync::Arc<zenkey_fleet::FetchOutcome>, String>,
     )>,
-    /// The scope's short name. The long explanation lives in the toolbar; the
+    /// The scope's short name. The long explanation lives in the location bar; the
     /// strip must stay narrow enough to fit, or its right-hand end — which is
     /// where the registry state and the reachability warning live — clips off
     /// screen exactly when something is wrong.

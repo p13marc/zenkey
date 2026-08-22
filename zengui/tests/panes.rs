@@ -2367,3 +2367,88 @@ fn a_media_viewing_reports_what_it_cannot_render() {
         "the attachment metadata reaches the screen"
     );
 }
+
+// ── Location bar (#185) ──────────────────────────────────────────────────
+
+/// The location bar names the empty base — the RFC v1.6 bus-root deployment
+/// is a first-class value, not a missing one — and says when nothing is
+/// selected rather than rendering a gap.
+#[test]
+fn the_location_bar_names_the_empty_base_and_the_empty_selection() {
+    use zengui::config::BaseChoice;
+    use zengui::message::Subject;
+    use zengui::view::location::{self, LocationData};
+
+    let options = [BaseChoice::bus_root(), BaseChoice::new("acme")];
+    // The picker's closed face and its rows both draw `BaseChoice`'s
+    // `Display`, and a `pick_list` draws that text itself — it is not a
+    // `Text` widget, so `iced_test`'s text selector cannot see inside it.
+    // The label is pinned at the seam the picker draws from instead; that
+    // this is the picker's row type is what `location::breadcrumb`'s
+    // signature enforces.
+    assert_eq!(
+        options[0].to_string(),
+        "(empty — keys start at v1/)",
+        "the empty base renders its label, never a blank row"
+    );
+    let mut ui = simulator::<Message, _, _>(location::breadcrumb(LocationData {
+        context: None,
+        base: "",
+        base_options: &options,
+        scope: zengui::scope::ScopePreset::Everything,
+        observing: false,
+        subject: &Subject::None,
+    }));
+    assert!(
+        ui.find("no context").is_ok(),
+        "an unnamed context is a state, not an omission"
+    );
+    assert!(
+        ui.find("nothing selected — pick a key in the tree").is_ok(),
+        "an empty key trail explains itself"
+    );
+}
+
+/// Every chunk of the subject reaches the screen, and clicking an ancestor
+/// selects that subtree — the acceptance the bar exists for (#185).
+#[test]
+fn the_location_bar_renders_the_trail_and_an_ancestor_click_selects_its_subtree() {
+    use zengui::config::BaseChoice;
+    use zengui::message::{Subject, SubjectMsg};
+    use zengui::view::location::{self, LocationData};
+
+    let subject = Subject::Key("v1/h-a/telemetry/sysinfo/disk".into());
+    let options = [BaseChoice::bus_root()];
+    let mut ui = simulator::<Message, _, _>(location::breadcrumb(LocationData {
+        context: Some("lab"),
+        base: "",
+        base_options: &options,
+        scope: zengui::scope::ScopePreset::Telemetry,
+        observing: false,
+        subject: &subject,
+    }));
+    for chunk in ["v1", "h-a", "telemetry", "sysinfo", "disk"] {
+        assert!(
+            ui.find(chunk).is_ok(),
+            "chunk {chunk:?} should be on screen"
+        );
+    }
+    assert!(
+        ui.find("context: lab").is_ok(),
+        "the active context is display as well as control"
+    );
+
+    ui.click("telemetry")
+        .expect("an ancestor chunk is a button");
+    let messages: Vec<String> = ui.into_messages().map(|m| format!("{m:?}")).collect();
+    let want = format!(
+        "{:?}",
+        Message::Subject(SubjectMsg::Select(Subject::Prefix(
+            "v1/h-a/telemetry".into()
+        )))
+    );
+    assert!(
+        messages.contains(&want),
+        "clicking an ancestor selects that subtree, got: {messages:?}"
+    );
+}

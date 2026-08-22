@@ -17,7 +17,7 @@
 //! ## The replay banner is not in here, deliberately
 //!
 //! Replay's *scrubber* and its capture line are a stream and live in the
-//! Replay tab. The `REPLAY` banner stays between the toolbar and the panes,
+//! Replay tab. The `REPLAY` banner stays between the location bar and the panes,
 //! where it has always been, because a mode indicator you can put away behind
 //! a tab is a mode indicator that can lie about what the panes are showing.
 
@@ -94,15 +94,15 @@ fn replay_stream<'a>(r: &'a ReplayMode, _slices: Option<&'a SliceSet>) -> Elemen
         Some(state) => col = col.push(replay::scrubber(state)),
         None if r.replay_open.is_none() => {
             col = col.push(kit::muted(
-                "no file open — the toolbar's \"replay…\" opens a .zrec, and \
-                 \"record\" writes one from the current watches",
+                "no file open — the location bar's \"replay…\" opens a .zrec, \
+                 and \"record\" writes one from the current watches",
             ));
         }
         None => {}
     }
     if let Some(rec) = &r.recording {
         col = col.push(kit::muted(format!(
-            "● recording current watches to {} — toolbar 'stop recording' finishes the file",
+            "● recording current watches to {} — the location bar's 'stop recording' finishes the file",
             rec.path
         )));
     }

@@ -9,8 +9,8 @@
 //! writes `ContextForm::status` → `Pane`. It settles the cases a topic-shaped
 //! grouping leaves to taste, and it is why `Reconnect` is `Deployment` (its
 //! handler is the tail of `BaseSelected`'s) rather than `Bus` or `Chrome`
-//! (it is reachable from the toolbar, Ctrl-R *and* the palette, so provenance
-//! says nothing).
+//! (it is reachable from the location bar, Ctrl-R *and* the palette, so
+//! provenance says nothing).
 //!
 //! ## What this file no longer claims
 //!
@@ -75,8 +75,8 @@ pub enum BusMsg {
 /// `Reconnect` is here rather than under `Bus`, on behaviour rather than taste:
 /// its handler is byte-for-byte the tail of `BaseSelected`'s, and a message whose
 /// body is a subset of another's belongs in that group. Where it is *reached
-/// from* — the toolbar, Ctrl-R, the palette — is a bad tiebreaker, because it is
-/// all three.
+/// from* — the location bar, Ctrl-R, the palette — is a bad tiebreaker, because
+/// it is all three.
 ///
 /// The scope watches come along for the same reason: `ScopeSelected`'s handler
 /// *is* `unwatch_scope()` then `watch_scope()`, so keeping them apart would put
@@ -236,10 +236,10 @@ pub enum SubjectMsg {
 /// `row![tree, right]`. Those arrive with #180.
 ///
 /// `Replay` is here and not a pane, because `view/replay.rs` has no `pane()` at
-/// all: it renders a banner between the toolbar and the panes, and `RightPane`
-/// has no `Replay` variant. Adding one to make it fit would put a twelfth tab in
-/// the strip and break `PANE_KEYS`' ten-digit arithmetic — a message reshape that
-/// changes the toolbar has escaped its scope.
+/// all: it renders a banner between the location bar and the panes, and
+/// `RightPane` has no `Replay` variant. Adding one to make it fit would put an
+/// extra tab in the strip and break `PANE_KEYS`' digit arithmetic — a message
+/// reshape that changes the location bar has escaped its scope.
 #[derive(Debug, Clone)]
 pub enum WorkspaceMsg {
     ToggleNode(String),
@@ -250,7 +250,7 @@ pub enum WorkspaceMsg {
     /// The tree scrolled: (absolute y offset, viewport height) — what the
     /// virtualized window renders against (issue #65).
     TreeScrolled(f32, f32),
-    /// Switch the right-hand pane (the toolbar's tab strip).
+    /// Switch the right-hand pane (the location bar's pane strip).
     PaneSelected(RightPane),
     /// Show a stream in the Activity dock, expanding it if it was put away
     /// (#183).

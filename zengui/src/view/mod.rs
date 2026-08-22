@@ -21,9 +21,9 @@
 //! collapse was composition rather than a rewrite.
 //!
 //! A **`dock`** (`activity::dock`) is a region that holds streams rather
-//! than a subject, and it owns its own tab strip. `strip`/`overlay`/`banner`/
-//! `open_row` are none of the three: surfaces that are not a region of the
-//! workspace at all.
+//! than a subject, and it owns its own tab strip. `location::bar`/`overlay`/
+//! `banner`/`open_row` are none of the three: surfaces that are not a region
+//! of the workspace at all.
 //!
 //! ## Where tabs are honest
 //!
@@ -61,10 +61,10 @@
 //! sets, this).
 //!
 //! The contract survived the #175 split intact, and that is worth recording:
-//! `panes::split` and `toolbar::strip` moved *out* of `app.rs` and take five
-//! and four sub-states respectively — never `Zengui`. Nothing under `view/`
-//! had to change to make the shell shrink, because `view` takes `&self` and
-//! six shared borrows of one struct are six disjoint borrows.
+//! `panes::split` and `location::bar` (the toolbar's successor, #185) moved
+//! *out* of `app.rs` and take five sub-states each — never `Zengui`. Nothing
+//! under `view/` had to change to make the shell shrink, because `view` takes
+//! `&self` and six shared borrows of one struct are six disjoint borrows.
 //!
 //! Both halves of the paragraph above used to be wrong here. The contract said
 //! `…_view`, and every function had been called `pane` for a year; and it said
@@ -83,6 +83,7 @@ pub mod echo;
 pub mod history;
 pub mod inspector;
 pub mod kit;
+pub mod location;
 pub mod media;
 pub mod nodes;
 pub mod palette;
@@ -93,5 +94,4 @@ pub mod spark;
 pub mod status;
 pub mod theme;
 pub mod tokens;
-pub mod toolbar;
 pub mod tree;
