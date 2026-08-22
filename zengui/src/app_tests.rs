@@ -629,6 +629,8 @@ fn the_retained_window_is_replay_mode_with_all_its_locks() {
         ReplayMsg::RetainedToggled,
     )));
     assert!(app.work.replay.replay.is_none(), "back to live");
+}
+
 /// #180's acceptance, both halves in one causal chain: dragging a splitter
 /// changes the ratio, and the changed layout is what a restart rebuilds.
 ///

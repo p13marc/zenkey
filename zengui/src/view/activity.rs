@@ -21,7 +21,7 @@
 //! where it has always been, because a mode indicator you can put away behind
 //! a tab is a mode indicator that can lie about what the panes are showing.
 
-use iced::widget::{Column, column, row};
+use iced::widget::{Column, button, column, row};
 use iced::{Element, Length};
 use zenkey_fleet::SliceSet;
 
