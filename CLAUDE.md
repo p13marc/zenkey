@@ -48,7 +48,11 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   The window follows **one `Subject`** (#181, `message.rs`) — a key, a subtree
   prefix, an origin, or nothing — and `view/inspector.rs` is the one surface
   that dispatches on it (#182). Under `view/`, a `pane` returns an `Element`
-  and owns its scroll; a `section` returns a `Column` and is a piece of one.
+  and owns its scroll; a `section` returns a `Column` and is a piece of one; a
+  `dock` (`view/activity.rs`, #183) is a region holding the session's parallel
+  streams — echo, the publish log, doctor verdicts, replay transport — with its
+  own tab strip. The three virtualized lists (tree, timeline, echo) share
+  `kit::window`.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus
