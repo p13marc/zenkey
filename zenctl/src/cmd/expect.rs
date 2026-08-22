@@ -37,7 +37,10 @@ pub async fn run(
     let session = args.session().await?;
     // Slices enrich: `--valid-payload` and `--qos declared` degrade to
     // explained violations when nothing is loaded, and the report says why.
-    let slices = args.slices_optional().await?.unwrap_or_default();
+    // `None` stays `None` into the engine so each violation names the
+    // missing registry (`no registry loaded…`) rather than claiming
+    // `no schema served` about types nobody looked up (RFC 09 §5.1 O4; #246).
+    let slices = args.slices_optional().await?;
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let spec = zenkey_fleet::ExpectSpec {
         selector: selector.to_string(),
@@ -54,7 +57,14 @@ pub async fn run(
         "expect: watching {selector} for {within}s — subscriber declared before \
          the window opened (RFC 09 §5.1 O4)"
     );
-    let report = match zenkey_fleet::run_expect(&session, args.base(), &slices, &store, &spec).await
+    let report = match zenkey_fleet::run_expect(
+        &session,
+        args.base(),
+        slices.as_ref(),
+        &store,
+        &spec,
+    )
+    .await
     {
         Ok(r) => r,
         Err(e) => {

@@ -662,16 +662,28 @@ impl DecodedSample {
 /// The whole decode pipeline for one sample: refine the key against the
 /// slices, resolve the schema through the store, decode — or fall back
 /// structurally, tagged with whatever we did learn and why it was not more.
+///
+/// `slices: None` means no registry was loaded at all, and the verdict is
+/// [`NotValidated::NoRegistry`] — nobody looked a type up, which must not
+/// masquerade as [`NotValidated::NoSchema`]'s "asked, and no schema is
+/// served/known for this type" (RFC 09 §5.1 O4; #246). Mirrors
+/// [`schema_dump`]'s `Option<&SliceSet>`.
 pub async fn decode_sample(
     store: &SchemaStore,
     session: &Session,
-    slices: &SliceSet,
+    slices: Option<&SliceSet>,
     base: &str,
     wire_key: &str,
     sample_encoding: Option<&str>,
     bytes: &[u8],
 ) -> DecodedSample {
     use zenkey::grammar::ClassOrPlane;
+    let Some(slices) = slices else {
+        // Not asked is not answered no: with no registry there was never a
+        // lookup to fail, so the reason names the missing registry, not the
+        // type (RFC 09 §5.1 O4; #246).
+        return DecodedSample::structural(None, NotValidated::NoRegistry, bytes);
+    };
     let refined = zenkey::grammar::parse_full(base, wire_key).and_then(|parsed| {
         let producer = match (&parsed.producer, &parsed.origin) {
             (Some(p), _) => p.name().to_string(),
@@ -691,8 +703,9 @@ pub async fn decode_sample(
         ))
     });
     let Some((producer, type_name, registry_encoding)) = refined else {
-        // No registered type — there is no schema to conform to (O4: this is
-        // "no contract", not "checked and passed").
+        // The loaded registry was consulted and names no type for this key —
+        // there is no schema to conform to (O4: this is "no contract", not
+        // "checked and passed", and not `NoRegistry`'s "nobody looked").
         return DecodedSample::structural(None, NotValidated::NoSchema, bytes);
     };
     let encoding = resolve_encoding(sample_encoding, registry_encoding.as_deref(), bytes);

@@ -38,11 +38,14 @@ pub async fn run(
     // Slices enrich: they name each key's payload type, and without them the
     // decode ladder falls to its structural rung — which is exactly what
     // `--raw` asks for on purpose. A registry that will not answer must not
-    // cost the user the stream itself (#210).
+    // cost the user the stream itself (#210). `None` stays `None` into the
+    // ladder, so a row's verdict reads `no registry loaded` rather than
+    // claiming `no schema served` about types nobody looked up
+    // (RFC 09 §5.1 O4; #246).
     let slices = if raw {
-        zenkey_fleet::SliceSet::default()
+        None
     } else {
-        args.slices_optional().await?.unwrap_or_default()
+        args.slices_optional().await?
     };
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
 
@@ -184,7 +187,7 @@ pub async fn run(
             let type_name = zenkey_fleet::decode::decode_sample(
                 &store,
                 &session,
-                &slices,
+                slices.as_ref(),
                 &base,
                 key,
                 Some(encoding),
@@ -206,7 +209,7 @@ pub async fn run(
             let d = sample::decode(
                 &store,
                 &session,
-                &slices,
+                slices.as_ref(),
                 &base,
                 key,
                 Some(encoding),
