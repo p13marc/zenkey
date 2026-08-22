@@ -116,7 +116,7 @@ impl<'a> Status<'a> {
         chrome: &'a crate::state::Chrome,
         dep: &'a crate::state::Deployment,
         obs: &'a crate::state::Observation,
-        sub: &'a crate::state::Subject,
+        sub: &'a crate::state::SubjectState,
         work: &'a crate::state::Workspace,
     ) -> Status<'a> {
         Status {

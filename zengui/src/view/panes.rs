@@ -14,7 +14,7 @@ use iced::widget::{container, row};
 use iced::{Element, Length};
 
 use crate::message::{Message, RightPane};
-use crate::state::{Chrome, Deployment, Observation, Subject, TreeState, Workspace};
+use crate::state::{Chrome, Deployment, Observation, SubjectState, TreeState, Workspace};
 use crate::view;
 use crate::view::tokens::space;
 
@@ -39,7 +39,7 @@ pub(crate) fn split<'a>(
     chrome: &'a Chrome,
     dep: &'a Deployment,
     obs: &'a Observation,
-    sub: &'a Subject,
+    sub: &'a SubjectState,
     tree: &'a TreeState,
     work: &'a Workspace,
 ) -> Element<'a, Message> {
@@ -55,7 +55,7 @@ pub(crate) fn split<'a>(
                 mine: &obs.my_watch_paths,
                 seeding: &obs.seeding_paths,
             },
-            selected: sub.selected.as_deref(),
+            selected: sub.current.path(),
         }))
         .width(Length::FillPortion(chrome.prefs.split_portions().0))
         .height(Length::Fill),
@@ -63,7 +63,7 @@ pub(crate) fn split<'a>(
             RightPane::Echo => view::echo::pane(
                 &work.echo.echo,
                 &work.echo.echo_view,
-                sub.selected.as_deref(),
+                sub.current.key(),
                 work.echo.echo.next_seq(),
             ),
             RightPane::Call => view::call::pane(
@@ -74,11 +74,12 @@ pub(crate) fn split<'a>(
             RightPane::Publish =>
                 view::publish::pane(&work.bench.publish_form, dep.slices.is_some()),
             RightPane::Detail => view::detail::pane(view::detail::DetailData {
-                key: sub.selected.as_deref().unwrap_or("(nothing selected)"),
-                facts: sub.selected.as_deref().and_then(|k| dep.facts.get(k)),
-                fetched: sub.fetched.as_ref().and_then(|(k, o)| {
-                    (Some(k.as_str()) == sub.selected.as_deref()).then_some(o)
-                }),
+                key: sub.current.key().unwrap_or("(nothing selected)"),
+                facts: sub.current.key().and_then(|k| dep.facts.get(k)),
+                fetched: sub
+                    .fetched
+                    .as_ref()
+                    .and_then(|(k, o)| { (Some(k.as_str()) == sub.current.key()).then_some(o) }),
                 decoded: sub.decoded.as_ref(),
                 series: sub.series.as_ref(),
                 history_entries: sub.history.as_ref().map(|r| r.ring.len()),
@@ -87,7 +88,7 @@ pub(crate) fn split<'a>(
             }),
             RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
                 roster: &work.verdicts.roster,
-                selected: work.verdicts.node_selected.as_deref(),
+                selected: sub.current.origin(),
                 detail: &work.verdicts.node_detail,
             }),
             RightPane::Doctor => view::doctor::pane(&work.verdicts.doctor, dep.base()),
@@ -95,11 +96,11 @@ pub(crate) fn split<'a>(
             RightPane::Media => view::media::pane(&work.bench.media, dep.slices.as_deref()),
             RightPane::Admin => view::admin::pane(&work.verdicts.admin),
             RightPane::History => view::history::pane(view::history::HistoryData {
-                key: sub.selected.as_deref(),
+                key: sub.current.key(),
                 recorder: sub.history.as_ref(),
                 watched: sub
-                    .selected
-                    .as_deref()
+                    .current
+                    .key()
                     .is_some_and(|k| key_is_watched(&obs.watched, k)),
             }),
             RightPane::Connect =>

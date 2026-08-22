@@ -10,12 +10,12 @@
 use iced::Task;
 
 use crate::message::Message;
-use crate::state::{Deployment, Subject};
+use crate::state::{Deployment, SubjectState};
 use crate::view::detail::DetailMsg;
 use crate::view::history::HistoryMsg;
 
 /// Choose which numeric leaf the sparkline plots (issue #64).
-pub(crate) fn update(sub: &mut Subject, dep: &Deployment, msg: DetailMsg) -> Task<Message> {
+pub(crate) fn update(sub: &mut SubjectState, dep: &Deployment, msg: DetailMsg) -> Task<Message> {
     let DetailMsg::LeafSelected(path) = msg;
     sub.series_leaf = Some(path);
     sub.refresh_series(dep);
@@ -25,7 +25,7 @@ pub(crate) fn update(sub: &mut Subject, dep: &Deployment, msg: DetailMsg) -> Tas
 /// The history pane (#63). Both actions are about the recorder, and there is
 /// nothing to do when the key is unselected — a recorder is created with the
 /// selection and dropped with it.
-pub(crate) fn history(sub: &mut Subject, msg: HistoryMsg) -> Task<Message> {
+pub(crate) fn history(sub: &mut SubjectState, msg: HistoryMsg) -> Task<Message> {
     if let Some(rec) = sub.history.as_mut() {
         match msg {
             HistoryMsg::Select(seq) => rec.selected = Some(seq),

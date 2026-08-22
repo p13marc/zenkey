@@ -11,15 +11,15 @@
 
 use iced::Task;
 
-use crate::message::{ChromeMsg, Message, RightPane, SubjectMsg};
-use crate::state::{Chrome, Deployment, Subject, Workspace};
+use crate::message::{ChromeMsg, Message, RightPane, Subject, SubjectMsg};
+use crate::state::{Chrome, Deployment, SubjectState, Workspace};
 use crate::view;
 
 /// The window, and what floats over it.
 pub(crate) fn update(
     chrome: &mut Chrome,
     dep: &Deployment,
-    sub: &Subject,
+    sub: &SubjectState,
     work: &mut Workspace,
     msg: ChromeMsg,
 ) -> Task<Message> {
@@ -67,7 +67,7 @@ pub(crate) fn update(
 fn update_key(
     chrome: &mut Chrome,
     dep: &Deployment,
-    sub: &Subject,
+    sub: &SubjectState,
     work: &mut Workspace,
     key: &iced::keyboard::Key,
     modifiers: iced::keyboard::Modifiers,
@@ -78,8 +78,8 @@ fn update_key(
     if crate::shortcuts::is_escape(key) {
         if chrome.palette.is_open() {
             chrome.palette.close();
-        } else if sub.selected.is_some() {
-            return Task::done(Message::Subject(SubjectMsg::SelectKey(None)));
+        } else if sub.current != Subject::None {
+            return Task::done(Message::Subject(SubjectMsg::Select(Subject::None)));
         }
         return Task::none();
     }
@@ -193,7 +193,7 @@ fn palette_row(
             let order = rank(&keys, &chrome.palette.query, |k| *k);
             order
                 .get(index)
-                .map(|i| Message::Subject(SubjectMsg::SelectKey(Some(keys[*i].to_string()))))
+                .map(|i| Message::Subject(SubjectMsg::Select(Subject::Key(keys[*i].to_string()))))
         }
         _ => None,
     }

@@ -9,7 +9,7 @@ use iced::widget::{column, row, scrollable, text};
 use iced::{Element, Length};
 use zenkey_fleet::NodeInfo;
 
-use crate::message::{Message, PaneMsg};
+use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
 use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
 use crate::view::kit;
 use crate::view::theme::{PresenceTone, colors};
@@ -18,8 +18,6 @@ use crate::view::tokens::{font, space};
 /// The pane's interactions, nested per the `CallMsg` precedent.
 #[derive(Debug, Clone)]
 pub enum NodesMsg {
-    /// An origin card was selected — loads its `node_info` one-shot.
-    Selected(String),
     /// The one-shot `node_info` landed.
     InfoLoaded(String, String, Result<Arc<NodeInfo>, String>),
     /// Click-through: land on the origin's subtree in the key tree.
@@ -108,7 +106,16 @@ fn origin_card<'a>(
         )
         .style(iced::widget::button::text)
         .padding(0)
-        .on_press(msg(NodesMsg::Selected(origin.to_string()))),
+        // Straight to the workspace's subject rather than to this pane
+        // (#181): a card is one of several ways to point the window at an
+        // origin, and the pane is not the owner of what is being looked at.
+        // Re-click deselects, and the pane knows that because it is told
+        // which card is current.
+        .on_press(Message::Subject(SubjectMsg::Select(if selected {
+            Subject::None
+        } else {
+            Subject::Origin(origin.to_string())
+        }))),
         iced::widget::space::horizontal(),
         iced::widget::button(text("show in tree").size(font::CAPTION))
             .padding(2)

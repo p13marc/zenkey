@@ -7,11 +7,10 @@
 
 use iced::Task;
 
-use crate::message::{Message, PaneMsg, RightPane, SubjectMsg, WorkspaceMsg};
+use crate::message::{Message, RightPane, Subject, SubjectMsg, WorkspaceMsg};
 use crate::services;
 use crate::state::workspace::Verdicts;
 use crate::update::Ctx;
-use crate::view;
 use crate::view::doctor::DoctorMsg;
 
 pub(crate) fn update(
@@ -89,14 +88,15 @@ pub(crate) fn update(
                 // the finding list is not lost.
                 Some(crate::doctor::Target::Key(key)) => Task::batch([
                     Task::done(Message::Workspace(WorkspaceMsg::Reveal(key.clone()))),
-                    Task::done(Message::Subject(SubjectMsg::SelectKey(Some(key)))),
+                    Task::done(Message::Subject(SubjectMsg::Select(Subject::Key(key)))),
                 ]),
-                // An origin/producer subject: land on the nodes pane.
+                // An origin subject: point the workspace at it and land on
+                // the nodes pane, which is where an origin is legible.
                 Some(crate::doctor::Target::Node(origin)) => {
                     *pane = RightPane::Nodes;
-                    Task::done(Message::Pane(PaneMsg::Nodes(
-                        view::nodes::NodesMsg::Selected(origin),
-                    )))
+                    Task::done(Message::Subject(SubjectMsg::Select(Subject::Origin(
+                        origin,
+                    ))))
                 }
                 None => Task::none(),
             }

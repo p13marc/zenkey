@@ -1,25 +1,34 @@
-//! The selected key, and everything derived from it.
+//! The [`Subject`] the whole workspace follows, and everything derived from it.
 //!
-//! No `forget`, and that is the finding rather than an omission: a selection
+//! The struct is `SubjectState` and the subject itself is
+//! [`Subject`](crate::message::Subject), which lives in `message.rs` because
+//! that is what carries it — and because `view` is public while `state` is
+//! `pub(crate)`, so a pane function could not name it from here.
+//! `SubjectState` follows the existing `TreeState` precedent: the sub-state
+//! that *holds* a thing is named for the thing plus `State`.
+//!
+//! No `forget`, and that is the finding rather than an omission: a subject
 //! follows the *user*, not the fleet. Switching base leaves the same key
 //! selected, and the panes then say honestly that they have no value for it
 //! yet — which is what "not asked" means (O4).
 //!
 //! Two panes have no state of their own and mutate this group instead: Detail
-//! and History are windows onto the selection. That is worth knowing before
-//! #180 docks the eleven panes — two of them have nothing to dock.
+//! and History are windows onto the subject. That is worth knowing before #180
+//! docks the eleven panes — two of them have nothing to dock.
 
 use std::sync::Arc;
 
 use zenkey_fleet::FetchOutcome;
 
 use super::deployment::Deployment;
+use crate::message::Subject;
 use crate::view;
 
 sub_state! {
     #[derive(Default)]
-    pub(crate) struct Subject {
-        pub(crate) selected: Option<String>,
+    pub(crate) struct SubjectState {
+        /// What the workspace is looking at (#181).
+        pub(crate) current: Subject,
         /// The selected key's observed skewed-latency summary, refreshed on the
         /// bus tick (#119) — never computed on the render path, and cleared
         /// with the selection.
@@ -50,7 +59,7 @@ sub_state! {
     }
 }
 
-impl Subject {
+impl SubjectState {
     /// Rebuild the detail pane's chart data.
     ///
     /// The one rebuild point (#178): everything that can change the chart
