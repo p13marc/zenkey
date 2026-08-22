@@ -21,6 +21,7 @@ use tokio::sync::broadcast;
 use zenoh::Session;
 use zenoh::sample::SampleKind;
 
+use crate::retain::{Retention, RetentionBudget, RetentionStats};
 use crate::stats::StatsTable;
 use crate::tree::KeyTreeSnapshot;
 
@@ -268,6 +269,10 @@ pub struct MonitorCore {
     stats: Mutex<StatsTable>,
     tree: ArcSwap<KeyTreeSnapshot>,
     dropped: AtomicU64,
+    /// The retained window (#217): recent samples off the same ingest path,
+    /// bounded by bytes *and* age. Its own mutex, never held with the stats
+    /// lock — the two bounds are different facts and different contention.
+    retain: Mutex<Retention>,
 }
 
 impl MonitorCore {
@@ -283,12 +288,24 @@ impl MonitorCore {
             stats: Mutex::new(StatsTable::with_capacity(max_keys)),
             tree: ArcSwap::from_pointee(KeyTreeSnapshot::default()),
             dropped: AtomicU64::new(0),
+            retain: Mutex::new(Retention::new(RetentionBudget::default())),
         })
     }
 
-    /// Ingest one sample: stats update + broadcast. Hot path — one lock, no
-    /// tree work (that happens on the tick).
+    /// Ingest one sample: stats update + retention + broadcast. Hot path —
+    /// two short locks, no tree work (that happens on the tick).
     pub fn ingest(&self, view: SampleView, sn: Option<u32>) {
+        self.ingest_at(Arc::new(view), sn, Instant::now());
+    }
+
+    /// [`MonitorCore::ingest`] with the clock injected (#217).
+    ///
+    /// Replay rebuilds feed this with the **capture clock** (the row's `t`
+    /// offset from the load epoch) rather than the wall clock, which is what
+    /// makes a rebuild deterministic down to the EWMA rates: the same rows at
+    /// the same instants fold to bit-identical statistics, however fast the
+    /// rebuild loop runs.
+    pub fn ingest_at(&self, view: Arc<SampleView>, sn: Option<u32>, now: Instant) {
         {
             // Observed *skewed* latency (#119): our wall clock minus the
             // sample's HLC — both halves this crate deliberately never mixes
@@ -317,17 +334,17 @@ impl MonitorCore {
             });
             let stamper = view.stamped_by.and_then(StampProvenance::stamper);
             let mut stats = self.stats.lock().expect("stats lock");
-            stats.record(
-                &view.key,
-                view.payload.len(),
-                sn,
-                Instant::now(),
-                latency,
-                stamper,
-            );
+            stats.record(&view.key, view.payload.len(), sn, now, latency, stamper);
         }
+        // The retained window (#217): an Arc clone, off the same path the
+        // broadcast rides — the ring can never disagree with what was
+        // ingested, and retaining costs a refcount bump, not a copy.
+        self.retain
+            .lock()
+            .expect("retain lock")
+            .push(Arc::clone(&view), now);
         // Send errors mean "no receiver right now" — not a failure.
-        let _ = self.tx.send(FleetEvent::Sample(Arc::new(view)));
+        let _ = self.tx.send(FleetEvent::Sample(view));
     }
 
     pub fn node_event(&self, key: String, up: bool) {
@@ -380,6 +397,40 @@ impl MonitorCore {
     /// (RFC 09 §5.1).
     pub fn keys_evicted(&self) -> u64 {
         self.with_stats(|s| s.evicted())
+    }
+
+    /// The retained window, oldest first (#217): `Arc` clones of every
+    /// sample still inside both retention budgets. This is what the GUI's
+    /// retained scrub rebuilds panes from, and what "save window as `.zrec`"
+    /// writes — the same rows either way.
+    ///
+    /// Covers only **watched** keys by construction: the ring sits on the
+    /// ingest path, and nothing unwatched is ever ingested. A consumer that
+    /// presents this window MUST say so (RFC 09 §5.1 O5 — a retained window
+    /// over three watches is not a retained window over the bus).
+    pub fn retained(&self) -> Vec<Arc<SampleView>> {
+        self.retain
+            .lock()
+            .expect("retain lock")
+            .snapshot(Instant::now())
+    }
+
+    /// The retained window's account of itself: budget in force, what it
+    /// holds, and what each bound cost — `evicted` (byte budget) apart from
+    /// `expired` (age), both apart from [`MonitorCore::dropped`],
+    /// [`MonitorCore::keys_evicted`] and [`MonitorCore::keys_unwatched`]
+    /// (RFC 09 §5.1 O6; v1.18 R1 forbids folding the kinds).
+    pub fn retention(&self) -> RetentionStats {
+        self.retain
+            .lock()
+            .expect("retain lock")
+            .stats(Instant::now())
+    }
+
+    /// Change the retention budget in force; applied from the next push or
+    /// read. The default ([`RetentionBudget::default`]) is 64 MiB / 2 min.
+    pub fn set_retention_budget(&self, budget: RetentionBudget) {
+        self.retain.lock().expect("retain lock").set_budget(budget);
     }
 
     /// Subscribe to the event stream.
@@ -789,5 +840,69 @@ mod tests {
         let Some(StreamItem::Event(FleetEvent::Sample(_))) = slow.recv().await else {
             panic!("expected a sample after the gap report");
         };
+    }
+
+    /// The retained window rides the ingest path, not the broadcast: a
+    /// receiver that lagged its way to `Dropped(n)` lost nothing from the
+    /// ring, and the window still holds every ingested sample (#217).
+    #[tokio::test]
+    async fn the_ring_sees_what_a_lagging_receiver_missed() {
+        let core = MonitorCore::new(2);
+        let mut slow = core.events();
+        for i in 0..10 {
+            core.ingest(view(&format!("zs/v1/h-a/telemetry/x/m{i}"), 1), None);
+        }
+        let Some(StreamItem::Dropped(_)) = slow.recv().await else {
+            panic!("the broadcast lagged");
+        };
+        let window = core.retained();
+        assert_eq!(window.len(), 10, "the ring is upstream of the lag");
+        assert_eq!(window[0].key, "zs/v1/h-a/telemetry/x/m0");
+        assert_eq!(window[9].key, "zs/v1/h-a/telemetry/x/m9");
+    }
+
+    /// RFC 09 §5.1 **O6** / v1.18 **R1**: the eviction populations stay
+    /// separate numbers (#217). Broadcast lag ("could not keep up"),
+    /// stats-table eviction ("chose to forget under the key bound") and
+    /// retention eviction ("chose to forget under the window's byte budget")
+    /// are three different facts about the same session, and each ledger
+    /// balances on its own.
+    #[tokio::test]
+    async fn the_eviction_populations_are_never_folded() {
+        const SAMPLES: usize = 100;
+        let core = MonitorCore::bounded(2, 8);
+        core.set_retention_budget(crate::retain::RetentionBudget {
+            max_bytes: 1100,
+            max_age: Duration::from_secs(3600),
+        });
+        let mut slow = core.events();
+        for i in 0..SAMPLES {
+            core.ingest(view(&format!("zs/v1/h-a/telemetry/x/m{i}"), 64), None);
+        }
+        let Some(StreamItem::Dropped(lagged)) = slow.recv().await else {
+            panic!("the broadcast lagged");
+        };
+
+        // Each population's own ledger balances — nothing crossed over.
+        assert_eq!(core.dropped(), lagged, "lag counts only broadcast lag");
+        let table_kept = core.with_stats(StatsTable::len);
+        assert_eq!(
+            table_kept as u64 + core.keys_evicted(),
+            SAMPLES as u64,
+            "every key is in the table or in its eviction count"
+        );
+        let r = core.retention();
+        assert_eq!(
+            r.retained as u64 + r.evicted,
+            SAMPLES as u64,
+            "every sample is in the ring or in its eviction count"
+        );
+        assert_eq!(r.expired, 0, "nothing aged out in this window");
+        assert_eq!(core.keys_unwatched(), 0, "nothing was unwatched");
+
+        // And they are genuinely different numbers, not one figure worn
+        // three ways.
+        assert_ne!(r.evicted, core.keys_evicted());
+        assert_ne!(r.evicted, core.dropped());
     }
 }
