@@ -1,22 +1,30 @@
 //! The replay surface (issue #74): an unmistakable banner, and the one
-//! thing the CLI cannot do — a time scrubber.
+//! thing the CLI cannot do — a time scrubber. Since #217 the scrubber has
+//! two sources: a `.zrec` file, and the monitor's retained window.
 //!
 //! Mode honesty is the whole design: while a `.zrec` feeds the panes, the
 //! banner names the file, its selectors, its base, when it was captured
 //! and what the capture dropped (a replay is a partial view and says so —
-//! RFC 09 §5.1 O6), and the live link is off. The scrubber's axis is the
-//! **capture clock** (each row's `t`, the recording observer's arrival
-//! offsets) and the label says so, because a consumer plotting a time axis
-//! states which clock it plotted (RFC 09 §5.2).
+//! RFC 09 §5.1 O6), and the live link is off. A retained window owes a
+//! different set of statements (#217): the budget in force, that the
+//! window covers only **watched** keys — a retained window over three
+//! watches presented as "the bus" is an O5 failure with a nicer UI — and
+//! what retention itself evicted, as its own number beside stats-table
+//! eviction and `Dropped(n)`, never folded into either (O6; v1.18 R1).
+//! The scrubber's axis is the **capture clock** (each row's `t`, the
+//! recording observer's arrival offsets) and the label says so, because a
+//! consumer plotting a time axis states which clock it plotted
+//! (RFC 09 §5.2).
 
 use iced::widget::{button, pick_list, row, slider, text};
 use iced::{Element, Length};
+use zenkey_fleet::RetentionStats;
 
 use super::kit;
 use super::theme::colors;
 use super::tokens::{font, space};
 use crate::message::{Message, WorkspaceMsg};
-use crate::replay::ReplayState;
+use crate::replay::{ReplaySource, ReplayState};
 use crate::state::workspace::ReplayMode;
 
 /// Replay-mode interactions.
@@ -42,6 +50,13 @@ pub enum ReplayMsg {
     RecordToggled,
     /// A recording finished (or failed): samples, drops, path — or why not.
     RecordFinished(Result<(u64, u64, String), String>),
+    /// Enter the retained window from live (#217) — or, from inside it,
+    /// back to live. The live/retained toggle on the scrubber.
+    RetainedToggled,
+    /// Write the retained window to a `.zrec` through the ordinary writer
+    /// (#217): the file is indistinguishable from a deliberate recording.
+    /// Lands on [`ReplayMsg::RecordFinished`], like a capture.
+    SaveWindow,
 }
 
 fn msg(m: ReplayMsg) -> Message {
@@ -69,23 +84,91 @@ pub const SPEEDS: [Speed; 6] = [
     Speed(8.0),
 ];
 
-/// The REPLAY banner plus the transport row. Rendered only in replay mode,
-/// directly under the location bar — the panes below it are showing the file.
+/// The spelled-out age half of a retention budget: minutes when round,
+/// seconds otherwise.
+fn age_label(d: std::time::Duration) -> String {
+    let s = d.as_secs();
+    if s >= 60 && s.is_multiple_of(60) {
+        format!("{} min", s / 60)
+    } else {
+        format!("{s}s")
+    }
+}
+
+/// A retention budget, spelled the one way every surface states it (#217):
+/// the banner, the dock and the status strip must not disagree about what
+/// the bound is.
+pub fn budget_label(b: zenkey_fleet::RetentionBudget) -> String {
+    format!(
+        "{} / {}",
+        kit::human_bytes(b.max_bytes as u64),
+        age_label(b.max_age)
+    )
+}
+
+/// What the retained banner states (#217), split from the widget so the
+/// honesty statements are testable as text: the measured span, the budget
+/// in force, and that the window covers only **watched** keys — presenting
+/// it as the bus would be an O5 failure with a nicer UI.
+pub fn retained_meta(taken: &RetentionStats, rows: usize, span_secs: f64) -> String {
+    format!(
+        "the last {span_secs:.1}s of watched traffic — {} · budget {} · \
+         watched keys only, not the bus",
+        kit::plural(rows, "sample"),
+        budget_label(taken.budget),
+    )
+}
+
+/// The retention bound's own cost, as its own number (RFC 09 §5.1 O6;
+/// v1.18 R1): shown when the **byte** budget bit, and never folded into
+/// the stats-table eviction count or into `Dropped(n)`. `None` while the
+/// window still holds everything its age claim promises.
+pub fn retained_evicted_note(taken: &RetentionStats) -> Option<String> {
+    (taken.evicted > 0).then(|| {
+        format!(
+            "{} evicted by the byte budget — the window is narrower than {} claims",
+            kit::plural(taken.evicted as usize, "sample"),
+            age_label(taken.budget.max_age),
+        )
+    })
+}
+
+/// The REPLAY/RETAINED banner. Rendered only in replay mode, directly
+/// under the location bar — the panes below it are showing the window,
+/// not the bus.
 pub fn banner(state: &ReplayState) -> Element<'_, Message> {
+    let (mode, what) = match &state.source {
+        ReplaySource::File { path, header } => (
+            "REPLAY",
+            format!(
+                "{} — {} under base {:?}, captured {} · {} row(s)",
+                path,
+                header.selectors.join(" + "),
+                header.base,
+                header.captured_at,
+                state.rows.len(),
+            ),
+        ),
+        ReplaySource::Retained { taken } => (
+            "RETAINED",
+            retained_meta(taken, state.rows.len(), state.span_us as f64 / 1e6),
+        ),
+    };
     // The mode indicator is the loudest claim on this row: EMPHASIS, in the
     // danger tone — everything else in the banner is metadata about it.
-    let title = kit::emphasis("REPLAY").style(|theme: &iced::Theme| text::Style {
+    let title = kit::emphasis(mode).style(|theme: &iced::Theme| text::Style {
         color: Some(colors(theme).danger()),
     });
-    let what = kit::muted(format!(
-        "{} — {} under base {:?}, captured {} · {} row(s)",
-        state.path,
-        state.header.selectors.join(" + "),
-        state.header.base,
-        state.header.captured_at,
-        state.rows.len(),
-    ));
-    let mut meta = row![title, what].spacing(space::SM);
+    let mut meta = row![title, kit::muted(what)].spacing(space::SM);
+    if let ReplaySource::Retained { taken } = &state.source
+        && let Some(note) = retained_evicted_note(taken)
+    {
+        meta = meta.push(
+            kit::caption(note).style(|theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).warning()),
+            }),
+        );
+    }
     if state.capture_dropped > 0 {
         meta = meta.push(
             kit::caption(format!(
@@ -111,9 +194,12 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     meta = meta.push(iced::widget::space::horizontal());
     meta = meta.push(kit::muted("live link off"));
     meta = meta.push(
-        button(kit::caption("exit replay"))
-            .on_press(msg(ReplayMsg::Exit))
-            .padding(4),
+        button(kit::caption(match &state.source {
+            ReplaySource::File { .. } => "exit replay",
+            ReplaySource::Retained { .. } => "back to live",
+        }))
+        .on_press(msg(ReplayMsg::Exit))
+        .padding(4),
     );
 
     iced::widget::column![meta].spacing(space::XS).into()
@@ -127,7 +213,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
 /// tab.
 pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
     let (pos, span) = state.clock();
-    let transport = row![
+    let mut transport = row![
         button(kit::caption(if state.playing { "pause" } else { "play" }))
             .on_press(msg(ReplayMsg::Toggled))
             .padding(4),
@@ -148,6 +234,15 @@ pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
     ]
     .spacing(space::SM)
     .align_y(iced::Alignment::Center);
+    // A retained window can become a file (#217): through the ordinary
+    // writer, so the result is indistinguishable from a deliberate capture.
+    if let ReplaySource::Retained { .. } = &state.source {
+        transport = transport.push(
+            button(kit::caption("save window as .zrec"))
+                .on_press(msg(ReplayMsg::SaveWindow))
+                .padding(4),
+        );
+    }
 
     transport.into()
 }
@@ -189,4 +284,62 @@ pub(crate) fn surfaces(replay: &ReplayMode) -> Vec<Element<'_, Message>> {
         out.push(banner(state));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use zenkey_fleet::RetentionBudget;
+
+    fn stats(evicted: u64) -> RetentionStats {
+        RetentionStats {
+            budget: RetentionBudget::default(),
+            retained: 42,
+            retained_bytes: 1024,
+            span: Duration::from_secs(90),
+            evicted,
+            expired: 7,
+        }
+    }
+
+    /// #217's three banner statements, as text: the budget, the measured
+    /// span, and that the window covers watched keys only — a retained
+    /// window presented as "the bus" is an O5 failure with a nicer UI.
+    #[test]
+    fn the_retained_banner_states_budget_and_coverage() {
+        let meta = retained_meta(&stats(0), 42, 90.0);
+        assert!(meta.contains("MiB"), "{meta}");
+        assert!(meta.contains("2 min"), "{meta}");
+        assert!(meta.contains("90.0s"), "{meta}");
+        assert!(meta.contains("watched keys only"), "{meta}");
+        assert!(meta.contains("not the bus"), "{meta}");
+    }
+
+    /// Retention eviction is its own number (RFC 09 §5.1 O6; v1.18 R1):
+    /// silent while the bound has not bitten, and named as *this* bound's
+    /// cost when it has — never a shared figure with the stats table or
+    /// the broadcast.
+    #[test]
+    fn retention_eviction_speaks_only_when_it_bit_and_names_its_bound() {
+        assert!(retained_evicted_note(&stats(0)).is_none());
+        let note = retained_evicted_note(&stats(9)).unwrap();
+        assert!(note.contains("9 samples"), "{note}");
+        assert!(note.contains("byte budget"), "{note}");
+        assert!(note.contains("narrower"), "{note}");
+    }
+
+    /// One spelling of the budget for every surface.
+    #[test]
+    fn the_budget_label_is_shared_and_readable() {
+        assert_eq!(
+            budget_label(RetentionBudget::default()),
+            format!("{} / 2 min", kit::human_bytes(64 * 1024 * 1024))
+        );
+        let odd = RetentionBudget {
+            max_bytes: 1024,
+            max_age: Duration::from_secs(90),
+        };
+        assert!(budget_label(odd).ends_with("/ 90s"));
+    }
 }

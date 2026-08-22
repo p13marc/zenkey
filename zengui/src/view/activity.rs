@@ -45,6 +45,11 @@ pub(crate) struct ActivityData<'a> {
     pub base: &'a str,
     pub replay: &'a ReplayMode,
     pub slices: Option<&'a SliceSet>,
+    /// The monitor's retained window as of the last live tick (#217) —
+    /// what the Replay tab's "scrub retained" affordance describes.
+    /// `None` before a monitor exists, which is "not asked", not "empty"
+    /// (O4).
+    pub retention: Option<zenkey_fleet::RetentionStats>,
 }
 
 pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
@@ -76,13 +81,17 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
         }
         ActivityTab::Publish => publish::log_section(d.publish),
         ActivityTab::Doctor => doctor::section(d.doctor, d.base),
-        ActivityTab::Replay => replay_stream(d.replay, d.slices),
+        ActivityTab::Replay => replay_stream(d.replay, d.slices, d.retention),
     };
     column![strip, body].spacing(space::SM).into()
 }
 
 /// The scrubber and the capture line — replay's *stream*, not its banner.
-fn replay_stream<'a>(r: &'a ReplayMode, _slices: Option<&'a SliceSet>) -> Element<'a, Message> {
+fn replay_stream<'a>(
+    r: &'a ReplayMode,
+    _slices: Option<&'a SliceSet>,
+    retention: Option<zenkey_fleet::RetentionStats>,
+) -> Element<'a, Message> {
     let mut col: Column<'a, Message> = column![].spacing(space::SM);
     if let Some(path) = &r.replay_open {
         col = col.push(replay::open_row(path));
@@ -99,6 +108,29 @@ fn replay_stream<'a>(r: &'a ReplayMode, _slices: Option<&'a SliceSet>) -> Elemen
             ));
         }
         None => {}
+    }
+    // The live/retained toggle (#217): only offered while live — inside a
+    // replay the banner's exit is the one way out — and only once a monitor
+    // exists to have retained anything.
+    if r.replay.is_none()
+        && let Some(taken) = retention
+    {
+        col = col.push(
+            row![
+                button(kit::caption("scrub retained window"))
+                    .on_press(Message::Workspace(WorkspaceMsg::Replay(
+                        replay::ReplayMsg::RetainedToggled,
+                    )))
+                    .padding(4),
+                kit::muted(format!(
+                    "holds {:.1}s of watched traffic · budget {}",
+                    taken.span.as_secs_f64(),
+                    replay::budget_label(taken.budget),
+                )),
+            ]
+            .spacing(space::SM)
+            .align_y(iced::Alignment::Center),
+        );
     }
     if let Some(rec) = &r.recording {
         col = col.push(kit::muted(format!(

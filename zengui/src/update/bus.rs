@@ -49,6 +49,15 @@ pub(crate) fn apply_tick(
             .and_then(|(lat, unstamped)| lat.map(|l| (l, unstamped))),
         _ => None,
     };
+    // The retained window's account of itself (#217), once per tick like
+    // the latency lookup above — and only on *live* ticks: a replayed tick
+    // must not read the live ring under file (or window) data, and the
+    // strip does not render it in replay mode anyway.
+    if work.replay.replay.is_none()
+        && let Some(monitor) = &obs.monitor
+    {
+        obs.retention = Some(monitor.core().retention());
+    }
     obs.observed = Arc::clone(&tick.tree);
     obs.keys = tick.keys;
     obs.keys_evicted = tick.keys_evicted;

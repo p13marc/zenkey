@@ -52,6 +52,13 @@ sub_state! {
         pub(crate) keys_evicted: u64,
         pub(crate) keys_unwatched: u64,
         pub(crate) totals: (u64, u64, f64),
+        /// The monitor's retained window, as of the last live tick (#217):
+        /// the budget the status strip states, and the ring's own costs —
+        /// counted apart from `keys_evicted`, `keys_unwatched` and the
+        /// broadcast's lag (RFC 09 §5.1 O6). `None` until a monitor exists,
+        /// which is not "empty" (O4) — and left stale during replay, when
+        /// the strip does not show it.
+        pub(crate) retention: Option<zenkey_fleet::RetentionStats>,
     }
 }
 
@@ -74,6 +81,7 @@ impl Default for Observation {
             keys_evicted: 0,
             keys_unwatched: 0,
             totals: (0, 0, 0.0),
+            retention: None,
         }
     }
 }
@@ -93,5 +101,9 @@ impl Observation {
         self.seeding_paths.clear();
         self.seed_totals = (0, 0, 0);
         self.seeded_watches = 0;
+        // The ring's account rides with the coverage (#217): it describes
+        // what the departing monitor retained for the departing watches, and
+        // "not asked yet" is the honest strip line until the new one ticks.
+        self.retention = None;
     }
 }

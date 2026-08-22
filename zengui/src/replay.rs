@@ -1,5 +1,5 @@
-//! Replay mode (issue #74): the panes fed from a `.zrec` file instead of
-//! the link.
+//! Replay mode (issue #74): the panes fed from a `.zrec` file — or, since
+//! #217, from the monitor's **retained window** — instead of the link.
 //!
 //! The seam is the tick: everything downstream of
 //! [`crate::message::BusTick`] already renders whatever it is handed, so
@@ -8,19 +8,27 @@
 //! builder, the same bounded counters as live — and the panes cannot tell
 //! the difference. Nothing here can publish: there is no session in this
 //! module at all, which is the RFC 09 §5.2 pane-replay posture made
-//! structural.
+//! structural. The retained window rides the same machinery over an
+//! in-memory ring: [`ReplayState::from_retained`] instead of
+//! [`ReplayState::load`], and everything after the constructor is shared.
 //!
 //! Two clocks ride a `.zrec` (§5.2's rule): the scrubber's axis is the
 //! **capture clock** — each row's `t`, the recording observer's arrival
 //! offsets — and the UI says so. Scrubbing backwards is a rebuild: LWW
 //! folding is not invertible, so `scrub_to` re-ingests from the top into a
 //! fresh core, which stays cheap because a capture is bounded by
-//! construction.
+//! construction (a file by [`zenkey_fleet::RecordBounds`], the ring by its
+//! [`zenkey_fleet::RetentionBudget`]). The rebuild feeds
+//! [`MonitorCore::ingest_at`] on the capture clock, so the fold — EWMA
+//! rates included — is deterministic in the rows alone, which is what lets
+//! a retained scrub and a file replay of the same traffic yield
+//! byte-identical panes (#217's acceptance).
 
 use std::io::BufRead;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use zenkey_fleet::{MonitorCore, SampleView, ZrecHeader, ZrecItem, ZrecReader};
+use zenkey_fleet::{MonitorCore, RetentionStats, SampleView, ZrecHeader, ZrecItem, ZrecReader};
 
 use crate::message::BusTick;
 
@@ -35,17 +43,35 @@ pub struct ReplayRow {
     pub view: Arc<SampleView>,
 }
 
-/// The whole replay: file metadata, the loaded rows, the transport state,
+/// Where the rows came from — the banner dispatches on this, because the
+/// two sources owe the user different honesty (#217).
+pub enum ReplaySource {
+    /// A `.zrec` opened from disk (#74).
+    File {
+        /// Where the file came from — the banner names it.
+        path: String,
+        /// The capture's own account of itself (selectors, base, when).
+        header: ZrecHeader,
+    },
+    /// The monitor's retained window, snapshotted on entry (#217).
+    Retained {
+        /// The ring's account of itself at the moment the window was taken:
+        /// the budget the banner states, and what each bound cost —
+        /// retention eviction stays its own number, apart from stats-table
+        /// eviction and from `Dropped(n)` (RFC 09 §5.1 O6, v1.18 R1).
+        taken: RetentionStats,
+    },
+}
+
+/// The whole replay: its source, the loaded rows, the transport state,
 /// and the session-less core the tree is folded through.
 pub struct ReplayState {
-    /// Where the file came from — the banner names it.
-    pub path: String,
-    /// The capture's own account of itself (selectors, base, when).
-    pub header: ZrecHeader,
-    /// `header.selectors`, shared — every tick this file yields carries the
-    /// same coverage statement, so it is built once rather than per scrub
-    /// (#178).
-    watched: Arc<[String]>,
+    /// Where the rows came from, with that source's own metadata.
+    pub source: ReplaySource,
+    /// The coverage statement every tick carries (O5): the file's header
+    /// selectors, or the watch set the ring was fed by. Built once rather
+    /// than per scrub (#178).
+    pub(crate) watched: Arc<[String]>,
     /// Every publishable row, in file order (which is capture order).
     pub rows: Vec<ReplayRow>,
     /// Samples the *capture* missed (summed from its drop records) — shown
@@ -62,6 +88,12 @@ pub struct ReplayState {
     /// Rows `[..cursor]` have been fed to the core for this playhead.
     cursor: usize,
     core: Arc<MonitorCore>,
+    /// The capture clock's zero on this process's monotonic clock: the load
+    /// instant for a file, the window's oldest arrival for a retained ring.
+    /// The rebuild feeds `fold_epoch + t` into [`MonitorCore::ingest_at`],
+    /// and "save window as `.zrec`" writes rows against it, so a saved
+    /// window keeps the pacing the ring preserved (#217).
+    pub(crate) fold_epoch: Instant,
 }
 
 /// A qos profile name back to wire axes, for display in the panes.
@@ -143,9 +175,11 @@ impl ReplayState {
         }
         let span_us = rows.last().map_or(0, |r| r.t_us);
         Ok(ReplayState {
-            path: path.to_string(),
             watched: Arc::from(header.selectors.clone()),
-            header,
+            source: ReplaySource::File {
+                path: path.to_string(),
+                header,
+            },
             rows,
             capture_dropped,
             malformed,
@@ -155,7 +189,57 @@ impl ReplayState {
             speed: 1.0,
             cursor: 0,
             core: MonitorCore::new(1024),
+            fold_epoch: loaded_at,
         })
+    }
+
+    /// The retained window as a replay (#217): the monitor's ring, driven by
+    /// the very machinery a `.zrec` gets — same rows type, same rebuild,
+    /// same ticks — so the panes cannot tell a retained scrub from a file.
+    ///
+    /// The rows are `Arc` clones straight out of the ring (no copy, no
+    /// re-parse); each row's `t` is its arrival offset from the window's
+    /// oldest sample, which is the same subtraction "save window as `.zrec`"
+    /// writes — the two views of the window agree by construction.
+    ///
+    /// `watched` is the coverage statement the ring was fed under (O5): the
+    /// window covers those watches only, never the bus, and the banner says
+    /// so. There is no `capture_dropped` here — the ring sits on the ingest
+    /// path, upstream of the broadcast's lag; its own costs ride in
+    /// `taken` and stay separate numbers (O6).
+    pub fn from_retained(
+        window: Vec<Arc<SampleView>>,
+        watched: Arc<[String]>,
+        taken: RetentionStats,
+    ) -> ReplayState {
+        let epoch = window
+            .first()
+            .map_or_else(Instant::now, |v| v.received);
+        let rows: Vec<ReplayRow> = window
+            .into_iter()
+            .map(|view| ReplayRow {
+                t_us: u64::try_from(
+                    view.received.saturating_duration_since(epoch).as_micros(),
+                )
+                .unwrap_or(u64::MAX),
+                view,
+            })
+            .collect();
+        let span_us = rows.last().map_or(0, |r| r.t_us);
+        ReplayState {
+            watched,
+            source: ReplaySource::Retained { taken },
+            rows,
+            capture_dropped: 0,
+            malformed: 0,
+            position_us: 0,
+            span_us,
+            playing: false,
+            speed: 1.0,
+            cursor: 0,
+            core: MonitorCore::new(1024),
+            fold_epoch: epoch,
+        }
     }
 
     /// Advance the playhead by a wall-clock step (scaled by `speed`) and
@@ -196,7 +280,15 @@ impl ReplayState {
             .is_some_and(|r| r.t_us <= self.position_us)
         {
             let row = &self.rows[self.cursor];
-            self.core.ingest((*row.view).clone(), None);
+            // The capture clock, not the wall clock (#217): the fold — EWMA
+            // rates included — is then a function of the rows alone, so the
+            // same window folds bit-identically however it arrived (ring or
+            // file) and however fast this loop runs.
+            self.core.ingest_at(
+                Arc::clone(&row.view),
+                None,
+                self.fold_epoch + Duration::from_micros(row.t_us),
+            );
             if samples.len() < BATCH_CAP {
                 samples.push(Arc::clone(&row.view));
             } else {

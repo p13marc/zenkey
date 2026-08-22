@@ -144,6 +144,11 @@ mod tests {
                     "keys_evicted",
                     "keys_unwatched",
                     "totals",
+                    // What the monitor's ring holds and what its bounds
+                    // cost (#217): observed evidence, refreshed per live
+                    // tick, invalidated with the monitor like everything
+                    // else here.
+                    "retention",
                 ],
             ),
             // The selection and everything derived from it.
@@ -242,6 +247,7 @@ mod tests {
             .iter()
             .map(|(g, f)| if *g == "work" { 1 } else { f.len() })
             .sum();
-        assert_eq!(leaves, 65, "the split must place every field exactly once");
+        // …plus `obs.retention`, the retained window's account (#217).
+        assert_eq!(leaves, 66, "the split must place every field exactly once");
     }
 }

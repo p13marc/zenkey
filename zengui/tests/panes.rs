@@ -1070,6 +1070,7 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         unreachable: false,
         prefs_note: Some("zengui.toml does not parse (bad) — using defaults"),
         replaying: false,
+        retention: None,
     }));
     assert!(
         ui.find("preferences: zengui.toml does not parse (bad) — using defaults")
@@ -1815,6 +1816,7 @@ fn the_projection_cache_discloses_its_bound() {
         unreachable: false,
         prefs_note: None,
         replaying: false,
+        retention: None,
     }));
     assert!(
         ui.find(status::facts_text(118, 312).as_str()).is_ok(),
@@ -1860,6 +1862,7 @@ fn an_untripped_cache_bound_says_nothing() {
         unreachable: false,
         prefs_note: None,
         replaying: false,
+        retention: None,
     }));
     assert!(ui.find(status::facts_text(12, 0).as_str()).is_err());
 }
@@ -2259,6 +2262,7 @@ fn the_strip_reports_replay_over_the_link() {
         unreachable: false,
         prefs_note: None,
         replaying: true,
+        retention: None,
     }));
     assert!(ui.find("REPLAY — live link off").is_ok());
     assert!(
