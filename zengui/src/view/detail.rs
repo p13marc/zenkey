@@ -40,10 +40,29 @@ pub enum DetailMsg {
 }
 
 /// What the app hands the pane.
+/// What the pane knows about the fetch for the key it is showing (#181).
+///
+/// Three states, and the third is why this is an enum. An `Option` made
+/// "superseded" indistinguishable from "not asked", so a fetch that landed for
+/// a key the user had already moved past rendered as *nothing was asked* —
+/// which is an O4 violation in the one pane whose whole job is saying what was
+/// and was not asked.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Fetched<'a> {
+    /// No fetch has landed for anything.
+    #[default]
+    NotAsked,
+    /// A fetch landed, but for a different subject. The answer is real; it is
+    /// just not about what is on screen.
+    Superseded,
+    /// The answer to the question this pane is showing.
+    Landed(&'a Result<std::sync::Arc<FetchOutcome>, String>),
+}
+
 pub struct DetailData<'a> {
     pub key: &'a str,
     pub facts: Option<&'a KeyFacts>,
-    pub fetched: Option<&'a Result<std::sync::Arc<FetchOutcome>, String>>,
+    pub fetched: Fetched<'a>,
     /// The decode of the fetched value, when it has completed:
     /// (declared type name if any, rendering).
     pub decoded: Option<&'a (Option<String>, Rendering)>,
@@ -250,13 +269,19 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
 
     // — Value: the fetch outcome + hex-beside-decoded.
     match data.fetched {
-        None => {
+        Fetched::NotAsked => {
             col = col.push(kit::muted(
                 "no value fetched — selecting a concrete key fetches once \
                  (storage → cache → window), nothing ambient",
             ));
         }
-        Some(Err(e)) => {
+        Fetched::Superseded => {
+            col = col.push(kit::muted(
+                "superseded — the last fetch answered a different subject, so \
+                 nothing here describes this key. Re-select it to ask again.",
+            ));
+        }
+        Fetched::Landed(Err(e)) => {
             col = col.push(
                 text(format!("fetch failed: {e}"))
                     .size(font::CAPTION)
@@ -265,7 +290,7 @@ pub fn pane<'a>(data: DetailData<'a>) -> Element<'a, Message> {
                     }),
             );
         }
-        Some(Ok(outcome)) => match outcome.as_ref() {
+        Fetched::Landed(Ok(outcome)) => match outcome.as_ref() {
             FetchOutcome::None { attempted } => {
                 col = col.push(kit::muted(format!(
                     "no value — asked {} — a non-verdict, not proof of absence \

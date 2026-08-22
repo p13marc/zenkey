@@ -52,17 +52,31 @@ pub(crate) fn update(
         }
         SubjectMsg::ValueFetched(key, outcome) => {
             // No base guard needed (#109 audit): the evidence is keyed by
-            // the full wire key, which names its own base (an explorer
-            // runs un-namespaced, RFC 09 §5), and the view passes
-            // `fetched` through only while that exact key is selected.
-            // Residual: a stale landing can still flip the right pane to
-            // Detail — a focus nit, not a misattributed verdict.
-            sub.decoded = None;
-            // A fetch normally lands the detail pane in view — except
-            // from the doctor's click-through, where losing the finding
-            // list would cost more than it shows (#71).
-            if work.right_pane != RightPane::Doctor {
-                work.right_pane = RightPane::Detail;
+            // the full wire key, which names its own base (an explorer runs
+            // un-namespaced, RFC 09 §5).
+            //
+            // A landing for a subject the user has moved past is *superseded*
+            // (#181), and the two things it must not do are here. It must not
+            // flip the pane — the old "focus nit" — and it must not clear
+            // `decoded`, which was the sharper defect hiding behind it: a late
+            // reply for key A wiped key B's rendering while B was on screen,
+            // and the pane then said "not asked" about a key it had answered.
+            let current = sub.current.key() == Some(key.as_str());
+            if current {
+                sub.decoded = None;
+                // A fetch lands the detail pane in view — except from the
+                // doctor's click-through, where losing the finding list would
+                // cost more than it shows (#71).
+                if work.right_pane != RightPane::Doctor {
+                    work.right_pane = RightPane::Detail;
+                }
+            }
+            // No decode for a superseded answer: it is work for a rendering
+            // nothing will show, and `ValueDecoded`'s own guard would drop it
+            // on arrival anyway.
+            if !current {
+                sub.fetched = Some((key, outcome));
+                return Task::none();
             }
             let decode_task = match (&outcome, &dep.session, &dep.schema_store, &dep.slices) {
                 (Ok(out), Some(session), Some(store), Some(slices)) => {

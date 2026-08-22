@@ -76,10 +76,13 @@ pub(crate) fn split<'a>(
             RightPane::Detail => view::detail::pane(view::detail::DetailData {
                 key: sub.current.key().unwrap_or("(nothing selected)"),
                 facts: sub.current.key().and_then(|k| dep.facts.get(k)),
-                fetched: sub
-                    .fetched
-                    .as_ref()
-                    .and_then(|(k, o)| { (Some(k.as_str()) == sub.current.key()).then_some(o) }),
+                fetched: match sub.fetched.as_ref() {
+                    None => view::detail::Fetched::NotAsked,
+                    Some((k, o)) if Some(k.as_str()) == sub.current.key() => {
+                        view::detail::Fetched::Landed(o)
+                    }
+                    Some(_) => view::detail::Fetched::Superseded,
+                },
                 decoded: sub.decoded.as_ref(),
                 series: sub.series.as_ref(),
                 history_entries: sub.history.as_ref().map(|r| r.ring.len()),

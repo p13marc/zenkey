@@ -526,7 +526,7 @@ fn the_publish_pane_bounds_its_log_and_never_invents_a_matcher() {
 #[test]
 fn the_detail_pane_tags_decode_provenance() {
     use std::sync::Arc;
-    use zengui::view::detail::{DetailData, pane};
+    use zengui::view::detail::{DetailData, Fetched, pane};
     use zenkey_fleet::decode::Rendering;
     use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
 
@@ -553,7 +553,7 @@ fn the_detail_pane_tags_decode_provenance() {
     let mut ui = simulator::<Message, _, _>(pane(DetailData {
         key,
         facts: Some(&facts),
-        fetched: Some(&fetched),
+        fetched: Fetched::Landed(&fetched),
         decoded: Some(&decoded),
         series: None,
         history_entries: None,
@@ -575,7 +575,7 @@ fn the_detail_pane_tags_decode_provenance() {
     let mut ui = simulator::<Message, _, _>(pane(DetailData {
         key,
         facts: Some(&facts),
-        fetched: Some(&none),
+        fetched: Fetched::Landed(&none),
         decoded: None,
         series: None,
         history_entries: None,
@@ -586,6 +586,55 @@ fn the_detail_pane_tags_decode_provenance() {
         ui.find("no value — asked get, @adv cache, subscribe window — a non-verdict, not proof of absence (RFC 05 §3.1)")
             .is_ok(),
         "silence stays attributed"
+    );
+}
+
+/// The three fetch states are three sentences, and "superseded" is the one
+/// that did not exist (#181).
+///
+/// It used to be folded into "not asked" by an `Option` in the view: a reply
+/// that landed for a key the user had moved past was filtered out, and the
+/// pane then told the user nothing had been asked about a key it had in fact
+/// answered. That is an O4 violation in the one pane whose job is saying what
+/// was and was not asked.
+#[test]
+fn the_detail_pane_distinguishes_superseded_from_never_asked() {
+    use zengui::view::detail::{DetailData, Fetched, pane};
+
+    let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+    let data = |fetched| DetailData {
+        key,
+        facts: None,
+        fetched,
+        decoded: None,
+        series: None,
+        history_entries: None,
+        observed: None,
+        latency: None,
+    };
+
+    const NOT_ASKED: &str = "no value fetched — selecting a concrete key \
+                             fetches once (storage → cache → window), nothing \
+                             ambient";
+    const SUPERSEDED: &str = "superseded — the last fetch answered a different \
+                              subject, so nothing here describes this key. \
+                              Re-select it to ask again.";
+
+    let mut ui = simulator::<Message, _, _>(pane(data(Fetched::NotAsked)));
+    assert!(
+        ui.find(NOT_ASKED).is_ok(),
+        "nothing was asked, and the pane says so"
+    );
+    assert!(ui.find(SUPERSEDED).is_err());
+
+    let mut ui = simulator::<Message, _, _>(pane(data(Fetched::Superseded)));
+    assert!(
+        ui.find(SUPERSEDED).is_ok(),
+        "an answer that is real but about something else is its own state"
+    );
+    assert!(
+        ui.find(NOT_ASKED).is_err(),
+        "and must not be reported as an unasked question"
     );
 }
 
@@ -1210,7 +1259,7 @@ fn the_history_pane_counts_what_it_evicted() {
 #[test]
 fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
     use zengui::series::{NumericLeaves, RateSampler, Series};
-    use zengui::view::detail::{DetailData, SeriesData, pane};
+    use zengui::view::detail::{DetailData, Fetched, SeriesData, pane};
 
     let series = SeriesData {
         leaves: NumericLeaves::default(),
@@ -1223,7 +1272,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
     let mut ui = simulator::<Message, _, _>(pane(DetailData {
         key: FOREIGN,
         facts: None,
-        fetched: None,
+        fetched: Fetched::NotAsked,
         decoded: None,
         series: Some(&series),
         history_entries: Some(3),
@@ -1246,7 +1295,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
 #[test]
 fn the_detail_pane_labels_the_series_it_plots() {
     use zengui::series::{Series, numeric_leaves};
-    use zengui::view::detail::{DetailData, SeriesData, pane};
+    use zengui::view::detail::{DetailData, Fetched, SeriesData, pane};
 
     let mut value = Series::new();
     value.push(41.0);
@@ -1266,7 +1315,7 @@ fn the_detail_pane_labels_the_series_it_plots() {
     let mut ui = simulator::<Message, _, _>(pane(DetailData {
         key: REGISTERED,
         facts: None,
-        fetched: None,
+        fetched: Fetched::NotAsked,
         decoded: None,
         series: Some(&series),
         history_entries: Some(3),

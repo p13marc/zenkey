@@ -348,3 +348,66 @@ fn a_symbolic_key_is_selected_but_never_fetched_or_recorded() {
     assert!(app.sub.history.is_none(), "nothing can be recorded for it");
     assert!(app.sub.fetched.is_none());
 }
+
+/// A superseded fetch says so, instead of pretending nothing was asked
+/// (#181).
+///
+/// Three things used to go wrong when a reply landed for a key the user had
+/// already moved past. The pane flipped to Detail for the wrong subject —
+/// acknowledged in place as "a focus nit". `decoded` was cleared
+/// unconditionally, so a late reply for key A wiped key B's rendering while B
+/// was on screen. And the view filtered the stale result out with an
+/// `Option`, which made "superseded" indistinguishable from "not asked" in the
+/// one pane whose whole job is saying what was and was not asked (O4).
+#[test]
+fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
+    use std::sync::Arc;
+
+    use crate::message::RightPane;
+    use zenkey_fleet::FetchOutcome;
+
+    let mut app = test_app();
+    let stale = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+    let current = "v1/h-3fa9c2d41b7e/state/tc/qdisc";
+
+    // Look at one key, then move on before its answer arrives.
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        stale.to_string(),
+    ))));
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        current.to_string(),
+    ))));
+    app.sub.decoded = None;
+    app.work.right_pane = RightPane::Echo;
+
+    let late = Arc::new(FetchOutcome::None {
+        attempted: ["storage", "cache", "window"],
+    });
+    let _ = app.update(Message::Subject(SubjectMsg::ValueFetched(
+        stale.to_string(),
+        Ok(late),
+    )));
+
+    assert_eq!(
+        app.work.right_pane,
+        RightPane::Echo,
+        "a superseded answer must not steal the pane"
+    );
+    assert!(
+        app.sub.fetched.is_some(),
+        "the answer is real evidence and is kept — the view decides it is \
+         about something else"
+    );
+    assert_eq!(
+        app.sub.fetched.as_ref().map(|(k, _)| k.as_str()),
+        Some(stale)
+    );
+
+    // And the view says which of the three states it is in.
+    let data = |sub: &crate::state::SubjectState| match sub.fetched.as_ref() {
+        None => "not asked",
+        Some((k, _)) if Some(k.as_str()) == sub.current.key() => "landed",
+        Some(_) => "superseded",
+    };
+    assert_eq!(data(&app.sub), "superseded");
+}
