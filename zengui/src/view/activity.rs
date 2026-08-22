@@ -21,7 +21,7 @@
 //! where it has always been, because a mode indicator you can put away behind
 //! a tab is a mode indicator that can lie about what the panes are showing.
 
-use iced::widget::{Column, button, column, row};
+use iced::widget::{Column, column, row};
 use iced::{Element, Length};
 use zenkey_fleet::SliceSet;
 
@@ -53,27 +53,19 @@ pub(crate) struct ActivityData<'a> {
 }
 
 pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
+    // Putting the dock away is the grid's `×` since #180 — the strip is
+    // only the stream switch now.
     let mut tabs = row![].spacing(space::XS);
     for t in ActivityTab::ALL {
         tabs = tabs.push(kit::tab(
             t.label(),
-            d.dock.tab == t && d.dock.shown,
+            d.dock.tab == t,
             Message::Workspace(WorkspaceMsg::ActivityTab(t)),
         ));
     }
-    let strip = row![
-        tabs,
-        iced::widget::space::horizontal(),
-        button(kit::caption(if d.dock.shown { "hide" } else { "show" }))
-            .on_press(Message::Workspace(WorkspaceMsg::ActivityToggled))
-            .padding(4),
-    ]
-    .spacing(space::SM)
-    .align_y(iced::Alignment::Center);
-
-    if !d.dock.shown {
-        return column![strip].into();
-    }
+    let strip = row![tabs]
+        .spacing(space::SM)
+        .align_y(iced::Alignment::Center);
 
     let body: Element<'a, Message> = match d.dock.tab {
         ActivityTab::Echo => {

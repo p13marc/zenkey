@@ -62,13 +62,21 @@ pub(crate) fn update(
             // reply for key A wiped key B's rendering while B was on screen,
             // and the pane then said "not asked" about a key it had answered.
             let current = sub.current.key() == Some(key.as_str());
+            // A fetch lands the Inspector in view. Since #180 that means
+            // restoring its dock if the user closed it — spoken as the same
+            // `PaneSelected` the palette and the workbench strip send, so the
+            // reveal is persisted by the one handler that persists layout.
+            // (The doctor exception this used to carry is gone with the
+            // doctor pane: its findings are a dock stream now, #183.)
+            let reveal = if current && !work.docks.is_open(crate::prefs::DockRole::Inspector) {
+                Task::done(Message::Workspace(
+                    crate::message::WorkspaceMsg::PaneSelected(RightPane::Inspector),
+                ))
+            } else {
+                Task::none()
+            };
             if current {
                 sub.decoded = None;
-                // A fetch lands the Inspector in view. The doctor exception
-                // this used to carry is gone with the doctor pane: its
-                // findings are a dock stream now (#183), so nothing is lost
-                // by switching the right-hand region.
-                work.right_pane = RightPane::Inspector;
             }
             // No decode for a superseded answer: it is work for a rendering
             // nothing will show, and `ValueDecoded`'s own guard would drop it
@@ -97,7 +105,7 @@ pub(crate) fn update(
                 _ => Task::none(),
             };
             sub.fetched = Some((key, outcome));
-            decode_task
+            Task::batch([reveal, decode_task])
         }
         SubjectMsg::ValueDecoded(key, type_name, rendering) => {
             // Stale guard: only the current subject's decode lands.

@@ -61,10 +61,12 @@
 //! sets, this).
 //!
 //! The contract survived the #175 split intact, and that is worth recording:
-//! `panes::split` and `location::bar` (the toolbar's successor, #185) moved
-//! *out* of `app.rs` and take five sub-states each — never `Zengui`. Nothing
-//! under `view/` had to change to make the shell shrink, because `view` takes
-//! `&self` and six shared borrows of one struct are six disjoint borrows.
+//! `panes::grid` (the `pane_grid` workspace, #180 — `split` until the split
+//! stopped being fixed) and `location::bar` (the toolbar's successor, #185)
+//! moved *out* of `app.rs` and take five sub-states each — never `Zengui`.
+//! Nothing under `view/` had to change to make the shell shrink, because
+//! `view` takes `&self` and six shared borrows of one struct are six
+//! disjoint borrows.
 //!
 //! Both halves of the paragraph above used to be wrong here. The contract said
 //! `…_view`, and every function had been called `pane` for a year; and it said

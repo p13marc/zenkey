@@ -39,14 +39,14 @@ pub(crate) fn update(
     match msg {
         PaneMsg::Call(msg) => call::update(&mut work.bench.call_form, msg, cx),
         PaneMsg::Nodes(msg) => nodes::update(&mut work.verdicts, msg, cx),
-        PaneMsg::Doctor(msg) => doctor::update(&mut work.verdicts, &mut work.right_pane, msg, cx),
+        PaneMsg::Doctor(msg) => doctor::update(&mut work.verdicts, msg, cx),
         PaneMsg::Blob(msg) => blob::update(&mut work.verdicts.blob, msg, cx),
         PaneMsg::Media(msg) => media::update(&mut work.bench.media, &work.verdicts.roster, msg, cx),
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
         PaneMsg::Detail(msg) => detail::update(sub, dep, msg),
         PaneMsg::History(msg) => detail::history(sub, msg),
         PaneMsg::Publish(msg) => publish::update(&mut work.bench, msg, cx),
-        PaneMsg::Echo(msg) => echo::update(&mut work.echo, &mut work.right_pane, msg, cx),
+        PaneMsg::Echo(msg) => echo::update(&mut work.echo, msg, cx),
         PaneMsg::Context(msg) => context::update(&mut work.bench.context_form, msg),
     }
 }

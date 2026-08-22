@@ -227,19 +227,21 @@ pub enum SubjectMsg {
     Select(Subject),
 }
 
-/// The shell around the panes: which one shows, the tree's own chrome, and the
-/// replay mode (#176).
+/// The shell around the panes: the dock grid, the tree's own chrome, and the
+/// replay mode (#176, #180).
 ///
-/// **Not what #176's issue body describes.** It sketched "pane_grid
-/// drag/resize/close, layout switch, window open/close" — none of which exist:
-/// `grep -rn pane_grid zengui/src` is empty and the layout is a fixed
-/// `row![tree, right]`. Those arrive with #180.
+/// The messages #176's issue body sketched and this doc then denied — "pane_grid
+/// drag/resize/close, layout switch" — arrived with #180, in the reserved
+/// spot: [`PaneResized`](WorkspaceMsg::PaneResized),
+/// [`PaneDragged`](WorkspaceMsg::PaneDragged),
+/// [`DockToggled`](WorkspaceMsg::DockToggled),
+/// [`LayoutPreset`](WorkspaceMsg::LayoutPreset). They live here rather than
+/// under `Chrome` (where the *persisted* layout is written) because a layout
+/// change's failure is displayed in the workspace itself — the rule above.
 ///
 /// `Replay` is here and not a pane, because `view/replay.rs` has no `pane()` at
 /// all: it renders a banner between the location bar and the panes, and
-/// `RightPane` has no `Replay` variant. Adding one to make it fit would put an
-/// extra tab in the strip and break `PANE_KEYS`' digit arithmetic — a message
-/// reshape that changes the location bar has escaped its scope.
+/// `RightPane` has no `Replay` variant.
 #[derive(Debug, Clone)]
 pub enum WorkspaceMsg {
     ToggleNode(String),
@@ -250,13 +252,26 @@ pub enum WorkspaceMsg {
     /// The tree scrolled: (absolute y offset, viewport height) — what the
     /// virtualized window renders against (issue #65).
     TreeScrolled(f32, f32),
-    /// Switch the right-hand pane (the location bar's pane strip).
+    /// Show a pane (#180): `Inspector` reveals the Inspector dock; every
+    /// other value becomes the Workbench dock's tool and reveals *it*. The
+    /// message survives the tab strip it was named for, because it is what
+    /// the palette, the doctor's finding jump and echo's drill-through all
+    /// speak.
     PaneSelected(RightPane),
-    /// Show a stream in the Activity dock, expanding it if it was put away
-    /// (#183).
+    /// Show a stream in the Activity dock, restoring the dock if it was
+    /// closed (#183, #180).
     ActivityTab(ActivityTab),
-    /// Collapse the Activity dock to its tab strip, or bring it back.
-    ActivityToggled,
+    /// A splitter was dragged (#180): the grid ratio it names changed.
+    PaneResized(iced::widget::pane_grid::ResizeEvent),
+    /// A dock was picked up, dropped or abandoned (#180).
+    PaneDragged(iced::widget::pane_grid::DragEvent),
+    /// A dock surface was clicked — focus follows the click (#180).
+    DockFocused(iced::widget::pane_grid::Pane),
+    /// Close an open dock, or restore a closed one at its home edge (#180) —
+    /// the dock strip's toggles and each title bar's `×` both speak this.
+    DockToggled(crate::prefs::DockRole),
+    /// Apply a saved layout (#180): Explore, Watch or Diagnose, on Alt+1/2/3.
+    LayoutPreset(crate::prefs::LayoutPreset),
     /// Open every prefix of a path so its subtree is visible, and reflatten.
     ///
     /// One message for what was the same eight-line loop written twice — in
@@ -459,8 +474,11 @@ impl ActivityTab {
     }
 }
 
-/// The right-hand pane switch — a tab strip, not a cycle, because the pane
-/// set grows with the epic (#61 nodes, #71 doctor, #60 publish).
+/// The pane vocabulary `PaneSelected` speaks — since #180 no longer a tab
+/// strip's list but still one list: `Inspector` names the Inspector dock, and
+/// the other four are the Workbench dock's tools. #190's keyboard map v2 and
+/// #184's Send merge will shrink it; until then it is the remnant the
+/// workbench's own tool strip iterates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPane {
     Call,
@@ -484,8 +502,8 @@ pub enum RightPane {
 }
 
 impl RightPane {
-    /// Every pane, in tab order — the strip iterates this, so a new variant
-    /// cannot be forgotten in the location bar.
+    /// Every pane, in the old tab order — the palette and the workbench's
+    /// tool strip iterate this, so a new variant cannot be forgotten.
     pub const ALL: [RightPane; 5] = [
         RightPane::Call,
         RightPane::Publish,

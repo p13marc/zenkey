@@ -7,7 +7,7 @@
 
 use iced::Task;
 
-use crate::message::{Message, RightPane, Subject, SubjectMsg};
+use crate::message::{Message, RightPane, Subject, SubjectMsg, WorkspaceMsg};
 use crate::state::workspace::EchoPane;
 use crate::update::Ctx;
 use crate::view;
@@ -16,12 +16,10 @@ use crate::view::echo::EchoMsg;
 /// The echo pane (#72). Every action here is a *view* action: nothing
 /// changes what the session subscribes to, which is what keeps "I filtered
 /// the pane" and "I narrowed the bus" two different, visible things.
-pub(crate) fn update(
-    echo: &mut EchoPane,
-    pane: &mut RightPane,
-    msg: EchoMsg,
-    cx: Ctx,
-) -> Task<Message> {
+///
+/// It stopped taking `&mut RightPane` when #180 made the Inspector a dock:
+/// the drill-through reveals it by *message* now, like the palette does.
+pub(crate) fn update(echo: &mut EchoPane, msg: EchoMsg, cx: Ctx) -> Task<Message> {
     match msg {
         EchoMsg::FilterChanged(f) => {
             echo.echo_view.filter = f;
@@ -46,9 +44,14 @@ pub(crate) fn update(
         }
         EchoMsg::LineClicked(key) => {
             // Drill-through reuses the selection path rather than being a
-            // second way to open the inspector.
-            *pane = RightPane::Inspector;
-            Task::done(Message::Subject(SubjectMsg::Select(Subject::Key(key))))
+            // second way to open the inspector — and reveals the Inspector
+            // dock the way every other surface does (#180).
+            Task::done(Message::Workspace(WorkspaceMsg::PaneSelected(
+                RightPane::Inspector,
+            )))
+            .chain(Task::done(Message::Subject(SubjectMsg::Select(
+                Subject::Key(key),
+            ))))
         }
         EchoMsg::Scrolled(y, h) => {
             echo.echo_scroll = (y, h.max(100.0));

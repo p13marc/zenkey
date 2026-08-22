@@ -31,11 +31,11 @@ pub(crate) fn update(
             // (issue #189). "Written on the next real change" meant a
             // resize-then-quit lost the geometry entirely.
             chrome.prefs.window = Some((w, h));
-            chrome.window_dirty = true;
+            chrome.prefs_dirty = true;
             Task::none()
         }
         ChromeMsg::WindowSettled => {
-            if chrome.window_dirty {
+            if chrome.prefs_dirty {
                 remember(chrome, dep, work);
             }
             Task::none()
@@ -208,12 +208,17 @@ fn run_palette_row(
     let Some(message) = palette_row(chrome, dep, work, index) else {
         return Task::none();
     };
-    // Jumping to a key also shows it: selecting without switching panes
-    // would look like nothing happened.
-    if matches!(chrome.palette.overlay, view::palette::Overlay::Keys) {
-        work.right_pane = RightPane::Inspector;
-    }
     chrome.palette.close();
+    // Jumping to a key also shows it: selecting without revealing the
+    // Inspector dock would look like nothing happened. Spoken as the same
+    // `PaneSelected` every other reveal uses (#180), so a closed dock is
+    // restored — and persisted — by the one handler that owns the layout.
+    if matches!(chrome.palette.overlay, view::palette::Overlay::Keys) {
+        return Task::done(Message::Workspace(
+            crate::message::WorkspaceMsg::PaneSelected(RightPane::Inspector),
+        ))
+        .chain(Task::done(message));
+    }
     Task::done(message)
 }
 
@@ -228,6 +233,6 @@ pub(crate) fn remember(chrome: &mut Chrome, dep: &Deployment, work: &Workspace) 
         .active
         .clone()
         .or(chrome.prefs.context.take());
-    chrome.window_dirty = false;
+    chrome.prefs_dirty = false;
     chrome.prefs.save();
 }
