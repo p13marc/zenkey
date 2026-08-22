@@ -187,6 +187,13 @@ pub(crate) enum Compat {
 /// The RFC-defined framework state subjects a `common = "..."` field may name
 /// (RFC 04 §1.2/§5, RFC 06 §4/§5), with the `zenkey::CommonState` constructor
 /// and the variable names the subject pattern must bind.
+///
+/// The cross-producer subset of this vocabulary also lives in
+/// `zenkey::CommonFamily` (#168), which drives `selector::common_family`.
+/// The tables are kept separate — the constructor expressions are
+/// codegen-specific, and the three `@catalog` rows are one service's
+/// subjects, not families across producers — but must agree where they
+/// overlap; a test below pins that.
 pub(crate) const COMMON_STATE: &[(&str, &str, &[&str])] = &[
     ("health", "Health", &[]),
     ("errors", "Errors", &[]),
@@ -1513,6 +1520,32 @@ mod tests {
     }
 
     const HEADER: &str = "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n";
+
+    /// #168 put the cross-producer family table in zenkey
+    /// (`CommonFamily`, driving `selector::common_family`); this lint's own
+    /// [`COMMON_STATE`] table must agree with it — same registry tokens,
+    /// same wanted pattern variables — wherever they overlap, or a subject
+    /// the lint accepts would fall outside the selector the runtime builds.
+    #[test]
+    fn common_state_table_agrees_with_zenkey_common_family() {
+        use zenkey::CommonFamily;
+        for f in CommonFamily::ALL {
+            let (_, _, vars) = COMMON_STATE
+                .iter()
+                .find(|(n, _, _)| *n == f.token())
+                .unwrap_or_else(|| panic!("COMMON_STATE has no row for {:?}", f.token()));
+            let want: Vec<&str> = f.var().into_iter().collect();
+            assert_eq!(*vars, &want[..], "pattern variables for {:?}", f.token());
+        }
+        // And the rows zenkey does *not* know are exactly the `@catalog`
+        // three — one service's subjects, not families across producers.
+        let extra: Vec<&str> = COMMON_STATE
+            .iter()
+            .map(|(n, _, _)| *n)
+            .filter(|n| CommonFamily::ALL.iter().all(|f| f.token() != *n))
+            .collect();
+        assert_eq!(extra, ["entity", "alias", "pdns"]);
+    }
 
     #[test]
     fn fanout_rejects_unknown_values() {

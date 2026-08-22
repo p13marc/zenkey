@@ -64,7 +64,7 @@ pub mod selector;
 pub mod slice;
 pub mod slug;
 
-pub use common_state::CommonState;
+pub use common_state::{CommonFamily, CommonState};
 pub use context::{BlobProbePrefix, V1Context};
 pub use grammar::{
     BlobTier, Class, ClassOrPlane, ContentHash, KeyError, Origin, Plane, Producer, StructuralKey,

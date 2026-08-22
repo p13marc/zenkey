@@ -9,6 +9,7 @@
 //! verbatim service origin (design property D4), which is why services have
 //! dedicated by-name builders ([`service_rpc`], [`service_alive`]).
 
+use crate::common_state::CommonFamily;
 use crate::grammar::{
     CLASS_EVENTS, CLASS_STATE, CLASS_TELEMETRY, Class, PLANE_RPC, SUBJECT_ALIVE, VERSION_CHUNK,
     is_valid_plain_chunk,
@@ -116,6 +117,30 @@ pub fn producer_state(scope: Scope, producer: &str, prefix: &[&str]) -> Selector
     Selector::from_canonical(out)
 }
 
+/// One framework state family across every producer in scope (issue #168):
+/// `v1/<scope>/state/*/<family…>`, with a trailing `*` where the family is
+/// population-keyed — `v1/*/state/*/health`, `v1/*/state/*/alert/*`.
+///
+/// The typed form of the fleet-wide questions the RFCs spell as raw
+/// selectors ("what is firing anywhere", RFC 04 §2; "all identity
+/// evidence", RFC 06 §4). Generated `Family::selector(scope)` interpolates
+/// one producer's name; this is the `*`-producer complement, restricted to
+/// [`CommonFamily`] — the RFC-defined cross-producer set — so the wildcard
+/// stays inside the grammar's guarantees. The `@catalog` subjects are
+/// deliberately unspellable here: they are one service's state, and by D4 a
+/// `*` scope could not reach them anyway (see [`CommonFamily`]).
+pub fn common_family(scope: Scope, family: CommonFamily) -> Selector {
+    let mut out = format!("{VERSION_CHUNK}/{}/{CLASS_STATE}/*", scope.chunk());
+    for chunk in family.prefix() {
+        out.push('/');
+        out.push_str(chunk);
+    }
+    if family.var().is_some() {
+        out.push_str("/*");
+    }
+    Selector::from_canonical(out)
+}
+
 /// A procedure selector in an arbitrary scope:
 /// `v1/<scope>/@rpc/<producer>/<procedure…>`. `producer` may be `*` to reach
 /// every producer (the discovery sweep); the scope may be one origin, which is
@@ -198,6 +223,49 @@ mod tests {
             producer_state(Scope::origin(&o), "tc", &["config"]),
             "v1/h-3fa9c2d41b7e/state/tc/config/**"
         );
+    }
+
+    /// The #168 shapes — exactly what adopters hand-spelled before this
+    /// existed (`"v1/*/state/*/health"`, `"v1/*/state/*/alert/*"`).
+    #[test]
+    fn common_family_shapes() {
+        assert_eq!(
+            common_family(Scope::fleet(), CommonFamily::Health),
+            "v1/*/state/*/health"
+        );
+        assert_eq!(
+            common_family(Scope::fleet(), CommonFamily::Alert),
+            "v1/*/state/*/alert/*"
+        );
+        assert_eq!(
+            common_family(Scope::fleet(), CommonFamily::EvidenceSelf),
+            "v1/*/state/*/evidence/self"
+        );
+        assert_eq!(
+            common_family(Scope::fleet(), CommonFamily::EvidenceNames),
+            "v1/*/state/*/evidence/names/*"
+        );
+        // One origin's family — the narrowed form.
+        let o = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
+        assert_eq!(
+            common_family(Scope::origin(&o), CommonFamily::Errors),
+            "v1/h-3fa9c2d41b7e/state/*/errors"
+        );
+        // Every family selector is strictly inside the state firehose.
+        for f in CommonFamily::ALL {
+            let sel = common_family(Scope::fleet(), f);
+            assert!(all_state(Scope::fleet()).includes(&sel), "{sel}");
+        }
+    }
+
+    /// D4 restated for #168: no family selector — even at fleet scope — can
+    /// see a service origin's state; `@catalog` is asked by name.
+    #[test]
+    fn common_family_never_sees_a_service() {
+        let entity = Key::from_canonical("v1/@catalog/state/entity/abc".to_string());
+        for f in CommonFamily::ALL {
+            assert!(!common_family(Scope::fleet(), f).intersects(&entity));
+        }
     }
 
     #[test]
