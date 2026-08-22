@@ -237,7 +237,7 @@ pub fn pane<'a>(
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         )),
-                        button(text("scaffold body").size(font::CAPTION))
+                        button(kit::caption("scaffold body"))
                             .padding(2)
                             .on_press(msg(CallMsg::ScaffoldBody)),
                     ]
@@ -255,8 +255,7 @@ pub fn pane<'a>(
         }
         if fanout_forbidden {
             meta = meta.push(
-                text("fanout = \"forbidden\" — a fleet (*) target is refused (RFC 05 §2.1)")
-                    .size(font::CAPTION)
+                kit::body("fanout = \"forbidden\" — a fleet (*) target is refused (RFC 05 §2.1)")
                     .style(|theme: &iced::Theme| text::Style {
                         color: Some(colors(theme).danger()),
                     }),
@@ -284,9 +283,12 @@ pub fn pane<'a>(
         && !form.target.is_empty()
         && !(fanout_forbidden && form.target == "*")
         && !form.in_flight;
-    let mut submit =
-        button(text(if form.in_flight { "calling…" } else { "call" }).size(font::CAPTION))
-            .padding(4);
+    let mut submit = button(kit::caption(if form.in_flight {
+        "calling…"
+    } else {
+        "call"
+    }))
+    .padding(4);
     if ready {
         submit = submit.on_press(msg(CallMsg::Submit));
     }
@@ -342,8 +344,7 @@ fn outcome_view<'a>(
     roster: &'a crate::nodes::NodeRoster,
 ) -> Element<'a, Message> {
     match outcome {
-        Err(e) => text(format!("refused / failed: {e}"))
-            .size(font::CAPTION)
+        Err(e) => kit::body(format!("refused / failed: {e}"))
             .style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).danger()),
             })

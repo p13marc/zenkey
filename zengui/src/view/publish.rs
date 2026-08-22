@@ -300,16 +300,13 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
         .width(Length::Fixed(90.0));
 
     let ready = !form.key.trim().is_empty() && !form.in_flight;
-    let mut send = button(
-        text(if form.in_flight {
-            "sending…"
-        } else if form.armed {
-            "re-send"
-        } else {
-            "send"
-        })
-        .size(font::CAPTION),
-    )
+    let mut send = button(kit::caption(if form.in_flight {
+        "sending…"
+    } else if form.armed {
+        "re-send"
+    } else {
+        "send"
+    }))
     .padding(4);
     if ready {
         send = send.on_press(msg(PublishMsg::Send));
@@ -317,7 +314,7 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
     let mut controls = row![send].spacing(space::SM);
     if form.armed {
         controls = controls.push(
-            button(text("stop").size(font::CAPTION))
+            button(kit::caption("stop"))
                 .padding(4)
                 .on_press(msg(PublishMsg::Stop)),
         );
@@ -325,7 +322,7 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
     // Retire (#115): a tombstone, not an empty put. Off the state class it
     // is the v1.12 operator act and stays disabled until confirmed.
     let needs_i_know = retire_needs_i_know(form.facts.as_ref());
-    let mut retire = button(text("retire").size(font::CAPTION)).padding(4);
+    let mut retire = button(kit::caption("retire")).padding(4);
     if ready && (!needs_i_know || form.retire_i_know) {
         retire = retire.on_press(msg(PublishMsg::Retire));
     }
@@ -363,11 +360,11 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
     }
 
     if let Some(e) = &form.error {
-        col = col.push(text(format!("refused: {e}")).size(font::CAPTION).style(
-            |theme: &iced::Theme| text::Style {
+        col = col.push(
+            kit::body(format!("refused: {e}")).style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).danger()),
-            },
-        ));
+            }),
+        );
     }
     if let Some(line) = provenance(form) {
         col = col.push(line);
@@ -434,16 +431,13 @@ fn log_view(form: &PublishForm) -> Element<'_, Message> {
         format!("send log — {}", kit::plural(form.log.len(), "entry"))
     }));
     for line in &form.log {
+        let entry = kit::body(line.text.as_str()).font(iced::Font::MONOSPACE);
         col = col.push(if line.ok {
-            kit::mono(line.text.clone())
+            entry
         } else {
-            text(line.text.clone())
-                .size(font::CAPTION)
-                .font(iced::Font::MONOSPACE)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                })
-                .into()
+            entry.style(|theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).danger()),
+            })
         });
     }
     col.into()

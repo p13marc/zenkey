@@ -27,7 +27,7 @@ use crate::series::{NumericLeaves, Series};
 use crate::view::kit;
 use crate::view::spark;
 use crate::view::theme::{RegistrationTone, SeriesTone, colors};
-use crate::view::tokens::{font, space};
+use crate::view::tokens::space;
 
 /// How much payload the hex view shows before truncating (with a note).
 const HEX_VIEW_BYTES: usize = 1024;
@@ -236,7 +236,10 @@ fn msg(m: DetailMsg) -> Message {
 pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
     let mut col = Column::new().spacing(space::SM);
     col = col.push(kit::section_header("Detail", None));
-    col = col.push(kit::mono(data.key.to_string()));
+    // The subject — the one TITLE in the window (#191). The Inspector is the
+    // surface that follows what the window is looking at, so the key it names
+    // is the page title, not another table cell.
+    col = col.push(kit::title(data.key).font(iced::Font::MONOSPACE));
 
     // — Key facts: the ladder verdict, worded per rung.
     match data.facts {
@@ -288,11 +291,9 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
         }
         Fetched::Landed(Err(e)) => {
             col = col.push(
-                text(format!("fetch failed: {e}"))
-                    .size(font::CAPTION)
-                    .style(|theme: &iced::Theme| text::Style {
-                        color: Some(colors(theme).danger()),
-                    }),
+                kit::body(format!("fetch failed: {e}")).style(|theme: &iced::Theme| text::Style {
+                    color: Some(colors(theme).danger()),
+                }),
             );
         }
         Fetched::Landed(Ok(outcome)) => match outcome.as_ref() {

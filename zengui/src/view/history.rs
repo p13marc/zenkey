@@ -24,7 +24,7 @@ use crate::history::{HistoryEntry, HistoryRecorder};
 use crate::message::{Message, PaneMsg, SubjectMsg};
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
-use crate::view::tokens::{font, space};
+use crate::view::tokens::space;
 
 /// How many field changes one diff lists before the rest are counted.
 const MAX_CHANGES: usize = 50;
@@ -90,7 +90,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     col = col.push(kit::section_header(
         "History",
         Some(
-            button(text("clear").size(font::CAPTION))
+            button(kit::caption("clear"))
                 .on_press(msg(HistoryMsg::Clear))
                 .padding(4)
                 .into(),
@@ -106,7 +106,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
              already went past are gone, not hidden.",
         ));
         col = col.push(
-            button(text("watch this key").size(font::CAPTION))
+            button(kit::caption("watch this key"))
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(key.to_string())))
                 .padding(4),
         );
@@ -201,15 +201,13 @@ fn row_view<'a>(
     let head = row![
         kit::mono(format!("{marker} t-{age}")),
         kit::muted(stamp(entry, rec)),
-        text(kind)
-            .size(font::CAPTION)
-            .style(move |theme: &iced::Theme| text::Style {
-                color: Some(if is_delete {
-                    colors(theme).danger()
-                } else {
-                    colors(theme).text_muted()
-                }),
+        kit::caption(kind).style(move |theme: &iced::Theme| text::Style {
+            color: Some(if is_delete {
+                colors(theme).danger()
+            } else {
+                colors(theme).text_muted()
             }),
+        }),
     ]
     .spacing(space::SM);
 
@@ -306,18 +304,15 @@ fn changes_view<'a>(d: &ValueDiff) -> Element<'a, Message> {
             Change::Added { path, new } => (format!("+ {path}  {}", brief(new)), Tone::Added),
             Change::Removed { path, old } => (format!("- {path}  {}", brief(old)), Tone::Removed),
         };
-        col = col.push(
-            text(line)
-                .size(font::CAPTION)
-                .font(iced::Font::MONOSPACE)
-                .style(move |theme: &iced::Theme| text::Style {
-                    color: Some(match tone {
-                        Tone::Changed => colors(theme).warning(),
-                        Tone::Added => colors(theme).success(),
-                        Tone::Removed => colors(theme).danger(),
-                    }),
+        col = col.push(kit::caption(line).font(iced::Font::MONOSPACE).style(
+            move |theme: &iced::Theme| text::Style {
+                color: Some(match tone {
+                    Tone::Changed => colors(theme).warning(),
+                    Tone::Added => colors(theme).success(),
+                    Tone::Removed => colors(theme).danger(),
                 }),
-        );
+            },
+        ));
     }
     if d.truncated > 0 {
         col = col.push(kit::muted(format!(
@@ -381,8 +376,7 @@ fn brief(v: &serde_json::Value) -> String {
 
 /// A statement about the timeline that is not a field change.
 fn note<'a>(s: &'static str) -> Element<'a, Message> {
-    text(s)
-        .size(font::CAPTION)
+    kit::body(s)
         .style(|theme: &iced::Theme| text::Style {
             color: Some(colors(theme).danger()),
         })

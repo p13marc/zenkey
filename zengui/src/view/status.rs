@@ -12,7 +12,7 @@ use iced::widget::{row, text};
 use crate::message::{LinkState, Message};
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::colors;
-use crate::view::tokens::{font, space};
+use crate::view::tokens::space;
 
 /// Where registry slices came from, if anywhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,8 +153,7 @@ fn keys_label<'a>(keys: usize, evicted: u64) -> Element<'a, Message> {
     if evicted == 0 {
         return kit::muted(label);
     }
-    text(label)
-        .size(font::CAPTION)
+    kit::caption(label)
         .style(|theme: &iced::Theme| text::Style {
             color: Some(colors(theme).warning()),
         })
@@ -203,15 +202,13 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         LinkState::Failed(e) => (format!("link failed: {e}"), true),
     };
 
-    let link = text(link_text)
-        .size(font::CAPTION)
-        .style(move |theme: &iced::Theme| text::Style {
-            color: Some(if link_is_bad {
-                colors(theme).danger()
-            } else {
-                colors(theme).text_muted()
-            }),
-        });
+    let link = kit::caption(link_text).style(move |theme: &iced::Theme| text::Style {
+        color: Some(if link_is_bad {
+            colors(theme).danger()
+        } else {
+            colors(theme).text_muted()
+        }),
+    });
 
     let (count, bytes, rate) = s.totals;
 
@@ -269,11 +266,11 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     // like every other bound that is costing something.
     if s.facts_evicted > 0 {
         r = r.push(
-            text(facts_text(s.facts_cached, s.facts_evicted))
-                .size(font::CAPTION)
-                .style(|theme: &iced::Theme| text::Style {
+            kit::caption(facts_text(s.facts_cached, s.facts_evicted)).style(
+                |theme: &iced::Theme| text::Style {
                     color: Some(colors(theme).warning()),
-                }),
+                },
+            ),
         );
     }
     if let Some((key, outcome)) = s.fetched {
@@ -301,11 +298,9 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     // explanation than the user re-deriving it (issue #73).
     if let Some(note) = s.prefs_note {
         r = r.push(
-            text(format!("preferences: {note}"))
-                .size(font::CAPTION)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).warning()),
-                }),
+            kit::caption(format!("preferences: {note}")).style(|theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).warning()),
+            }),
         );
     }
 
@@ -314,11 +309,11 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     // anything. Say it outright.
     if s.unreachable {
         r = r.push(
-            text("no endpoints and scouting off — this session reaches nothing")
-                .size(font::CAPTION)
-                .style(|theme: &iced::Theme| text::Style {
+            kit::caption("no endpoints and scouting off — this session reaches nothing").style(
+                |theme: &iced::Theme| text::Style {
                     color: Some(colors(theme).danger()),
-                }),
+                },
+            ),
         );
     }
 

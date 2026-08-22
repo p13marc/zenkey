@@ -26,7 +26,7 @@ use crate::admin::{AdminState, AdminSweep, router_row_id, storage_row_id};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::{CoverageTone, colors};
-use crate::view::tokens::{font, space};
+use crate::view::tokens::space;
 
 /// How many declared entities the list renders before it stops and says so.
 ///
@@ -57,7 +57,7 @@ pub fn pane(state: &AdminState) -> Element<'_, Message> {
     } else {
         "sweep admin space"
     };
-    let mut run = button(text(run_label).size(font::CAPTION)).padding(4);
+    let mut run = button(kit::caption(run_label)).padding(4);
     if !state.in_flight {
         run = run.on_press(msg(AdminMsg::Run));
     }
@@ -78,11 +78,9 @@ pub fn pane(state: &AdminState) -> Element<'_, Message> {
 
     if let Some(e) = &state.error {
         col = col.push(
-            text(format!("sweep failed: {e}"))
-                .size(font::CAPTION)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                }),
+            kit::body(format!("sweep failed: {e}")).style(|theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).danger()),
+            }),
         );
     }
 
@@ -252,7 +250,7 @@ fn coverage_row(r: &CoverageRow) -> Element<'_, Message> {
     kit::card(
         row![
             kit::badge_coverage(tone, detail),
-            button(text(r.producer.clone()).size(font::CAPTION))
+            button(kit::caption(r.producer.clone()))
                 .padding(2)
                 .on_press(msg(AdminMsg::FilterProducer(r.producer.clone()))),
             kit::mono(r.path.clone()),
@@ -308,14 +306,11 @@ fn entities(sweep: &AdminSweep) -> Element<'_, Message> {
 
 fn raw_toggle<'a>(id: &str, state: &AdminState) -> Element<'a, Message> {
     let shown = state.expanded_raw.contains(id);
-    button(
-        text(if shown {
-            "hide raw document"
-        } else {
-            "show raw document"
-        })
-        .size(font::CAPTION),
-    )
+    button(kit::caption(if shown {
+        "hide raw document"
+    } else {
+        "show raw document"
+    }))
     .padding(2)
     .on_press(msg(AdminMsg::RawToggled(id.to_string())))
     .into()

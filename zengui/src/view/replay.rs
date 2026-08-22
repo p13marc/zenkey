@@ -72,11 +72,11 @@ pub const SPEEDS: [Speed; 6] = [
 /// The REPLAY banner plus the transport row. Rendered only in replay mode,
 /// directly under the toolbar — the panes below it are showing the file.
 pub fn banner(state: &ReplayState) -> Element<'_, Message> {
-    let title = text("REPLAY")
-        .size(font::BODY)
-        .style(|theme: &iced::Theme| text::Style {
-            color: Some(colors(theme).danger()),
-        });
+    // The mode indicator is the loudest claim on this row: EMPHASIS, in the
+    // danger tone — everything else in the banner is metadata about it.
+    let title = kit::emphasis("REPLAY").style(|theme: &iced::Theme| text::Style {
+        color: Some(colors(theme).danger()),
+    });
     let what = kit::muted(format!(
         "{} — {} under base {:?}, captured {} · {} row(s)",
         state.path,
@@ -88,11 +88,10 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     let mut meta = row![title, what].spacing(space::SM);
     if state.capture_dropped > 0 {
         meta = meta.push(
-            text(format!(
+            kit::caption(format!(
                 "capture dropped {} sample(s) — partial view",
                 state.capture_dropped
             ))
-            .size(font::CAPTION)
             .style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).warning()),
             }),
@@ -100,11 +99,10 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     }
     if state.malformed > 0 {
         meta = meta.push(
-            text(format!(
+            kit::caption(format!(
                 "{} malformed row(s) skipped-and-counted",
                 state.malformed
             ))
-            .size(font::CAPTION)
             .style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).warning()),
             }),
@@ -113,7 +111,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     meta = meta.push(iced::widget::space::horizontal());
     meta = meta.push(kit::muted("live link off"));
     meta = meta.push(
-        button(text("exit replay").size(font::CAPTION))
+        button(kit::caption("exit replay"))
             .on_press(msg(ReplayMsg::Exit))
             .padding(4),
     );
@@ -130,7 +128,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
 pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
     let (pos, span) = state.clock();
     let transport = row![
-        button(text(if state.playing { "pause" } else { "play" }).size(font::CAPTION))
+        button(kit::caption(if state.playing { "pause" } else { "play" }))
             .on_press(msg(ReplayMsg::Toggled))
             .padding(4),
         pick_list(SPEEDS, Some(Speed(state.speed)), |s| msg(
@@ -157,16 +155,16 @@ pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
 /// The open row: a path box, shown on demand from the toolbar.
 pub fn open_row(path: &str) -> Element<'_, Message> {
     row![
-        text("replay file").size(font::CAPTION),
+        kit::caption("replay file"),
         iced::widget::text_input(".zrec path", path)
             .on_input(|s| msg(ReplayMsg::PathChanged(s)))
             .on_submit(msg(ReplayMsg::Open))
             .size(font::CAPTION)
             .width(Length::Fill),
-        button(text("open").size(font::CAPTION))
+        button(kit::caption("open"))
             .on_press(msg(ReplayMsg::Open))
             .padding(4),
-        button(text("cancel").size(font::CAPTION))
+        button(kit::caption("cancel"))
             .on_press(msg(ReplayMsg::OpenToggled))
             .padding(4),
     ]

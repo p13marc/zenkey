@@ -21,11 +21,11 @@
 //! where it has always been, because a mode indicator you can put away behind
 //! a tab is a mode indicator that can lie about what the panes are showing.
 
-use iced::widget::{Column, button, column, row, text};
+use iced::widget::{Column, button, column, row};
 use iced::{Element, Length};
 use zenkey_fleet::SliceSet;
 
-use super::tokens::{font, space};
+use super::tokens::space;
 use super::{doctor, echo, kit, publish, replay};
 use crate::echo::EchoRing;
 use crate::message::{ActivityTab, Message, WorkspaceMsg};
@@ -59,7 +59,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
     let strip = row![
         tabs,
         iced::widget::space::horizontal(),
-        button(text(if d.dock.shown { "hide" } else { "show" }).size(font::CAPTION))
+        button(kit::caption(if d.dock.shown { "hide" } else { "show" }))
             .on_press(Message::Workspace(WorkspaceMsg::ActivityToggled))
             .padding(4),
     ]

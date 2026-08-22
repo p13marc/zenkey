@@ -6,7 +6,7 @@
 //! and nothing else.
 
 use iced::Element;
-use iced::widget::{pick_list, row, text};
+use iced::widget::{pick_list, row};
 
 use crate::message::{ChromeMsg, DeploymentMsg, Message, RightPane, WorkspaceMsg};
 use crate::scope::ScopePreset;
@@ -48,21 +48,18 @@ pub(crate) fn strip<'a>(
 
     // Observation is opt-in and labelled by its cost (issue #85).
     let observing = !obs.scope_watches.is_empty();
-    let observe = iced::widget::button(
-        text(if observing {
-            "stop observing scope"
-        } else {
-            "observe scope"
-        })
-        .size(tokens::font::CAPTION),
-    )
+    let observe = iced::widget::button(kit::caption(if observing {
+        "stop observing scope"
+    } else {
+        "observe scope"
+    }))
     .on_press(Message::Deployment(DeploymentMsg::ScopeWatchToggled))
     .padding(4);
 
     row![
-        text("base").size(tokens::font::CAPTION),
+        kit::caption("base"),
         base_picker,
-        text("scope").size(tokens::font::CAPTION),
+        kit::caption("scope"),
         scope_picker,
         observe,
         iced::widget::Row::from_iter(RightPane::ALL.into_iter().map(|p| {
@@ -76,19 +73,16 @@ pub(crate) fn strip<'a>(
         kit::muted(dep.settings.scope.label()),
         // Capture and replay (#74): record writes the current watches
         // to a .zrec; replay feeds the panes from one.
-        iced::widget::button(
-            text(if work.replay.recording.is_some() {
-                "stop recording"
-            } else {
-                "record"
-            })
-            .size(tokens::font::CAPTION)
-        )
+        iced::widget::button(kit::caption(if work.replay.recording.is_some() {
+            "stop recording"
+        } else {
+            "record"
+        }))
         .on_press(Message::Workspace(WorkspaceMsg::Replay(
             ReplayMsg::RecordToggled
         )))
         .padding(4),
-        iced::widget::button(text("replay…").size(tokens::font::CAPTION))
+        iced::widget::button(kit::caption("replay…"))
             .on_press(Message::Workspace(WorkspaceMsg::Replay(
                 ReplayMsg::OpenToggled
             )))
@@ -96,32 +90,33 @@ pub(crate) fn strip<'a>(
         iced::widget::space::horizontal(),
         // Window preferences (issue #73): the theme name is the button,
         // so the label says what you get rather than what you have.
-        iced::widget::button(
-            text(format!("theme: {}", chrome.prefs.theme.label())).size(tokens::font::CAPTION)
-        )
+        iced::widget::button(kit::caption(format!(
+            "theme: {}",
+            chrome.prefs.theme.label()
+        )))
         .on_press(Message::Chrome(ChromeMsg::Prefs(
             crate::message::PrefsMsg::ThemeToggled
         )))
         .padding(4),
-        iced::widget::button(text("-").size(tokens::font::CAPTION))
+        iced::widget::button(kit::caption("-"))
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomOut
             )))
             .padding(4),
-        iced::widget::button(
-            text(format!("{}%", (chrome.prefs.zoom * 100.0).round() as i32))
-                .size(tokens::font::CAPTION)
-        )
+        iced::widget::button(kit::caption(format!(
+            "{}%",
+            (chrome.prefs.zoom * 100.0).round() as i32
+        )))
         .on_press(Message::Chrome(ChromeMsg::Prefs(
             crate::message::PrefsMsg::ZoomReset
         )))
         .padding(4),
-        iced::widget::button(text("+").size(tokens::font::CAPTION))
+        iced::widget::button(kit::caption("+"))
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomIn
             )))
             .padding(4),
-        iced::widget::button(text("reconnect").size(tokens::font::CAPTION))
+        iced::widget::button(kit::caption("reconnect"))
             .on_press(Message::Deployment(DeploymentMsg::Reconnect))
             .padding(4),
     ]
