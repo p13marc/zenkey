@@ -45,6 +45,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   one per pane), where a signature is the exhaustive list of sub-states it can
   move; every bus call in `services/` as a free `fn -> Task<Message>`. Nothing
   but `update` takes `&mut Zengui`, and nothing under `view/` names it at all.
+  The window follows **one `Subject`** (#181, `message.rs`) — a key, a subtree
+  prefix, an origin, or nothing — and `view/inspector.rs` is the one surface
+  that dispatches on it (#182). Under `view/`, a `pane` returns an `Element`
+  and owns its scroll; a `section` returns a `Column` and is a piece of one.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus
