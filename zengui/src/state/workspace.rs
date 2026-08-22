@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 use crate::echo::EchoRing;
-use crate::message::RightPane;
+use crate::message::{ActivityTab, RightPane};
 use crate::view;
 
 /// What an armed repeating publication resends each tick: the declaration,
@@ -30,6 +30,28 @@ pub(crate) struct RepeatLoad {
     pub(crate) publication: Arc<zenkey_fleet::Publication>,
     pub(crate) bytes: Arc<Vec<u8>>,
     pub(crate) attachment: Option<Arc<Vec<u8>>>,
+}
+
+/// The bottom dock: the session's time-ordered streams (#183).
+///
+/// Echo, the publish log, doctor results and the replay scrubber are all
+/// about the *session* and none of them about the subject — which is why they
+/// competed badly for tab slots with panes that follow the subject, and why
+/// verifying a publish used to mean leaving the form to look at Echo.
+pub(crate) struct ActivityDock {
+    pub(crate) tab: ActivityTab,
+    /// Collapsed to its tab strip. A dock you cannot put away is a dock that
+    /// costs screen whether or not you are reading it.
+    pub(crate) shown: bool,
+}
+
+impl Default for ActivityDock {
+    fn default() -> ActivityDock {
+        ActivityDock {
+            tab: ActivityTab::default(),
+            shown: true,
+        }
+    }
 }
 
 /// A running toolbar capture (#74): dropping the notify without firing it
@@ -98,6 +120,10 @@ sub_state! {
         pub(crate) echo: EchoRing,
         /// The echo pane's view state (issue #72): filters, follow-tail, gaps.
         pub(crate) echo_view: view::echo::EchoView,
+        /// Scroll position + viewport height, driving the virtual window
+        /// (#183). Session-lived, unlike the timeline's: the stream is about
+        /// the session, not about the subject.
+        pub(crate) echo_scroll: (f32, f32),
     }
 }
 
@@ -127,6 +153,7 @@ sub_state! {
         /// Which right-hand pane is showing.
         pub(crate) right_pane: RightPane,
         pub(crate) verdicts: Verdicts,
+    pub(crate) activity: ActivityDock,
         pub(crate) bench: Workbench,
         pub(crate) echo: EchoPane,
         pub(crate) replay: ReplayMode,
@@ -136,12 +163,14 @@ sub_state! {
 impl Workspace {
     pub(crate) fn new(echo_lines: usize) -> Workspace {
         Workspace {
-            right_pane: RightPane::Echo,
+            right_pane: RightPane::Inspector,
             verdicts: Verdicts::default(),
+            activity: ActivityDock::default(),
             bench: Workbench::default(),
             echo: EchoPane {
                 echo: EchoRing::new(echo_lines),
                 echo_view: view::echo::EchoView::new(),
+                echo_scroll: (0.0, 600.0),
             },
             replay: ReplayMode::default(),
         }

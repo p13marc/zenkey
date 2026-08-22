@@ -64,12 +64,11 @@ pub(crate) fn update(
             let current = sub.current.key() == Some(key.as_str());
             if current {
                 sub.decoded = None;
-                // A fetch lands the detail pane in view — except from the
-                // doctor's click-through, where losing the finding list would
-                // cost more than it shows (#71).
-                if work.right_pane != RightPane::Doctor {
-                    work.right_pane = RightPane::Inspector;
-                }
+                // A fetch lands the Inspector in view. The doctor exception
+                // this used to carry is gone with the doctor pane: its
+                // findings are a dock stream now (#183), so nothing is lost
+                // by switching the right-hand region.
+                work.right_pane = RightPane::Inspector;
             }
             // No decode for a superseded answer: it is work for a rendering
             // nothing will show, and `ValueDecoded`'s own guard would drop it
@@ -137,6 +136,9 @@ fn select(
         .key()
         .filter(|k| !k.contains('{'))
         .map(|k| crate::history::HistoryRecorder::new(k, dep.settings.history_entries));
+    // A new subject is a new timeline: it starts at the top rather than
+    // wherever the last key's list happened to be scrolled (#183).
+    sub.history_scroll = (0.0, sub.history_scroll.1);
     // The plotted series belong to the same subject (issue #64): they start
     // empty, and stop being fed when it goes away.
     sub.rate_series = crate::series::RateSampler::new();

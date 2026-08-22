@@ -252,6 +252,11 @@ pub enum WorkspaceMsg {
     TreeScrolled(f32, f32),
     /// Switch the right-hand pane (the toolbar's tab strip).
     PaneSelected(RightPane),
+    /// Show a stream in the Activity dock, expanding it if it was put away
+    /// (#183).
+    ActivityTab(ActivityTab),
+    /// Collapse the Activity dock to its tab strip, or bring it back.
+    ActivityToggled,
     /// Open every prefix of a path so its subtree is visible, and reflatten.
     ///
     /// One message for what was the same eight-line loop written twice — in
@@ -355,19 +360,22 @@ impl PaneMsg {
     /// variants map to `Inspector`. The relation the test still pins is
     /// coverage in both directions — every pane owes a message, every message
     /// names a pane — which is what it was for.
-    pub fn pane(&self) -> RightPane {
-        match self {
-            PaneMsg::Echo(_) => RightPane::Echo,
+    pub fn pane(&self) -> Option<RightPane> {
+        Some(match self {
             PaneMsg::Call(_) => RightPane::Call,
             PaneMsg::Publish(_) => RightPane::Publish,
             PaneMsg::Detail(_) | PaneMsg::History(_) | PaneMsg::Blob(_) | PaneMsg::Media(_) => {
                 RightPane::Inspector
             }
             PaneMsg::Nodes(_) => RightPane::Nodes,
-            PaneMsg::Doctor(_) => RightPane::Doctor,
             PaneMsg::Admin(_) => RightPane::Admin,
             PaneMsg::Context(_) => RightPane::Connect,
-        }
+            // The Activity dock's streams (#183): they are regions of the
+            // workspace, but not right-hand panes, and answering `Echo` for
+            // one would put a message in the strip that the strip cannot
+            // select.
+            PaneMsg::Echo(_) | PaneMsg::Doctor(_) => return None,
+        })
     }
 }
 
@@ -416,11 +424,43 @@ pub struct PublishOutcome {
     pub attachment: Option<Arc<Vec<u8>>>,
 }
 
+/// Which parallel stream the Activity dock is showing (#183).
+///
+/// Tabs, and they stay honest here for the reason they stopped being honest
+/// in the workspace: these are four genuinely parallel *streams* of the
+/// session, not four views of one thing. Only one can be read at a time
+/// because a human reads one at a time — not because the app cannot hold two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActivityTab {
+    #[default]
+    Echo,
+    Publish,
+    Doctor,
+    Replay,
+}
+
+impl ActivityTab {
+    pub const ALL: [ActivityTab; 4] = [
+        ActivityTab::Echo,
+        ActivityTab::Publish,
+        ActivityTab::Doctor,
+        ActivityTab::Replay,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ActivityTab::Echo => "echo",
+            ActivityTab::Publish => "publish log",
+            ActivityTab::Doctor => "doctor",
+            ActivityTab::Replay => "replay",
+        }
+    }
+}
+
 /// The right-hand pane switch — a tab strip, not a cycle, because the pane
 /// set grows with the epic (#61 nodes, #71 doctor, #60 publish).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPane {
-    Echo,
     Call,
     Publish,
     /// One surface that follows the subject (#182): the key facts, the value
@@ -432,7 +472,6 @@ pub enum RightPane {
     /// them was the user assembling by hand what the Inspector assembles.
     Inspector,
     Nodes,
-    Doctor,
     /// Routers, storages and the state-coverage table (issue #70).
     Admin,
     /// Contexts and endpoints (issue #67).
@@ -442,25 +481,21 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
     /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 8] = [
-        RightPane::Echo,
+    pub const ALL: [RightPane; 6] = [
         RightPane::Call,
         RightPane::Publish,
         RightPane::Inspector,
         RightPane::Nodes,
-        RightPane::Doctor,
         RightPane::Admin,
         RightPane::Connect,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
-            RightPane::Echo => "echo",
             RightPane::Call => "call",
             RightPane::Publish => "publish",
             RightPane::Inspector => "inspector",
             RightPane::Nodes => "nodes",
-            RightPane::Doctor => "doctor",
             RightPane::Admin => "admin",
             RightPane::Connect => "connect",
         }
@@ -574,12 +609,13 @@ mod tests {
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Context(view::contexts::ContextMsg::Load),
         ];
-        // Coverage in both directions, not a bijection — #182 made four
-        // variants sections of the Inspector, so `Detail`, `History`, `Blob`
-        // and `Media` all name it. What must stay true is that no pane in the
-        // strip is unreachable by message, and no message names a pane that
-        // is not in the strip.
-        let mut covered: Vec<RightPane> = one_per_pane.iter().map(PaneMsg::pane).collect();
+        // Coverage in both directions, and neither a bijection nor total.
+        // #182 made four variants sections of the Inspector, so `Detail`,
+        // `History`, `Blob` and `Media` all name it; #183 moved Echo and
+        // Doctor into the Activity dock, so those name no right-hand pane at
+        // all. What must stay true is that no pane in the strip is
+        // unreachable by message, and no message names a pane not in it.
+        let mut covered: Vec<RightPane> = one_per_pane.iter().filter_map(PaneMsg::pane).collect();
         covered.sort_by_key(|p| p.label());
         covered.dedup();
         let mut all = RightPane::ALL.to_vec();
@@ -589,15 +625,22 @@ mod tests {
             "every pane in the strip owes `PaneMsg` a variant, and vice versa"
         );
 
-        // And the folding is itself the claim: exactly four variants name the
-        // Inspector, which is the four tabs it replaced.
+        // And the two foldings are themselves claims. Four variants name the
+        // Inspector — the four tabs it replaced (#182); two name no pane at
+        // all — the two streams that moved to the dock (#183). Without these,
+        // a fifth variant quietly joining either group would go unnoticed.
         let folded = one_per_pane
             .iter()
-            .filter(|m| m.pane() == RightPane::Inspector)
+            .filter(|m| m.pane() == Some(RightPane::Inspector))
             .count();
         assert_eq!(
             folded, 4,
             "Detail, History, Blob and Media are the Inspector's sections"
+        );
+        let docked = one_per_pane.iter().filter(|m| m.pane().is_none()).count();
+        assert_eq!(
+            docked, 2,
+            "Echo and Doctor are Activity streams, not right-hand panes"
         );
     }
 }

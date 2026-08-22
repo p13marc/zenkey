@@ -21,9 +21,12 @@ use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
 use crate::view::tokens::{font, space};
 
-/// How many lines to draw. The ring may hold more; drawing thousands of rows
-/// per frame is what makes a GUI feel broken under load.
-const VISIBLE: usize = 300;
+/// One echo line's height, so the window can do arithmetic on it (#183).
+///
+/// This pane used to cap *drawing* at 300 rows and disclose the cap in its
+/// own strip — honest, and still a truncation: past 300 matches, scrolling
+/// reached nothing. A window draws about forty and reaches all of them.
+pub const ROW_HEIGHT: f32 = 20.0;
 
 /// The pane's view state (owned by the app).
 #[derive(Debug, Clone, Default)]
@@ -33,6 +36,15 @@ pub struct EchoView {
     /// A key expression narrowing the view — *display* only. Empty = no
     /// key filter.
     pub key_filter: String,
+    /// Whether the stream narrows to the workspace's subject (#183).
+    ///
+    /// This behaviour is not new — it was unconditional, and
+    /// [`EchoView::admits`] has always narrowed to the selection. What is new
+    /// is that it is a *choice*: the publish-verification loop wants it on,
+    /// and reading the whole scope while a key happens to be selected wants
+    /// it off. Defaults to on, which is what the pane did before it could be
+    /// asked.
+    pub follow_subject: bool,
     /// Why the key filter is not in force, when it does not parse. Shown
     /// rather than silently ignored: a filter that looks applied and is not
     /// would make the pane claim a narrowing it never did.
@@ -54,6 +66,7 @@ impl EchoView {
     pub fn new() -> EchoView {
         EchoView {
             following: true,
+            follow_subject: true,
             ..EchoView::default()
         }
     }
@@ -142,18 +155,24 @@ pub fn matches(line: &EchoLine, filter: &str) -> bool {
     line.key.to_lowercase().contains(&needle) || line.preview.to_lowercase().contains(&needle)
 }
 
-/// The lines a given view shows, newest first, bounded by the draw cap.
+/// Every line a given view admits, newest first.
 ///
-/// Returns `(lines, matched)` — `matched` counts everything that passed the
-/// filters, so the strip can say "showing N of M" rather than implying the
-/// bound is the answer.
+/// Returns `(lines, matched)`, which since #183 are the same number: the draw
+/// cap is gone, so every matching line is *reachable* and the window decides
+/// which are on screen. `matched` stays a separate return value because the
+/// strip reports it, and because a caller computing it from `lines.len()`
+/// would start lying silently the day a cap comes back.
+///
+/// The vector is references, not lines: at the ring's default bound that is a
+/// few thousand pointers built once per frame, and it is what makes the
+/// window's arithmetic possible at all. The pane's only truncation is now the
+/// ring's own retention bound, which has always reported itself.
 pub fn visible<'a>(
     ring: &'a EchoRing,
     view: &EchoView,
     selection: Option<&str>,
 ) -> (Vec<&'a EchoLine>, usize) {
     let mut lines = Vec::new();
-    let mut matched = 0usize;
     for line in ring.iter() {
         // While paused, anything newer than the freeze point is invisible —
         // but it is *counted*, which is what the gap report is made of.
@@ -165,11 +184,9 @@ pub fn visible<'a>(
         if !view.admits(line, selection) {
             continue;
         }
-        matched += 1;
-        if lines.len() < VISIBLE {
-            lines.push(line);
-        }
+        lines.push(line);
     }
+    let matched = lines.len();
     (lines, matched)
 }
 
@@ -239,6 +256,11 @@ pub enum EchoMsg {
     LineClicked(String),
     /// Copy the visible lines as ndjson to the clipboard.
     Export,
+    /// The stream scrolled: (absolute y offset, viewport height) — what the
+    /// virtualized window renders against (#183).
+    Scrolled(f32, f32),
+    /// Pin the stream to the workspace's subject, or unpin it (#183).
+    FollowSubjectToggled,
 }
 
 fn msg(m: EchoMsg) -> Message {
@@ -246,12 +268,13 @@ fn msg(m: EchoMsg) -> Message {
 }
 
 /// Render the echo pane.
-pub fn pane<'a>(
+pub fn section<'a>(
     ring: &'a EchoRing,
     view: &'a EchoView,
     selection: Option<&'a str>,
     next_seq: u64,
-) -> Element<'a, Message> {
+    scroll: (f32, f32),
+) -> Column<'a, Message> {
     let controls = row![
         text_input("filter payload/key…", &view.filter)
             .on_input(|t| msg(EchoMsg::FilterChanged(t)))
@@ -264,6 +287,18 @@ pub fn pane<'a>(
         button(text(if view.following { "pause" } else { "follow" }).size(font::CAPTION))
             .on_press(msg(EchoMsg::FollowToggled))
             .padding(4),
+        // The publish-verification loop in one control (#183): pin the stream
+        // to whatever the window is looking at, or read the whole scope.
+        button(
+            text(if view.follow_subject {
+                "pinned to subject"
+            } else {
+                "pin to subject"
+            })
+            .size(font::CAPTION),
+        )
+        .on_press(msg(EchoMsg::FollowSubjectToggled))
+        .padding(4),
         button(text("ndjson").size(font::CAPTION))
             .on_press(msg(EchoMsg::Export))
             .padding(4),
@@ -277,10 +312,24 @@ pub fn pane<'a>(
     let header = kit::section_header("Echo", Some(controls.into()));
 
     let (lines, matched) = visible(ring, view, selection);
-    let mut body = Column::new().spacing(1);
-    for line in &lines {
-        body = body.push(line_view(line));
+    // O(visible) (#183), the same window the tree and the timeline use.
+    let (first, last) = kit::window(lines.len(), scroll.0, scroll.1, ROW_HEIGHT);
+    let mut body = Column::new();
+    if first > 0 {
+        body =
+            body.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * ROW_HEIGHT)));
     }
+    for line in &lines[first..last] {
+        body =
+            body.push(iced::widget::container(line_view(line)).height(Length::Fixed(ROW_HEIGHT)));
+    }
+    if last < lines.len() {
+        body = body.push(
+            iced::widget::Space::new()
+                .height(Length::Fixed((lines.len() - last) as f32 * ROW_HEIGHT)),
+        );
+    }
+    let drawn = last - first;
 
     let content: Element<'_, Message> = if lines.is_empty() {
         kit::empty_state(
@@ -293,7 +342,15 @@ pub fn pane<'a>(
             },
         )
     } else {
-        iced::widget::scrollable(body).height(Length::Fill).into()
+        iced::widget::scrollable(body)
+            .height(Length::Fill)
+            .on_scroll(|viewport| {
+                msg(EchoMsg::Scrolled(
+                    viewport.absolute_offset().y,
+                    viewport.bounds().height,
+                ))
+            })
+            .into()
     };
 
     let mut col = column![header];
@@ -306,9 +363,9 @@ pub fn pane<'a>(
                 }),
         );
     }
-    col = col.push(state_strip(ring, view, matched, lines.len(), next_seq));
+    col = col.push(state_strip(ring, view, matched, drawn, next_seq));
     col = col.push(loss_strip(ring));
-    col.push(content).spacing(space::SM).into()
+    col.push(content).spacing(space::SM)
 }
 
 /// What the view is doing to the ring: how much of it is on screen, and — the
@@ -320,8 +377,12 @@ fn state_strip<'a>(
     shown: usize,
     next_seq: u64,
 ) -> Element<'a, Message> {
+    // "drawing" rather than "showing", since #183: the window draws a few
+    // dozen of the matched lines and scrolling reaches every one of them. It
+    // used to be a *cap* — past 300 matches the rest were unreachable — and
+    // the word has to change with the fact.
     let mut parts = vec![format!(
-        "showing {shown} of {matched} matched · {} retained",
+        "drawing {shown} of {matched} matched · {} retained",
         ring.len()
     )];
     if let Some(gap) = view.paused_gap(next_seq) {

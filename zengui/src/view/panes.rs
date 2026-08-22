@@ -60,12 +60,6 @@ pub(crate) fn split<'a>(
         .width(Length::FillPortion(chrome.prefs.split_portions().0))
         .height(Length::Fill),
         container(match work.right_pane {
-            RightPane::Echo => view::echo::pane(
-                &work.echo.echo,
-                &work.echo.echo_view,
-                sub.current.key(),
-                work.echo.echo.next_seq(),
-            ),
             RightPane::Call => view::call::pane(
                 &work.bench.call_form,
                 dep.slices.as_deref(),
@@ -86,6 +80,7 @@ pub(crate) fn split<'a>(
                 decoded: sub.decoded.as_ref(),
                 series: sub.series.as_ref(),
                 history: sub.history.as_ref(),
+                history_scroll: sub.history_scroll,
                 watched: sub
                     .current
                     .key()
@@ -102,7 +97,6 @@ pub(crate) fn split<'a>(
                 selected: sub.current.origin(),
                 detail: &work.verdicts.node_detail,
             }),
-            RightPane::Doctor => view::doctor::pane(&work.verdicts.doctor, dep.base()),
             RightPane::Admin => view::admin::pane(&work.verdicts.admin),
             RightPane::Connect =>
                 view::contexts::pane(&work.bench.context_form, dep.settings.is_unreachable(),),

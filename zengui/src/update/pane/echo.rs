@@ -50,6 +50,14 @@ pub(crate) fn update(
             *pane = RightPane::Inspector;
             Task::done(Message::Subject(SubjectMsg::Select(Subject::Key(key))))
         }
+        EchoMsg::Scrolled(y, h) => {
+            echo.echo_scroll = (y, h.max(100.0));
+            Task::none()
+        }
+        EchoMsg::FollowSubjectToggled => {
+            echo.echo_view.follow_subject = !echo.echo_view.follow_subject;
+            Task::none()
+        }
         EchoMsg::Export => {
             let text = view::echo::export(
                 &echo.echo,

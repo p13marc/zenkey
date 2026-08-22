@@ -1,19 +1,18 @@
 //! The admin & storage panel (#70, #131): one explicit sweep, or nothing.
+//!
+//! It stopped taking `&mut RightPane` when #183 moved Echo into the Activity
+//! dock: its producer filter used to land the user on the echo pane, and the
+//! tree — which is what the filter actually drives — is always on screen.
 
 use iced::Task;
 
 use crate::admin::AdminState;
-use crate::message::{Message, RightPane, WorkspaceMsg};
+use crate::message::{Message, WorkspaceMsg};
 use crate::services;
 use crate::update::Ctx;
 use crate::view::admin::AdminMsg;
 
-pub(crate) fn update(
-    admin: &mut AdminState,
-    pane: &mut RightPane,
-    msg: AdminMsg,
-    cx: Ctx,
-) -> Task<Message> {
+pub(crate) fn update(admin: &mut AdminState, msg: AdminMsg, cx: Ctx) -> Task<Message> {
     match msg {
         AdminMsg::RawToggled(id) => {
             admin.toggle_raw(id);
@@ -21,8 +20,9 @@ pub(crate) fn update(
         }
         AdminMsg::FilterProducer(producer) => {
             // The tree already owns "show me this": reusing its search is
-            // one behaviour, not two that can drift.
-            *pane = RightPane::Echo;
+            // one behaviour, not two that can drift. It used to land on Echo
+            // as well; Echo is a dock stream now (#183), and the tree is
+            // always on screen, so there is nothing to switch to.
             Task::done(Message::Workspace(WorkspaceMsg::TreeSearchChanged(
                 producer,
             )))

@@ -200,13 +200,38 @@ impl Zengui {
         for surface in view::replay::surfaces(&self.work.replay) {
             layout = layout.push(surface);
         }
-        let layout = layout.push(panes).push(view::status::strip(Status::of(
-            &self.chrome,
-            &self.dep,
-            &self.obs,
-            &self.sub,
-            &self.work,
-        )));
+        // The Activity dock (#183): the session's parallel streams, below the
+        // subject-scoped panes because that is what they are about. `panes`
+        // takes what is left after the dock and the strips, so putting the
+        // dock away gives the space back rather than leaving a hole.
+        let layout = layout
+            .push(panes)
+            .push(view::activity::dock(view::activity::ActivityData {
+                dock: &self.work.activity,
+                echo: &self.work.echo.echo,
+                echo_view: &self.work.echo.echo_view,
+                echo_scroll: self.work.echo.echo_scroll,
+                follow: self
+                    .work
+                    .echo
+                    .echo_view
+                    .follow_subject
+                    .then(|| self.sub.current.key())
+                    .flatten(),
+                next_seq: self.work.echo.echo.next_seq(),
+                publish: &self.work.bench.publish_form,
+                doctor: &self.work.verdicts.doctor,
+                base: self.dep.base(),
+                replay: &self.work.replay,
+                slices: self.dep.slices.as_deref(),
+            }))
+            .push(view::status::strip(Status::of(
+                &self.chrome,
+                &self.dep,
+                &self.obs,
+                &self.sub,
+                &self.work,
+            )));
 
         // The overlay floats above everything (#75). `stack` rather than a
         // modal widget because the layering rule is ours — palette above

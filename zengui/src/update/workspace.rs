@@ -59,6 +59,17 @@ pub(crate) fn update(
             tree.reflatten(dep, obs);
             Task::none()
         }
+        WorkspaceMsg::ActivityTab(tab) => {
+            // Choosing a stream brings the dock back if it was put away: a
+            // tab that selects an invisible thing is a tab that does nothing.
+            work.activity.shown = work.activity.tab != tab || !work.activity.shown;
+            work.activity.tab = tab;
+            Task::none()
+        }
+        WorkspaceMsg::ActivityToggled => {
+            work.activity.shown = !work.activity.shown;
+            Task::none()
+        }
         WorkspaceMsg::PaneSelected(pane) => {
             work.right_pane = pane;
             Task::none()

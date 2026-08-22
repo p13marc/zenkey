@@ -20,8 +20,26 @@
 //! them survived with a one-line call-site edit — which is the test that the
 //! collapse was composition rather than a rewrite.
 //!
-//! `strip`/`overlay`/`banner`/`open_row` are neither: surfaces that are not a
-//! region of the workspace at all.
+//! A **`dock`** (`activity::dock`) is a region that holds streams rather
+//! than a subject, and it owns its own tab strip. `strip`/`overlay`/`banner`/
+//! `open_row` are none of the three: surfaces that are not a region of the
+//! workspace at all.
+//!
+//! ## Where tabs are honest
+//!
+//! The workspace had eleven, and they were eleven views of one thing — #182
+//! collapsed four into the Inspector for that reason and #183 moved two more
+//! into the dock. The dock has four, and they are four genuinely parallel
+//! streams that run whether or not they are on screen. A tab is honest when
+//! only one of the things it switches between can be *read* at a time; it is
+//! dishonest when only one can be *shown*.
+//!
+//! ## Three virtualized lists, one window
+//!
+//! The tree, the Inspector's timeline and the dock's echo stream all draw
+//! O(visible) rows through [`kit::window`]. Each supplies its own row height
+//! and its own scroll offset; none supplies its own idea of what "visible"
+//! means. Before #183 only the tree had a window at all.
 //!
 //! A surface with more than a few inputs takes one borrowed-fields struct by
 //! value — [`detail::DetailData`], [`nodes::NodesData`], [`history::HistoryData`],
@@ -54,6 +72,7 @@
 //! struct instead. A contract nobody reads against the code is the failure this
 //! crate keeps finding (#178, #250).
 
+pub mod activity;
 pub mod admin;
 pub mod blob;
 pub mod call;

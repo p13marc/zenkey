@@ -41,8 +41,6 @@ use crate::view::tokens::{font, space};
 
 /// Fixed row height — what makes the scroll window arithmetic exact.
 pub const ROW_HEIGHT: f32 = 24.0;
-/// Rows rendered beyond each window edge, so scrolling never shows a gap.
-const OVERSCAN: usize = 8;
 
 /// What a chunk means, when the subtree is conforming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1239,14 +1237,12 @@ fn under_seeding(row_path: &str, seeding: &BTreeSet<String>) -> bool {
 }
 
 /// The visible row window for a scroll position: `(first, last)` indices
-/// into the flattened rows, with overscan. Pure, so it is testable without
-/// a renderer.
+/// into the flattened rows, with overscan.
+///
+/// Delegates to [`kit::window`], which History and Echo also use since #183 —
+/// three virtualized lists, one idea of "visible".
 pub fn window(rows: usize, scroll_y: f32, viewport_h: f32) -> (usize, usize) {
-    let first = (scroll_y / ROW_HEIGHT).floor() as usize;
-    let visible = (viewport_h / ROW_HEIGHT).ceil() as usize + 1;
-    let first = first.saturating_sub(OVERSCAN);
-    let last = (first + visible + 2 * OVERSCAN).min(rows);
-    (first.min(rows), last)
+    kit::window(rows, scroll_y, viewport_h, ROW_HEIGHT)
 }
 
 /// Render the rows.
@@ -2263,7 +2259,7 @@ mod tests {
         );
 
         let (first, last) = window(50_000, 25_000.0 * ROW_HEIGHT, 600.0);
-        assert!((25_000 - OVERSCAN..=25_000).contains(&first));
+        assert!((25_000 - kit::OVERSCAN..=25_000).contains(&first));
         assert!(last > 25_000);
 
         let (first, last) = window(10, 1_000_000.0, 600.0);

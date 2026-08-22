@@ -69,6 +69,8 @@ pub struct InspectorData<'a> {
     pub decoded: Option<&'a (Option<String>, zenkey_fleet::decode::Rendering)>,
     pub series: Option<&'a SeriesData>,
     pub history: Option<&'a HistoryRecorder>,
+    /// The timeline's scroll offset and viewport height (#183).
+    pub history_scroll: (f32, f32),
     /// Whether an active watch covers the subject key — the distinction the
     /// History section rests on.
     pub watched: bool,
@@ -162,6 +164,7 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         key: Some(key),
         recorder: d.history,
         watched: d.watched,
+        scroll: d.history_scroll,
     }))
 }
 

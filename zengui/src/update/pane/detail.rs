@@ -26,6 +26,13 @@ pub(crate) fn update(sub: &mut SubjectState, dep: &Deployment, msg: DetailMsg) -
 /// nothing to do when the key is unselected — a recorder is created with the
 /// selection and dropped with it.
 pub(crate) fn history(sub: &mut SubjectState, msg: HistoryMsg) -> Task<Message> {
+    // View-only state, and it is not the recorder's: a scroll offset survives
+    // a `Clear` and a subject that has no recorder can still be scrolled to
+    // the top.
+    if let HistoryMsg::Scrolled(y, h) = msg {
+        sub.history_scroll = (y, h.max(100.0));
+        return Task::none();
+    }
     if let Some(rec) = sub.history.as_mut() {
         match msg {
             HistoryMsg::Select(seq) => rec.selected = Some(seq),
@@ -33,6 +40,7 @@ pub(crate) fn history(sub: &mut SubjectState, msg: HistoryMsg) -> Task<Message> 
                 rec.ring.clear();
                 rec.selected = None;
             }
+            HistoryMsg::Scrolled(..) => unreachable!("handled above"),
         }
     }
     Task::none()

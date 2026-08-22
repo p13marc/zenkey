@@ -154,6 +154,7 @@ mod tests {
                     "selected_latency",
                     "fetched",
                     "decoded",
+                    "history_scroll",
                     "history",
                     "rate_series",
                     "series_leaf",
@@ -178,7 +179,14 @@ mod tests {
             ),
             (
                 "work",
-                &["right_pane", "verdicts", "bench", "echo", "replay"],
+                &[
+                    "right_pane",
+                    "verdicts",
+                    "activity",
+                    "bench",
+                    "echo",
+                    "replay",
+                ],
             ),
             (
                 "work.verdicts",
@@ -194,7 +202,7 @@ mod tests {
                     "media",
                 ],
             ),
-            ("work.echo", &["echo", "echo_view"]),
+            ("work.echo", &["echo", "echo_view", "echo_scroll"]),
             (
                 "work.replay",
                 &[
@@ -234,6 +242,6 @@ mod tests {
             .iter()
             .map(|(g, f)| if *g == "work" { 1 } else { f.len() })
             .sum();
-        assert_eq!(leaves, 63, "the split must place every field exactly once");
+        assert_eq!(leaves, 65, "the split must place every field exactly once");
     }
 }
