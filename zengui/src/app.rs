@@ -241,7 +241,8 @@ impl Zengui {
         // the open one clones only what it draws (#110).
         match view::palette::overlay(
             &self.chrome.palette,
-            &self.work.bench.context_form.known,
+            &self.work.bench.context_form,
+            self.dep.settings.is_unreachable(),
             self.dep.facts.keys(),
         ) {
             None => layout.into(),

@@ -297,9 +297,11 @@ pub enum ChromeMsg {
     WindowSettled,
 }
 
-/// A message from one of the eleven right-hand panes (#176).
+/// A message from a pane-shaped surface (#176): the right-hand panes, the
+/// Inspector's sections (#182), the dock's streams (#183), and the Connect
+/// overlay (#185).
 ///
-/// One variant per [`RightPane`], and **not** the `Pane(PaneId, PaneMsg)` pair
+/// One variant per surface, and **not** the `Pane(PaneId, PaneMsg)` pair
 /// #176 first sketched: that makes 121 states representable where eleven are
 /// legal — `Pane(PaneId::Call, PaneMsg::Blob(..))` would compile and mean
 /// nothing. The pane identity is already the variant tag.
@@ -343,7 +345,7 @@ pub enum PaneMsg {
     Admin(crate::view::admin::AdminMsg),
     /// Echo pane interactions (issue #72, echo v2).
     Echo(crate::view::echo::EchoMsg),
-    /// Connection pane interactions (issue #67).
+    /// Connect-overlay interactions (issue #67; an overlay since #185).
     Context(crate::view::contexts::ContextMsg),
 }
 
@@ -369,12 +371,11 @@ impl PaneMsg {
             }
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
-            PaneMsg::Context(_) => RightPane::Connect,
-            // The Activity dock's streams (#183): they are regions of the
-            // workspace, but not right-hand panes, and answering `Echo` for
-            // one would put a message in the strip that the strip cannot
-            // select.
-            PaneMsg::Echo(_) | PaneMsg::Doctor(_) => return None,
+            // The Activity dock's streams (#183), and the Connect overlay
+            // (#185): regions of the window, but not right-hand panes, and
+            // answering a pane for one would put a message in the strip that
+            // the strip cannot select.
+            PaneMsg::Echo(_) | PaneMsg::Doctor(_) | PaneMsg::Context(_) => return None,
         })
     }
 }
@@ -385,7 +386,8 @@ impl PaneMsg {
 /// cheap to clone: `Session`, `Arc<…>` and `ZBytes` are all refcounted.
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// One of the eleven right-hand panes.
+    /// A pane-shaped surface: a right-hand pane, an Inspector section, a
+    /// dock stream, or the Connect overlay.
     Pane(PaneMsg),
     /// The window, and what floats over it.
     Chrome(ChromeMsg),
@@ -474,20 +476,22 @@ pub enum RightPane {
     Nodes,
     /// Routers, storages and the state-coverage table (issue #70).
     Admin,
-    /// Contexts and endpoints (issue #67).
-    Connect,
+    // `Connect` is deliberately absent since #185: contexts and endpoints
+    // (issue #67) are a session-scoped *overlay*
+    // ([`Overlay::Connect`](crate::view::palette::Overlay)), reached from the
+    // location bar's context chip or Ctrl+Shift+C — not an eleventh view of
+    // the subject.
 }
 
 impl RightPane {
     /// Every pane, in tab order — the strip iterates this, so a new variant
-    /// cannot be forgotten in the toolbar.
-    pub const ALL: [RightPane; 6] = [
+    /// cannot be forgotten in the location bar.
+    pub const ALL: [RightPane; 5] = [
         RightPane::Call,
         RightPane::Publish,
         RightPane::Inspector,
         RightPane::Nodes,
         RightPane::Admin,
-        RightPane::Connect,
     ];
 
     pub fn label(self) -> &'static str {
@@ -497,7 +501,6 @@ impl RightPane {
             RightPane::Inspector => "inspector",
             RightPane::Nodes => "nodes",
             RightPane::Admin => "admin",
-            RightPane::Connect => "connect",
         }
     }
 }
@@ -612,9 +615,10 @@ mod tests {
         // Coverage in both directions, and neither a bijection nor total.
         // #182 made four variants sections of the Inspector, so `Detail`,
         // `History`, `Blob` and `Media` all name it; #183 moved Echo and
-        // Doctor into the Activity dock, so those name no right-hand pane at
-        // all. What must stay true is that no pane in the strip is
-        // unreachable by message, and no message names a pane not in it.
+        // Doctor into the Activity dock and #185 made Connect an overlay, so
+        // those three name no right-hand pane at all. What must stay true is
+        // that no pane in the strip is unreachable by message, and no message
+        // names a pane not in it.
         let mut covered: Vec<RightPane> = one_per_pane.iter().filter_map(PaneMsg::pane).collect();
         covered.sort_by_key(|p| p.label());
         covered.dedup();
@@ -626,9 +630,10 @@ mod tests {
         );
 
         // And the two foldings are themselves claims. Four variants name the
-        // Inspector — the four tabs it replaced (#182); two name no pane at
-        // all — the two streams that moved to the dock (#183). Without these,
-        // a fifth variant quietly joining either group would go unnoticed.
+        // Inspector — the four tabs it replaced (#182); three name no pane at
+        // all — the two streams that moved to the dock (#183) and the Connect
+        // overlay (#185). Without these, a further variant quietly joining
+        // either group would go unnoticed.
         let folded = one_per_pane
             .iter()
             .filter(|m| m.pane() == Some(RightPane::Inspector))
@@ -639,8 +644,9 @@ mod tests {
         );
         let docked = one_per_pane.iter().filter(|m| m.pane().is_none()).count();
         assert_eq!(
-            docked, 2,
-            "Echo and Doctor are Activity streams, not right-hand panes"
+            docked, 3,
+            "Echo and Doctor are Activity streams and Connect is an overlay, \
+             not right-hand panes"
         );
     }
 }
