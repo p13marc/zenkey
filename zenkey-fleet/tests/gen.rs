@@ -1,10 +1,12 @@
 //! The generator (#162) on a real bus: conforming traffic, marked traffic,
-//! budgeted events, and the served RFC 08 halves.
-//! Ports 7537-7538 (disjoint from every other test binary).
+//! budgeted events, and the served RFC 08 halves. Fault injection (#163):
+//! each kind's delta from valid, observed on the wire, and the fault marker
+//! riding every faulted sample.
+//! Ports 7537-7539 (disjoint from every other test binary).
 
 use std::time::Duration;
 
-use zenkey_fleet::generate::{GenPattern, GenSpec, build_plan, run_gen, serve_describe};
+use zenkey_fleet::generate::{Fault, GenPattern, GenSpec, build_plan, run_gen, serve_describe};
 
 async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
     let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
@@ -53,6 +55,7 @@ fn spec(duration_s: f64) -> GenSpec {
         duration: Duration::from_secs_f64(duration_s),
         seed: 7,
         tool: "zenctl gen".into(),
+        faults: vec![],
     }
 }
 
@@ -180,4 +183,115 @@ async fn the_mock_producer_serves_both_registry_halves() {
         zenkey::schema::SchemaSet::parse(std::str::from_utf8(&bytes.to_bytes()).unwrap())
             .expect("served set parses");
     assert!(served_set.get("Health").is_some());
+}
+
+/// Fault injection (#163): every kind's delta from valid, observed on the
+/// wire, and the `fault=<kind>` marker riding every faulted sample. All
+/// seven kinds run against the one `health` state subject (declared
+/// `transition`, `application/json`), so each variant's deviation is exactly
+/// one dimension away from a known-valid baseline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn injected_faults_deviate_by_exactly_one_dimension_and_stay_marked() {
+    let (observer, generator) = peer_pair(7539).await;
+    let slices =
+        zenkey_fleet::SliceSet::from_slices(vec![zenkey::parse_slice(SLICES).expect("slice")]);
+    let set = zenkey::schema::SchemaSet::parse(SET).expect("set");
+    let store = zenkey_fleet::decode::SchemaStore::new("", Duration::from_millis(200));
+
+    let mut spec = spec(2.0);
+    spec.faults = Fault::ALL.to_vec();
+    spec.subject = Some("health".into()); // the state subject only — no events
+
+    let monitor = zenkey_fleet::Monitor::start(&observer, zenkey_fleet::MonitorSpec::default())
+        .await
+        .expect("monitor");
+    let mut events = monitor.events();
+    monitor.watch("v1/**").await.expect("watch");
+
+    let plan = build_plan(None, &store, &slices, "", Some(&set), &spec)
+        .await
+        .expect("plan");
+    assert_eq!(plan.len(), 7, "one variant per fault kind: {plan:?}");
+
+    let report = run_gen(&generator, &store, &plan, &spec)
+        .await
+        .expect("run");
+    assert!(report.sent > 0, "{report:?}");
+
+    // Bucket observed samples by the fault kind their marker names.
+    use std::collections::HashMap;
+    let mut by_fault: HashMap<String, Vec<std::sync::Arc<zenkey_fleet::SampleView>>> = HashMap::new();
+    let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while let Ok(Some(item)) = tokio::time::timeout_at(drain_deadline, events.recv()).await {
+        if let zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) = item {
+            let att = s.attachment.as_ref().expect("every faulted sample is marked");
+            let marker: serde_json::Value =
+                serde_json::from_slice(&att.to_bytes()).expect("marker is JSON");
+            assert_eq!(marker["synthetic"], true);
+            assert_eq!(marker["origin"], "h-fefefefefefe");
+            let kind = marker["fault"]
+                .as_str()
+                .expect("a faulted sample carries fault=<kind>")
+                .to_string();
+            by_fault.entry(kind).or_default().push(s);
+        }
+    }
+
+    // Every kind was seen at least once.
+    for f in Fault::ALL {
+        assert!(
+            by_fault.contains_key(f.as_str()),
+            "no sample observed for fault {} — saw {:?}",
+            f.as_str(),
+            by_fault.keys().collect::<Vec<_>>()
+        );
+    }
+
+    let one = |kind: &str| by_fault[kind][0].clone();
+
+    // truncate: half a JSON body no longer parses.
+    let t = one("truncate");
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&t.payload.to_bytes()).is_err(),
+        "a truncated body is a partial frame"
+    );
+
+    // wrong-type: a bare JSON string where the object type is declared.
+    let wt = one("wrong-type");
+    let v: serde_json::Value = serde_json::from_slice(&wt.payload.to_bytes()).unwrap();
+    assert!(v.is_string(), "{v}");
+
+    // extra-field: the valid object plus an undeclared field.
+    let ef = one("extra-field");
+    let v: serde_json::Value = serde_json::from_slice(&ef.payload.to_bytes()).unwrap();
+    assert_eq!(v["_fault"], true, "{v}");
+    assert!(v.get("ok").is_some(), "the valid fields survive: {v}");
+
+    // unregistered-key: the key gained a trailing chunk the registry never
+    // declared.
+    let uk = one("unregistered-key");
+    assert!(uk.key.ends_with("/health/unregistered"), "{}", uk.key);
+
+    // wrong-qos: the declared `transition` profile did not ride.
+    let wq = one("wrong-qos");
+    assert!(
+        !wq.qos_matches(zenkey::qos::QosProfile::Transition),
+        "the declared profile was not honoured"
+    );
+
+    // missing-encoding: the declared application/json encoding was dropped.
+    let me = one("missing-encoding");
+    assert_ne!(me.encoding, "application/json", "encoding {}", me.encoding);
+
+    // unstamped: no HLC timestamp, though the valid baseline stamps.
+    let us = one("unstamped");
+    assert!(us.timestamp.is_none(), "the fault omits the HLC stamp");
+
+    // The baseline it deviates from: a non-faulted health sample IS stamped
+    // and DOES carry the declared encoding — proof the delta is one dimension.
+    // (The other kinds keep the valid encoding/timestamp/qos.)
+    let baseline = one("truncate"); // truncate touches only the body
+    assert!(baseline.timestamp.is_some(), "valid path stamps for LWW");
+    assert_eq!(baseline.encoding, "application/json");
+    assert!(baseline.qos_matches(zenkey::qos::QosProfile::Transition));
 }

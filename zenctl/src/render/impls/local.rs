@@ -262,12 +262,17 @@ impl Render for GenPlan<'_> {
                     .map(|c| format!(", capped at {c} event(s)"))
                     .unwrap_or_default(),
             ))]);
+            // The fault this entry injects, stated before a byte moves — the
+            // tool says exactly what it is about to do to the bus (#163).
+            if let (Some(fault), Some(delta)) = (e.fault, &e.fault_delta) {
+                g.row([Cell::text(format!("    ↳ FAULT[{}]: {delta}", fault.as_str()))]);
+            }
         }
         t.grid(g);
     }
 
     fn notes(&self) -> Vec<Note> {
-        vec![
+        let mut notes = vec![
             Note::coverage(format!(
                 "plan: {} subject(s) as {}, {}s",
                 self.entries.len(),
@@ -278,7 +283,28 @@ impl Render for GenPlan<'_> {
             // --listen-for` has to be able to tell this traffic from real.
             Note::coverage("every sample carries the marker {\"synthetic\":true}")
                 .cite("RFC 09 §5.3"),
-        ]
+        ];
+        // When faults are in play, name the kinds up front and re-state the
+        // per-sample marker rule (a faulted sample additionally carries
+        // fault=<kind>, RFC 09 §5.3).
+        let mut kinds: Vec<&str> = self
+            .entries
+            .iter()
+            .filter_map(|e| e.fault.map(|f| f.as_str()))
+            .collect();
+        kinds.sort_unstable();
+        kinds.dedup();
+        if !kinds.is_empty() {
+            notes.push(
+                Note::coverage(format!(
+                    "injecting fault(s): {} — near-valid traffic for consumer-robustness \
+                     testing; every faulted sample's marker carries fault=<kind>",
+                    kinds.join(", ")
+                ))
+                .cite("RFC 09 §5.3"),
+            );
+        }
+        notes
     }
 }
 

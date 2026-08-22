@@ -1,14 +1,24 @@
 //! `zenctl gen` (#162) — registry-driven pattern generation, guarded.
+//! `--fault` (#163) is a mode of the same generator: near-valid traffic for
+//! consumer-robustness testing.
 //!
 //! Orchestration only: the plan, the schedule, and the synthesis live in
-//! `zenkey_fleet::gen`/`synth`. This command's job is the etiquette — print
-//! the full plan before anything is published (the replay dry-run
+//! `zenkey_fleet::generate`/`synth`. This command's job is the etiquette —
+//! print the full plan before anything is published (the replay dry-run
 //! precedent), refuse a wide run without `--i-know`, and stamp the RFC 09
 //! §5.3 synthetic marker via the engine.
+//!
+//! Fault injection is **double-guarded** (#163, RFC 09 §5.3): it requires
+//! `--i-know` *and* an explicit endpoint or `--base` — never the ambient
+//! named-context default — because a fault injector publishes deliberately
+//! non-conforming traffic and must not land on whatever bus the shell was
+//! pointed at. Each fault perturbs one dimension of a synthesized sample
+//! post-synthesis, so the plan prints exactly what deviates per key, and
+//! every faulted sample's marker carries `fault=<kind>`.
 
 use crate::cli::Pattern;
 use anyhow::Result;
-use zenkey_fleet::generate::{GenPattern, GenSpec};
+use zenkey_fleet::generate::{Fault, GenPattern, GenSpec};
 
 use crate::Bus;
 
@@ -38,12 +48,35 @@ pub async fn run(
     pattern: Pattern,
     duration: f64,
     seed: u64,
+    fault: &[String],
+    explicit_target: bool,
     schema_set: Option<&std::path::Path>,
     serve_describe: bool,
     dry_run: bool,
     i_know: bool,
     args: &Bus,
 ) -> Result<()> {
+    // Fault injection is double-guarded (#163): it produces deliberately
+    // near-valid traffic, so it may only ever run knowingly, and only against
+    // a bus the operator named — never the ambient context default.
+    let faults: Vec<Fault> = fault.iter().map(|s| Fault::parse(s)).collect::<Result<_>>()?;
+    if !faults.is_empty() {
+        if !i_know {
+            anyhow::bail!(
+                "--fault injects deliberately non-conforming traffic — that is \
+                 consumer-robustness testing on a bus you own, not a default. \
+                 Pass --i-know to mean it."
+            );
+        }
+        if !explicit_target {
+            anyhow::bail!(
+                "--fault refuses the ambient context: name the bus explicitly with \
+                 --base or an endpoint (--connect/--listen/--zenoh-config), so faults \
+                 cannot land on whatever bus your shell happened to be pointed at."
+            );
+        }
+    }
+
     let vars: Vec<(String, String)> = vars
         .iter()
         .map(|kv| {
@@ -98,6 +131,7 @@ pub async fn run(
         duration: std::time::Duration::from_secs_f64(duration),
         seed,
         tool: "zenctl gen".into(),
+        faults,
     };
 
     let plan = zenkey_fleet::generate::build_plan(

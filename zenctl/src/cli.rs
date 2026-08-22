@@ -286,6 +286,16 @@ pub(crate) enum Command {
         /// Synthesis/jitter seed — same seed, same run.
         #[arg(long, default_value_t = 42)]
         seed: u64,
+        /// Inject fault(s) into otherwise-valid samples (#163) for
+        /// consumer-robustness testing on a bus you own. Comma-separated
+        /// kinds: truncate, wrong-type, extra-field, unregistered-key,
+        /// wrong-qos, missing-encoding, unstamped. Each perturbs one dimension
+        /// post-synthesis; the plan states the delta per key, and every
+        /// faulted sample's marker carries fault=<kind> (RFC 09 §5.3).
+        /// DOUBLE-GUARDED: requires --i-know AND an explicit endpoint or
+        /// --base — faults must never land on the ambient context default.
+        #[arg(long = "fault", value_name = "KIND", value_delimiter = ',')]
+        fault: Vec<String>,
         /// SchemaSet JSON document (RFC 08 §7) for payload shapes when the
         /// bus serves no describe (the registry carries type names, not
         /// shapes).
