@@ -212,11 +212,12 @@ async fn the_tree_carries_foreign_traffic() {
     let merged = zenkey_fleet::skeleton::merge(&skel, &snapshot, &["**".to_string()]);
     let flat = tree::flatten(&merged, "", &expanded, 500, std::time::Instant::now());
 
-    // `rows` carries the shape; the numbers are joined by `row` (#177).
+    // `rows` carries the shape; the numbers are joined by `row` (#177), and
+    // paths are ids into the flatten's own arena (#251).
     let i = flat
         .rows
         .iter()
-        .position(|r| r.path == "demo")
+        .position(|r| flat.arena.display(r.path) == "demo")
         .expect("a `demo` node");
     assert_eq!(flat.rows[i].role, None, "foreign chunks are not labelled");
     let demo = flat.row(i);
@@ -226,7 +227,7 @@ async fn the_tree_carries_foreign_traffic() {
     let i = flat
         .rows
         .iter()
-        .position(|r| r.path == "demo/example/foo")
+        .position(|r| flat.arena.display(r.path) == "demo/example/foo")
         .expect("the foo leaf");
     assert!(flat.rows[i].is_leaf);
     let leaf = flat.row(i);
