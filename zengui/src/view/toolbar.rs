@@ -27,8 +27,8 @@ pub(crate) fn strip<'a>(
     // apart.
     let base_picker = pick_list(
         &dep.base_options[..],
-        Some(dep.settings.base.clone()),
-        |r| Message::Deployment(DeploymentMsg::BaseSelected(r)),
+        Some(crate::config::BaseChoice::new(dep.settings.base.clone())),
+        |r| Message::Deployment(DeploymentMsg::BaseSelected(r.base)),
     )
     .placeholder("base")
     .text_size(tokens::font::CAPTION);

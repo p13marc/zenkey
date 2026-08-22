@@ -223,22 +223,59 @@ impl Cli {
     }
 }
 
+/// How a base should be shown to a human.
+///
+/// The empty base is a real, named deployment — the default one — not an
+/// unset field. RFC 09 §5: "an explorer that cannot see and name it is
+/// blind to the common case." One function, shared by [`Settings::base_label`]
+/// and [`BaseChoice`]'s `Display`, so the window title and the picker rows
+/// cannot drift into two spellings.
+pub fn base_label(base: &str) -> &str {
+    if base.is_empty() {
+        "(empty — keys start at v1/)"
+    } else {
+        base
+    }
+}
+
+/// One row of the base picker: a deployment base, displayed by its label.
+///
+/// The wrapper exists because a `pick_list` renders a `String` verbatim, which
+/// is how the empty base — the RFC v1.6 bus-root deployment, a first-class
+/// value — came to render as a literally blank row (#185).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaseChoice {
+    /// The base as the wire spells it; `""` is the bus root.
+    pub base: String,
+}
+
+impl BaseChoice {
+    pub fn new(base: impl Into<String>) -> BaseChoice {
+        BaseChoice { base: base.into() }
+    }
+
+    /// The base-less bus-root deployment (RFC v1.6's default).
+    pub fn bus_root() -> BaseChoice {
+        BaseChoice {
+            base: String::new(),
+        }
+    }
+}
+
+impl std::fmt::Display for BaseChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(base_label(&self.base))
+    }
+}
+
 impl Settings {
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout_secs)
     }
 
-    /// How the base should be shown to a human.
-    ///
-    /// The empty base is a real, named deployment — the default one — not an
-    /// unset field. RFC 09 §5: "an explorer that cannot see and name it is
-    /// blind to the common case."
+    /// How the base should be shown to a human — see [`base_label`].
     pub fn base_label(&self) -> &str {
-        if self.base.is_empty() {
-            "(empty — keys start at v1/)"
-        } else {
-            &self.base
-        }
+        base_label(&self.base)
     }
 
     /// Whether this session can observe anything at all.
@@ -291,6 +328,20 @@ mod tests {
             parse(&["--base", "zensight"]).unwrap().base_label(),
             "zensight"
         );
+    }
+
+    /// …and the picker row a `pick_list` renders says the same thing, because
+    /// it displays through the same label (#185). Before this type, the picker
+    /// rendered the empty base as a literally blank row.
+    #[test]
+    fn a_base_picker_row_displays_the_label_not_the_raw_string() {
+        assert_eq!(
+            BaseChoice::bus_root().to_string(),
+            "(empty — keys start at v1/)"
+        );
+        assert_eq!(BaseChoice::new("acme/fleet-a").to_string(), "acme/fleet-a");
+        // The picker's `selected` comparison is by base, not by label.
+        assert_eq!(BaseChoice::new(""), BaseChoice::bus_root());
     }
 
     #[test]
