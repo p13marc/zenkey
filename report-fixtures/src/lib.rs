@@ -477,7 +477,7 @@ pub fn schema_dump() -> SchemaDump {
             hash: "sha256:aaaa".into(),
             document: None,
         }],
-        missing: vec!["TelemetryPoint".into()],
+        missing: Some(vec!["TelemetryPoint".into()]),
     }
 }
 
@@ -489,8 +489,16 @@ pub fn schema_dump_unserved() -> SchemaDump {
         served: false,
         app: None,
         types: vec![],
-        missing: vec![],
+        missing: None,
     }
+}
+
+/// A served set dumped with no registry loaded — totality was never checked,
+/// which must not render as "nothing missing" (RFC 09 §5.1 O4, #246).
+pub fn schema_dump_unchecked() -> SchemaDump {
+    let mut dump = schema_dump();
+    dump.missing = None;
+    dump
 }
 
 /// A declared tier whose roster was asked and answered nothing, beside one

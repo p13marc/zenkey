@@ -409,6 +409,16 @@ producer  sysinfo   (app zensight)
 "#]]
     );
     assert!(notes(&fx::schema_dump_unserved()).contains("not the same as having none"));
+    // No registry loaded: `missing` is absent, not `[]`, and the note says
+    // totality was not checked — not asked is not answered no
+    // (RFC 09 §5.1 O4, #246).
+    assert!(notes(&fx::schema_dump_unchecked()).contains("totality not checked"));
+    let unchecked: serde_json::Value =
+        serde_json::from_str(ndjson(&fx::schema_dump_unchecked()).lines().next().unwrap()).unwrap();
+    assert!(unchecked.get("missing").is_none());
+    let checked: serde_json::Value =
+        serde_json::from_str(ndjson(&fx::schema_dump()).lines().next().unwrap()).unwrap();
+    assert_eq!(checked["missing"], serde_json::json!(["TelemetryPoint"]));
 }
 
 /// Three `origins` outcomes, three sentences: answered-and-empty, not asked,

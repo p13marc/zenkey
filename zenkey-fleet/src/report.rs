@@ -377,8 +377,11 @@ pub struct SchemaDump {
     pub types: Vec<SchemaRow>,
     /// Registry-declared type names this producer's set does **not** cover —
     /// RFC 08 §7's totality clause, checked where the user is already looking.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub missing: Vec<String>,
+    /// `None` = no registry was loaded, so totality was never checked — not
+    /// asked is not answered no (RFC 09 §5.1 O4); `Some(vec![])` is the
+    /// actual clean bill.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing: Option<Vec<String>>,
 }
 
 /// One producer on one origin — row-shaped so a `--watch` loop can diff it

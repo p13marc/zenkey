@@ -25,12 +25,15 @@ pub async fn dump(producer: &str, type_filter: Option<&str>, full: bool, args: &
     let session = args.session().await?;
     // Slices enrich the dump — the *types* come from the producer's served
     // `describe` (`zenkey_fleet::decode::schema_dump`); slices only compute
-    // which declared ones are missing. An empty set here is the honest
-    // degradation, and `slices_optional` is what says so out loud.
-    let slices = args.slices_optional().await?.unwrap_or_default();
+    // which declared ones are missing. `None` here is the honest degradation
+    // (`slices_optional` says so out loud), and it stays `None` into the dump
+    // so "totality not checked" cannot render as "nothing missing"
+    // (RFC 09 §5.1 O4; #246).
+    let slices = args.slices_optional().await?;
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let report =
-        zenkey_fleet::schema_dump(&store, &session, &slices, producer, type_filter, full).await;
+        zenkey_fleet::schema_dump(&store, &session, slices.as_ref(), producer, type_filter, full)
+            .await;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
