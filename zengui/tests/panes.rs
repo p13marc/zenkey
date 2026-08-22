@@ -1930,6 +1930,7 @@ mod admin {
                             whatami: "router".into(),
                             version: Some("1.9.0".into()),
                             locators: vec!["tcp/10.0.0.1:7447".into()],
+                            locators_via_links: vec![],
                             answered: true,
                         },
                         zenkey_fleet::TopologyNode {
@@ -1937,6 +1938,7 @@ mod admin {
                             whatami: "peer".into(),
                             version: None,
                             locators: vec![],
+                            locators_via_links: vec![],
                             answered: false,
                         },
                     ],
@@ -1944,6 +1946,7 @@ mod admin {
                         reporter: "z1".into(),
                         peer: "z2".into(),
                         whatami: "peer".into(),
+                        region: None,
                         links: vec![],
                     }],
                     asked: "@/*/*".into(),

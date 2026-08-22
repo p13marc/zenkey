@@ -5,10 +5,14 @@
 //! in particular pins the limit that measuring found:
 //!
 //! **zenoh 1.9 delivers no `SourceInfo` to a subscriber** — not from a plain
-//! publisher and not from an AdvancedPublisher. So the id-to-id comparison the
-//! classifier wants is usually unavailable, and the honest answer is
-//! `Unattributable`: we know *a* clock stamped the sample and which one, and
-//! we cannot say whether it was the publisher's.
+//! publisher and not from an AdvancedPublisher — **and 1.10 doubles down**:
+//! upstream PR eclipse-zenoh/zenoh#2563 (a 1.10.0 breaking change) removed
+//! even the ability to set `SourceInfo` through the advanced API, because
+//! the AdvancedSubscriber overwrote the field for its own recovery
+//! bookkeeping. So the id-to-id comparison the classifier wants is usually
+//! unavailable, and the honest answer is `Unattributable`: we know *a*
+//! clock stamped the sample and which one, and we cannot say whether it
+//! was the publisher's.
 //!
 //! That is a weaker claim than the one the code used to make, and it is the
 //! true one. The test below proves the classifier is *conservative* rather
@@ -78,9 +82,11 @@ async fn a_stamp_we_cannot_attribute_is_unknown_and_still_names_its_stamper() {
 
     assert!(
         source.is_none(),
-        "zenoh 1.9 delivers no SourceInfo to a subscriber. If this now fails, \
-         SourceInfo has started riding and the classifier can attribute for \
-         real — update this test and O7's practical note rather than the code."
+        "zenoh 1.9 and 1.10 deliver no SourceInfo to a subscriber (1.10's \
+         eclipse-zenoh/zenoh#2563 even dropped setting it via the advanced \
+         API). If this now fails, SourceInfo has started riding and the \
+         classifier can attribute for real — update this test and O7's \
+         practical note rather than the code."
     );
 
     match provenance {

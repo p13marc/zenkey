@@ -114,8 +114,9 @@ pub struct SampleRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload_bytes: Option<usize>,
     /// The publishing entity, `zid:eid#sn`, when `SourceInfo` rode the
-    /// sample. Usually absent: zenoh 1.9 delivers none to a subscriber
-    /// (RFC 09 §5.1 O7's practical note).
+    /// sample. Usually absent: zenoh 1.9 and 1.10 deliver none to a
+    /// subscriber — 1.10 even dropped setting it through the advanced API
+    /// (eclipse-zenoh/zenoh#2563) — RFC 09 §5.1 O7's practical note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// The attachment as a rendering (#117), on the same terms as

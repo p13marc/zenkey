@@ -98,7 +98,22 @@ impl Render for RouterList {
                 // A router whose admin document omits its version is not one
                 // we failed to ask (O4).
                 Cell::asked(r.version.clone()),
-                Cell::text(r.locators.join(", ")),
+                // Empty is normal on zenoh 1.10+ (loopback endpoints are
+                // filtered from the admin doc, eclipse-zenoh/zenoh#2671):
+                // stated per-row so a blank never reads as unreachable.
+                Cell::text(if r.locators.is_empty() {
+                    if r.version
+                        .as_deref()
+                        .is_some_and(zenkey_fleet::admin_doc_omits_loopback)
+                    {
+                        "no locators listed (zenoh 1.10+ omits loopback listen endpoints)"
+                            .to_string()
+                    } else {
+                        "no locators listed".to_string()
+                    }
+                } else {
+                    r.locators.join(", ")
+                }),
             ]);
         }
         t.grid(g);
@@ -187,14 +202,21 @@ impl Render for TopologyView<'_> {
                     Cell::text(&n.whatami),
                     // Heard of but never queried is not "no version".
                     Cell::asked(n.version.clone()),
-                    Cell::text(format!("{}{you}", n.locators.join(" "))),
+                    Cell::text(format!("{}{you}", locator_cell(n))),
                 ]);
             } else {
+                // A heard-of node can still carry link evidence: the
+                // address its reporter reached it at, labelled as such.
+                let via = if n.locators_via_links.is_empty() {
+                    String::new()
+                } else {
+                    format!("  via session link: {}", n.locators_via_links.join(" "))
+                };
                 nodes.row([
                     Cell::text(&n.zid),
                     Cell::text(&n.whatami),
                     Cell::Unknown,
-                    Cell::text(format!("(heard of, not queryable){you}")),
+                    Cell::text(format!("(heard of, not queryable){via}{you}")),
                 ]);
             }
         }
@@ -240,12 +262,47 @@ impl Render for TopologyView<'_> {
                  a reading about reachability, never an empty mesh",
                 self.report.asked
             ))],
-            n => vec![Note::coverage(format!(
-                "{n} root doc(s) answered {}; {} node(s) total ({} only heard of)",
-                self.report.asked,
-                self.report.nodes.len(),
-                self.report.nodes.iter().filter(|x| !x.answered).count()
-            ))],
+            n => {
+                let mut notes = vec![Note::coverage(format!(
+                    "{n} root doc(s) answered {}; {} node(s) total ({} only heard of)",
+                    self.report.asked,
+                    self.report.nodes.len(),
+                    self.report.nodes.iter().filter(|x| !x.answered).count()
+                ))];
+                // An answered 1.10+ node declaring no locators is the
+                // normal loopback-only answer, not a reachability gap —
+                // said out loud so the empty column reads as what it is.
+                if self.report.nodes.iter().any(|x| {
+                    x.answered
+                        && x.locators.is_empty()
+                        && x.version
+                            .as_deref()
+                            .is_some_and(zenkey_fleet::admin_doc_omits_loopback)
+                }) {
+                    notes.push(Note::coverage(
+                        "a root doc listing no locators is normal on zenoh 1.10+: \
+                         loopback listen endpoints are filtered from the admin doc \
+                         (eclipse-zenoh/zenoh#2671); a \"via session link\" address \
+                         is what a live link used, not a listen-endpoint claim",
+                    ));
+                }
+                notes
+            }
         }
+    }
+}
+
+/// The locator column for an answered node: root-doc locators verbatim;
+/// where the doc declared none (normal on zenoh 1.10+ loopback-only nodes,
+/// eclipse-zenoh/zenoh#2671), the link-corroborated endpoints ride with
+/// their provenance labelled — never folded into the locator claim — and
+/// a node no link names says so rather than rendering blank.
+fn locator_cell(n: &zenkey_fleet::TopologyNode) -> String {
+    if !n.locators.is_empty() {
+        n.locators.join(" ")
+    } else if !n.locators_via_links.is_empty() {
+        format!("via session link: {}", n.locators_via_links.join(" "))
+    } else {
+        "no locators listed".to_string()
     }
 }

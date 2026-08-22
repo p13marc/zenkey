@@ -2,6 +2,12 @@
 //! lists become edges, and a mentioned-but-silent node renders "heard of,
 //! not queryable" rather than being omitted.
 //!
+//! Since zenoh 1.10 the root doc filters loopback endpoints out of its
+//! `locators` (eclipse-zenoh/zenoh#2671), so this loopback-bound fixture
+//! also pins the corroboration path: the listen endpoint reaches the
+//! report as `locators_via_links` — link evidence, not a listen claim
+//! (#155).
+//!
 //! The fixture dogfoods #122: `adminspace.enabled` defaults to false and
 //! `session::open` never turns it on, so the serving peer is opened through
 //! the config passthrough with a file that enables it — exactly how an
@@ -54,19 +60,44 @@ async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
         .expect("the serving peer answered as a node");
     assert!(server.answered);
     assert_eq!(server.whatami, "peer");
+    // zenoh 1.10 filters loopback endpoints out of the root doc
+    // (eclipse-zenoh/zenoh#2671 — deliberate, the loopback scouting fix),
+    // and this fixture listens on 127.0.0.1 only, so the honest root-doc
+    // answer is *no locators*. If this assertion ever fails, upstream
+    // changed its mind about the filter — re-read #155 before trusting
+    // root-doc locators again.
     assert!(
-        server.locators.iter().any(|l| l.contains("7522")),
-        "locators ride out: {:?}",
+        server.locators.is_empty(),
+        "a loopback-only 1.10 node declares no root-doc locators: {:?}",
         server.locators
     );
-
+    // The join corroborates from the session link instead: the server-side
+    // endpoint of the reported link is the listen address — labelled link
+    // evidence, kept out of `locators`, never an invented listen claim.
     assert!(
-        report
-            .edges
+        server
+            .locators_via_links
             .iter()
-            .any(|e| e.reporter == serving_zid && e.peer == asking_zid),
-        "the server reports its session to the asker as an edge: {:?}",
-        report.edges
+            .any(|l| l.contains("7522")),
+        "the listen endpoint rides out as link evidence: {:?}",
+        server.locators_via_links
+    );
+
+    let edge = report
+        .edges
+        .iter()
+        .find(|e| e.reporter == serving_zid && e.peer == asking_zid)
+        .unwrap_or_else(|| {
+            panic!(
+                "the server reports its session to the asker as an edge: {:?}",
+                report.edges
+            )
+        });
+    // 1.10 session entries declare a region (the regions rework); carried
+    // verbatim as data, whatever it says.
+    assert!(
+        edge.region.is_some(),
+        "a 1.10 session entry states its region: {edge:?}"
     );
     let heard_of = report
         .nodes
