@@ -265,7 +265,10 @@ impl Render for GenPlan<'_> {
             // The fault this entry injects, stated before a byte moves — the
             // tool says exactly what it is about to do to the bus (#163).
             if let (Some(fault), Some(delta)) = (e.fault, &e.fault_delta) {
-                g.row([Cell::text(format!("    ↳ FAULT[{}]: {delta}", fault.as_str()))]);
+                g.row([Cell::text(format!(
+                    "    ↳ FAULT[{}]: {delta}",
+                    fault.as_str()
+                ))]);
             }
         }
         t.grid(g);
