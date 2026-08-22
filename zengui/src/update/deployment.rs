@@ -16,14 +16,14 @@ use iced::Task;
 
 use crate::message::{DeploymentMsg, LinkState, Message};
 use crate::services;
-use crate::state::{Chrome, Deployment, Observation, Subject, TreeState, Workspace};
+use crate::state::{Chrome, Deployment, Observation, SubjectState, TreeState, Workspace};
 
 /// What the app is pointed at, and the coverage that follows.
 pub(crate) fn update(
     chrome: &mut Chrome,
     dep: &mut Deployment,
     obs: &mut Observation,
-    sub: &mut Subject,
+    sub: &mut SubjectState,
     tree: &mut TreeState,
     work: &mut Workspace,
     msg: DeploymentMsg,

@@ -22,7 +22,7 @@ use crate::config::Settings;
 use crate::link::{self, LinkKey};
 use crate::message::{ChromeMsg, Message, PaneMsg, WorkspaceMsg};
 use crate::services;
-use crate::state::{Chrome, Deployment, Observation, Subject, TreeState, Workspace};
+use crate::state::{Chrome, Deployment, Observation, SubjectState, TreeState, Workspace};
 use crate::update;
 use crate::view;
 use crate::view::status::Status;
@@ -32,7 +32,7 @@ pub struct Zengui {
     chrome: Chrome,
     dep: Deployment,
     obs: Observation,
-    sub: Subject,
+    sub: SubjectState,
     tree: TreeState,
     work: Workspace,
 }
@@ -60,7 +60,7 @@ impl Zengui {
             chrome: Chrome::new(prefs, prefs_note),
             dep: Deployment::new(settings),
             obs: Observation::default(),
-            sub: Subject::default(),
+            sub: SubjectState::default(),
             tree: TreeState::default(),
             work: Workspace::new(echo_lines),
         };
@@ -89,7 +89,7 @@ impl Zengui {
     /// It destructures immediately, so what each group can move is its
     /// parameter list rather than a promise. The honest count: `deployment`
     /// names all six, and `bus`, `subject` and `workspace` name five —
-    /// `subject` through the causal chain from `SelectKey`, `workspace`
+    /// `subject` through the causal chain from `Select`, `workspace`
     /// through the one arm that hands to replay. The two that stay narrow are
     /// `chrome`, which cannot move a row or a watch, and `pane`, which hands
     /// each pane only its own state.

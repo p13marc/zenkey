@@ -7,7 +7,7 @@
 
 use iced::Task;
 
-use crate::message::{Message, RightPane, SubjectMsg};
+use crate::message::{Message, RightPane, Subject, SubjectMsg};
 use crate::state::workspace::EchoPane;
 use crate::update::Ctx;
 use crate::view;
@@ -48,13 +48,13 @@ pub(crate) fn update(
             // Drill-through reuses the selection path rather than being a
             // second way to open the inspector.
             *pane = RightPane::Detail;
-            Task::done(Message::Subject(SubjectMsg::SelectKey(Some(key))))
+            Task::done(Message::Subject(SubjectMsg::Select(Subject::Key(key))))
         }
         EchoMsg::Export => {
             let text = view::echo::export(
                 &echo.echo,
                 &echo.echo_view,
-                cx.sub.selected.as_deref(),
+                cx.sub.current.key(),
                 cx.dep.base(),
             );
             iced::clipboard::write(text)

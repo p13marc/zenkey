@@ -15,7 +15,7 @@ use iced::Task;
 use crate::message::Message;
 use crate::services;
 use crate::state::workspace::RecordingHandle;
-use crate::state::{Deployment, Observation, Subject, TreeState, Workspace};
+use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
 use crate::update::bus;
 use crate::view::replay::ReplayMsg;
 
@@ -25,7 +25,7 @@ use crate::view::replay::ReplayMsg;
 pub(crate) fn update(
     dep: &mut Deployment,
     obs: &mut Observation,
-    sub: &mut Subject,
+    sub: &mut SubjectState,
     tree: &mut TreeState,
     work: &mut Workspace,
     msg: ReplayMsg,

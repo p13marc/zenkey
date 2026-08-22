@@ -34,7 +34,7 @@ use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
 use crate::keyfacts::Registration;
-use crate::message::{Message, SubjectMsg, WorkspaceMsg};
+use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::{RegistrationTone, colors};
 use crate::view::tokens::{font, space};
@@ -1219,7 +1219,7 @@ pub struct TreeData<'a> {
 /// that reason — see [`RowShape`].
 pub fn row_press(r: &RowShape) -> Message {
     match (&r.target, r.is_leaf || !r.has_children) {
-        (Some(t), true) => Message::Subject(SubjectMsg::SelectKey(Some(t.clone()))),
+        (Some(t), true) => Message::Subject(SubjectMsg::Select(Subject::Key(t.clone()))),
         _ => Message::Workspace(WorkspaceMsg::ToggleNode(r.path.clone())),
     }
 }
@@ -2139,7 +2139,7 @@ mod tests {
             .expect("prefix row");
         assert!(prefix.is_leaf && prefix.has_children);
         match row_press(prefix) {
-            Message::Subject(SubjectMsg::SelectKey(Some(k))) => {
+            Message::Subject(SubjectMsg::Select(Subject::Key(k))) => {
                 assert_eq!(k, "v1/h-3fa9c2d41b7e/state/tc/iface")
             }
             other => panic!("body must select, got {other:?}"),

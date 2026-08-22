@@ -8,7 +8,7 @@
 use iced::Task;
 
 use crate::message::{Message, PaneMsg};
-use crate::state::{Deployment, Observation, Subject, Workspace};
+use crate::state::{Deployment, Observation, SubjectState, Workspace};
 use crate::update::Ctx;
 
 pub(crate) mod admin;
@@ -27,7 +27,7 @@ pub(crate) mod replay;
 pub(crate) fn update(
     dep: &mut Deployment,
     obs: &Observation,
-    sub: &mut Subject,
+    sub: &mut SubjectState,
     work: &mut Workspace,
     msg: PaneMsg,
 ) -> Task<Message> {

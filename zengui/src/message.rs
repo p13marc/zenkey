@@ -114,18 +114,96 @@ pub enum DeploymentMsg {
     Reconnect,
 }
 
-/// One key: chosen, observed, fetched, decoded (#176).
+/// What the whole workspace is looking at (#181).
 ///
-/// `SelectKey` heads a causal chain — its own handler ends in the
+/// One value, read by every pane, rather than a `selected` here and a
+/// `node_selected` there and each pane's private idea of its own target. The
+/// panes *read* this; nothing tells them about it.
+///
+/// ## Why these four and not the six the issue sketched
+///
+/// Every variant below is reachable by an interaction that exists today. The
+/// issue proposed `Producer`, `Router`, `Storage` and `Bus` as well — but
+/// nothing in the app can select a router or a storage (the admin pane has no
+/// selection at all), and an unreachable variant is a state the compiler makes
+/// every `match` handle and no test can reach. They arrive with the pane that
+/// can construct them.
+///
+/// It also proposed `Key(PathId)`, and `PathId` is #251's path arena, which
+/// #177 deliberately deferred. A `String` until then.
+///
+/// ## What one subject does not yet do
+///
+/// Pinning — a pane detaching to hold a *second* subject — is #257. It is not
+/// a second `Option<String>`: six fields of the subject sub-state are derived
+/// from the subject and rebuilt when it moves, so a real pin needs a second
+/// recorder fed by the same tick, a second fetch and a second decode. Freezing only the identity
+/// would leave a pane titled with one key while its chart described another,
+/// which is the failure [`Fetched::Superseded`](crate::view::detail::Fetched)
+/// exists to prevent, one panel over.
+///
+/// ## Why `Prefix` is separate from `Key`, which the issue did not have
+///
+/// A prefix is not a key. `Key` heads a causal chain that ends in a
+/// `fetch_value` GET; routing "show this origin in the tree" through it would
+/// query something no producer publishes — an unasked-for bus query, which is
+/// what #85's laziness rule forbids. The distinction is load-bearing, and the
+/// type is where it belongs.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Subject {
+    /// Nothing chosen. The panes say so rather than showing the last thing.
+    #[default]
+    None,
+    /// One concrete wire key: fetchable, recordable, plottable.
+    Key(String),
+    /// A subtree prefix — highlighted in the tree, never fetched.
+    Prefix(String),
+    /// One origin from the liveliness roster: a host or a service token.
+    Origin(String),
+}
+
+impl Subject {
+    /// The concrete key, if the subject is one.
+    ///
+    /// The fetch, the history recorder and the latency lookup all go through
+    /// this, so "is this fetchable?" is asked once, by the type.
+    pub fn key(&self) -> Option<&str> {
+        match self {
+            Subject::Key(k) => Some(k),
+            _ => None,
+        }
+    }
+
+    /// What the key tree should highlight: a key or a prefix, both of which
+    /// are display paths.
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Subject::Key(p) | Subject::Prefix(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// The origin, if the subject is one.
+    pub fn origin(&self) -> Option<&str> {
+        match self {
+            Subject::Origin(o) => Some(o),
+            _ => None,
+        }
+    }
+}
+
+/// One subject: chosen, observed, fetched, decoded (#176).
+///
+/// `Select` heads a causal chain — its own handler ends in the
 /// `Task::perform` that produces `ValueFetched`, which produces `ValueDecoded` —
 /// so filing the head under the workspace and the tail here would force
-/// `update_subject` to re-enter `update_workspace` to do its own job.
+/// `update::subject` to re-enter `update::workspace` to do its own job.
 ///
 /// `ValueFetched`/`ValueDecoded` are deliberately *not* folded into `DetailMsg`,
 /// which the async-result rule might seem to demand. They are not a pane's
-/// result: the fetch is issued by the **tree's** selection and the handler flips
-/// `right_pane`. A detail pane owning a fetch it never requested would be a
-/// worse lie than the placement it replaced.
+/// result: the fetch is issued by the **subject**, not by a pane, and a pane
+/// owning a fetch it never requested would be a worse lie than the placement it
+/// replaced.
 #[derive(Debug, Clone)]
 pub enum SubjectMsg {
     /// The user toggled observation of one subtree (the tree's watch button).
@@ -140,15 +218,13 @@ pub enum SubjectMsg {
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
     /// (key, declared type if any, rendering).
     ValueDecoded(String, Option<String>, Arc<zenkey_fleet::decode::Rendering>),
-    SelectKey(Option<String>),
-    /// Select a *subtree prefix* — no fetch.
+    /// Point the whole workspace at something (#181).
     ///
-    /// Not a cosmetic split from `SelectKey`. A prefix is not a key, and
-    /// routing "show this origin in the tree" through `SelectKey` would issue
-    /// a `fetch_value` GET against something no producer publishes: an
-    /// unasked-for bus query introduced by a refactor, which is exactly what
-    /// #85's laziness rule forbids.
-    SelectPath(String),
+    /// One message where there were three — `SelectKey`, `SelectPath` and the
+    /// nodes pane's own `Selected`. What happens next is the [`Subject`]'s
+    /// business, not the caller's: a `Key` fetches, an `Origin` asks for its
+    /// `node_info`, a `Prefix` does neither.
+    Select(Subject),
 }
 
 /// The shell around the panes: which one shows, the tree's own chrome, and the
@@ -454,6 +530,33 @@ mod tests {
     /// `the_pane_bindings_cover_every_pane`: a tab that exists and cannot be
     /// spoken to, or a message from a pane that is not in the strip, is the
     /// failure all three guard.
+    /// The #85 rule, as a property of the type rather than of a comment.
+    ///
+    /// `key()` is what the fetch, the history recorder and the latency lookup
+    /// all go through. A prefix answering it would put a `fetch_value` GET on
+    /// the wire against something no producer publishes — the exact bug the
+    /// `SelectKey`/`SelectPath` split existed to prevent, now unrepresentable
+    /// rather than merely avoided at each call site.
+    #[test]
+    fn only_a_key_is_fetchable_and_a_prefix_is_still_a_path() {
+        let key = Subject::Key("v1/h-3fa9c2d41b7e/state/sysinfo/health".into());
+        let prefix = Subject::Prefix("v1/h-3fa9c2d41b7e".into());
+        let origin = Subject::Origin("h-3fa9c2d41b7e".into());
+
+        assert_eq!(key.key(), Some("v1/h-3fa9c2d41b7e/state/sysinfo/health"));
+        assert_eq!(prefix.key(), None, "a prefix must never be fetched");
+        assert_eq!(origin.key(), None);
+        assert_eq!(Subject::None.key(), None);
+
+        // Both are display paths, and the tree highlights either.
+        assert_eq!(key.path(), Some("v1/h-3fa9c2d41b7e/state/sysinfo/health"));
+        assert_eq!(prefix.path(), Some("v1/h-3fa9c2d41b7e"));
+        assert_eq!(origin.path(), None, "an origin id is not a display path");
+
+        assert_eq!(origin.origin(), Some("h-3fa9c2d41b7e"));
+        assert_eq!(key.origin(), None);
+    }
+
     #[test]
     fn every_pane_has_a_message_and_every_message_a_pane() {
         use crate::view;
@@ -462,7 +565,7 @@ mod tests {
             PaneMsg::Call(view::call::CallMsg::Submit),
             PaneMsg::Publish(view::publish::PublishMsg::Send),
             PaneMsg::Detail(view::detail::DetailMsg::LeafSelected(String::new())),
-            PaneMsg::Nodes(view::nodes::NodesMsg::Selected(String::new())),
+            PaneMsg::Nodes(view::nodes::NodesMsg::ShowInTree(String::new())),
             PaneMsg::Doctor(view::doctor::DoctorMsg::Run),
             PaneMsg::History(view::history::HistoryMsg::Clear),
             PaneMsg::Blob(view::blob::BlobMsg::Probe),

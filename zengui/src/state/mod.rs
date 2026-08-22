@@ -17,7 +17,7 @@
 //! | [`Chrome`] | nothing the bus does — it is the window |
 //! | [`Deployment`] | pointing at a different fleet |
 //! | [`Observation`] | the pump restarting; its coverage, by a base change |
-//! | [`Subject`] | the user selecting something else |
+//! | [`SubjectState`] | the user pointing the workspace somewhere else |
 //! | [`TreeState`] | a new merge input, or a presentation change |
 //! | [`Workspace`] | per sub-group — see [`workspace`] |
 //!
@@ -73,7 +73,7 @@ pub(crate) mod workspace;
 pub(crate) use chrome::Chrome;
 pub(crate) use deployment::Deployment;
 pub(crate) use observation::Observation;
-pub(crate) use subject::Subject;
+pub(crate) use subject::SubjectState;
 pub(crate) use tree::TreeState;
 pub(crate) use workspace::Workspace;
 
@@ -150,7 +150,7 @@ mod tests {
             (
                 "sub",
                 &[
-                    "selected",
+                    "current",
                     "selected_latency",
                     "fetched",
                     "decoded",
@@ -182,14 +182,7 @@ mod tests {
             ),
             (
                 "work.verdicts",
-                &[
-                    "roster",
-                    "node_selected",
-                    "node_detail",
-                    "doctor",
-                    "blob",
-                    "admin",
-                ],
+                &["roster", "node_detail", "doctor", "blob", "admin"],
             ),
             (
                 "work.bench",
@@ -218,7 +211,7 @@ mod tests {
             ("chrome", Chrome::FIELDS),
             ("dep", Deployment::FIELDS),
             ("obs", Observation::FIELDS),
-            ("sub", Subject::FIELDS),
+            ("sub", SubjectState::FIELDS),
             ("tree", TreeState::FIELDS),
             ("work", Workspace::FIELDS),
             ("work.verdicts", Verdicts::FIELDS),
@@ -234,12 +227,13 @@ mod tests {
              about one fleet ends up shown against another."
         );
 
-        // The count is its own claim: `Zengui` had 64 fields, and a split
-        // that quietly dropped one would still pass every assertion above.
+        // The count is its own claim: a split that quietly dropped a field
+        // would still pass every assertion above. 64 at the #175 split, minus
+        // `node_selected`, which #181 replaced with the one subject.
         let leaves: usize = actual
             .iter()
             .map(|(g, f)| if *g == "work" { 1 } else { f.len() })
             .sum();
-        assert_eq!(leaves, 64, "the split must place every field exactly once");
+        assert_eq!(leaves, 63, "the split must place every field exactly once");
     }
 }

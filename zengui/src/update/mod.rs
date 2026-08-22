@@ -28,7 +28,7 @@
 //! is view-side, where nothing is narrow — a status strip reads five of six
 //! sub-states because that is what a status strip *is*.
 
-use crate::state::{Deployment, Observation, Subject};
+use crate::state::{Deployment, Observation, SubjectState};
 
 pub(crate) mod bus;
 pub(crate) mod chrome;
@@ -46,5 +46,5 @@ pub(crate) mod workspace;
 pub(crate) struct Ctx<'a> {
     pub(crate) dep: &'a Deployment,
     pub(crate) obs: &'a Observation,
-    pub(crate) sub: &'a Subject,
+    pub(crate) sub: &'a SubjectState,
 }

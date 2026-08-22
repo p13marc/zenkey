@@ -9,13 +9,13 @@
 use iced::Task;
 
 use crate::message::{Message, WorkspaceMsg};
-use crate::state::{Deployment, Observation, Subject, TreeState, Workspace};
+use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
 
 /// The shell around the panes, and the replay mode.
 pub(crate) fn update(
     dep: &mut Deployment,
     obs: &mut Observation,
-    sub: &mut Subject,
+    sub: &mut SubjectState,
     tree: &mut TreeState,
     work: &mut Workspace,
     msg: WorkspaceMsg,

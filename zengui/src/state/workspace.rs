@@ -8,7 +8,9 @@
 //!   arguing about: it is fed by the tick, like the key tree. But being fed by
 //!   the tick is not a group — the tick also feeds `media.viewing` and the
 //!   subject\'s history. It is `NodesData`\'s first field, and it is cleared
-//!   with `node_selected` and `node_detail`, so it is filed with them.)
+//!   with `node_detail`, so it is filed with it. The origin *selection* is no
+//!   longer here at all — since #181 there is one subject, and it is the
+//!   user's, not this pane's.)
 //! - [`Workbench`] — what the user typed. Kept: a half-written publish body is
 //!   not a claim about any fleet.
 //! - [`EchoPane`] — the live line ring and its filters. Kept, and the ring is
@@ -43,8 +45,6 @@ sub_state! {
     pub(crate) struct Verdicts {
         /// The node dashboard's presence model (#61), fed by liveliness only.
         pub(crate) roster: crate::nodes::NodeRoster,
-        /// The selected origin in the nodes pane.
-        pub(crate) node_selected: Option<String>,
         /// Its one-shot `node_info` detail — the pane's only data-plane cost.
         pub(crate) node_detail: view::nodes::DetailState,
         /// The doctor panel's run state (#71) — run-on-demand only.
@@ -65,7 +65,6 @@ impl Verdicts {
     /// doctor\'s form.
     pub(crate) fn forget(&mut self) {
         self.roster.clear();
-        self.node_selected = None;
         self.node_detail = view::nodes::DetailState::NotAsked;
         self.doctor.clear();
         self.blob.clear();

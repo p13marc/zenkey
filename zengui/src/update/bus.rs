@@ -17,14 +17,14 @@ use crate::message::{BusMsg, BusTick, LinkState, Message};
 use crate::scope;
 use crate::services;
 use crate::state::tree::shape_held;
-use crate::state::{Deployment, Observation, Subject, TreeState, Workspace};
+use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
 use crate::view;
 use crate::view::status::SliceSource;
 
 pub(crate) fn apply_tick(
     dep: &mut Deployment,
     obs: &mut Observation,
-    sub: &mut Subject,
+    sub: &mut SubjectState,
     tree: &mut TreeState,
     work: &mut Workspace,
     tick: &BusTick,
@@ -38,7 +38,7 @@ pub(crate) fn apply_tick(
     );
     // Per tick, not per frame: one bounded lock for one key's latency
     // summary (#119). None when unselected, unobserved, or unstamped.
-    sub.selected_latency = match (&sub.selected, &obs.monitor) {
+    sub.selected_latency = match (sub.current.key(), &obs.monitor) {
         // During replay the live monitor's stats are about a different
         // world than the panes are showing — consulting them would put
         // live latency under file data (O4 in miniature).
@@ -139,7 +139,7 @@ pub(crate) fn ensure_facts(dep: &mut Deployment, key: &str) {
 pub(crate) fn update(
     dep: &mut Deployment,
     obs: &mut Observation,
-    sub: &mut Subject,
+    sub: &mut SubjectState,
     tree: &mut TreeState,
     work: &mut Workspace,
     msg: BusMsg,

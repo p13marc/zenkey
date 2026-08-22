@@ -1,25 +1,32 @@
-//! One key: chosen, observed, fetched, decoded (#175).
+//! One subject: chosen, observed, fetched, decoded (#175, #181).
 //!
 //! Five of six, and the reason is the causal chain the message group exists
-//! for: `SelectKey` ends in the `fetch_value` that produces `ValueFetched`,
-//! which produces `ValueDecoded`. Selecting reveals a row (`tree`), lands the
-//! detail pane (`work`), records history and rebuilds the chart (`sub`), and
-//! caches the key's facts (`dep`). Watching moves the coverage (`obs`).
+//! for: `Select` ends in the `fetch_value` that produces `ValueFetched`,
+//! which produces `ValueDecoded`. Pointing the window somewhere reveals a row
+//! (`tree`), lands a pane (`work`), records history and rebuilds the chart
+//! (`sub`), and caches the key's facts (`dep`). Watching moves the coverage
+//! (`obs`).
+//!
+//! Since #181 there is exactly one [`Subject`], and every way of choosing one
+//! — the tree, the echo line, the palette, the doctor finding, the node card —
+//! raises the same message. What happens next branches on the subject, not on
+//! who asked.
 
 use std::sync::Arc;
 
 use iced::Task;
 
-use crate::message::{Message, RightPane, SubjectMsg};
+use crate::message::{Message, RightPane, Subject, SubjectMsg};
 use crate::scope;
 use crate::services;
-use crate::state::{Deployment, Observation, Subject, TreeState, Workspace};
+use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
+use crate::view;
 
 /// One key: chosen, observed, fetched, decoded.
 pub(crate) fn update(
     dep: &mut Deployment,
     obs: &mut Observation,
-    sub: &mut Subject,
+    sub: &mut SubjectState,
     tree: &mut TreeState,
     work: &mut Workspace,
     msg: SubjectMsg,
@@ -43,23 +50,33 @@ pub(crate) fn update(
             tracing::warn!("unwatch {path} failed: {e}");
             Task::none()
         }
-        SubjectMsg::SelectPath(path) => {
-            sub.selected = Some(path);
-            Task::none()
-        }
         SubjectMsg::ValueFetched(key, outcome) => {
             // No base guard needed (#109 audit): the evidence is keyed by
-            // the full wire key, which names its own base (an explorer
-            // runs un-namespaced, RFC 09 §5), and the view passes
-            // `fetched` through only while that exact key is selected.
-            // Residual: a stale landing can still flip the right pane to
-            // Detail — a focus nit, not a misattributed verdict.
-            sub.decoded = None;
-            // A fetch normally lands the detail pane in view — except
-            // from the doctor's click-through, where losing the finding
-            // list would cost more than it shows (#71).
-            if work.right_pane != RightPane::Doctor {
-                work.right_pane = RightPane::Detail;
+            // the full wire key, which names its own base (an explorer runs
+            // un-namespaced, RFC 09 §5).
+            //
+            // A landing for a subject the user has moved past is *superseded*
+            // (#181), and the two things it must not do are here. It must not
+            // flip the pane — the old "focus nit" — and it must not clear
+            // `decoded`, which was the sharper defect hiding behind it: a late
+            // reply for key A wiped key B's rendering while B was on screen,
+            // and the pane then said "not asked" about a key it had answered.
+            let current = sub.current.key() == Some(key.as_str());
+            if current {
+                sub.decoded = None;
+                // A fetch lands the detail pane in view — except from the
+                // doctor's click-through, where losing the finding list would
+                // cost more than it shows (#71).
+                if work.right_pane != RightPane::Doctor {
+                    work.right_pane = RightPane::Detail;
+                }
+            }
+            // No decode for a superseded answer: it is work for a rendering
+            // nothing will show, and `ValueDecoded`'s own guard would drop it
+            // on arrival anyway.
+            if !current {
+                sub.fetched = Some((key, outcome));
+                return Task::none();
             }
             let decode_task = match (&outcome, &dep.session, &dep.schema_store, &dep.slices) {
                 (Ok(out), Some(session), Some(store), Some(slices)) => {
@@ -84,41 +101,67 @@ pub(crate) fn update(
             decode_task
         }
         SubjectMsg::ValueDecoded(key, type_name, rendering) => {
-            // Stale guard: only the currently selected key's decode lands.
-            if sub.selected.as_deref() == Some(key.as_str()) {
+            // Stale guard: only the current subject's decode lands.
+            if sub.current.key() == Some(key.as_str()) {
                 sub.decoded = Some((type_name, (*rendering).clone()));
             }
             Task::none()
         }
-        SubjectMsg::SelectKey(key) => {
-            sub.selected = key.clone();
-            // The old key's latency summary is not evidence about the
-            // new one — cleared now, refreshed on the next tick (#119).
-            sub.selected_latency = None;
-            // History follows the selection and nothing else (issue #63):
-            // the previous recording is dropped here, which is what makes
-            // deselecting free. A symbolic skeleton path names no concrete
-            // key, so nothing can be recorded for it.
-            sub.history = key
-                .as_deref()
-                .filter(|k| !k.contains('{'))
-                .map(|k| crate::history::HistoryRecorder::new(k, dep.settings.history_entries));
-            // The plotted series belong to the same selection (issue #64):
-            // they start empty, and stop being fed when it goes away.
-            sub.rate_series = crate::series::RateSampler::new();
-            sub.series_leaf = None;
-            sub.refresh_series(dep);
-            let (Some(session), Some(key)) = (dep.session.clone(), key) else {
-                return Task::none();
-            };
-            // Lazy value-on-demand: one fetch per selection, nothing
-            // ambient (issue #85). Symbolic skeleton paths have no
-            // concrete value to fetch.
-            if key.contains('{') {
-                return Task::none();
-            }
-            services::value::fetch(session, key)
+        SubjectMsg::Select(subject) => select(dep, sub, work, subject),
+    }
+}
+
+/// Point the workspace at something, and do whatever that thing implies.
+///
+/// One function where there were three handlers, and it branches on the
+/// [`Subject`] rather than on which pane asked (#181). Everything derived from
+/// the old subject is dropped here — the latency summary, the history
+/// recorder, the rate sampler and the chart — because none of it is evidence
+/// about the new one.
+fn select(
+    dep: &Deployment,
+    sub: &mut SubjectState,
+    work: &mut Workspace,
+    subject: Subject,
+) -> Task<Message> {
+    sub.current = subject;
+    // The old key's latency summary is not evidence about the new one —
+    // cleared now, refreshed on the next tick (#119).
+    sub.selected_latency = None;
+    // History follows the subject and nothing else (issue #63): the previous
+    // recording is dropped here, which is what makes deselecting free. A
+    // symbolic skeleton path names no concrete key, so nothing can be
+    // recorded for it.
+    sub.history = sub
+        .current
+        .key()
+        .filter(|k| !k.contains('{'))
+        .map(|k| crate::history::HistoryRecorder::new(k, dep.settings.history_entries));
+    // The plotted series belong to the same subject (issue #64): they start
+    // empty, and stop being fed when it goes away.
+    sub.rate_series = crate::series::RateSampler::new();
+    sub.series_leaf = None;
+    sub.refresh_series(dep);
+
+    let Some(session) = dep.session.clone() else {
+        return Task::none();
+    };
+    match &sub.current {
+        // Lazy value-on-demand: one fetch per subject, nothing ambient
+        // (issue #85). Symbolic skeleton paths have no concrete value.
+        Subject::Key(key) if !key.contains('{') => services::value::fetch(session, key.clone()),
+        // The nodes pane's one data-plane cost, paid on selection.
+        Subject::Origin(origin) => {
+            work.verdicts.node_detail = view::nodes::DetailState::Loading(origin.clone());
+            services::sweep::node_info(
+                session,
+                dep.base().to_string(),
+                origin.clone(),
+                dep.timeout(),
+            )
         }
+        // A prefix is not a key, and neither is nothing.
+        _ => Task::none(),
     }
 }
 
