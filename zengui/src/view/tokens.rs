@@ -12,8 +12,9 @@
 //! the point: it is what makes "no raw colors outside `theme`/`kit`" a rule a
 //! grep can enforce.
 
-/// Typographic scale (pixels). Five steps, used app-wide. `f32` so it feeds
-/// `text(..).size(..)` (Iced `Pixels`) directly.
+/// Typographic scale (pixels). Five steps, used app-wide — via the role
+/// constructors in `kit` (#191). `f32` so it feeds `.size(..)` (Iced
+/// `Pixels`) directly.
 pub mod font {
     /// Captions, labels, dense table cells, metadata.
     pub const CAPTION: f32 = 12.0;
