@@ -517,10 +517,17 @@ async fn observe_traffic(
                         let budget = decode_budget.entry(s.key.clone()).or_default();
                         if *budget < DECODE_BUDGET {
                             *budget += 1;
+                            // `Some`: the doctor's slice set comes from its
+                            // own live introspect sweep, so the registry was
+                            // always asked here — `NoRegistry` (#246) cannot
+                            // arise, and like every not-validated reason
+                            // other than `Undecodable` it would fall through
+                            // the `_` arm below: not asked/not checkable is
+                            // never a finding (RFC 09 §5.1 O4).
                             let d = crate::decode::decode_sample(
                                 store,
                                 session,
-                                slices,
+                                Some(slices),
                                 base,
                                 &s.key,
                                 Some(&s.encoding),

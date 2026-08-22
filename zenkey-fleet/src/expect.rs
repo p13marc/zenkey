@@ -96,10 +96,16 @@ impl Default for ExpectSpec {
 /// Run one expectation window. `Err` means the observation never stood up
 /// (session/watch failure) — callers map it to the Impaired exit, never to
 /// "not met".
+///
+/// `slices: None` means no registry was loaded: the decode pipeline then
+/// reports [`Verdict::NotValidated`]([`NoRegistry`](zenkey::schema::validate::NotValidated::NoRegistry))
+/// per sample, which `--valid` treats exactly like every other `NotValidated`
+/// reason — the assertion was validity, and "unknowable" is not met
+/// (RFC 09 §5.1 O4; #246). It is never a pass or a fail on its own.
 pub async fn run_expect(
     session: &Session,
     base: &str,
-    slices: &SliceSet,
+    slices: Option<&SliceSet>,
     store: &SchemaStore,
     spec: &ExpectSpec,
 ) -> Result<ExpectReport> {
@@ -169,6 +175,10 @@ pub async fn run_expect(
                             &mut violations_total,
                             format!("{}: invalid — {}", s.key, errors.join("; ")),
                         ),
+                        // Every not-validated reason — `NoRegistry`
+                        // included — rides the same arm: the user asserted
+                        // validity, and "unknowable" is not met. The reason
+                        // string keeps the two silences apart (#246).
                         Verdict::NotValidated(reason) => violate(
                             &mut violations,
                             &mut violations_total,
@@ -180,7 +190,7 @@ pub async fn run_expect(
                     let against = match check {
                         QosCheck::Profile(p) => Some(p),
                         QosCheck::Declared => {
-                            match crate::facts::describe_key(base, &s.key, Some(slices))
+                            match crate::facts::describe_key(base, &s.key, slices)
                                 .facts
                                 .registration
                             {

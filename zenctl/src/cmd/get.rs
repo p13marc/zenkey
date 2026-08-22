@@ -43,11 +43,14 @@ pub async fn run(
     // Slices enrich: they name each key's payload type, and without them the
     // decode ladder falls to its structural rung — which is exactly what
     // `--raw` asks for on purpose. A registry that will not answer must not
-    // cost the user the samples themselves (#210).
+    // cost the user the samples themselves (#210). `None` stays `None` into
+    // the ladder, so a row's verdict reads `no registry loaded` rather than
+    // claiming `no schema served` about types nobody looked up
+    // (RFC 09 §5.1 O4; #246).
     let slices = if raw {
-        zenkey_fleet::SliceSet::default()
+        None
     } else {
-        args.slices_optional().await?.unwrap_or_default()
+        args.slices_optional().await?
     };
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
     let session = args.session().await?;
@@ -63,7 +66,7 @@ pub async fn run(
             let prepared = zenkey_fleet::prepare_publish(
                 &session,
                 &store,
-                if raw { None } else { Some(&slices) },
+                slices.as_ref(),
                 &base,
                 key_part,
                 None,
@@ -97,7 +100,7 @@ pub async fn run(
     if crate::render::Mode::of(args.format()).machine() {
         let mut rows = Vec::with_capacity(answers.len());
         for a in &answers {
-            rows.push(row(a, &store, &session, &slices, &base, raw, no_decode).await);
+            rows.push(row(a, &store, &session, slices.as_ref(), &base, raw, no_decode).await);
         }
         let report = crate::render::GetReport {
             selector: selector.to_string(),
@@ -125,7 +128,14 @@ pub async fn run(
                             continue;
                         }
                         let d = sample::decode(
-                            &store, &session, &slices, &base, &a.key, encoding, &bytes, no_decode,
+                            &store,
+                            &session,
+                            slices.as_ref(),
+                            &base,
+                            &a.key,
+                            encoding,
+                            &bytes,
+                            no_decode,
                         )
                         .await;
                         let type_name = d.type_name;
@@ -202,7 +212,7 @@ async fn row(
     a: &FleetAnswer,
     store: &zenkey_fleet::decode::SchemaStore,
     session: &zenoh::Session,
-    slices: &zenkey_fleet::SliceSet,
+    slices: Option<&zenkey_fleet::SliceSet>,
     base: &str,
     raw: bool,
     no_decode: bool,
@@ -359,5 +369,31 @@ mod tests {
         assert_eq!(invalid["verdict"], "invalid");
         assert_eq!(invalid["violations"], serde_json::json!(["f: not a u64"]));
         assert_eq!(invalid["decode_error"], "boom");
+    }
+
+    /// #246: the two silences carry distinct wire spellings. `no-schema` is
+    /// "the registry was consulted and names no schema for this"; a run with
+    /// no registry loaded never looked, and its rows must say that instead of
+    /// making a claim about the types (RFC 09 §5.1 O4). Same terms as
+    /// `topic echo`'s ndjson row — one decode ladder, two verbs.
+    #[test]
+    fn the_two_not_validated_silences_stay_apart_on_the_wire() {
+        use zenkey::schema::validate::NotValidated;
+        let a = value("acme");
+        let spelled = |reason: NotValidated| {
+            value_row(
+                &a,
+                &decoded(Some(zenkey_fleet::Verdict::NotValidated(reason)), None),
+            )["verdict"]
+                .clone()
+        };
+        assert_eq!(
+            spelled(NotValidated::NoSchema),
+            "not-validated: no schema served for this type"
+        );
+        assert_eq!(
+            spelled(NotValidated::NoRegistry),
+            "not-validated: no registry loaded, so no type was looked up"
+        );
     }
 }

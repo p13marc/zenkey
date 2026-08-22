@@ -693,10 +693,16 @@ pub async fn run_watchdog(
                                     let budget = decode_budget.entry(s.key.clone()).or_default();
                                     if *budget < DECODE_BUDGET {
                                         *budget += 1;
+                                        // `Some`: the watchdog runs over the
+                                        // slice set its caller resolved; an
+                                        // `invalid-payload` rule counts every
+                                        // not-`Valid` verdict the same way,
+                                        // so `NoRegistry` (#246) would change
+                                        // no transition — only the reason.
                                         let d = crate::decode::decode_sample(
                                             store,
                                             session,
-                                            slices,
+                                            Some(slices),
                                             base,
                                             &s.key,
                                             Some(&s.encoding),

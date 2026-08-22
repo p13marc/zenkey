@@ -46,10 +46,15 @@ pub fn decode(
 ) -> Task<Message> {
     Task::perform(
         async move {
+            // `Some`: the caller only schedules a decode once slices have
+            // loaded (`update/subject.rs`), so the registry was always asked
+            // here — with none loaded the pane shows the fetch undecoded and
+            // claims nothing, which is `NoRegistry`'s honesty (#246) by
+            // omission rather than by verdict.
             let d = zenkey_fleet::decode::decode_sample(
                 &store,
                 &session,
-                &slices,
+                Some(&slices),
                 &base,
                 &wire_key,
                 Some(&encoding),

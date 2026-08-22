@@ -269,7 +269,7 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
     let d = zenkey_fleet::decode::decode_sample(
         &store,
         &b,
-        &slices,
+        Some(&slices),
         "",
         SUBJECT_KEY,
         Some(&sample.encoding().to_string()),
@@ -380,6 +380,37 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
         !note.contains("not a registered subject"),
         "\"not asked\" must not render as \"unregistered\": {note}"
     );
+
+    // The read side keeps the same two silences apart (#246): a loaded
+    // registry that names no type for the key is `NoSchema` ("asked, and
+    // there is no contract"); no registry at all is `NoRegistry` ("nobody
+    // looked") — RFC 09 §5.1 O4 applied to the verdict, not just the note.
+    use zenkey::schema::validate::NotValidated;
+    let asked = zenkey_fleet::decode::decode_sample(
+        &store,
+        &b,
+        Some(&slices()),
+        "",
+        "demo/foreign/key",
+        None,
+        body,
+    )
+    .await;
+    assert_eq!(
+        asked.verdict,
+        zenkey_fleet::Verdict::NotValidated(NotValidated::NoSchema)
+    );
+    let unasked =
+        zenkey_fleet::decode::decode_sample(&store, &b, None, "", "demo/foreign/key", None, body)
+            .await;
+    assert_eq!(
+        unasked.verdict,
+        zenkey_fleet::Verdict::NotValidated(NotValidated::NoRegistry)
+    );
+    assert!(matches!(
+        unasked.rendering,
+        zenkey_fleet::decode::Rendering::Structural(_)
+    ));
 }
 
 /// #98's acceptance, over #97's path: a `cdr`-declaring subject ships CDR
@@ -422,7 +453,7 @@ async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
     let d = zenkey_fleet::decode::decode_sample(
         &store,
         &b,
-        &slices,
+        Some(&slices),
         "",
         TWIST_KEY,
         Some("application/cdr"),

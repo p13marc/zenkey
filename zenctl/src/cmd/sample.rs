@@ -148,11 +148,16 @@ pub struct Decoded {
 ///
 /// `--no-decode` is not a failed decode: it renders structurally, and reports
 /// no verdict at all rather than an unfavourable one.
+///
+/// `slices: None` means no registry was loaded, and the verdict comes back
+/// `not-validated: no registry loaded…` rather than `no-schema`'s claim
+/// about the type — the two silences stay apart on the wire
+/// (RFC 09 §5.1 O4; #246).
 #[allow(clippy::too_many_arguments)]
 pub async fn decode(
     store: &zenkey_fleet::decode::SchemaStore,
     session: &zenoh::Session,
-    slices: &zenkey_fleet::SliceSet,
+    slices: Option<&zenkey_fleet::SliceSet>,
     base: &str,
     key: &str,
     encoding: Option<&str>,

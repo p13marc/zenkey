@@ -33,8 +33,17 @@ pub enum Verdict {
 /// are ordinary states of a live bus (O4 — "not asked" is not "no").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotValidated {
-    /// No schema is available for the observed type.
+    /// A registry was consulted and no schema is served/known for the
+    /// observed type. This is "asked, and the answer was silence about the
+    /// type" — never the same fact as [`NoRegistry`](Self::NoRegistry)'s
+    /// "nobody looked" (RFC 09 §5.1 O4; #246).
     NoSchema,
+    /// No registry was loaded, so no type was ever looked up. "Not asked"
+    /// must not masquerade as a fact about the type (RFC 09 §5.1 O4): a run
+    /// whose registry was merely unreachable used to emit
+    /// [`NoSchema`](Self::NoSchema) on every row, which reads as a claim
+    /// about the *types* (#246).
+    NoRegistry,
     /// The `validate-json` feature is compiled out of this binary.
     FeatureOff,
     /// The schema kind has no validator beyond its own decode.
@@ -49,6 +58,7 @@ impl std::fmt::Display for NotValidated {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             NotValidated::NoSchema => "no schema served for this type",
+            NotValidated::NoRegistry => "no registry loaded, so no type was looked up",
             NotValidated::FeatureOff => "validation compiled out (validate-json)",
             NotValidated::KindUnsupported => "schema kind has no validator beyond decode",
             NotValidated::Undecodable => "bytes did not decode",
@@ -90,6 +100,28 @@ pub fn validate_json(validator: &jsonschema::Validator, value: &serde_json::Valu
         Verdict::Valid
     } else {
         Verdict::Invalid(errors)
+    }
+}
+
+#[cfg(test)]
+mod vocabulary_tests {
+    use super::*;
+
+    /// The reason strings are wire vocabulary: every ndjson `verdict` field
+    /// carries `not-validated: <reason>` verbatim, so a consumer greps them.
+    /// In particular the two silences must never share a spelling —
+    /// "no registry loaded" is "not asked", "no schema served" is "asked,
+    /// and the type has none" (RFC 09 §5.1 O4; #246).
+    #[test]
+    fn the_two_silences_have_distinct_wire_spellings() {
+        assert_eq!(
+            NotValidated::NoSchema.to_string(),
+            "no schema served for this type"
+        );
+        assert_eq!(
+            NotValidated::NoRegistry.to_string(),
+            "no registry loaded, so no type was looked up"
+        );
     }
 }
 
