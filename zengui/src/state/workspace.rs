@@ -20,9 +20,152 @@
 
 use std::sync::Arc;
 
+use iced::widget::pane_grid;
+
 use crate::echo::EchoRing;
 use crate::message::{ActivityTab, RightPane};
+use crate::prefs::{DockRole, LayoutAxis, LayoutNode};
 use crate::view;
+
+/// The workspace grid (#180): `pane_grid::State` plus the focus.
+///
+/// `pane_grid::State` is not serializable — its pane and split ids are
+/// widget-internal counters — so this is the runtime half of a pair: the grid
+/// is **rebuilt** from the persisted [`LayoutNode`] on launch
+/// ([`DockGrid::from_layout`]) and **captured** back into one on every layout
+/// change ([`DockGrid::capture`]). The ids differ across a restart; the tree
+/// of splits, ratios and roles is what survives, and it is all that matters.
+pub(crate) struct DockGrid {
+    pub(crate) grid: pane_grid::State<DockRole>,
+    /// The dock last clicked — where a restored dock anchors, and what #190's
+    /// dock-focus keys will move.
+    pub(crate) focus: Option<pane_grid::Pane>,
+}
+
+fn configuration(node: &LayoutNode) -> pane_grid::Configuration<DockRole> {
+    match node {
+        LayoutNode::Split { axis, ratio, a, b } => pane_grid::Configuration::Split {
+            axis: match axis {
+                LayoutAxis::Horizontal => pane_grid::Axis::Horizontal,
+                LayoutAxis::Vertical => pane_grid::Axis::Vertical,
+            },
+            ratio: *ratio,
+            a: Box::new(configuration(a)),
+            b: Box::new(configuration(b)),
+        },
+        LayoutNode::Dock(role) => pane_grid::Configuration::Pane(*role),
+    }
+}
+
+fn capture(
+    node: &pane_grid::Node,
+    panes: &std::collections::BTreeMap<pane_grid::Pane, DockRole>,
+) -> Option<LayoutNode> {
+    match node {
+        pane_grid::Node::Split {
+            axis, ratio, a, b, ..
+        } => {
+            match (capture(a, panes), capture(b, panes)) {
+                (Some(a), Some(b)) => Some(LayoutNode::Split {
+                    axis: match axis {
+                        pane_grid::Axis::Horizontal => LayoutAxis::Horizontal,
+                        pane_grid::Axis::Vertical => LayoutAxis::Vertical,
+                    },
+                    ratio: *ratio,
+                    a: Box::new(a),
+                    b: Box::new(b),
+                }),
+                // A split with one missing side collapses to the other — the
+                // shape `State::close` leaves cannot actually produce this,
+                // but a capture must not invent a dock to fill a hole.
+                (Some(one), None) | (None, Some(one)) => Some(one),
+                (None, None) => None,
+            }
+        }
+        pane_grid::Node::Pane(pane) => panes.get(pane).map(|role| LayoutNode::Dock(*role)),
+    }
+}
+
+impl DockGrid {
+    pub(crate) fn from_layout(root: &LayoutNode) -> DockGrid {
+        DockGrid {
+            grid: pane_grid::State::with_configuration(configuration(root)),
+            focus: None,
+        }
+    }
+
+    /// The serializable tree this grid is, for prefs. `None` is structurally
+    /// unreachable (a grid holds at least one pane); the fallback keeps the
+    /// persisted layout legal rather than panicking over a widget invariant.
+    pub(crate) fn capture(&self) -> LayoutNode {
+        capture(self.grid.layout(), &self.grid.panes)
+            .unwrap_or(LayoutNode::Dock(DockRole::Inspector))
+    }
+
+    pub(crate) fn pane_of(&self, role: DockRole) -> Option<pane_grid::Pane> {
+        self.grid
+            .iter()
+            .find(|(_, r)| **r == role)
+            .map(|(pane, _)| *pane)
+    }
+
+    pub(crate) fn is_open(&self, role: DockRole) -> bool {
+        self.pane_of(role).is_some()
+    }
+
+    /// Bring a closed dock back, each role at its home edge — the locator on
+    /// the left, the activity dock on the bottom, the inspector and the
+    /// workbench on the right. Returns whether the layout changed, so the
+    /// caller knows to persist it.
+    pub(crate) fn restore(&mut self, role: DockRole) -> bool {
+        if self.is_open(role) {
+            return false;
+        }
+        let anchor = self
+            .focus
+            .filter(|p| self.grid.get(*p).is_some())
+            .or_else(|| self.grid.iter().next().map(|(pane, _)| *pane));
+        let Some(anchor) = anchor else {
+            return false;
+        };
+        let edge = match role {
+            DockRole::Locator => pane_grid::Edge::Left,
+            DockRole::Activity => pane_grid::Edge::Bottom,
+            DockRole::Inspector | DockRole::Workbench => pane_grid::Edge::Right,
+        };
+        let Some((pane, _)) = self.grid.split(pane_grid::Axis::Vertical, anchor, role) else {
+            return false;
+        };
+        self.grid.drop(pane, pane_grid::Target::Edge(edge));
+        self.focus = Some(pane);
+        true
+    }
+
+    /// Close an open dock. The last dock stays: a workspace with zero regions
+    /// is a window that renders nothing and can never be clicked back.
+    /// Returns whether the layout changed.
+    pub(crate) fn close(&mut self, role: DockRole) -> bool {
+        if self.grid.len() <= 1 {
+            return false;
+        }
+        let Some(pane) = self.pane_of(role) else {
+            return false;
+        };
+        let sibling = self.grid.close(pane).map(|(_, sibling)| sibling);
+        if self.focus == Some(pane) {
+            self.focus = sibling;
+        }
+        true
+    }
+
+    pub(crate) fn toggle(&mut self, role: DockRole) -> bool {
+        if self.is_open(role) {
+            self.close(role)
+        } else {
+            self.restore(role)
+        }
+    }
+}
 
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
@@ -38,20 +181,12 @@ pub(crate) struct RepeatLoad {
 /// about the *session* and none of them about the subject — which is why they
 /// competed badly for tab slots with panes that follow the subject, and why
 /// verifying a publish used to mean leaving the form to look at Echo.
+/// Putting the dock away is the grid's job since #180 — closing its pane —
+/// so the old `shown` flag is gone: two ways to hide one region is one way
+/// too many, and the grid's way survives a restart.
+#[derive(Default)]
 pub(crate) struct ActivityDock {
     pub(crate) tab: ActivityTab,
-    /// Collapsed to its tab strip. A dock you cannot put away is a dock that
-    /// costs screen whether or not you are reading it.
-    pub(crate) shown: bool,
-}
-
-impl Default for ActivityDock {
-    fn default() -> ActivityDock {
-        ActivityDock {
-            tab: ActivityTab::default(),
-            shown: true,
-        }
-    }
 }
 
 /// A running capture (#74, started from the location bar): dropping the
@@ -151,10 +286,15 @@ sub_state! {
 
 sub_state! {
     pub(crate) struct Workspace {
-        /// Which right-hand pane is showing.
+        /// The dock grid (#180): which regions are open, where, and how big.
+        pub(crate) docks: DockGrid,
+        /// Which tool the Workbench dock is showing. `Inspector` is not a
+        /// tool — the Inspector is a dock of its own since #180, and
+        /// [`WorkspaceMsg::PaneSelected`](crate::message::WorkspaceMsg) maps
+        /// it to that dock rather than storing it here.
         pub(crate) right_pane: RightPane,
         pub(crate) verdicts: Verdicts,
-    pub(crate) activity: ActivityDock,
+        pub(crate) activity: ActivityDock,
         pub(crate) bench: Workbench,
         pub(crate) echo: EchoPane,
         pub(crate) replay: ReplayMode,
@@ -162,9 +302,10 @@ sub_state! {
 }
 
 impl Workspace {
-    pub(crate) fn new(echo_lines: usize) -> Workspace {
+    pub(crate) fn new(echo_lines: usize, layout: &LayoutNode) -> Workspace {
         Workspace {
-            right_pane: RightPane::Inspector,
+            docks: DockGrid::from_layout(layout),
+            right_pane: RightPane::Call,
             verdicts: Verdicts::default(),
             activity: ActivityDock::default(),
             bench: Workbench::default(),
@@ -175,5 +316,56 @@ impl Workspace {
             },
             replay: ReplayMode::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+    use crate::prefs::LayoutPreset;
+
+    /// The round trip the persistence rests on: rebuild-from-layout then
+    /// capture is the identity, for every preset and for a bent tree.
+    #[test]
+    fn a_layout_rebuilds_and_captures_to_itself() {
+        for p in LayoutPreset::ALL {
+            let root = p.root();
+            assert_eq!(
+                DockGrid::from_layout(&root).capture(),
+                root,
+                "{}",
+                p.label()
+            );
+        }
+        let bent = LayoutNode::Split {
+            axis: LayoutAxis::Horizontal,
+            ratio: 0.42,
+            a: Box::new(LayoutNode::Dock(DockRole::Workbench)),
+            b: Box::new(LayoutNode::Dock(DockRole::Activity)),
+        };
+        assert_eq!(DockGrid::from_layout(&bent).capture(), bent);
+    }
+
+    /// Close removes exactly one dock; restore brings it back; the last dock
+    /// cannot be closed at all.
+    #[test]
+    fn docks_close_and_restore_and_the_last_one_stays() {
+        let mut docks = DockGrid::from_layout(&LayoutPreset::Watch.root());
+        assert!(docks.is_open(DockRole::Activity));
+        assert!(docks.close(DockRole::Activity));
+        assert!(!docks.is_open(DockRole::Activity));
+        assert!(!docks.close(DockRole::Activity), "already closed");
+
+        assert!(docks.restore(DockRole::Activity));
+        assert!(docks.is_open(DockRole::Activity));
+        assert!(!docks.restore(DockRole::Activity), "already open");
+
+        assert!(docks.close(DockRole::Locator));
+        assert!(docks.close(DockRole::Activity));
+        assert!(
+            !docks.close(DockRole::Inspector),
+            "the last dock must survive"
+        );
+        assert!(docks.is_open(DockRole::Inspector));
     }
 }

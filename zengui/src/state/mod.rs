@@ -105,10 +105,7 @@ mod tests {
     fn every_field_is_in_the_group_that_invalidates_it() {
         const PLACED: &[(&str, &[&str])] = &[
             // The window, and nothing the bus does touches it.
-            (
-                "chrome",
-                &["prefs", "window_dirty", "prefs_note", "palette"],
-            ),
+            ("chrome", &["prefs", "prefs_dirty", "prefs_note", "palette"]),
             // What fleet this is, and what is claimed about it.
             (
                 "dep",
@@ -185,6 +182,12 @@ mod tests {
             (
                 "work",
                 &[
+                    // The grid is workspace state, not chrome: what it shows
+                    // is regions of the workspace, and `right_pane` — which
+                    // tool the Workbench region shows — invalidates with it.
+                    // Its *persisted form* lives in `chrome.prefs.layout`,
+                    // exactly as the scope does (#180).
+                    "docks",
                     "right_pane",
                     "verdicts",
                     "activity",
