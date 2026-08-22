@@ -110,6 +110,57 @@ pub async fn diff(args: &Bus) -> Result<()> {
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
+/// `registry retired` (issue #226) — the deprecation burn-down.
+///
+/// Thin for `cutover`'s reason (#206): the per-entry ladder, the wire
+/// bucketing and the worst-of verdict are judgement over bus traffic and live
+/// in `zenkey_fleet::retired`. What is left here is what only a CLI has: the
+/// session, the rendering, and the exit code.
+pub async fn retired(listen: Option<u64>, args: &Bus) -> Result<()> {
+    let dirs = args.registry_dirs();
+    if dirs.is_empty() {
+        return Err(anyhow!(
+            "registry retired walks the [[deprecated]] ledger of local registry \
+             files — pass --registry <dir> (or set one on the active context)"
+        ));
+    }
+    // The ledger source is the dirs alone, never the bus union: the served
+    // slices are a *fact to check against* (§6.1), not a second ledger.
+    let local = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
+    let session = args.session().await?;
+    let entries: usize = local.slices().iter().map(|s| s.deprecated.len()).sum();
+    if let Some(window) = listen {
+        // Stated before the window opens, not after (O5).
+        eprintln!(
+            "{}",
+            zenkey_fleet::retired::scope_note(
+                entries,
+                &zenkey_fleet::cutover::new_prefix(args.base()),
+                window
+            )
+        );
+    }
+    let registries: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+    let report = zenkey_fleet::run_retired(
+        &session,
+        args.base(),
+        &local,
+        registries,
+        listen,
+        args.timeout(),
+    )
+    .await?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
+    // The exit discipline shared with `cutover` and `expect`: a library
+    // returns a verdict, a command exits with it (0 = pass, 1 = a retired
+    // subject still speaks, 2 = unproven — silence is not a pass).
+    match report.verdict {
+        zenkey_fleet::report::CutoverVerdict::Pass => Ok(()),
+        zenkey_fleet::report::CutoverVerdict::OldStillSpeaks => std::process::exit(1),
+        zenkey_fleet::report::CutoverVerdict::Unproven => std::process::exit(2),
+    }
+}
+
 /// `registry lint <dir>` — the consumer's build lints, without the build.
 pub fn lint(dir: &Path, ledger: Option<&PathBuf>, out: crate::cli::OutputArgs) -> Result<()> {
     let mut config = zenkey_build::Config::new()

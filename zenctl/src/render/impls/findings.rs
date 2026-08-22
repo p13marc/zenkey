@@ -6,7 +6,10 @@
 //! at both sides; a producer that serves no `describe` has undescribed shapes,
 //! which is not the same as having none.
 
-use zenkey_fleet::report::{DoctorReport, DoctorSeverity, RegistryDiff, SchemaDump};
+use zenkey_fleet::report::{
+    CutoverVerdict, DoctorReport, DoctorSeverity, RegistryDiff, RetiredEntry, RetiredReport,
+    SchemaDump,
+};
 
 use crate::render::{Cell, Grid, Note, Render, Row, Table};
 
@@ -178,6 +181,154 @@ impl Render for RegistryDiff {
             ))
             .cite("RFC 08 §6"),
         ]
+    }
+}
+
+/// One entry's four facts as prose cells, each honest about whether it was
+/// obtainable at all: "not listened" is not silence, "no admin space" is not
+/// zero subscribers (RFC 09 §5.1 O4).
+fn retired_facts(e: &RetiredEntry) -> String {
+    let wire = match e.wire_samples {
+        None => "wire not listened".to_string(),
+        Some(0) => "wire silent".to_string(),
+        Some(n) => format!("wire {n} sample(s)"),
+    };
+    let served = match e.still_declared {
+        None => "no served slice".to_string(),
+        Some(true) => "STILL SERVED".to_string(),
+        Some(false) => "not served".to_string(),
+    };
+    let subs = match e.subscribers {
+        None => "subscribers unknown".to_string(),
+        Some(n) => format!("{n} subscriber(s)"),
+    };
+    let replacement = match (&e.replaced_by, e.replacement_samples) {
+        (None, _) => "no replacement declared".to_string(),
+        (Some(p), None) => format!("→ {p}: not listened"),
+        (Some(p), Some(n)) => format!("→ {p}: {n} sample(s)"),
+    };
+    format!("{wire} · {served} · {subs} · {replacement}")
+}
+
+impl Render for RetiredReport {
+    const FAMILY: &'static str = "registry-retired";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        // Everything except the entries themselves — the coverage claim (which
+        // registries were read, what listened, what answered) must survive a
+        // truncated pipe.
+        let mut e = match serde_json::to_value(self).expect("a report serializes") {
+            serde_json::Value::Object(m) => m,
+            _ => unreachable!("a report is an object"),
+        };
+        e.remove("entries");
+        e.insert("entries".into(), self.entries.len().into());
+        e
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for e in &self.entries {
+            out(Row::of("entry", e));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        let mut grid = Grid::unheaded(3).max(1, 40);
+        for e in &self.entries {
+            // The word is the carrier; the mark repeats it (#200).
+            let mark = match e.verdict {
+                CutoverVerdict::Pass => Cell::styled("✓", crate::render::style::PASS),
+                CutoverVerdict::OldStillSpeaks => Cell::styled("✗", crate::render::style::ERROR),
+                CutoverVerdict::Unproven => Cell::styled("?", crate::render::style::UNPROVEN),
+            };
+            grid.row([
+                mark,
+                Cell::text(format!("{}: {}", e.producer, e.path)),
+                Cell::text(retired_facts(e)),
+            ]);
+        }
+        t.grid(grid);
+        let (word, style) = match self.verdict {
+            CutoverVerdict::Pass => ("PASS", crate::render::style::PASS),
+            CutoverVerdict::OldStillSpeaks => ("FAIL", crate::render::style::ERROR),
+            // Dim, not yellow: the absence of a verdict, not a milder failure.
+            CutoverVerdict::Unproven => ("UNPROVEN", crate::render::style::UNPROVEN),
+        };
+        t.line_styled(word, style);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = Vec::new();
+        // The coverage claim is exactly the files that were read: a
+        // `--registry` dir may be one team's slice of the fleet's ledger, and
+        // this report must never read as fleet totality.
+        notes.push(
+            Note::coverage(format!(
+                "ledger: {} entr(y|ies) from {} — coverage is exactly these files, \
+                 which may be one checkout's slice of the fleet's ledger",
+                self.entries.len(),
+                self.registries.join(", "),
+            ))
+            .cite("RFC 09 §5.1 O5"),
+        );
+        match (self.window_s, self.plane_samples) {
+            (Some(w), Some(p)) => notes.push(Note::coverage(format!(
+                "listened {w}s: {p} sample(s) on the v1 plane — the proof-of-life \
+                 half for entries with no declared replacement"
+            ))),
+            _ => notes.push(
+                Note::coverage(
+                    "no listen window ran — wire facts read \"not listened\", never \
+                     \"absent\"; pass --listen-for <SECS> to observe the retired \
+                     families",
+                )
+                .cite("RFC 09 §5.1 O4"),
+            ),
+        }
+        if self.dropped > 0 {
+            notes.push(Note::bound(format!(
+                "{} sample(s) dropped while behind — every silence claim covers \
+                 only what was seen",
+                self.dropped
+            )));
+        }
+        notes.push(match self.admin_entities {
+            Some(n) => Note::coverage(format!(
+                "{} served slice(s) answered introspect; {} declared entit(y|ies) \
+                 from the admin space",
+                self.introspect_answered, n
+            )),
+            None => Note::coverage(format!(
+                "{} served slice(s) answered introspect; no admin space answered — \
+                 declared subscribers are unknown, not zero",
+                self.introspect_answered
+            ))
+            .cite("RFC 09 §5.1 O4"),
+        });
+        if self.entries.is_empty() {
+            notes.push(Note::summary(
+                "the ledger declares no [[deprecated]] entries — nothing retired, \
+                 nothing to burn down.",
+            ));
+        }
+        notes.push(match self.verdict {
+            CutoverVerdict::Pass => Note::coverage(
+                "every ledger entry is silent while its replacement (or the v1 \
+                 plane) carries traffic — the burn-down holds",
+            )
+            .cite("RFC 08 §3"),
+            CutoverVerdict::OldStillSpeaks => Note::coverage(
+                "a retired subject still shows life — on the wire, in a served \
+                 introspect slice (the registry MUST NOT lie), or in a declared \
+                 subscriber",
+            )
+            .cite("RFC 08 §6.1"),
+            CutoverVerdict::Unproven => Note::silence(
+                "at least one entry has no positive evidence either way — a silent \
+                 replacement, or no listen window: silence is not a pass",
+            ),
+        });
+        notes
     }
 }
 

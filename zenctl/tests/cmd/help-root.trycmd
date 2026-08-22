@@ -21,7 +21,7 @@ Commands:
   service      Procedures on the `@rpc` plane
   interface    Payload types declared by the registry slices
   schema       Dump a producer's served payload schemas (`@rpc/<producer>/describe`), or check a payload against one (`schema check`, #159)
-  registry     The registry as a document: export it, diff it, lint it
+  registry     The registry as a document: export it, diff it, lint it, burn it down
   bench        Measure the fleet
   admin        Zenoh admin space (`@/**`) — the middleware's own introspection
   storage      Storages: what the mesh persists, joined against declared state
@@ -68,7 +68,7 @@ Commands:
   service      Procedures on the `@rpc` plane
   interface    Payload types declared by the registry slices
   schema       Dump a producer's served payload schemas (`@rpc/<producer>/describe`), or check a payload against one (`schema check`, #159)
-  registry     The registry as a document: export it, diff it, lint it
+  registry     The registry as a document: export it, diff it, lint it, burn it down
   bench        Measure the fleet
   admin        Zenoh admin space (`@/**`) — the middleware's own introspection
   storage      Storages: what the mesh persists, joined against declared state

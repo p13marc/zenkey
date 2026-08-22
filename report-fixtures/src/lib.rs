@@ -706,6 +706,60 @@ pub fn cutover_report() -> CutoverReport {
     }
 }
 
+/// The burn-down with all three entry states (issue #226): a retired subject
+/// still served (the RFC 08 §6.1 lie), one finished, and one whose
+/// replacement was silent — `Unproven`, not a pass.
+pub fn retired_report() -> RetiredReport {
+    let entries = vec![
+        RetiredEntry {
+            producer: "logs".into(),
+            path: "logs/errors_total".into(),
+            since: Some("2.0".into()),
+            replaced_by: Some("logs/journald/errors_total".into()),
+            selector: "v1/*/*/logs/logs/errors_total".into(),
+            wire_samples: Some(3),
+            still_declared: Some(true),
+            subscribers: Some(1),
+            replacement_samples: Some(480),
+            verdict: CutoverVerdict::OldStillSpeaks,
+        },
+        RetiredEntry {
+            producer: "logs".into(),
+            path: "logs/by_unit/{unit}/burn_rate".into(),
+            since: Some("2.0".into()),
+            replaced_by: Some("logs/journald/burn_rate".into()),
+            selector: "v1/*/*/logs/logs/by_unit/*/burn_rate".into(),
+            wire_samples: Some(0),
+            still_declared: Some(false),
+            subscribers: Some(0),
+            replacement_samples: Some(120),
+            verdict: CutoverVerdict::Pass,
+        },
+        RetiredEntry {
+            producer: "logs".into(),
+            path: "logs/units_in_failure".into(),
+            since: Some("2.0".into()),
+            replaced_by: Some("logs/journald/units_in_failure".into()),
+            selector: "v1/*/*/logs/logs/units_in_failure".into(),
+            wire_samples: Some(0),
+            still_declared: Some(false),
+            subscribers: Some(0),
+            replacement_samples: Some(0),
+            verdict: CutoverVerdict::Unproven,
+        },
+    ];
+    RetiredReport {
+        registries: vec!["../zensight/zensight-common/registry".into()],
+        entries,
+        window_s: Some(30),
+        plane_samples: Some(960),
+        dropped: 5,
+        introspect_answered: 2,
+        admin_entities: Some(14),
+        verdict: CutoverVerdict::OldStillSpeaks,
+    }
+}
+
 /// A window that could not carry its claim: `Impaired` is the absence of a
 /// verdict, not a milder failure (O6).
 pub fn expect_report() -> ExpectReport {

@@ -483,6 +483,62 @@ fn doctor_severities_are_the_stable_lowercase_vocabulary() {
     );
 }
 
+/// A `retired` run without a listen window and without a reachable admin
+/// space serializes *no* wire facts at all — "not asked" is carried by
+/// absence, never by zero or null (RFC 09 §5.1 O4, issue #226).
+#[test]
+fn a_retired_entry_omits_every_fact_that_was_never_asked() {
+    let entry = RetiredEntry {
+        producer: "logs".into(),
+        path: "logs/errors_total".into(),
+        since: None,
+        replaced_by: None,
+        selector: "v1/*/*/logs/logs/errors_total".into(),
+        wire_samples: None,
+        still_declared: None,
+        subscribers: None,
+        replacement_samples: None,
+        verdict: CutoverVerdict::Unproven,
+    };
+    assert_eq!(
+        serde_json::to_value(&entry).unwrap(),
+        json!({
+            "producer": "logs",
+            "path": "logs/errors_total",
+            "selector": "v1/*/*/logs/logs/errors_total",
+            "verdict": "unproven",
+        }),
+        "an unasked fact is absent, not zero and not null"
+    );
+    let report = RetiredReport {
+        registries: vec!["registry".into()],
+        entries: vec![],
+        window_s: None,
+        plane_samples: None,
+        dropped: 0,
+        introspect_answered: 0,
+        admin_entities: None,
+        verdict: CutoverVerdict::Pass,
+    };
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        json!({
+            "registries": ["registry"],
+            "entries": [],
+            "dropped": 0,
+            "introspect_answered": 0,
+            "verdict": "pass",
+        }),
+        "no window and no admin space stay absent; the registries always state \
+         themselves"
+    );
+    // The shared fixture exercises the listened case: every fact present.
+    let full = serde_json::to_value(fx::retired_report()).unwrap();
+    assert_eq!(full["window_s"], 30);
+    assert_eq!(full["entries"][0]["still_declared"], true);
+    assert_eq!(full["entries"][2]["verdict"], "unproven");
+}
+
 /// Every enum in this surface, its wire spelling, behind an exhaustive
 /// `match`.
 ///
