@@ -533,12 +533,23 @@ pub async fn run() -> Result<()> {
             pattern,
             duration,
             seed,
+            fault,
             schema_set,
             serve_describe,
             dry_run,
             i_know,
             bus,
         } => {
+            // The fault-injection double-guard's second half (#163): an
+            // explicit endpoint or an explicit --base/ZENCTL_BASE, never the
+            // ambient named context. Computed here, on the raw flags, because
+            // the resolved `Bus` has already folded the context in and can no
+            // longer tell "you asked for this bus" from "your shell was
+            // pointed at it".
+            let explicit_target = bus.base.is_some()
+                || !bus.connect.is_empty()
+                || !bus.listen.is_empty()
+                || bus.zenoh_config.is_some();
             let bus = Bus::resolve(&bus)?;
             cmd::generate::run(
                 producer.as_deref(),
@@ -549,6 +560,8 @@ pub async fn run() -> Result<()> {
                 pattern,
                 duration,
                 seed,
+                &fault,
+                explicit_target,
                 schema_set.as_deref(),
                 serve_describe,
                 dry_run,

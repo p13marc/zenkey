@@ -1,0 +1,22 @@
+`gen --fault` is double-guarded (#163), and both halves refuse **before** a
+session is opened — which is what lets them be offline cases.
+
+An unknown fault kind is refused by name, the vocabulary spelled out (spray's
+decline precedent, applied to a flag).
+
+```console
+$ zenctl gen --fault scramble
+? 1
+Error: unknown fault kind "scramble" — known kinds: truncate, wrong-type, extra-field, unregistered-key, wrong-qos, missing-encoding, unstamped
+
+```
+
+The first guard: fault injection is deliberately non-conforming traffic, so it
+may only run knowingly. No `--i-know`, no faults.
+
+```console
+$ zenctl gen --fault truncate
+? 1
+Error: --fault injects deliberately non-conforming traffic — that is consumer-robustness testing on a bus you own, not a default. Pass --i-know to mean it.
+
+```
