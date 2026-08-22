@@ -86,9 +86,9 @@ pub struct ProcedureDecl {
 /// an explorer can answer "who holds blobs, and of which kind?" without
 /// probing the bus for keys nobody may be serving.
 ///
-/// Note the asymmetry, which is pre-existing rather than introduced here:
-/// `[[media]]` has had a registry field table since v1.3 and codegen since
-/// v1.5, but has never appeared in a slice. Retrofitting it is separate work.
+/// Note the asymmetry, which was pre-existing rather than introduced here:
+/// `[[media]]` had a registry field table since v1.3 and codegen since v1.5,
+/// but did not appear in a slice until v1.16 ([`MediaDecl`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobDecl {
     /// `artifact` | `tree` | `store` (RFC 07 §2).
@@ -189,6 +189,12 @@ impl RegistrySlice {
     /// Does this slice serve this `@blob` tier (RFC 07 §2)?
     pub fn serves_blob_tier(&self, tier: &str) -> bool {
         self.blob.iter().any(|b| b.tier == tier)
+    }
+
+    /// Does this slice publish a `@media` stream with exactly this pattern
+    /// (RFC 07 §1, in the slice since v1.16)?
+    pub fn serves_media(&self, path: &str) -> bool {
+        self.media.iter().any(|m| m.path == path)
     }
 }
 
@@ -518,6 +524,16 @@ pub enum SliceFinding {
     MissingBlobTier {
         tier: String,
     },
+    /// The host publishes a `@media` stream we do not know (RFC 08 §6;
+    /// `[[media]]` reached the slice in v1.16, and reached this diff in
+    /// #169 — until then media drift produced no finding at all).
+    UnknownMediaStream {
+        path: String,
+    },
+    /// We know a `@media` stream the host does not publish.
+    MissingMediaStream {
+        path: String,
+    },
     /// The host still serves a subject its own ledger marks deprecated.
     ServesDeprecated {
         path: String,
@@ -538,6 +554,8 @@ impl SliceFinding {
             Self::MissingProcedure { path } => format!("does not serve procedure {path}"),
             Self::UnknownBlobTier { tier } => format!("serves unknown @blob tier {tier}"),
             Self::MissingBlobTier { tier } => format!("does not serve @blob tier {tier}"),
+            Self::UnknownMediaStream { path } => format!("serves unknown @media stream {path}"),
+            Self::MissingMediaStream { path } => format!("does not serve @media stream {path}"),
             Self::ServesDeprecated { path, replaced_by } => match replaced_by {
                 Some(r) => format!("serves deprecated {path} (use {r})"),
                 None => format!("serves deprecated {path}"),
@@ -599,6 +617,20 @@ pub fn diff(served: &RegistrySlice, local: &RegistrySlice) -> Vec<SliceFinding> 
         if !served.serves_blob_tier(&b.tier) {
             out.push(SliceFinding::MissingBlobTier {
                 tier: b.tier.clone(),
+            });
+        }
+    }
+    for m in &served.media {
+        if !local.serves_media(&m.path) {
+            out.push(SliceFinding::UnknownMediaStream {
+                path: m.path.clone(),
+            });
+        }
+    }
+    for m in &local.media {
+        if !served.serves_media(&m.path) {
+            out.push(SliceFinding::MissingMediaStream {
+                path: m.path.clone(),
             });
         }
     }
@@ -831,6 +863,54 @@ mod tests {
                 .any(|f| matches!(f, SliceFinding::MissingBlobTier { tier } if tier == "store"))
         );
         assert!(diff(&served, &served).is_empty());
+    }
+
+    /// Media drift is a finding in both directions (#169): `[[media]]` rode
+    /// the slice since v1.16, but `diff()` compared only subjects,
+    /// procedures, and blob tiers — a host serving an undeclared `@media`
+    /// stream, or missing a declared one, was silent.
+    #[test]
+    fn media_stream_drift_is_a_finding() {
+        let with = |paths: &[&str]| {
+            let mut src = String::from(
+                "[registry]\nversion = \"1.16\"\napp = \"acme\"\nconvention = 1\n\
+                 [producer]\nname = \"netring\"\n",
+            );
+            for p in paths {
+                src.push_str(&format!(
+                    "[[media]]\npath = {p:?}\nencoding = \"image/jpeg\"\n"
+                ));
+            }
+            parse_slice(&src).unwrap()
+        };
+        let served = with(&["{stream}/preview/jpeg", "{stream}/live/h264"]);
+        let local = with(&["{stream}/live/h264", "{stream}/still/png"]);
+        let findings = diff(&served, &local);
+        assert!(findings.iter().any(|f| matches!(
+            f,
+            SliceFinding::UnknownMediaStream { path } if path == "{stream}/preview/jpeg"
+        )));
+        assert!(findings.iter().any(|f| matches!(
+            f,
+            SliceFinding::MissingMediaStream { path } if path == "{stream}/still/png"
+        )));
+        // The stream both sides declare is not drift.
+        assert!(!findings.iter().any(|f| matches!(
+            f,
+            SliceFinding::UnknownMediaStream { path }
+            | SliceFinding::MissingMediaStream { path } if path == "{stream}/live/h264"
+        )));
+        assert!(diff(&served, &served).is_empty());
+
+        // Pre-v1.16 slices simply carry no media entries: absent on both
+        // sides is agreement, and absent against a declaring build is drift.
+        let old = with(&[]);
+        assert!(diff(&old, &old).is_empty());
+        assert!(
+            diff(&old, &local)
+                .iter()
+                .all(|f| matches!(f, SliceFinding::MissingMediaStream { .. }))
+        );
     }
 
     #[test]
