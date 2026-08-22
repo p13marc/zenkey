@@ -629,4 +629,113 @@ fn the_retained_window_is_replay_mode_with_all_its_locks() {
         ReplayMsg::RetainedToggled,
     )));
     assert!(app.work.replay.replay.is_none(), "back to live");
+/// #180's acceptance, both halves in one causal chain: dragging a splitter
+/// changes the ratio, and the changed layout is what a restart rebuilds.
+///
+/// The drag arrives as the widget's own `ResizeEvent` — the same message
+/// `on_resize` produces — and the "restart" is `DockGrid::from_layout` over
+/// the prefs the drag wrote, which is exactly what `with_prefs` does at
+/// launch.
+#[test]
+fn a_splitter_drag_survives_restart() {
+    use crate::message::WorkspaceMsg;
+    use crate::prefs::{LayoutNode, LayoutPreset};
+    use iced::widget::pane_grid;
+
+    let mut app = test_app();
+    let _ = app.update(Message::Workspace(WorkspaceMsg::LayoutPreset(
+        LayoutPreset::Watch,
+    )));
+    assert_eq!(app.chrome.prefs.layout, LayoutPreset::Watch.layout());
+
+    // Drag the root splitter (Watch: the top row against the Activity dock).
+    let split = *app
+        .work
+        .docks
+        .grid
+        .layout()
+        .splits()
+        .next()
+        .expect("Watch has a split");
+    let _ = app.update(Message::Workspace(WorkspaceMsg::PaneResized(
+        pane_grid::ResizeEvent { split, ratio: 0.81 },
+    )));
+
+    // The drag reached the persisted model, unnamed it, and marked the prefs
+    // for the settle timer — never one file write per pixel (#189's lesson).
+    assert_eq!(
+        app.chrome.prefs.layout.preset, None,
+        "a dragged layout is no longer the preset it started as"
+    );
+    assert!(app.chrome.prefs_dirty, "the settle timer owes a write");
+    let LayoutNode::Split { ratio, .. } = &app.chrome.prefs.layout.root else {
+        panic!("the captured layout lost its root split");
+    };
+    assert!((ratio - 0.81).abs() < 1e-6, "the ratio landed: {ratio}");
+
+    // Restart: a fresh grid over the prefs the drag wrote shows the same
+    // workspace — id-for-id equality is impossible (the ids are widget
+    // counters), tree equality is the point.
+    let reborn = crate::state::workspace::DockGrid::from_layout(&app.chrome.prefs.layout.root);
+    assert_eq!(reborn.capture(), app.work.docks.capture());
+}
+
+/// #180's other acceptance: the workspace renders as a grid, with two docks
+/// side by side — headlessly, over the whole `view`.
+#[test]
+fn the_workspace_renders_two_docks_side_by_side() {
+    use iced_test::simulator;
+
+    let app = test_app();
+    // The default layout is Explore: Locator | Inspector.
+    assert_eq!(
+        app.chrome.prefs.layout,
+        crate::prefs::LayoutPreset::Explore.layout()
+    );
+    let mut ui = simulator::<Message, _, _>(app.view());
+    // Each dock's title bar names its role — both on screen at once, which
+    // eleven mutually-exclusive tabs could never do.
+    assert!(ui.find("locator").is_ok(), "the locator dock renders");
+    assert!(ui.find("inspector").is_ok(), "the inspector dock renders");
+}
+
+/// Selecting a pane stopped meaning "swap the one visible surface" (#180):
+/// `Inspector` reveals its dock without touching the workbench's tool, and a
+/// tool selection lands in the workbench dock — restoring it if it was
+/// closed, because a selection that changes nothing visible is a lie.
+#[test]
+fn pane_selection_is_dock_reveal_not_a_tab_swap() {
+    use crate::message::{RightPane, WorkspaceMsg};
+    use crate::prefs::DockRole;
+
+    let mut app = test_app();
+    assert!(
+        !app.work.docks.is_open(DockRole::Workbench),
+        "Explore opens no workbench"
+    );
+
+    let _ = app.update(Message::Workspace(WorkspaceMsg::PaneSelected(
+        RightPane::Nodes,
+    )));
+    assert!(
+        app.work.docks.is_open(DockRole::Workbench),
+        "selecting a tool opens the workbench"
+    );
+    assert_eq!(app.work.right_pane, RightPane::Nodes);
+    assert_eq!(
+        app.chrome.prefs.layout.preset, None,
+        "opening a dock bends the layout"
+    );
+
+    // The Inspector is a dock, not a workbench tool: selecting it must not
+    // overwrite which tool the workbench shows.
+    let _ = app.update(Message::Workspace(WorkspaceMsg::PaneSelected(
+        RightPane::Inspector,
+    )));
+    assert_eq!(
+        app.work.right_pane,
+        RightPane::Nodes,
+        "the workbench keeps its tool"
+    );
+    assert!(app.work.docks.is_open(DockRole::Inspector));
 }
