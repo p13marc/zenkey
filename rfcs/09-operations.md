@@ -1,11 +1,14 @@
 # 09 — Operations Cookbook
 
-**Status: v1.21** · informative chapter, but §5.1 is normative for tools and §5.3 for the synthetic marker · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19 and v1.21 — see [00-index.md](00-index.md)*
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19 and v1.21; the tool-facing material (§5.1–§5.3, §6 — including the former normative carve-outs) moved to [13](13-observer-conformance.md) in v1.24 — see [00-index.md](00-index.md)*
 
 Worked recipes for the infrastructure concerns the grammar was shaped
-around: session setup, subscriptions, storage, ACL, and constrained links,
-plus the obligations of tools that only read the bus (§5.1).
-Base = `zensight` throughout; substitute your deployment's base.
+around: session setup, subscriptions, storage, ACL, and constrained links.
+The obligations of tools that only read the bus, and the judgment
+procedures built on them, live in [13](13-observer-conformance.md) since
+v1.24 — the tombstones below (§5.1–§5.3, §6) keep pre-v1.24 citations
+resolvable. Base = `zensight` throughout; substitute your deployment's
+base.
 
 ---
 
@@ -506,283 +509,30 @@ that can drift from it.
   blind to the common case. `zenctl base list` implements this sweep and
   reports the empty base as `(empty)`, selected with `--base ""`.
 
-### 5.1 Observer obligations (v1.9; reviewed and amended at ratification, v1.18)
+### 5.1 Observer obligations — moved to [13 §3](13-observer-conformance.md) (v1.24)
 
-*Added in v1.9. The convention told tools how to read a conformant key and
-said nothing about the other three cases an explorer actually meets: a key
-under a different base, a key that is not this convention at all, and a
-question the tool has not yet asked. Each was left to be invented per tool,
-and the obvious inventions are the dishonest ones.*
+The observer obligations O1–O7 and the frugality note live in
+[13 §3](13-observer-conformance.md), wording and numbering untouched — a
+pre-v1.24 citation of "RFC 09 §5.1 O*n*" resolves to 13 §3 O*n*. What the
+move added (the per-medium consequences and the conformance-test shape) is
+new text in 13, not a change to any rule.
 
-An **observer** is any tool that reads the bus without publishing on it —
-`zenctl`, `zengui`, a probe, a dashboard. Observers run un-namespaced (§4),
-so they see everything on the wire, including traffic this convention does
-not govern. The rules below are what keeps that honest.
+### 5.2 Capture and replay — moved to [13 §4](13-observer-conformance.md) (v1.24)
 
-**O1 — A key that does not parse is a fact, not an error.** An observer
-**MUST NOT** discard, hide, or refuse a key merely because it is not
-conformant. Non-conformant traffic is not prohibited — nothing in this
-convention binds a foreign publisher, and [03 §1.2](03-grammar.md) is a rule
-about where the *convention's* keyspace lives, not a claim on the bus. An
-observer **SHOULD** present such a key with whatever it can still establish
-(its chunks, its traffic, its payload rendered structurally per
-[08 §7](08-registry.md)) and state what it could not.
+The `.zrec` etiquette and the re-stamping decision live in
+[13 §4](13-observer-conformance.md), carried over verbatim; the format
+additionally gained a minimal normative contract there (13 §4.1 — before
+v1.24 the reference implementation's code was normative for the format).
 
-**O2 — Classify by degrading, in this order.** Each rung that fails weakens
-the claim rather than discarding the key:
+### 5.3 Synthetic traffic — moved to [13 §5](13-observer-conformance.md) (v1.24)
 
-| Rung | Question | On failure |
-|---|---|---|
-| 1 | Does it sit under the configured base (`strip_base`)? | **Not under this base.** Terminal. |
-| 2 | Does the remainder parse as `v1/…` ([03 §1](03-grammar.md))? | **Unparsed**, carrying the reason. |
-| 3 | Does a registry slice refine the subject ([08 §2](08-registry.md) precedence)? | **Unregistered**, or **no slice for this producer**. |
+The synthetic marker and the generator's etiquette live in
+[13 §5](13-observer-conformance.md), unchanged: same attachment shape, same
+deliberate non-marking of replayed-real traffic and of `spray`.
 
-**O3 — Do not guess another deployment's base.** An observer that finds a key
-outside its configured base **MUST NOT** attribute it to a base by scanning
-left-to-right for a `v1` chunk: a subject tail has no fixed arity, and a base
-may itself contain a literal `v1`. Naming other bases is the §5 sweep's job,
-which attributes fixed-arity *from the right*. "Not under this base" is the
-honest terminal answer.
+## 6. Cutover acceptance — moved to [13 §6](13-observer-conformance.md) (v1.24)
 
-**O4 — "Not asked" is not "answered no".** An observer **MUST** distinguish a
-question it has not put to the bus from one that was answered negatively. A
-tool with no registry loaded has learned nothing about whether a subject is
-registered, and rendering that identically to "this subject is not registered"
-reports a verdict it never obtained — [05 §3.1](05-control-rpc.md)'s rule
-applied to a badge rather than to a reply set. The same holds for a roster not
-yet seeded and a schema not yet fetched.
-
-**O5 — A wildcard scope is not total coverage, and must not be presented as
-such.** `*` and `**` never match a chunk beginning with `@` (this is what
-makes §4 D2 and D4 true). A `**` subscription therefore cannot reach `@rpc`,
-`@media`, `@blob`, `@adv` sidecars, the admin space, **or any service origin**.
-The first half is a gift — a firehose subscriber cannot accidentally pull
-video frames or bulk objects. The second is a trap: an observer scoped `**`
-sees no `@catalog` traffic *by construction*, and if it labels that scope
-"everything" then a healthy catalog and a dead one look identical. An observer
-offering a wildcard scope **MUST** either name the verbatim planes it wants
-alongside it, or state that they are excluded.
-
-**O6 — A bounded observer reports what it dropped.** Any long-running observer
-bounds something — a buffer, a scrollback, a key table — and an unbounded one
-is merely a leak with better manners. Whatever the bound, the tool **MUST**
-report what it cost, and MUST NOT fold the kinds into one number, because
-they are different facts about the same window: samples missed while it was
-behind ("we could not keep up"), keys or lines retired to stay within the
-bound ("we chose to forget"), and — where the tool folds a burst into one
-rendered update — samples **coalesced** ("we kept the newest and summarized
-the rest"; amended at ratification, v1.18). Coalescing is neither of the
-first two: nothing the view promised to show was lost, but a consumer that
-assumes it saw every sample individually is wrong. A view that silently
-shrinks is indistinguishable from a bus that went quiet.
-
-**O7 — A tool that reports a timestamp names who stamped it.** An observer
-that surfaces a sample's HLC — as a time, as an age, or as a latency —
-**MUST NOT** describe it as the publisher's clock unless it established that
-the publisher stamped it. Zenoh timestamps at the **first node with
-timestamping enabled**, which on a deployment configured
-`timestamping: { enabled: { router: true } }` is a router rather than the
-producer; the stamping node's identity rides on every stamped sample, and can
-be compared against the publisher's whenever `SourceInfo` is present. Three
-cases, and they are three: **self-stamped** (the HLC is the publisher's
-clock), **stamped elsewhere** (it is that node's clock, and a latency computed
-from it measures stamper → observer), and **unattributable** (stamped, but
-nothing said by whom — O4 applies: unknown, not foreign). An observer
-**MUST NOT** pool measurements taken from different stampers into one
-distribution: they measure from different clocks, and a combined median
-describes neither. Naming the stamper is the whole obligation — this rule
-asks for nothing new on the wire.
-
-*Practical note (measured against zenoh 1.9).* A subscriber is not currently
-delivered `SourceInfo` — not from a plain publisher and not from an
-AdvancedPublisher — so the id-to-id comparison is usually **unavailable**, and
-**unattributable** is the ordinary answer rather than the exceptional one. That
-is not a reason to guess. An observer that names the stamping node and says it
-cannot attribute it has told the truth; one that calls the same number "the
-publisher's HLC" has not, whatever the deployment happens to be doing. The rule
-is written against what the wire carries, not against what one release
-propagates, so it needs no revision if that changes.
-
-*Informative — frugality (added at ratification, v1.18).* The obligations
-above are about honesty, not thrift, but one habit keeps both cheap: an
-observer SHOULD retrieve only what its user asked to see. Rendering what is
-already in hand — registry slices, a seeded roster — is ambient and free;
-anything that costs the data plane (a probe, a fetch, a subscription) is
-asked for explicitly, once per ask. Guidance rather than obligation, because
-cost is a design budget rather than a truth condition — recorded because the
-reference explorers hold to it (data movement costs exactly one deliberate
-action; zenkey #84/#85), and because a tool that ignores it tends to violate
-O5 by accident: a pane that quietly fans out to keep itself fresh is
-claiming coverage nobody asked it to have.
-
-> **Where this came from.** Every rule above is a mistake that was made and
-> caught while building `zengui` against this convention, not a hypothetical.
-> O2 and O4 replaced a boolean "registered" flag that rendered "no registry
-> loaded" as "unregistered". O3 replaced a base guess. O5 replaced a design
-> that had defended against `@media` frames arriving through a `**` scope —
-> which cannot happen — while missing that the same scope silently hid
-> `@catalog`. O6's third kind arrived the same way, at ratification: the
-> reference GUI's link layer batches bursts under a cap and counts the
-> overflow (`coalesced`) beside its broadcast lag (`lagged`) — an honest
-> number the two-counter wording could only misfile. O7 is the first that came
-> from the *engine* rather than the GUI: `zenkey-fleet` documented its HLC as
-> "the publisher's clock" and computed a latency from it for as long as the
-> measurement had shipped, while never once reading the stamper id that rode
-> beside it (zenkey #213).
-
-### 5.2 Capture and replay — `.zrec` etiquette (v1.13)
-
-*Added in v1.13. The v1.5 amendment slate's H7 promised cookbook material
-on "record/replay etiquette" and never delivered it — nothing existed to
-document. With the `record` module in `zenkey-fleet` (zenkey #39) and the
-`zenctl record` / `zenctl replay` commands (zenkey #53), the etiquette half
-matters, because replay is **publishing**, and publishing a capture onto a
-live fleet base is exactly the accident this convention exists to prevent.
-This section is informative; the code is normative for the format. The
-obligations of §5.1 apply throughout — a capture file is an observer whose
-window happens to be on disk.*
-
-**The format, in one screen.** A `.zrec` file is newline-delimited JSON —
-deliberately the *same row dialect* the explorers already emit
-(`zenctl topic echo --format ndjson`) and read back
-(`zenctl topic pub --from ndjson`), not a second format:
-
-- **Line 1 — the header**: `{"zrec": 1, "selectors": […], "base": "…",
-  "captured_at": "<RFC 3339>"}`. The header names what was asked (O4) and
-  under which base; a wildcard selector cannot cross an `@`-chunk, so a
-  `**` capture states that `@rpc`/`@blob`/`@media`/`@catalog` and service
-  origins are excluded rather than claiming "everything" (O5).
-- **Sample rows**: the echo row shape plus `"bytes"` (base64, the exact
-  wire payload — `"value"` is a decoded *rendering* and is not
-  round-trippable), `"t"` (microseconds since capture start, the
-  **observer's arrival clock** — this is what replay paces by), and the
-  publisher's HLC `"timestamp"` carried **informatively** (see below).
-  Tombstones are rows with `"delete": true`. Non-conformant keys are
-  recorded verbatim (O1) — a capture curates nothing.
-- **Drop records, interleaved where they happened**: `{"dropped": n}`.
-  O6 applied to a file: a capture taken while the observer was behind is a
-  partial view, and the file itself says so, at the position where the gap
-  is. A reader surfaces the sum; a replay repeats it.
-
-**Timestamps are re-stamped on replay, deliberately.** Replayed samples go
-through declared publishers and receive the *replaying* session's HLC; the
-capture's `"timestamp"` field is provenance, not a value to reproduce.
-Reconciliation is by HLC — newer value wins, newer delete wins, and an
-untimestamped sample cannot be reconciled at all
-([04-planes.md §3.2](04-planes.md)) — so carrying a foreign, hours-old HLC
-back onto the wire would make every replayed sample silently lose LWW
-against anything live, which turns "replay onto a quiet base" into a no-op
-that *looks* like a replay. Re-stamping keeps replay legible: what you
-published now is newest now. The cost is the inverse hazard, and it is the
-whole reason this section exists: **re-stamped old data wins LWW against a
-live fleet** ([04-planes.md §1.2](04-planes.md)) — a replayed capture can
-overwrite current state with last Tuesday.
-
-**Hence the etiquette:**
-
-- **Dry-run first.** A replay whose puts you have not previewed is a write
-  you have not reviewed. `zenctl replay --dry-run` lists every would-be
-  put and performs none.
-- **The header base is a contract.** Replaying under a base other than the
-  one in the capture header is refused unless explicitly forced
-  (`--force-base`) — the tool never re-derives a base from the recorded
-  keys (O3), and "same keys, different deployment" is presumed to be a
-  mistake until the operator says otherwise.
-- **Tombstone rows are operator deletes.** A recorded delete replays
-  through the same class-conscious retire gate as a live one
-  ([04-planes.md §1.2](04-planes.md), the v1.12 bullet): confirmation off
-  the `state` class, wildcards impossible by construction (rows carry
-  concrete keys).
-- **Two replays exist; do not confuse them.** *Re-publishing* replay (the
-  CLI) makes real puts through declared publishers and is governed by
-  everything above. *Pane* replay (the GUI's scrubber) feeds a tool's own
-  views from the file and never touches a session — it is reading, not
-  publishing, and needs no etiquette beyond honesty about its mode.
-- **A time scrubber states its clock.** A `.zrec` carries two clocks — the
-  observer's arrival offsets (`"t"`) and the publishers' HLCs — and a
-  consumer plotting a time axis says which one it plotted. The reference
-  scrubber plots `"t"`.
-
-### 5.3 Synthetic traffic — the generator's etiquette (v1.19)
-
-*Added in v1.19, alongside `zenctl gen` (zenkey #162). Replay got its
-etiquette in §5.2 because replay is publishing; a **generator** is
-publishing with one fewer excuse — the bytes never even happened. This
-section is normative for the marker; the generator's own behavior
-(guards, plan preview) is tool documentation.*
-
-Synthetic traffic is any sample published to exercise or test a consumer
-rather than to report a fact about the world: generated payloads, fault
-injections, load patterns. The keyspace cannot distinguish it — that is
-the point of generating conforming traffic — so the **attachment** must:
-
-- A tool that publishes synthetic traffic MUST attach, to every synthetic
-  sample, a JSON object attachment carrying at least
-  `{"synthetic": true, "tool": "<name>", "origin": "<generating origin>"}`.
-  A fault injector additionally carries `"fault": "<kind>"`
-  (zenkey #163). Attachments on the data classes are otherwise free-form —
-  the registry types media-frame attachments ([08 §2](08-registry.md)'s
-  `[[media]]` `attachment` field) and declares nothing about data-class
-  attachments; this marker is the one reserved shape among them.
-- An observer that judges traffic (a doctor listen window, an `expect`
-  verdict, a capture reader) SHOULD count marked samples separately and
-  say so — generated traffic judged as real is a self-inflicted finding.
-- A `.zrec` capture records the marker like any attachment (the row
-  dialect already round-trips attachments verbatim), so a **replay of
-  synthetic traffic stays marked** with no extra rule.
-- Deliberately **not** changed: replayed-but-originally-real traffic is
-  not marked — replay provenance stays in the capture header and §5.2's
-  re-stamping rules; inventing a marker for it would rewrite recorded
-  bytes. The `spray` demo is likewise unmarked: it exists to be a
-  self-contained adversarial bus, runs against no fleet but its own, and
-  marking it would defeat the negative cases it stages.
-
-## 6. Cutover acceptance
-
-*Added in v1.2. Nothing in the convention said how you **prove** a
-migration finished. [11](11-zensight-profile.md) scopes verification out
-explicitly, so it belongs here.*
-
-A cutover to (or between majors of) this convention is **not done** until
-an isolated run demonstrates **both** of the following. One without the
-other is not evidence.
-
-**1. The retired key family is silent.**
-
-Stand up the deployment, subscribe to the *whole* old root, and assert an
-empty result set while the new planes carry traffic. A migration you can
-assert the *absence* of is a migration you can finish; one you cannot is a
-migration you merely believe in.
-
-Note what this costs you if the version chunk is plain (`v1`, not `@v1`):
-`<base>/**` reaches the new keys too, so the subscriber sees your own
-traffic and the leak check must state its meaning explicitly — *anything
-outside `<base>/v1/`* — rather than riding on key algebra. Same guarantee,
-stated rather than inferred. (A verbatim version chunk gives the algebraic
-version for free, and costs you zenoh-ext's `@adv` sidecars, which is a bad
-trade — [03-grammar.md §1.2](03-grammar.md).)
-
-**2. A consumer-shaped, concrete-key probe passes.**
-
-> **A probe MUST build its keys the way the product builds them.**
-
-A fleet-selector probe (`<base>/v1/*/@rpc/…`) **cannot** catch a broken
-origin path: the `*` matches *any* origin, so a caller whose origin concept
-is complete garbage still gets replies. The reference implementation's
-smoke was green — subscribing on wildcards, asserting replies arrived —
-while **every drill-down in the product was broken**, because the product
-used concrete origins and the probe did not
-([06-identity.md §6.3](06-identity.md)).
-
-> **A test that uses a wildcard where the product uses a concrete value is
-> testing a different program.**
-
-So the probe MUST resolve an origin through the same bridge the consumer
-uses ([06-identity.md §6](06-identity.md)) and then issue **origin-scoped**
-calls — and it MUST fail if the bridge yields nothing. Absence of replies
-and absence of *callers* must not look alike.
-
-Recommended shape (both halves, one run): multicast off / gossip on
-(§0.1), an explicit endpoint, the full producer set, one un-namespaced
-observer for the honest wire view (§5), and a consumer-shaped phase that
-resolves origins and drills down exactly as the UI does.
+The two-halved acceptance procedure (retired family silent **and** a
+consumer-shaped concrete-key probe) lives in
+[13 §6](13-observer-conformance.md), unchanged — it is a judgment
+procedure, and it moved with the rest of them.

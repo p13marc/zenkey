@@ -847,8 +847,9 @@ Normative points:
   kind's own encoding** — deliberately *not* sample-then-sniff, because an
   outgoing body has no wire bytes to sniff and the operator's text says
   nothing about the subject. A tool that could not encode MUST say so
-  rather than publish the unencoded body silently ([09 §5.1](09-operations.md)
-  O4 applied to a write).
+  rather than publish the unencoded body silently
+  ([13 §3](13-observer-conformance.md) O4 applied to a write; cited as
+  09 §5.1 O4 before v1.24).
 
 The decode contract for a generic tool is then mechanical: wire key →
 structural parse → slice refine → type name (+ encoding) → SchemaSet
