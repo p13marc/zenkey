@@ -71,19 +71,36 @@ pub async fn check(
 
     // Offline (--schema-set) needs no session at all — that is the whole
     // point: an app repo checks its golden payloads in CI with no bus.
+    // Every schema-acquisition failure below is `not_checked`, never `?`: a
+    // `?` exits 1, this verb's "does not conform", and an unreadable file, a
+    // dead bus or a missing flag is not a claim about the payload (the same
+    // split #244 fixed for the payload itself).
     let schema = match (schema_set, producer) {
         (Some(path), _) => {
-            let text = std::fs::read_to_string(path)?;
-            let set = zenkey::schema::SchemaSet::parse(&text).map_err(|e| {
-                anyhow::anyhow!("{}: not a SchemaSet document: {e}", path.display())
-            })?;
+            let text = match std::fs::read_to_string(path) {
+                Ok(t) => t,
+                Err(e) => not_checked(&format!("{}: {e}", path.display())),
+            };
+            let set = match zenkey::schema::SchemaSet::parse(&text) {
+                Ok(s) => s,
+                Err(e) => not_checked(&format!(
+                    "{}: not a SchemaSet document: {e}",
+                    path.display()
+                )),
+            };
             match set.get(type_name) {
                 Some(s) => s.clone(),
                 None => not_checked(&format!("{} carries no type {type_name:?}", path.display())),
             }
         }
         (None, Some(p)) => {
-            let session = args.session().await?;
+            let session = match args.session().await {
+                Ok(s) => s,
+                Err(e) => not_checked(&format!(
+                    "no session, so {p}'s served describe is out of reach: {}",
+                    crate::errors::without_source_locations(&format!("{e:#}"))
+                )),
+            };
             let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
             match store.schema_for(&session, p, type_name).await {
                 Some(s) => s,
@@ -93,9 +110,9 @@ pub async fn check(
                 )),
             }
         }
-        (None, None) => anyhow::bail!(
+        (None, None) => not_checked(
             "give --producer (live describe) or --schema-set FILE — the registry \
-             TOMLs carry type names, not shapes (RFC 08 §7)"
+             TOMLs carry type names, not shapes (RFC 08 §7)",
         ),
     };
 

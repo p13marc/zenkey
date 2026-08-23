@@ -405,7 +405,9 @@ pub async fn run() -> Result<()> {
                 }),
             ..
         } => {
-            let bus = Bus::resolve(&bus)?;
+            // A verdict verb: a failure before the question is asked is the
+            // reserved exit 2, never 1 (`cmd::asked`'s rule).
+            let bus = cmd::asked("schema check", Bus::resolve(&bus));
             cmd::schema::check(
                 &type_name,
                 &from,
@@ -446,7 +448,9 @@ pub async fn run() -> Result<()> {
             cmd::registry::diff(&bus).await
         }
         Command::Registry(RegistryCmd::Retired { listen, bus }) => {
-            let bus = Bus::resolve(&bus)?;
+            // A verdict verb: a failure before the question is asked is the
+            // reserved exit 2, never 1 (`cmd::asked`'s rule).
+            let bus = cmd::asked("registry retired", Bus::resolve(&bus));
             cmd::registry::retired(listen, &bus).await
         }
         Command::Registry(RegistryCmd::Lint { dir, ledger, out }) => {
@@ -528,7 +532,9 @@ pub async fn run() -> Result<()> {
             window,
             bus,
         } => {
-            let bus = Bus::resolve(&bus)?;
+            // A verdict verb: a failure before the question is asked is the
+            // reserved exit 2, never 1 (`cmd::asked`'s rule).
+            let bus = cmd::asked("cutover", Bus::resolve(&bus));
             cmd::cutover::run(&old_root, window, &bus).await
         }
         Command::Gen(args) => cmd::generate::run(args).await,
@@ -543,7 +549,9 @@ pub async fn run() -> Result<()> {
             absent,
             bus,
         } => {
-            let bus = Bus::resolve(&bus)?;
+            // A verdict verb: a failure before the question is asked is the
+            // reserved exit 2, never 1 (`cmd::asked`'s rule).
+            let bus = cmd::asked("expect", Bus::resolve(&bus));
             cmd::expect::run(
                 &selector,
                 within,

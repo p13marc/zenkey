@@ -20,7 +20,10 @@ so it is a **1**, not the 2 it used to be (#209).
 That the 2 was wrong is a claim about this tool's vocabulary rather than a
 preference: exit 2 here means *not proven* — `expect`, `cutover` and
 `schema check` all reserve it for a question that could not be asked. A
-misspelled context name is not an unanswerable question.
+misspelled context name is not an unanswerable question — **on a listing**,
+whose 1 carries no verdict. On the verdict verbs themselves the same mistake
+must land on the reserved 2, because their 1 *is* a verdict; that half lives
+in `verdict-not-asked.trycmd`.
 
 It is also refused **before** the command starts, which is the other half of
 what changed: resolution used to happen at whichever accessor was reached

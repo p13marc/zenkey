@@ -11,7 +11,10 @@ use anyhow::Result;
 use crate::Bus;
 
 pub async fn run(old_root: &str, window: u64, args: &Bus) -> Result<()> {
-    let session = args.session().await?;
+    // A verdict verb: a session that will not open is `asked`'s exit 2 — an
+    // exit 1 here would read "the old family still speaks" about a bus
+    // nobody listened to.
+    let session = super::asked("cutover", args.session().await);
     let base = args.base().to_string();
 
     // Stated before the window opens, not after: a user watching a 30-second
@@ -25,7 +28,10 @@ pub async fn run(old_root: &str, window: u64, args: &Bus) -> Result<()> {
         )
     );
 
-    let report = zenkey_fleet::run_cutover(&session, &base, old_root, window).await?;
+    let report = super::asked(
+        "cutover",
+        zenkey_fleet::run_cutover(&session, &base, old_root, window).await,
+    );
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // The one part that cannot move: a library returns a verdict, a command
     // exits with it (0 = pass, 1 = the old root still speaks, 2 = unproven —

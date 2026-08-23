@@ -117,17 +117,24 @@ pub async fn diff(args: &Bus) -> Result<()> {
 /// in `zenkey_fleet::retired`. What is left here is what only a CLI has: the
 /// session, the rendering, and the exit code.
 pub async fn retired(listen: Option<u64>, args: &Bus) -> Result<()> {
+    // A verdict verb: every pre-run failure below goes through `asked`'s
+    // exit 2 — an exit 1 here would read "a retired subject still speaks"
+    // about a ledger nobody could walk.
     let dirs = args.registry_dirs();
-    if dirs.is_empty() {
-        return Err(anyhow!(
-            "registry retired walks the [[deprecated]] ledger of local registry \
-             files — pass --registry <dir> (or set one on the active context)"
-        ));
-    }
     // The ledger source is the dirs alone, never the bus union: the served
     // slices are a *fact to check against* (§6.1), not a second ledger.
-    let local = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
-    let session = args.session().await?;
+    let local = super::asked(
+        "registry retired",
+        if dirs.is_empty() {
+            Err(anyhow!(
+                "registry retired walks the [[deprecated]] ledger of local registry \
+                 files — pass --registry <dir> (or set one on the active context)"
+            ))
+        } else {
+            zenkey_fleet::SliceSet::from_dirs(&dirs)
+        },
+    );
+    let session = super::asked("registry retired", args.session().await);
     let entries: usize = local.slices().iter().map(|s| s.deprecated.len()).sum();
     if let Some(window) = listen {
         // Stated before the window opens, not after (O5).
@@ -141,15 +148,18 @@ pub async fn retired(listen: Option<u64>, args: &Bus) -> Result<()> {
         );
     }
     let registries: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
-    let report = zenkey_fleet::run_retired(
-        &session,
-        args.base(),
-        &local,
-        registries,
-        listen,
-        args.timeout(),
-    )
-    .await?;
+    let report = super::asked(
+        "registry retired",
+        zenkey_fleet::run_retired(
+            &session,
+            args.base(),
+            &local,
+            registries,
+            listen,
+            args.timeout(),
+        )
+        .await,
+    );
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // The exit discipline shared with `cutover` and `expect`: a library
     // returns a verdict, a command exits with it (0 = pass, 1 = a retired
