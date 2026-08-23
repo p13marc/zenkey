@@ -70,4 +70,9 @@ async fn a_responder_answers_and_logs_the_ask() {
             .as_ref(),
         b"ping"
     );
+    assert_eq!(
+        view.reply_error, None,
+        "a sent reply carries no error (deep-review D7: the error path \
+         rides the view, not the void)"
+    );
 }
