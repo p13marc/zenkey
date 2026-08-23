@@ -129,6 +129,10 @@ ci:
     # The update thread does not touch the disk (#255): a handler that needs
     # the filesystem needs a services:: function and a landing message.
     ./scripts/check-fs-seam.sh
+    # RFC chapter headers agree with rfcs/CHANGELOG.md's Amends ledger
+    # (v1.25 S6) — and this is the lane that always runs it, since CI's
+    # triggers skip doc-only pushes.
+    ./scripts/check-rfc-status.sh
     # The type scale by role (#191), the interactive seam (#193) and the
     # spacing grid (#192) — all run as CI's type-scale job.
     ./scripts/check-type-scale.sh

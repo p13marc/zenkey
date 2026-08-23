@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.7, v1.8, v1.11, v1.16 and v1.17 — see [00-index.md](00-index.md)*
+**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.7, v1.8, v1.11, v1.16, v1.17 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -197,6 +197,19 @@ and a foreseeable first consumer exists (a support-bundle upload). An
 endpoint being unconsumed today is an argument about tables describing
 what is served — it is not, by itself, an argument for removing the one
 write affordance the plane has.
+
+**A manifest's `filename` is advisory, never a path (v1.25).** A manifest
+MAY carry a suggested filename for the artifact. A consumer MUST NOT join
+that name — or any other server-supplied name — into a filesystem path:
+where fetched bytes land is decided on the consumer's side (its user, or
+its own naming rule such as the target's own id/hash spelling), never by
+the party serving them. A remote name joined to a local path is a
+path-traversal vector (`../…`) on exactly the plane where a tool defaults
+a destination, and the manifest travels over the same bus as the blob —
+§2.1 anchors the *bytes*, nothing anchors the *name*. The advisory name
+MAY pre-fill an operator-editable destination field; it never becomes a
+path on its own. Both reference frontends enforce this; the rule was
+enforced code, stated nowhere, until now.
 
 Resume is a persisted **chunk bitfield**: the client re-requests exactly the
 holes it is missing, as a chunk-range selector on the same wildcard GET. A
@@ -556,14 +569,18 @@ behind a feature gate, a registry MAY accept its declaration
 it.*
 
 The demotion is an observation, not a redesign. After a full release cycle
-of v1.7's table, adoption was zero: no producer declared `fanout`, no
-consumer enabled the reference client's feature (every registry entry that
-declares a blob tier excludes it, with the reason written in the TOML), and
-the one genuinely one-to-many stream in the deployed fleet chose `@media`
-instead. A normative endpoint table should describe what is served;
-keeping an endpoint every declaring producer excludes makes the table
-aspirational, and aspirational normative text is how a second implementer
-ends up building something nobody will speak to. Demotion costs nothing to
+of v1.7's table, adoption was zero: no consumer enabled the reference
+client's feature, no producer *serves* the endpoint, and the one genuinely
+one-to-many stream in the deployed fleet chose `@media` instead. (An
+earlier draft of this paragraph claimed every blob-declaring registry
+entry *excludes* the token; corrected in v1.25 — the codegen regression
+corpus's one artifact entry deliberately **declares** `fanout`, precisely
+to pin that the token stays legal in `endpoints` per D5.
+Declared-but-unserved is the accurate description, and it is D5's point.)
+A normative endpoint table should describe what is served; keeping an
+endpoint that no declaring producer serves makes the table aspirational,
+and aspirational normative text is how a second implementer ends up
+building something nobody will speak to. Demotion costs nothing to
 reverse: if a real one-to-many customer appears — firmware rollout is the
 plausible one — promotion back into §2.2 is a one-line amendment.
 

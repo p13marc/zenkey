@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20 and v1.23 — see [00-index.md](00-index.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -221,10 +221,11 @@ Normative field table (`[[subject]]`; `[[procedure]]`/`[[media]]` analogous):
 | `qos` | enum, profiles of [04-planes.md §3](04-planes.md) | no (class default); **alert-family `state`** (`common = "alert"`, or a leading `alert` chunk) MUST declare it, `= "alert"` or stronger (v1.23) | named QoS profile |
 | `unit` | string | primitive numerics only | unit of the leaf value |
 | `cardinality` | integer | yes if `path` has any `{var}` | expected key-population bound (order of magnitude); the budget review enforces |
-| `ttl_s` | integer | live `state` only | staleness TTL; publishers refresh ≤ ttl/2, consumers age out at ttl |
+| `ttl_s` | integer | every `state` subject (v1.25; was "live `state` only") | staleness TTL; publishers refresh ≤ ttl/2, consumers age out at ttl. The old qualifier misread [04 §1.2](04-planes.md): "live" there is a per-*key* condition (not yet retired), not a per-subject property a TOML could carry — every state subject's keys age, and the reference lint has always required the field on all of them. Adopted as written |
+| `common` | framework token | no (`state` only, v1.25) | declares this entry as a framework state subject ([04-planes.md §1.4](04-planes.md)) and drives the generated framework grouping (the enforcement crate's `AnySubject::common_state()`). Closed vocabulary: the neutral per-producer tokens `health`, `sensor`, `alert`, `evidence_self`, `evidence_device`, `evidence_names`; the `@catalog` service tokens `entity`, `alias`, `pdns`; plus any token the application's profile chapter declares (ZenSight: `errors`, [11 §2](11-zensight-profile.md)). The entry's `path` MUST be the token's canonical spelling (04 §1.4's table) with its variables |
 | `rate` | `rare` \| `low` \| `burst(n/h)` | `events` only | rate class (CI-checked, [04-planes.md §1.3](04-planes.md)) |
 | `seed` | `none` \| `latest` \| `tail(n)` | no (class default: `state` → `latest`, `telemetry` → `none`) | late-joiner entitlement ([04-planes.md §3.1](04-planes.md)); *how* it is met (storage vs cache) is deployment config |
-| `detect_s` | integer | no (live `state` only; default = `ttl_s`) | max latency to detect a missed transition; values ≪ `ttl_s` require the advanced tier ([04-planes.md §3.3](04-planes.md)) |
+| `detect_s` | integer | no (`state` only; default = `ttl_s`) | max latency to detect a missed transition; values ≪ `ttl_s` require the advanced tier ([04-planes.md §3.3](04-planes.md)) |
 | `replay` | `none` \| `window(t)` | `events` only | how far back events must stay queryable (met by the events storage) |
 | `delivery` | `full` (default) \| `invalidate` | no | oversized-state pattern ([04-planes.md §1.2](04-planes.md)) |
 | `encoding` | MIME-ish string (`application/cbor`, `application/json`, `application/protobuf`, `application/cdr`) | no (RECOMMENDED, v1.5) | the payload encoding a consumer should expect; resolution order is sample `Encoding` > this field > sniff on read, and declared > this field > the schema kind's own on write ([04-planes.md §3](04-planes.md), §7) |
@@ -237,7 +238,7 @@ normative field table:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `path` | pattern string | yes | media sub-path after `@media/<producer>/`; same variable rules as below |
+| `path` | pattern string | yes | media sub-path after `@media/<producer>/`; variable rules as below, **except** that `{var...}` is forbidden (v1.25) |
 | `encoding` | middleware `Encoding` (may be a `type/*` family) | yes | the wire `Encoding` set on every sample (`video/h264`, `image/jpeg`) — the codec is declared here, never in a payload envelope |
 | `attachment` | type-table name | yes | the per-frame sidecar type on the Zenoh attachment (`FrameMeta`); **CI-resolved against the shared type table** ([§5](#5-ownership-and-process)), exactly like a `[[subject]]` `type`, so a typo or a drifted schema fails the build |
 | `cardinality` | integer | yes if `path` has any `{var}` | key-population bound, budget-reviewed — the same rule as `[[subject]]`, and it now binds the highest-bandwidth plane, whose `{tier}` chunk multiplies its key count |
@@ -377,7 +378,7 @@ they too have their own normative field table:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `path` | pattern string | yes | procedure sub-path after `@rpc/<producer>/`; same variable rules as `[[subject]]` |
+| `path` | pattern string | yes | procedure sub-path after `@rpc/<producer>/`; variable rules as `[[subject]]`, **except** that `{var...}` is forbidden (v1.25, below) |
 | `kind` | enum `read \| write \| long-running` | yes | procedure idiom ([05-control-rpc.md §3](05-control-rpc.md)) |
 | `request` | type-table name | no (empty-body reads) | payload type of the query body; CI-resolved against the shared type table ([§5](#5-ownership-and-process)) |
 | `reply` | type-table name | yes | payload type of a success reply (errors ride `reply_err`, 05 §3) |
@@ -401,11 +402,20 @@ Variable rules:
 - `{var}` = exactly one chunk; MUST document its domain (device name, unit
   slug, ip-slug, ULID, hash…) in the description or a `domain` sub-key.
 - `{var...}` = **rest-variable**: one or more chunks, allowed only in
-  trailing position, at most one per pattern. This is how open-depth
-  subjects (gNMI paths, directory-like metrics) register without
-  enumerating every path: the pattern still binds exactly one payload type
-  across all expansions, and its `cardinality` budget covers the whole
-  family. Generated accessors expose the rest as a chunk list.
+  trailing position, at most one per pattern — and only in `[[subject]]`
+  patterns (v1.25; the reference lint always refused the rest, while this
+  text said "same variable rules"). A **procedure** names one operation:
+  an open-depth procedure family would be a call surface nobody can
+  enumerate, introspect honestly (§6), or ACL by literal key
+  ([09 §3](09-operations.md)). A **media** path names a stream a viewer
+  subscribes to *exactly* ([07 §1](07-bulk-planes.md)): a family of
+  unenumerable depth cannot appear in the stream catalogue the
+  no-wildcard rule depends on. Open depth is a subject-tail affordance —
+  which is how open-depth subjects (gNMI paths, directory-like metrics)
+  register without enumerating every path: the pattern still binds
+  exactly one payload type across all expansions, and its `cardinality`
+  budget covers the whole family. Generated accessors expose the rest as
+  a chunk list.
 - A pattern with any variable still binds one payload type across all its
   expansions ([02-principles.md P5](02-principles.md)).
 - Service origins (`@catalog`) register the same way with `[service]`
@@ -552,12 +562,15 @@ job and is diagnosed from the wire, not from TOML.
   base name ending in `-<int>`, [03-grammar.md §1.5](03-grammar.md); no
   reserved token as a subject leaf); no `deprecated` path is re-registered
   and no `[[deprecated]]` entry is ever deleted; every `events` entry has
-  a `rate`; every `{var}`-bearing entry has a `cardinality`; every live
-  `state` entry has a `ttl_s`; every **alert-family** `state` entry
+  a `rate`; every `{var}`-bearing entry has a `cardinality`; every
+  `state` entry has a `ttl_s` (v1.25 — see the §2 row); every **alert-family** `state` entry
   (`common = "alert"`, or a leading `alert` chunk) declares
   `qos = "alert"` or stronger — the per-class default cannot see a family,
   and a silent fall to `refreshed` would drop-qualify the one family the
-  express axis exists for ([04-planes.md §3](04-planes.md), v1.23).
+  express axis exists for ([04-planes.md §3](04-planes.md), v1.23); every
+  `common = "…"` value is in the framework vocabulary, on a `state`
+  entry, with the token's canonical pattern and variables
+  ([04-planes.md §1.4](04-planes.md), v1.25).
 - CI MUST enforce, for `[[blob]]` entries (v1.8) — these are closed
   vocabularies fixed by [07 §2](07-bulk-planes.md), so every one of them is
   decidable at build time and none is a matter of taste:
@@ -764,6 +777,42 @@ the day it was written. A future `feature`/`when` field on the subject and
 procedure declarations would let the slice carry this itself, and is the
 right eventual answer; it is deliberately deferred here rather than
 designed in the abstract.
+
+**The ledger, specified (v1.25).** v1.20 wrote the MUST above and stopped
+there; its siblings (`deprecated.lock`, §3; `registry.lock`, §3.1) are
+specified to the byte, and a ledger the check reads deserves the same. The
+file is **`conditional.lock`**, in the registry directory beside
+`deprecated.lock`, and shaped like it: `#` comment lines, then one
+tab-separated line per conditional subject —
+
+```
+<producer>	<path>	<condition>
+```
+
+`<producer>` and `<path>` name the registry entry exactly as a
+`deprecated.lock` line does. `<condition>` is the gating condition as
+**free text** — `feature wireguard`, `operator enables flow export`,
+`host exposes a TPM` — prose for the human deciding whether the gate
+still exists, deliberately not a machine-readable expression: the
+field-level `feature`/`when` design stays deferred (above; zenkey #171),
+and a ledger that grew its own condition grammar would be that design
+landing by the back door.
+
+The two-direction check of the paragraph above, concretely:
+
+- a subject listed in the ledger is **exempt** from the emitted-surface
+  check — the build- or test-time check of "Checking the two halves" MUST
+  NOT require the build's mappers to cover it;
+- a ledger line whose `<producer>`/`<path>` names no registry entry is an
+  **error** — the entry was retired or renamed, and the line must follow
+  it or leave.
+
+Both directions fail the consumer's build (reference implementation:
+`zenkey-build`). Unlike `deprecated.lock`, this ledger is **not**
+append-only: a line leaves when its condition does, and a subject that
+became unconditional re-enters the emitted-surface check by deletion —
+which is the honest direction of travel, and the mechanical form of the
+decay warning above.
 
 ## 7. Payload self-description (v1.5)
 

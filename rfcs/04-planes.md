@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified), amended v1.4, v1.5 and v1.12** · normative chapter
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -92,13 +92,19 @@ rules for deciding where a given piece of information belongs.
 
 **Alerts are state.** An alert has a stable identity key
 `state/<producer>/alert/<alert_key>`, transitions firing → resolved on that
-one key, and is retired by tombstone. `<alert_key>` is normatively: the
-FNV-1a 64-bit hash of the rule name and the sorted discriminating labels
-(host-scoped labels excluded), rendered as 16 lowercase hex chars. The
-producing source is *not* hashed — origin and producer are already in the
-key, which is what makes the key origin-scoped. (This deliberately differs
-from the incumbent `alert_key`, which prefixes the rule name and hashes the
-source; see [11-zensight-profile.md §3](11-zensight-profile.md).) Modelling
+one key, and is retired by tombstone. `<alert_key>` is normatively: **a
+stable, origin-excluded hash of rule identity + discriminating labels,
+byte-precise per application profile** — stable, so that
+firing → resolved → retired is one key's history; origin-excluded (the
+producing source is *not* hashed, and host-scoped labels are excluded with
+it), because origin and producer are already in the key, which is what
+makes the key origin-scoped. The hash function, its exact input framing,
+and the rendered width are **profile constants**: an application's profile
+chapter fixes them with the same byte precision
+[06-identity.md §1](06-identity.md) gives the origin derivation, so two
+producers of one application mint the same key for the same alert (the
+reference profile's recipe and test vector:
+[11-zensight-profile.md §3.1](11-zensight-profile.md)). Modelling
 alerts as events would force every consumer to re-derive "what is firing
 now" from an unbounded log — the exact query the class system should answer
 with one selector: `<base>/v1/*/state/*/alert/*`.
@@ -124,6 +130,46 @@ with one selector: `<base>/v1/*/state/*/alert/*`.
   storage is the normative contract, decided in
   [12-open-questions.md §4](12-open-questions.md); the bus contract is
   only immutability + unique keys.
+
+### 1.4 The framework state set (normative, v1.25)
+
+A handful of `state` subjects recur on **every** producer — this chapter
+and [06](06-identity.md) have named each of them since v1.0, but the set
+itself was never written down in one place, and the registry's `common`
+field ([08-registry.md §2](08-registry.md)) needs a definition to point
+at. This is that place. The **framework state set** is:
+
+| Subject (under `state/<producer>/`) | `common` token | Defined |
+|---|---|---|
+| `health` | `health` | the producer health document (§1.2; the identity bridge rides it, [06 §6.2](06-identity.md)) |
+| `sensor` | `sensor` | the registration document (§5) |
+| `alert/{alert_key}` | `alert` | the alert family (§1.2) |
+| `evidence/self` | `evidence_self` | the producer's own identity claim ([06 §4](06-identity.md)) |
+| `evidence/device/{device}` | `evidence_device` | an observed device's identity claim ([06 §4](06-identity.md)) |
+| `evidence/names/{ip_slug}` | `evidence_names` | a passive-DNS name observation ([06 §4](06-identity.md)) |
+
+plus the `@catalog` **service** subjects — `entity/{entity_id}`,
+`alias/{old_id}`, `pdns/{ip_slug}` (tokens `entity`, `alias`, `pdns`;
+[06 §5](06-identity.md)) — which are one service's state rather than a
+family across producers. `alive` is deliberately **not** in the set: it
+is presence, not a state subject (§5, [03-grammar.md §3](03-grammar.md)),
+and has no `common` token.
+
+Three rules make the set usable rather than decorative:
+
+- **The spelling is the table's.** A registry entry declaring
+  `common = "<token>"` MUST use the token's subject pattern exactly as
+  written above — the token is a claim that this entry *is* that
+  framework subject, and the generated framework grouping
+  ([08-registry.md §2](08-registry.md)) dispatches on it.
+- **The neutral set is closed here.** New neutral tokens arrive by
+  amendment to this table (or to 06's, for catalog subjects), like any
+  other convention vocabulary.
+- **Profile tokens extend it, in the profile chapter.** A framework
+  subject an application adds beyond this set (ZenSight's `errors`,
+  [11-zensight-profile.md §2](11-zensight-profile.md)) is declared in
+  that application's profile chapter with the same table discipline; it
+  is real vocabulary for that application and invisible to every other.
 
 ---
 
@@ -246,7 +292,7 @@ choice, exactly as QoS profiles are enforceable by router config:
 | Entitlement | Registry field | Meaning | Class defaults |
 |---|---|---|---|
 | **Seed** | `seed = none \| latest \| tail(n)` | what a late joiner may obtain per key without waiting out a cadence | `state`: `latest` (mandatory) · `telemetry`: `none` (a blank chart until the next cadence conforms) · `events`: n/a (see replay) |
-| **Miss detection** | `detect_s` (live `state` only; default = `ttl_s`) | the maximum time within which a consumer can *detect* a missed transition | baseline meets `detect_s = ttl_s` for free (refresh + aging + liveliness); smaller values need the advanced tier (§3.3) |
+| **Miss detection** | `detect_s` (`state` only; default = `ttl_s`) | the maximum time within which a consumer can *detect* a missed transition | baseline meets `detect_s = ttl_s` for free (refresh + aging + liveliness); smaller values need the advanced tier (§3.3) |
 | **Replay** | `replay = none \| window(t)` (`events` only) | how far back events are queryable | satisfied at deployment level by the events storage |
 | **Tombstone visibility** | (from `ttl_s`) | a delete is observable ≥ TTL (§1.2) | enforced by storage GC sizing ([09-operations.md §2.3](09-operations.md)) |
 
@@ -259,7 +305,14 @@ Two universal rules, mechanism-independent:
   subject** — a latest-value storage covering `state/**`
   ([09-operations.md §2](09-operations.md)), publisher-side caches (§3.3),
   or both. A deployment with neither has no late-joiner story at all,
-  which does not conform.
+  which does not conform. The burden this MUST creates is allocated in two
+  halves (v1.25): *which* mechanism discharges it is the **deployment's**
+  choice — the deployment is the party that knows whether a storage runs
+  (§3.5 states the default) — while the registry's per-subject `seed`
+  declaration is how a **producer** knows what is asked of it: in a
+  deployment that runs no latest-value storage, the producer of a
+  seed-entitled subject is the only possible seed source, and MUST cache
+  that subject (§3.3).
 
 Telemetry loss needs no detection machinery: a dropped sample is priced
 into the `sampled` profile and superseded by the next cadence — spending
@@ -298,8 +351,9 @@ seed *procedures* no longer exist):
   `@adv` caches — no storage needed, reconcile internal. (2) A plain GET
   on the state selector is answered only by a router storage — publisher
   caches live under the verbatim `@adv` sidecar a plain GET cannot reach.
-  They differ in *coverage*: a cache dies with its publisher, a storage
-  does not. A consumer whose correctness depends on state from **crashed**
+  Which path is the deployment's default is §3.5's one rule (storage
+  where one runs; caches where none does). They differ in *coverage*: a
+  cache dies with its publisher, a storage does not. A consumer whose correctness depends on state from **crashed**
   producers (a UI rendering the firing alert of a dead host — the case
   §1.2's TTL retirement exists for) MUST include the storage seed where
   one is deployed; cache seeding alone suffices only where dead producers'
@@ -359,7 +413,9 @@ Where the tier earns its cost:
 - **Router-less / storage-less meshes**, where publisher caches are the
   *only* possible seed source: `cache(1)` on state subjects (no miss
   detection unless `detect_s` demands it), consumers seed with
-  `history()`.
+  `history()`. This is where §3.1's seeding burden lands on the producer,
+  and the one deployment shape in which the tier is the *normative* seed
+  mechanism rather than an opt-in (§3.5).
 - **Chart-tail seeding without a telemetry storage**: `cache(n)` on the
   handful of subjects whose registry says `seed = tail(n)` — not across a
   wide telemetry fan.
@@ -406,31 +462,53 @@ denied recovery, indistinguishable from "nothing to recover";
 The split mirrors §3's QoS design: **entitlements in the registry,
 mechanisms in deployment/build config.** A subject's row in the registry
 says what consumers may rely on; whether a cache or a storage delivers it
-is invisible to the keys and to the wire contract.
+is invisible to the keys and to the wire contract. The table's first
+column is also the seeding decision (§3.5): the row a deployment sits in
+names its seed source.
 
-### 3.5 Late-joiner seeding is delegated for volatile state (v1.5)
+### 3.5 Seeding, one story: storage first, caches where no storage runs (v1.5, narrowed in v1.25)
 
-The middleware's advanced tier (§3.3) is now the **normative seeding
-mechanism for volatile state**: a publisher of `refreshed`/`transition`
-state (and last-value telemetry, where seeded at all) meets its `seed`
-entitlement with the advanced publisher's **cache** and the subscriber's
-**history/recovery** — the mechanism the middleware ecosystem has
-consolidated on (its older cache/querying-subscriber APIs are deprecated
-upstream, and the seeding entitlement predates that consolidation).
-Storage-backed seeding remains correct where a deployment already runs the
-storage for *durable* reasons; what changes is the default answer to "how
-does a late joiner see current state" — a producer-side cache, not a
-router deployment dependency.
+The seed entitlement (§3.1) has two conforming mechanisms, and the choice
+between them is a fact about the *deployment*, not a preference:
+
+- **Where a latest-value storage covers `state/**` ([09-operations.md
+  §2](09-operations.md)), the storage seed is the default.** It answers
+  §3.2's plain GET, it outlives every publisher — the coverage the
+  crashed-producer case in §3.2 turns on, since a cache dies with its
+  publisher — and it costs the fleet nothing per key. A deployment that
+  runs the storage anyway, for durable at-rest reasons (§4), has already
+  paid for its seed source.
+- **Where no such storage exists — the router-less mesh of §3.4's second
+  row — publisher-side caches are the normative mechanism**: the advanced
+  tier's cache + history/recovery (§3.3), which is the mechanism the
+  middleware ecosystem has consolidated on (its older
+  cache/querying-subscriber APIs are deprecated upstream). In a
+  storage-less deployment the producer *is* the seed source for every
+  subject whose registry entry carries a seed entitlement — that is
+  §3.1's burden allocation, read from the producer's side.
+
+The v1.5 form of this section declared the advanced tier "the normative
+seeding mechanism for volatile state" outright. That sentence is
+**narrowed** here (v1.25), not repudiated: read as a universal default it
+contradicted §3.3's own rule — the tier is opt-in per subject, never a
+class default — and §3.4's first row, which sends the normal fleet to the
+baseline; and it would have re-imported, as a default, exactly the
+per-key cost the §3.3 box prices. What v1.5 correctly decided survives in
+the second bullet: *when a cache is the answer, the middleware's advanced
+tier is the cache* — the convention defines no seeding mechanism of its
+own, and §3.3's opt-in and cost box stand as the no-storage answer's
+price list.
 
 **What does not change:** the storage-manager remains authoritative for
 durable at-rest data (§4 — event logs, state history, the catalog);
 `seed`/`detect_s` registry semantics are untouched (entitlements in the
-registry, mechanisms in deployment — §3.4's split holds); and local
-durability layers (a constrained leaf's on-disk backfill store) are a
-different concern entirely. The hard dependency this rests on is the
-plain version chunk: the advanced tier's `@adv` liveliness tokens must
-remain structurally parseable ([03-grammar.md §1.2](03-grammar.md)) —
-the enforcement crate pins it with executable tests.
+registry, mechanisms in deployment — §3.4's split holds); §3.2's seed
+discipline binds both paths; and local durability layers (a constrained
+leaf's on-disk backfill store) are a different concern entirely. The hard
+dependency this rests on is the plain version chunk: the advanced tier's
+`@adv` liveliness tokens must remain structurally parseable
+([03-grammar.md §1.2](03-grammar.md)) — the enforcement crate pins it
+with executable tests.
 
 ---
 
