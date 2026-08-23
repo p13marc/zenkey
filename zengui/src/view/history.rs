@@ -16,7 +16,7 @@
 //!    (RFC 04 §1.2); a payload with no structural form degrades to a byte
 //!    comparison that says so rather than inventing field names.
 
-use iced::widget::{Column, button, column, row, text};
+use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
 use zenkey_fleet::diff::{Change, ValueDiff};
 
@@ -90,7 +90,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     col = col.push(kit::section_header(
         "History",
         Some(
-            button(kit::caption("clear"))
+            kit::action(kit::caption("clear"))
                 .on_press(msg(HistoryMsg::Clear))
                 .padding(4)
                 .into(),
@@ -106,7 +106,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
              already went past are gone, not hidden.",
         ));
         col = col.push(
-            button(kit::caption("watch this key"))
+            kit::action(kit::caption("watch this key"))
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(key.to_string())))
                 .padding(4),
         );
@@ -211,12 +211,13 @@ fn row_view<'a>(
     ]
     .spacing(space::SM);
 
-    button(column![head, kit::mono(entry.preview.clone())].spacing(1))
-        .on_press(msg(HistoryMsg::Select(entry.seq)))
-        .style(iced::widget::button::text)
-        .padding(iced::Padding::from([2.0, 0.0]))
-        .width(Length::Fill)
-        .into()
+    kit::row_button(
+        column![head, kit::mono(entry.preview.clone())].spacing(1),
+        false,
+    )
+    .on_press(msg(HistoryMsg::Select(entry.seq)))
+    .padding(iced::Padding::from([2.0, 0.0]))
+    .into()
 }
 
 /// The row's time, labelled with the clock that produced it.

@@ -8,7 +8,7 @@
 //! registry guard — this pane adds the visual layer: the fleet option is
 //! *labelled* refused as soon as the selected procedure declares it.
 
-use iced::widget::{Column, button, column, pick_list, row, text, text_input};
+use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
 use zenkey_fleet::SliceSet;
 use zenkey_fleet::report::CallReport;
@@ -181,7 +181,7 @@ pub fn pane<'a>(
         );
     }
 
-    let producer_pick = pick_list(producers, form.producer.clone(), |p| {
+    let producer_pick = kit::picker(producers, form.producer.clone(), |p| {
         msg(CallMsg::ProducerPicked(p))
     })
     .placeholder("producer")
@@ -193,7 +193,7 @@ pub fn pane<'a>(
         .and_then(|p| slices.get(p))
         .map(|s| s.procedures.iter().map(|p| p.path.clone()).collect())
         .unwrap_or_default();
-    let procedure_pick = pick_list(procedures, form.procedure.clone(), |p| {
+    let procedure_pick = kit::picker(procedures, form.procedure.clone(), |p| {
         msg(CallMsg::ProcedurePicked(p))
     })
     .placeholder("procedure")
@@ -237,7 +237,7 @@ pub fn pane<'a>(
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         )),
-                        button(kit::caption("scaffold body"))
+                        kit::action(kit::caption("scaffold body"))
                             .padding(2)
                             .on_press(msg(CallMsg::ScaffoldBody)),
                     ]
@@ -263,16 +263,16 @@ pub fn pane<'a>(
         }
     }
 
-    let target = text_input("target: h-… | @service | *", &form.target)
+    let target = kit::input("target: h-… | @service | *", &form.target)
         .on_input(|t| msg(CallMsg::TargetChanged(t)))
         .size(font::CAPTION);
-    let params = text_input("params: k=v;k=v (selector)", &form.params)
+    let params = kit::input("params: k=v;k=v (selector)", &form.params)
         .on_input(|t| msg(CallMsg::ParamsChanged(t)))
         .size(font::CAPTION);
-    let body = text_input("body: JSON (query payload)", &form.body)
+    let body = kit::input("body: JSON (query payload)", &form.body)
         .on_input(|t| msg(CallMsg::BodyChanged(t)))
         .size(font::CAPTION);
-    let attachment = text_input(
+    let attachment = kit::input(
         "attachment: verbatim, beside the body (empty = none)",
         &form.attachment,
     )
@@ -283,7 +283,7 @@ pub fn pane<'a>(
         && !form.target.is_empty()
         && !(fanout_forbidden && form.target == "*")
         && !form.in_flight;
-    let mut submit = button(kit::caption(if form.in_flight {
+    let mut submit = kit::action(kit::caption(if form.in_flight {
         "calling…"
     } else {
         "call"

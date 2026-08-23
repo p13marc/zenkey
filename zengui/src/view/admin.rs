@@ -17,7 +17,7 @@
 //! `Option` carries, and it is why the entity section is load-bearing rather
 //! than decoration.
 
-use iced::widget::{button, column, row, scrollable, text};
+use iced::widget::{column, row, scrollable, text};
 use iced::{Element, Length};
 use zenkey_fleet::report::StorageList;
 use zenkey_fleet::{Coverage, CoverageRow, RouterInfo, StorageInfo};
@@ -57,7 +57,7 @@ pub fn pane(state: &AdminState) -> Element<'_, Message> {
     } else {
         "sweep admin space"
     };
-    let mut run = button(kit::caption(run_label)).padding(4);
+    let mut run = kit::action(kit::caption(run_label)).padding(4);
     if !state.in_flight {
         run = run.on_press(msg(AdminMsg::Run));
     }
@@ -263,7 +263,7 @@ fn coverage_row(r: &CoverageRow) -> Element<'_, Message> {
     kit::card(
         row![
             kit::badge_coverage(tone, detail),
-            button(kit::caption(r.producer.clone()))
+            kit::action(kit::caption(r.producer.clone()))
                 .padding(2)
                 .on_press(msg(AdminMsg::FilterProducer(r.producer.clone()))),
             kit::mono(r.path.clone()),
@@ -319,7 +319,7 @@ fn entities(sweep: &AdminSweep) -> Element<'_, Message> {
 
 fn raw_toggle<'a>(id: &str, state: &AdminState) -> Element<'a, Message> {
     let shown = state.expanded_raw.contains(id);
-    button(kit::caption(if shown {
+    kit::action(kit::caption(if shown {
         "hide raw document"
     } else {
         "show raw document"

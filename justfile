@@ -126,6 +126,10 @@ ci:
     # (#209, #210).
     ./scripts/check-dispatch.sh
     ./scripts/check-degradation.sh
+    # The type scale by role (#191) and the interactive seam (#193) — both
+    # run as CI's type-scale job.
+    ./scripts/check-type-scale.sh
+    ./scripts/check-interactive.sh
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo build --workspace --all-targets --locked
     cargo test --workspace --locked

@@ -19,7 +19,7 @@
 //! and the user still owns what is in it.
 
 use iced::Element;
-use iced::widget::{Column, button, checkbox, column, row, text, text_input};
+use iced::widget::{Column, column, row, text};
 use zenkey_fleet::report::{BlobHolder, BlobList, BlobProbeReport};
 
 use crate::blob::{BlobState, Fetch, Probe};
@@ -153,14 +153,14 @@ fn tier_matrix<'a>(list: Option<&'a BlobList>, slices_loaded: bool) -> Element<'
 }
 
 fn target_row(state: &BlobState) -> Element<'_, Message> {
-    let field = text_input(
+    let field = kit::input(
         "artifact id, or tree/<hex>, or store/<algo>/<hex>",
         &state.target_input,
     )
     .on_input(|t| msg(BlobMsg::TargetChanged(t)))
     .size(font::CAPTION);
 
-    let mut probe = button(kit::caption(match state.probe {
+    let mut probe = kit::action(kit::caption(match state.probe {
         Probe::InFlight => "probing…",
         _ => "probe",
     }))
@@ -290,7 +290,7 @@ fn holder_row(h: &BlobHolder, index: usize, selected: bool, tier1: bool) -> Elem
 
     let mut body = column![
         row![
-            button(kit::caption(if selected {
+            kit::action(kit::caption(if selected {
                 "● selected"
             } else {
                 "○ choose"
@@ -327,7 +327,7 @@ fn holder_row(h: &BlobHolder, index: usize, selected: bool, tier1: bool) -> Elem
 fn fetch_form(state: &BlobState) -> Element<'_, Message> {
     let mut col = column![kit::section_header("fetch", None)].spacing(space::XS);
 
-    let dest = text_input("destination path", &state.dest_input)
+    let dest = kit::input("destination path", &state.dest_input)
         .on_input(|t| msg(BlobMsg::DestChanged(t)))
         .size(font::CAPTION);
     let mut dest_row = row![dest].spacing(space::SM);
@@ -338,7 +338,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
         .is_some()
     {
         dest_row = dest_row.push(
-            button(kit::caption("use suggested name"))
+            kit::action(kit::caption("use suggested name"))
                 .padding(2)
                 .on_press(msg(BlobMsg::UseSuggestedName)),
         );
@@ -349,7 +349,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
          joined to a path",
     ));
 
-    let root = text_input(
+    let root = kit::input(
         "content root (hex) — the anchor to verify against",
         &state.root_input,
     )
@@ -357,7 +357,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
     .size(font::CAPTION);
     col = col.push(root);
     col = col.push(
-        checkbox(state.allow_unpinned)
+        kit::check(state.allow_unpinned)
             .label("accept unpinned (trust-on-first-use)")
             .on_toggle(|b| msg(BlobMsg::AllowUnpinnedToggled(b)))
             .text_size(font::CAPTION),
@@ -369,7 +369,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
         Some(h) => format!("fetch from {}", h.origin),
         None => "fetch".to_string(),
     };
-    let mut go = button(kit::caption(label)).padding(4);
+    let mut go = kit::action(kit::caption(label)).padding(4);
     match state.fetch_ready() {
         Ok(()) => go = go.on_press(msg(BlobMsg::Fetch)),
         Err(why) => col = col.push(kit::muted(why)),
@@ -377,7 +377,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
     let mut controls = row![go].spacing(space::SM);
     if matches!(state.fetch, Fetch::InFlight { .. }) {
         controls = controls.push(
-            button(kit::caption("stop"))
+            kit::action(kit::caption("stop"))
                 .padding(4)
                 .on_press(msg(BlobMsg::Cancel)),
         );

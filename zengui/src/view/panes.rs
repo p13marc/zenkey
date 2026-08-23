@@ -15,7 +15,7 @@
 //! grid composes them, which is why `tests/panes.rs` renders them with no
 //! window and no bus, grid or not.
 
-use iced::widget::{button, column, pane_grid, row};
+use iced::widget::{column, pane_grid, row};
 use iced::{Element, Length};
 
 use crate::message::{Message, RightPane, WorkspaceMsg};
@@ -83,9 +83,8 @@ fn title_bar<'a>(role: DockRole, focused: bool) -> pane_grid::TitleBar<'a, Messa
         })
     })
     .controls(pane_grid::Controls::new(
-        button(kit::caption("×"))
+        kit::link(kit::caption("×"))
             .padding([0, 4])
-            .style(iced::widget::button::text)
             .on_press(Message::Workspace(WorkspaceMsg::DockToggled(role))),
     ))
     .padding(space::XS)

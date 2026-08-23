@@ -28,7 +28,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use iced::widget::{Column, button, column, row, text};
+use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
 use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
@@ -1227,15 +1227,19 @@ pub fn tone(reg: &Registration) -> RegistrationTone {
 
 /// The badge text for a registration state.
 ///
-/// The tri-state is only useful if the words differ: "—" (not asked) must not
-/// read like "unregistered" (asked, and the answer was no).
+/// The five-state is only useful if the words differ: "—" (not asked) must
+/// not read like "unregistered" (asked, and the answer was no), and "n/a"
+/// (no question exists) like neither. The tree deliberately draws no badge
+/// for `NotApplicable` — a foreign key answering a question nobody asked is
+/// noise — but the word exists so every state *has* a distinct glyph + word
+/// pair (#193).
 pub fn registration_label(reg: &Registration) -> &'static str {
     match reg {
         Registration::Registered(_) => "registered",
         Registration::Unregistered => "unregistered",
         Registration::NoSliceForProducer => "no slice",
         Registration::Unknown => "—",
-        Registration::NotApplicable => "",
+        Registration::NotApplicable => "n/a",
     }
 }
 
@@ -1432,9 +1436,8 @@ fn row_view<'a>(
     // The expand marker is its own affordance (issue #93): a concrete key
     // that is also a prefix of deeper keys keeps body-click = select.
     let marker: Element<'a, Message> = match marker_press(shape, arena) {
-        Some(msg) => button(kit::caption(if r.expanded { "▾" } else { "▸" }))
+        Some(msg) => kit::link(kit::caption(if r.expanded { "▾" } else { "▸" }))
             .padding(2)
-            .style(button::text)
             .on_press(msg)
             .into(),
         None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
@@ -1518,9 +1521,13 @@ fn row_view<'a>(
             human_rate(r.rate_hz)
         )));
         if let Some(f) = r.target.as_deref().and_then(|t| facts.get(t)) {
-            let label = registration_label(&f.registration);
-            if !label.is_empty() {
-                line = line.push(kit::tone_badge(tone(&f.registration), label));
+            // No badge for `NotApplicable`: the registry question does not
+            // exist for a foreign key, so a badge would only be noise.
+            if !matches!(f.registration, Registration::NotApplicable) {
+                line = line.push(kit::tone_badge(
+                    tone(&f.registration),
+                    registration_label(&f.registration),
+                ));
             }
             if let Some(ty) = f.type_name() {
                 line = line.push(kit::muted(ty.to_string()));
@@ -1546,23 +1553,18 @@ fn row_view<'a>(
             } else {
                 "○"
             };
-            button(kit::caption(watch_label))
+            kit::link(kit::caption(watch_label))
                 .padding(2)
-                .style(button::text)
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(t.clone())))
                 .into()
         }
         None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
     };
 
-    let body = button(line)
-        .width(Length::Fill)
+    // The hover wash is what makes a 40k-row list trackable with the mouse
+    // (#193); selection additionally paints the stronger shade.
+    let body = kit::row_button(line, is_selected)
         .padding(2)
-        .style(|theme: &iced::Theme, _status| button::Style {
-            background: None,
-            text_color: colors(theme).text(),
-            ..Default::default()
-        })
         .on_press(row_press(shape, arena));
     row![watch, indent, marker, body]
         .spacing(space::XS)
@@ -1573,11 +1575,11 @@ fn row_view<'a>(
 /// A standalone pane, for tests and for the `view/mod` composition.
 pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
     let flat = d.flat;
-    let pivot_picker = iced::widget::pick_list(Pivot::ALL.to_vec(), Some(d.pivot), |v| {
+    let pivot_picker = kit::picker(Pivot::ALL.to_vec(), Some(d.pivot), |v| {
         Message::Workspace(WorkspaceMsg::PivotSelected(v))
     })
     .text_size(font::CAPTION);
-    let find = iced::widget::text_input("find keys…", d.search)
+    let find = kit::input("find keys…", d.search)
         .size(font::CAPTION)
         .on_input(|v| Message::Workspace(WorkspaceMsg::TreeSearchChanged(v)));
     let mut header = row![pivot_picker, find]
@@ -1828,6 +1830,7 @@ mod tests {
     #[test]
     fn registration_labels_distinguish_not_asked_from_not_registered() {
         assert_eq!(registration_label(&Registration::Unknown), "—");
+        assert_eq!(registration_label(&Registration::NotApplicable), "n/a");
         assert_eq!(
             registration_label(&Registration::Unregistered),
             "unregistered"

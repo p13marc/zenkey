@@ -18,7 +18,7 @@
 //! nothing it has not seen, which keeps the overlay from inventing a keyspace (O4 — a suggestion is not an observation,
 //! and these are only ever the latter).
 
-use iced::widget::{Column, column, container, row, text_input};
+use iced::widget::{Column, column, container, row};
 use iced::{Element, Length};
 
 use crate::message::{
@@ -318,7 +318,7 @@ fn list<'a>(
     hint: &'a str,
     rows: Vec<String>,
 ) -> Element<'a, Message> {
-    let input = text_input("…", &state.query)
+    let input = kit::input("…", &state.query)
         .on_input(|q| Message::Chrome(ChromeMsg::Palette(PaletteMsg::QueryChanged(q))))
         .on_submit(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Activate)))
         .size(font::BODY);
@@ -330,20 +330,15 @@ fn list<'a>(
     for (i, label) in rows.iter().enumerate() {
         let selected = i == state.cursor;
         body = body.push(
-            iced::widget::button(
+            kit::row_button(
                 row![
                     kit::caption(if selected { "›" } else { " " }),
                     kit::caption(label.clone()).font(iced::Font::MONOSPACE),
                 ]
                 .spacing(space::SM),
+                selected,
             )
             .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Pick(i))))
-            .style(if selected {
-                iced::widget::button::secondary
-            } else {
-                iced::widget::button::text
-            })
-            .width(Length::Fill)
             .padding(2),
         );
     }

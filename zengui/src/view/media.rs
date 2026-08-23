@@ -17,7 +17,7 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use iced::Length;
-use iced::widget::{Column, button, column, row, text, text_input};
+use iced::widget::{Column, column, row, text};
 use zenkey_fleet::{SampleView, SliceSet, WatchId};
 
 use super::kit;
@@ -200,7 +200,7 @@ pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Colum
                     );
                     if decodable(&m.encoding) {
                         col = col.push(
-                            button(kit::caption(label))
+                            kit::action(kit::caption(label))
                                 .on_press(msg(MediaMsg::DeclPicked {
                                     producer: slice.name.clone(),
                                     path: m.path.clone(),
@@ -215,13 +215,13 @@ pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Colum
         }
     }
 
-    let origin = text_input("origin: h-… (exact — never a wildcard)", &state.origin)
+    let origin = kit::input("origin: h-… (exact — never a wildcard)", &state.origin)
         .on_input(|s| msg(MediaMsg::OriginChanged(s)))
         .size(font::CAPTION);
-    let producer = text_input("producer", &state.producer)
+    let producer = kit::input("producer", &state.producer)
         .on_input(|s| msg(MediaMsg::ProducerChanged(s)))
         .size(font::CAPTION);
-    let subpath = text_input(
+    let subpath = kit::input(
         "stream path: fill every {var} (e.g. cam0/preview/png)",
         &state.subpath,
     )
@@ -232,10 +232,10 @@ pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Colum
         producer,
         subpath,
         match &state.viewing {
-            None => button(kit::caption("view"))
+            None => kit::action(kit::caption("view"))
                 .on_press(msg(MediaMsg::View))
                 .padding(4),
-            Some(_) => button(kit::caption("stop"))
+            Some(_) => kit::action(kit::caption("stop"))
                 .on_press(msg(MediaMsg::Stop))
                 .padding(4),
         },

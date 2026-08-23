@@ -99,8 +99,7 @@ fn origin_card<'a>(
     let mut body = column![].spacing(space::XS);
 
     let header = row![
-        iced::widget::button(kit::emphasis(origin).font(iced::Font::MONOSPACE))
-            .style(iced::widget::button::text)
+        kit::link(kit::emphasis(origin).font(iced::Font::MONOSPACE))
             .padding(0)
             // Straight to the workspace's subject rather than to this pane
             // (#181): a card is one of several ways to point the window at an
@@ -113,7 +112,7 @@ fn origin_card<'a>(
                 Subject::Origin(origin.to_string())
             }))),
         iced::widget::space::horizontal(),
-        iced::widget::button(kit::caption("show in tree"))
+        kit::action(kit::caption("show in tree"))
             .padding(2)
             .on_press(msg(NodesMsg::ShowInTree(origin.to_string()))),
     ]
