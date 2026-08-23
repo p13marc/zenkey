@@ -46,12 +46,30 @@ pub(crate) fn update(
         PaneMsg::Blob(msg) => blob::update(&mut work.verdicts.blob, msg, cx),
         PaneMsg::Media(msg) => media::update(&mut work.bench.media, &work.verdicts.roster, msg, cx),
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
-        PaneMsg::Detail(msg) => detail::update(sub, dep, msg),
-        PaneMsg::History(msg) => detail::history(sub, msg),
-        // Two more windows onto the subject (#223, #214) — like Detail and
-        // History they take the subject state and the deployment, not `cx`.
-        PaneMsg::Fields(msg) => fields::update(sub, dep, msg),
-        PaneMsg::Why(msg) => why::update(sub, dep, msg),
+        // The four subject-slot sections (#257): the SlotId names which
+        // Inspector spoke — the docked one is the follow slot, a pinned
+        // window its own. This is the one routing point; the handlers below
+        // take the resolved slot and never know which surface they serve.
+        // A message for a dropped slot lands nowhere: its window is gone,
+        // and with it the only surface that could display the result.
+        PaneMsg::Detail(id, msg) => match sub.slot_mut(id) {
+            Some(slot) => detail::update(slot, dep, msg),
+            None => Task::none(),
+        },
+        PaneMsg::History(id, msg) => match sub.slot_mut(id) {
+            Some(slot) => detail::history(slot, msg),
+            None => Task::none(),
+        },
+        // Two more windows onto a slot (#223, #214) — like Detail and
+        // History they take the slot and the deployment, not `cx`.
+        PaneMsg::Fields(id, msg) => match sub.slot_mut(id) {
+            Some(slot) => fields::update(slot, dep, msg),
+            None => Task::none(),
+        },
+        PaneMsg::Why(id, msg) => match sub.slot_mut(id) {
+            Some(slot) => why::update(slot, dep, msg),
+            None => Task::none(),
+        },
         PaneMsg::Echo(msg) => echo::update(&mut work.echo, msg, cx),
         PaneMsg::Context(msg) => context::update(&mut work.bench.context_form, msg),
         PaneMsg::Scope(msg) => scope_editor::update(&mut work.bench.scope_form, msg, cx),

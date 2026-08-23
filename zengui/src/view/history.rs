@@ -21,7 +21,7 @@ use iced::{Element, Length};
 use zenkey_fleet::diff::{Change, ValueDiff};
 
 use crate::history::{HistoryEntry, HistoryRecorder};
-use crate::message::{Message, PaneMsg, SubjectMsg};
+use crate::message::{Message, PaneMsg, SlotId, SubjectMsg};
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
 use crate::view::tokens::{CAPTION_LINE, Spacing};
@@ -44,12 +44,15 @@ pub enum HistoryMsg {
     Scrolled(f32, f32),
 }
 
-fn msg(m: HistoryMsg) -> Message {
-    Message::Pane(PaneMsg::History(m))
+fn msg(slot: SlotId, m: HistoryMsg) -> Message {
+    Message::Pane(PaneMsg::History(slot, m))
 }
 
 /// What the app hands the pane.
 pub struct HistoryData<'a> {
+    /// The subject slot this section renders (#257) — every message it
+    /// emits carries it home.
+    pub slot: SlotId,
     /// The selected wire key, if any.
     pub key: Option<&'a str>,
     /// The recording, when one is running for that key.
@@ -93,12 +96,13 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     };
 
     let sp = data.sp;
+    let slot = data.slot;
     let mut col = Column::new().spacing(sp.sm);
     col = col.push(kit::section_header(
         "History",
         Some(
             kit::action(kit::caption("clear"))
-                .on_press(msg(HistoryMsg::Clear))
+                .on_press(msg(data.slot, HistoryMsg::Clear))
                 .padding(sp.xs)
                 .into(),
         ),
@@ -164,8 +168,15 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     }
     for entry in rec.ring.iter().skip(first).take(last - first) {
         rows = rows.push(
-            iced::widget::container(row_view(entry, newest, Some(entry.seq) == focus, rec, sp))
-                .height(Length::Fixed(row_h)),
+            iced::widget::container(row_view(
+                data.slot,
+                entry,
+                newest,
+                Some(entry.seq) == focus,
+                rec,
+                sp,
+            ))
+            .height(Length::Fixed(row_h)),
         );
     }
     if last < total {
@@ -176,11 +187,11 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
         iced::widget::scrollable(rows)
             .height(Length::FillPortion(3))
             .width(Length::Fill)
-            .on_scroll(|viewport| {
-                msg(HistoryMsg::Scrolled(
-                    viewport.absolute_offset().y,
-                    viewport.bounds().height,
-                ))
+            .on_scroll(move |viewport| {
+                msg(
+                    slot,
+                    HistoryMsg::Scrolled(viewport.absolute_offset().y, viewport.bounds().height),
+                )
             }),
     );
 
@@ -190,6 +201,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
 
 /// One timeline row.
 fn row_view<'a>(
+    slot: SlotId,
     entry: &HistoryEntry,
     newest: u64,
     focused: bool,
@@ -224,7 +236,7 @@ fn row_view<'a>(
     // `sp.row(..)`, which already spends all the air the density allows —
     // spacing here would only push the preview past the clip.
     kit::row_button(column![head, kit::mono(entry.preview.clone())], false)
-        .on_press(msg(HistoryMsg::Select(entry.seq)))
+        .on_press(msg(slot, HistoryMsg::Select(entry.seq)))
         .into()
 }
 

@@ -18,8 +18,9 @@
 use iced::widget::{column, pane_grid, row};
 use iced::{Element, Length};
 
-use crate::message::{Message, RightPane, WorkspaceMsg};
+use crate::message::{Message, RightPane, SlotId, WorkspaceMsg};
 use crate::prefs::{Density, DockRole};
+use crate::state::subject::SubjectSlot;
 use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
 use crate::view;
 use crate::view::tokens::{Spacing, space};
@@ -60,7 +61,9 @@ pub(crate) fn grid<'a>(
     pane_grid::PaneGrid::new(&work.docks.grid, move |pane, role, _maximized| {
         let focused = work.docks.focus == Some(pane);
         let sp = Spacing::of(role.density(density));
-        pane_grid::Content::new(body(dep, obs, sub, tree, work, *role, sp))
+        // The grid's docks all follow the selection (#257): only a torn-off
+        // window ([`solo`]) can bind another slot.
+        pane_grid::Content::new(body(dep, obs, sub, tree, work, *role, SlotId::FOLLOW, sp))
             .title_bar(title_bar(*role, focused))
     })
     .spacing(space::XS)
@@ -80,6 +83,12 @@ pub(crate) fn grid<'a>(
 /// `pane_grid` cell; a torn-off window ([`solo`], #186) composes the same
 /// call alone — one dispatch, two framings, so a dock cannot render
 /// differently for having its own window.
+///
+/// `slot` is which subject the Inspector shows (#257): the grid always says
+/// [`SlotId::FOLLOW`]; a pinned window says its own. The other three docks
+/// ignore it — the Locator *is* the follow selection, and the Activity and
+/// Workbench streams are about the session.
+#[allow(clippy::too_many_arguments)]
 fn body<'a>(
     dep: &'a Deployment,
     obs: &'a Observation,
@@ -87,11 +96,18 @@ fn body<'a>(
     tree: &'a TreeState,
     work: &'a Workspace,
     role: DockRole,
+    slot: SlotId,
     sp: Spacing,
 ) -> Element<'a, Message> {
     match role {
         DockRole::Locator => locator(dep, obs, sub, tree, work, sp),
-        DockRole::Inspector => inspector(dep, obs, sub, work, sp),
+        DockRole::Inspector => {
+            // A slot that is gone renders as the follow slot rather than a
+            // blank window; unreachable in practice, because closing a
+            // pinned window is what drops its slot.
+            let bound = sub.slot(slot).unwrap_or_else(|| sub.follow());
+            inspector(dep, obs, bound, work, sp)
+        }
         DockRole::Activity => activity(dep, obs, sub, work, sp),
         DockRole::Workbench => workbench(dep, sub, work, sp),
     }
@@ -101,6 +117,12 @@ fn body<'a>(
 /// grid renders, with the dock padding the grid cell would have given it.
 /// No title bar — the window's own chrome names it, and the way to re-dock
 /// is to close the window.
+///
+/// `slot` is the window's binding (#257). A pinned Inspector leads with the
+/// pin statement — what it holds, and that closing the window unpins — so a
+/// window whose chart no longer moves with the tree says why, in words, on
+/// the surface the ⇱ produced.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn solo<'a>(
     dep: &'a Deployment,
     obs: &'a Observation,
@@ -108,14 +130,53 @@ pub(crate) fn solo<'a>(
     tree: &'a TreeState,
     work: &'a Workspace,
     role: DockRole,
+    slot: SlotId,
     density: Density,
 ) -> Element<'a, Message> {
     let sp = Spacing::of(role.density(density));
-    iced::widget::container(body(dep, obs, sub, tree, work, role, sp))
+    let mut col = column![].spacing(sp.sm);
+    if role == DockRole::Inspector {
+        col = col.push(pin_banner(sub, slot));
+    }
+    iced::widget::container(col.push(body(dep, obs, sub, tree, work, role, slot, sp)))
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(sp.md)
         .into()
+}
+
+/// What a torn Inspector window is (#257), stated rather than inferred: a
+/// pin names what it holds; a follow window says the selection drives it.
+/// The wording is the honesty rule — a pane bound to a slot the tree does
+/// not drive must say so, or its stillness reads as a dead app.
+fn pin_banner<'a>(sub: &'a SubjectState, slot: SlotId) -> Element<'a, Message> {
+    let line = match sub.slot(slot) {
+        Some(s) if slot.is_pin() => match &s.current {
+            crate::message::Subject::Key(k) => format!(
+                "pinned to {k} — the selection drives the docked Inspector, \
+                 not this window; closing it unpins and drops this recording"
+            ),
+            crate::message::Subject::Prefix(p) => format!(
+                "pinned to the subtree {p} — the selection drives the docked \
+                 Inspector, not this window; closing it unpins"
+            ),
+            crate::message::Subject::Origin(o) => format!(
+                "pinned to the origin {o} — the selection drives the docked \
+                 Inspector, not this window; closing it unpins"
+            ),
+            // Unreachable — a pin is only minted for a subject — but a match
+            // must say what it would mean.
+            crate::message::Subject::None => "pinned to nothing — close this window".to_string(),
+        },
+        // Follow-bound (a tear-off with nothing selected, or a window
+        // restored at boot: a pin's evidence is session-lived, so the pin
+        // did not survive the restart) — and the honest degenerate case of
+        // a dropped slot, which closing the window has already forgotten.
+        _ => "follows the selection — pins are made by tearing off the \
+              Inspector while a subject is selected"
+            .to_string(),
+    };
+    kit::muted(line)
 }
 
 /// A dock's handle: its name (the drag surface), its `⇱` (tear off into a
@@ -172,7 +233,7 @@ fn locator<'a>(
             mine: &obs.my_watch_paths,
             seeding: &obs.seeding_paths,
         },
-        selected: sub.current.path(),
+        selected: sub.follow().current.path(),
         sp,
     })
 }
@@ -180,36 +241,37 @@ fn locator<'a>(
 fn inspector<'a>(
     dep: &'a Deployment,
     obs: &'a Observation,
-    sub: &'a SubjectState,
+    slot: &'a SubjectSlot,
     work: &'a Workspace,
     sp: Spacing,
 ) -> Element<'a, Message> {
     view::inspector::pane(view::inspector::InspectorData {
-        subject: &sub.current,
-        facts: sub.current.key().and_then(|k| dep.facts.get(k)),
-        fetched: match sub.fetched.as_ref() {
+        slot: slot.id,
+        subject: &slot.current,
+        facts: slot.current.key().and_then(|k| dep.facts.get(k)),
+        fetched: match slot.fetched.as_ref() {
             None => view::detail::Fetched::NotAsked,
-            Some((k, o)) if Some(k.as_str()) == sub.current.key() => {
+            Some((k, o)) if Some(k.as_str()) == slot.current.key() => {
                 view::detail::Fetched::Landed(o)
             }
             Some(_) => view::detail::Fetched::Superseded,
         },
-        decoded: sub.decoded.as_deref(),
-        series: sub.series.as_ref(),
-        history: sub.history.as_ref(),
-        history_scroll: sub.history_scroll,
-        watched: sub
+        decoded: slot.decoded.as_deref(),
+        series: slot.series.as_ref(),
+        history: slot.history.as_ref(),
+        history_scroll: slot.history_scroll,
+        watched: slot
             .current
             .key()
             .is_some_and(|k| key_is_watched(&obs.watched, k)),
-        latency: sub.selected_latency.clone(),
+        latency: slot.selected_latency.clone(),
         blob: &work.verdicts.blob,
         media: &work.bench.media,
         slices: dep.slices.as_deref(),
         roster: &work.verdicts.roster,
         node_detail: &work.verdicts.node_detail,
-        fields: &sub.fields,
-        why: &sub.why,
+        fields: &slot.fields,
+        why: &slot.why,
         base: dep.base(),
         observed: &obs.observed,
         sp,
@@ -232,7 +294,7 @@ fn activity<'a>(
             .echo
             .echo_view
             .follow_subject
-            .then(|| sub.current.key())
+            .then(|| sub.follow().current.key())
             .flatten(),
         verdicts: &work.verdicts.payloads,
         next_seq: work.echo.echo.next_seq(),
@@ -277,7 +339,7 @@ fn workbench<'a>(
         ),
         RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
             roster: &work.verdicts.roster,
-            selected: sub.current.origin(),
+            selected: sub.follow().current.origin(),
             detail: &work.verdicts.node_detail,
             slices: dep.slices.as_deref(),
             sp,

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use iced::widget::{Column, row};
 use zenkey_fleet::why::{RungAnswer, WhyReport, WhyVerdict};
 
-use crate::message::{Message, PaneMsg};
+use crate::message::{Message, PaneMsg, SlotId};
 use crate::view::kit;
 use crate::view::theme::RungTone;
 use crate::view::tokens::Spacing;
@@ -52,8 +52,8 @@ impl WhyState {
     }
 }
 
-fn msg(m: WhyMsg) -> Message {
-    Message::Pane(PaneMsg::Why(m))
+fn msg(slot: SlotId, m: WhyMsg) -> Message {
+    Message::Pane(PaneMsg::Why(slot, m))
 }
 
 /// The tone one rung's answer reads as — the single mapping, so no rung can
@@ -76,15 +76,16 @@ pub fn rung_label(answer: &RungAnswer) -> &'static str {
     }
 }
 
-/// The Why section for a key subject. `sp` is the dock's resolved spacing
-/// grid (#192): a section spends it, it never resolves one.
-pub fn section(state: &WhyState, sp: Spacing) -> Column<'_, Message> {
+/// The Why section for a key subject. `slot` is the subject slot the
+/// surface is bound to (#257) — `Run` carries it home. `sp` is the dock's
+/// resolved spacing grid (#192): a section spends it, it never resolves one.
+pub fn section(state: &WhyState, slot: SlotId, sp: Spacing) -> Column<'_, Message> {
     let mut col = Column::new().spacing(sp.sm);
 
     let run_label = if state.in_flight { "asking…" } else { "why?" };
     let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
-        run = run.on_press(msg(WhyMsg::Run));
+        run = run.on_press(msg(slot, WhyMsg::Run));
     }
     col = col.push(kit::section_header("Why", Some(run.into())));
 

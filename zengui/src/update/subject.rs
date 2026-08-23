@@ -61,11 +61,18 @@ pub(crate) fn update(
             // `decoded`, which was the sharper defect hiding behind it: a late
             // reply for key A wiped key B's rendering while B was on screen,
             // and the pane then said "not asked" about a key it had answered.
-            let current = sub.current.key() == Some(key.as_str());
+            //
+            // Since #257 the landing routes by key across every slot: a pin
+            // that shares the follow slot's key gets the same answer — one
+            // fetch, one decode, N surfaces — because the evidence is about
+            // the key, not about who is showing it.
+            let current = sub.follow().current.key() == Some(key.as_str());
             // A fetch lands the Inspector in view. Since #180 that means
             // restoring its dock if the user closed it — spoken as the same
             // `PaneSelected` the palette and the workbench strip send, so the
             // reveal is persisted by the one handler that persists layout.
+            // Only the *follow* slot's fetch reveals (#257): a pinned
+            // window's evidence is already on screen in that window.
             // (The doctor exception this used to carry is gone with the
             // doctor pane: its findings are a dock stream now, #183.)
             let reveal = if current && !work.docks.is_open(crate::prefs::DockRole::Inspector) {
@@ -75,19 +82,28 @@ pub(crate) fn update(
             } else {
                 Task::none()
             };
-            if current {
-                sub.decoded = None;
+            let mut landed = false;
+            for slot in sub.slots.iter_mut() {
+                if slot.current.key() == Some(key.as_str()) {
+                    slot.decoded = None;
+                    slot.fetched = Some((key.clone(), outcome.clone()));
+                    landed = true;
+                }
             }
-            // No decode for a superseded answer: it is work for a rendering
-            // nothing will show, and `ValueDecoded`'s own guard would drop it
-            // on arrival anyway.
-            if !current {
-                sub.fetched = Some((key, outcome));
+            // No slot asks about this key any more: the answer is real and
+            // is kept on the follow slot — the asker — where the view renders
+            // it as *superseded* rather than pretending nothing was asked.
+            // No decode for it: it is work for a rendering nothing will
+            // show, and `ValueDecoded`'s own guard would drop it anyway.
+            if !landed {
+                sub.follow_mut().fetched = Some((key, outcome));
                 return Task::none();
             }
-            // The decode runs with or without a registry: `slices: None`
-            // yields `NotValidated(NoRegistry)` — "nobody looked" rendered
-            // as itself rather than by omission (#164, #246).
+            // One decode however many slots the answer landed in (#257): the
+            // decode is keyed by the key, and `ValueDecoded` fans out again.
+            // It runs with or without a registry: `slices: None` yields
+            // `NotValidated(NoRegistry)` — "nobody looked" rendered as
+            // itself rather than by omission (#164, #246).
             let decode_task = match (&outcome, &dep.session, &dep.schema_store) {
                 (Ok(out), Some(session), Some(store)) => {
                     if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
@@ -107,7 +123,6 @@ pub(crate) fn update(
                 }
                 _ => Task::none(),
             };
-            sub.fetched = Some((key, outcome));
             Task::batch([reveal, decode_task])
         }
         SubjectMsg::ValueDecoded(key, sample) => {
@@ -115,10 +130,12 @@ pub(crate) fn update(
             // (#164): the check ran and its result is a fact about the key,
             // not about the selection.
             work.verdicts.payloads.record(&key, sample.verdict.clone());
-            // Stale guard: only the current subject's decode lands in the
-            // pane.
-            if sub.current.key() == Some(key.as_str()) {
-                sub.decoded = Some(sample);
+            // Stale guard, per slot (#257): the decode lands in every slot
+            // still showing its key, and in none that moved on.
+            for slot in sub.slots.iter_mut() {
+                if slot.current.key() == Some(key.as_str()) {
+                    slot.decoded = Some(Arc::clone(&sample));
+                }
             }
             Task::none()
         }
@@ -133,12 +150,17 @@ pub(crate) fn update(
 /// the old subject is dropped here — the latency summary, the history
 /// recorder, the rate sampler and the chart — because none of it is evidence
 /// about the new one.
+///
+/// Since #257 this is the *follow slot's* move, and only its: a selection is
+/// the tree speaking, and the tree drives slot 0. The pinned slots are
+/// exactly the subjects a selection must not touch.
 fn select(
     dep: &Deployment,
-    sub: &mut SubjectState,
+    subs: &mut SubjectState,
     work: &mut Workspace,
     subject: Subject,
 ) -> Task<Message> {
+    let sub = subs.follow_mut();
     sub.current = subject;
     // The old key's latency summary is not evidence about the new one —
     // cleared now, refreshed on the next tick (#119).

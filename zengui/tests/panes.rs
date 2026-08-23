@@ -735,6 +735,7 @@ fn the_detail_pane_tags_decode_provenance() {
         decode_error: Some("wrong wire kind".to_string()),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key,
         facts: Some(&facts),
@@ -758,6 +759,7 @@ fn the_detail_pane_tags_decode_provenance() {
         attempted: ["get", "@adv cache", "subscribe window"],
     }));
     let mut ui = simulator::<Message, _, _>(section(DetailData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key,
         facts: Some(&facts),
@@ -789,6 +791,7 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
 
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
     let data = |fetched| DetailData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key,
         facts: None,
@@ -867,6 +870,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         observed: &'a KeyTreeSnapshot,
     ) -> InspectorData<'a> {
         InspectorData {
+            slot: zengui::message::SlotId::FOLLOW,
             sp: sp(),
             subject,
             facts,
@@ -1545,6 +1549,7 @@ fn the_history_pane_says_why_it_is_empty() {
 
     // Nothing selected.
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: None,
         recorder: None,
@@ -1556,6 +1561,7 @@ fn the_history_pane_says_why_it_is_empty() {
     // Selected, but no watch covers it — the two must not read alike.
     let rec = recording(REGISTERED, 8, &[]);
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: Some(REGISTERED),
         recorder: Some(&rec),
@@ -1573,6 +1579,7 @@ fn the_history_pane_says_why_it_is_empty() {
 
     // Watched and genuinely quiet: a different sentence, and not a verdict.
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: Some(REGISTERED),
         recorder: Some(&rec),
@@ -1604,6 +1611,7 @@ fn the_history_pane_diffs_consecutive_payloads() {
         ],
     );
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: Some(REGISTERED),
         recorder: Some(&rec),
@@ -1645,6 +1653,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
     rec.selected = Some(1);
     {
         let mut ui = simulator::<Message, _, _>(section(HistoryData {
+            slot: zengui::message::SlotId::FOLLOW,
             sp: sp(),
             key: Some(REGISTERED),
             recorder: Some(&rec),
@@ -1666,6 +1675,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
     rec.selected = Some(2);
     {
         let mut ui = simulator::<Message, _, _>(section(HistoryData {
+            slot: zengui::message::SlotId::FOLLOW,
             sp: sp(),
             key: Some(REGISTERED),
             recorder: Some(&rec),
@@ -1694,6 +1704,7 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
         ],
     );
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: Some(FOREIGN),
         recorder: Some(&rec),
@@ -1718,6 +1729,7 @@ fn the_history_pane_counts_what_it_evicted() {
     let rec = recording(REGISTERED, 3, &borrowed);
 
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: Some(REGISTERED),
         recorder: Some(&rec),
@@ -1749,6 +1761,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: FOREIGN,
         facts: None,
@@ -1793,6 +1806,7 @@ fn the_detail_pane_labels_the_series_it_plots() {
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
+        slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: REGISTERED,
         facts: None,
@@ -3076,6 +3090,7 @@ fn projection_inspector<'a>(
     node_detail: &'a zengui::view::nodes::DetailState,
 ) -> zengui::view::inspector::InspectorData<'a> {
     zengui::view::inspector::InspectorData {
+        slot: zengui::message::SlotId::FOLLOW,
         subject,
         facts,
         fetched: zengui::view::detail::Fetched::NotAsked,
@@ -3222,6 +3237,7 @@ fn the_decoded_pane_renders_three_verdict_states_and_keeps_the_silences_apart() 
             decode_error: None,
         }));
         simulator::<Message, _, _>(section(DetailData {
+            slot: zengui::message::SlotId::FOLLOW,
             key,
             facts: None,
             fetched: Fetched::Landed(&fetched),
@@ -3421,6 +3437,7 @@ fn the_fields_section_states_its_window_and_its_bounds() {
     let state = FieldsState::default();
     let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
         &state,
+        zengui::message::SlotId::FOLLOW,
         sp(),
     ))));
     assert!(
@@ -3467,6 +3484,7 @@ fn the_fields_section_states_its_window_and_its_bounds() {
     };
     let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
         &state,
+        zengui::message::SlotId::FOLLOW,
         sp(),
     ))));
     assert!(
@@ -3516,6 +3534,7 @@ fn the_why_section_renders_not_asked_and_never_no() {
     let state = WhyState::default();
     let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
         &state,
+        zengui::message::SlotId::FOLLOW,
         sp(),
     ))));
     assert!(
@@ -3553,6 +3572,7 @@ fn the_why_section_renders_not_asked_and_never_no() {
     };
     let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
         &state,
+        zengui::message::SlotId::FOLLOW,
         sp(),
     ))));
     assert!(

@@ -17,7 +17,7 @@
 //! | [`Chrome`] | nothing the bus does — it is the window |
 //! | [`Deployment`] | pointing at a different fleet |
 //! | [`Observation`] | the pump restarting; its coverage, by a base change |
-//! | [`SubjectState`] | the user pointing the workspace somewhere else |
+//! | [`SubjectState`] | per slot (#257): the follow slot by the user pointing the workspace somewhere else; a pin by being dropped whole |
 //! | [`TreeState`] | a new merge input, or a presentation change |
 //! | [`Workspace`] | per sub-group — see [`workspace`] |
 //!
@@ -153,10 +153,20 @@ mod tests {
                     "budgets",
                 ],
             ),
-            // The selection and everything derived from it.
+            // The subjects: the follow slot the tree drives, plus one slot
+            // per pin (#257). The container holds the slots and the id mint;
+            // everything derived lives *in* a slot, so dropping a pin drops
+            // exactly its own evidence.
+            ("sub", &["slots", "next_slot"]),
+            // One slot: a subject and everything derived from it — the old
+            // singular `SubjectState`, per slot since #257. Invalidated by
+            // that slot's subject moving (the follow slot's, by the user
+            // pointing the workspace somewhere else; a pin's, never — it is
+            // dropped whole instead).
             (
-                "sub",
+                "sub.slot",
                 &[
+                    "id",
                     "current",
                     "selected_latency",
                     "fetched",
@@ -168,7 +178,7 @@ mod tests {
                     "series",
                     // The field-observation window (#223) and the why
                     // ladder (#214): both are evidence about one key, both
-                    // dropped when the subject moves.
+                    // dropped when the slot's subject moves.
                     "fields",
                     "why",
                 ],
@@ -265,6 +275,7 @@ mod tests {
             ("dep", Deployment::FIELDS),
             ("obs", Observation::FIELDS),
             ("sub", SubjectState::FIELDS),
+            ("sub.slot", subject::SubjectSlot::FIELDS),
             ("tree", TreeState::FIELDS),
             ("work", Workspace::FIELDS),
             ("work.verdicts", Verdicts::FIELDS),
@@ -285,13 +296,21 @@ mod tests {
         // `node_selected`, which #181 replaced with the one subject.
         let leaves: usize = actual
             .iter()
-            .map(|(g, f)| if *g == "work" { 1 } else { f.len() })
+            .map(|(g, f)| match *g {
+                "work" => 1,
+                // `slots` is the `sub.slot` group's home, not a leaf; only
+                // the id mint counts here (#257).
+                "sub" => 1,
+                _ => f.len(),
+            })
             .sum();
         // …plus `obs.retention`, the retained window's account (#217), plus
         // the two overlay drafts (#187, #188) and the replay loading claim
         // (#255); minus one when #184 merged `call_form` and `publish_form`
         // into `send_form`; plus the verdict cache (#164), the budget join
         // (#221) and the subject's fields and why sections (#223, #214).
-        assert_eq!(leaves, 72, "the split must place every field exactly once");
+        // Then #257: the 11 subject fields moved into `sub.slot` and gained
+        // the slot's `id`; the container keeps the id mint — 72 became 74.
+        assert_eq!(leaves, 74, "the split must place every field exactly once");
     }
 }

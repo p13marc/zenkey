@@ -97,6 +97,10 @@ impl Zengui {
             self.work.windows.torn.push(TornWindow {
                 id,
                 role: t.role,
+                // Follow-bound (#257): only follow windows persist — a pin's
+                // evidence is session-lived, and restoring the identity
+                // without it would be the freeze the issue rejects.
+                slot: crate::message::SlotId::FOLLOW,
                 size: t.size,
                 position: t.position,
             });
@@ -119,10 +123,19 @@ impl Zengui {
     }
 
     pub fn title(&self, window: iced::window::Id) -> String {
-        match self.work.windows.role_of(window) {
+        match self.work.windows.torn.iter().find(|t| t.id == window) {
             // A torn-off dock's window says which region it is — its own
-            // chrome is the only title bar it has (#186).
-            Some(role) => format!("zengui — {} — {}", role.label(), self.dep.base_label()),
+            // chrome is the only title bar it has (#186). A pinned window
+            // says so in the title too (#257); the banner inside states the
+            // subject, since a key rarely fits a title bar.
+            Some(t) if t.slot.is_pin() => {
+                format!(
+                    "zengui — {} (pinned) — {}",
+                    t.role.label(),
+                    self.dep.base_label()
+                )
+            }
+            Some(t) => format!("zengui — {} — {}", t.role.label(), self.dep.base_label()),
             None => format!("zengui — {}", self.dep.base_label()),
         }
     }
@@ -258,7 +271,7 @@ impl Zengui {
     /// test that never opened a window still renders the workspace with any
     /// id it likes.
     pub fn view(&self, window: iced::window::Id) -> Element<'_, Message> {
-        if let Some(role) = self.work.windows.role_of(window) {
+        if let Some(torn) = self.work.windows.torn.iter().find(|t| t.id == window) {
             // The replay banner renders in *every* window (#74, #186): a
             // torn-off Echo fed from a file with no banner over it would be
             // a live-looking stream that is not live.
@@ -275,7 +288,10 @@ impl Zengui {
                     &self.sub,
                     &self.tree,
                     &self.work,
-                    role,
+                    torn.role,
+                    // The window's slot binding (#257): a pinned Inspector
+                    // renders its own subject; everything else follows.
+                    torn.slot,
                     self.chrome.prefs.density,
                 ))
                 .into();
@@ -343,6 +359,7 @@ impl Zengui {
                 ),
                 history: self
                     .sub
+                    .follow()
                     .history
                     .as_ref()
                     .map(|r| (r.ring.len(), r.ring.evicted())),

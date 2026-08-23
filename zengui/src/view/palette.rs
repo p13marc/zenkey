@@ -192,7 +192,10 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         // default (no listen).
         Action {
             label: "why is this key silent?".into(),
-            message: Message::Pane(PaneMsg::Why(crate::view::why::WhyMsg::Run)),
+            message: Message::Pane(PaneMsg::Why(
+                crate::message::SlotId::FOLLOW,
+                crate::view::why::WhyMsg::Run,
+            )),
         },
         Action {
             label: "reconnect".into(),

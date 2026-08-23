@@ -128,7 +128,11 @@ fn truncate(s: String) -> String {
 }
 
 /// A bounded per-key timeline that counts what it drops.
-#[derive(Debug)]
+///
+/// `Clone` since #257: pinning a subject clones the recorder so the pinned
+/// pane keeps the timeline it was showing. From the clone on, the two rings
+/// are two observers — each counts its own retention and its own evictions.
+#[derive(Debug, Clone)]
 pub struct HistoryRing {
     entries: VecDeque<HistoryEntry>,
     max_entries: usize,
@@ -228,8 +232,9 @@ impl HistoryRing {
 /// is open.
 ///
 /// Replaced wholesale when the selection changes, which is what makes
-/// deselecting stop the cost — there is no recorder left to feed.
-#[derive(Debug)]
+/// deselecting stop the cost — there is no recorder left to feed. Cloned at
+/// pin time (#257), so `since` stays the honest start of what the ring holds.
+#[derive(Debug, Clone)]
 pub struct HistoryRecorder {
     /// The full wire key being recorded.
     pub key: String,

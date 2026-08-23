@@ -22,7 +22,7 @@ use iced::{Element, Length};
 use zenkey_fleet::decode::{DecodedSample, Rendering};
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
-use crate::message::{Message, PaneMsg};
+use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::{NumericLeaves, Series};
 use crate::view::kit;
 use crate::view::spark;
@@ -60,6 +60,9 @@ pub enum Fetched<'a> {
 }
 
 pub struct DetailData<'a> {
+    /// The subject slot this section renders (#257) — every message it
+    /// emits carries it home.
+    pub slot: SlotId,
     pub key: &'a str,
     pub facts: Option<&'a KeyFacts>,
     pub fetched: Fetched<'a>,
@@ -227,8 +230,8 @@ pub struct SeriesCaches {
 /// `Message::Workspace(WorkspaceMsg::PaneSelected)` below is deliberately *not* routed through
 /// this: it names another region, and a pane reaching across is a fact
 /// worth leaving visible at its call site.
-fn msg(m: DetailMsg) -> Message {
-    Message::Pane(PaneMsg::Detail(m))
+fn msg(slot: SlotId, m: DetailMsg) -> Message {
+    Message::Pane(PaneMsg::Detail(slot, m))
 }
 
 /// The Inspector's key sections, as a column the caller scrolls (#182).
@@ -351,7 +354,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
 
     // — Series: sparklines over the recorded history (issue #64).
     if let Some(series) = data.series
-        && let Some(section) = series_section(series, sp)
+        && let Some(section) = series_section(series, data.slot, sp)
     {
         col = col.push(section);
     }
@@ -374,7 +377,11 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
 /// Returning `None` is the point: a payload that carries no number is an
 /// ordinary fact, and rendering an empty chart or an error for it would invent
 /// a problem (#64's second acceptance line).
-fn series_section<'a>(data: &'a SeriesData, sp: Spacing) -> Option<Element<'a, Message>> {
+fn series_section<'a>(
+    data: &'a SeriesData,
+    slot: SlotId,
+    sp: Spacing,
+) -> Option<Element<'a, Message>> {
     let plottable = !data.leaves.leaves.is_empty();
     if !plottable && !data.rate.has_data() {
         return None;
@@ -396,7 +403,7 @@ fn series_section<'a>(data: &'a SeriesData, sp: Spacing) -> Option<Element<'a, M
             picker = picker.push(kit::tab(
                 path.clone(),
                 active,
-                msg(DetailMsg::LeafSelected(path.clone())),
+                msg(slot, DetailMsg::LeafSelected(path.clone())),
             ));
         }
         col = col.push(iced::widget::scrollable(picker).width(Length::Fill));

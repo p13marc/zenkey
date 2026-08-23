@@ -47,7 +47,7 @@ use super::history::HistoryData;
 use super::{blob, detail, history, kit, media, nodes};
 use crate::blob::BlobState;
 use crate::history::HistoryRecorder;
-use crate::message::{Message, Subject};
+use crate::message::{Message, SlotId, Subject};
 use crate::nodes::NodeRoster;
 use crate::view::media::MediaState;
 use crate::view::nodes::DetailState;
@@ -62,6 +62,11 @@ use crate::view::tokens::Spacing;
 /// from "what the app holds" to "what a section needs" is written once and in
 /// one place.
 pub struct InspectorData<'a> {
+    /// Which subject slot this surface is bound to (#257): the docked
+    /// Inspector says [`SlotId::FOLLOW`]; a pinned window says its own.
+    /// Every section message carries it home, so two Inspectors over two
+    /// slots never speak into each other's state.
+    pub slot: SlotId,
     pub subject: &'a Subject,
     /// The projected facts for a key subject — the plane classifier, and the
     /// facts ladder the Detail section renders.
@@ -155,6 +160,7 @@ fn prefix_sections<'a>(prefix: &'a str) -> Column<'a, Message> {
 
 fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
     let mut col = detail::section(DetailData {
+        slot: d.slot,
         key,
         facts: d.facts,
         fetched: d.fetched,
@@ -185,12 +191,13 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     }
 
     // The bounded field observation (#223) and the why ladder (#214): both
-    // follow the subject, both cost only what their buttons say — and both
-    // spend the dock's resolved grid (#192).
-    col = col.push(super::fields::section(d.fields, d.sp));
-    col = col.push(super::why::section(d.why, d.sp));
+    // follow the slot's subject, both cost only what their buttons say — and
+    // both spend the dock's resolved grid (#192).
+    col = col.push(super::fields::section(d.fields, d.slot, d.sp));
+    col = col.push(super::why::section(d.why, d.slot, d.sp));
 
     col.push(history::section(HistoryData {
+        slot: d.slot,
         key: Some(key),
         recorder: d.history,
         watched: d.watched,

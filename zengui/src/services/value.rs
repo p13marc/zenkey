@@ -111,6 +111,7 @@ pub fn validate(
 /// for the window, and provably releases it. The per-path table is bounded
 /// by the engine's `DEFAULT_MAX_PATHS` and the report states its drops (O6).
 pub fn field(
+    slot: crate::message::SlotId,
     session: zenoh::Session,
     base: String,
     slices: Option<Arc<zenkey_fleet::SliceSet>>,
@@ -130,7 +131,14 @@ pub fn field(
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
         },
-        |out| Message::Pane(PaneMsg::Fields(crate::view::fields::FieldsMsg::Done(out))),
+        // The landing carries the asking slot's id (#257): a pinned
+        // Inspector's report comes home to the pin, never to the dock.
+        move |out| {
+            Message::Pane(PaneMsg::Fields(
+                slot,
+                crate::view::fields::FieldsMsg::Done(out),
+            ))
+        },
     )
 }
 
@@ -140,6 +148,7 @@ pub fn field(
 /// the admin sweeps and one bounded GET on the asked key — no subscriber, so
 /// the `wire-heard` rung lands `NotAsked` and says so rather than "silent".
 pub fn why(
+    slot: crate::message::SlotId,
     session: zenoh::Session,
     base: String,
     slices: Option<Arc<zenkey_fleet::SliceSet>>,
@@ -157,7 +166,8 @@ pub fn why(
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
         },
-        |out| Message::Pane(PaneMsg::Why(crate::view::why::WhyMsg::Done(out))),
+        // The asking slot's id rides the landing (#257).
+        move |out| Message::Pane(PaneMsg::Why(slot, crate::view::why::WhyMsg::Done(out))),
     )
 }
 

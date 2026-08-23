@@ -127,10 +127,13 @@ pub(crate) fn update(
             }
             if t.history_entries != dep.settings.history_entries {
                 dep.settings.history_entries = t.history_entries;
-                // The recorder in flight resizes too; the next selection
-                // starts at the new bound anyway.
-                if let Some(rec) = sub.history.as_mut() {
-                    rec.ring.resize(t.history_entries);
+                // Every recorder in flight resizes too — the pins' as much
+                // as the follow slot's (#257); the next selection starts at
+                // the new bound anyway.
+                for slot in sub.slots.iter_mut() {
+                    if let Some(rec) = slot.history.as_mut() {
+                        rec.ring.resize(t.history_entries);
+                    }
                 }
                 applied.push(format!("history {} entries (live)", t.history_entries));
             }
@@ -203,7 +206,11 @@ fn repoint(
         dep.base(),
         dep.timeout(),
     )));
-    sub.decoded = None;
+    // Every slot's decode was judged under the departing deployment's
+    // schemas (#257) — the pins' as much as the follow slot's.
+    for slot in sub.slots.iter_mut() {
+        slot.decoded = None;
+    }
     tree.reflatten(dep, obs);
     Task::batch([super::bus::start_monitor(dep), super::bus::load_slices(dep)])
 }

@@ -1,35 +1,44 @@
-//! The [`Subject`] the whole workspace follows, and everything derived from it.
+//! The subject **slots** (#181, #257): what the workspace looks at, and
+//! everything derived from each subject.
 //!
-//! The struct is `SubjectState` and the subject itself is
-//! [`Subject`](crate::message::Subject), which lives in `message.rs` because
-//! that is what carries it — and because `view` is public while `state` is
-//! `pub(crate)`, so a pane function could not name it from here.
-//! `SubjectState` follows the existing `TreeState` precedent: the sub-state
-//! that *holds* a thing is named for the thing plus `State`.
+//! Since #257 the workspace holds N subjects, not one. [`SubjectSlot`] is the
+//! old singular `SubjectState`: one subject plus every field derived from it
+//! — the recorder, the rate sampler, the chart, the fetch, the decode, the
+//! Fields and Why sections. [`SubjectState`] is the collection: slot 0
+//! ([`SlotId::FOLLOW`]) is the subject the tree and the location bar drive,
+//! and every further slot is a *pin* — a subject a torn-off Inspector holds
+//! while the selection moves on.
+//!
+//! The issue's finding is why this is a slot and not an `Option<Subject>`
+//! beside the current one: six fields here are rebuilt when the subject
+//! moves, so freezing only the identity would title a pane with one key
+//! while its chart described another — the O4 failure #181 removed from the
+//! fetch path, reintroduced one panel over. A pin that is a special case is
+//! a pin that is wrong in the tear-off window; a pin that is a slot is just
+//! another subject the tick already feeds.
 //!
 //! No `forget`, and that is the finding rather than an omission: a subject
-//! follows the *user*, not the fleet. Switching base leaves the same key
-//! selected, and the panes then say honestly that they have no value for it
-//! yet — which is what "not asked" means (O4).
-//!
-//! Two panes have no state of their own and mutate this group instead: Detail
-//! and History are windows onto the subject. That is worth knowing before #180
-//! docks the eleven panes — two of them have nothing to dock.
+//! follows the *user*, not the fleet. Switching base leaves the same keys
+//! selected and pinned, and the panes then say honestly that they have no
+//! value for them yet — which is what "not asked" means (O4).
 
 use std::sync::Arc;
 
 use zenkey_fleet::FetchOutcome;
 
 use super::deployment::Deployment;
-use crate::message::Subject;
+use crate::message::{SlotId, Subject};
 use crate::view;
 
 sub_state! {
-    #[derive(Default)]
-    pub(crate) struct SubjectState {
-        /// What the workspace is looking at (#181).
+    /// One subject and everything derived from it — per slot since #257.
+    pub(crate) struct SubjectSlot {
+        /// Which slot this is. [`SlotId::FOLLOW`] is the tree's; anything
+        /// else is a pin, held by the window bound to it.
+        pub(crate) id: SlotId,
+        /// What this slot is looking at (#181).
         pub(crate) current: Subject,
-        /// The selected key's observed skewed-latency summary, refreshed on the
+        /// The slot key's observed skewed-latency summary, refreshed on the
         /// bus tick (#119) — never computed on the render path, and cleared
         /// with the selection.
         pub(crate) selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
@@ -46,18 +55,19 @@ sub_state! {
         /// timeline, so it starts at the top rather than wherever the last
         /// key's list happened to be.
         pub(crate) history_scroll: (f32, f32),
-        /// The selected key's history recording (issue #63). Created on selection,
-        /// dropped on the next one — which is what makes deselecting stop the
-        /// cost, since there is then nothing left to feed.
+        /// The slot key's history recording (issue #63). Created on selection
+        /// (or cloned at pin time, #257), dropped with the slot — which is
+        /// what makes unpinning stop the cost, since there is then nothing
+        /// left to feed.
         pub(crate) history: Option<crate::history::HistoryRecorder>,
-        /// The selected key's rate series (issue #64), sampled once per stats
+        /// The slot key's rate series (issue #64), sampled once per stats
         /// tick. Reset with the selection, like the history it sits beside.
         pub(crate) rate_series: crate::series::RateSampler,
         /// Which numeric leaf the value sparkline plots; `None` follows the first
         /// leaf the payload offers.
         pub(crate) series_leaf: Option<String>,
-        /// The detail pane's chart data, rebuilt when its **inputs** change rather
-        /// than on every frame (#178).
+        /// The detail section's chart data, rebuilt when its **inputs** change
+        /// rather than on every frame (#178).
         ///
         /// It was computed inside `view()`, which meant walking the history ring
         /// twice and cloning the whole rate series ~60 times a second for a
@@ -65,18 +75,35 @@ sub_state! {
         /// rebuild point; everything that can change the chart calls it, and
         /// nothing else may write this field.
         pub(crate) series: Option<view::detail::SeriesData>,
-        /// The bounded field observation on the subject key (#223): run on
+        /// The bounded field observation on the slot key (#223): run on
         /// demand, dropped with the subject — its report is evidence about
         /// one key's window.
         pub(crate) fields: view::fields::FieldsState,
-        /// The why ladder's state for the subject key (#214): run on demand
+        /// The why ladder's state for the slot key (#214): run on demand
         /// at the frugal default, dropped with the subject.
         pub(crate) why: view::why::WhyState,
     }
 }
 
-impl SubjectState {
-    /// Rebuild the detail pane's chart data.
+impl SubjectSlot {
+    pub(crate) fn new(id: SlotId) -> SubjectSlot {
+        SubjectSlot {
+            id,
+            current: Subject::None,
+            selected_latency: None,
+            fetched: None,
+            decoded: None,
+            history_scroll: (0.0, 600.0),
+            history: None,
+            rate_series: crate::series::RateSampler::new(),
+            series_leaf: None,
+            series: None,
+            fields: view::fields::FieldsState::default(),
+            why: view::why::WhyState::default(),
+        }
+    }
+
+    /// Rebuild the detail section's chart data.
     ///
     /// The one rebuild point (#178): everything that can change the chart
     /// calls this, and nothing else writes `series`. It takes the deployment
@@ -86,7 +113,7 @@ impl SubjectState {
         self.series = self.series_data(dep);
     }
 
-    /// Derive the detail pane's sparkline data from the recorded history
+    /// Derive the detail section's sparkline data from the recorded history
     /// (issue #64).
     ///
     /// The ring is the single source, so nothing here is cached beyond the
@@ -133,5 +160,156 @@ impl SubjectState {
             rate: self.rate_series.series().clone(),
             unit,
         })
+    }
+}
+
+sub_state! {
+    /// The workspace's subjects (#257): the follow slot the tree drives,
+    /// plus one slot per pin.
+    pub(crate) struct SubjectState {
+        /// The slots. `slots[0]` is always the follow slot — [`SubjectState::follow`]
+        /// leans on that — and the rest are pins in pin order.
+        pub(crate) slots: Vec<SubjectSlot>,
+        /// The id the next pin gets. Never reused within a session, so a
+        /// message routed to a dropped slot misses instead of landing in a
+        /// stranger.
+        pub(crate) next_slot: SlotId,
+    }
+}
+
+impl Default for SubjectState {
+    fn default() -> SubjectState {
+        SubjectState {
+            slots: vec![SubjectSlot::new(SlotId::FOLLOW)],
+            next_slot: SlotId::FOLLOW.next(),
+        }
+    }
+}
+
+impl SubjectState {
+    /// The follow slot — the subject the tree and the location bar drive.
+    pub(crate) fn follow(&self) -> &SubjectSlot {
+        &self.slots[0]
+    }
+
+    pub(crate) fn follow_mut(&mut self) -> &mut SubjectSlot {
+        &mut self.slots[0]
+    }
+
+    pub(crate) fn slot(&self, id: SlotId) -> Option<&SubjectSlot> {
+        self.slots.iter().find(|s| s.id == id)
+    }
+
+    pub(crate) fn slot_mut(&mut self, id: SlotId) -> Option<&mut SubjectSlot> {
+        self.slots.iter_mut().find(|s| s.id == id)
+    }
+
+    /// Pin the follow slot's subject (#257): mint a new slot carrying the
+    /// whole derivation, so the pinned pane keeps showing exactly what it
+    /// showed — the history recorded so far, the fetch, the decode, the
+    /// chart — and evolves independently from here on.
+    ///
+    /// The recorder is *cloned*, not shared: from this instant the two slots
+    /// are two observers, and each ring counts its own retention and its own
+    /// evictions. The Fields and Why sections start over instead — their
+    /// landings route by slot id, so a report in flight for the follow slot
+    /// must not be awaited by the pin (only the window *input* carries over;
+    /// it is the user's, not the fleet's).
+    pub(crate) fn pin_current(&mut self, dep: &Deployment) -> SlotId {
+        let id = self.next_slot;
+        self.next_slot = self.next_slot.next();
+        let follow = self.follow();
+        let fields = view::fields::FieldsState {
+            window: follow.fields.window.clone(),
+            ..Default::default()
+        };
+        let mut slot = SubjectSlot {
+            id,
+            current: follow.current.clone(),
+            selected_latency: follow.selected_latency.clone(),
+            fetched: follow.fetched.clone(),
+            decoded: follow.decoded.clone(),
+            history_scroll: follow.history_scroll,
+            history: follow.history.clone(),
+            rate_series: follow.rate_series.clone(),
+            series_leaf: follow.series_leaf.clone(),
+            // Rebuilt below: a `SeriesData` carries retained canvas geometry,
+            // which is per-surface by nature.
+            series: None,
+            fields,
+            why: view::why::WhyState::default(),
+        };
+        slot.refresh_series(dep);
+        self.slots.push(slot);
+        id
+    }
+
+    /// Drop one pinned slot — its recorder, its chart, its fetch — and
+    /// nothing of any other slot's. The follow slot refuses: it is the
+    /// workspace's, not any pane's.
+    pub(crate) fn unpin(&mut self, id: SlotId) -> bool {
+        if !id.is_pin() {
+            return false;
+        }
+        let before = self.slots.len();
+        self.slots.retain(|s| s.id != id);
+        self.slots.len() != before
+    }
+
+    /// Drop every pin — the layout presets are fully docked, and a pinned
+    /// window they close takes its slot with it (#186, #257).
+    pub(crate) fn drop_pins(&mut self) {
+        self.slots.retain(|s| !s.id.is_pin());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dep() -> Deployment {
+        Deployment::new(crate::app::test_settings())
+    }
+
+    /// The pin carries the derivation, not just the identity — the issue's
+    /// whole point. And dropping it drops exactly its own evidence.
+    #[test]
+    fn a_pin_carries_the_evidence_and_unpinning_drops_only_its_own() {
+        let dep = dep();
+        let mut sub = SubjectState::default();
+        let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+        sub.follow_mut().current = Subject::Key(key.into());
+        sub.follow_mut().history = Some(crate::history::HistoryRecorder::new(key, 10));
+
+        let pin = sub.pin_current(&dep);
+        assert!(pin.is_pin());
+        let pinned = sub.slot(pin).expect("just minted");
+        assert_eq!(pinned.current.key(), Some(key));
+        assert!(
+            pinned.history.is_some(),
+            "the pin keeps recording what the follow slot was recording"
+        );
+
+        assert!(!sub.unpin(SlotId::FOLLOW), "the follow slot is not a pin");
+        assert!(sub.unpin(pin));
+        assert!(sub.slot(pin).is_none());
+        assert!(
+            sub.follow().history.is_some(),
+            "unpinning must not touch the follow slot's recorder"
+        );
+        assert!(!sub.unpin(pin), "a dropped slot stays dropped");
+    }
+
+    /// Ids are never reused within a session: a message routed to a dropped
+    /// slot must miss, not land in whatever slot was minted after it.
+    #[test]
+    fn slot_ids_are_not_reused() {
+        let dep = dep();
+        let mut sub = SubjectState::default();
+        let first = sub.pin_current(&dep);
+        assert!(sub.unpin(first));
+        let second = sub.pin_current(&dep);
+        assert_ne!(first, second);
+        assert!(sub.slot(first).is_none());
     }
 }
