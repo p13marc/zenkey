@@ -61,8 +61,12 @@ fn test_home() -> PathBuf {
 }
 
 fn cases() -> trycmd::TestCases {
+    cases_in(test_home())
+}
+
+fn cases_in(home: PathBuf) -> trycmd::TestCases {
     let t = trycmd::TestCases::new();
-    t.env("ZENKEY_EXPLORER_CONFIG_DIR", test_home().to_str().unwrap())
+    t.env("ZENKEY_EXPLORER_CONFIG_DIR", home.to_str().unwrap())
         // Set *empty* rather than left alone: empty is the documented default
         // (the base-less bus-root deployment, RFC v1.6), clap renders
         // `[env: ZENCTL_BASE=]` for unset and empty alike, and pinning it stops
@@ -111,6 +115,21 @@ fn the_offline_surface_prints_what_it_has_always_printed() {
     cases().case("tests/cmd/*.trycmd");
 }
 
+/// The context/cache family (`tests/cmd/contexts/`) runs in a home of its
+/// own. Its cases *write* the home they run in — a context they create is
+/// every concurrent case's active context, and any case that loads slices
+/// (`topic info --registry …`, session-transport-fallback) fills the cache
+/// keyed by whatever context is active at that instant — so sharing the
+/// glob's home makes `cache clear`'s pinned `existed:false` a race against
+/// trycmd's file scheduling. Same `cli-home` root, so one
+/// `rm -rf target/tmp/cli-home` still resets the whole corpus.
+#[test]
+fn the_stateful_context_family_runs_in_a_home_of_its_own() {
+    let home = test_home().join("contexts");
+    std::fs::create_dir_all(&home).expect("create the context family's config root");
+    cases_in(home).case("tests/cmd/contexts/*.trycmd");
+}
+
 /// Walk the tree the binary actually builds, and collect the leaves.
 fn leaves(cmd: &clap::Command, path: &mut Vec<String>, out: &mut Vec<String>) {
     let subs: Vec<&clap::Command> = cmd
@@ -142,8 +161,11 @@ fn the_corpus_names_every_leaf_verb() {
     let mut found = Vec::new();
     leaves(&cmd, &mut Vec::new(), &mut found);
 
+    // Both corpora count: the flat glob and the stateful context family in
+    // its own subdirectory (one level is all the layout has).
     let corpus: String = std::fs::read_dir("tests/cmd")
         .expect("the corpus directory")
+        .chain(std::fs::read_dir("tests/cmd/contexts").expect("the context family"))
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().is_some_and(|x| x == "trycmd"))
         .map(|e| std::fs::read_to_string(e.path()).expect("a case file"))
