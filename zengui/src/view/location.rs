@@ -12,7 +12,7 @@
 //! moved here from the Inspector's subject line, which now carries the key at
 //! `EMPHASIS` — exactly one TITLE per window, and it answers "where am I".
 //!
-//! [`bar`] reads five of the six sub-states and moves none, like the toolbar
+//! `bar` reads five of the six sub-states and moves none, like the toolbar
 //! before it. [`breadcrumb`] takes plain data ([`LocationData`]) so
 //! `tests/panes.rs` renders it headlessly, the same seam as
 //! [`super::status::Status`].
@@ -37,7 +37,7 @@ pub struct LocationData<'a> {
     pub context: Option<&'a str>,
     /// The deployment base in force; `""` is the bus root.
     pub base: &'a str,
-    /// The picker's options ([`crate::update::bus::rebuild_base_options`]).
+    /// The picker's options (`crate::update::bus::rebuild_base_options`).
     pub base_options: &'a [BaseChoice],
     pub scope: ScopePreset,
     /// Whether the scope's watches are live (#85's opt-in observation).
