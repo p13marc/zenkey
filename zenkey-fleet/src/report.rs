@@ -689,7 +689,7 @@ pub struct ObservationSummary {
     /// Samples the bounded observer missed; non-zero weakens every
     /// listen-phase finding and the report says so.
     pub dropped: u64,
-    /// Samples carrying the synthetic-traffic marker (RFC 09 §5.2, #162) —
+    /// Samples carrying the synthetic-traffic marker (RFC 09 §5.3, #162) —
     /// generated traffic judged as real would be a self-inflicted finding.
     pub synthetic_marked: u64,
     /// Field-intelligence paths (#223) the bounded per-path table refused to

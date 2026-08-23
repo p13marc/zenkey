@@ -413,7 +413,7 @@ pub(crate) fn rate_cap_per_hour(rate: &str) -> Option<u64> {
     }
 }
 
-/// Does an attachment carry the RFC 09 §5.2 synthetic-traffic marker
+/// Does an attachment carry the RFC 09 §5.3 synthetic-traffic marker
 /// (`{"synthetic": true, …}`, #162)? Generated traffic judged as real would
 /// be a self-inflicted finding, so the observation counts it separately —
 /// here and in the watchdog's windows (`condition`, #227).
