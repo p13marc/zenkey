@@ -29,6 +29,9 @@ async fn drain_seed(
             SeedItem::Sample(v) => {
                 values.push(String::from_utf8_lossy(&v.payload.to_bytes()).to_string())
             }
+            SeedItem::Dropped(n) => {
+                panic!("these fixtures never outrun the bounded channel ({n} dropped)")
+            }
             SeedItem::SeedComplete(c) => return (values, c),
         }
     }
@@ -248,6 +251,9 @@ async fn a_transition_in_the_seed_window_lands_exactly_once() {
                 } else {
                     before_boundary += 1;
                 }
+            }
+            Ok(Some(SeedItem::Dropped(n))) => {
+                panic!("this fixture never outruns the bounded channel ({n} dropped)")
             }
             Ok(Some(SeedItem::SeedComplete(c))) => {
                 assert_eq!(c.history_replies, None, "history was opted out");

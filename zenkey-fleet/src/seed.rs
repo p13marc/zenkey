@@ -79,14 +79,88 @@ pub struct SeedCoverage {
 pub enum SeedItem {
     /// A sample that survived the per-key LWW merge — seed and live alike.
     Sample(SampleView),
+    /// How many samples this consumer just missed: the delivery channel is
+    /// bounded, and a receiver that fell behind is told the count rather
+    /// than handed a silently thinned stream (RFC 09 §5.1 O6 — the mirror
+    /// of [`crate::StreamItem::Dropped`]). Merge suppressions are *not* in
+    /// this number; they ride [`SeedCoverage::superseded`].
+    Dropped(u64),
     /// Both seed paths have resolved; everything after this is live-only.
-    /// Consumers that render "loading" state key off this boundary.
+    /// Consumers that render "loading" state key off this boundary. Never
+    /// dropped: the boundary is sent with backpressure, not best-effort.
     SeedComplete(SeedCoverage),
+}
+
+/// The delivery channel's bound — the same figure as the monitor's default
+/// broadcast capacity ([`crate::MonitorSpec::default`]), for the same
+/// reason: bound it to what a consumer can drain, and surface the lag.
+const SEED_CAPACITY: usize = 1024;
+
+/// The sending half of the bounded seed channel: samples are best-effort
+/// (`try_send`) with every refusal counted, so a slow consumer costs a
+/// stated drop, never unbounded memory (deep-review D5).
+#[derive(Clone)]
+struct SeedSender {
+    tx: tokio::sync::mpsc::Sender<SeedItem>,
+    dropped: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl SeedSender {
+    fn send_sample(&self, view: SampleView) {
+        use tokio::sync::mpsc::error::TrySendError;
+        match self.tx.try_send(SeedItem::Sample(view)) {
+            Ok(()) => {}
+            // The bound refused it: count the drop (O6).
+            Err(TrySendError::Full(_)) => {
+                self.dropped
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            // No receiver any more — nothing is observing, nothing to count.
+            Err(TrySendError::Closed(_)) => {}
+        }
+    }
+
+    /// The boundary, with backpressure: waits for room rather than dropping
+    /// — a lost `SeedComplete` would leave every consumer "loading" forever.
+    async fn send_boundary(&self, coverage: SeedCoverage) {
+        let _ = self.tx.send(SeedItem::SeedComplete(coverage)).await;
+    }
+}
+
+/// The receiving half: surfaces the accumulated drop count as a
+/// [`SeedItem::Dropped`] before the next item, like the monitor's lagging
+/// broadcast receiver does.
+struct SeedReceiver {
+    rx: tokio::sync::mpsc::Receiver<SeedItem>,
+    dropped: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl SeedReceiver {
+    async fn recv(&mut self) -> Option<SeedItem> {
+        let missed = self.dropped.swap(0, std::sync::atomic::Ordering::Relaxed);
+        if missed > 0 {
+            return Some(SeedItem::Dropped(missed));
+        }
+        self.rx.recv().await
+    }
+}
+
+/// The bounded seed channel, drop-accounted on both halves.
+fn seed_channel(capacity: usize) -> (SeedSender, SeedReceiver) {
+    let (tx, rx) = tokio::sync::mpsc::channel::<SeedItem>(capacity);
+    let dropped = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    (
+        SeedSender {
+            tx,
+            dropped: Arc::clone(&dropped),
+        },
+        SeedReceiver { rx, dropped },
+    )
 }
 
 /// A subscription whose first phase is a correctly-merged seed.
 pub struct SeededSubscriber {
-    rx: tokio::sync::mpsc::UnboundedReceiver<SeedItem>,
+    rx: SeedReceiver,
     // Held for lifetime: dropping undeclares.
     _subscriber: zenoh::pubsub::Subscriber<()>,
     task: tokio::task::JoinHandle<()>,
@@ -105,7 +179,9 @@ impl Drop for SeededSubscriber {
 }
 
 impl SeededSubscriber {
-    /// `None` when the subscription ended.
+    /// `None` when the subscription ended. A consumer that fell behind the
+    /// bounded channel is handed [`SeedItem::Dropped`] with the count of
+    /// samples it missed before the stream resumes (O6).
     pub async fn recv(&mut self) -> Option<SeedItem> {
         self.rx.recv().await
     }
@@ -197,6 +273,83 @@ pub(crate) fn cache_selector(selector: &str) -> String {
     format!("{selector}/@adv/**")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view(key: &str) -> SampleView {
+        SampleView {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(vec![0u8; 1]),
+            encoding: "zenoh/bytes".to_string(),
+            kind: zenoh::sample::SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: std::time::Instant::now(),
+        }
+    }
+
+    /// Deep-review D5: the seed channel is bounded, and what the bound
+    /// refuses is counted and surfaced as [`SeedItem::Dropped`] before the
+    /// stream resumes — the O6 honesty every other delivery surface in this
+    /// crate already has. The boundary rides with backpressure and is never
+    /// among the dropped.
+    #[tokio::test]
+    async fn a_slow_seed_consumer_is_told_what_it_missed() {
+        let (tx, mut rx) = seed_channel(4);
+        for i in 0..10 {
+            tx.send_sample(view(&format!("k/{i}")));
+        }
+        // 4 fit; 6 were refused by the bound.
+        let Some(SeedItem::Dropped(n)) = rx.recv().await else {
+            panic!("expected the dropped count first");
+        };
+        assert_eq!(n, 6, "every refusal is counted, exactly once");
+        for i in 0..4 {
+            let Some(SeedItem::Sample(v)) = rx.recv().await else {
+                panic!("expected the retained samples");
+            };
+            assert_eq!(v.key, format!("k/{i}"), "the retained head is in order");
+        }
+        // The count was handed over, not double-reported.
+        tx.send_sample(view("k/late"));
+        let Some(SeedItem::Sample(v)) = rx.recv().await else {
+            panic!("the stream resumes");
+        };
+        assert_eq!(v.key, "k/late");
+
+        // The boundary waits for room instead of dropping (a lost boundary
+        // is a consumer stuck on "loading" forever).
+        for i in 0..4 {
+            tx.send_sample(view(&format!("b/{i}")));
+        }
+        let boundary = tokio::spawn(async move {
+            tx.send_boundary(SeedCoverage {
+                history_replies: Some(0),
+                storage_replies: Some(0),
+                superseded: 0,
+            })
+            .await;
+        });
+        let mut seen_boundary = false;
+        while let Some(item) = rx.recv().await {
+            if let SeedItem::SeedComplete(c) = item {
+                assert_eq!(c.superseded, 0);
+                seen_boundary = true;
+                break;
+            }
+        }
+        assert!(seen_boundary, "the boundary is never among the dropped");
+        boundary.await.expect("boundary task");
+    }
+}
+
 /// Subscribe with a correct seed phase (RFC 04 §3.2).
 ///
 /// Order of operations is the contract: the subscriber is declared first;
@@ -212,7 +365,7 @@ pub async fn seed_subscribe(
     selector: &str,
     policy: SeedPolicy,
 ) -> Result<SeededSubscriber> {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SeedItem>();
+    let (tx, rx) = seed_channel(SEED_CAPACITY);
     let merge = Arc::new(Merge::new());
 
     // 1) The subscriber, FIRST — anything published from here on is caught.
@@ -224,7 +377,7 @@ pub async fn seed_subscribe(
             move |sample| {
                 let view = view_of(&sample);
                 if merge.admit(&view) {
-                    let _ = tx.send(SeedItem::Sample(view));
+                    tx.send_sample(view);
                 }
             }
         })
@@ -243,7 +396,7 @@ pub async fn seed_subscribe(
                     let sel = cache_selector(&selector);
                     Some(
                         seed_get(&session, &sel, policy.timeout, &merge, |view| {
-                            let _ = tx.send(SeedItem::Sample(view));
+                            tx.send_sample(view);
                         })
                         .await,
                     )
@@ -255,7 +408,7 @@ pub async fn seed_subscribe(
                 if policy.storage {
                     Some(
                         seed_get(&session, &selector, policy.timeout, &merge, |view| {
-                            let _ = tx.send(SeedItem::Sample(view));
+                            tx.send_sample(view);
                         })
                         .await,
                     )
@@ -264,11 +417,12 @@ pub async fn seed_subscribe(
                 }
             };
             let (history_replies, storage_replies) = tokio::join!(history, storage);
-            let _ = tx.send(SeedItem::SeedComplete(SeedCoverage {
+            tx.send_boundary(SeedCoverage {
                 history_replies,
                 storage_replies,
                 superseded: merge.superseded(),
-            }));
+            })
+            .await;
         })
     };
 
