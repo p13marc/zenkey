@@ -1,0 +1,66 @@
+RFC 03 §2 forbids `$*` in selectors, not merely in published keys — the
+sub-chunk wildcard is markedly slower, strains the infrastructure (RFC 02 P6),
+and a key that seems to need it is a key that wants splitting into chunks.
+zengui's scope seam has always refused it; these cases pin the CLI's
+`cmd::raw_selector` seam doing the same, with the same wording, on every verb
+that accepts a typed selector. Composed selectors (`--origin`/`--class`/
+`--producer` positions) cannot spell `$*` at all.
+
+The refusal is offline by design: it happens before a session opens, so no
+traffic — not even a subscriber declaration — is spent on a selector the
+convention forbids.
+
+```console
+$ zenctl topic echo 'v1/$*/x'
+? 1
+Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
+
+```
+
+```console
+$ zenctl get 'v1/$*/x'
+? 1
+Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
+
+```
+
+```console
+$ zenctl record 'v1/$*/x' --out /dev/null
+? 1
+Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
+
+```
+
+```console
+$ zenctl field 'v1/$*/x'
+? 1
+Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
+
+```
+
+```console
+$ zenctl topic hz 'v1/$*/x'
+? 1
+Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
+
+```
+
+The verdict verbs land the same refusal on their reserved exit 2: a `$*`
+selector is a question that cannot be asked, and their 1 would claim a verdict
+this run never reached.
+
+```console
+$ zenctl expect 'v1/$*/x' --within 1
+? 2
+Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
+expect: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+```console
+$ zenctl why 'v1/$*/x'
+? 2
+Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
+why: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

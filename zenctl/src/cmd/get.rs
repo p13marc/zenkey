@@ -39,6 +39,8 @@ pub async fn run(
     no_decode: bool,
     args: &Bus,
 ) -> Result<()> {
+    // The raw seam: `$*` never reaches the session (RFC 03 §2).
+    let selector = super::raw_selector(selector)?;
     let base = args.base().to_string();
     // Slices enrich: they name each key's payload type, and without them the
     // decode ladder falls to its structural rung — which is exactly what
