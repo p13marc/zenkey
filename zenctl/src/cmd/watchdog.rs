@@ -48,8 +48,14 @@ pub async fn run(rules: &[String], tick: f64, ticks: Option<u64>, args: &Bus) ->
     );
     let mut out = std::io::stdout();
     let mut emit = |t: &Transition| {
-        if let Ok(line) = serde_json::to_string(t) {
-            let _ = writeln!(out, "{line}");
+        // Tagged (`"row":"transition"`) like every non-sample line of an
+        // explorer stream, so a consumer can select or skip them by kind.
+        if let Ok(v) = serde_json::to_value(t) {
+            let _ = writeln!(
+                out,
+                "{}",
+                crate::render::Row::tagged("transition", v).into_line()
+            );
             let _ = out.flush();
         }
     };

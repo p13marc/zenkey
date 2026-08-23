@@ -258,6 +258,7 @@ pub async fn run_from_ndjson(
     let mut tombstones = 0usize;
     let mut malformed = 0usize;
     let mut refused = 0usize;
+    let mut meta = 0usize;
     let mut first_errors: Vec<String> = Vec::new();
     let mut record_err = |line_no: usize, reason: String, count: &mut usize| {
         *count += 1;
@@ -273,8 +274,16 @@ pub async fn run_from_ndjson(
         if line.trim().is_empty() {
             continue;
         }
-        let row = match zenkey_fleet::parse_row(&line) {
-            Ok(r) => r,
+        // Through the stream reader, not the bare row parser: an echo stream
+        // interleaves tagged meta rows (`"row":"dropped"`, `"row":"seed"`)
+        // with its samples, and those are skipped-and-counted-as-skipped —
+        // stream metadata is not a malformed row (#235's symmetry, kept).
+        let row = match zenkey_fleet::parse_stream_line(&line) {
+            Ok(zenkey_fleet::StreamLine::Sample(r)) => r,
+            Ok(zenkey_fleet::StreamLine::Meta(_)) => {
+                meta += 1;
+                continue;
+            }
             Err(e) => {
                 record_err(line_no, e, &mut malformed);
                 continue;
@@ -345,6 +354,12 @@ pub async fn run_from_ndjson(
             " — stdin held no publishable rows"
         }
     );
+    if meta > 0 {
+        eprintln!(
+            "{meta} tagged meta line(s) skipped (dropped/seed markers — stream \
+             metadata, not rows)"
+        );
+    }
     if malformed > 0 || refused > 0 {
         eprintln!(
             "{malformed} malformed row(s), {refused} refused delete row(s) — counted, \
