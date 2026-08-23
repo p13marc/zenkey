@@ -71,10 +71,10 @@ impl Render for RateView<'_> {
             let mut tail = row.key.clone();
             // R3: the gate moved onto the row itself — a row without `--loss`
             // carries no count at all, so there is nothing to draw either.
-            if let Some(gaps) = row.sn_gaps {
+            if let Some(gaps) = row.sn_gaps.get() {
                 tail.push_str(&format!("  ({gaps} sn gap(s))"));
             }
-            match (&row.latency, row.unstamped) {
+            match (&row.latency, row.unstamped.get()) {
                 // One clause per population, never one median across them: a
                 // publisher-stamped sample and a router-stamped one measure
                 // from different clocks (#213).
@@ -131,7 +131,7 @@ impl Render for RateView<'_> {
         if let Some(l) = self.report.rows.iter().find_map(|r| r.latency.as_ref()) {
             notes.push(Note::caveat(format!("latency = {}", l.caveat())).cite("RFC 09 §5.1 O7"));
         }
-        if let Some(gaps) = self.report.sn_gaps {
+        if let Some(gaps) = self.report.sn_gaps.get() {
             notes.push(Note::coverage(format!(
                 "{gaps} source-sn gap(s) — zero also means \"publishers attach no \
                  SourceInfo\", which is an observation rather than proof of \

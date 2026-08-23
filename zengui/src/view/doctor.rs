@@ -140,7 +140,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
     // R1: `synced: None` means the served-vs-declared diff never ran (no
     // registry loaded) — which must not read as "nothing out of sync"
     // (RFC 09 §5.1 O4).
-    if report.synced.is_none() {
+    if report.synced.is_not_asked() {
         col = col.push(kit::muted(
             "no registry loaded — the served-vs-declared diff never ran; \
              \"not checked\" is not \"in sync\" (RFC 09 §5.1 O4)",

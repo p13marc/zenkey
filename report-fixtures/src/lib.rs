@@ -303,7 +303,7 @@ pub fn doctor_report() -> DoctorReport {
                 citation: Some("RFC 09 §5.1 O7".into()),
             },
         ],
-        synced: Some(vec![format!("{ORIGIN}/catalog (registry 1.1)")]),
+        synced: Asked::Asked(vec![format!("{ORIGIN}/catalog (registry 1.1)")]),
         introspect_answered: 2,
         live_producers: 3,
         describe_served: 1,
@@ -488,7 +488,7 @@ pub fn interface_show() -> InterfaceShow {
             },
         ],
         // `Some` = `--schema` was asked (R4); `None` is the unasked run.
-        schemas: Some(vec![
+        schemas: Asked::Asked(vec![
             SchemaRow {
                 producer: "sysinfo".into(),
                 type_name: "HealthSnapshot".into(),
@@ -511,7 +511,7 @@ pub fn interface_show() -> InterfaceShow {
 /// says so instead of an empty list that reads as "none served" (R4).
 pub fn interface_show_unasked() -> InterfaceShow {
     InterfaceShow {
-        schemas: None,
+        schemas: Asked::NotAsked,
         ..interface_show()
     }
 }
@@ -623,7 +623,7 @@ pub fn schema_dump() -> SchemaDump {
             hash: "sha256:aaaa".into(),
             document: None,
         }],
-        missing: Some(vec!["TelemetryPoint".into()]),
+        missing: Asked::Asked(vec!["TelemetryPoint".into()]),
     }
 }
 
@@ -635,7 +635,7 @@ pub fn schema_dump_unserved() -> SchemaDump {
         served: false,
         app: None,
         types: vec![],
-        missing: None,
+        missing: Asked::NotAsked,
     }
 }
 
@@ -643,7 +643,7 @@ pub fn schema_dump_unserved() -> SchemaDump {
 /// which must not render as "nothing missing" (RFC 09 §5.1 O4, #246).
 pub fn schema_dump_unchecked() -> SchemaDump {
     let mut dump = schema_dump();
-    dump.missing = None;
+    dump.missing = Asked::NotAsked;
     dump
 }
 
@@ -666,7 +666,7 @@ pub fn blob_list() -> BlobList {
                 encoding: None,
                 since: Some("1.1".into()),
                 description: None,
-                origins: Some(vec![]),
+                origins: Asked::Asked(vec![]),
             },
             BlobTierRow {
                 producer: "parallax".into(),
@@ -679,7 +679,7 @@ pub fn blob_list() -> BlobList {
                 encoding: Some("application/octet-stream".into()),
                 since: None,
                 description: Some("build artifacts".into()),
-                origins: None,
+                origins: Asked::NotAsked,
             },
         ],
     }
@@ -864,10 +864,10 @@ pub fn retired_report() -> RetiredReport {
             since: Some("2.0".into()),
             replaced_by: Some("logs/journald/errors_total".into()),
             selector: "v1/*/*/logs/logs/errors_total".into(),
-            wire_samples: Some(3),
+            wire_samples: Asked::Asked(3),
             still_declared: Some(true),
             subscribers: Some(1),
-            replacement_samples: Some(480),
+            replacement_samples: Asked::Asked(480),
             verdict: CutoverVerdict::OldStillSpeaks,
         },
         RetiredEntry {
@@ -876,10 +876,10 @@ pub fn retired_report() -> RetiredReport {
             since: Some("2.0".into()),
             replaced_by: Some("logs/journald/burn_rate".into()),
             selector: "v1/*/*/logs/logs/by_unit/*/burn_rate".into(),
-            wire_samples: Some(0),
+            wire_samples: Asked::Asked(0),
             still_declared: Some(false),
             subscribers: Some(0),
-            replacement_samples: Some(120),
+            replacement_samples: Asked::Asked(120),
             verdict: CutoverVerdict::Pass,
         },
         RetiredEntry {
@@ -888,19 +888,19 @@ pub fn retired_report() -> RetiredReport {
             since: Some("2.0".into()),
             replaced_by: Some("logs/journald/units_in_failure".into()),
             selector: "v1/*/*/logs/logs/units_in_failure".into(),
-            wire_samples: Some(0),
+            wire_samples: Asked::Asked(0),
             still_declared: Some(false),
             subscribers: Some(0),
-            replacement_samples: Some(0),
+            replacement_samples: Asked::Asked(0),
             verdict: CutoverVerdict::Unproven,
         },
     ];
     RetiredReport {
         registries: vec!["../zensight/zensight-common/registry".into()],
         entries,
-        window_s: Some(30),
-        plane_samples: Some(960),
-        dropped: Some(5),
+        window_s: Asked::Asked(30),
+        plane_samples: Asked::Asked(960),
+        dropped: Asked::Asked(5),
         introspect_answered: 2,
         admin_entities: Some(14),
         verdict: CutoverVerdict::OldStillSpeaks,
@@ -975,7 +975,7 @@ pub fn rate_report() -> RateReport {
         keys: 50_000,
         evicted: 912,
         max_keys: 50_000,
-        sn_gaps: Some(0),
+        sn_gaps: Asked::Asked(0),
         rows: vec![
             // R3: the row-level counters ride the same ask-gates as their
             // report-level siblings — this fixture is a `--loss --latency`
@@ -984,17 +984,17 @@ pub fn rate_report() -> RateReport {
                 key: format!("v1/{ORIGIN}/telemetry/sysinfo/disk/var-log/used"),
                 count: 50,
                 bytes: 2_250,
-                sn_gaps: Some(0),
+                sn_gaps: Asked::Asked(0),
                 latency: None,
-                unstamped: Some(50),
+                unstamped: Asked::Asked(50),
             },
             RateRow {
                 key: format!("v1/{ORIGIN}/state/sysinfo/health"),
                 count: 50,
                 bytes: 1_800,
-                sn_gaps: Some(0),
+                sn_gaps: Asked::Asked(0),
                 latency: None,
-                unstamped: Some(0),
+                unstamped: Asked::Asked(0),
             },
         ],
     }

@@ -172,7 +172,7 @@ mod tests {
     fn report(findings: Vec<DoctorFinding>) -> DoctorReport {
         DoctorReport {
             findings,
-            synced: None,
+            synced: zenkey_fleet::report::Asked::NotAsked,
             introspect_answered: 0,
             live_producers: 0,
             describe_served: 0,

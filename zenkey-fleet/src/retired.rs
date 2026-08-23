@@ -294,10 +294,10 @@ pub async fn run_retired(
                 since: decl.since.clone(),
                 replaced_by: decl.replaced_by.clone(),
                 selector,
-                wire_samples,
+                wire_samples: wire_samples.into(),
                 still_declared,
                 subscribers,
-                replacement_samples,
+                replacement_samples: replacement_samples.into(),
                 verdict: entry_verdict(wire_samples, still_declared, subscribers, life),
             }
         })
@@ -307,11 +307,11 @@ pub async fn run_retired(
     Ok(RetiredReport {
         registries,
         entries,
-        window_s: listen_s,
-        plane_samples: listen_s.map(|_| plane_samples),
+        window_s: listen_s.into(),
+        plane_samples: listen_s.map(|_| plane_samples).into(),
         // Gated like its sibling wire facts (R6): with no window there was
         // no observer, and "observed cleanly" is a claim nobody made.
-        dropped: listen_s.map(|_| dropped),
+        dropped: listen_s.map(|_| dropped).into(),
         introspect_answered: served.slices().len(),
         admin_entities: admin.as_ref().map(|e| e.entities.len()),
         verdict,
@@ -418,10 +418,10 @@ mod tests {
             since: None,
             replaced_by: None,
             selector: "v1/*/*/logs/logs/errors_total".into(),
-            wire_samples: None,
+            wire_samples: crate::report::Asked::NotAsked,
             still_declared: None,
             subscribers: None,
-            replacement_samples: None,
+            replacement_samples: crate::report::Asked::NotAsked,
             verdict,
         };
         assert_eq!(overall(&[]), CutoverVerdict::Pass);

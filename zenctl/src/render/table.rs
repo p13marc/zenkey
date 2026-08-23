@@ -90,10 +90,23 @@ impl Cell {
     /// The **only** bridge from an `Option`, and `None` means *not asked*.
     ///
     /// If the option means "asked, and there was nothing", do not use this —
-    /// write `Cell::text(v.unwrap_or_default())` and mean it.
+    /// write `Cell::text(v.unwrap_or_default())` and mean it. Where the
+    /// report layer already spells the distinction nominally, prefer
+    /// [`Cell::from_asked`].
     pub fn asked<T: Into<String>>(v: Option<T>) -> Cell {
         match v {
             Some(v) => Cell::Text(v.into(), None),
+            None => Cell::Unknown,
+        }
+    }
+
+    /// The bridge from the report layer's nominal not-asked
+    /// ([`zenkey_fleet::report::Asked`], #246/P1): `NotAsked` **is**
+    /// [`Cell::Unknown`] — one mapping, so no renderer can draw a
+    /// not-asked fact as an empty cell or a zero.
+    pub fn from_asked<T: ToString>(v: &zenkey_fleet::report::Asked<T>) -> Cell {
+        match v.as_option() {
+            Some(v) => Cell::Text(v.to_string(), None),
             None => Cell::Unknown,
         }
     }

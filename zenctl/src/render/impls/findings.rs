@@ -35,7 +35,7 @@ impl Render for DoctorReport {
 
     fn table(&self, t: &mut Table) {
         let mut grid = Grid::unheaded(2);
-        for s in self.synced.iter().flatten() {
+        for s in self.synced.as_deref().into_iter().flatten() {
             grid.row([
                 Cell::styled("✓", crate::render::style::PASS),
                 Cell::text(format!("{s}: in sync")),
@@ -70,7 +70,7 @@ impl Render for DoctorReport {
         // R1: the degradation used to be a bare eprintln in `cmd/doctor.rs`,
         // invisible to `--format json` — a machine consumer read "no synced
         // slices" where the truth was "the diff never ran".
-        if self.synced.is_none() {
+        if self.synced.is_not_asked() {
             notes.push(
                 Note::coverage(
                     "no local registry given — the served-vs-declared diff never ran; \
@@ -216,7 +216,7 @@ impl Render for RegistryDiff {
 /// obtainable at all: "not listened" is not silence, "no admin space" is not
 /// zero subscribers (RFC 09 §5.1 O4).
 fn retired_facts(e: &RetiredEntry) -> String {
-    let wire = match e.wire_samples {
+    let wire = match e.wire_samples.get() {
         None => "wire not listened".to_string(),
         Some(0) => "wire silent".to_string(),
         Some(n) => format!("wire {n} sample(s)"),
@@ -230,7 +230,7 @@ fn retired_facts(e: &RetiredEntry) -> String {
         None => "subscribers unknown".to_string(),
         Some(n) => format!("{n} subscriber(s)"),
     };
-    let replacement = match (&e.replaced_by, e.replacement_samples) {
+    let replacement = match (&e.replaced_by, e.replacement_samples.get()) {
         (None, _) => "no replacement declared".to_string(),
         (Some(p), None) => format!("→ {p}: not listened"),
         (Some(p), Some(n)) => format!("→ {p}: {n} sample(s)"),
@@ -299,7 +299,7 @@ impl Render for RetiredReport {
             ))
             .cite("RFC 09 §5.1 O5"),
         );
-        match (self.window_s, self.plane_samples) {
+        match (self.window_s.get(), self.plane_samples.get()) {
             (Some(w), Some(p)) => notes.push(Note::coverage(format!(
                 "listened {w}s: {p} sample(s) on the v1 plane — the proof-of-life \
                  half for entries with no declared replacement"
@@ -315,7 +315,7 @@ impl Render for RetiredReport {
         }
         // R6: `dropped` rides only when a window ran — an unconditional `0`
         // used to claim a clean observation on runs that never observed.
-        if let Some(dropped) = self.dropped
+        if let Some(dropped) = self.dropped.get()
             && dropped > 0
         {
             notes.push(Note::bound(format!(
@@ -375,7 +375,7 @@ impl Render for SchemaDump {
         }
         // Present exactly when totality was checked — `[]` is the clean
         // bill, absence is "not asked" (RFC 09 §5.1 O4).
-        if let Some(missing) = &self.missing {
+        if let Some(missing) = self.missing.as_option() {
             e.insert("missing".into(), serde_json::json!(missing));
         }
         e
@@ -438,7 +438,7 @@ impl Render for SchemaDump {
         if self.types.is_empty() {
             notes.push(Note::coverage("the served set declares no matching types"));
         }
-        match &self.missing {
+        match self.missing.as_deref() {
             // Not asked is not answered no: with no registry loaded, an
             // empty gap would be vacuous, so the sentence says what was
             // not checked instead (#246).

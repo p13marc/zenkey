@@ -66,8 +66,8 @@ impl Render for BlobList {
             // Three different facts, three different sentences. An empty
             // roster is not a fleet verdict (RFC 05 §3.1) and an unasked one
             // is not an empty one (RFC 09 §5.1 O4).
-            detail.push(match &row.origins {
-                Some(origins) if origins.is_empty() => "      origins    — (no liveliness \
+            detail.push(match row.origins.as_deref() {
+                Some([]) => "      origins    — (no liveliness \
                      token answered; silence is not a verdict — RFC 05 §3.1)"
                     .to_string(),
                 Some(origins) => format!("      origins    {}", origins.join(" ")),

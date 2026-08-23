@@ -916,7 +916,7 @@ mod tests {
                     citation: None,
                 })
                 .collect(),
-            synced: None,
+            synced: crate::report::Asked::NotAsked,
             introspect_answered: 0,
             live_producers: 0,
             describe_served: 0,

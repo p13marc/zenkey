@@ -275,7 +275,7 @@ fn a_doctor_run_carries_its_coverage_and_its_bound_into_every_format() {
     // degradation is a note in the report — it used to be a bare eprintln in
     // the command, invisible to every machine format.
     let unchecked = zenkey_fleet::report::DoctorReport {
-        synced: None,
+        synced: zenkey_fleet::report::Asked::NotAsked,
         ..fx::doctor_report()
     };
     let n = notes(&unchecked);
@@ -522,7 +522,7 @@ served schema (RFC 08 §7):
     assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
     // …and asked-with-silence is the third state, distinct from both.
     let silent = zenkey_fleet::report::InterfaceShow {
-        schemas: Some(vec![]),
+        schemas: zenkey_fleet::report::Asked::Asked(vec![]),
         ..fx::interface_show_unasked()
     };
     let envelope: serde_json::Value =

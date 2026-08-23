@@ -394,7 +394,7 @@ pub async fn schema_dump(
             types: Vec::new(),
             // No served set to check against — totality is unaskable here,
             // not clean.
-            missing: None,
+            missing: crate::report::Asked::NotAsked,
         };
     };
     let types: Vec<crate::report::SchemaRow> = set
@@ -403,8 +403,8 @@ pub async fn schema_dump(
         .map(|(name, schema)| row(producer, name, schema, full || type_filter.is_some()))
         .collect();
     // Checked only when a registry answered: a loaded registry with no slice
-    // for this producer declares nothing, so `Some(vec![])` is a real clean
-    // bill; no registry at all stays `None` (RFC 09 §5.1 O4).
+    // for this producer declares nothing, so `Asked(vec![])` is a real clean
+    // bill; no registry at all stays `NotAsked` (RFC 09 §5.1 O4).
     let missing = slices.map(|slices| {
         slices
             .get(producer)
@@ -421,7 +421,7 @@ pub async fn schema_dump(
         served: true,
         app: Some(set.app().to_string()),
         types,
-        missing,
+        missing: missing.into(),
     }
 }
 

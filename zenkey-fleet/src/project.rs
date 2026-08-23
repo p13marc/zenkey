@@ -286,8 +286,8 @@ impl SliceSet {
             carriers,
             // Offline by construction: schemas come from the bus, and the
             // caller fills them in only when `--schema` asked for them —
-            // `None` says the bus was never asked (O4, R4).
-            schemas: None,
+            // `NotAsked` says the bus was never asked (O4, R4).
+            schemas: crate::report::Asked::NotAsked,
         })
     }
 }
@@ -485,7 +485,7 @@ mod tests {
         assert_eq!(list.slices_without_blob, 0);
         assert!(list.tiers.iter().all(|t| t.known_tier));
         // Nobody asked the roster, so nothing may claim who serves it (O4).
-        assert!(list.tiers.iter().all(|t| t.origins.is_none()));
+        assert!(list.tiers.iter().all(|t| t.origins.is_not_asked()));
 
         // Backward direction: the same slice minus the blob entries parses
         // with an empty list rather than failing — and counts as a slice that
