@@ -26,7 +26,7 @@ use iced::{Element, Length};
 use zenkey_fleet::SliceSet;
 
 use super::tokens::space;
-use super::{doctor, echo, kit, publish, replay};
+use super::{doctor, echo, kit, replay, send};
 use crate::echo::EchoRing;
 use crate::message::{ActivityTab, Message, WorkspaceMsg};
 use crate::state::workspace::{ActivityDock, ReplayMode};
@@ -40,7 +40,7 @@ pub(crate) struct ActivityData<'a> {
     /// The subject key, when Echo is pinned to follow it.
     pub follow: Option<&'a str>,
     pub next_seq: u64,
-    pub publish: &'a publish::PublishForm,
+    pub publish: &'a send::SendForm,
     pub doctor: &'a crate::doctor::DoctorState,
     pub base: &'a str,
     pub replay: &'a ReplayMode,
@@ -71,7 +71,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
         ActivityTab::Echo => {
             echo::section(d.echo, d.echo_view, d.follow, d.next_seq, d.echo_scroll).into()
         }
-        ActivityTab::Publish => publish::log_section(d.publish),
+        ActivityTab::Publish => send::log_section(d.publish),
         ActivityTab::Doctor => doctor::section(d.doctor, d.base),
         ActivityTab::Replay => replay_stream(d.replay, d.slices, d.retention),
     };

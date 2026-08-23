@@ -5,7 +5,7 @@
 //!
 //! `&mut Zengui` said nothing. A handler that took it could move any field,
 //! and the only way to find out which ones it *did* move was to read it. Six
-//! sub-states turn that into a signature: `(&mut CallForm, Ctx)` says
+//! sub-states turn that into a signature: `(&mut SendForm, Ctx)` says
 //! one-plus-reads, and `(dep, obs, sub, tree, work)` says five-of-six — which
 //! is a measurement rather than a shrug, and what #180 needs in order to dock
 //! a pane.
@@ -212,8 +212,7 @@ mod tests {
                     // The Settings overlay's draft (#188): same placement,
                     // same reasoning.
                     "settings_form",
-                    "call_form",
-                    "publish_form",
+                    "send_form",
                     "publication",
                     "media",
                 ],
@@ -259,8 +258,8 @@ mod tests {
             .map(|(g, f)| if *g == "work" { 1 } else { f.len() })
             .sum();
         // …plus `obs.retention`, the retained window's account (#217), plus
-        // the two overlay drafts: `work.bench.scope_form` (#187) and
-        // `work.bench.settings_form` (#188).
-        assert_eq!(leaves, 68, "the split must place every field exactly once");
+        // the two overlay drafts (#187, #188); minus one when #184 merged
+        // `call_form` and `publish_form` into `send_form`.
+        assert_eq!(leaves, 67, "the split must place every field exactly once");
     }
 }

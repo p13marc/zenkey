@@ -77,7 +77,6 @@
 pub mod activity;
 pub mod admin;
 pub mod blob;
-pub mod call;
 pub mod contexts;
 pub mod detail;
 pub mod doctor;
@@ -90,9 +89,9 @@ pub mod media;
 pub mod nodes;
 pub mod palette;
 pub mod panes;
-pub mod publish;
 pub mod replay;
 pub mod scope_editor;
+pub mod send;
 pub mod settings;
 pub mod spark;
 pub mod status;

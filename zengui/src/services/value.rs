@@ -69,7 +69,7 @@ pub fn decode(
     )
 }
 
-/// The declared request type's schema, flattened into the call form's fields
+/// The declared request type's schema, flattened into the Send form's fields
 /// (§6.4 item 3).
 ///
 /// "Not asked yet" is `None` and stays `None` until an answer lands; the pane
@@ -87,10 +87,10 @@ pub fn request_schema(
             store
                 .schema_for(&session, &producer, &request)
                 .await
-                .map(|schema| crate::view::call::schema_fields(&schema))
+                .map(|schema| crate::view::send::schema_fields(&schema))
         },
         |fields| {
-            Message::Pane(PaneMsg::Call(crate::view::call::CallMsg::RequestSchema(
+            Message::Pane(PaneMsg::Send(crate::view::send::SendMsg::RequestSchema(
                 fields,
             )))
         },

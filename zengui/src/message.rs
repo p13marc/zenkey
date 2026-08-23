@@ -5,7 +5,7 @@
 //! > **A message lives where its failure is displayed.**
 //!
 //! `SessionOpened(Err)` writes `link`, which the status strip renders → `Bus`.
-//! `CallDone(Err)` writes `CallForm::outcome` → `Pane`. `ContextSwitched(Err)`
+//! `SendMsg::Done(Err)` writes `SendForm::outcome` → `Pane`. `ContextSwitched(Err)`
 //! writes `ContextForm::status` → `Pane`. It settles the cases a topic-shaped
 //! grouping leaves to taste, and it is why `Reconnect` is `Deployment` (its
 //! handler is the tail of `BaseSelected`'s) rather than `Bus` or `Chrome`
@@ -352,10 +352,11 @@ pub enum ChromeMsg {
 /// coupling wearing a different name.
 #[derive(Debug, Clone)]
 pub enum PaneMsg {
-    /// Publish/call pane interactions (issue #60).
-    Call(crate::view::call::CallMsg),
-    /// Publish pane interactions (issue #60's other half).
-    Publish(crate::view::publish::PublishMsg),
+    /// Send pane interactions (issue #60, merged by #184): publish and call
+    /// are one form with a mode toggle, so they are one message group — the
+    /// rule above places both halves here, because every failure of either
+    /// is written into `SendForm`.
+    Send(crate::view::send::SendMsg),
     /// Node dashboard interactions (issue #61).
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).
@@ -396,8 +397,7 @@ impl PaneMsg {
     /// names a pane — which is what it was for.
     pub fn pane(&self) -> Option<RightPane> {
         Some(match self {
-            PaneMsg::Call(_) => RightPane::Call,
-            PaneMsg::Publish(_) => RightPane::Publish,
+            PaneMsg::Send(_) => RightPane::Send,
             PaneMsg::Detail(_) | PaneMsg::History(_) | PaneMsg::Blob(_) | PaneMsg::Media(_) => {
                 RightPane::Inspector
             }
@@ -497,13 +497,13 @@ impl ActivityTab {
 
 /// The pane vocabulary `PaneSelected` speaks — since #180 no longer a tab
 /// strip's list but still one list: `Inspector` names the Inspector dock, and
-/// the other four are the Workbench dock's tools. #190's keyboard map v2 and
-/// #184's Send merge will shrink it; until then it is the remnant the
-/// workbench's own tool strip iterates.
+/// the other three are the Workbench dock's tools. #184 merged `Call` and
+/// `Publish` into `Send`; #190's keyboard map v2 may shrink it further, and
+/// until then it is the remnant the workbench's own tool strip iterates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPane {
-    Call,
-    Publish,
+    /// Publish and call, one form with a mode toggle (#184).
+    Send,
     /// One surface that follows the subject (#182): the key facts, the value
     /// and its decode, the history diff, the chart — and the `@blob` or
     /// `@media` sections when the key is on one of those planes.
@@ -525,9 +525,8 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in the old tab order — the palette and the workbench's
     /// tool strip iterate this, so a new variant cannot be forgotten.
-    pub const ALL: [RightPane; 5] = [
-        RightPane::Call,
-        RightPane::Publish,
+    pub const ALL: [RightPane; 4] = [
+        RightPane::Send,
         RightPane::Inspector,
         RightPane::Nodes,
         RightPane::Admin,
@@ -535,8 +534,7 @@ impl RightPane {
 
     pub fn label(self) -> &'static str {
         match self {
-            RightPane::Call => "call",
-            RightPane::Publish => "publish",
+            RightPane::Send => "send",
             RightPane::Inspector => "inspector",
             RightPane::Nodes => "nodes",
             RightPane::Admin => "admin",
@@ -640,8 +638,7 @@ mod tests {
         use crate::view;
         let one_per_pane = [
             PaneMsg::Echo(view::echo::EchoMsg::Clear),
-            PaneMsg::Call(view::call::CallMsg::Submit),
-            PaneMsg::Publish(view::publish::PublishMsg::Send),
+            PaneMsg::Send(view::send::SendMsg::Submit),
             PaneMsg::Detail(view::detail::DetailMsg::LeafSelected(String::new())),
             PaneMsg::Nodes(view::nodes::NodesMsg::ShowInTree(String::new())),
             PaneMsg::Doctor(view::doctor::DoctorMsg::Run),

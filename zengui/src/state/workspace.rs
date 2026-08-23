@@ -241,8 +241,9 @@ sub_state! {
         /// The Settings overlay's draft (#188).
         pub(crate) settings_form: view::settings::SettingsForm,
 
-        pub(crate) call_form: view::call::CallForm,
-        pub(crate) publish_form: view::publish::PublishForm,
+        /// The Send pane's one form (#184): publish and call, behind a mode
+        /// toggle.
+        pub(crate) send_form: view::send::SendForm,
         /// The armed publication and what it repeats (#60). Held here rather
         /// than in the form because a `Publication` is a live bus declaration, not
         /// view state — dropping it undeclares.
@@ -309,7 +310,7 @@ impl Workspace {
     pub(crate) fn new(echo_lines: usize, layout: &LayoutNode) -> Workspace {
         Workspace {
             docks: DockGrid::from_layout(layout),
-            right_pane: RightPane::Call,
+            right_pane: RightPane::Send,
             verdicts: Verdicts::default(),
             activity: ActivityDock::default(),
             bench: Workbench::default(),
