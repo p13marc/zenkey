@@ -233,7 +233,7 @@ pub(crate) fn update(
             dep.slices = Some(slices);
             reresolve_registrations(dep);
             refresh_blob_list(dep, work);
-            forget_judgements(work);
+            forget_judgements(obs, work);
             // The skeleton is built FROM the slices — (re)build it now.
             build_skeleton(dep)
         }
@@ -246,7 +246,7 @@ pub(crate) fn update(
             dep.slices = Some(slices);
             reresolve_registrations(dep);
             refresh_blob_list(dep, work);
-            forget_judgements(work);
+            forget_judgements(obs, work);
             build_skeleton(dep)
         }
         BusMsg::SlicesUnionLoaded(Err(e)) => {
@@ -265,9 +265,13 @@ pub(crate) fn update(
             apply_tick(dep, obs, sub, tree, work, &tick);
             // Live ticks only, deliberately: replay feeds `apply_tick` from
             // a file (`update/pane/replay.rs`) and never reaches this arm —
-            // validating file data against a live bus would put one world's
-            // verdicts under the other's data (O4 in miniature).
-            schedule_validation(dep, work, &tick)
+            // validating file data against a live bus, or re-judging a live
+            // budget under file keys, would put one world's verdicts under
+            // the other's data (O4 in miniature).
+            Task::batch([
+                schedule_validation(dep, work, &tick),
+                schedule_budget(dep, obs, work),
+            ])
         }
         BusMsg::VerdictsChecked(batch) => {
             // The bounded validation batch lands (#164): render paths only
@@ -275,6 +279,10 @@ pub(crate) fn update(
             for (key, verdict) in batch {
                 work.verdicts.payloads.record(&key, verdict);
             }
+            Task::none()
+        }
+        BusMsg::BudgetJoined(badges) => {
+            obs.budgets = Some(badges);
             Task::none()
         }
     }
@@ -318,6 +326,24 @@ fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Ta
         dep.base().to_string(),
         batch,
     )
+}
+
+/// Every this-many ticks (~4 s), re-join the budget (#221). Throttled: the
+/// join is O(observed keys × refinement) and a population does not explode
+/// per frame. Only where a registry is loaded — with no declarations there
+/// is no budget, and `obs.budgets` stays `None`, which draws no badge.
+const BUDGET_EVERY_TICKS: u64 = 16;
+
+fn schedule_budget(dep: &Deployment, obs: &Observation, work: &Workspace) -> Task<Message> {
+    let Some(slices) = dep.slices.clone() else {
+        return Task::none();
+    };
+    // The verdict cache's logical clock is the tick count — one counter,
+    // advanced in `apply_tick`, shared by both throttles.
+    if work.verdicts.payloads.tick_count() % BUDGET_EVERY_TICKS != 1 {
+        return Task::none();
+    }
+    services::sweep::budget(dep.base().to_string(), slices, Arc::clone(&obs.observed))
 }
 
 /// (Re)build the skeleton: slices are already loaded; roster + admin are
@@ -386,12 +412,14 @@ pub(crate) fn refresh_blob_list(dep: &Deployment, work: &mut Workspace) {
     ));
 }
 
-/// A registry (re)load invalidates every payload verdict judged under the
-/// old one (#164 — the `(key, schema hash)` discipline, kept by clearing at
-/// every door a hash can change through). The cache refills on the ordinary
-/// tick cadence; until then "not yet checked" is the honest read.
-pub(crate) fn forget_judgements(work: &mut Workspace) {
+/// A registry (re)load invalidates everything judged under the old one: the
+/// payload verdicts (#164 — the `(key, schema hash)` discipline, kept by
+/// clearing at every door a hash can change through) and the budget join
+/// (#221 — declared bounds are the registry's). Both refill on the ordinary
+/// cadences; until then "not yet checked" and no-badge are the honest reads.
+pub(crate) fn forget_judgements(obs: &mut Observation, work: &mut Workspace) {
     work.verdicts.payloads.clear();
+    obs.budgets = None;
 }
 
 pub(crate) fn reresolve_registrations(dep: &mut Deployment) {

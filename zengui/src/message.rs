@@ -70,6 +70,9 @@ pub enum BusMsg {
     /// payload-conformance verdict of its newest sample. Lands in the
     /// verdict cache; the render paths only look up.
     VerdictsChecked(Vec<(String, zenkey::schema::validate::Verdict)>),
+    /// The throttled budget join finished (#221): declared `cardinality`
+    /// against the observed tree, keyed by subtree display path.
+    BudgetJoined(Arc<crate::budget::BudgetBadges>),
 }
 
 /// What the app is pointed at, and the coverage that follows (#176).

@@ -167,6 +167,7 @@ fn locator<'a>(
         viewport_h: tree.tree_scroll.1,
         facts: &dep.facts,
         verdicts: &work.verdicts.payloads,
+        budgets: obs.budgets.as_deref(),
         watches: view::tree::Watches {
             mine: &obs.my_watch_paths,
             seeding: &obs.seeding_paths,

@@ -1303,6 +1303,10 @@ pub struct TreeData<'a> {
     /// Per-key payload-conformance verdicts (#164) — the cache the tick's
     /// bounded validation batches fill, looked up here, never computed here.
     pub verdicts: &'a crate::verdict::VerdictCache,
+    /// Per-subtree budget badges (#221): `None` = no registry loaded (or the
+    /// join has not run) — with no declarations there is no budget to be
+    /// over, and no badge claims otherwise.
+    pub budgets: Option<&'a crate::budget::BudgetBadges>,
     /// The pair this struct exists for.
     pub watches: Watches<'a>,
     /// The selected wire key, if any.
@@ -1388,6 +1392,7 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
                     arena: &flat.arena,
                     facts: d.facts,
                     verdicts: d.verdicts,
+                    budgets: d.budgets,
                     selected: d.selected,
                     watches: d.watches,
                     sp: d.sp,
@@ -1440,6 +1445,8 @@ struct RowContext<'a> {
     facts: &'a FactsIndex,
     /// Per-key payload verdicts (#164) — looked up, never computed here.
     verdicts: &'a crate::verdict::VerdictCache,
+    /// Per-subtree budget badges (#221); `None` = no registry loaded.
+    budgets: Option<&'a crate::budget::BudgetBadges>,
     selected: Option<&'a str>,
     watches: Watches<'a>,
     /// The dock's resolved spacing grid (#192) — rows spend it, they never
@@ -1452,6 +1459,7 @@ fn row_view<'a>(shape: &RowShape, r: &TreeRow, cx: RowContext<'a>) -> Element<'a
         arena,
         facts,
         verdicts,
+        budgets,
         selected,
         watches,
         sp,
@@ -1531,6 +1539,19 @@ fn row_view<'a>(shape: &RowShape, r: &TreeRow, cx: RowContext<'a>) -> Element<'a
     }
     if let Some(ty) = &r.decl_type {
         line = line.push(kit::muted(ty.clone()));
+    }
+
+    // The key-population budget (#221), on the offending family's subtree
+    // row. Over-declared is a warning with its numbers; a `{path...}` family
+    // is exempt and says so (never a silent pass); under-declared draws
+    // nothing — a window proves a lower bound, not the population (O4/O6).
+    // `budgets` is `None` with no registry loaded: no declarations, no badge.
+    if let Some(b) = budgets.and_then(|b| b.get(r.target.as_deref().unwrap_or(&r.path))) {
+        let severity = match b {
+            crate::budget::BudgetBadge::Over { .. } => crate::view::theme::SeverityTone::Warning,
+            crate::budget::BudgetBadge::Exempt => crate::view::theme::SeverityTone::Info,
+        };
+        line = line.push(kit::badge_severity(severity, b.label()));
     }
 
     line = line.push(iced::widget::space::horizontal());

@@ -146,6 +146,11 @@ mod tests {
                     // tick, invalidated with the monitor like everything
                     // else here.
                     "retention",
+                    // Declared cardinality joined against the observed
+                    // population (#221): a fact about what arrived, judged
+                    // under the loaded registry — cleared with the coverage,
+                    // because it described the departing fleet's keys.
+                    "budgets",
                 ],
             ),
             // The selection and everything derived from it.
@@ -280,7 +285,8 @@ mod tests {
         // …plus `obs.retention`, the retained window's account (#217), plus
         // the two overlay drafts (#187, #188) and the replay loading claim
         // (#255); minus one when #184 merged `call_form` and `publish_form`
-        // into `send_form`; plus the verdict cache (#164).
-        assert_eq!(leaves, 69, "the split must place every field exactly once");
+        // into `send_form`; plus the verdict cache (#164) and the budget
+        // join (#221).
+        assert_eq!(leaves, 70, "the split must place every field exactly once");
     }
 }

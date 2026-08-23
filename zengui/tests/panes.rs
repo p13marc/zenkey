@@ -155,6 +155,7 @@ fn the_tree_renders_the_registration_state() {
         viewport_h: 600.0,
         facts: &facts,
         verdicts: &verdicts,
+        budgets: None,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -204,6 +205,7 @@ fn density_changes_the_grid_never_the_claims() {
             viewport_h: 600.0,
             facts: &facts,
             verdicts: &verdicts,
+            budgets: None,
             watches: tree::Watches {
                 mine: &watches,
                 seeding: &watches,
@@ -237,6 +239,7 @@ fn an_unresolved_tree_claims_neither_way() {
         viewport_h: 600.0,
         facts: &facts,
         verdicts: &verdicts,
+        budgets: None,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -270,6 +273,7 @@ fn foreign_keys_render_without_convention_labels() {
         viewport_h: 600.0,
         facts: &facts,
         verdicts: &verdicts,
+        budgets: None,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -304,6 +308,7 @@ fn the_empty_tree_explains_itself() {
         viewport_h: 600.0,
         facts: &facts,
         verdicts: &verdicts,
+        budgets: None,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -3314,5 +3319,88 @@ fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
         ui.find("verdicts: 1 key checked (each badge is the key's most recently checked sample)")
             .is_ok(),
         "the strip scopes what a badge claims"
+    );
+}
+
+/// #221: the tree badges an over-budget `{var}` family on its subtree row
+/// with the numbers; under-declared draws nothing; a `{path...}` family is
+/// exempt and says so — never a silent pass.
+#[test]
+fn the_tree_badges_the_budget_join() {
+    use zengui::budget;
+    use zenkey_fleet::stats::StatsTable;
+
+    // A registry that declares a tight budget (2) on the disk family and a
+    // rest-variable family beside it.
+    let subject = |path: &str, class: &str, cardinality: Option<i64>| zenkey::slice::SubjectDecl {
+        path: path.into(),
+        class: class.into(),
+        type_name: "T".into(),
+        common: None,
+        since: None,
+        description: None,
+        qos: None,
+        ttl_s: None,
+        unit: None,
+        rate: None,
+        cardinality,
+        encoding: None,
+    };
+    let tight = SliceSet::from_slices(vec![zenkey::slice::RegistrySlice {
+        version: "1.0".into(),
+        app: "t".into(),
+        convention: 1,
+        name: "sysinfo".into(),
+        service_origin: None,
+        description: None,
+        subjects: vec![
+            subject("disk/{mount}/used", "telemetry", Some(2)),
+            subject("log/{path...}", "events", Some(1)),
+        ],
+        procedures: vec![],
+        blob: vec![],
+        media: vec![],
+        deprecated: vec![],
+    }]);
+
+    let over = [
+        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/used",
+        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var/used",
+        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/tmp/used",
+        "v1/h-3fa9c2d41b7e/events/sysinfo/log/var/log/syslog",
+    ];
+    let mut stats = StatsTable::new();
+    let now = std::time::Instant::now();
+    for k in &over {
+        stats.record(k, 1, None, now, None, None);
+    }
+    let badges = budget::badges("", &tight, &KeyTreeSnapshot::build(&stats));
+
+    let (flat, facts) = render(&over, true);
+    let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
+    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        flat: &flat,
+        pivot: tree::Pivot::Chunks,
+        search: "",
+        scroll_y: 0.0,
+        viewport_h: 600.0,
+        facts: &facts,
+        verdicts: &verdicts,
+        budgets: Some(&badges),
+        watches: tree::Watches {
+            mine: &watches,
+            seeding: &watches,
+        },
+        selected: None,
+        sp: sp(),
+    }));
+    assert!(
+        ui.find("over budget: observed 3 of 2 declared").is_ok(),
+        "the offending family's subtree carries the numbers"
+    );
+    assert!(
+        ui.find("exempt: rest-variable").is_ok(),
+        "a rest-variable family is exempt and says so, never a silent pass"
     );
 }

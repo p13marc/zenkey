@@ -35,6 +35,7 @@
 pub mod admin;
 pub mod app;
 pub mod blob;
+pub mod budget;
 pub mod config;
 pub mod doctor;
 pub mod echo;
