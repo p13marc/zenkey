@@ -338,13 +338,16 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             ) else {
                 return Task::none();
             };
+            // The declared request type, read off the same `service_info`
+            // projection the pane renders (#234) — one derivation of "what
+            // does this procedure take", not two.
             let Some(request) = cx
                 .dep
                 .slices
                 .as_ref()
-                .and_then(|s| s.get(&producer))
-                .and_then(|s| s.procedures.iter().find(|d| d.path == p))
-                .and_then(|d| d.request.clone())
+                .and_then(|s| s.service_info(&producer, Some(&p)).ok())
+                .and_then(|i| i.procedures.into_iter().next())
+                .and_then(|d| d.request)
             else {
                 // No declared request type: there is nothing to scaffold,
                 // and that is an answer.

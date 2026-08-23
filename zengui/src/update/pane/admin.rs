@@ -55,5 +55,15 @@ pub(crate) fn update(admin: &mut AdminState, msg: AdminMsg, cx: Ctx) -> Task<Mes
             admin.finish(outcome, &base);
             Task::none()
         }
+        AdminMsg::CopyDot => {
+            // The Graphviz export (#234): the engine's `render_dot` over the
+            // sweep already in hand — no bus cost, clipboard-bound exactly
+            // like echo's ndjson export. No sweep, nothing to copy: the
+            // button only renders inside a swept topology section.
+            let Some(sweep) = admin.sweep.as_deref() else {
+                return Task::none();
+            };
+            iced::clipboard::write(zenkey_fleet::render_dot(&sweep.topology, &sweep.origins))
+        }
     }
 }

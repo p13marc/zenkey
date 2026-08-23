@@ -651,12 +651,18 @@ fn call_body<'a>(
         ));
     };
 
-    let producers: Vec<String> = slices
-        .slices()
-        .iter()
-        .filter(|s| !s.procedures.is_empty())
-        .map(|s| s.name.clone())
+    // The fleet's `@rpc` vocabulary and one producer's surface both come from
+    // the engine's projections (#234): `service_list` for who declares
+    // procedures at all, `service_info` for the keys, shapes and fanout
+    // verdicts — zenctl `service info`'s report (#211), consumed rather than
+    // re-derived from the raw slices.
+    let mut producers: Vec<String> = slices
+        .service_list(None)
+        .procedures
+        .into_iter()
+        .map(|p| p.producer)
         .collect();
+    producers.dedup();
     if producers.is_empty() {
         return col.push(kit::empty_state(
             "No procedures declared",
@@ -670,11 +676,13 @@ fn call_body<'a>(
     .placeholder("producer")
     .text_size(font::CAPTION);
 
-    let procedures: Vec<String> = form
+    let info = form
         .producer
         .as_deref()
-        .and_then(|p| slices.get(p))
-        .map(|s| s.procedures.iter().map(|p| p.path.clone()).collect())
+        .map(|p| slices.service_info(p, None));
+    let surface = info.as_ref().and_then(|r| r.as_ref().ok());
+    let procedures: Vec<String> = surface
+        .map(|i| i.procedures.iter().map(|p| p.path.clone()).collect())
         .unwrap_or_default();
     let procedure_pick = pick_list(procedures, form.procedure.clone(), |p| {
         msg(SendMsg::ProcedurePicked(p))
@@ -683,27 +691,48 @@ fn call_body<'a>(
     .text_size(font::CAPTION);
 
     // The declared shape of the selected procedure, and the fanout verdict.
-    let decl = form
-        .producer
-        .as_deref()
+    let decl = surface
         .zip(form.procedure.as_deref())
-        .and_then(|(prod, proc)| {
-            slices
-                .get(prod)
-                .and_then(|s| s.procedures.iter().find(|p| p.path == proc))
-        });
+        .and_then(|(i, want)| i.procedures.iter().find(|p| p.path == want));
     let fanout_forbidden = decl
         .map(|d| d.fanout.as_deref() == Some("forbidden"))
         .unwrap_or(false);
 
     let mut meta = Column::new().spacing(2);
+    if let Some(Err(e)) = info.as_ref() {
+        // Unreachable while the picker feeds from the same slices, but a
+        // projection that answers with an error is rendered, not swallowed.
+        meta = meta.push(
+            kit::body(e.to_string()).style(|theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).danger()),
+            }),
+        );
+    }
     if let Some(d) = decl {
+        // The key a caller would use — with `{origin}` standing for the
+        // publishing identity, and no producer chunk for a service origin
+        // (RFC 06 §5). The surface the Call pane picked from but never
+        // showed (#234).
+        meta = meta.push(kit::mono(format!("→ {}", d.key)));
         meta = meta.push(kit::muted(format!(
             "kind {} · request {} · reply {}",
             d.kind,
             d.request.as_deref().unwrap_or("—"),
             d.reply.as_deref().unwrap_or("—"),
         )));
+        meta = meta.push(kit::muted(format!(
+            "fanout {} · idempotent {} · encoding {} · since {}",
+            d.fanout.as_deref().unwrap_or("—"),
+            d.idempotent
+                .map(|b| b.to_string())
+                .as_deref()
+                .unwrap_or("—"),
+            d.encoding.as_deref().unwrap_or("—"),
+            d.since.as_deref().unwrap_or("—"),
+        )));
+        if let Some(desc) = &d.description {
+            meta = meta.push(kit::muted(desc.clone()));
+        }
         // Request-form scaffolding (§6.4 item 3): the served schema's fields,
         // and a button that drops a skeleton body in the editor. A declared
         // request type whose schema has not been fetched says "not asked" —

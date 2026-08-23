@@ -312,6 +312,19 @@ fn the_call_mode_labels_forbidden_fanout() {
             .is_ok(),
         "the refusal must be visible before any send"
     );
+    // #234: the `@rpc` surface the pane picked from is finally shown — the
+    // call key `service_info` spells, `{origin}` standing for the
+    // publishing identity (#211).
+    assert!(
+        ui.find("→ v1/{origin}/@rpc/netring/capture/trigger")
+            .is_ok(),
+        "the declared call key is on screen, not left to be reconstructed"
+    );
+    assert!(
+        ui.find("fanout forbidden · idempotent false · encoding — · since —")
+            .is_ok(),
+        "the declared shape rides the surface"
+    );
 
     // Without a registry the pane says "not asked", not empty dropdowns.
     let empty = SendForm {
@@ -763,6 +776,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
     let media = MediaState::default();
     let roster = NodeRoster::default();
     let node_detail = DetailState::NotAsked;
+    let observed = KeyTreeSnapshot::default();
 
     let facts_for = |key: &str| {
         let mut f = KeyFacts::project("", key);
@@ -777,6 +791,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         slices: &'a SliceSet,
         roster: &'a NodeRoster,
         node_detail: &'a DetailState,
+        observed: &'a KeyTreeSnapshot,
     ) -> InspectorData<'a> {
         InspectorData {
             subject,
@@ -793,6 +808,8 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             slices: Some(slices),
             roster,
             node_detail,
+            base: "",
+            observed,
         }
     }
 
@@ -806,6 +823,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         &slices,
         &roster,
         &node_detail,
+        &observed,
     )));
     assert!(ui.find("Nothing selected").is_ok());
     assert!(ui.find("Detail").is_err(), "no subject, no sections");
@@ -821,6 +839,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         &slices,
         &roster,
         &node_detail,
+        &observed,
     )));
     assert!(ui.find("A subtree, not a key").is_ok());
     assert!(ui.find("History").is_err(), "a subtree records nothing");
@@ -837,6 +856,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         &slices,
         &roster,
         &node_detail,
+        &observed,
     )));
     assert!(ui.find("Detail").is_ok());
     assert!(
@@ -858,6 +878,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         &slices,
         &roster,
         &node_detail,
+        &observed,
     )));
     assert!(ui.find("Blobs").is_ok(), "the plane is read off ClassKind");
     assert!(
@@ -875,6 +896,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         &slices,
         &roster,
         &node_detail,
+        &observed,
     )));
     assert!(
         ui.find("no liveliness token observed for this origin")
@@ -908,6 +930,7 @@ fn the_nodes_pane_marks_retraction_suspect_and_names_the_catalog() {
         roster: &roster,
         selected: None,
         detail: &DetailState::NotAsked,
+        slices: None,
     }));
     assert!(
         ui.find("sysinfo: alive").is_ok(),
@@ -939,6 +962,7 @@ fn the_nodes_pane_distinguishes_not_asked_from_empty() {
         roster: &roster,
         selected: None,
         detail: &DetailState::NotAsked,
+        slices: None,
     }));
     assert!(
         ui.find("no presence asked yet").is_ok(),
@@ -987,6 +1011,7 @@ fn the_node_detail_reports_freshness_honestly() {
         roster: &roster,
         selected: Some("h-3fa9c2d41b7e"),
         detail: &detail,
+        slices: None,
     }));
     assert!(
         ui.find("sysinfo/health  no sample answered — stale  (ttl 30s)  STALE")
@@ -2115,13 +2140,24 @@ mod admin {
                             answered: false,
                         },
                     ],
-                    edges: vec![zenkey_fleet::TopologyEdge {
-                        reporter: "z1".into(),
-                        peer: "z2".into(),
-                        whatami: "peer".into(),
-                        region: None,
-                        links: vec![],
-                    }],
+                    edges: vec![
+                        zenkey_fleet::TopologyEdge {
+                            reporter: "z1".into(),
+                            peer: "z2".into(),
+                            whatami: "peer".into(),
+                            region: None,
+                            links: vec![],
+                        },
+                        // The same link from the other end: corroboration,
+                        // not duplication (`mesh_links`, #234).
+                        zenkey_fleet::TopologyEdge {
+                            reporter: "z2".into(),
+                            peer: "z1".into(),
+                            whatami: "router".into(),
+                            region: None,
+                            links: vec![],
+                        },
+                    ],
                     asked: "@/*/*".into(),
                     answered: 1,
                     self_zid: "z2".into(),
@@ -2164,6 +2200,19 @@ mod admin {
             ui.find("drag to pan · scroll to zoom · right-click resets")
                 .is_ok(),
             "the viewport controls are discoverable"
+        );
+        // #234: the engine's `mesh_links` dedup keeps the evidence grade the
+        // hand-rolled one threw away, and the caption states it.
+        assert!(
+            ui.find(
+                "1 of 1 link(s) corroborated by both ends — a link only one end mentions is weaker evidence (drawn thinner)"
+            )
+            .is_ok(),
+            "reciprocal reports read as corroboration, not as two links"
+        );
+        assert!(
+            ui.find("copy graphviz (dot)").is_ok(),
+            "the render_dot export is offered where the mesh is (#234)"
         );
         // iced_test's find matches a widget's WHOLE text.
         assert!(
@@ -2855,4 +2904,184 @@ fn the_settings_overlay_labels_live_against_reconnect_and_states_each_cost() {
     // The apply and the reconnect it labels toward are both offered.
     assert!(ui.find("apply").is_ok());
     assert!(ui.find("reconnect now").is_ok());
+
+// ── The engine's projections, consumed (#234) ────────────────────────────
+
+/// A two-subject slice where exactly one subject has traffic, plus a ledger
+/// entry — the smallest fleet in which declared and observed diverge.
+fn projection_fixture() -> (SliceSet, zengui::nodes::NodeRoster, KeyTreeSnapshot) {
+    use zenkey::slice::{DeprecationDecl, RegistrySlice, SubjectDecl};
+
+    let subject = |path: &str| SubjectDecl {
+        path: path.into(),
+        class: "state".into(),
+        type_name: "Health".into(),
+        common: None,
+        since: None,
+        description: None,
+        qos: None,
+        ttl_s: None,
+        unit: None,
+        rate: None,
+        cardinality: None,
+        encoding: None,
+    };
+    let slice = RegistrySlice {
+        version: "1.0".into(),
+        app: "demo".into(),
+        convention: 1,
+        name: "sysinfo".into(),
+        service_origin: None,
+        description: None,
+        subjects: vec![subject("health"), subject("mode")],
+        procedures: vec![],
+        blob: vec![],
+        media: vec![],
+        deprecated: vec![DeprecationDecl {
+            path: "old/health".into(),
+            since: Some("0.9".into()),
+            replaced_by: Some("health".into()),
+        }],
+    };
+    let slices = SliceSet::from_slices(vec![slice]);
+
+    let mut roster = zengui::nodes::NodeRoster::default();
+    roster.apply_transitions(
+        "",
+        &[("v1/h-3fa9c2d41b7e/state/sysinfo/alive".to_string(), true)],
+        Instant::now(),
+    );
+
+    let mut stats = StatsTable::new();
+    stats.record(
+        "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+        8,
+        None,
+        Instant::now(),
+        None,
+        None,
+    );
+    (slices, roster, KeyTreeSnapshot::build(&stats))
+}
+
+fn projection_inspector<'a>(
+    subject: &'a zengui::message::Subject,
+    facts: Option<&'a KeyFacts>,
+    slices: &'a SliceSet,
+    roster: &'a zengui::nodes::NodeRoster,
+    observed: &'a KeyTreeSnapshot,
+    blob: &'a zengui::blob::BlobState,
+    media: &'a zengui::view::media::MediaState,
+    node_detail: &'a zengui::view::nodes::DetailState,
+) -> zengui::view::inspector::InspectorData<'a> {
+    zengui::view::inspector::InspectorData {
+        subject,
+        facts,
+        fetched: zengui::view::detail::Fetched::NotAsked,
+        decoded: None,
+        series: None,
+        history: None,
+        history_scroll: (0.0, 600.0),
+        watched: false,
+        latency: None,
+        blob,
+        media,
+        slices: Some(slices),
+        roster,
+        node_detail,
+        base: "",
+        observed,
+    }
+}
+
+/// #234's headline acceptance: a subject the registry declares and nothing
+/// publishes is visible, and distinguishable from one that is publishing.
+/// The rows are the engine's `topic_list` — declared, not observed — joined
+/// against the tick's tree; the ledger rows ride along (RFC 08 §6), and the
+/// presence line carries the `node_rows` slice join.
+#[test]
+fn the_inspector_marks_a_declared_but_unpublished_subject() {
+    use zengui::message::Subject;
+
+    let (slices, roster, observed) = projection_fixture();
+    let blob = zengui::blob::BlobState::default();
+    let media = zengui::view::media::MediaState::default();
+    let node_detail = zengui::view::nodes::DetailState::NotAsked;
+    let subject = Subject::Origin("h-3fa9c2d41b7e".into());
+
+    let mut ui = simulator::<Message, _, _>(zengui::view::inspector::pane(projection_inspector(
+        &subject,
+        None,
+        &slices,
+        &roster,
+        &observed,
+        &blob,
+        &media,
+        &node_detail,
+    )));
+    assert!(ui.find("declared subjects").is_ok());
+    assert!(
+        ui.find("sysinfo: 2 declared subject(s) · 1 observed on this origin")
+            .is_ok(),
+        "declared and observed are counted apart — the registry is the difference"
+    );
+    assert!(
+        ui.find("observed on this origin").is_ok(),
+        "the publishing subject says so"
+    );
+    assert!(
+        ui.find("declared — not observed by this session (only watched keys are seen)")
+            .is_ok(),
+        "the unpublished subject is visible AND worded to this window's coverage (O5), \
+         never as proof nothing publishes"
+    );
+    assert!(
+        ui.find("old/health DEPRECATED since 0.9 — replaced by health")
+            .is_ok(),
+        "the ledger rows ride along — RFC 08 §6's headline buy"
+    );
+    assert!(
+        ui.find("app demo · registry v1.0 (declared)").is_ok(),
+        "the presence row carries the node_rows slice join, labelled as declared"
+    );
+}
+
+/// The type-subject arm (#234): a registered key's payload type is placed in
+/// the registry vocabulary (`interface_list`) and its carriers listed
+/// (`interface_show`) — who else speaks this type, without a slice scan of
+/// the pane's own.
+#[test]
+fn the_inspector_places_a_registered_type_in_the_vocabulary() {
+    use zengui::message::Subject;
+
+    let (slices, roster, observed) = projection_fixture();
+    let blob = zengui::blob::BlobState::default();
+    let media = zengui::view::media::MediaState::default();
+    let node_detail = zengui::view::nodes::DetailState::NotAsked;
+
+    let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+    let mut facts = KeyFacts::project("", key);
+    facts.resolve(&slices);
+    let subject = Subject::Key(key.into());
+
+    let mut ui = simulator::<Message, _, _>(zengui::view::inspector::pane(projection_inspector(
+        &subject,
+        Some(&facts),
+        &slices,
+        &roster,
+        &observed,
+        &blob,
+        &media,
+        &node_detail,
+    )));
+    assert!(ui.find("Type").is_ok());
+    assert!(
+        ui.find("Health — one of 1 declared payload type(s), carried by 2 declaration(s)")
+            .is_ok(),
+        "the vocabulary placement is the engine's interface_list"
+    );
+    assert!(
+        ui.find("sysinfo · state mode").is_ok(),
+        "interface_show names the other carrier of the same type"
+    );
 }

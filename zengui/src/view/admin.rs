@@ -45,6 +45,9 @@ pub enum AdminMsg {
     /// A coverage row's producer, sent to the tree's search box. A pane never
     /// reimplements an action another pane owns.
     FilterProducer(String),
+    /// Copy the swept mesh as Graphviz — the engine's `render_dot` (#234),
+    /// clipboard-bound like echo's ndjson export.
+    CopyDot,
 }
 
 fn msg(m: AdminMsg) -> Message {
@@ -397,15 +400,15 @@ fn topology<'a>(
         })
         .collect();
     let index_of = |zid: &str| report.nodes.iter().position(|n| n.zid == zid);
-    let mut edges: Vec<(usize, usize)> = Vec::new();
-    for e in &report.edges {
-        if let (Some(a), Some(b)) = (index_of(&e.reporter), index_of(&e.peer)) {
-            let (a, b) = if a <= b { (a, b) } else { (b, a) };
-            if !edges.contains(&(a, b)) {
-                edges.push((a, b));
-            }
-        }
-    }
+    // The undirected mesh is the engine's `mesh_links` (#234): it collapses
+    // the per-reporter edges by unordered zid pair and marks reciprocal
+    // reports as corroboration — a distinction the hand-rolled dedup this
+    // replaces used to throw away.
+    let links = zenkey_fleet::mesh_links(report);
+    let edges: Vec<(usize, usize, bool)> = links
+        .iter()
+        .filter_map(|l| Some((index_of(&l.a)?, index_of(&l.b)?, l.corroborated)))
+        .collect();
     // The origin overlay (#131): anchor each attachment to the node its
     // evidence names — session zid when the admin sources named one, the
     // mere reporter (drawn dotted) otherwise. Unanchorable rows are counted
@@ -444,9 +447,33 @@ fn topology<'a>(
             origins.len() - attached,
         )));
     }
+    if !edges.is_empty() {
+        let corroborated = edges.iter().filter(|(_, _, c)| *c).count();
+        // Reciprocal reports are corroboration, not duplication — a link
+        // only one end mentions is weaker evidence, and the caption keeps
+        // the distinction the engine's dedup makes.
+        col = col.push(kit::muted(format!(
+            "{corroborated} of {} link(s) corroborated by both ends — a link \
+             only one end mentions is weaker evidence (drawn thinner)",
+            edges.len(),
+        )));
+    }
     col = col.push(kit::muted(
         "drag to pan · scroll to zoom · right-click resets",
     ));
+    col = col.push(
+        row![
+            button(kit::caption("copy graphviz (dot)"))
+                .padding(2)
+                .on_press(msg(AdminMsg::CopyDot)),
+            kit::muted(
+                "the engine's render_dot — the same graph `zenctl admin graph` \
+                 emits, so one `dot` invocation reads both explorers",
+            ),
+        ]
+        .spacing(space::SM)
+        .align_y(iced::Alignment::Center),
+    );
     // The caption *is* the testable surface: a bounded node roll-call.
     const LISTED: usize = 12;
     for n in report.nodes.iter().take(LISTED) {
@@ -500,7 +527,9 @@ const NODE_R: f32 = 7.0;
 
 struct Mesh<'a> {
     nodes: Vec<MeshNode>,
-    edges: Vec<(usize, usize)>,
+    /// `(a, b, corroborated)` — corroborated links draw wider, because both
+    /// ends reported them (the engine's `mesh_links` distinction, #234).
+    edges: Vec<(usize, usize, bool)>,
     origins: Vec<MeshOrigin>,
     /// Retained geometry (#178).
     ///
@@ -617,12 +646,12 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
                 Point::new(cx + radius * angle.cos(), cy + radius * angle.sin())
             };
             let palette = colors(theme);
-            for (a, b) in &self.edges {
+            for (a, b, corroborated) in &self.edges {
                 let path = canvas::Path::line(pos(*a), pos(*b));
                 frame.stroke(
                     &path,
                     canvas::Stroke::default()
-                        .with_width(1.0)
+                        .with_width(if *corroborated { 1.8 } else { 1.0 })
                         .with_color(palette.axis()),
                 );
             }

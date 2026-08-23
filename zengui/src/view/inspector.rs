@@ -38,8 +38,9 @@
 
 use iced::widget::{Column, column, scrollable};
 use iced::{Element, Length};
-use zenkey_fleet::facts::{ClassKind, KeyFacts, KeyShape};
-use zenkey_fleet::{LatencyReport, SliceSet};
+use zenkey_fleet::facts::{ClassKind, KeyFacts, KeyShape, Registration};
+use zenkey_fleet::report::TopicRow;
+use zenkey_fleet::{KeyTreeSnapshot, LatencyReport, SliceSet};
 
 use super::detail::{DetailData, Fetched, SeriesData};
 use super::history::HistoryData;
@@ -80,6 +81,13 @@ pub struct InspectorData<'a> {
     pub slices: Option<&'a SliceSet>,
     pub roster: &'a NodeRoster,
     pub node_detail: &'a DetailState,
+    /// The deployment base, for building the wire chunks the observed-tree
+    /// lookups below need.
+    pub base: &'a str,
+    /// The observed key tree — what has actually arrived (#234): the
+    /// declared-subjects section joins the registry's claims against it, so
+    /// a subject declared and never seen is loud rather than invisible.
+    pub observed: &'a KeyTreeSnapshot,
 }
 
 /// Which plane a key sits on, when it sits on one at all.
@@ -150,6 +158,12 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         latency: d.latency.clone(),
     });
 
+    // The declared type's place in the registry vocabulary (#234) — the
+    // type-subject arm the engine's interface projections answer.
+    if let Some(section) = type_section(d) {
+        col = col.push(section);
+    }
+
     // The plane sections, when the key is on one. Order matters: the plane is
     // the more specific fact, so it reads after the general one.
     match plane(d.facts) {
@@ -171,12 +185,222 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
 }
 
 fn origin_sections<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
+    // The roster→slice join is the engine's `node_rows` (#234) — the same
+    // rows `zenctl node list --verbose` prints, not a scan of this pane's
+    // own. `live_map()` is `None` while unseeded, so an unasked join stays
+    // "not asked" (O4).
+    let joined = d
+        .roster
+        .live_map()
+        .map(|m| zenkey_fleet::node_rows(&m, d.slices));
     column![
         kit::section_header("Inspector", None),
         // The subject, restated in the pane. The one TITLE lives in the
         // location bar since #185.
         kit::emphasis(origin).font(iced::Font::MONOSPACE),
-        nodes::presence_section(d.roster, origin),
+        nodes::presence_section(d.roster, origin, joined.as_ref()),
         nodes::detail_section(d.node_detail),
     ]
+    .push(declared_subjects(origin, d))
+}
+
+/// How many declared-subject rows render before the list stops and says so —
+/// sysinfo alone declares 121, and an unbounded list is the O6 bug this
+/// project already fixed once for the key tree (RFC 09 §5.1 O6).
+const DECLARED_ROWS: usize = 40;
+
+/// What this origin's producers **declare**, joined against what has been
+/// **observed** — #234's headline. The tree answers "what is publishing?";
+/// this section answers "what did the registry promise?", and the difference
+/// between the two questions is the registry itself: a subject declared and
+/// never published used to be invisible in the GUI, which is precisely the
+/// case an explorer should make loud.
+///
+/// The rows are [`SliceSet::topic_list`] — the engine's projection, declared
+/// not observed — with the ledger rows included, because "which hosts still
+/// serve a deprecated subject" is RFC 08 §6's headline buy.
+fn declared_subjects<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
+    let mut col = column![kit::section_header("declared subjects", None)].spacing(2);
+    let Some(slices) = d.slices else {
+        return col.push(kit::muted(
+            "no registry loaded — what this origin's producers declare is \
+             unknown (not asked, O4)",
+        ));
+    };
+    let Some(producers) = d.roster.get(origin) else {
+        return col.push(kit::muted(
+            "no liveliness token observed — the producers to project are \
+             unknown (RFC 05 §3.1)",
+        ));
+    };
+    let mut shown = 0usize;
+    let mut cut = 0usize;
+    for producer in producers.keys() {
+        // Instance suffixes share the base slice (RFC 03 §1.5) — the same
+        // resolution the engine's `node_rows` applies.
+        let name = zenkey::grammar::Producer::parse_chunk(producer)
+            .map(|p| p.name().to_string())
+            .unwrap_or_else(|_| producer.clone());
+        if slices.get(&name).is_none() {
+            col = col.push(kit::muted(format!(
+                "{producer}: no slice declares it — its subjects are unknown, \
+                 not absent (O4)"
+            )));
+            continue;
+        }
+        let list = match slices.topic_list(Some(&name), None, None, true) {
+            Ok(list) => list,
+            Err(e) => {
+                col = col.push(kit::muted(format!("{producer}: {e}")));
+                continue;
+            }
+        };
+        let declared = list.subjects.iter().filter(|r| !r.deprecated).count();
+        let observed = list
+            .subjects
+            .iter()
+            .filter(|r| !r.deprecated)
+            .filter(|r| subject_observed(d.observed, d.base, origin, producer, r))
+            .count();
+        col = col.push(kit::muted(format!(
+            "{producer}: {declared} declared subject(s) · {observed} observed \
+             on this origin"
+        )));
+        for row in &list.subjects {
+            if shown >= DECLARED_ROWS {
+                cut += 1;
+                continue;
+            }
+            shown += 1;
+            col = col.push(declared_row(
+                row,
+                subject_observed(d.observed, d.base, origin, producer, row),
+            ));
+        }
+    }
+    if cut > 0 {
+        col = col.push(kit::muted(format!("+{cut} more not shown (display bound)")));
+    }
+    col
+}
+
+/// One declared subject, with the declared-vs-observed verdict beside it.
+///
+/// "Not observed by this session" is worded to what the evidence supports:
+/// the tree holds only what watches let through, so absence there is a fact
+/// about this window's coverage, never proof nothing publishes (O4/O5).
+fn declared_row<'a>(row: &TopicRow, observed: bool) -> Element<'a, Message> {
+    if row.deprecated {
+        return kit::muted(format!(
+            "{} DEPRECATED{}{}",
+            row.path,
+            row.deprecated_since
+                .as_deref()
+                .map(|s| format!(" since {s}"))
+                .unwrap_or_default(),
+            row.replaced_by
+                .as_deref()
+                .map(|r| format!(" — replaced by {r}"))
+                .unwrap_or_default(),
+        ));
+    }
+    let status = match (row.open_ended, observed) {
+        (false, true) => "observed on this origin".to_string(),
+        (false, false) => {
+            "declared — not observed by this session (only watched keys are seen)".to_string()
+        }
+        // The registry fixes an open-ended family's shape, not its members
+        // (RFC 08 §2), so members are only checkable at the literal prefix.
+        (true, true) => "family — observed under its prefix on this origin".to_string(),
+        (true, false) => "family — nothing observed under its prefix by this session".to_string(),
+    };
+    iced::widget::row![
+        kit::mono(format!("{} {} ({})", row.class, row.path, row.type_name)),
+        kit::muted(status),
+    ]
+    .spacing(space::SM)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// Whether anything has been observed under one declared subject on one
+/// origin, judged against the tick's tree snapshot — zero bus cost, the same
+/// in-memory join the roster's freshness column makes.
+///
+/// The chunks are assembled from parsed identities: the origin comes from a
+/// liveliness token, the class and path from a registry slice — never from
+/// user input. A `{var}` position truncates to the family's literal prefix,
+/// and a service origin carries no producer chunk (RFC 06 §5).
+fn subject_observed(
+    tree: &KeyTreeSnapshot,
+    base: &str,
+    origin: &str,
+    producer: &str,
+    row: &TopicRow,
+) -> bool {
+    let mut chunks: Vec<&str> = Vec::new();
+    if !base.is_empty() {
+        chunks.extend(base.split('/'));
+    }
+    chunks.push("v1");
+    chunks.push(origin);
+    chunks.push(&row.class);
+    if !origin.starts_with('@') {
+        chunks.push(producer);
+    }
+    for c in row.path.split('/') {
+        if c.contains('{') {
+            break;
+        }
+        chunks.push(c);
+    }
+    tree.node(&chunks).is_some()
+}
+
+/// The subject's payload type against the registry's type vocabulary (#234):
+/// [`SliceSet::interface_list`] for where it sits in the vocabulary,
+/// [`SliceSet::interface_show`] for every declaration that carries it — the
+/// engine's projections, consumed rather than re-derived from the slices.
+fn type_section<'a>(d: &InspectorData<'a>) -> Option<Column<'a, Message>> {
+    let slices = d.slices?;
+    let Registration::Registered(subject) = &d.facts?.registration else {
+        return None;
+    };
+    let type_name = subject.type_name.as_str();
+    let mut col = column![kit::section_header("Type", None)].spacing(2);
+    let vocabulary = slices.interface_list();
+    let carriers = vocabulary
+        .types
+        .iter()
+        .find(|t| t.name == type_name)
+        .map(|t| t.carriers)
+        .unwrap_or(0);
+    col = col.push(kit::muted(format!(
+        "{type_name} — one of {} declared payload type(s), carried by \
+         {carriers} declaration(s)",
+        vocabulary.types.len(),
+    )));
+    match slices.interface_show(type_name) {
+        Ok(show) => {
+            // Bounded: TelemetryPoint alone has a three-digit carrier list,
+            // and the bound is disclosed rather than silent (O6).
+            const CARRIER_ROWS: usize = 12;
+            for c in show.carriers.iter().take(CARRIER_ROWS) {
+                col = col.push(kit::mono(format!(
+                    "{} · {} {}",
+                    c.producer, c.class, c.path
+                )));
+            }
+            if show.carriers.len() > CARRIER_ROWS {
+                col = col.push(kit::muted(format!(
+                    "+{} more carrier(s) not shown (display bound)",
+                    show.carriers.len() - CARRIER_ROWS
+                )));
+            }
+        }
+        // Unreachable while the type came off a Registered rung of the same
+        // slices, but a projection that errors is rendered, not swallowed.
+        Err(e) => col = col.push(kit::muted(e.to_string())),
+    }
+    Some(col)
 }

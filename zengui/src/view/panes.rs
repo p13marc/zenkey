@@ -145,6 +145,8 @@ fn inspector<'a>(
         slices: dep.slices.as_deref(),
         roster: &work.verdicts.roster,
         node_detail: &work.verdicts.node_detail,
+        base: dep.base(),
+        observed: &obs.observed,
     })
 }
 
@@ -206,6 +208,7 @@ fn workbench<'a>(
             roster: &work.verdicts.roster,
             selected: sub.current.origin(),
             detail: &work.verdicts.node_detail,
+            slices: dep.slices.as_deref(),
         }),
         RightPane::Admin => view::admin::pane(&work.verdicts.admin),
         // Unreachable by construction — `PaneSelected(Inspector)` restores

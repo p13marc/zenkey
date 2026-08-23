@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use iced::widget::{column, row, scrollable, text};
 use iced::{Element, Length};
-use zenkey_fleet::NodeInfo;
+use zenkey_fleet::report::NodeList;
+use zenkey_fleet::{NodeInfo, SliceSet};
 
 use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
 use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
@@ -38,6 +39,9 @@ pub struct NodesData<'a> {
     pub roster: &'a NodeRoster,
     pub selected: Option<&'a str>,
     pub detail: &'a DetailState,
+    /// The loaded registry, for the roster→slice join (#234). `None` = not
+    /// asked, and the rows then claim nothing about apps or versions.
+    pub slices: Option<&'a SliceSet>,
 }
 
 /// Wrap one of this pane's messages for the app (#176).
@@ -81,10 +85,25 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
         return col.into();
     }
 
+    // The roster→slice join is the engine's `node_rows` (#234) — the same
+    // rows `zenctl node list --verbose` prints, so the two explorers cannot
+    // disagree about which app a producer belongs to. `live_map()` is `None`
+    // while unseeded, so an unasked join claims nothing (O4).
+    let joined = d
+        .roster
+        .live_map()
+        .map(|m| zenkey_fleet::node_rows(&m, d.slices));
+
     let mut cards = column![].spacing(space::SM);
     for (origin, producers) in d.roster.iter() {
         let selected = d.selected == Some(origin.as_str());
-        cards = cards.push(origin_card(origin, producers, selected, d.detail));
+        cards = cards.push(origin_card(
+            origin,
+            producers,
+            selected,
+            d.detail,
+            joined.as_ref(),
+        ));
     }
     col = col.push(scrollable(cards).height(Length::Fill));
     col.into()
@@ -95,6 +114,7 @@ fn origin_card<'a>(
     producers: &'a std::collections::BTreeMap<String, ProducerPresence>,
     selected: bool,
     detail: &'a DetailState,
+    joined: Option<&NodeList>,
 ) -> Element<'a, Message> {
     let mut body = column![].spacing(space::XS);
 
@@ -120,7 +140,7 @@ fn origin_card<'a>(
     .align_y(iced::Alignment::Center);
     body = body.push(header);
 
-    for row in presence_rows(producers) {
+    for row in presence_rows(origin, producers, joined) {
         body = body.push(row);
     }
 
@@ -130,17 +150,31 @@ fn origin_card<'a>(
     kit::card(body)
 }
 
-/// One row per producer: presence, why, and how fresh its state is.
+/// One row per producer: presence, why, how fresh its state is — and which
+/// app the registry says it belongs to, when the engine's `node_rows` join
+/// answered (#234). "(declared)" because the claim comes from the loaded
+/// slices, not from this node's own introspect — that one is the detail
+/// section's, on demand.
 ///
 /// Shared between the dashboard card and the Inspector's origin sections
 /// (#182) — the same sentences in both places, because they are the same
 /// claim and a second wording would be a second answer.
 fn presence_rows<'a>(
+    origin: &'a str,
     producers: &'a std::collections::BTreeMap<String, ProducerPresence>,
+    joined: Option<&NodeList>,
 ) -> Vec<Element<'a, Message>> {
     producers
         .iter()
         .map(|(producer, p)| {
+            let declared = joined
+                .and_then(|list| {
+                    list.nodes
+                        .iter()
+                        .find(|r| r.origin == origin && &r.producer == producer)
+                })
+                .and_then(|r| r.app.as_deref().zip(r.registry_version.as_deref()))
+                .map(|(app, v)| format!("app {app} · registry v{v} (declared)"));
             let (tone, presence_label) = if p.alive {
                 (PresenceTone::Alive, "alive".to_string())
             } else {
@@ -158,14 +192,18 @@ fn presence_rows<'a>(
                 (true, None) => "watched — no state sample seen".to_string(),
                 (false, _) => "not watched — freshness unknown".to_string(),
             };
-            row![
-                kit::badge_presence(tone, format!("{producer}: {presence_label}")),
-                iced::widget::space::horizontal(),
-                kit::muted(freshness),
-            ]
+            let mut r = row![kit::badge_presence(
+                tone,
+                format!("{producer}: {presence_label}")
+            )]
             .spacing(space::SM)
-            .align_y(iced::Alignment::Center)
-            .into()
+            .align_y(iced::Alignment::Center);
+            if let Some(declared) = declared {
+                r = r.push(kit::muted(declared));
+            }
+            r = r.push(iced::widget::space::horizontal());
+            r = r.push(kit::muted(freshness));
+            r.into()
         })
         .collect()
 }
@@ -175,7 +213,11 @@ fn presence_rows<'a>(
 /// An origin the roster has never seen is a *fact* and says so — it is not
 /// rendered as an empty card, which would read as "this node has no
 /// producers".
-pub fn presence_section<'a>(roster: &'a NodeRoster, origin: &'a str) -> Element<'a, Message> {
+pub fn presence_section<'a>(
+    roster: &'a NodeRoster,
+    origin: &'a str,
+    joined: Option<&NodeList>,
+) -> Element<'a, Message> {
     let Some((_, producers)) = roster.iter().find(|(o, _)| o.as_str() == origin) else {
         return kit::empty_state(
             "no liveliness token observed for this origin",
@@ -184,7 +226,7 @@ pub fn presence_section<'a>(roster: &'a NodeRoster, origin: &'a str) -> Element<
         );
     };
     let mut col = column![].spacing(space::XS);
-    for row in presence_rows(producers) {
+    for row in presence_rows(origin, producers, joined) {
         col = col.push(row);
     }
     col.into()
