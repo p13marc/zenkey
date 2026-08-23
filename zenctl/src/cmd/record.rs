@@ -24,7 +24,9 @@ pub async fn run(
     args: &Bus,
 ) -> Result<()> {
     let selector = match selector {
-        Some(s) => s.to_string(),
+        // Typed selectors pass the raw seam (`$*` refusal, RFC 03 §2);
+        // composed ones cannot spell it.
+        Some(s) => super::raw_selector(s)?.to_string(),
         None => super::compose_selector(args, origin, class, producer)?,
     };
     let header = ZrecHeader {

@@ -223,6 +223,7 @@ mod tests {
                         encoding: None,
                         fanout: None,
                         idempotent: Some(true),
+                        cardinality: None,
                         since: None,
                         description: None,
                     }]

@@ -25,7 +25,9 @@ use crate::cli::WhyArgs;
 pub async fn run(args: WhyArgs) -> Result<()> {
     // A verdict verb: every pre-run failure is `asked`'s exit 2, never 1 —
     // exit 1 here means "no cause found and everything looks healthy", which
-    // a bus that would not open has no standing to claim.
+    // a bus that would not open has no standing to claim. A `$*` key is the
+    // same kind of failure: a question that cannot be asked (RFC 03 §2).
+    super::asked("why", super::raw_selector(&args.key));
     let bus = super::asked("why", Bus::resolve(&args.bus));
     // The registry through the one degradation door (#210): unavailable is
     // `None` — announced once, and rendered as "not asked" by the rung.

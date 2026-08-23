@@ -73,6 +73,11 @@ pub struct ProcedureDecl {
     pub fanout: Option<String>,
     /// Whether the procedure declares itself idempotent (RFC 08 §2).
     pub idempotent: Option<bool>,
+    /// The declared key-population bound of a `{var}`-bearing path, when
+    /// declared (RFC 08 §2 — required there, optional here: this type reads
+    /// foreign slices, and the strict check belongs to that build's own
+    /// zenkey-build).
+    pub cardinality: Option<i64>,
     pub since: Option<String>,
     pub description: Option<String>,
 }
@@ -283,6 +288,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             request: s(e.get("request")),
             fanout: s(e.get("fanout")),
             idempotent: e.get("idempotent").and_then(|v| v.as_bool()),
+            cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
             encoding: s(e.get("encoding")),
             since: s(e.get("since")),
             description: s(e.get("description")),
@@ -448,6 +454,7 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         if let Some(i) = d.idempotent {
             out.push_str(&format!("idempotent = {i}\n"));
         }
+        opt_int(&mut out, "cardinality", d.cardinality);
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -695,6 +702,13 @@ mod tests {
             idempotent = false
             since = "1.1"
             description = "start a capture"
+            [[procedure]]
+            path = "capture/{port}/drain"
+            kind = "write"
+            reply = "Ack"
+            cardinality = 8
+            since = "1.2"
+            description = "drain one port's ring"
             [[blob]]
             tier = "artifact"
             endpoints = ["manifest", "slice", "have"]

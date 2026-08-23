@@ -26,50 +26,68 @@ pub fn ip_slug_str(text: &str) -> Option<String> {
     text.parse::<IpAddr>().ok().map(ip_slug)
 }
 
+/// Lowercase a ULID-shaped identifier for key encoding — or refuse.
+///
+/// RFC 03 §2: identifiers whose canonical text form is uppercase MUST be
+/// **lowercased at key-build time** where the domain is case-insensitive —
+/// in particular ULIDs, whose Crockford base32 decodes case-insensitively
+/// (payloads MAY keep the canonical uppercase display form). Lowercasing a
+/// ULID therefore names the *same* identifier in its one key spelling;
+/// escaping its uppercase bytes (as [`chunk_slug`] would) mints a
+/// different chunk nobody serves.
+///
+/// Returns `Some(lowercased)` when `id` is ULID-shaped — 26 Crockford
+/// base32 characters (`0-9`, `A-Z` without `I`/`L`/`O`/`U`), either case —
+/// and `None` otherwise, so a caller refuses or falls back deliberately
+/// instead of lowercasing a value from a domain that might be
+/// case-sensitive (the v1.4 exemption).
+pub fn ulid_slug(id: &str) -> Option<String> {
+    fn crockford(b: u8) -> bool {
+        let b = b.to_ascii_uppercase();
+        b.is_ascii_digit() || (b.is_ascii_uppercase() && !matches!(b, b'I' | b'L' | b'O' | b'U'))
+    }
+    (id.len() == 26 && id.bytes().all(crockford)).then(|| id.to_ascii_lowercase())
+}
+
 /// Slug an arbitrary value (unit name, filename, device name) into a single
 /// legal chunk, losslessly (RFC 03 §2).
+///
+/// Boundary handling follows the v1.4 erratum: a chunk must start and end
+/// alphanumeric, so a charset-legal-but-non-alphanumeric byte (`.`, `_`, `-`)
+/// at either boundary is escaped like any illegal byte, and when the escaped
+/// form still leads (or ends) with the escape's own `_`, the reserved marker
+/// `x` is affixed on that side — `_myns` → `x_x5f_myns`, the RFC's example.
+/// The marker is part of the injective encoding: it appears only next to an
+/// `_xNN_` escape, so it never collides with a value that starts with `x`
+/// literally (the old sentinel-only form did collide: `_myns` and `e_myns`
+/// shared a chunk).
 pub fn chunk_slug(value: &str) -> String {
     if is_valid_plain_chunk(value) {
         return value.to_string();
     }
+    let bytes = value.as_bytes();
     let mut out = String::with_capacity(value.len() + 8);
-    for &b in value.as_bytes() {
+    for (i, &b) in bytes.iter().enumerate() {
         let c = b as char;
-        let legal_inner =
-            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_' || c == '-';
-        if legal_inner {
+        let alnum = c.is_ascii_lowercase() || c.is_ascii_digit();
+        let legal_inner = alnum || c == '.' || c == '_' || c == '-';
+        let boundary = i == 0 || i == bytes.len() - 1;
+        if legal_inner && (alnum || !boundary) {
             out.push(c);
         } else {
             out.push_str(&format!("_x{b:02x}_"));
         }
     }
-    // The escape may leave an illegal first/last byte (e.g. leading '.') —
-    // guard the boundary bytes the same lossless way.
-    let bytes = out.as_bytes();
-    let boundary_ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
-    let fix_first = !bytes.is_empty() && !boundary_ok(bytes[0]) && bytes[0] != b'_';
-    let fix_last =
-        bytes.len() > 1 && !boundary_ok(bytes[bytes.len() - 1]) && bytes[bytes.len() - 1] != b'_';
-    let mut fixed = String::new();
-    for (i, &b) in out.as_bytes().iter().enumerate() {
-        let at_first = i == 0 && fix_first;
-        let at_last = i == out.len() - 1 && fix_last;
-        if at_first || at_last {
-            fixed.push_str(&format!("_x{b:02x}_"));
-        } else {
-            fixed.push(b as char);
-        }
+    // `_xNN_` starts and ends with `_`, which the charset forbids at
+    // boundaries; the erratum's marker makes the boundary alphanumeric in
+    // one pass instead of re-escaping forever.
+    if out.starts_with('_') {
+        out.insert(0, 'x');
     }
-    // `_xNN_` starts/ends with '_', which the charset forbids at boundaries;
-    // pad with the sentinel 'e' ("escaped") on each affected side.
-    let mut result = fixed;
-    if result.starts_with('_') {
-        result.insert(0, 'e');
+    if out.ends_with('_') {
+        out.push('x');
     }
-    if result.ends_with('_') {
-        result.push('e');
-    }
-    result
+    out
 }
 
 #[cfg(test)]
@@ -123,6 +141,14 @@ mod tests {
             "ab.",
             "café",
             "unit@.service",
+            // The v1.4 erratum's collision pair: the old sentinel-only
+            // boundary fix mapped `_myns` to `e_myns`, colliding with the
+            // literal value `e_myns`.
+            "_myns",
+            "e_myns",
+            "x_myns",
+            "myns_",
+            "_",
         ];
         let slugs: Vec<String> = corpus.iter().map(|v| chunk_slug(v)).collect();
         let unique: HashSet<&String> = slugs.iter().collect();
@@ -133,5 +159,42 @@ mod tests {
                 "illegal slug {s:?}"
             );
         }
+    }
+
+    /// RFC 03 §2: a ULID is key-encoded in lowercase — both cases of one
+    /// ULID name one chunk, and non-ULID shapes are refused rather than
+    /// guessed at.
+    #[test]
+    fn ulid_shapes_lowercase_and_others_refuse() {
+        let canonical = "01JGXQZ4YQK8V6TXW3M9F2A7CD";
+        assert_eq!(
+            ulid_slug(canonical).as_deref(),
+            Some("01jgxqz4yqk8v6txw3m9f2a7cd")
+        );
+        assert_eq!(
+            ulid_slug("01jgxqz4yqk8v6txw3m9f2a7cd").as_deref(),
+            Some("01jgxqz4yqk8v6txw3m9f2a7cd"),
+            "already-lowercase is the fixed point"
+        );
+        // Not ULID-shaped: wrong length, excluded letters, illegal bytes.
+        assert_eq!(ulid_slug("01HQXK8F9C2N4PZQ"), None, "16 chars");
+        assert_eq!(ulid_slug("01JGXQZ4YQK8V6TXW3M9F2A7CI"), None, "I excluded");
+        assert_eq!(ulid_slug("01jgxqz4yqk8v6txw3m9f2a7c."), None);
+        assert_eq!(ulid_slug(""), None);
+    }
+
+    /// The v1.4 erratum, by its own example: escaping must converge to an
+    /// alphanumeric first character, and the `x` marker is affixed *with* the
+    /// boundary byte escaped — not instead of escaping it (RFC 03 §2).
+    #[test]
+    fn erratum_boundary_escape_is_the_rfcs() {
+        assert_eq!(chunk_slug("_myns"), "x_x5f_myns");
+        // The collision the erratum exists to prevent: a `_`-leading value
+        // and the literal spelling of the old sentinel form stay distinct.
+        assert_ne!(chunk_slug("_myns"), chunk_slug("e_myns"));
+        assert_eq!(chunk_slug("e_myns"), "e_myns");
+        // The trailing boundary converges the same way.
+        assert_eq!(chunk_slug("myns_"), "myns_x5f_x");
+        assert_eq!(chunk_slug(".ab"), "x_x2e_ab");
     }
 }

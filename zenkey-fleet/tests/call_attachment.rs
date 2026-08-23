@@ -74,7 +74,7 @@ async fn a_call_carries_attachments_both_ways() {
     .expect("call");
     assert_eq!(report.answers.len(), 1);
     let a = &report.answers[0];
-    assert!(a.ok);
+    assert!(a.outcome.is_ok());
     assert_eq!(
         a.attachment,
         Some(serde_json::Value::String("who=me".into())),

@@ -182,6 +182,14 @@ profiles; the rejected alternative (a per-key `express` override in the
 registry) is recorded in the v1.5 changelog — it would reopen the exact
 per-key QoS bikeshed the closed profile set exists to prevent.
 
+Note that the `alert` row's default binds a *family*, not a class, and the
+registry's per-class default mechanism cannot see a family: an alert-family
+subject therefore **declares** `qos = "alert"` in its registry entry rather
+than relying on any default, and the registry lint enforces it
+([08-registry.md §2/§5](08-registry.md), v1.23) — a silent fall to the
+`state` class default would make the firing flank drop-eligible on the one
+family the express axis exists for.
+
 The `refreshed`/`transition` split inside `state` is about the **cost of
 waiting out a missed write**, not about self-healing: *all* live state
 refreshes at ≤ TTL/2 (§1.2), so every state subject eventually self-heals.

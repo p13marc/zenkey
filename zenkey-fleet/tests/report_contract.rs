@@ -293,18 +293,19 @@ fn coverage_flattens_into_its_row_with_snake_case_tags() {
     );
 }
 
-/// Six optionals on one struct, every one of them a wire fact that is absent
-/// rather than null when it did not ride.
+/// Every optional is a wire fact that is absent rather than null when it did
+/// not ride — and the outcome enum serializes to the exact shape the old
+/// `{ok, error: Option}` struct pinned here, so scripts keep parsing.
 #[test]
 fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
     let bare = CallAnswer {
         origin: "h-3fa9c2d41b7e".into(),
-        ok: true,
-        value: None,
-        text: None,
+        outcome: CallOutcome::Ok {
+            value: None,
+            text: None,
+        },
         attachment: None,
         attachment_bytes: None,
-        error: None,
     };
     assert_eq!(
         serde_json::to_value(&bare).unwrap(),
@@ -312,8 +313,7 @@ fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
     );
 
     let failed = CallAnswer {
-        ok: false,
-        error: Some(CallError {
+        outcome: CallOutcome::Err(CallError {
             name: "unsupported".into(),
             message: "not built with that feature".into(),
         }),
@@ -326,6 +326,23 @@ fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
             "ok": false,
             "error": {"name": "unsupported", "message": "not built with that feature"},
         })
+    );
+
+    // The full shape, field order included: origin, ok, the outcome's own
+    // fields, the attachment pair, error last — byte-identical to what the
+    // derived struct serialized before the enum (C7).
+    let rich = CallAnswer {
+        origin: "h-3fa9c2d41b7e".into(),
+        outcome: CallOutcome::Ok {
+            value: Some(json!({"count": 214})),
+            text: None,
+        },
+        attachment: Some(json!({"trace": "abc123"})),
+        attachment_bytes: Some(18),
+    };
+    assert_eq!(
+        serde_json::to_string(&rich).unwrap(),
+        r#"{"origin":"h-3fa9c2d41b7e","ok":true,"value":{"count":214},"attachment":{"trace":"abc123"},"attachment_bytes":18}"#
     );
 
     // Silence is exit 2 and an empty answer list — never an error reply.

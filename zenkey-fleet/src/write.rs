@@ -24,7 +24,7 @@ use zenkey::qos::QosProfile;
 use zenoh::Session;
 
 use crate::registry::SliceSet;
-use crate::report::{CallAnswer, CallError, CallReport};
+use crate::report::{CallAnswer, CallError, CallOutcome, CallReport};
 
 /// A declared publisher with its QoS profile applied — the only publish path.
 pub struct Publication {
@@ -328,7 +328,9 @@ fn attachment_value(bytes: &[u8]) -> serde_json::Value {
 /// - `params` ride the selector (`?k=v;k=v`), the body rides the payload
 ///   (RFC 05 §1).
 /// - **Fan-out guard**: a [`CallTarget::Fleet`] call is refused when the
-///   loaded slices declare the procedure `fanout = "forbidden"`. With no
+///   loaded slices declare the procedure `fanout = "forbidden"` — or when a
+///   `kind = "write"` procedure declares nothing, because RFC 08 §2 defaults
+///   a write to forbidden and introspect serves the TOML verbatim. With no
 ///   slices loaded the registry layer cannot judge — the call proceeds, and
 ///   the builder/ACL layers remain (documented, not silent: the report's key
 ///   is the caller's audit trail).
@@ -351,12 +353,28 @@ pub async fn call(
         && let Some(slices) = slices
         && let Some(slice) = slices.get(producer)
         && let Some(proc_decl) = slice.procedures.iter().find(|p| p.path == procedure)
-        && proc_decl.fanout.as_deref() == Some("forbidden")
     {
-        bail!(
-            "procedure {producer}/{procedure} declares fanout = \"forbidden\" — a \
-             fleet (`*`) call to it is refused (RFC 05 §2.1); name one origin"
-        );
+        // Introspect serves the TOML verbatim, so an omitted `fanout` reaches
+        // this layer as `None` — and RFC 08 §2 *defaults* a `kind = "write"`
+        // procedure to forbidden. The default has to be applied here, or a
+        // dynamic caller fans out a write the generated builders refuse to
+        // spell.
+        let forbidden = match proc_decl.fanout.as_deref() {
+            Some("forbidden") => true,
+            Some(_) => false,
+            None => proc_decl.kind == "write",
+        };
+        if forbidden {
+            let declared = if proc_decl.fanout.is_some() {
+                "declares fanout = \"forbidden\""
+            } else {
+                "is a write with no declared fanout, which defaults to forbidden (RFC 08 §2)"
+            };
+            bail!(
+                "procedure {producer}/{procedure} {declared} — a \
+                 fleet (`*`) call to it is refused (RFC 05 §2.1); name one origin"
+            );
+        }
     }
 
     let segments: Vec<&str> = procedure.split('/').collect();
@@ -394,42 +412,30 @@ pub async fn call(
                     }
                     None => (None, None),
                 };
-                match &a.answer {
+                let outcome = match &a.answer {
                     crate::query::Answer::Value(bytes) => {
                         let bytes = bytes.to_bytes();
                         match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            Ok(v) => CallAnswer {
-                                origin: a.origin.clone(),
-                                ok: true,
+                            Ok(v) => CallOutcome::Ok {
                                 value: Some(v),
                                 text: None,
-                                attachment: att,
-                                attachment_bytes: att_bytes,
-                                error: None,
                             },
-                            Err(_) => CallAnswer {
-                                origin: a.origin.clone(),
-                                ok: true,
+                            Err(_) => CallOutcome::Ok {
                                 value: None,
                                 text: Some(String::from_utf8_lossy(&bytes).to_string()),
-                                attachment: att,
-                                attachment_bytes: att_bytes,
-                                error: None,
                             },
                         }
                     }
-                    crate::query::Answer::Error { name, message } => CallAnswer {
-                        origin: a.origin.clone(),
-                        ok: false,
-                        value: None,
-                        text: None,
-                        attachment: att,
-                        attachment_bytes: att_bytes,
-                        error: Some(CallError {
-                            name: name.clone(),
-                            message: message.clone(),
-                        }),
-                    },
+                    crate::query::Answer::Error { name, message } => CallOutcome::Err(CallError {
+                        name: name.clone(),
+                        message: message.clone(),
+                    }),
+                };
+                CallAnswer {
+                    origin: a.origin.clone(),
+                    outcome,
+                    attachment: att,
+                    attachment_bytes: att_bytes,
                 }
             })
             .collect(),
@@ -556,7 +562,7 @@ mod tests {
         assert!(err.contains("cannot classify"), "{err}");
     }
 
-    fn slice_with_proc(fanout: Option<&str>) -> SliceSet {
+    fn slice_with_proc(kind: &str, fanout: Option<&str>) -> SliceSet {
         SliceSet::from_slices(vec![RegistrySlice {
             version: "1.0".into(),
             app: "t".into(),
@@ -567,12 +573,13 @@ mod tests {
             subjects: vec![],
             procedures: vec![ProcedureDecl {
                 path: "capture/trigger".into(),
-                kind: "write".into(),
+                kind: kind.into(),
                 reply: Some("Ack".into()),
                 request: None,
                 encoding: None,
                 fanout: fanout.map(str::to_string),
                 idempotent: Some(false),
+                cardinality: None,
                 since: None,
                 description: None,
             }],
@@ -603,7 +610,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fleet_calls_to_forbidden_fanout_are_refused() {
         let session = crate::session::open(&[], &[], false).await.unwrap();
-        let slices = slice_with_proc(Some("forbidden"));
+        let slices = slice_with_proc("write", Some("forbidden"));
         let err = call(
             &session,
             "",
@@ -622,9 +629,10 @@ mod tests {
         assert!(err.contains("fanout"), "{err}");
         assert!(err.contains("RFC 05 §2.1"), "{err}");
 
-        // Unconstrained procedures fan out fine (zero replies here — a
-        // non-verdict, not an error).
-        let report = call(
+        // A write whose TOML *omits* fanout is refused the same way: RFC 08
+        // §2 defaults `kind = "write"` to forbidden, and introspect serves
+        // the TOML verbatim — the default is this guard's to apply.
+        let err = call(
             &session,
             "",
             &CallTarget::Fleet,
@@ -634,10 +642,37 @@ mod tests {
             None,
             None,
             Duration::from_millis(100),
-            Some(&slice_with_proc(None)),
+            Some(&slice_with_proc("write", None)),
         )
         .await
-        .unwrap();
-        assert_eq!(report.exit_code(), 2, "silence stays exit 2");
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("defaults to forbidden"), "{err}");
+        assert!(err.contains("RFC 08 §2"), "{err}");
+        assert!(err.contains("RFC 05 §2.1"), "{err}");
+
+        // An explicit `fanout = "allowed"` write still fans out, and a read
+        // with nothing declared keeps its allowed default (zero replies here
+        // — a non-verdict, not an error).
+        for slices in [
+            slice_with_proc("write", Some("allowed")),
+            slice_with_proc("read", None),
+        ] {
+            let report = call(
+                &session,
+                "",
+                &CallTarget::Fleet,
+                "netring",
+                "capture/trigger",
+                &[],
+                None,
+                None,
+                Duration::from_millis(100),
+                Some(&slices),
+            )
+            .await
+            .unwrap();
+            assert_eq!(report.exit_code(), 2, "silence stays exit 2");
+        }
     }
 }

@@ -75,6 +75,22 @@ pub(crate) fn asked<T>(verb: &str, result: Result<T>) -> T {
     }
 }
 
+/// The raw-selector seam: every selector (or key) a user types, rather than
+/// composes through positions, passes here before anything reaches the
+/// session. RFC 03 §2 forbids `$*` in selectors, not merely in published
+/// keys (RFC 02 P6: it is markedly slower and strains the infrastructure —
+/// if a chunk needs `$*`, the key is wrong and wants splitting). zengui's
+/// scope seam refuses it with this wording; the CLI must not be the frontend
+/// that lets it through.
+pub fn raw_selector(sel: &str) -> Result<&str> {
+    if sel.contains("$*") {
+        return Err(anyhow!(
+            "`$*` must not be used in selectors (RFC 03 §2): {sel:?}"
+        ));
+    }
+    Ok(sel)
+}
+
 /// Compose a server-side selector from origin/class/producer positions
 /// (RFC 03: positions, not filters — never client-filter what the grammar
 /// can say). `None` positions wildcard.

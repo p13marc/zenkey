@@ -10,6 +10,8 @@ use anyhow::Result;
 use crate::Bus;
 
 pub async fn run(selector: &str, window: f64, max_paths: usize, args: &Bus) -> Result<()> {
+    // The raw seam: `$*` never reaches the session (RFC 03 §2).
+    let selector = super::raw_selector(selector)?;
     if window <= 0.0 {
         anyhow::bail!("--window must be a positive number of seconds");
     }

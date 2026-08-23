@@ -18,6 +18,9 @@ pub async fn run(
     absent: bool,
     args: &Bus,
 ) -> Result<()> {
+    // A verdict verb: a `$*` selector is a question that cannot be asked
+    // (RFC 03 §2), so it lands on `asked`'s reserved 2, never on 1.
+    let selector = super::asked("expect", super::raw_selector(selector));
     let qos = match qos {
         None => None,
         Some("declared") => Some(zenkey_fleet::QosCheck::Declared),

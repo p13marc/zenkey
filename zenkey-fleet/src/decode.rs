@@ -308,6 +308,12 @@ fn referenced_types(slice: &zenkey::slice::RegistrySlice) -> Vec<String> {
     for b in &slice.blob {
         names.extend(b.reference.as_deref());
     }
+    // Media frames are opaque, but their per-frame attachment sidecar is a
+    // registry type like any other (RFC 08 §2) — the build-side §7 totality
+    // check includes it, and this set must not be the smaller one (G-08g).
+    for m in &slice.media {
+        names.extend(m.attachment.as_deref());
+    }
     names.sort_unstable();
     names.dedup();
     names.into_iter().map(str::to_string).collect()
@@ -737,6 +743,46 @@ pub async fn decode_sample(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 08 §7's totality set for one producer: every type the slice
+    /// references — subject types, procedure request/reply, blob references,
+    /// **and media attachment sidecars**. The build-side check has counted
+    /// media since v1.16; the fleet side must not be the smaller set (G-08g).
+    #[test]
+    fn the_totality_set_counts_every_referenced_type() {
+        let slice = zenkey::slice::parse_slice(
+            r#"
+            [registry]
+            version = "1.0"
+            app = "acme"
+            convention = 1
+            [producer]
+            name = "netring"
+            [[subject]]
+            path = "health"
+            class = "state"
+            type = "Health"
+            [[procedure]]
+            path = "capture/trigger"
+            kind = "write"
+            request = "CaptureSpec"
+            reply = "Ack"
+            [[blob]]
+            tier = "artifact"
+            endpoints = ["manifest"]
+            reference = "PcapRef"
+            [[media]]
+            path = "front/video/h264"
+            encoding = "video/h264"
+            attachment = "FrameMeta"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            referenced_types(&slice),
+            ["Ack", "CaptureSpec", "FrameMeta", "Health", "PcapRef"]
+        );
+    }
 
     #[test]
     fn encoding_resolution_order() {
