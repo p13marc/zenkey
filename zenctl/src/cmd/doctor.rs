@@ -39,12 +39,9 @@ pub async fn run(
     // `registry_dirs()` (not the raw flag) was the fix for doctor silently
     // ignoring a named context's `registry=`.
     let dirs = args.registry_dirs();
-    if dirs.is_empty() {
-        eprintln!(
-            "note: no --registry <dir> given — skipping the served-vs-declared diff; only the \
-             roster-vs-introspect check runs."
-        );
-    }
+    // No `--registry` warning here: the degradation rides the report itself —
+    // `DoctorReport.synced: None` plus the O4 coverage note in its renderer —
+    // so every format carries it, not just a tty's stderr (review finding R1).
     let locals = zenkey_fleet::SliceSet::from_dirs(&dirs)?.slices().to_vec();
 
     let spec = DoctorSpec {

@@ -257,19 +257,48 @@ fn a_doctor_run_carries_its_coverage_and_its_bound_into_every_format() {
 
     let envelope: serde_json::Value =
         serde_json::from_str(ndjson(&fx::doctor_report()).lines().next().unwrap()).unwrap();
-    let notes = envelope["notes"]
+    let envelope_notes = envelope["notes"]
         .as_array()
         .expect("notes ride the envelope");
     assert!(
-        notes
+        envelope_notes
             .iter()
             .any(|n| n["text"].as_str().unwrap().contains("dropped")),
-        "the bound reaches a script too: {notes:?}"
+        "the bound reaches a script too: {envelope_notes:?}"
     );
     assert!(
         !envelope.as_object().unwrap().contains_key("findings"),
         "findings are rows, not an envelope field"
     );
+
+    // R1: with no registry the served-vs-declared diff never ran, and the
+    // degradation is a note in the report — it used to be a bare eprintln in
+    // the command, invisible to every machine format.
+    let unchecked = zenkey_fleet::report::DoctorReport {
+        synced: None,
+        ..fx::doctor_report()
+    };
+    let n = notes(&unchecked);
+    assert!(n.contains("diff never ran"), "{n}");
+    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&unchecked).lines().next().unwrap()).unwrap();
+    assert!(
+        !envelope.as_object().unwrap().contains_key("synced"),
+        "diff never ran: the key is absent (O4), never an empty list"
+    );
+    assert!(
+        envelope["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|note| note["text"].as_str().unwrap().contains("diff never ran")),
+        "the degradation reaches a script too: {envelope}"
+    );
+    // …and the fixture's checked run keeps the key.
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&fx::doctor_report()).lines().next().unwrap()).unwrap();
+    assert!(envelope["synced"].is_array(), "{envelope}");
 }
 
 /// The `why` ladder (#214): one line per rung, the three answer states drawn
@@ -477,6 +506,29 @@ served schema (RFC 08 §7):
 "#]]
     );
     assert!(notes(&fx::interface_show()).contains("disagree about"));
+
+    // R4: without --schema the bus was never asked, and the document must not
+    // carry the old unconditional `"schemas": 0` — an unasked bus is not one
+    // serving nothing (O4).
+    let unasked = fx::interface_show_unasked();
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&unasked).lines().next().unwrap()).unwrap();
+    assert!(
+        !envelope.as_object().unwrap().contains_key("schemas"),
+        "not asked: the count is absent, never 0 — {envelope}"
+    );
+    let n = notes(&unasked);
+    assert!(n.contains("not asked"), "{n}");
+    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
+    // …and asked-with-silence is the third state, distinct from both.
+    let silent = zenkey_fleet::report::InterfaceShow {
+        schemas: Some(vec![]),
+        ..fx::interface_show_unasked()
+    };
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["schemas"], 0, "asked, none served: a real zero");
+    assert!(notes(&silent).contains("no carrier served one"));
 }
 
 /// The empty base is a real deployment, not a missing value, so it renders
@@ -618,6 +670,29 @@ target  tree/deadbeef  (tier tree)
 "#]]
     );
     assert!(notes(&fx::blob_probe_unissued()).contains("not probed"));
+
+    // R7: a silent probe over zero registry slices names the third silence —
+    // "nobody declares this tier" was never established either.
+    let silent_no_registry = zenkey_fleet::report::BlobProbeReport {
+        holders: vec![],
+        answered: 0,
+        roots: vec![],
+        declared_by: vec![],
+        slices_considered: 0,
+        ..fx::blob_probe()
+    };
+    let n = notes(&silent_no_registry);
+    assert!(n.contains("no registry loaded"), "{n}");
+    // …while a silent probe with slices read keeps the two-silence wording:
+    // an empty declared_by over a real sweep IS "nobody declares it".
+    let silent_swept = zenkey_fleet::report::BlobProbeReport {
+        declared_by: vec![],
+        slices_considered: 11,
+        ..silent_no_registry
+    };
+    let n = notes(&silent_swept);
+    assert!(!n.contains("no registry loaded"), "{n}");
+    assert!(n.contains("no replies"), "{n}");
 }
 
 #[test]
@@ -675,6 +750,27 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
         "probe is the call plus one provenance line:\n{probe}"
     );
     assert!(call.contains("attachment (18 B)"), "the clause probe lost");
+
+    // R5: a silent call's note names the wait, and the document states it —
+    // it used to say "the timeout too short" about a timeout the report
+    // never carried (O5). The probe inherits both by delegation.
+    let silent = zenkey_fleet::report::CallReport {
+        answers: vec![],
+        ..fx::call_report()
+    };
+    let n = notes(&silent);
+    assert!(n.contains("within 5s"), "{n}");
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["timeout_s"], 5);
+    let silent_probe = zenkey_fleet::report::ProbeReport {
+        call: silent,
+        ..fx::probe_report()
+    };
+    assert!(notes(&silent_probe).contains("within 5s"));
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&silent_probe).lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["timeout_s"], 5);
 }
 
 #[test]

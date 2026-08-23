@@ -129,7 +129,12 @@ impl Render for InterfaceShow {
         let mut e = serde_json::Map::new();
         e.insert("type_name".into(), self.type_name.clone().into());
         e.insert("carriers".into(), self.carriers.len().into());
-        e.insert("schemas".into(), self.schemas.len().into());
+        // R4: the count rides only when `--schema` asked — the envelope used
+        // to write an unconditional `"schemas": 0`, which read as "asked,
+        // none served" on a run that never asked (RFC 09 §5.1 O4).
+        if let Some(schemas) = &self.schemas {
+            e.insert("schemas".into(), schemas.len().into());
+        }
         e
     }
 
@@ -140,7 +145,7 @@ impl Render for InterfaceShow {
         for c in &self.carriers {
             out(Row::of("carrier", c));
         }
-        for s in &self.schemas {
+        for s in self.schemas.iter().flatten() {
             out(Row::of("schema", s));
         }
     }
@@ -160,10 +165,12 @@ impl Render for InterfaceShow {
             ]);
         }
         t.grid(g);
-        if !self.schemas.is_empty() {
+        if let Some(schemas) = self.schemas.as_deref()
+            && !schemas.is_empty()
+        {
             t.blank().line("served schema (RFC 08 §7):");
             let mut s = Grid::unheaded(3).max(0, 10).max(1, 12);
-            for sc in &self.schemas {
+            for sc in schemas {
                 s.row([
                     Cell::text(format!("  {}", sc.producer)),
                     Cell::text(&sc.kind),
@@ -171,7 +178,7 @@ impl Render for InterfaceShow {
                 ]);
             }
             t.grid(s);
-            for sc in &self.schemas {
+            for sc in schemas {
                 if let Some(doc) = &sc.document {
                     t.blank().line(format!("  {} says:", sc.producer));
                     t.line(serde_json::to_string_pretty(doc).unwrap_or_default());
@@ -192,19 +199,35 @@ impl Render for InterfaceShow {
                 self.carriers.len()
             )));
         }
-        // Same name, different hash across producers: §7 says this is a
-        // finding, and the type's own page is where it is worth seeing.
-        if let Some(first) = self.schemas.first()
-            && self.schemas.iter().any(|s| s.hash != first.hash)
-        {
-            notes.push(
-                Note::coverage(format!(
-                    "⚠ producers disagree about {}'s shape — a schema-drift finding; \
-                     `zenctl doctor` carries it as one",
-                    self.type_name
-                ))
-                .cite("RFC 08 §7"),
-            );
+        match self.schemas.as_deref() {
+            // R4: not asked is not "none served".
+            None => notes.push(
+                Note::coverage(
+                    "served schemas not asked — pass --schema to query the carriers; \
+                     an unasked bus is not one serving nothing",
+                )
+                .cite("RFC 09 §5.1 O4"),
+            ),
+            Some([]) => notes.push(Note::silence(
+                "schemas asked and no carrier served one — describe is a SHOULD \
+                 (RFC 08 §7), so undescribed is not shapeless",
+            )),
+            // Same name, different hash across producers: §7 says this is a
+            // finding, and the type's own page is where it is worth seeing.
+            Some(schemas) => {
+                if let Some(first) = schemas.first()
+                    && schemas.iter().any(|s| s.hash != first.hash)
+                {
+                    notes.push(
+                        Note::coverage(format!(
+                            "⚠ producers disagree about {}'s shape — a schema-drift \
+                             finding; `zenctl doctor` carries it as one",
+                            self.type_name
+                        ))
+                        .cite("RFC 08 §7"),
+                    );
+                }
+            }
         }
         notes
     }
@@ -418,10 +441,21 @@ impl Render for BlobProbeReport {
         if let Some(why) = &self.not_probed {
             notes.push(Note::coverage(format!("not probed: {why}")).cite("RFC 09 §5.1 O4"));
         } else if self.holders.is_empty() {
-            notes.push(Note::silence(
-                "no replies — no origin holds this object, or none that could answer \
-                 was up",
-            ));
+            // R7: the third silence — with no registry read, "nobody declares
+            // this tier" was never established either, and the note must not
+            // leave only the two bus-side readings on the table.
+            if self.declared_by.is_empty() && self.slices_considered == 0 {
+                notes.push(Note::silence(
+                    "no replies — no origin holds this object, none that could answer \
+                     was up, or (no registry loaded) whether anyone even declares \
+                     this tier is unknown",
+                ));
+            } else {
+                notes.push(Note::silence(
+                    "no replies — no origin holds this object, or none that could answer \
+                     was up",
+                ));
+            }
         }
         if !self.declared_by.is_empty() {
             notes.push(Note::coverage(format!(

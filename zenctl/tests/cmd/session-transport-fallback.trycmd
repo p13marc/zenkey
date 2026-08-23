@@ -16,6 +16,10 @@ is how a case like this becomes a timeout instead of a test.
 degradation note and the fact that a full answer follows it — not four hundred
 lines of registry.
 
+The `since` and `about` lines (and the matching ndjson keys) are the
+report-honesty batch's R2: the registry always declared them, and `topic info`
+dropped them at the report boundary — dead fields on the wire until now.
+
 ```console
 $ zenctl topic info --format table --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
 no session (failed to open Zenoh session); answering from --registry only: ../fixture-tests/registry.
@@ -28,6 +32,8 @@ class     state
 subject   health
 payload   HealthSnapshot
   (`zenctl interface show HealthSnapshot --schema` for the served shape)
+since     1.0
+about     sensor health document (framework; absorbs the legacy @/status running flag)
 ttl       120s  (refresh <= 60s; stale after 120s)
 
 ```
@@ -49,6 +55,6 @@ and this is where the corpus states it:
 $ zenctl topic info --format ndjson --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
 no session (failed to open Zenoh session); answering from --registry only: ../fixture-tests/registry.
 That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
-{"class":"state","key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","note":"","origin":"h-3fa9c2d41b7e","payload_type":"HealthSnapshot","producer":"sysinfo","report":"topic-info","subject":"health","ttl_s":120,"verdict":"registered"}
+{"class":"state","description":"sensor health document (framework; absorbs the legacy @/status running flag)","key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","note":"","origin":"h-3fa9c2d41b7e","payload_type":"HealthSnapshot","producer":"sysinfo","report":"topic-info","since":"1.0","subject":"health","ttl_s":120,"verdict":"registered"}
 
 ```

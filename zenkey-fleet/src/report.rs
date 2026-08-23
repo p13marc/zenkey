@@ -228,6 +228,14 @@ impl TopicInfo {
                 // Declared since v1.0, dropped on this path until #221 — the
                 // field existed and was never filled.
                 info.cardinality = s.cardinality;
+                // R2, the third recurrence of the same class (cardinality
+                // pre-#221, then these): `rate` reached `SubjectFacts` and
+                // died at this boundary; `since`/`description` never even
+                // left the slice. The no-dead-field pin in
+                // `report_contract.rs` now guards the whole struct.
+                info.rate = s.rate.clone();
+                info.since = s.since.clone();
+                info.description = s.description.clone();
             }
             Registration::Unregistered => {
                 info.verdict = TopicVerdict::Unregistered;
@@ -347,11 +355,13 @@ pub struct InterfaceShow {
     pub type_name: String,
     pub carriers: Vec<CarrierRow>,
     /// What each producer serving this type name says its schema is
-    /// (issue #51). Empty = nothing asked or nothing served; two rows with
-    /// different hashes *is* the RFC 08 §7 drift finding, visible right here
-    /// rather than only in `doctor`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub schemas: Vec<SchemaRow>,
+    /// (issue #51). `None` = `--schema` was not passed, so the bus was never
+    /// asked; `Some(vec![])` = asked and no carrier served one — the empty
+    /// `Vec` used to conflate the two (RFC 09 §5.1 O4, review finding R4).
+    /// Two rows with different hashes *is* the RFC 08 §7 drift finding,
+    /// visible right here rather than only in `doctor`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub schemas: Option<Vec<SchemaRow>>,
 }
 
 /// One type's schema entry as one producer serves it (issue #51).
@@ -519,6 +529,12 @@ pub struct CallAnswer {
 #[derive(Debug, Clone, Serialize)]
 pub struct CallReport {
     pub key: String,
+    /// Seconds the GET waited — the other half of the coverage claim
+    /// (zenctl's `GetReport` is the model), and what makes a silent result
+    /// legible: the renderer's silence note used to name a timeout the
+    /// document never stated (RFC 09 §5.1 O5, review finding R5). Additive,
+    /// so scripts on the old shape keep parsing.
+    pub timeout_s: u64,
     pub answers: Vec<CallAnswer>,
 }
 
@@ -543,17 +559,24 @@ pub struct RateRow {
     pub key: String,
     pub count: u64,
     pub bytes: u64,
-    /// Source-sequence gaps (zero also means "publishers attach no
-    /// SourceInfo" — an observation, not proof of losslessness).
-    pub sn_gaps: u64,
+    /// Source-sequence gaps. `None` = `--loss` was not asked — the same gate
+    /// the report-level `sn_gaps` always had; the row used to serialize an
+    /// uncaveated `0` regardless (#238's twin, review finding R3). Even when
+    /// present, zero also means "publishers attach no SourceInfo" — an
+    /// observation, not proof of losslessness.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sn_gaps: Option<u64>,
     /// Observed **skewed** latency over the window (#119) — absent when no
     /// sample was HLC-stamped, which is not zero latency. Split by who
     /// stamped it (#213): the three populations measure from different
     /// clocks and are never folded into one median.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency: Option<crate::stats::LatencyReport>,
-    /// Samples that carried no HLC — the other half of the observation.
-    pub unstamped: u64,
+    /// Samples that carried no HLC — the other half of the latency
+    /// observation, so it rides the same gate: `None` = `--latency` was not
+    /// asked (R3, matching #238's fix for `latency` itself).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unstamped: Option<u64>,
 }
 
 /// The `topic hz` / `topic bw` report (issue #46) — measured counts plus the
@@ -652,9 +675,15 @@ pub struct DoctorFinding {
 pub struct DoctorReport {
     pub findings: Vec<DoctorFinding>,
     /// Producer slices confirmed in sync with the local registry
-    /// (`origin/producer`), when `--registry` was given.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub synced: Vec<String>,
+    /// (`origin/producer`).
+    ///
+    /// `None` = no local registry was given, so the served-vs-declared diff
+    /// **never ran** — which must not read like "ran, none in sync"
+    /// (RFC 09 §5.1 O4). `Some(vec![])` = the diff ran and confirmed nothing;
+    /// the findings say why. The `Vec` used to skip-if-empty, which conflated
+    /// the two (review finding R1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced: Option<Vec<String>>,
     /// Introspect replies received across the fleet.
     pub introspect_answered: usize,
     /// Producers on the liveliness roster.
@@ -689,7 +718,7 @@ pub struct ObservationSummary {
     /// Samples the bounded observer missed; non-zero weakens every
     /// listen-phase finding and the report says so.
     pub dropped: u64,
-    /// Samples carrying the synthetic-traffic marker (RFC 09 §5.2, #162) —
+    /// Samples carrying the synthetic-traffic marker (RFC 09 §5.3, #162) —
     /// generated traffic judged as real would be a self-inflicted finding.
     pub synthetic_marked: u64,
     /// Field-intelligence paths (#223) the bounded per-path table refused to
@@ -875,6 +904,12 @@ pub struct BlobProbeReport {
     /// silences).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub declared_by: Vec<String>,
+    /// How many registry slices the `declared_by` sweep read —
+    /// [`BlobList`]'s own solution, applied here (review finding R7). Without
+    /// it an empty `declared_by` conflates "no slice declares this tier" with
+    /// "no registry was loaded, so nobody was asked" (RFC 09 §5.1 O4) — the
+    /// third silence, beside the two above. Additive.
+    pub slices_considered: usize,
 }
 
 /// A fetch's progress, as the caller may render it.
@@ -976,6 +1011,7 @@ mod tests {
     fn call_exit_codes() {
         let mut r = CallReport {
             key: "k".into(),
+            timeout_s: 5,
             answers: vec![],
         };
         assert_eq!(r.exit_code(), 2, "silence is its own exit code");
@@ -1060,7 +1096,9 @@ mod tests {
                 evidence: "registry version differs: served 1.0, local 2.0".into(),
                 citation: Some("RFC 08 §6".into()),
             }],
-            synced: vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()],
+            // R1: `Option` since the report-honesty batch — `Some` serializes
+            // exactly as the old non-empty `Vec` did.
+            synced: Some(vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()]),
             introspect_answered: 2,
             live_producers: 3,
             describe_served: 1,
@@ -1091,6 +1129,31 @@ mod tests {
                 "deep": false,
             }),
             "without --listen-for the document is byte-identical to pre-#161"
+        );
+        // R1 (report-honesty batch): `synced` is three-state. Absent = the
+        // served-vs-declared diff never ran (no registry, O4); `[]` = it ran
+        // and confirmed nothing; non-empty pins above. The wire change is
+        // deliberate: a no-registry run serialized nothing here before, and
+        // still does — only the ran-and-empty case gains a visible `[]`.
+        let unchecked = DoctorReport {
+            synced: None,
+            ..report.clone()
+        };
+        let json = serde_json::to_value(&unchecked).unwrap();
+        assert!(
+            !json.as_object().unwrap().contains_key("synced"),
+            "diff never ran: the key is absent, exactly as pre-R1 no-registry \
+             runs serialized"
+        );
+        let ran_empty = DoctorReport {
+            synced: Some(vec![]),
+            ..report.clone()
+        };
+        let json = serde_json::to_value(&ran_empty).unwrap();
+        assert_eq!(
+            json["synced"],
+            serde_json::json!([]),
+            "ran and confirmed nothing is `[]`, not absence"
         );
         // With the listen phase, the observation section pins too. Note
         // `field_paths_dropped` (#223) is absent at zero — appended, like
@@ -1375,8 +1438,13 @@ pub struct RetiredReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plane_samples: Option<u64>,
     /// Samples the bounded observer missed during the window (O6): non-zero
-    /// weakens every silence claim and the report says so.
-    pub dropped: u64,
+    /// weakens every silence claim and the report says so. `None` = no listen
+    /// window ran, so there was no observer to miss anything — matching its
+    /// sibling wire facts (`window_s`/`plane_samples`); an unconditional `0`
+    /// used to claim a clean observation nobody made (RFC 09 §5.1 O4, review
+    /// finding R6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<u64>,
     /// Served introspect slices that answered (RFC 08 §6).
     pub introspect_answered: usize,
     /// Declared entities the admin sweep returned; `None` = no admin space

@@ -380,7 +380,10 @@ pub async fn run_doctor(
 
     Ok(DoctorReport {
         findings,
-        synced,
+        // `None` when no local registry was given: the served-vs-declared
+        // diff never ran, and the report must say so rather than looking
+        // like "ran, none in sync" (RFC 09 §5.1 O4, review finding R1).
+        synced: (!locals.is_empty()).then_some(synced),
         introspect_answered: answered,
         live_producers: live,
         describe_served: described.len(),
@@ -413,7 +416,7 @@ pub(crate) fn rate_cap_per_hour(rate: &str) -> Option<u64> {
     }
 }
 
-/// Does an attachment carry the RFC 09 §5.2 synthetic-traffic marker
+/// Does an attachment carry the RFC 09 §5.3 synthetic-traffic marker
 /// (`{"synthetic": true, …}`, #162)? Generated traffic judged as real would
 /// be a self-inflicted finding, so the observation counts it separately —
 /// here and in the watchdog's windows (`condition`, #227).

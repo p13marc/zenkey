@@ -870,11 +870,14 @@ fn outcome_view<'a>(
             let mut col = Column::new().spacing(sp.xs);
             col = col.push(kit::mono(format!("→ {}", report.key)));
             if report.answers.is_empty() {
-                // Exit-code 2's meaning, rendered: silence is not a verdict.
-                col = col.push(kit::muted(
-                    "no replies within the timeout — a non-verdict, not proof of \
+                // Exit-code 2's meaning, rendered: silence is not a verdict —
+                // and the wait it is read against is stated, not alluded to
+                // (R5: the report carries it now).
+                col = col.push(kit::muted(format!(
+                    "no replies within {}s — a non-verdict, not proof of \
                      absence (RFC 05 §3.1); the roster says who should have answered",
-                ));
+                    report.timeout_s
+                )));
             }
             for a in &report.answers {
                 let line = match (&a.error, &a.value, &a.text) {

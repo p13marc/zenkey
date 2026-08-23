@@ -101,6 +101,8 @@ fn the_five_registration_states_render_five_distinct_glyph_word_pairs() {
             ttl_s: None,
             rate: None,
             cardinality: None,
+            since: None,
+            description: None,
         })),
         Registration::Unregistered,
         Registration::NoSliceForProducer,
@@ -421,6 +423,7 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
         target: "*".into(),
         outcome: Some(Ok(CallReport {
             key: "v1/*/@rpc/netring/introspect".into(),
+            timeout_s: 5,
             answers: vec![CallAnswer {
                 origin: "h-aaaaaaaaaaaa".into(),
                 ok: true,
@@ -1128,7 +1131,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
             evidence: "registry version differs: served 1.0, local 2.0".into(),
             citation: Some("RFC 08 §6".into()),
         }],
-        synced: vec![],
+        synced: None,
         introspect_answered: 1,
         live_producers: 1,
         describe_served: 0,
@@ -1204,7 +1207,7 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
 
     let report = DoctorReport {
         findings: vec![],
-        synced: vec![],
+        synced: None,
         introspect_answered: 1,
         live_producers: 1,
         describe_served: 0,
@@ -1931,6 +1934,7 @@ mod blob {
             holders,
             roots,
             declared_by: vec![],
+            slices_considered: 0,
         }));
     }
 
@@ -2079,6 +2083,7 @@ mod blob {
             answered: 0,
             roots: vec![],
             declared_by: vec!["logs".into()],
+            slices_considered: 2,
         }));
         let mut ui = simulator::<Message, _, _>(section(&state, false, sp()));
         assert!(ui.find("not probed").is_ok());

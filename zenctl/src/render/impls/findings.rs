@@ -35,7 +35,7 @@ impl Render for DoctorReport {
 
     fn table(&self, t: &mut Table) {
         let mut grid = Grid::unheaded(2);
-        for s in &self.synced {
+        for s in self.synced.iter().flatten() {
             grid.row([
                 Cell::styled("✓", crate::render::style::PASS),
                 Cell::text(format!("{s}: in sync")),
@@ -67,6 +67,18 @@ impl Render for DoctorReport {
 
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
+        // R1: the degradation used to be a bare eprintln in `cmd/doctor.rs`,
+        // invisible to `--format json` — a machine consumer read "no synced
+        // slices" where the truth was "the diff never ran".
+        if self.synced.is_none() {
+            notes.push(
+                Note::coverage(
+                    "no local registry given — the served-vs-declared diff never ran; \
+                     only bus-derived checks did, and \"not checked\" is not \"in sync\"",
+                )
+                .cite("RFC 09 §5.1 O4"),
+            );
+        }
         // The listen phase's scope statement (#161): what was watched, for how
         // long, and what the bounded observer missed.
         if let Some(obs) = &self.observation {
@@ -301,11 +313,14 @@ impl Render for RetiredReport {
                 .cite("RFC 09 §5.1 O4"),
             ),
         }
-        if self.dropped > 0 {
+        // R6: `dropped` rides only when a window ran — an unconditional `0`
+        // used to claim a clean observation on runs that never observed.
+        if let Some(dropped) = self.dropped
+            && dropped > 0
+        {
             notes.push(Note::bound(format!(
-                "{} sample(s) dropped while behind — every silence claim covers \
-                 only what was seen",
-                self.dropped
+                "{dropped} sample(s) dropped while behind — every silence claim \
+                 covers only what was seen"
             )));
         }
         notes.push(match self.admin_entities {

@@ -119,6 +119,62 @@ fn the_topic_verdict_vocabulary_is_snake_case_and_partial_reports_omit() {
     );
 }
 
+/// The NO-DEAD-FIELD PIN (report-honesty finding R2, third recurrence of the
+/// class: `cardinality` was declared and never filled until #221; `rate`
+/// reached `SubjectFacts` and died at the report boundary; `since` and
+/// `description` never left the slice at all).
+///
+/// The guard is structural: `fx::topic_info_full()` populates **every**
+/// `Option` the shape can serialize, and this test drives the one real
+/// constructor path — slice TOML → `describe_key` → `from_description` — and
+/// requires the two documents to be identical. A field added to `TopicInfo`
+/// that the constructor cannot fill fails here the day it lands, instead of
+/// serializing as a permanent absence that reads like "not declared" (O4).
+#[test]
+fn no_topic_info_field_is_dead_the_constructor_reaches_them_all() {
+    let toml = r#"
+        [registry]
+        version = "1.0"
+        app = "t"
+        convention = 1
+        [producer]
+        name = "sysinfo"
+        [[subject]]
+        path = "disk/{mount}/used"
+        class = "telemetry"
+        type = "TelemetryPoint"
+        unit = "bytes"
+        qos = "sampled"
+        ttl_s = 120
+        rate = "low"
+        cardinality = 16
+        encoding = "application/cbor"
+        since = "1.0"
+        description = "bytes used per mount"
+    "#;
+    let slices =
+        zenkey_fleet::SliceSet::from_slices(vec![zenkey::parse_slice(toml).expect("slice parses")]);
+    let described = zenkey_fleet::facts::describe_key(
+        "",
+        &format!("v1/{}/telemetry/sysinfo/disk/var-log/used", fx::ORIGIN),
+        Some(&slices),
+    );
+    let built = serde_json::to_value(TopicInfo::from_description(&described)).unwrap();
+    let full = serde_json::to_value(fx::topic_info_full()).unwrap();
+    for key in full.as_object().unwrap().keys() {
+        assert!(
+            built.get(key).is_some(),
+            "TopicInfo.{key} is dead: the fixture serializes it, but the \
+             constructor path never fills it"
+        );
+    }
+    assert_eq!(
+        built, full,
+        "the constructor's document IS the every-field fixture — no field \
+         reachable only by literal construction"
+    );
+}
+
 /// The flag that disambiguates the two `None`s beside it. Without it, "asked
 /// and nothing was served" and "never asked" are the same document.
 #[test]
@@ -273,14 +329,22 @@ fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
     );
 
     // Silence is exit 2 and an empty answer list — never an error reply.
+    // R5: `timeout_s` is new in the report-honesty batch — the silence note
+    // named a timeout the document never stated. Additive; old consumers
+    // keep parsing.
     let silent = CallReport {
         key: "v1/*/@rpc/sysinfo/introspect".into(),
+        timeout_s: 5,
         answers: vec![],
     };
     assert_eq!(silent.exit_code(), 2);
     assert_eq!(
         serde_json::to_value(&silent).unwrap(),
-        json!({"key": "v1/*/@rpc/sysinfo/introspect", "answers": []})
+        json!({
+            "key": "v1/*/@rpc/sysinfo/introspect",
+            "timeout_s": 5,
+            "answers": [],
+        })
     );
     assert_eq!(
         CallReport {
@@ -297,13 +361,18 @@ fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
 /// tripped bound still says so (O6).
 #[test]
 fn a_rate_row_keeps_its_latency_populations_apart() {
+    // R3 (#238's twin): `sn_gaps`/`unstamped` are Options since the
+    // report-honesty batch — present iff `--loss`/`--latency` asked, exactly
+    // like the report-level `sn_gaps` and the row's own `latency`. The pin
+    // change is the visible act: a row from an unasked run used to serialize
+    // an uncaveated `"sn_gaps": 0`.
     let quiet = RateRow {
         key: "v1/h-a/telemetry/p/m".into(),
         count: 12,
         bytes: 480,
-        sn_gaps: 0,
+        sn_gaps: Some(0),
         latency: None,
-        unstamped: 12,
+        unstamped: Some(12),
     };
     assert_eq!(
         serde_json::to_value(&quiet).unwrap(),
@@ -315,6 +384,21 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
             "unstamped": 12,
         }),
         "nothing stamped: the latency key is absent, which is not zero latency"
+    );
+
+    let unasked = RateRow {
+        sn_gaps: None,
+        unstamped: None,
+        ..quiet.clone()
+    };
+    assert_eq!(
+        serde_json::to_value(&unasked).unwrap(),
+        json!({
+            "key": "v1/h-a/telemetry/p/m",
+            "count": 12,
+            "bytes": 480,
+        }),
+        "no --loss and no --latency: both counters are absent (O4), never zero"
     );
 
     let dist = zenkey_fleet::LatencySummary {
@@ -332,7 +416,7 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
             stampers: vec![],
             stampers_dropped: 0,
         }),
-        unstamped: 1,
+        unstamped: Some(1),
         ..quiet
     };
     assert_eq!(
@@ -401,6 +485,10 @@ fn the_three_state_verdicts_keep_their_third_state() {
 /// file is compiled without the `blob` feature, which is the proof.
 #[test]
 fn a_blob_probe_reports_what_it_asked_and_what_answered() {
+    // R7: `slices_considered` is new in the report-honesty batch —
+    // BlobList's own solution, so an empty `declared_by` no longer conflates
+    // "no slice declares this tier" with "no registry was loaded" (O4).
+    // Additive and unconditional, like BlobList's.
     let empty = BlobProbeReport {
         target: "01hq9k".into(),
         tier: "artifact".into(),
@@ -410,6 +498,7 @@ fn a_blob_probe_reports_what_it_asked_and_what_answered() {
         answered: 0,
         roots: vec![],
         declared_by: vec!["artifacts".into()],
+        slices_considered: 3,
     };
     assert_eq!(
         serde_json::to_value(&empty).unwrap(),
@@ -421,9 +510,24 @@ fn a_blob_probe_reports_what_it_asked_and_what_answered() {
             "answered": 0,
             "roots": [],
             "declared_by": ["artifacts"],
+            "slices_considered": 3,
         }),
         "asked but unanswered: the selector is on record, so silence is \
          visibly a non-verdict rather than an absent question"
+    );
+    let no_registry = BlobProbeReport {
+        declared_by: vec![],
+        slices_considered: 0,
+        ..empty
+    };
+    let v = serde_json::to_value(&no_registry).unwrap();
+    assert!(
+        v.get("declared_by").is_none(),
+        "an empty capability list stays absent"
+    );
+    assert_eq!(
+        v["slices_considered"], 0,
+        "…and the zero slice count is what says it was never a verdict (R7)"
     );
 
     let holder = BlobHolder {
@@ -510,12 +614,15 @@ fn a_retired_entry_omits_every_fact_that_was_never_asked() {
         }),
         "an unasked fact is absent, not zero and not null"
     );
+    // R6: `dropped` joined the window-gated wire facts — it serialized an
+    // unconditional `0` here, claiming a clean observation on a run that
+    // never observed. The pin change is the visible act.
     let report = RetiredReport {
         registries: vec!["registry".into()],
         entries: vec![],
         window_s: None,
         plane_samples: None,
-        dropped: 0,
+        dropped: None,
         introspect_answered: 0,
         admin_entities: None,
         verdict: CutoverVerdict::Pass,
@@ -525,16 +632,16 @@ fn a_retired_entry_omits_every_fact_that_was_never_asked() {
         json!({
             "registries": ["registry"],
             "entries": [],
-            "dropped": 0,
             "introspect_answered": 0,
             "verdict": "pass",
         }),
-        "no window and no admin space stay absent; the registries always state \
-         themselves"
+        "no window: every wire fact — dropped included — stays absent; the \
+         registries always state themselves"
     );
     // The shared fixture exercises the listened case: every fact present.
     let full = serde_json::to_value(fx::retired_report()).unwrap();
     assert_eq!(full["window_s"], 30);
+    assert_eq!(full["dropped"], 5, "a listened run carries its drop count");
     assert_eq!(full["entries"][0]["still_declared"], true);
     assert_eq!(full["entries"][2]["verdict"], "unproven");
 }

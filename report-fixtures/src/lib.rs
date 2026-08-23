@@ -231,6 +231,36 @@ pub fn topic_info() -> TopicInfo {
     }
 }
 
+/// Every `Option` on the report populated — the NO-DEAD-FIELD PIN's fixture
+/// (report-honesty finding R2, third recurrence of the class: `cardinality`
+/// sat dead until #221, `rate`/`since`/`description` until this batch).
+/// `report_contract.rs` asserts the constructor path can reach every field
+/// this serializes; a field addable here but unreachable there is dead on
+/// arrival.
+pub fn topic_info_full() -> TopicInfo {
+    TopicInfo {
+        key: format!("v1/{ORIGIN}/telemetry/sysinfo/disk/var-log/used"),
+        verdict: TopicVerdict::Registered,
+        note: String::new(),
+        origin: Some(ORIGIN.into()),
+        producer: Some("sysinfo".into()),
+        class: Some("telemetry".into()),
+        subject: Some("disk/{mount}/used".into()),
+        variables: [("mount".to_string(), "var-log".to_string())]
+            .into_iter()
+            .collect(),
+        payload_type: Some("TelemetryPoint".into()),
+        unit: Some("bytes".into()),
+        qos: Some("sampled".into()),
+        ttl_s: Some(120),
+        rate: Some("low".into()),
+        cardinality: Some(16),
+        encoding: Some("application/cbor".into()),
+        since: Some("1.0".into()),
+        description: Some("bytes used per mount".into()),
+    }
+}
+
 /// A key that parses and that nothing declares — the rung above the bottom,
 /// and the one whose fields are absent rather than null.
 pub fn topic_info_unregistered() -> TopicInfo {
@@ -273,7 +303,7 @@ pub fn doctor_report() -> DoctorReport {
                 citation: Some("RFC 09 §5.1 O7".into()),
             },
         ],
-        synced: vec![format!("{ORIGIN}/catalog (registry 1.1)")],
+        synced: Some(vec![format!("{ORIGIN}/catalog (registry 1.1)")]),
         introspect_answered: 2,
         live_producers: 3,
         describe_served: 1,
@@ -457,7 +487,8 @@ pub fn interface_show() -> InterfaceShow {
                 path: "health".into(),
             },
         ],
-        schemas: vec![
+        // `Some` = `--schema` was asked (R4); `None` is the unasked run.
+        schemas: Some(vec![
             SchemaRow {
                 producer: "sysinfo".into(),
                 type_name: "HealthSnapshot".into(),
@@ -472,7 +503,16 @@ pub fn interface_show() -> InterfaceShow {
                 hash: "sha256:bbbb".into(),
                 document: None,
             },
-        ],
+        ]),
+    }
+}
+
+/// The same type without `--schema` — the bus was never asked, and the report
+/// says so instead of an empty list that reads as "none served" (R4).
+pub fn interface_show_unasked() -> InterfaceShow {
+    InterfaceShow {
+        schemas: None,
+        ..interface_show()
     }
 }
 
@@ -660,6 +700,8 @@ pub fn blob_probe() -> BlobProbeReport {
         answered: 2,
         roots: vec!["60e03a78c0e0".into(), "97ac2e30aa77".into()],
         declared_by: vec!["parallax".into()],
+        // R7: the count behind `declared_by` — same numbers as blob_list().
+        slices_considered: 11,
         holders: vec![
             BlobHolder {
                 origin: ORIGIN.into(),
@@ -710,6 +752,7 @@ pub fn blob_probe_unissued() -> BlobProbeReport {
         answered: 0,
         roots: vec![],
         declared_by: vec!["parallax".into()],
+        slices_considered: 11,
         holders: vec![],
     }
 }
@@ -753,6 +796,7 @@ pub fn blob_fetch() -> BlobFetchReport {
 pub fn call_report() -> CallReport {
     CallReport {
         key: "v1/*/@rpc/sysinfo/processes".to_string(),
+        timeout_s: 5,
         answers: vec![
             CallAnswer {
                 origin: ORIGIN.into(),
@@ -859,7 +903,7 @@ pub fn retired_report() -> RetiredReport {
         entries,
         window_s: Some(30),
         plane_samples: Some(960),
-        dropped: 5,
+        dropped: Some(5),
         introspect_answered: 2,
         admin_entities: Some(14),
         verdict: CutoverVerdict::OldStillSpeaks,
@@ -936,21 +980,24 @@ pub fn rate_report() -> RateReport {
         max_keys: 50_000,
         sn_gaps: Some(0),
         rows: vec![
+            // R3: the row-level counters ride the same ask-gates as their
+            // report-level siblings — this fixture is a `--loss --latency`
+            // run where nothing was stamped.
             RateRow {
                 key: format!("v1/{ORIGIN}/telemetry/sysinfo/disk/var-log/used"),
                 count: 50,
                 bytes: 2_250,
-                sn_gaps: 0,
+                sn_gaps: Some(0),
                 latency: None,
-                unstamped: 50,
+                unstamped: Some(50),
             },
             RateRow {
                 key: format!("v1/{ORIGIN}/state/sysinfo/health"),
                 count: 50,
                 bytes: 1_800,
-                sn_gaps: 0,
+                sn_gaps: Some(0),
                 latency: None,
-                unstamped: 0,
+                unstamped: Some(0),
             },
         ],
     }
