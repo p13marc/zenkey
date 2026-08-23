@@ -643,5 +643,6 @@ pub async fn run() -> Result<()> {
             let timeout = resolve::timeout(timeout, stored);
             cmd::scout::run(&what, timeout, &connect, &listen, out.format, out.color).await
         }
+        Command::Why(args) => cmd::why::run(args).await,
     }
 }

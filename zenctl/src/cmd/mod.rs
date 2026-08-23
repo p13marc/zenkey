@@ -44,6 +44,7 @@ pub mod serve;
 pub mod storage;
 pub mod watch;
 pub mod watchdog;
+pub mod why;
 
 use anyhow::{Result, anyhow};
 
