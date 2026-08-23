@@ -1,6 +1,6 @@
 # 03 — Canonical Grammar
 
-**Status: v1.0 (ratified)** · normative chapter
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.1, v1.4, v1.6 and v1.9 — see [00-index.md](00-index.md)*
 
 This chapter defines the canonical key grammar of the convention. Everything
 else in this RFC (planes, RPC, identity, registry) hangs off this shape.
@@ -326,8 +326,10 @@ This convention narrows it:
   charset-illegal character escaped, below) and travels canonically in the
   payload. Lowercasing applies only where the domain is case-*insensitive*
   and uppercase is merely a display form (ULIDs, hex).
-- Verbatim chunks MUST match `@[a-z0-9][a-z0-9_-]*` (plus the `@v<int>`
-  version form).
+- Verbatim chunks MUST match `@[a-z0-9][a-z0-9_-]*`. Note `@v…` is **not**
+  a legal verbatim chunk: the version chunk has been a plain `v<int>` since
+  v1.1 (§1.2), and a verbatim `@v…` would collide with the historical v1.0
+  spelling ([12-open-questions.md §7](12-open-questions.md)).
 - Values that contain characters outside this charset MUST be **slugged**
   before entering a key, and the original value MUST travel in the payload.
   Slugging MUST be canonical and injective within each documented variable

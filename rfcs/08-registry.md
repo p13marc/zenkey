@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.5, v1.8, v1.10, v1.15, v1.16 and v1.17 — see [00-index.md](00-index.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17 and v1.20 — see [00-index.md](00-index.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -134,7 +134,7 @@ normative field table below):
 [registry]
 version = "1.2"                             # this file's MAJOR.MINOR (§3)
 app     = "zensight"                        # owning application
-convention = 1                              # the @v major it targets
+convention = 1                              # the v<int> major it targets
 
 [producer]
 name = "netring"                            # base name; instances suffix -<int> in keys
@@ -180,7 +180,7 @@ since       = "1.0"
 description = "fire the pre-trigger ring / rotate the spool"
 
 [[media]]
-path        = "{stream}/video/{codec}/{profile}"
+path        = "{stream}/video/{codec}/{tier}"
 encoding    = "video/*"
 attachment  = "FrameMeta"
 since       = "1.0"
@@ -425,7 +425,7 @@ Two independent version axes, deliberately decoupled:
 
 | Axis | Mechanism | Bumped when |
 |---|---|---|
-| **Convention major** | the `@v<int>` key chunk | grammar positions or their semantics change incompatibly — hermetic break by key algebra ([03-grammar.md §1.2](03-grammar.md)). The posture is D-Bus's "hopefully never": the protocol version froze at 1 |
+| **Convention major** | the `v<int>` key chunk | grammar positions or their semantics change incompatibly — hermetic break by key algebra ([03-grammar.md §1.2](03-grammar.md)). The posture is D-Bus's "hopefully never": the protocol version froze at 1 |
 | **Registry version** | the `[registry] version` header + `since`/`gone` fields, MAJOR.MINOR, one stream per registry file | MINOR: additive (new subjects/procedures, deprecations). MAJOR: a reviewed break that would otherwise be a forbidden rebind — reserved for the exceptional case where deprecate-and-add cannot express the change; in the normal course MAJOR never moves |
 
 Each registry *file* versions independently (its producer's stream);

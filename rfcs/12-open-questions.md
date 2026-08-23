@@ -2,8 +2,12 @@
 
 **Status: v1.2 — all six original items DECIDED** (2026-07-12, review round 4);
 **§7 added 2026-07-14** (the version chunk is plain, not verbatim);
-**§8 added 2026-07-14** (the v1.2 amendments that were *rejected*);
-**§9 adoption note added in v1.14** (matching badges shipped; deferral
+**§8 added 2026-07-14** (the v1.2 amendments that were *rejected*), **its
+§8.2 revisit trigger fired and was recorded twice** (in v1.8, for the v1.7
+rewrite of chapter 07, and in v1.17 — rejection re-affirmed both times);
+**§3's concrete desired-state form added in v1.4**;
+**§9 added in v1.5** (matching-status introspection deferred), **its adoption
+note in v1.14** (matching badges shipped; deferral
 re-affirmed). This
 chapter began as the open-questions list; it is kept as the decision
 record — each item preserves the alternatives and names its

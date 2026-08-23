@@ -51,7 +51,10 @@ payload in a protobuf envelope, a ~200-entry subject registry binding
 name → type → QoS.
 
 - **Took**: the verbatim `@v{major}` version chunk (their signature move,
-  endorsed by Zenoh's own KE RFC); verbatim `@rpc`; identity-first chunk
+  endorsed by Zenoh's own KE RFC) — taken in v1.0, spelling reversed in
+  v1.1 to a plain `v{major}` ([12-open-questions.md §7](12-open-questions.md));
+  the cross-major isolation idea survives as the plain version chunk;
+  verbatim `@rpc`; identity-first chunk
   order; the subject registry with type+QoS binding; snake_case with units
   in primitive names; presence-in-token-keys.
 - **Rejected**: the trailing open-depth `source_id` — parseable only
@@ -301,7 +304,9 @@ our subject registry.
   name → id resolution is a *service* (their Translate, our `@catalog`,
   [06-identity.md](06-identity.md)). Companion-spec versioning — an
   incompatible major changes the namespace *identity itself*, the same
-  move as our verbatim `@v<int>`. Namespace-URI prefix ownership (with
+  move as our version chunk (verbatim `@v<int>` in v1.0, plain `v<int>`
+  since v1.1 — [12-open-questions.md §7](12-open-questions.md); the
+  isolation move is unchanged). Namespace-URI prefix ownership (with
   OTel, a second witness for the registry collision rule), and the
   harmonization lesson — competing per-vendor vocabularies for one concept
   are the failure mode a registry process must converge, not namespace

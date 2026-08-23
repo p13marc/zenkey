@@ -1,9 +1,67 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.21** (2026-08-20, the stamper amendment below; ratified at v1.20,
-2026-08-18; v1.0 2026-07-12; adopted for ZenSight, migration tracked in
+**Status: v1.22** (2026-08-23, the errata sweep below; ratified at v1.18,
+2026-08-15; v1.0 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the enforcement
 crate `zenkey`).
+
+> **v1.22 (2026-08-23, the errata sweep)** — an editorial pass with no design
+> content: the places where the text had fallen behind its own amendments are
+> made to agree with them.
+>
+> - **The `@v` ghost.** The v1.1 reversal was never fully propagated:
+>   [03 §2](03-grammar.md)'s verbatim lexical rule still licensed an
+>   "`@v<int>` version form" — the parenthetical is deleted and the rule now
+>   says outright that `@v…` is *not* a legal verbatim chunk (it would
+>   collide with the historical v1.0 spelling). The glossary's "plane" row
+>   no longer claims the version chunk "uses" the verbatim mechanism (it did
+>   in v1.0; it is plain since v1.1). [08 §3](08-registry.md)'s version-axis
+>   table and example comment spell the major `v<int>`, and
+>   [10 §2/§10](10-prior-art.md)'s Keelson and OPC-UA ledger rows are
+>   annotated: the verbatim `@v{major}` was taken in v1.0 and its spelling
+>   reversed in v1.1 ([12 §7](12-open-questions.md)) — the isolation idea
+>   survives as the plain version chunk.
+> - **The phantom `streams` procedure.** [07 §1](07-bulk-planes.md)
+>   advertised tiers via "the `streams` procedure's StreamDescriptor" — a
+>   procedure the convention never defined. The catalogue is the per-stream
+>   `state` documents (`state/<producer>/stream/<stream>`,
+>   [05 §5](05-control-rpc.md)), as §1's own rules already said.
+> - **The revoked chunk name.** [08 §2](08-registry.md)'s media example
+>   still spelled its last chunk `{profile}`; it is `{tier}`, the name v1.3
+>   made load-bearing — the surrounding field table already said so.
+> - **The ratification header.** This file's status line claimed
+>   ratification at v1.20, 2026-08-18; the v1.18 entry records it at v1.18,
+>   2026-08-15, and R3 flipped the headers then. The header now agrees with
+>   its own changelog.
+> - **The phantom citation.** [09 §5.3](09-operations.md) cited "RFC 05 §6
+>   v1.14" for the attachment posture — RFC 05 has five sections, and the
+>   claim was half-false besides ([[media]] `attachment` *is* typed registry
+>   vocabulary, [08 §2](08-registry.md)). The sentence now states the actual
+>   posture: the registry types media-frame attachments, data-class
+>   attachments are undeclared, and the synthetic marker is the one reserved
+>   shape. The literally-rendering `[#163]` link is plain text.
+> - **Declare-before-alive meets the bounded grace.** [04 §5](04-planes.md)
+>   gains one cross-referencing sentence: the invariant stands, and the
+>   v1.20 checker tolerates the spawn race per
+>   [08 §6.1](08-registry.md) "Checking the two halves".
+> - **Status lines.** Chapter headers 03, 04, 07, 08, 09 and 12 now name
+>   every version that amended them (03: v1.1, v1.4, v1.6, v1.9; 04: +v1.4,
+>   +v1.5; 07: +v1.3, +v1.4; 08: +v1.3, +v1.4, +v1.20; 09: +v1.4, +v1.5;
+>   12: §9's v1.5 origin, §3's v1.4 form, §8.2's two trigger records). 08's
+>   omission of v1.20 was the costly one — v1.20 carries MUSTs a reader
+>   could not discover from the header.
+> - **One code comment** (`zenkey-fleet::facts`) cited a phantom "RFC 08
+>   §6.4" and quoted a phrase that exists nowhere; it now cites its real
+>   basis, [09 §5.1](09-operations.md) O2/O4, rationale kept.
+>
+> **What did *not* change.** No normative behavior moved anywhere: the v1.1
+> reversal, the v1.3 tier rename, the v1.18 ratification, and v1.20's
+> obligations stand exactly as ratified — this entry only makes the text
+> agree with them. [04 §5](04-planes.md)'s declare-before-alive MUST is
+> cross-referenced, not relaxed; 03's plane-table annotation history
+> (added v1.7, reverted v1.17, net zero) stays recorded in 07's entries
+> rather than in 03's header. No key, wire, registry, or QoS change of any
+> kind.
 
 > **v1.21 (2026-08-20, a timestamp names who stamped it)** — [09
 > §5.1](09-operations.md) gains **O7**, and it is the first observer
@@ -702,7 +760,7 @@ frames and bulk actually live there is the registry's placement rule
 | **base** | the deployment's root chunk(s); everything the convention defines lives under it. MAY be empty (v1.6): the base-less deployment sets no session namespace and lives at the bus root |
 | **origin** | the publishing identity in every key — a host id or a named service |
 | **class** | the update semantics of a subtree: telemetry / state / events |
-| **plane** | a verbatim-isolated subtree no data wildcard can reach: `@rpc`, `@media`, `@blob` (the version chunk uses the same verbatim mechanism but is not a plane) |
+| **plane** | a verbatim-isolated subtree no data wildcard can reach: `@rpc`, `@media`, `@blob` (the version chunk used the same verbatim mechanism in v1.0 but was never a plane; it is plain `v<int>` since v1.1 — [03 §1.2](03-grammar.md)) |
 | **producer** | the component (sensor/agent/service) that emits the data |
 | **subject** | the registry-governed meaning path — the open part of the key |
 | **catalog** | the singleton service that fuses identity evidence into entities; the only author of identity *conclusions* |

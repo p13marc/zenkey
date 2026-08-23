@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified), amended v1.12** · normative chapter
+**Status: v1.0 (ratified), amended v1.4, v1.5 and v1.12** · normative chapter
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -509,7 +509,12 @@ like data selectors:
   advanced tier) all their AdvancedPublishers *before* declaring their
   `alive` token — "alive ⇒ callable **and seedable**": callers can
   attribute RPC silence ([05-control-rpc.md §3](05-control-rpc.md)), and a
-  §5-triggered re-seed can never race an undeclared cache.
+  §5-triggered re-seed can never race an undeclared cache. The invariant
+  stands as written; a conformance checker sampling the declared set allows
+  a bounded grace for declarations spawned concurrently at startup
+  ([08-registry.md §6.1](08-registry.md), "Checking the two halves",
+  v1.20) — it tolerates the spawn race, not a producer that reports `alive`
+  before it is callable.
 - **One roster, not two.** The advanced tier's `publisher_detection`
   tokens (`<key>/@adv/pub/…`, §3.3) are per-*publisher-entity* machinery,
   consumed only by AdvancedSubscriber internals
