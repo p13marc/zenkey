@@ -90,25 +90,29 @@ pub struct Cli {
     #[arg(long)]
     pub eager: bool,
 
-    /// How many echo lines to retain.
-    #[arg(long, default_value_t = 2000)]
-    pub echo_lines: usize,
+    /// How many echo lines to retain (default 2000; the Settings overlay
+    /// changes it live, and remembers the change — a flag beats the memory
+    /// for this launch without becoming it).
+    #[arg(long)]
+    pub echo_lines: Option<usize>,
 
-    /// How many samples of the selected key's history to retain (issue #63).
+    /// How many samples of the selected key's history to retain (issue #63;
+    /// default 200, remembered like `--echo-lines` since #188).
     ///
     /// Smaller than the echo ring on purpose: history keeps whole payloads so
     /// it can diff them, where echo keeps a one-line preview. Entries dropped
     /// to respect this bound are counted and displayed (RFC 09 §5.1 O6).
-    #[arg(long, default_value_t = 200)]
-    pub history_entries: usize,
+    #[arg(long)]
+    pub history_entries: Option<usize>,
 
-    /// How many distinct keys to keep statistics for.
+    /// How many distinct keys to keep statistics for (default
+    /// `zenkey_fleet::stats::DEFAULT_MAX_KEYS`; remembered since #188).
     ///
     /// Least-recently-seen keys are retired past this, and the retirements are
     /// counted and displayed — a long-running observer is bounded, and says so
     /// (RFC 09 §5.1 O6). Raise it on a bus with a very wide key population.
-    #[arg(long, default_value_t = zenkey_fleet::stats::DEFAULT_MAX_KEYS)]
-    pub max_keys: usize,
+    #[arg(long)]
+    pub max_keys: Option<usize>,
 }
 
 /// Resolved, owned settings. No `Option` gymnastics past this point.
@@ -160,31 +164,65 @@ impl Cli {
         prefs: &crate::prefs::Prefs,
     ) -> anyhow::Result<Settings> {
         let context = context.unwrap_or_default();
+        // A typed `--selector` is validated hard: the user just wrote it, and
+        // a bad one is an error, not a preference to shrug off.
+        for sel in &self.selector {
+            crate::scope::validate_selector(sel)?;
+        }
+        // A remembered selector is filtered soft (the counterpart of
+        // `Prefs::sanitised`, for a `Prefs` handed in directly): a stale or
+        // hand-edited row must not refuse to start.
+        let selectors: Vec<String> = if self.selector.is_empty() {
+            prefs
+                .selectors
+                .iter()
+                .filter(|s| crate::scope::validate_selector(s).is_ok())
+                .cloned()
+                .collect()
+        } else {
+            self.selector.clone()
+        };
         // A `--selector` implies custom whatever else was asked for; then the
-        // flag; then what the window had last time. A *remembered* `custom` is
-        // dropped rather than restored, because the selectors that made it
-        // meaningful are session state and are not persisted — restoring it
-        // alone would refuse to start (issue #189).
+        // flag; then what the window had last time. Since #187 the selectors
+        // persist beside the scope, so a remembered `custom` restores — it is
+        // dropped only when nothing survived to give it meaning, because
+        // refusing to start over a stale preference would be the worst kind
+        // of persistence (issue #189).
         let scope = if !self.selector.is_empty() {
             ScopePreset::Custom
         } else {
             self.scope
-                .or_else(|| Some(prefs.scope).filter(|s| *s != ScopePreset::Custom))
+                .or_else(|| {
+                    Some(prefs.scope).filter(|s| *s != ScopePreset::Custom || !selectors.is_empty())
+                })
                 .unwrap_or(ScopePreset::Everything)
         };
-        if scope == ScopePreset::Custom && self.selector.is_empty() {
+        if scope == ScopePreset::Custom && selectors.is_empty() {
             anyhow::bail!("--scope custom needs at least one --selector");
         }
-        for sel in &self.selector {
-            crate::scope::validate_selector(sel)?;
-        }
-        if self.echo_lines == 0 {
+        // The bounds resolve flag > remembered (#188) > documented default.
+        // The same soft/hard split as the selectors: a *typed* zero is an
+        // error, a remembered zero was already dropped by `Prefs::sanitised`
+        // and is re-dropped here for a `Prefs` handed in directly.
+        let echo_lines = self
+            .echo_lines
+            .or(prefs.echo_lines.filter(|n| *n > 0))
+            .unwrap_or(2000);
+        let history_entries = self
+            .history_entries
+            .or(prefs.history_entries.filter(|n| *n > 0))
+            .unwrap_or(200);
+        let max_keys = self
+            .max_keys
+            .or(prefs.max_keys.filter(|n| *n > 0))
+            .unwrap_or(zenkey_fleet::stats::DEFAULT_MAX_KEYS);
+        if echo_lines == 0 {
             anyhow::bail!("--echo-lines must be at least 1");
         }
-        if self.history_entries == 0 {
+        if history_entries == 0 {
             anyhow::bail!("--history-entries must be at least 1");
         }
-        if self.max_keys == 0 {
+        if max_keys == 0 {
             anyhow::bail!("--max-keys must be at least 1");
         }
         Ok(Settings {
@@ -214,11 +252,13 @@ impl Cli {
             },
             timeout_secs: self.timeout.or(context.timeout).unwrap_or(5),
             scope,
-            selectors: self.selector,
-            eager: self.eager,
-            echo_lines: self.echo_lines,
-            history_entries: self.history_entries,
-            max_keys: self.max_keys,
+            selectors,
+            // The flag can only assert, so it wins by OR: `--eager` over a
+            // remembered lazy is eager; there is no `--no-eager` to lose.
+            eager: self.eager || prefs.eager.unwrap_or(false),
+            echo_lines,
+            history_entries,
+            max_keys,
         })
     }
 }
@@ -405,6 +445,37 @@ mod tests {
         assert!(!parse(&["--scouting"]).unwrap().is_unreachable());
     }
 
+    /// The bounds the Settings overlay persists come back on the next
+    /// launch, and a typed flag beats the memory without becoming it (#188).
+    #[test]
+    fn remembered_bounds_fill_in_and_a_flag_still_wins() {
+        let remembered = Prefs {
+            echo_lines: Some(5000),
+            history_entries: Some(400),
+            max_keys: Some(100_000),
+            eager: Some(true),
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &remembered).unwrap();
+        assert_eq!(s.echo_lines, 5000);
+        assert_eq!(s.history_entries, 400);
+        assert_eq!(s.max_keys, 100_000);
+        assert!(s.eager, "a remembered eager connects observing");
+
+        let s = parse_remembering(&["--echo-lines", "100"], &remembered).unwrap();
+        assert_eq!(s.echo_lines, 100, "the typed flag wins this launch");
+        assert_eq!(s.max_keys, 100_000, "the others stay remembered");
+
+        // A remembered zero is a hand edit: dropped to the default, never a
+        // refusal — where the typed zero stays fatal (the tests above).
+        let stale = Prefs {
+            echo_lines: Some(0),
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &stale).expect("must still start");
+        assert_eq!(s.echo_lines, 2000);
+    }
+
     /// Context supplies defaults; flags override (issue #35).
     #[test]
     fn context_supplies_defaults_and_flags_override() {
@@ -487,9 +558,52 @@ mod tests {
         );
     }
 
-    /// A remembered `custom` is dropped rather than restored: the selectors
-    /// that gave it meaning are session state and are not persisted, so
-    /// restoring it alone would refuse to start (issue #189).
+    /// A remembered `custom` restores with its selectors (#187) — the
+    /// acceptance that a custom selector set survives restart — and a typed
+    /// flag still wins over every remembered value.
+    #[test]
+    fn a_remembered_custom_scope_restores_with_its_selectors() {
+        let remembered = Prefs {
+            scope: ScopePreset::Custom,
+            selectors: vec!["demo/**".into()],
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &remembered).unwrap();
+        assert_eq!(s.scope, ScopePreset::Custom);
+        assert_eq!(s.selectors, ["demo/**"]);
+
+        // An explicit `--scope custom` rides the remembered selectors too —
+        // it used to refuse to start without a `--selector` beside it.
+        let s = parse_remembering(&["--scope", "custom"], &remembered).unwrap();
+        assert_eq!(s.selectors, ["demo/**"]);
+
+        // A typed `--selector` replaces the remembered set outright.
+        let s = parse_remembering(&["--selector", "acme/**"], &remembered).unwrap();
+        assert_eq!(s.scope, ScopePreset::Custom);
+        assert_eq!(s.selectors, ["acme/**"]);
+
+        // A preset flag wins the scope, and the selectors stay remembered
+        // for the next switch back to custom.
+        let s = parse_remembering(&["--scope", "state"], &remembered).unwrap();
+        assert_eq!(s.scope, ScopePreset::State);
+        assert_eq!(s.selectors, ["demo/**"]);
+
+        // A remembered row that no longer validates is filtered soft — a
+        // stale preference must never refuse a launch (a *typed* bad
+        // selector stays fatal, `a_bad_selector_is_rejected_at_the_boundary`).
+        let stale = Prefs {
+            scope: ScopePreset::Custom,
+            selectors: vec!["demo/$*/x".into(), "ok/**".into()],
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &stale).unwrap();
+        assert_eq!(s.scope, ScopePreset::Custom);
+        assert_eq!(s.selectors, ["ok/**"]);
+    }
+
+    /// A remembered `custom` with nothing left to give it meaning is dropped
+    /// rather than restored — refusing to start over a stale preference
+    /// would be the worst kind of persistence (issue #189).
     #[test]
     fn a_remembered_custom_scope_does_not_strand_the_next_launch() {
         let stranded = Prefs {

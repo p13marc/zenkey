@@ -121,6 +121,17 @@ fn update_palette(
     use view::palette::PaletteMsg;
     match msg {
         PaletteMsg::Open(overlay) => {
+            // The modal editors open on the deployment's current truth — a
+            // draft left from last time must not masquerade as the active
+            // scope (#187) or the settings in force (#188).
+            if overlay == view::palette::Overlay::Selectors {
+                work.bench
+                    .scope_form
+                    .seed(dep.settings.scope, &dep.settings.selectors);
+            }
+            if overlay == view::palette::Overlay::Settings {
+                work.bench.settings_form.seed(&dep.settings);
+            }
             chrome.palette.open(overlay);
             Task::none()
         }
@@ -227,6 +238,10 @@ fn run_palette_row(
 /// whatever the user was actually doing.
 pub(crate) fn remember(chrome: &mut Chrome, dep: &Deployment, work: &Workspace) {
     chrome.prefs.scope = dep.settings.scope;
+    // The selectors that give a custom scope its meaning travel with it
+    // (#187): a remembered `custom` used to be dropped on the next launch
+    // because these were session state.
+    chrome.prefs.selectors = dep.settings.selectors.clone();
     chrome.prefs.context = work
         .bench
         .context_form

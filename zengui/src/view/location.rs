@@ -104,18 +104,19 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
     .placeholder("base")
     .text_size(tokens::font::CAPTION);
 
-    /// The closed scope vocabulary, in menu order.
-    const SCOPES: [ScopePreset; 5] = [
-        ScopePreset::Everything,
-        ScopePreset::Deployment,
-        ScopePreset::Telemetry,
-        ScopePreset::State,
-        ScopePreset::Events,
-    ];
-    let scope_picker = kit::picker(&SCOPES[..], Some(d.scope), |s| {
+    // The whole scope vocabulary, custom included (#187): the picker's
+    // options always contain the selected value. Picking custom forks the
+    // current preset's resolved selectors and opens the editor; the chip
+    // beside it is the direct route to the same overlay.
+    let scope_picker = kit::picker(&ScopePreset::ALL[..], Some(d.scope), |s| {
         Message::Deployment(DeploymentMsg::ScopeSelected(s))
     })
     .text_size(tokens::font::CAPTION);
+    let selectors_chip = kit::action(kit::caption("selectors…"))
+        .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+            Overlay::Selectors,
+        ))))
+        .padding(4);
 
     // Observation is opt-in and labelled by its cost (issue #85); it rides
     // beside the scope it observes.
@@ -133,6 +134,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
         base_picker,
         kit::muted("▸"),
         scope_picker,
+        selectors_chip,
         observe,
         kit::muted("▸"),
     ]
@@ -230,6 +232,13 @@ fn controls<'a>(
             )))
             .padding(4),
         iced::widget::space::horizontal(),
+        // The Settings overlay (#188): the launch knobs, and the same
+        // chrome preferences the buttons beside it move.
+        kit::action(kit::caption("settings…"))
+            .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+                Overlay::Settings
+            ))))
+            .padding(4),
         // Window preferences (issue #73): the theme name is the button, so
         // the label says what you get rather than what you have.
         kit::action(kit::caption(format!(
@@ -325,5 +334,19 @@ mod tests {
     #[test]
     fn no_subject_means_no_segments() {
         assert!(segments(&Subject::None, "acme").is_empty());
+    }
+
+    /// The #187 defect, pinned at the seam the picker draws from (a
+    /// `pick_list` renders its own rows, so `iced_test` cannot look inside
+    /// it): the option list is `ScopePreset::ALL`, whose exhaustiveness over
+    /// the enum `scope.rs` pins — so whatever scope the window is in,
+    /// `--scope custom --selector …` included, the options contain the
+    /// selected value.
+    #[test]
+    fn the_scope_pickers_options_always_contain_the_selected_value() {
+        assert!(
+            ScopePreset::ALL.contains(&ScopePreset::Custom),
+            "the picker's option list excludes custom — the #187 lie again"
+        );
     }
 }

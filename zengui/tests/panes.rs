@@ -1182,11 +1182,37 @@ fn the_connect_pane_states_what_scouting_means() {
 fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     use zengui::view::contexts::ContextForm;
     use zengui::view::palette::{Overlay, PaletteState, overlay};
+    use zengui::view::scope_editor::{ScopeEditorData, ScopeForm};
 
     let form = ContextForm {
         known: vec!["lab".to_string()],
         ..ContextForm::default()
     };
+    let scope_form = ScopeForm::default();
+    fn scope(form: &ScopeForm) -> ScopeEditorData<'_> {
+        ScopeEditorData {
+            scope: zengui::scope::ScopePreset::Everything,
+            base: "",
+            selectors: &[],
+            form,
+        }
+    }
+    let cfg = launch_settings();
+    let settings_form = zengui::view::settings::SettingsForm::default();
+    fn settings<'a>(
+        settings: &'a zengui::config::Settings,
+        form: &'a zengui::view::settings::SettingsForm,
+    ) -> zengui::view::settings::SettingsData<'a> {
+        zengui::view::settings::SettingsData {
+            settings,
+            form,
+            theme: "dark",
+            zoom: 1.0,
+            echo: (0, 0, 0),
+            history: None,
+            keys: (0, 0),
+        }
+    }
     let keys = [
         "v1/h-3fa9c2d41b7e/state/sysinfo/health".to_string(),
         "demo/example/foo".to_string(),
@@ -1195,8 +1221,15 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     let mut state = PaletteState::default();
     state.open(Overlay::Commands);
     {
-        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
-            .expect("commands overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            settings(&cfg, &settings_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
         // The doctor stopped being a place and became an action (#183): its run
         // is a palette command and its verdict lands in the Activity dock.
@@ -1217,8 +1250,15 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // what typing is for — which is also the fuzzy match's real workload.
     state.query = "ndjson".into();
     {
-        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
-            .expect("commands overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            settings(&cfg, &settings_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("export echo as ndjson").is_ok());
         assert!(
@@ -1232,8 +1272,15 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // as an inventory of the keyspace (O4).
     state.open(Overlay::Keys);
     {
-        let element =
-            overlay(&state, &form, false, keys.iter().map(String::as_str)).expect("keys overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            settings(&cfg, &settings_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("keys overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("v1/h-3fa9c2d41b7e/state/sysinfo/health").is_ok());
         assert!(
@@ -1246,8 +1293,15 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // from what `resolve` dispatches.
     state.open(Overlay::Help);
     {
-        let element =
-            overlay(&state, &form, false, keys.iter().map(String::as_str)).expect("help overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            settings(&cfg, &settings_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("help overlay");
         let mut ui = simulator::<Message, _, _>(element);
         for binding in zengui::shortcuts::map() {
             assert!(
@@ -1263,8 +1317,15 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     // form state, same messages, a different surface.
     state.open(Overlay::Connect);
     {
-        let element = overlay(&state, &form, false, keys.iter().map(String::as_str))
-            .expect("connect overlay");
+        let element = overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            settings(&cfg, &settings_form),
+            keys.iter().map(String::as_str),
+        )
+        .expect("connect overlay");
         let mut ui = simulator::<Message, _, _>(element);
         assert!(ui.find("Connection").is_ok(), "the pane renders inside it");
         assert!(
@@ -1275,7 +1336,17 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
 
     // Closed means nothing renders.
     state.close();
-    assert!(overlay(&state, &form, false, keys.iter().map(String::as_str)).is_none());
+    assert!(
+        overlay(
+            &state,
+            &form,
+            false,
+            scope(&scope_form),
+            settings(&cfg, &settings_form),
+            keys.iter().map(String::as_str)
+        )
+        .is_none()
+    );
 }
 
 // ── History pane (#63) ───────────────────────────────────────────────────
@@ -2515,4 +2586,228 @@ fn the_location_bar_renders_the_trail_and_an_ancestor_click_selects_its_subtree(
         messages.contains(&want),
         "clicking an ancestor selects that subtree, got: {messages:?}"
     );
+}
+
+// ── The key-expression editor (#187) ─────────────────────────────────────
+
+/// On a preset the editor is read-only truth: the selectors actually
+/// resolved by `scope::selectors` — the Deployment preset's explicit
+/// @catalog line included (RFC 03 §4 D4) — each with what it cannot see,
+/// under the D2 statement, with the fork as the only way to edit.
+#[test]
+fn the_selector_editor_shows_the_resolved_truth_and_its_blind_spots() {
+    use zengui::scope::ScopePreset;
+    use zengui::view::scope_editor::{self, ScopeEditorData, ScopeForm};
+
+    let form = ScopeForm::default();
+    let mut ui = simulator::<Message, _, _>(scope_editor::pane(ScopeEditorData {
+        scope: ScopePreset::Deployment,
+        base: "zensight",
+        selectors: &[],
+        form: &form,
+    }));
+
+    // The D2 rule is stated inline — the exact wording, pinned.
+    assert!(
+        ui.find(scope_editor::D2_RULE).is_ok(),
+        "the D2 rule is on screen"
+    );
+
+    // The resolved selectors are the ones `scope::selectors` builds — the
+    // catalog subtree spelled explicitly, never reachable by the fleet
+    // wildcards (D4).
+    for sel in ScopePreset::Deployment.selectors("zensight", &[]) {
+        assert!(
+            ui.find(sel.as_str()).is_ok(),
+            "resolved selector {sel:?} not shown"
+        );
+    }
+    assert!(
+        ui.find("zensight/v1/@catalog/state/**").is_ok(),
+        "the Deployment preset must keep naming the catalog subtree"
+    );
+
+    // Every selector names what it cannot see.
+    assert!(
+        ui.find(format!(
+            "  cannot see: {}",
+            zengui::scope::blind_spot("zensight/v1/*/telemetry/**")
+        ))
+        .is_ok(),
+        "a fleet selector's blind spot is on screen"
+    );
+    assert!(ui.find("fork into custom and edit").is_ok());
+    assert!(
+        ui.find("apply — the scope becomes custom").is_err(),
+        "a preset is read-only until forked"
+    );
+}
+
+/// In custom mode the editor validates per keystroke: an invalid row shows
+/// the validator's own words (`$*` names RFC 03 §2), a valid row shows its
+/// blind spot, and the apply row is offered.
+#[test]
+fn the_selector_editor_validates_each_row_as_typed() {
+    use zengui::scope::ScopePreset;
+    use zengui::view::scope_editor::{self, ScopeEditorData, ScopeForm};
+
+    let form = ScopeForm {
+        editing: true,
+        rows: vec!["demo/**".into(), "demo/$*/x".into()],
+        status: None,
+    };
+    let active = ["demo/**".to_string()];
+    let mut ui = simulator::<Message, _, _>(scope_editor::pane(ScopeEditorData {
+        scope: ScopePreset::Custom,
+        base: "",
+        selectors: &active,
+        form: &form,
+    }));
+
+    // The valid row carries its blind spot…
+    assert!(
+        ui.find(format!(
+            "  cannot see: {}",
+            zengui::scope::blind_spot("demo/**")
+        ))
+        .is_ok()
+    );
+    // …and the invalid row carries the validator's verdict, verbatim —
+    // which is where RFC 03 §2 reaches the screen.
+    let err = zengui::scope::validate_selector("demo/$*/x").unwrap_err();
+    assert!(
+        ui.find(format!("  {err}")).is_ok(),
+        "the row's own error must be beside it"
+    );
+    assert!(ui.find("apply — the scope becomes custom").is_ok());
+    assert!(ui.find("add selector").is_ok());
+    assert!(
+        ui.find("fork into custom and edit").is_err(),
+        "already editing — nothing to fork"
+    );
+}
+
+// ── The Settings overlay (#188) ──────────────────────────────────────────
+
+/// A `Settings` for the overlay tests, spelled out — the same shape
+/// `app.rs`'s `test_app` uses.
+fn launch_settings() -> zengui::config::Settings {
+    zengui::config::Settings {
+        base: String::new(),
+        connect: vec![],
+        listen: vec![],
+        scouting: None,
+        zenoh_config: None,
+        registry: vec![],
+        timeout_secs: 5,
+        scope: zengui::scope::ScopePreset::Everything,
+        selectors: vec![],
+        eager: false,
+        echo_lines: 2000,
+        history_entries: 200,
+        max_keys: 50_000,
+    }
+}
+
+/// The Settings overlay (#188): every knob it controls is labelled live or
+/// on-reconnect, each bound states the cost of raising it — the key table in
+/// the status strip's own words — and every `Settings` field it does not
+/// control is documented as owned elsewhere.
+#[test]
+fn the_settings_overlay_labels_live_against_reconnect_and_states_each_cost() {
+    use zengui::view::settings::{self, SettingsData, SettingsForm};
+
+    let cfg = launch_settings();
+    let mut form = SettingsForm::default();
+    form.seed(&cfg);
+    let mut ui = simulator::<Message, _, _>(settings::pane(SettingsData {
+        settings: &cfg,
+        form: &form,
+        theme: "dark",
+        zoom: 1.0,
+        echo: (1200, 34, 5),
+        history: Some((80, 3)),
+        keys: (120, 7),
+    }));
+
+    // The groups, and the live-vs-reconnect split.
+    assert!(ui.find("bounds — applied live").is_ok());
+    assert!(ui.find("bounds — take effect on reconnect").is_ok());
+
+    // Each bound's cost, in the voice the status strip already uses — the
+    // key table literally through `status::keys_text`.
+    assert!(
+        ui.find(format!(
+            "takes effect on reconnect — a larger key table is more memory. \
+             now: {}",
+            zengui::view::status::keys_text(120, 7),
+        ))
+        .is_ok(),
+        "the key-table bound must state its cost in the strip's words"
+    );
+    assert!(
+        ui.find(
+            "applies live — a larger ring is more memory and a longer filter \
+             scan. now: 1200 lines held (+34 evicted, 5 lagged)"
+        )
+        .is_ok(),
+        "the echo bound must state memory and the filter scan"
+    );
+    assert!(
+        ui.find(
+            "applies live — history keeps whole payloads so it can diff them: \
+             the costliest bound per entry. now: 80 entries (+3 evicted)"
+        )
+        .is_ok()
+    );
+    // The invariant, stated where the bounds are set.
+    assert!(ui.find(settings::BOUND_INVARIANT).is_ok());
+
+    // Eager is labelled, not silently inert.
+    assert!(
+        ui.find(
+            "takes effect on reconnect — the live equivalent is the location \
+             bar's observe-scope toggle (#85)"
+        )
+        .is_ok()
+    );
+
+    // The registry names its blast radius and its path.
+    assert!(
+        ui.find(
+            "a registry change re-runs the slice union and can change every \
+             registration badge in the tree — applying it takes the same \
+             forget path a base change does: every verdict about the old \
+             slices is dropped rather than left on screen (O4). To keep it \
+             across launches, save it into a context (Connect)."
+        )
+        .is_ok()
+    );
+
+    // Every field the overlay does not control is documented as owned
+    // elsewhere — base, session setup, scope.
+    assert!(
+        ui.find("base: (empty — keys start at v1/) — the location bar's base picker owns it")
+            .is_ok()
+    );
+    assert!(
+        ui.find(
+            "connect (none), listen (none), scouting (unset — off unless a \
+             config file says otherwise), zenoh config (none) — session \
+             setup, owned by the Connect overlay (Ctrl+Shift+C); a change \
+             there reopens the session"
+        )
+        .is_ok()
+    );
+    assert!(
+        ui.find(
+            "scope (everything, 0 custom selectors) — the location bar's \
+             scope picker and its selectors editor own them"
+        )
+        .is_ok()
+    );
+
+    // The apply and the reconnect it labels toward are both offered.
+    assert!(ui.find("apply").is_ok());
+    assert!(ui.find("reconnect now").is_ok());
 }

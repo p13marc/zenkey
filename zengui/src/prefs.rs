@@ -323,8 +323,25 @@ pub struct Prefs {
     pub context: Option<String>,
     /// The scope preset last selected.
     pub scope: ScopePreset,
+    /// The custom selectors last applied (#187) — what makes a remembered
+    /// `custom` scope restorable rather than dropped. Kept even while a
+    /// preset is selected, so switching back to custom recovers them.
+    pub selectors: Vec<String>,
     /// The workspace grid (#180), superseding the scalar `split`.
     pub layout: WorkspaceLayout,
+    /// How many echo lines to retain (#188). `None` until set in the
+    /// Settings overlay: a command-line flag is a one-launch choice and is
+    /// deliberately not written back here — only the overlay's apply is,
+    /// so a flag never silently becomes the new default.
+    pub echo_lines: Option<usize>,
+    /// How many history entries the selected key's recorder retains (#188).
+    pub history_entries: Option<usize>,
+    /// How many distinct keys the monitor tracks statistics for (#188).
+    /// Applied on the next (re)connect, and remembered here so the raise
+    /// survives the restart it takes effect through.
+    pub max_keys: Option<usize>,
+    /// Whether to observe the scope immediately on connect (#188).
+    pub eager: Option<bool>,
 }
 
 impl Default for Prefs {
@@ -335,7 +352,12 @@ impl Default for Prefs {
             window: None,
             context: None,
             scope: ScopePreset::Everything,
+            selectors: Vec::new(),
             layout: WorkspaceLayout::default(),
+            echo_lines: None,
+            history_entries: None,
+            max_keys: None,
+            eager: None,
         }
     }
 }
@@ -408,6 +430,18 @@ impl Prefs {
         self.window = self
             .window
             .filter(|(w, h)| w.is_finite() && h.is_finite() && *w >= 320.0 && *h >= 240.0);
+        // A hand-edited selector that no longer validates (empty, `$*`, not a
+        // key expression) is dropped rather than allowed to refuse the next
+        // launch — the same field-by-field posture as the zoom clamp. What
+        // that leaves of a remembered custom scope is `config.rs`'s question.
+        self.selectors
+            .retain(|s| crate::scope::validate_selector(s).is_ok());
+        // A remembered zero bound is a hand edit, not a choice the overlay
+        // can make (the boundary rejects zeros): drop it to unset rather
+        // than refuse the launch a typed `--echo-lines 0` rightly refuses.
+        self.echo_lines = self.echo_lines.filter(|n| *n > 0);
+        self.history_entries = self.history_entries.filter(|n| *n > 0);
+        self.max_keys = self.max_keys.filter(|n| *n > 0);
         self
     }
 
@@ -458,7 +492,12 @@ mod tests {
             window: Some((1440.0, 900.0)),
             context: Some("lab".into()),
             scope: ScopePreset::Deployment,
+            selectors: vec!["demo/**".into(), "v1/*/state/**".into()],
             layout: LayoutPreset::Watch.layout(),
+            echo_lines: Some(5000),
+            history_entries: Some(400),
+            max_keys: Some(100_000),
+            eager: Some(true),
         };
         prefs.save_to(&path).unwrap();
         let (back, note) = Prefs::load_from(&path);
@@ -584,6 +623,40 @@ mod tests {
         let (prefs, note) = Prefs::load_from(&path);
         assert!(note.is_none());
         assert_eq!(prefs.layout, LayoutPreset::Watch.layout());
+    }
+
+    /// A remembered selector that no longer validates is dropped on load,
+    /// field by field (#187) — like the zoom clamp, a typo in one row must
+    /// not discard the valid rows beside it, and must never refuse a launch.
+    #[test]
+    fn an_invalid_remembered_selector_is_dropped_not_fatal() {
+        let path = tmp("bad-selector.toml");
+        std::fs::write(
+            &path,
+            "scope = \"custom\"\nselectors = [\"demo/**\", \"demo/$*/x\", \"\"]\n",
+        )
+        .unwrap();
+        let (prefs, note) = Prefs::load_from(&path);
+        assert!(note.is_none(), "it parsed; one row was just wrong");
+        assert_eq!(prefs.scope, ScopePreset::Custom);
+        assert_eq!(
+            prefs.selectors,
+            ["demo/**"],
+            "the `$*` row (RFC 03 §2) and the empty row are dropped"
+        );
+    }
+
+    /// A hand-edited zero bound unsets rather than strands (#188): the CLI
+    /// boundary rejects a *typed* zero, but a stale file must never refuse
+    /// the launch — same soft/hard split as the selectors above.
+    #[test]
+    fn a_remembered_zero_bound_is_dropped_not_fatal() {
+        let path = tmp("zero-bounds.toml");
+        std::fs::write(&path, "echo_lines = 0\nmax_keys = 40000\n").unwrap();
+        let (prefs, note) = Prefs::load_from(&path);
+        assert!(note.is_none());
+        assert_eq!(prefs.echo_lines, None, "zero unsets");
+        assert_eq!(prefs.max_keys, Some(40_000), "the good field survives");
     }
 
     #[test]

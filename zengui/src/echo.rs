@@ -156,6 +156,19 @@ impl EchoRing {
         }
     }
 
+    /// Re-bound the ring in place (#188) — the Settings overlay's live apply.
+    ///
+    /// Raising the bound **never** discards the counters that reported the
+    /// old bound's cost: `evicted`, `lagged` and `coalesced` are untouched,
+    /// because a raised bound does not un-lose what was already lost.
+    /// Shrinking trims immediately, and what it trims is counted like any
+    /// other eviction (RFC 09 §5.1 O6).
+    pub fn resize(&mut self, max_lines: usize) {
+        self.max_lines = max_lines.max(1);
+        self.max_bytes = self.max_lines.saturating_mul(2048);
+        self.trim();
+    }
+
     /// Render and retain one sample.
     pub fn push(&mut self, view: &SampleView) {
         let line = EchoLine::render(self.next_seq, view);
@@ -329,6 +342,42 @@ mod tests {
             "attachment bytes must count against the budget, got {}",
             ring.len()
         );
+    }
+
+    /// The #188 invariant: resizing the ring live never discards the
+    /// counters that reported the old bound's cost. Shrinking trims and
+    /// counts what it trims; raising raises and un-loses nothing.
+    #[test]
+    fn resizing_keeps_the_loss_counters() {
+        let mut ring = EchoRing::new(10);
+        for i in 0..15 {
+            push(&mut ring, line(i, "k", 1));
+        }
+        ring.record_lag(7);
+        ring.record_coalesced(2);
+        assert_eq!((ring.len(), ring.evicted()), (10, 5));
+
+        // Shrink: the trim is an eviction like any other, and is counted.
+        ring.resize(3);
+        assert_eq!(ring.len(), 3);
+        assert_eq!(ring.evicted(), 12, "5 from the old bound, 7 from the new");
+        let newest: Vec<u64> = ring.iter().map(|l| l.seq).collect();
+        assert_eq!(newest, [14, 13, 12], "the oldest are the ones trimmed");
+
+        // Raise: capacity grows, and no counter is reset — a raised bound
+        // does not un-lose what was already lost.
+        ring.resize(1000);
+        for i in 15..30 {
+            push(&mut ring, line(i, "k", 1));
+        }
+        assert_eq!(ring.len(), 18, "the raised bound holds them all");
+        assert_eq!(ring.evicted(), 12, "raising must not clear the count");
+        assert_eq!(ring.lagged(), 7);
+        assert_eq!(ring.coalesced(), 2);
+
+        // Zero is clamped like the constructor clamps it, not a panic.
+        ring.resize(0);
+        assert_eq!(ring.len(), 1);
     }
 
     #[test]
