@@ -616,13 +616,8 @@ impl Default for FetchSpec {
 /// timestamp; unstamped answers lose to stamped ones (RFC 04 §1.2's LWW).
 pub async fn fetch_value(session: &Session, key: &str, spec: FetchSpec) -> Result<FetchOutcome> {
     // Rung 1 + 2: bounded GETs.
-    for (selector, source) in [
-        (key.to_string(), ValueSource::Storage),
-        (format!("{key}/@adv/**?_max=1"), ValueSource::Cache),
-    ] {
-        if let Some(v) = get_latest(session, &selector, source, spec.get_timeout).await? {
-            return Ok(FetchOutcome::Value(v));
-        }
+    if let Some(v) = fetch_stored(session, key, spec.get_timeout).await? {
+        return Ok(FetchOutcome::Value(v));
     }
 
     // Rung 3: a window. The subscriber is explicitly undeclared afterwards —
@@ -657,6 +652,31 @@ pub async fn fetch_value(session: &Session, key: &str, spec: FetchSpec) -> Resul
     Ok(FetchOutcome::None {
         attempted: ["get", "@adv cache", "subscribe window"],
     })
+}
+
+/// The **stored** half of the [`fetch_value`] ladder, on its own: GET the
+/// concrete key (rung 1 — storages answer), then GET the `@adv` cache
+/// (rung 2). No subscriber is ever declared, so this is two bounded GETs
+/// and nothing on the data plane — the shape `zenctl why`'s default run
+/// needs (issue #214), where the subscribe window is an explicit opt-in.
+///
+/// `Ok(None)` is silence, and silence is never a verdict (RFC 05 §3.1): it
+/// means neither a storage nor a publisher cache *answered*, not that no
+/// value exists.
+pub async fn fetch_stored(
+    session: &Session,
+    key: &str,
+    get_timeout: Duration,
+) -> Result<Option<FetchedValue>> {
+    for (selector, source) in [
+        (key.to_string(), ValueSource::Storage),
+        (format!("{key}/@adv/**?_max=1"), ValueSource::Cache),
+    ] {
+        if let Some(v) = get_latest(session, &selector, source, get_timeout).await? {
+            return Ok(Some(v));
+        }
+    }
+    Ok(None)
 }
 
 async fn get_latest(

@@ -701,3 +701,57 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         assert_eq!(wire(&v, "event"), blob_progress(&v));
     }
 }
+
+/// The `why` ladder's wire shape (#214): one rung per stable id in order, the
+/// three-state answer flattened as a snake_case tag — and `not_asked` carries
+/// **no** `reason`, because a question that was not put has no negative
+/// answer to spell (RFC 09 §5.1 O4). Absent optionals stay absent: an empty
+/// `impairments` and an unrequested listen window serialize as nothing, not
+/// as `[]`/`null`.
+#[test]
+fn a_why_rung_keeps_not_asked_distinct_on_the_wire() {
+    let v = serde_json::to_value(fx::why_report()).unwrap();
+    assert_eq!(v["verdict"], "healthy");
+    assert!(
+        v.get("impairments").is_none(),
+        "no impairments is absence, not an empty list"
+    );
+    assert!(
+        v.get("listened_s").is_none(),
+        "not listened is absence (O4), never null"
+    );
+    let ids: Vec<&str> = v["rungs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, zenkey_fleet::RUNG_IDS, "one rung per id, in order");
+
+    let established = &v["rungs"][0];
+    assert_eq!(established["answer"], "established");
+    assert!(established.get("reason").is_none());
+
+    let lazy = &v["rungs"][4];
+    assert_eq!(lazy["id"], "publisher-declared");
+    assert_eq!(lazy["answer"], "not_established");
+    assert!(
+        lazy["reason"]
+            .as_str()
+            .unwrap()
+            .contains("publishers declare lazily"),
+        "the RFC 08 §6.1 wording rides the wire: {lazy}"
+    );
+    assert!(
+        lazy.get("evidence").is_none(),
+        "empty evidence is absent, not []"
+    );
+
+    let not_asked = &v["rungs"][9];
+    assert_eq!(not_asked["id"], "wire-heard");
+    assert_eq!(not_asked["answer"], "not_asked");
+    assert!(
+        not_asked.get("reason").is_none(),
+        "not_asked has no negative answer to spell"
+    );
+}

@@ -1107,3 +1107,106 @@ pub fn attachments() -> Vec<zenkey_fleet::OriginAttachment> {
         },
     ]
 }
+
+/// The `why` ladder (#214), in its most instructive posture: a producer that
+/// is declared and alive but has never published the subject. All three
+/// answer states appear — established rungs with evidence, the
+/// `publisher-declared` rung carrying the lazy-declaration wording that must
+/// never read as a bug (RFC 08 §6.1), and `NotAsked` rungs that say why they
+/// were not asked (RFC 09 §5.1 O4) — under the `Healthy` verdict (exit 1).
+pub fn why_report() -> zenkey_fleet::WhyReport {
+    use zenkey_fleet::why::{Rung, RungAnswer};
+    let rung = |id: &'static str, question: &'static str, answer, evidence: &[&str]| Rung {
+        id,
+        question,
+        answer,
+        evidence: evidence.iter().map(|e| (*e).to_string()).collect(),
+    };
+    zenkey_fleet::WhyReport {
+        key: format!("v1/{ORIGIN}/telemetry/sysinfo/disk/root/used"),
+        base: String::new(),
+        rungs: vec![
+            rung(
+                "scope-reach",
+                "does a `**` explorer scope reach this key?",
+                RungAnswer::Established,
+                &["the `v1/**` explorer scope intersects this key"],
+            ),
+            rung(
+                "key-parse",
+                "does it parse as a v1 key under the base?",
+                RungAnswer::Established,
+                &[
+                    "origin h-3fa9c2d41b7e (host), class telemetry, producer sysinfo, \
+                     subject disk/root/used",
+                ],
+            ),
+            rung(
+                "registry-declared",
+                "does a loaded registry slice declare it?",
+                RungAnswer::Established,
+                &["declared as disk/{mount}/used (TelemetryPoint)"],
+            ),
+            rung(
+                "origin-alive",
+                "is the origin on the liveliness roster?",
+                RungAnswer::Established,
+                &["h-3fa9c2d41b7e is on the roster with producer(s): sysinfo"],
+            ),
+            rung(
+                "publisher-declared",
+                "did any session declare a matching publisher?",
+                RungAnswer::NotEstablished {
+                    reason: "declared, alive, never published — publishers declare \
+                             lazily (RFC 08 §6.1): no publisher declaration exists \
+                             until the first publication, so this is not evidence \
+                             of a bug"
+                        .into(),
+                },
+                &[],
+            ),
+            rung(
+                "storage-coverage",
+                "is a storage configured to capture it?",
+                RungAnswer::Established,
+                &[
+                    "storage latest@aabbccdd (v1/*/telemetry/**) captures every key \
+                   this expression names",
+                ],
+            ),
+            rung(
+                "stored-value",
+                "does a stored value answer a bounded GET?",
+                RungAnswer::NotEstablished {
+                    reason: "none of get, @adv cache returned a value — which is \
+                             silence, not proof no value exists (RFC 05 §3.1)"
+                        .into(),
+                },
+                &[],
+            ),
+            rung(
+                "sample-freshness",
+                "is the last known sample within its declared ttl?",
+                RungAnswer::NotAsked,
+                &["no sample in hand to age — the stored-value rung found none"],
+            ),
+            rung(
+                "admin-answered",
+                "is the admin space answering at all?",
+                RungAnswer::Established,
+                &["1 admin root document(s) answered @/*/*"],
+            ),
+            rung(
+                "wire-heard",
+                "did the key speak during a listen window?",
+                RungAnswer::NotAsked,
+                &["not listened — the data plane costs one deliberate action \
+                     (RFC 09 §5.1, v1.18 frugality); pass --listen-for <SECS> to \
+                     watch the wire"],
+            ),
+        ],
+        verdict: zenkey_fleet::WhyVerdict::Healthy,
+        impairments: vec![],
+        listened_s: None,
+    }
+}
