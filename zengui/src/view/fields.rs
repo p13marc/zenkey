@@ -66,7 +66,7 @@ pub struct FieldsState {
     /// staleness guard: a report for a superseded subject never lands.
     pub asked: Option<String>,
     pub report: Option<Result<Arc<FieldReport>, String>>,
-    /// Sparklines for up to [`SPARK_ROWS`] numeric paths, built at landing.
+    /// Sparklines for up to `SPARK_ROWS` numeric paths, built at landing.
     pub sparks: Vec<PathSpark>,
 }
 
@@ -263,7 +263,7 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
 }
 
 /// Build the landing's sparklines: numeric report paths the subject's
-/// recorded history can actually plot, bounded at [`SPARK_ROWS`].
+/// recorded history can actually plot, bounded at `SPARK_ROWS`.
 pub fn sparks_for(
     report: &FieldReport,
     history: Option<&crate::history::HistoryRecorder>,
