@@ -1432,8 +1432,13 @@ pub struct RetiredReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plane_samples: Option<u64>,
     /// Samples the bounded observer missed during the window (O6): non-zero
-    /// weakens every silence claim and the report says so.
-    pub dropped: u64,
+    /// weakens every silence claim and the report says so. `None` = no listen
+    /// window ran, so there was no observer to miss anything — matching its
+    /// sibling wire facts (`window_s`/`plane_samples`); an unconditional `0`
+    /// used to claim a clean observation nobody made (RFC 09 §5.1 O4, review
+    /// finding R6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<u64>,
     /// Served introspect slices that answered (RFC 08 §6).
     pub introspect_answered: usize,
     /// Declared entities the admin sweep returned; `None` = no admin space

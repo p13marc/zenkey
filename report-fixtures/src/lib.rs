@@ -900,7 +900,7 @@ pub fn retired_report() -> RetiredReport {
         entries,
         window_s: Some(30),
         plane_samples: Some(960),
-        dropped: 5,
+        dropped: Some(5),
         introspect_answered: 2,
         admin_entities: Some(14),
         verdict: CutoverVerdict::OldStillSpeaks,

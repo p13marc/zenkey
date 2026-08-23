@@ -309,7 +309,9 @@ pub async fn run_retired(
         entries,
         window_s: listen_s,
         plane_samples: listen_s.map(|_| plane_samples),
-        dropped,
+        // Gated like its sibling wire facts (R6): with no window there was
+        // no observer, and "observed cleanly" is a claim nobody made.
+        dropped: listen_s.map(|_| dropped),
         introspect_answered: served.slices().len(),
         admin_entities: admin.as_ref().map(|e| e.entities.len()),
         verdict,

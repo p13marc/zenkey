@@ -594,12 +594,15 @@ fn a_retired_entry_omits_every_fact_that_was_never_asked() {
         }),
         "an unasked fact is absent, not zero and not null"
     );
+    // R6: `dropped` joined the window-gated wire facts — it serialized an
+    // unconditional `0` here, claiming a clean observation on a run that
+    // never observed. The pin change is the visible act.
     let report = RetiredReport {
         registries: vec!["registry".into()],
         entries: vec![],
         window_s: None,
         plane_samples: None,
-        dropped: 0,
+        dropped: None,
         introspect_answered: 0,
         admin_entities: None,
         verdict: CutoverVerdict::Pass,
@@ -609,16 +612,16 @@ fn a_retired_entry_omits_every_fact_that_was_never_asked() {
         json!({
             "registries": ["registry"],
             "entries": [],
-            "dropped": 0,
             "introspect_answered": 0,
             "verdict": "pass",
         }),
-        "no window and no admin space stay absent; the registries always state \
-         themselves"
+        "no window: every wire fact — dropped included — stays absent; the \
+         registries always state themselves"
     );
     // The shared fixture exercises the listened case: every fact present.
     let full = serde_json::to_value(fx::retired_report()).unwrap();
     assert_eq!(full["window_s"], 30);
+    assert_eq!(full["dropped"], 5, "a listened run carries its drop count");
     assert_eq!(full["entries"][0]["still_declared"], true);
     assert_eq!(full["entries"][2]["verdict"], "unproven");
 }

@@ -313,11 +313,14 @@ impl Render for RetiredReport {
                 .cite("RFC 09 §5.1 O4"),
             ),
         }
-        if self.dropped > 0 {
+        // R6: `dropped` rides only when a window ran — an unconditional `0`
+        // used to claim a clean observation on runs that never observed.
+        if let Some(dropped) = self.dropped
+            && dropped > 0
+        {
             notes.push(Note::bound(format!(
-                "{} sample(s) dropped while behind — every silence claim covers \
-                 only what was seen",
-                self.dropped
+                "{dropped} sample(s) dropped while behind — every silence claim \
+                 covers only what was seen"
             )));
         }
         notes.push(match self.admin_entities {
