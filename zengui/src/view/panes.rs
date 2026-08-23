@@ -60,13 +60,8 @@ pub(crate) fn grid<'a>(
     pane_grid::PaneGrid::new(&work.docks.grid, move |pane, role, _maximized| {
         let focused = work.docks.focus == Some(pane);
         let sp = Spacing::of(role.density(density));
-        let body: Element<'a, Message> = match role {
-            DockRole::Locator => locator(dep, obs, sub, tree, sp),
-            DockRole::Inspector => inspector(dep, obs, sub, work, sp),
-            DockRole::Activity => activity(dep, obs, sub, work, sp),
-            DockRole::Workbench => workbench(dep, sub, work, sp),
-        };
-        pane_grid::Content::new(body).title_bar(title_bar(*role, focused))
+        pane_grid::Content::new(body(dep, obs, sub, tree, work, *role, sp))
+            .title_bar(title_bar(*role, focused))
     })
     .spacing(space::XS)
     .min_size(120)
@@ -80,9 +75,67 @@ pub(crate) fn grid<'a>(
     .into()
 }
 
-/// A dock's handle: its name (the drag surface) and its `×`. The focused
-/// dock's title reads on the pane surface; the rest stay muted.
+/// One dock's content, whatever window it renders in: the single `match`
+/// from a [`DockRole`] to a pane function. The grid composes it into a
+/// `pane_grid` cell; a torn-off window ([`solo`], #186) composes the same
+/// call alone — one dispatch, two framings, so a dock cannot render
+/// differently for having its own window.
+fn body<'a>(
+    dep: &'a Deployment,
+    obs: &'a Observation,
+    sub: &'a SubjectState,
+    tree: &'a TreeState,
+    work: &'a Workspace,
+    role: DockRole,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    match role {
+        DockRole::Locator => locator(dep, obs, sub, tree, sp),
+        DockRole::Inspector => inspector(dep, obs, sub, work, sp),
+        DockRole::Activity => activity(dep, obs, sub, work, sp),
+        DockRole::Workbench => workbench(dep, sub, work, sp),
+    }
+}
+
+/// A torn-off dock, alone in its own window (#186): the same [`body`] the
+/// grid renders, with the dock padding the grid cell would have given it.
+/// No title bar — the window's own chrome names it, and the way to re-dock
+/// is to close the window.
+pub(crate) fn solo<'a>(
+    dep: &'a Deployment,
+    obs: &'a Observation,
+    sub: &'a SubjectState,
+    tree: &'a TreeState,
+    work: &'a Workspace,
+    role: DockRole,
+    density: Density,
+) -> Element<'a, Message> {
+    let sp = Spacing::of(role.density(density));
+    iced::widget::container(body(dep, obs, sub, tree, work, role, sp))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(sp.md)
+        .into()
+}
+
+/// A dock's handle: its name (the drag surface), its `⇱` (tear off into a
+/// window, #186 — not on the Locator, which is the navigation itself) and
+/// its `×`. The focused dock's title reads on the pane surface; the rest
+/// stay muted.
 fn title_bar<'a>(role: DockRole, focused: bool) -> pane_grid::TitleBar<'a, Message> {
+    let mut controls = row![].spacing(space::XS);
+    if role != DockRole::Locator {
+        controls = controls.push(
+            kit::link(kit::caption("⇱"))
+                .padding([0.0, space::XS])
+                .on_press(Message::Workspace(WorkspaceMsg::TearOff(role))),
+        );
+    }
+    controls = controls.push(
+        kit::link(kit::caption("×"))
+            .padding([0.0, space::XS])
+            .on_press(Message::Workspace(WorkspaceMsg::DockToggled(role))),
+    );
     pane_grid::TitleBar::new(if focused {
         kit::caption(role.label())
     } else {
@@ -90,11 +143,7 @@ fn title_bar<'a>(role: DockRole, focused: bool) -> pane_grid::TitleBar<'a, Messa
             color: Some(theme::colors(t).text_muted()),
         })
     })
-    .controls(pane_grid::Controls::new(
-        kit::link(kit::caption("×"))
-            .padding([0.0, space::XS])
-            .on_press(Message::Workspace(WorkspaceMsg::DockToggled(role))),
-    ))
+    .controls(pane_grid::Controls::new(controls))
     .padding(space::XS)
     .style(move |t: &iced::Theme| iced::widget::container::Style {
         background: focused.then(|| theme::colors(t).surface().into()),

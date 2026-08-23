@@ -33,16 +33,14 @@ fn main() -> iced::Result {
             std::process::exit(2);
         }
     };
-    let window = iced::window::Settings {
-        size: prefs
-            .window
-            .map(|(w, h)| iced::Size::new(w, h))
-            .unwrap_or(iced::Size::new(1280.0, 800.0)),
-        ..Default::default()
-    };
-
-    iced::application(
-        move || Zengui::with_prefs(settings.clone(), prefs.clone(), prefs_note.clone()),
+    // A daemon, not an application (#186): the process owns N windows — the
+    // main workspace plus a window per torn-off dock — so `view`, `title`,
+    // `theme` and `scale_factor` are window-aware, and `boot` opens the
+    // windows the preferences describe (a daemon opens none by itself).
+    // Closing the main window exits explicitly (`update`'s `WindowClosed`
+    // arm); a daemon that relied on "last window closed" would never stop.
+    iced::daemon(
+        move || Zengui::boot(settings.clone(), prefs.clone(), prefs_note.clone()),
         Zengui::update,
         Zengui::view,
     )
@@ -50,6 +48,5 @@ fn main() -> iced::Result {
     .theme(Zengui::theme)
     .scale_factor(Zengui::scale_factor)
     .subscription(Zengui::subscription)
-    .window(window)
     .run()
 }

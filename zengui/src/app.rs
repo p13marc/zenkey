@@ -73,16 +73,66 @@ impl Zengui {
         )
     }
 
-    pub fn title(&self) -> String {
-        format!("zengui — {}", self.dep.base_label())
+    /// Open the windows the preferences describe (#186): the main workspace,
+    /// and one window per dock the named layout keeps torn off. Called by
+    /// [`Zengui::boot`] — never by [`Zengui::with_prefs`], so a headless test
+    /// constructs an app with no windows at all.
+    pub(crate) fn open_windows(&mut self) -> Task<Message> {
+        use crate::state::workspace::{TornWindow, torn_settings};
+        let mut tasks = Vec::new();
+        let size = self
+            .chrome
+            .prefs
+            .window
+            .map(|(w, h)| iced::Size::new(w, h))
+            .unwrap_or(iced::Size::new(1280.0, 800.0));
+        let (main, open) = iced::window::open(iced::window::Settings {
+            size,
+            ..iced::window::Settings::default()
+        });
+        self.work.windows.main = Some(main);
+        tasks.push(open.discard());
+        for t in self.chrome.prefs.layout.torn.clone() {
+            let (id, open) = iced::window::open(torn_settings(t.role, t.size, t.position));
+            self.work.windows.torn.push(TornWindow {
+                id,
+                role: t.role,
+                size: t.size,
+                position: t.position,
+            });
+            tasks.push(open.discard());
+        }
+        Task::batch(tasks)
     }
 
-    pub fn theme(&self) -> iced::Theme {
+    /// What the daemon boots (#186): the state, its windows, and the link.
+    /// `iced::daemon` opens no window of its own, so the main window — and
+    /// every torn-off dock the named layout remembers — is opened here.
+    pub fn boot(
+        settings: Settings,
+        prefs: crate::prefs::Prefs,
+        prefs_note: Option<String>,
+    ) -> (Zengui, Task<Message>) {
+        let (mut app, link) = Zengui::with_prefs(settings, prefs, prefs_note);
+        let windows = app.open_windows();
+        (app, Task::batch([windows, link]))
+    }
+
+    pub fn title(&self, window: iced::window::Id) -> String {
+        match self.work.windows.role_of(window) {
+            // A torn-off dock's window says which region it is — its own
+            // chrome is the only title bar it has (#186).
+            Some(role) => format!("zengui — {} — {}", role.label(), self.dep.base_label()),
+            None => format!("zengui — {}", self.dep.base_label()),
+        }
+    }
+
+    pub fn theme(&self, _window: iced::window::Id) -> iced::Theme {
         self.chrome.prefs.theme.theme()
     }
 
-    /// The UI scale factor iced applies to the whole window (issue #73).
-    pub fn scale_factor(&self) -> f32 {
+    /// The UI scale factor iced applies to every window (issue #73).
+    pub fn scale_factor(&self, _window: iced::window::Id) -> f32 {
         self.chrome.prefs.zoom
     }
 
@@ -151,11 +201,29 @@ impl Zengui {
                     .map(|_| Message::Pane(PaneMsg::Send(view::send::SendMsg::Tick))),
             );
         }
-        // Window geometry, for the next launch (issue #73).
+        // Window geometry (issue #73; per window since #186): the main
+        // window's size lands in the prefs, a torn-off dock's in the named
+        // layout — `update::chrome` tells them apart by id.
+        subs.push(iced::window::resize_events().map(|(id, size)| {
+            Message::Chrome(ChromeMsg::WindowResized(id, size.width, size.height))
+        }));
+        // A torn-off window's position, where the platform reports one
+        // (#186): the second monitor is the point of the feature.
         subs.push(
-            iced::window::resize_events().map(|(_, size)| {
-                Message::Chrome(ChromeMsg::WindowResized(size.width, size.height))
+            iced::window::events().filter_map(|(id, event)| match event {
+                iced::window::Event::Moved(p) => {
+                    Some(Message::Chrome(ChromeMsg::WindowMoved(id, p.x, p.y)))
+                }
+                _ => None,
             }),
+        );
+        // Window closes (#186): a torn-off dock's window restores its dock
+        // to the grid; the main window's close is the application's — a
+        // daemon would otherwise keep running with nothing to show, which
+        // is the zombie the issue names.
+        subs.push(
+            iced::window::close_events()
+                .map(|id| Message::Workspace(WorkspaceMsg::WindowClosed(id))),
         );
         // …and the settle timer that actually writes it, which exists only
         // while a resize — of the window (#189) or of a dock splitter
@@ -183,7 +251,35 @@ impl Zengui {
         Subscription::batch(subs)
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
+    /// One `view`, dispatched by window id (#186): a torn-off dock's window
+    /// renders that dock alone — through the same free pane functions the
+    /// grid composes — and every other id renders the main workspace. The
+    /// main window is the fallback rather than a named case, so a headless
+    /// test that never opened a window still renders the workspace with any
+    /// id it likes.
+    pub fn view(&self, window: iced::window::Id) -> Element<'_, Message> {
+        if let Some(role) = self.work.windows.role_of(window) {
+            // The replay banner renders in *every* window (#74, #186): a
+            // torn-off Echo fed from a file with no banner over it would be
+            // a live-looking stream that is not live.
+            let mut layout = iced::widget::column![]
+                .spacing(space::MD)
+                .padding(space::MD);
+            for surface in view::replay::surfaces(&self.work.replay) {
+                layout = layout.push(surface);
+            }
+            return layout
+                .push(view::panes::solo(
+                    &self.dep,
+                    &self.obs,
+                    &self.sub,
+                    &self.tree,
+                    &self.work,
+                    role,
+                    self.chrome.prefs.density,
+                ))
+                .into();
+        }
         // The workspace is the dock grid (#180): every region — the locator,
         // the Inspector, the Activity dock (#183), the workbench — is a pane
         // of it, resizable and rearrangeable, and a closed dock gives its
@@ -272,27 +368,28 @@ impl Zengui {
 #[path = "app_tests.rs"]
 mod tests;
 
+/// The settings a bus-less test window runs under (#175, #186).
+#[cfg(test)]
+pub(crate) fn test_settings() -> Settings {
+    Settings {
+        base: String::new(),
+        connect: vec![],
+        listen: vec![],
+        scouting: None,
+        zenoh_config: None,
+        registry: vec![],
+        timeout_secs: 5,
+        scope: crate::scope::ScopePreset::Everything,
+        selectors: vec![],
+        eager: false,
+        echo_lines: 100,
+        history_entries: 10,
+        max_keys: 1000,
+    }
+}
+
 /// A window with no bus behind it, for the tests in [`tests`] (#175).
 #[cfg(test)]
 fn test_app() -> Zengui {
-    Zengui::with_prefs(
-        Settings {
-            base: String::new(),
-            connect: vec![],
-            listen: vec![],
-            scouting: None,
-            zenoh_config: None,
-            registry: vec![],
-            timeout_secs: 5,
-            scope: crate::scope::ScopePreset::Everything,
-            selectors: vec![],
-            eager: false,
-            echo_lines: 100,
-            history_entries: 10,
-            max_keys: 1000,
-        },
-        crate::prefs::Prefs::default(),
-        None,
-    )
-    .0
+    Zengui::with_prefs(test_settings(), crate::prefs::Prefs::default(), None).0
 }

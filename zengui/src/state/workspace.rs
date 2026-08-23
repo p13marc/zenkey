@@ -22,9 +22,11 @@ use std::sync::Arc;
 
 use iced::widget::pane_grid;
 
+use iced::window;
+
 use crate::echo::EchoRing;
 use crate::message::{ActivityTab, RightPane};
-use crate::prefs::{DockRole, LayoutAxis, LayoutNode};
+use crate::prefs::{DockRole, LayoutAxis, LayoutNode, TornDock};
 use crate::view;
 
 /// The workspace grid (#180): `pane_grid::State` plus the focus.
@@ -167,6 +169,116 @@ impl DockGrid {
     }
 }
 
+/// One dock in a window of its own (#186): the runtime half of a
+/// [`TornDock`], carrying the widget-internal window id the way [`DockGrid`]
+/// carries pane ids — minted at open, different across a restart, never
+/// serialized.
+pub(crate) struct TornWindow {
+    pub(crate) id: window::Id,
+    pub(crate) role: DockRole,
+    /// The window's last reported size, for the persisted layout.
+    pub(crate) size: Option<(f32, f32)>,
+    /// The window's last reported position (`None` where the platform never
+    /// says — Wayland).
+    pub(crate) position: Option<(f32, f32)>,
+}
+
+/// What a closed window was (#186) — the whole close policy, as data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClosedWindow {
+    /// The main workspace window: closing it is closing the application.
+    /// A daemon does not stop when its windows are gone (iced 0.14
+    /// `daemon.rs`), so without this verdict the process would outlive its
+    /// last window as a zombie.
+    Main,
+    /// A torn-off dock's window: the dock returns to the grid.
+    Torn(DockRole),
+    /// A window this state never knew or already forgot — a close event
+    /// racing a layout change. Answering `Main` here would exit the app on a
+    /// stale event, so "I don't know" must be sayable.
+    Unknown,
+}
+
+/// The session's windows (#186): the main workspace and every torn-off dock.
+///
+/// Like [`DockGrid`], this is the runtime half of a persisted pair: the ids
+/// are minted by `window::open` at boot ([`crate::app::Zengui`]) or on a
+/// tear-off, and what survives a restart is the [`TornDock`] list in the
+/// named layout ([`crate::prefs::WorkspaceLayout::torn`]).
+#[derive(Default)]
+pub(crate) struct WindowSet {
+    /// The main window. `None` only in a test that never booted — the view
+    /// treats every id it cannot name as the main workspace, so this is read
+    /// solely by [`WindowSet::classify`].
+    pub(crate) main: Option<window::Id>,
+    pub(crate) torn: Vec<TornWindow>,
+    /// The main window closed and `iced::exit` is in flight — pinned here so
+    /// the close semantics are a fact a test can read, not only a task it
+    /// cannot.
+    pub(crate) exiting: bool,
+}
+
+impl WindowSet {
+    pub(crate) fn role_of(&self, id: window::Id) -> Option<DockRole> {
+        self.torn.iter().find(|t| t.id == id).map(|t| t.role)
+    }
+
+    pub(crate) fn window_of(&self, role: DockRole) -> Option<window::Id> {
+        self.torn.iter().find(|t| t.role == role).map(|t| t.id)
+    }
+
+    pub(crate) fn classify(&self, id: window::Id) -> ClosedWindow {
+        if self.main == Some(id) {
+            ClosedWindow::Main
+        } else if let Some(role) = self.role_of(id) {
+            ClosedWindow::Torn(role)
+        } else {
+            ClosedWindow::Unknown
+        }
+    }
+
+    pub(crate) fn remove(&mut self, id: window::Id) {
+        self.torn.retain(|t| t.id != id);
+    }
+
+    /// The serializable half, for the named layout — the same capture shape
+    /// as [`DockGrid::capture`].
+    pub(crate) fn capture(&self) -> Vec<TornDock> {
+        self.torn
+            .iter()
+            .map(|t| TornDock {
+                role: t.role,
+                size: t.size,
+                position: t.position,
+            })
+            .collect()
+    }
+}
+
+/// What a torn-off dock's window opens as (#186): the persisted geometry
+/// when there is one, else a default sized for what the dock holds — wide
+/// and short for the Activity streams, tall for the subject surfaces.
+pub(crate) fn torn_settings(
+    role: DockRole,
+    size: Option<(f32, f32)>,
+    position: Option<(f32, f32)>,
+) -> window::Settings {
+    let (w, h) = size.unwrap_or(match role {
+        DockRole::Activity => (960.0, 380.0),
+        DockRole::Inspector | DockRole::Workbench => (520.0, 700.0),
+        // Never torn; the arm exists because a match must say what it
+        // would mean.
+        DockRole::Locator => (400.0, 700.0),
+    });
+    window::Settings {
+        size: iced::Size::new(w, h),
+        position: position
+            .map(|(x, y)| window::Position::Specific(iced::Point::new(x, y)))
+            .unwrap_or_default(),
+        ..window::Settings::default()
+    }
+}
+
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
 pub(crate) struct RepeatLoad {
@@ -297,6 +409,10 @@ sub_state! {
     pub(crate) struct Workspace {
         /// The dock grid (#180): which regions are open, where, and how big.
         pub(crate) docks: DockGrid,
+        /// The session's windows (#186): the main one, and a window per
+        /// torn-off dock. Empty until boot opens them — the pure
+        /// constructor mints no window ids, so a headless test never does.
+        pub(crate) windows: WindowSet,
         /// Which tool the Workbench dock is showing. `Inspector` is not a
         /// tool — the Inspector is a dock of its own since #180, and
         /// [`WorkspaceMsg::PaneSelected`](crate::message::WorkspaceMsg) maps
@@ -314,6 +430,7 @@ impl Workspace {
     pub(crate) fn new(echo_lines: usize, layout: &LayoutNode) -> Workspace {
         Workspace {
             docks: DockGrid::from_layout(layout),
+            windows: WindowSet::default(),
             right_pane: RightPane::Send,
             verdicts: Verdicts::default(),
             activity: ActivityDock::default(),
@@ -353,6 +470,44 @@ mod grid_tests {
             b: Box::new(LayoutNode::Dock(DockRole::Activity)),
         };
         assert_eq!(DockGrid::from_layout(&bent).capture(), bent);
+    }
+
+    /// The close policy as data (#186): the main window is `Main`, a torn
+    /// dock's window names its role, and anything else — a close event
+    /// racing a layout change — is `Unknown`, because answering `Main` for
+    /// a stale id would exit the application on a window that no longer
+    /// matters.
+    #[test]
+    fn a_window_set_classifies_and_forgets() {
+        let mut set = WindowSet::default();
+        let main = window::Id::unique();
+        let torn = window::Id::unique();
+        let stranger = window::Id::unique();
+        assert_eq!(
+            set.classify(main),
+            ClosedWindow::Unknown,
+            "before boot, no id is the main window"
+        );
+        set.main = Some(main);
+        set.torn.push(TornWindow {
+            id: torn,
+            role: DockRole::Activity,
+            size: None,
+            position: None,
+        });
+        assert_eq!(set.classify(main), ClosedWindow::Main);
+        assert_eq!(set.classify(torn), ClosedWindow::Torn(DockRole::Activity));
+        assert_eq!(set.classify(stranger), ClosedWindow::Unknown);
+        assert_eq!(set.window_of(DockRole::Activity), Some(torn));
+        assert_eq!(set.role_of(torn), Some(DockRole::Activity));
+
+        set.remove(torn);
+        assert_eq!(
+            set.classify(torn),
+            ClosedWindow::Unknown,
+            "a forgotten window is a stranger — its late events do nothing"
+        );
+        assert_eq!(set.window_of(DockRole::Activity), None);
     }
 
     /// Close removes exactly one dock; restore brings it back; the last dock
