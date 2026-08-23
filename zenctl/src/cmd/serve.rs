@@ -20,6 +20,20 @@ pub async fn run(
     count: usize,
     args: &Bus,
 ) -> Result<()> {
+    // RFC 05 §2.1 (G-05c): `@rpc` queryables are **never** declared
+    // complete — one complete queryable short-circuits every default
+    // (`BestMatching`) fleet call to a single reply. Refused before any
+    // session opens, so the refusal is offline-testable like gen's guards.
+    let key_part = keyexpr.split('?').next().unwrap_or(keyexpr);
+    if complete && key_part.split('/').any(|c| c == "@rpc") {
+        anyhow::bail!(
+            "--complete on an @rpc key expression: RFC 05 §2.1 forbids it — a \
+             `complete` @rpc queryable short-circuits every BestMatching fleet \
+             call to this one responder, silently collapsing the fleet to a \
+             single reply. Serve the procedure without --complete."
+        );
+    }
+
     let typed = reply.read()?;
 
     let session = args.session().await?;

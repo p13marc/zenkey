@@ -41,6 +41,13 @@ pub fn ip_slug_str(text: &str) -> Option<String> {
 /// and `None` otherwise, so a caller refuses or falls back deliberately
 /// instead of lowercasing a value from a domain that might be
 /// case-sensitive (the v1.4 exemption).
+///
+/// This is also the `events` id path (RFC 04 §1.3): every event key ends in
+/// a unique, time-sortable id — ULID recommended, key-encoded lowercase —
+/// and this function *is* that encoding. Route an event id through it and
+/// the trailing chunk of `events/<producer>/…/<ulid>` is the RFC's one
+/// spelling; a refusal (`None`) means the id was never a ULID, which a
+/// producer should treat as its own bug, not a value to escape.
 pub fn ulid_slug(id: &str) -> Option<String> {
     fn crockford(b: u8) -> bool {
         let b = b.to_ascii_uppercase();
@@ -181,6 +188,25 @@ mod tests {
         assert_eq!(ulid_slug("01JGXQZ4YQK8V6TXW3M9F2A7CI"), None, "I excluded");
         assert_eq!(ulid_slug("01jgxqz4yqk8v6txw3m9f2a7c."), None);
         assert_eq!(ulid_slug(""), None);
+    }
+
+    /// RFC 04 §1.3's event-id recommendation rides this same function: a
+    /// canonical-uppercase ULID slugs to the trailing chunk of an events
+    /// key, verbatim to the RFC 11 §2 worked example.
+    #[test]
+    fn event_ids_are_ulid_slugs() {
+        let id = ulid_slug("01JGXQZ4YQK8V6TXW3M9F2A7CD").unwrap();
+        let key = crate::grammar::data_key(
+            &crate::grammar::Origin::Host(crate::origin::HostId::parse("h-3fa9c2d41b7e").unwrap()),
+            crate::grammar::Class::Events,
+            Some(&crate::grammar::Producer::new("netring").unwrap()),
+            &["capture", &id],
+        )
+        .unwrap();
+        assert_eq!(
+            key,
+            "v1/h-3fa9c2d41b7e/events/netring/capture/01jgxqz4yqk8v6txw3m9f2a7cd"
+        );
     }
 
     /// The v1.4 erratum, by its own example: escaping must converge to an

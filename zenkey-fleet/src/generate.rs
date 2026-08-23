@@ -521,8 +521,8 @@ pub async fn build_plan(
 }
 
 /// The serving halves of a mock producer, alive while held: each declared
-/// responder is *driven* by its own task (a [`crate::MockResponder`] is
-/// pull-based — a responder nobody drives answers nobody). Dropping this
+/// responder is *driven* by its own task (a [`crate::producer::Responder`]
+/// is pull-based — a responder nobody drives answers nobody). Dropping this
 /// aborts the drivers, which undeclares their queryables.
 #[derive(Debug)]
 pub struct MockProducer {
@@ -551,21 +551,15 @@ pub async fn serve_describe(
     schema_set: Option<&SchemaSet>,
     producer: Option<&str>,
 ) -> Result<MockProducer> {
-    let mut tasks = Vec::new();
-    let mut keys = 0usize;
-    let mut serve = |key: String, body: Vec<u8>, encoding: &'static str| {
-        let session = session.clone();
-        keys += 1;
-        tasks.push(tokio::spawn(async move {
-            let Ok(responder) =
-                crate::serve::declare_responder(&session, &key, body, Some(encoding), false).await
-            else {
-                return;
-            };
-            // Drive it: every incoming query gets the static answer.
-            while responder.next().await.is_some() {}
-        }));
-    };
+    // The bring-up discipline (RFC 04 §5 via `crate::producer::BringUp`):
+    // every queryable is declared — awaited, on its own concrete key —
+    // before this function returns, so a consumer under test that sees the
+    // mock exists can already call it, and RFC 08 §6.1's bounded grace has
+    // no spawn race to tolerate. The mock deliberately never declares
+    // `alive` (`without_alive`): a tool answering for a producer must not
+    // also claim its presence (RFC 13 §5).
+    let mut up = crate::producer::BringUp::new(session);
+    let mut bodies: Vec<(Vec<u8>, &'static str)> = Vec::new();
     for (slice, raw) in slices.entries() {
         if slice.service_origin.is_some() {
             continue;
@@ -579,11 +573,25 @@ pub async fn serve_describe(
             continue; // a bus-built set has no verbatim TOML to serve
         }
         let introspect = with_base(base, format!("v1/{origin}/@rpc/{}/introspect", slice.name));
-        serve(introspect, raw.as_bytes().to_vec(), "text/plain");
+        up.serve(&introspect).await?;
+        bodies.push((raw.as_bytes().to_vec(), "text/plain"));
         if let Some(set) = schema_set {
             let describe = with_base(base, format!("v1/{origin}/@rpc/{}/describe", slice.name));
-            serve(describe, set.to_json().into_bytes(), "application/json");
+            up.serve(&describe).await?;
+            bodies.push((set.to_json().into_bytes(), "application/json"));
         }
+    }
+    // Drive each declared responder: every incoming query gets its static
+    // answer, replied on the responder's own concrete key (RFC 05 §2.1).
+    let responders = up.without_alive();
+    let keys = responders.len();
+    let mut tasks = Vec::new();
+    for (responder, (body, encoding)) in responders.into_iter().zip(bodies) {
+        tasks.push(tokio::spawn(async move {
+            while let Some(query) = responder.next().await {
+                let _ = responder.reply(&query, body.clone(), Some(encoding)).await;
+            }
+        }));
     }
     Ok(MockProducer { keys, tasks })
 }

@@ -1,0 +1,23 @@
+`serve --complete` on an `@rpc` key is refused before a session opens
+(G-05c). RFC 05 §2.1's checklist row is "`complete` — **never** on an `@rpc`
+queryable": zenoh's default query target (`BestMatching`) short-circuits to a
+single queryable the moment any matching one is declared complete, so a mock
+that claims completeness on a procedure key silently collapses every
+default-target fleet call to its one reply. The dev tool refuses to model
+the violation.
+
+```console
+$ zenctl serve v1/h-3fa9c2d41b7e/@rpc/sysinfo/processes {} --complete
+? 1
+Error: --complete on an @rpc key expression: RFC 05 §2.1 forbids it — a `complete` @rpc queryable short-circuits every BestMatching fleet call to this one responder, silently collapsing the fleet to a single reply. Serve the procedure without --complete.
+
+```
+
+The parameters half of a selector does not hide the plane chunk:
+
+```console
+$ zenctl serve v1/*/@rpc/sysinfo/processes?sort=cpu {} --complete
+? 1
+Error: --complete on an @rpc key expression: RFC 05 §2.1 forbids it — a `complete` @rpc queryable short-circuits every BestMatching fleet call to this one responder, silently collapsing the fleet to a single reply. Serve the procedure without --complete.
+
+```

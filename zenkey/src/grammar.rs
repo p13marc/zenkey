@@ -58,7 +58,9 @@ pub const BLOB_TIER_ARTIFACT: &str = "artifact";
 pub const BLOB_TIER_TREE: &str = "tree";
 pub const BLOB_TIER_STORE: &str = "store";
 
-/// Reserved liveliness subject leaf (RFC 03 §3, 04 §5). Never a data subject.
+/// Reserved liveliness token (RFC 03 §3, 04 §5): never a data-subject chunk
+/// at **any** position of **any** class (widened from the `state`-leaf case
+/// in v1.25, adopting the rule the registry lint always enforced).
 pub const SUBJECT_ALIVE: &str = "alive";
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -596,9 +598,12 @@ pub fn data_key(
                 .to_string(),
         ));
     }
-    // `alive` is a reserved liveliness-only token under `state` (RFC 03 §3):
-    // state keys carrying it come only from the dedicated builders below.
-    if class == Class::State && subject.contains(&SUBJECT_ALIVE) {
+    // `alive` is a reserved liveliness-only token at any position of any
+    // class (RFC 03 §3, widened in v1.25 to the rule the registry lint
+    // always enforced — `telemetry/foo/alive` reads as presence to every
+    // human and selector that greps for the token): keys carrying it come
+    // only from the dedicated builders below.
+    if subject.contains(&SUBJECT_ALIVE) {
         return Err(KeyError::ReservedToken(
             SUBJECT_ALIVE.to_string(),
             "data subject chunk",
@@ -1116,6 +1121,26 @@ mod tests {
                 Class::State,
                 Some(&Producer::new("netlink").unwrap()),
                 &["alive"]
+            )
+            .is_err()
+        );
+        // v1.25 (RFC 03 §3): reserved at any position of any class, not just
+        // the state leaf — the widened rule the registry lint always held.
+        assert!(
+            data_key(
+                &host(),
+                Class::Telemetry,
+                Some(&Producer::new("netlink").unwrap()),
+                &["foo", "alive"]
+            )
+            .is_err()
+        );
+        assert!(
+            data_key(
+                &host(),
+                Class::Events,
+                Some(&Producer::new("netlink").unwrap()),
+                &["alive", "01jgxqz4yqk8v6txw3m9f2a7cd"]
             )
             .is_err()
         );

@@ -14,6 +14,8 @@
 //! Layer map:
 //! - [`key`] — [`Key`]/[`Selector`]/[`Chunk`]: validated key value types over
 //!   `zenoh_keyexpr::OwnedKeyExpr` (RFC 08 §1.2).
+//! - [`alert`] — the alert-key derivation, byte-precise (RFC 11 §3.1 — the
+//!   reference profile's binding of RFC 04 §1.2's neutral requirement).
 //! - [`grammar`] — chunk lexical rules, reserved tokens, structural key
 //!   assembly and parsing (RFC 03); [`ContentHash`], the validated digest
 //!   type that makes `@blob` Tier-2 content-addressing structural (RFC 07
@@ -50,6 +52,7 @@
 //! un-namespaced debug tools (`zenctl`). Application code that reaches for a
 //! base to *build a key* has made a mistake: the session adds the base.
 
+pub mod alert;
 pub mod common_state;
 pub mod context;
 pub mod grammar;

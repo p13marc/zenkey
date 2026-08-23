@@ -1,0 +1,8 @@
+# Conditional-subject ledger (RFC 08 §6.1, v1.25): one tab-separated line
+# per registered subject whose emission is gated — <producer>, <path>, and
+# the gating condition as free text. Unlike deprecated.lock this file is
+# NOT append-only: a line leaves when its condition does, and the subject
+# re-enters the emitted-surface check by deletion.
+netlink	sockets/tcp/connlat_us_p50	feature ebpf
+netlink	sockets/tcp/connlat_us_p95	feature ebpf
+netlink	wireguard/{iface}/peers	host exposes a WireGuard interface

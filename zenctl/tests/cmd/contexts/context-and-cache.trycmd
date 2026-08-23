@@ -4,8 +4,11 @@ bus at all. They are the reason this corpus sets
 developer's own `~/.config/zenctl/config.toml`.
 
 One file, run in order, because these commands are stateful and every other
-case in the corpus is not. Nothing else here writes config, so the shared home
-is safe.
+case in the corpus is not — and run in a **home of its own**
+(`tests/cli.rs`), because the statefulness cuts both ways: the context this
+file creates would be every concurrent case's active context, and any case
+that loads slices fills the cache keyed by it, which made `cache clear`'s
+pinned `existed:false` a race against trycmd's file scheduling.
 
 An empty config says so, and says what to type next — an empty set is not a
 verdict (RFC 05 §3.1), and here it is not even a mystery:

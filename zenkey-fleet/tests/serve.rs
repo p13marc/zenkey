@@ -58,7 +58,10 @@ async fn a_responder_answers_and_logs_the_ask() {
         panic!("expected a value reply");
     };
     assert_eq!(v.to_bytes().as_ref(), br#"{"mock":true}"#);
-    assert_eq!(answers[0].key, KEY, "replied on the query's own key");
+    assert_eq!(
+        answers[0].key, KEY,
+        "replied on the responder's own concrete key (RFC 05 §2.1)"
+    );
     assert_eq!(answers[0].encoding.as_deref(), Some("application/json"));
 
     let view = log.await.expect("join");
@@ -75,4 +78,51 @@ async fn a_responder_answers_and_logs_the_ask() {
         "a sent reply carries no error (deep-review D7: the error path \
          rides the view, not the void)"
     );
+}
+
+/// G-05b, the fix pinned from the wire: a **wildcard** GET at a concrete
+/// responder gets its reply on the responder's own concrete key — before
+/// the fix, the mock echoed `query.key_expr()` and the reply key was the
+/// caller's wildcard selector, which default consolidation would collapse
+/// across a mocked fleet (RFC 05 §2.1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_wildcard_ask_is_answered_on_the_responders_concrete_key() {
+    let (a, b) = peer_pair(7521).await;
+
+    let responder = zenkey_fleet::declare_responder(
+        &a,
+        KEY,
+        br#"{"mock":true}"#.to_vec(),
+        Some("application/json"),
+        false,
+    )
+    .await
+    .expect("declare responder");
+    let log = tokio::spawn(async move {
+        let view = responder.next().await.expect("one ask");
+        responder.undeclare().await.expect("undeclare");
+        view
+    });
+
+    let answers = loop {
+        let answers = zenkey_fleet::fleet_get(
+            &b,
+            "",
+            "v1/*/@rpc/mock/answer",
+            None,
+            Duration::from_millis(500),
+        )
+        .await
+        .expect("get");
+        if !answers.is_empty() {
+            break answers;
+        }
+    };
+    assert_eq!(
+        answers[0].key, KEY,
+        "the reply rides the responder's concrete key, not the echoed \
+         wildcard selector (RFC 05 §2.1, G-05b)"
+    );
+    let view = log.await.expect("join");
+    assert!(view.selector.contains("v1/*"), "{}", view.selector);
 }

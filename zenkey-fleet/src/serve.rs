@@ -43,6 +43,12 @@ pub struct ServedQuery {
 /// A declared queryable answering every query with one static body.
 pub struct MockResponder {
     queryable: zenoh::query::Queryable<FifoChannelHandler<zenoh::query::Query>>,
+    /// The declared expression — the responder's own key when concrete
+    /// (RFC 05 §2.1: replies ride the responder's key, G-05b).
+    keyexpr: String,
+    /// Whether `keyexpr` is concrete (no wildcards) — decided once at
+    /// declaration.
+    concrete: bool,
     reply: Vec<u8>,
     encoding: Option<String>,
 }
@@ -64,13 +70,18 @@ pub async fn declare_responder(
     encoding: Option<&str>,
     complete: bool,
 ) -> Result<MockResponder> {
+    let parsed = zenoh::key_expr::KeyExpr::try_from(keyexpr.to_string())
+        .map_err(|e| anyhow!("declare queryable {keyexpr}: {e}"))?;
+    let concrete = !parsed.is_wild();
     let queryable = session
-        .declare_queryable(keyexpr.to_string())
+        .declare_queryable(parsed)
         .complete(complete)
         .await
         .map_err(|e| anyhow!("declare queryable {keyexpr}: {e}"))?;
     Ok(MockResponder {
         queryable,
+        keyexpr: keyexpr.to_string(),
+        concrete,
         reply,
         encoding: encoding.map(str::to_string),
     })
@@ -78,10 +89,15 @@ pub async fn declare_responder(
 
 impl MockResponder {
     /// Answer the next query and return its view, or `None` once the
-    /// queryable is gone. The reply is addressed to the query's own key —
-    /// concrete where the query was concrete — and an error on the reply
-    /// path rides the view ([`ServedQuery::reply_error`]) at the caller's
-    /// log, not silently.
+    /// queryable is gone. The reply is addressed to the responder's **own
+    /// declared key** when that key is concrete (RFC 05 §2.1: attribution
+    /// and consolidation both read the reply key, so echoing a wildcard
+    /// selector back — the G-05b violation this used to commit — collapses
+    /// a mocked fleet to one surviving reply). A responder declared on a
+    /// wildcard has no own concrete key; it falls back to the query's key,
+    /// which is concrete exactly when the asker named a real key. An error
+    /// on the reply path rides the view ([`ServedQuery::reply_error`]) at
+    /// the caller's log, not silently.
     pub async fn next(&self) -> Option<ServedQuery> {
         let query = self.queryable.recv_async().await.ok()?;
         let mut view = ServedQuery {
@@ -92,7 +108,11 @@ impl MockResponder {
             attachment: query.attachment().cloned(),
             reply_error: None,
         };
-        let key = query.key_expr().clone();
+        let key = if self.concrete {
+            self.keyexpr.clone()
+        } else {
+            query.key_expr().to_string()
+        };
         let reply = query.reply(key, self.reply.clone());
         let reply = match &self.encoding {
             Some(e) => reply.encoding(e.as_str()),
