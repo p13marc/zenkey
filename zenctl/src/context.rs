@@ -79,11 +79,12 @@ pub fn edit(out: crate::cli::OutputArgs) -> Result<()> {
     }
     match load() {
         Ok(config) => emit(&list_report(&config)?, out),
-        Err(e) => {
-            eprintln!("{} no longer parses: {e}", path.display());
-            eprintln!("the file is kept as you wrote it — fix it and re-run");
-            std::process::exit(1);
-        }
+        // Through the anyhow edge (`errors::render` in main), not a bare
+        // eprintln-and-exit: every error this tool prints wears one shape.
+        Err(e) => Err(e.context(format!(
+            "{} no longer parses — the file is kept as you wrote it; fix it and re-run",
+            path.display()
+        ))),
     }
 }
 
