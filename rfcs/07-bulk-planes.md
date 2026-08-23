@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.7, v1.8, v1.11, v1.16 and v1.17 — see [00-index.md](00-index.md)*
+**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.7, v1.8, v1.11, v1.16 and v1.17 — see [00-index.md](00-index.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -29,8 +29,10 @@ each viewer subscribes to the single tier its link can take. This is what
 lets two operators on different links watch the same camera without fighting
 over one encoder's settings (the constrained-link viewer picks `low`, the LAN
 viewer keeps `high`, and neither move touches the other). The offered tiers
-are advertised in the stream catalogue (the `streams` procedure's
-`StreamDescriptor`), so a viewer *can* know them.
+are advertised in the stream catalogue — the per-stream `state` documents
+(`state/<producer>/stream/<stream>`,
+[05-control-rpc.md §5](05-control-rpc.md); status/catalogue is `state`, per
+the rules below) — so a viewer *can* know them.
 
 Rules:
 

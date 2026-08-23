@@ -88,11 +88,13 @@ pub enum ClassKind {
 
 /// Whether the registry recognises this subject.
 ///
-/// RFC 08 §6.4 asks for a "registered-vs-wild flag", but a `bool` cannot be
-/// honest: it renders "we have not loaded a registry yet" identically to "this
-/// subject is not registered". That is the false-verdict failure of RFC 05
-/// §3.1 / RFC 12 §9 applied to a badge — *silence is never a verdict*, and
-/// neither is a not-yet-asked question.
+/// RFC 09 §5.1 O2 asks an observer to classify by degrading — "unregistered"
+/// and "no slice for this producer" are distinct rungs, each weakening the
+/// claim rather than discarding the key — and O4 is why a `bool` cannot be
+/// honest here: it renders "we have not loaded a registry yet" identically to
+/// "this subject is not registered". That is the false-verdict failure of
+/// RFC 05 §3.1 / RFC 12 §9 applied to a badge — *silence is never a verdict*,
+/// and neither is a not-yet-asked question.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Registration {
     /// No slice set loaded yet. We have not asked. Render as "—", never "wild".

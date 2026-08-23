@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.21** · informative chapter, but §5.1 is normative for tools and §5.3 for the synthetic marker · *amended in v1.2, v1.9, v1.13, v1.18, v1.19 and v1.21 — see [00-index.md](00-index.md)*
+**Status: v1.21** · informative chapter, but §5.1 is normative for tools and §5.3 for the synthetic marker · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19 and v1.21 — see [00-index.md](00-index.md)*
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links,
@@ -720,8 +720,10 @@ the point of generating conforming traffic — so the **attachment** must:
   sample, a JSON object attachment carrying at least
   `{"synthetic": true, "tool": "<name>", "origin": "<generating origin>"}`.
   A fault injector additionally carries `"fault": "<kind>"`
-  ([#163]). Attachments are otherwise free-form (RFC 05 §6 v1.14 keeps
-  them out of the registry's vocabulary); this is the one reserved shape.
+  (zenkey #163). Attachments on the data classes are otherwise free-form —
+  the registry types media-frame attachments ([08 §2](08-registry.md)'s
+  `[[media]]` `attachment` field) and declares nothing about data-class
+  attachments; this marker is the one reserved shape among them.
 - An observer that judges traffic (a doctor listen window, an `expect`
   verdict, a capture reader) SHOULD count marked samples separately and
   say so — generated traffic judged as real is a self-inflicted finding.
