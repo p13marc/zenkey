@@ -58,7 +58,17 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   dock (`panes::grid`) from the persisted density — Ctrl+Shift+D, Compact
   default in the Locator — which multiplies the grid and row heights, never a
   font size. Gated by `scripts/check-spacing.sh`, like the type scale (#191)
-  and the interactive seam (#193).
+  and the interactive seam (#193). **Windows (#186)**: `main.rs` runs
+  `iced::daemon`, so the process owns N windows and `view`/`title`/`theme`/
+  `scale_factor` take a `window::Id`. Inspector, Activity and Workbench tear
+  off into windows of their own (`WorkspaceMsg::TearOff`, rendered through
+  the same free pane functions via `panes::solo`); the Locator never does —
+  it *is* the navigation. A role has one home: a torn dock leaves the grid,
+  every reveal path focuses its window, closing the window re-docks it, and
+  closing the **main** window exits explicitly (a daemon never stops on its
+  own). The torn set and each window's geometry ride the named layout
+  (`WorkspaceLayout::torn`); the replay locks are per-application and hold
+  across every window.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus
