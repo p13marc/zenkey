@@ -39,7 +39,7 @@ Commands:
   context      Manage named connection contexts (config file)
   cache        Inspect or clear the slice cache that feeds shell completion
   completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
-  doctor       Diff what the fleet *serves* against local registry files
+  doctor       Check the fleet against the contracts it claims (RFC 08 §6): drift, freshness, QoS, coverage
   why          Why is this key silent — the non-verdict, itemised (#214)
   help         Print this message or the help of the given subcommand(s)
 
@@ -89,7 +89,7 @@ Commands:
   context      Manage named connection contexts (config file)
   cache        Inspect or clear the slice cache that feeds shell completion
   completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
-  doctor       Diff what the fleet *serves* against local registry files
+  doctor       Check the fleet against the contracts it claims (RFC 08 §6): drift, freshness, QoS, coverage
   why          Why is this key silent — the non-verdict, itemised (#214)
   help         Print this message or the help of the given subcommand(s)
 

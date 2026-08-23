@@ -58,7 +58,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -124,7 +124,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -222,7 +222,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -279,7 +279,7 @@ Arguments:
 
 Options:
       --from <FROM>
-          Read rows from stdin instead: `--from ndjson` accepts the exact row shape `topic echo --format ndjson` (and the zengui export) emits — key + value per row, optionally encoding/qos/delete/ attachment. One shape, both directions; malformed rows are counted and reported, never silently skipped
+          Read rows from stdin instead: `--from ndjson` accepts the exact row shape `topic echo --format ndjson` (and the zengui export) emits — key + value per row, optionally encoding/qos/delete/ attachment. One shape, both directions; malformed rows are counted and reported, never silently skipped, and echo's tagged meta lines (`"row":"dropped"`/`"row":"seed"`) are skipped as stream metadata — counted as skipped, not malformed
 
           Possible values:
           - ndjson: The echo/export row shape, one JSON object per stdin line
@@ -323,7 +323,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -397,7 +397,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -484,7 +484,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -565,7 +565,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
