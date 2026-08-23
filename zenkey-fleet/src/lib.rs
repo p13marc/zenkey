@@ -50,6 +50,8 @@ pub mod doctor;
 #[cfg(feature = "decode")]
 pub mod expect;
 #[cfg(feature = "decode")]
+pub mod field;
+#[cfg(feature = "decode")]
 pub mod generate;
 #[cfg(feature = "decode")]
 pub mod synth;
@@ -71,6 +73,8 @@ pub use decode::{
 pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
 #[cfg(feature = "decode")]
 pub use expect::{ExpectSpec, QosCheck, run_expect};
+#[cfg(feature = "decode")]
+pub use field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run_field};
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]

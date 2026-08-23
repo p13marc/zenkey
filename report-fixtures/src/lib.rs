@@ -288,7 +288,67 @@ pub fn doctor_report() -> DoctorReport {
             keys_seen: 7,
             dropped: 3,
             synthetic_marked: 0,
+            field_paths_dropped: 0,
         }),
+    }
+}
+
+/// A `zenctl field` window (#223): one frozen numeric flagged stuck, one
+/// healthy small-domain path beside it, and a path table that hit its bound
+/// — the report must carry the bound's cost, not just its rows.
+pub fn field_report() -> FieldReport {
+    let key = format!("v1/{ORIGIN}/state/sysinfo/health");
+    FieldReport {
+        selector: "v1/*/state/sysinfo/health".into(),
+        window_s: 30.0,
+        samples: 42,
+        keys_seen: 1,
+        dropped: 0,
+        undocumented: 2,
+        registry_loaded: true,
+        paths: 2,
+        max_paths: 2,
+        paths_dropped: 3,
+        paths_dropped_examples: vec![format!("{key} · debug.trace")],
+        rows: vec![
+            FieldRow {
+                key: key.clone(),
+                path: "temperature_c".into(),
+                seen: 40,
+                documents: 40,
+                kinds: vec!["number".into()],
+                changes: 0,
+                last_change_s: None,
+                min: Some(21.5),
+                max: Some(21.5),
+                last: Some(21.5),
+                values: Some(vec!["21.5".into()]),
+            },
+            FieldRow {
+                key: key.clone(),
+                path: "status".into(),
+                seen: 40,
+                documents: 40,
+                kinds: vec!["string".into()],
+                changes: 1,
+                last_change_s: Some(12.0),
+                min: None,
+                max: None,
+                last: None,
+                values: Some(vec!["\"degraded\"".into(), "\"ok\"".into()]),
+            },
+        ],
+        findings: vec![DoctorFinding {
+            severity: DoctorSeverity::Warning,
+            check: "field-stuck".into(),
+            subject: format!("{key} · temperature_c"),
+            evidence: "value 21.5 unchanged across 40 sample(s) spanning 29.5s — at \
+                       least 3× the declared ttl_s 5s — while the key kept publishing. \
+                       An observation over this 30s window, not a verdict: a \
+                       constant-by-design field always reads this way"
+                .into(),
+            citation: Some("RFC 04 §1.2".into()),
+        }],
     }
 }
 

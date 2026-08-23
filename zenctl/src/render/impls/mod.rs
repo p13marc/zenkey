@@ -19,6 +19,7 @@ mod blobs;
 mod calls;
 mod closing;
 mod documents;
+mod fields;
 mod findings;
 pub mod observations;
 mod rate;
