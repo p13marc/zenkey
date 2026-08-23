@@ -1,9 +1,9 @@
 # 13 — Observer Conformance
 
-**Status: v1.24 (ratified)** · normative chapter · *created in v1.24 from
-chapter 09 §5.1–§5.3 and §6; the moved material entered the set in v1.2,
-v1.9, v1.13 and v1.19 and was amended in v1.18 and v1.21 — see
-[00-index.md](00-index.md)*
+**Status: v1.24 (ratified)** · normative chapter · *created in v1.24 —
+see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
+§6; the moved material entered the set in v1.2, v1.9, v1.13 and v1.19
+and was amended there in v1.18 and v1.21
 
 > **Citation migration.** Before v1.24 everything in this chapter lived in
 > chapter 09, and pre-v1.24 texts and code cite it there: "RFC 09 §5.1"

@@ -1,6 +1,6 @@
 # 11 — Reference Application Profile: ZenSight
 
-**Status: v1.0 (ratified)** · informative chapter
+**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
 
 > **Registry location note (2026-07).** The registry *data* this profile
 > describes (`registry/*.toml` for the ten producers and `@catalog`, plus

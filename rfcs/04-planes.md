@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified), amended v1.4, v1.5 and v1.12** · normative chapter
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —

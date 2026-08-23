@@ -1,6 +1,6 @@
 # 05 — Control Plane: `@rpc`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2 — see [00-index.md](00-index.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
 
 All interaction — questions, instructions, downloads-of-detail — happens on
 the `@rpc` plane through **queryables** (request/reply), never through

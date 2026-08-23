@@ -1,6 +1,8 @@
 # 12 — Decisions
 
-**Status: v1.2 — all six original items DECIDED** (2026-07-12, review round 4);
+**Status: v1.2 — all six original items DECIDED** (2026-07-12, review
+round 4) · *amended in v1.1, v1.2, v1.4, v1.5, v1.8, v1.14 and v1.17 —
+see [CHANGELOG.md](CHANGELOG.md)*;
 **§7 added 2026-07-14** (the version chunk is plain, not verbatim);
 **§8 added 2026-07-14** (the v1.2 amendments that were *rejected*), **its
 §8.2 revisit trigger fired and was recorded twice** (in v1.8, for the v1.7

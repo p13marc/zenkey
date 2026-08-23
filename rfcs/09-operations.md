@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19 and v1.21; the tool-facing material (§5.1–§5.3, §6 — including the former normative carve-outs) moved to [13](13-observer-conformance.md) in v1.24 — see [00-index.md](00-index.md)*
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21 and v1.24 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.

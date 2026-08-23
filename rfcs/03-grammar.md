@@ -1,6 +1,6 @@
 # 03 — Canonical Grammar
 
-**Status: v1.0 (ratified)** · normative chapter · *amended in v1.1, v1.4, v1.6 and v1.9 — see [00-index.md](00-index.md)*
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.1, v1.4, v1.6, v1.9 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
 
 This chapter defines the canonical key grammar of the convention. Everything
 else in this RFC (planes, RPC, identity, registry) hangs off this shape.
