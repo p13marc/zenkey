@@ -4,9 +4,18 @@
 //! a color — and the only place allowed to call `text(` at all (#191): every
 //! view builds its text through the five role constructors below, so the type
 //! scale is assigned by role, not by taste, and a grep can enforce it.
+//!
+//! The same discipline covers the two other encodings a call site used to be
+//! able to get wrong (#193): a badge's glyph comes from its tone enum, never
+//! from the call site, so colour cannot be the only carrier and two states of
+//! a scale cannot share a mark; and every interactive element is built by a
+//! `kit::` constructor, so the `button::Status` set and the [`focus_ring`]
+//! are each handled exactly once (`check-interactive.sh` enforces the seam).
 
 use iced::widget::text::IntoFragment;
-use iced::widget::{Text, column, container, row, text};
+use iced::widget::{
+    Button, Checkbox, PickList, Slider, Text, TextInput, button, column, container, row, text,
+};
 use iced::{Border, Color, Element, Length};
 
 use super::theme::colors;
@@ -64,17 +73,19 @@ pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
 }
 
 /// One tab of the right-pane strip: the active tab reads `primary` on the
-/// pane surface, inactive tabs read muted with no background.
+/// pane surface, inactive tabs read muted with no background — and hovering
+/// an inactive one paints the hover wash, like every interactive element
+/// (#193).
 pub fn tab<'a, M: Clone + 'a>(
     label: impl Into<String>,
     active: bool,
     on_press: M,
 ) -> Element<'a, M> {
-    iced::widget::button(caption(label.into()))
+    button(caption(label.into()))
         .padding([2, 8])
-        .style(move |theme: &iced::Theme, _status| {
+        .style(move |theme: &iced::Theme, status| {
             let c = colors(theme);
-            iced::widget::button::Style {
+            let mut style = button::Style {
                 background: active.then(|| c.surface().into()),
                 text_color: if active { c.primary() } else { c.text_muted() },
                 border: Border {
@@ -87,7 +98,17 @@ pub fn tab<'a, M: Clone + 'a>(
                     radius: 4.0.into(),
                 },
                 ..Default::default()
+            };
+            match status {
+                button::Status::Active => {}
+                button::Status::Hovered | button::Status::Pressed if !active => {
+                    style.background = Some(c.hover().into());
+                    style.text_color = c.text();
+                }
+                button::Status::Hovered | button::Status::Pressed => {}
+                button::Status::Disabled => style.text_color = c.text_dim(),
             }
+            style
         })
         .on_press(on_press)
         .into()
@@ -112,103 +133,350 @@ pub fn section_header<'a, M: 'a>(
     r.into()
 }
 
-/// A small colored label.
+/// The one badge renderer (#193): glyph **and** word, colour on both.
 ///
-/// Carries a dot **and** text: meaning is never conveyed by color alone, which
-/// matters here because the registration states are exactly the kind of thing a
-/// colorblind user would otherwise have to guess at.
-pub fn badge<'a, M: 'a>(color: Color, label: impl Into<String>) -> Element<'a, M> {
+/// Private, because the glyph is not a parameter any call site gets to pass —
+/// each public badge constructor derives it from its tone enum, so a badge
+/// with colour alone, or two states of a scale sharing a glyph, cannot be
+/// written.
+fn glyph_badge<'a, M: 'a>(
+    glyph: &'static str,
+    label: impl Into<String>,
+    style: impl Fn(&iced::Theme) -> text::Style + Clone + 'a,
+) -> Element<'a, M> {
     row![
-        caption("●").style(move |_: &iced::Theme| text::Style { color: Some(color) }),
-        caption(label.into()).style(move |_: &iced::Theme| text::Style { color: Some(color) }),
+        caption(glyph).style(style.clone()),
+        caption(label.into()).style(style),
     ]
     .spacing(space::XS)
     .align_y(iced::Alignment::Center)
     .into()
 }
 
-/// A badge whose color is resolved against the live theme.
-///
-/// Prefer this over [`badge`] wherever the color is semantic: passing a
-/// pre-resolved `Color` would bake in one theme's palette.
+/// A registration badge, theme-resolved. The glyph comes from the tone
+/// (#193): passing a pre-resolved `Color` would bake in one theme's palette,
+/// and passing a glyph would let two states share one.
 pub fn tone_badge<'a, M: 'a>(
     tone: super::theme::RegistrationTone,
     label: impl Into<String>,
 ) -> Element<'a, M> {
-    let style = move |theme: &iced::Theme| text::Style {
-        color: Some(colors(theme).registration(tone)),
-    };
-    row![
-        caption("●").style(style),
-        caption(label.into()).style(style),
-    ]
-    .spacing(space::XS)
-    .align_y(iced::Alignment::Center)
-    .into()
+    glyph_badge(tone.glyph(), label, move |theme: &iced::Theme| {
+        text::Style {
+            color: Some(colors(theme).registration(tone)),
+        }
+    })
 }
 
-/// A presence badge (#61) — theme-resolved like [`tone_badge`].
+/// A presence badge (#61) — theme-resolved like [`tone_badge`], glyph from
+/// the tone.
 pub fn badge_presence<'a, M: 'a>(
     tone: super::theme::PresenceTone,
     label: impl Into<String>,
 ) -> Element<'a, M> {
-    let style = move |theme: &iced::Theme| text::Style {
-        color: Some(colors(theme).presence(tone)),
-    };
-    row![
-        caption("●").style(style),
-        caption(label.into()).style(style),
-    ]
-    .spacing(space::XS)
-    .align_y(iced::Alignment::Center)
-    .into()
+    glyph_badge(tone.glyph(), label, move |theme: &iced::Theme| {
+        text::Style {
+            color: Some(colors(theme).presence(tone)),
+        }
+    })
 }
 
 /// A doctor-severity badge (#71) — theme-resolved like [`tone_badge`],
-/// mirroring the CLI's severity marks.
+/// carrying the CLI's severity marks via the tone.
 pub fn badge_severity<'a, M: 'a>(
     tone: super::theme::SeverityTone,
     label: impl Into<String>,
 ) -> Element<'a, M> {
-    let style = move |theme: &iced::Theme| text::Style {
-        color: Some(colors(theme).severity(tone)),
-    };
-    let mark = match tone {
-        super::theme::SeverityTone::Error => "✗",
-        super::theme::SeverityTone::Warning => "⚠",
-        super::theme::SeverityTone::Info => "·",
-    };
-    row![
-        caption(mark).style(style),
-        caption(label.into()).style(style),
-    ]
-    .spacing(space::XS)
-    .align_y(iced::Alignment::Center)
-    .into()
+    glyph_badge(tone.glyph(), label, move |theme: &iced::Theme| {
+        text::Style {
+            color: Some(colors(theme).severity(tone)),
+        }
+    })
 }
 
 /// A storage-coverage badge (#70) — theme-resolved like [`tone_badge`], and
-/// carrying the CLI's own mark so the two explorers read alike. Mark **and**
-/// text, never colour alone.
+/// carrying the CLI's own mark via the tone so the two explorers read alike.
+/// Mark **and** text, never colour alone.
 pub fn badge_coverage<'a, M: 'a>(
     tone: super::theme::CoverageTone,
     label: impl Into<String>,
 ) -> Element<'a, M> {
-    let style = move |theme: &iced::Theme| text::Style {
-        color: Some(colors(theme).coverage(tone)),
-    };
-    let mark = match tone {
-        super::theme::CoverageTone::Covered => "✓",
-        super::theme::CoverageTone::Partial => "~",
-        super::theme::CoverageTone::Uncovered => "·",
-    };
-    row![
-        caption(mark).style(style),
-        caption(label.into()).style(style),
-    ]
-    .spacing(space::XS)
-    .align_y(iced::Alignment::Center)
-    .into()
+    glyph_badge(tone.glyph(), label, move |theme: &iced::Theme| {
+        text::Style {
+            color: Some(colors(theme).coverage(tone)),
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Interactive constructors (#193)
+// ---------------------------------------------------------------------------
+//
+// Every interactive element in zengui is built by one of the constructors
+// below, so the full `button::Status` set — Active, Hovered, Pressed,
+// Disabled — is handled once, here, instead of per call site. Keyboard focus
+// is always [`focus_ring`]: a ring, never a fill change, because a fill
+// change is colour-only by definition and fails the invariant it is meant to
+// signal. The `check-interactive.sh` gate keeps the next call site honest.
+
+/// The keyboard-focus ring (#193): 2px of `primary()`.
+///
+/// Iced draws borders just inside the widget's bounds, so the ring's 1px
+/// offset comes from the padding every constructor here keeps between the
+/// ring and its content — the ring never touches the glyphs it outlines.
+pub fn focus_ring(theme: &iced::Theme) -> Border {
+    Border {
+        color: colors(theme).primary(),
+        width: 2.0,
+        radius: 4.0.into(),
+    }
+}
+
+/// A chrome action button — "run", "save", "send".
+///
+/// Call sites chain `.padding` / `.on_press` / `.width`; the four statuses
+/// are decided here. No `on_press` renders as `Disabled`, dimmed — still
+/// words, not just a colour change.
+pub fn action<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Button<'a, M> {
+    button(content.into()).style(|theme: &iced::Theme, status| {
+        let c = colors(theme);
+        let base = button::Style {
+            background: Some(c.primary().into()),
+            text_color: c.on_primary(),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 4.0.into(),
+            },
+            ..button::Style::default()
+        };
+        match status {
+            button::Status::Active => base,
+            button::Status::Hovered | button::Status::Pressed => button::Style {
+                background: Some(c.primary_strong().into()),
+                ..base
+            },
+            button::Status::Disabled => button::Style {
+                background: Some(c.surface().into()),
+                text_color: c.text_dim(),
+                ..base
+            },
+        }
+    })
+}
+
+/// An inline, text-like button — breadcrumb chunks, the ▸/▾ expand markers,
+/// the ◉/○ watch toggles, a pane's "×".
+///
+/// Hover paints the wash rather than fading the label: a fading label reads
+/// as the *text* changing, and on a dense surface it is easy to lose.
+pub fn link<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Button<'a, M> {
+    button(content.into()).style(|theme: &iced::Theme, status| {
+        let c = colors(theme);
+        let base = button::Style {
+            background: None,
+            text_color: c.text(),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 4.0.into(),
+            },
+            ..button::Style::default()
+        };
+        match status {
+            button::Status::Active => base,
+            button::Status::Hovered => button::Style {
+                background: Some(c.hover().into()),
+                ..base
+            },
+            button::Status::Pressed => button::Style {
+                background: Some(c.border().into()),
+                ..base
+            },
+            button::Status::Disabled => button::Style {
+                text_color: c.text_dim(),
+                ..base
+            },
+        }
+    })
+}
+
+/// A full-width row click target — tree rows, echo lines, history entries,
+/// palette results.
+///
+/// Transparent at rest; hover paints the wash so a 40k-row list is trackable
+/// with the mouse (#193); `selected` paints the stronger shade persistently.
+/// The row's own content still carries the words — the background is an aid,
+/// never the message.
+pub fn row_button<'a, M: 'a>(content: impl Into<Element<'a, M>>, selected: bool) -> Button<'a, M> {
+    button(content.into())
+        .width(Length::Fill)
+        .style(move |theme: &iced::Theme, status| {
+            let c = colors(theme);
+            let background = if selected {
+                Some(c.border().into())
+            } else {
+                match status {
+                    button::Status::Hovered => Some(c.hover().into()),
+                    button::Status::Pressed => Some(c.border().into()),
+                    button::Status::Active | button::Status::Disabled => None,
+                }
+            };
+            button::Style {
+                background,
+                text_color: if matches!(status, button::Status::Disabled) {
+                    c.text_dim()
+                } else {
+                    c.text()
+                },
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 4.0.into(),
+                },
+                ..button::Style::default()
+            }
+        })
+}
+
+/// A single-line input. Focus is [`focus_ring`], handled once here — the
+/// input's own padding is the ring's offset from the value text.
+pub fn input<'a, M: Clone + 'a>(placeholder: &str, value: &str) -> TextInput<'a, M> {
+    iced::widget::text_input(placeholder, value).style(|theme: &iced::Theme, status| {
+        use iced::widget::text_input::{Status, Style};
+        let c = colors(theme);
+        let base = Style {
+            background: c.background().into(),
+            border: Border {
+                color: c.border(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            icon: c.text_muted(),
+            placeholder: c.text_dim(),
+            value: c.text(),
+            selection: c.primary(),
+        };
+        match status {
+            Status::Active => base,
+            Status::Hovered => Style {
+                border: Border {
+                    color: c.text_muted(),
+                    ..base.border
+                },
+                ..base
+            },
+            Status::Focused { .. } => Style {
+                border: focus_ring(theme),
+                ..base
+            },
+            Status::Disabled => Style {
+                background: c.surface().into(),
+                value: c.text_dim(),
+                ..base
+            },
+        }
+    })
+}
+
+/// A dropdown. An open picker wears the [`focus_ring`] — it holds the
+/// keyboard.
+pub fn picker<'a, T, L, V, M>(
+    options: L,
+    selected: Option<V>,
+    on_select: impl Fn(T) -> M + 'a,
+) -> PickList<'a, T, L, V, M>
+where
+    T: ToString + PartialEq + Clone + 'a,
+    L: std::borrow::Borrow<[T]> + 'a,
+    V: std::borrow::Borrow<T> + 'a,
+    M: Clone,
+{
+    iced::widget::pick_list(options, selected, on_select).style(|theme: &iced::Theme, status| {
+        use iced::widget::pick_list::{Status, Style};
+        let c = colors(theme);
+        let base = Style {
+            text_color: c.text(),
+            placeholder_color: c.text_dim(),
+            handle_color: c.text_muted(),
+            background: c.background().into(),
+            border: Border {
+                color: c.border(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+        };
+        match status {
+            Status::Active => base,
+            Status::Hovered => Style {
+                border: Border {
+                    color: c.text_muted(),
+                    ..base.border
+                },
+                ..base
+            },
+            Status::Opened { .. } => Style {
+                border: focus_ring(theme),
+                ..base
+            },
+        }
+    })
+}
+
+/// A labelled checkbox. The box fills `primary()` when checked — and the
+/// label says what is checked, so the fill is never the only carrier.
+pub fn check<'a, M: 'a>(is_checked: bool) -> Checkbox<'a, M> {
+    iced::widget::checkbox(is_checked).style(|theme: &iced::Theme, status| {
+        use iced::widget::checkbox::{Status, Style};
+        let c = colors(theme);
+        let checked = match status {
+            Status::Active { is_checked }
+            | Status::Hovered { is_checked }
+            | Status::Disabled { is_checked } => is_checked,
+        };
+        let base = Style {
+            background: if checked {
+                c.primary().into()
+            } else {
+                c.background().into()
+            },
+            icon_color: c.on_primary(),
+            border: Border {
+                color: c.border(),
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            text_color: Some(c.text()),
+        };
+        match status {
+            Status::Active { .. } => base,
+            Status::Hovered { .. } => Style {
+                border: Border {
+                    color: c.primary(),
+                    ..base.border
+                },
+                ..base
+            },
+            Status::Disabled { .. } => Style {
+                background: c.surface().into(),
+                text_color: Some(c.text_dim()),
+                ..base
+            },
+        }
+    })
+}
+
+/// The replay scrubber. Construction routes through `kit::` like every other
+/// interactive element; the theme's slider style already draws its hover and
+/// drag states off the same palette.
+pub fn scrub<'a, T, M: Clone>(
+    range: std::ops::RangeInclusive<T>,
+    value: T,
+    on_change: impl Fn(T) -> M + 'a,
+) -> Slider<'a, T, M>
+where
+    T: Copy + From<u8> + PartialOrd,
+{
+    iced::widget::slider(range, value, on_change)
 }
 
 /// Dimmed caption text.
