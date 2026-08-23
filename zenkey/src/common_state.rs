@@ -8,8 +8,13 @@
 //!
 //! Almost all of the state class is the *same* small set of subjects on every
 //! producer — health, errors, the registration doc, alerts, evidence.
-//! [`CommonState`] is that set — the subjects the RFCs themselves name
-//! (RFC 04 §1.2/§5, RFC 06 §4/§5). The registry codegen (`zenkey-build`)
+//! [`CommonState`] is that set — the **framework state set**, defined once in
+//! RFC 04 §1.4 (v1.25; before that, named piecemeal across 04 §1.2/§5 and
+//! 06 §4/§5): the neutral per-producer core plus the `@catalog` service trio
+//! (RFC 06 §5). `errors` is the one non-neutral member — it is ZenSight's
+//! token, defined in RFC 11 §2 under 04 §1.4's profile-extension rule, and
+//! appears in no neutral chapter. `alive` is deliberately absent: presence,
+//! not a state subject (RFC 04 §5). The registry codegen (`zenkey-build`)
 //! generates `AnySubject::common_state()` from the `common =` field on a
 //! consumer's registry entries, so the mapping cannot drift from the registry.
 //! App-specific state groupings beyond this set are the consumer's to define
@@ -32,7 +37,8 @@
 pub enum CommonState<'a> {
     /// `health` — the sensor health document.
     Health,
-    /// `errors` — the rolling error window.
+    /// `errors` — the rolling error window (ZenSight's profile token, RFC 11
+    /// §2; real vocabulary for that application, invisible to every other).
     Errors,
     /// `sensor` — the registration document (identity, version, capabilities).
     Sensor,
@@ -72,7 +78,8 @@ pub enum CommonState<'a> {
 pub enum CommonFamily {
     /// `health` — the sensor health document (RFC 04 §1.2).
     Health,
-    /// `errors` — the rolling error window (RFC 04 §1.2).
+    /// `errors` — the rolling error window (ZenSight's profile token,
+    /// RFC 11 §2 — no neutral chapter defines it).
     Errors,
     /// `sensor` — the registration document (RFC 04 §5).
     Sensor,
