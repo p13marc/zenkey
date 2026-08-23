@@ -12,7 +12,7 @@ use zenkey_fleet::report::{
     BlobFetchReport, BlobProbeReport, BlobTreeIndexReport, InterfaceShow, TopicInfo,
 };
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 /// The struct, as an envelope. Used by the families whose whole content is
 /// report-level facts — deriving it from the serialization rather than
@@ -431,6 +431,15 @@ impl Render for BlobProbeReport {
             g.detail(detail);
         }
         t.grid(g);
+    }
+
+    /// The selectors actually asked; an unissued probe (`not_probed`) asked
+    /// nothing, and its scope says exactly that.
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: self.asked.clone(),
+            window_s: None,
+        })
     }
 
     fn notes(&self) -> Vec<Note> {

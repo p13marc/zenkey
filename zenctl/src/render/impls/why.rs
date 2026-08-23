@@ -5,7 +5,7 @@
 
 use zenkey_fleet::why::{RungAnswer, WhyReport, WhyVerdict, is_cause};
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 impl Render for WhyReport {
     const FAMILY: &'static str = "why";
@@ -105,5 +105,14 @@ impl Render for WhyReport {
             ),
         });
         notes
+    }
+
+    /// The asked key; the window is the opt-in listen (`None` = the run
+    /// cost the control plane only, and there was no window).
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.key.clone()],
+            window_s: self.listened_s,
+        })
     }
 }

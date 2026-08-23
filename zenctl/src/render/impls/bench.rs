@@ -4,7 +4,7 @@
 
 use zenkey_fleet::report::BenchReport;
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 impl Render for BenchReport {
     const FAMILY: &'static str = "bench";
@@ -92,5 +92,12 @@ impl Render for BenchReport {
             )));
         }
         notes
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.key.clone()],
+            window_s: Some(self.elapsed_s),
+        })
     }
 }

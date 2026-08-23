@@ -84,6 +84,16 @@ impl<R: Render> Render for WatchTick<'_, R> {
     fn notes(&self) -> Vec<crate::render::Note> {
         self.inner.notes()
     }
+
+    /// Delegated with the rendering: a watched family's bound must not go
+    /// silent through the wrapper.
+    fn bounds(&self) -> Vec<crate::render::BoundCost> {
+        self.inner.bounds()
+    }
+
+    fn scope(&self) -> Option<crate::render::ObservedScope> {
+        self.inner.scope()
+    }
 }
 
 /// Redraw one cycle as a table, marking what changed since the last one.
@@ -126,7 +136,7 @@ fn redraw<R: Render>(
     }
     writeln!(out, "{footer}")?;
     out.flush()?;
-    for note in report.notes() {
+    for note in crate::render::notes_with_bounds(report) {
         eprintln!("{}", note.text);
     }
     *prev = lines;

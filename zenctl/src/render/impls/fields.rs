@@ -10,7 +10,7 @@
 
 use zenkey_fleet::report::{DoctorSeverity, FieldReport};
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 impl Render for FieldReport {
     const FAMILY: &'static str = "field";
@@ -86,6 +86,41 @@ impl Render for FieldReport {
         }
     }
 
+    fn bounds(&self) -> Vec<BoundCost> {
+        // The examples behind the refused count (`paths_dropped_examples`)
+        // and the bound itself (`max_paths`) ride the document; the note
+        // carries the cost and its reading (the bounds() migration).
+        vec![
+            BoundCost::new(
+                BoundKind::Missed,
+                self.dropped,
+                "sample(s) dropped while behind — every per-path count covers \
+                 only what was seen",
+            ),
+            BoundCost::new(
+                BoundKind::Refused,
+                self.paths_dropped,
+                "path observation(s) refused at the path-table bound; stats \
+                 cover the tracked set",
+            ),
+            // The bounded facts cache's cost (#107, O6): declared ttl/type
+            // context covers the retained keys only.
+            BoundCost::new(
+                BoundKind::Retired,
+                self.facts_evicted,
+                "key projection(s) retired by the bounded facts cache — \
+                 declared ttl/type context covers the retained keys only",
+            ),
+        ]
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.selector.clone()],
+            window_s: Some(self.window_s),
+        })
+    }
+
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         let mut coverage = format!(
@@ -109,34 +144,6 @@ impl Render for FieldReport {
                 )
                 .cite("RFC 09 §5.1 O4"),
             );
-        }
-        if self.dropped > 0 {
-            notes.push(Note::bound(format!(
-                "{} sample(s) dropped while behind — every per-path count covers \
-                 only what was seen",
-                self.dropped
-            )));
-        }
-        if self.paths_dropped > 0 {
-            let examples = if self.paths_dropped_examples.is_empty() {
-                String::new()
-            } else {
-                format!(" — e.g. {}", self.paths_dropped_examples.join(", "))
-            };
-            notes.push(Note::bound(format!(
-                "path table full at {}: {} path observation(s) refused{examples}; \
-                 stats cover the tracked set",
-                self.max_paths, self.paths_dropped
-            )));
-        }
-        if self.facts_evicted > 0 {
-            // The bounded facts cache's cost (#107, O6): declared ttl/type
-            // context covers the retained keys only.
-            notes.push(Note::bound(format!(
-                "the facts cache retired {} key projection(s) at its bound — \
-                 declared ttl/type context covers the retained keys only",
-                self.facts_evicted
-            )));
         }
         if self.findings.is_empty() {
             notes.push(Note::summary(format!(

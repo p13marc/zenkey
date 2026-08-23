@@ -13,7 +13,7 @@
 
 use zenkey_fleet::report::{RouterList, ScoutReport};
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 impl Render for ScoutReport {
     const FAMILY: &'static str = "scout";
@@ -71,6 +71,14 @@ impl Render for ScoutReport {
             )
             .cite("RFC 09 §5.1 O5"),
         ]
+    }
+
+    /// The asked node kinds (empty = all three) and the round's window.
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: self.asked.clone(),
+            window_s: Some(self.timeout_s as f64),
+        })
     }
 }
 
@@ -137,6 +145,13 @@ impl Render for RouterList {
             self.routers.len(),
             self.asked
         ))]
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.asked.clone()],
+            window_s: None,
+        })
     }
 }
 
@@ -289,6 +304,13 @@ impl Render for TopologyView<'_> {
                 notes
             }
         }
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.report.asked.clone()],
+            window_s: None,
+        })
     }
 }
 

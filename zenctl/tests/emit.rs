@@ -7,7 +7,9 @@
 //! snapshotted, because a snapshot review can wave through exactly the change
 //! these forbid.
 
-use zenctl::render::{Cell, Format, Grid, Note, Render, Row, Table, Width, to_string};
+use zenctl::render::{
+    BoundCost, BoundKind, Cell, Format, Grid, Note, Render, Row, Table, Width, to_string,
+};
 
 #[derive(serde::Serialize)]
 struct Doc {
@@ -20,6 +22,8 @@ struct Doc {
     items: Vec<&'static str>,
     #[serde(skip)]
     notes: Vec<Note>,
+    #[serde(skip)]
+    bounds: Vec<BoundCost>,
 }
 
 impl Render for Doc {
@@ -53,6 +57,10 @@ impl Render for Doc {
     fn notes(&self) -> Vec<Note> {
         self.notes.clone()
     }
+
+    fn bounds(&self) -> Vec<BoundCost> {
+        self.bounds.clone()
+    }
 }
 
 fn doc() -> Doc {
@@ -61,6 +69,7 @@ fn doc() -> Doc {
         not_probed: None,
         items: vec!["one", "two"],
         notes: Vec::new(),
+        bounds: Vec::new(),
     }
 }
 
@@ -178,6 +187,38 @@ fn a_row_less_family_emits_exactly_one_line() {
     let (lines, _) = ndjson(&d);
     assert_eq!(lines.len(), 1);
     assert!(lines[0].get("rows").is_none(), "and no empty rows array");
+}
+
+/// A declared bound cost cannot ship silently (RFC 13, v1.24): the emit path
+/// itself writes one `Note::bound` per **non-zero** cost, as `"{n} {what}"`
+/// with the O6 citation, into stderr and the machine documents alike — and a
+/// zero cost writes nothing, so impls declare unconditionally.
+#[test]
+fn a_non_zero_bound_cost_is_auto_appended_and_a_zero_one_is_not() {
+    let mut d = doc();
+    d.bounds = vec![
+        BoundCost::new(
+            BoundKind::Retired,
+            912,
+            "key(s) retired at the table bound — totals cover the retained set",
+        ),
+        BoundCost::new(BoundKind::Missed, 0, "sample(s) dropped while behind"),
+    ];
+    let (lines, err) = ndjson(&d);
+    let notes = lines[0]["notes"]
+        .as_array()
+        .expect("the bound note rides the envelope");
+    assert_eq!(notes.len(), 1, "one note per NON-zero cost: {notes:?}");
+    assert_eq!(
+        notes[0]["text"],
+        "912 key(s) retired at the table bound — totals cover the retained set"
+    );
+    assert_eq!(notes[0]["cite"], "RFC 09 §5.1 O6");
+    assert!(err.contains("912 key(s) retired"), "{err}");
+    assert!(
+        !err.contains("dropped while behind"),
+        "a zero cost says nothing: {err}"
+    );
 }
 
 /// A citation renders the same way wherever a note is printed.

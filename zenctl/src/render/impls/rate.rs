@@ -18,7 +18,7 @@
 
 use zenkey_fleet::report::RateReport;
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 /// A rate report plus the one thing about it that is a *view*.
 ///
@@ -138,15 +138,25 @@ impl Render for RateView<'_> {
                  losslessness"
             )));
         }
-        if self.report.evicted > 0 {
-            // The table is bounded; a shrunken key set must say so.
-            notes.push(Note::bound(format!(
-                "{} key(s) retired to stay within the {}-key bound — totals cover the \
-                 retained set",
-                self.report.evicted, self.report.max_keys
-            )));
-        }
         notes
+    }
+
+    /// The stats table is bounded (`max_keys` rides the document); a
+    /// shrunken key set must say so.
+    fn bounds(&self) -> Vec<BoundCost> {
+        vec![BoundCost::new(
+            BoundKind::Retired,
+            self.report.evicted,
+            "key(s) retired at the stats-table bound — totals cover the \
+             retained set",
+        )]
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.report.selector.clone()],
+            window_s: Some(self.report.window_s as f64),
+        })
     }
 }
 

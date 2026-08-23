@@ -14,7 +14,7 @@
 
 use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport, ProbeReport};
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 /// One answer, as a person reads it: the value if it is JSON-shaped, the raw
 /// text otherwise, and the reply's attachment when the wire carried one.
@@ -99,6 +99,15 @@ impl Render for CallReport {
             ))],
         }
     }
+
+    /// The GET's coverage claim: the one key asked, and the wait the report
+    /// carries (R5 / P1's `timeout_s`).
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.key.clone()],
+            window_s: Some(self.timeout_s as f64),
+        })
+    }
 }
 
 impl Render for ProbeReport {
@@ -144,5 +153,10 @@ impl Render for ProbeReport {
             );
         }
         notes
+    }
+
+    /// Delegated, like the rendering: the probe's observation *is* the call.
+    fn scope(&self) -> Option<ObservedScope> {
+        self.call.scope()
     }
 }

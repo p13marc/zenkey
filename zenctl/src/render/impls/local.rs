@@ -399,6 +399,13 @@ impl Render for GetReport {
         }
         Vec::new()
     }
+
+    fn scope(&self) -> Option<crate::render::ObservedScope> {
+        Some(crate::render::ObservedScope {
+            asked: vec![self.selector.clone()],
+            window_s: Some(self.timeout_s as f64),
+        })
+    }
 }
 
 /// One context as `zenctl context list` shows it.
