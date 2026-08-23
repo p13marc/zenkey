@@ -273,83 +273,6 @@ pub(crate) fn cache_selector(selector: &str) -> String {
     format!("{selector}/@adv/**")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn view(key: &str) -> SampleView {
-        SampleView {
-            key: key.to_string(),
-            payload: zenoh::bytes::ZBytes::from(vec![0u8; 1]),
-            encoding: "zenoh/bytes".to_string(),
-            kind: zenoh::sample::SampleKind::Put,
-            timestamp: None,
-            stamped_by: None,
-            attachment: None,
-            priority: zenoh::qos::Priority::DEFAULT,
-            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
-            reliability: zenoh::qos::Reliability::DEFAULT,
-            express: false,
-            source: None,
-            received: std::time::Instant::now(),
-        }
-    }
-
-    /// Deep-review D5: the seed channel is bounded, and what the bound
-    /// refuses is counted and surfaced as [`SeedItem::Dropped`] before the
-    /// stream resumes — the O6 honesty every other delivery surface in this
-    /// crate already has. The boundary rides with backpressure and is never
-    /// among the dropped.
-    #[tokio::test]
-    async fn a_slow_seed_consumer_is_told_what_it_missed() {
-        let (tx, mut rx) = seed_channel(4);
-        for i in 0..10 {
-            tx.send_sample(view(&format!("k/{i}")));
-        }
-        // 4 fit; 6 were refused by the bound.
-        let Some(SeedItem::Dropped(n)) = rx.recv().await else {
-            panic!("expected the dropped count first");
-        };
-        assert_eq!(n, 6, "every refusal is counted, exactly once");
-        for i in 0..4 {
-            let Some(SeedItem::Sample(v)) = rx.recv().await else {
-                panic!("expected the retained samples");
-            };
-            assert_eq!(v.key, format!("k/{i}"), "the retained head is in order");
-        }
-        // The count was handed over, not double-reported.
-        tx.send_sample(view("k/late"));
-        let Some(SeedItem::Sample(v)) = rx.recv().await else {
-            panic!("the stream resumes");
-        };
-        assert_eq!(v.key, "k/late");
-
-        // The boundary waits for room instead of dropping (a lost boundary
-        // is a consumer stuck on "loading" forever).
-        for i in 0..4 {
-            tx.send_sample(view(&format!("b/{i}")));
-        }
-        let boundary = tokio::spawn(async move {
-            tx.send_boundary(SeedCoverage {
-                history_replies: Some(0),
-                storage_replies: Some(0),
-                superseded: 0,
-            })
-            .await;
-        });
-        let mut seen_boundary = false;
-        while let Some(item) = rx.recv().await {
-            if let SeedItem::SeedComplete(c) = item {
-                assert_eq!(c.superseded, 0);
-                seen_boundary = true;
-                break;
-            }
-        }
-        assert!(seen_boundary, "the boundary is never among the dropped");
-        boundary.await.expect("boundary task");
-    }
-}
-
 /// Subscribe with a correct seed phase (RFC 04 §3.2).
 ///
 /// Order of operations is the contract: the subscriber is declared first;
@@ -431,4 +354,81 @@ pub async fn seed_subscribe(
         _subscriber: subscriber,
         task,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view(key: &str) -> SampleView {
+        SampleView {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(vec![0u8; 1]),
+            encoding: "zenoh/bytes".to_string(),
+            kind: zenoh::sample::SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: std::time::Instant::now(),
+        }
+    }
+
+    /// Deep-review D5: the seed channel is bounded, and what the bound
+    /// refuses is counted and surfaced as [`SeedItem::Dropped`] before the
+    /// stream resumes — the O6 honesty every other delivery surface in this
+    /// crate already has. The boundary rides with backpressure and is never
+    /// among the dropped.
+    #[tokio::test]
+    async fn a_slow_seed_consumer_is_told_what_it_missed() {
+        let (tx, mut rx) = seed_channel(4);
+        for i in 0..10 {
+            tx.send_sample(view(&format!("k/{i}")));
+        }
+        // 4 fit; 6 were refused by the bound.
+        let Some(SeedItem::Dropped(n)) = rx.recv().await else {
+            panic!("expected the dropped count first");
+        };
+        assert_eq!(n, 6, "every refusal is counted, exactly once");
+        for i in 0..4 {
+            let Some(SeedItem::Sample(v)) = rx.recv().await else {
+                panic!("expected the retained samples");
+            };
+            assert_eq!(v.key, format!("k/{i}"), "the retained head is in order");
+        }
+        // The count was handed over, not double-reported.
+        tx.send_sample(view("k/late"));
+        let Some(SeedItem::Sample(v)) = rx.recv().await else {
+            panic!("the stream resumes");
+        };
+        assert_eq!(v.key, "k/late");
+
+        // The boundary waits for room instead of dropping (a lost boundary
+        // is a consumer stuck on "loading" forever).
+        for i in 0..4 {
+            tx.send_sample(view(&format!("b/{i}")));
+        }
+        let boundary = tokio::spawn(async move {
+            tx.send_boundary(SeedCoverage {
+                history_replies: Some(0),
+                storage_replies: Some(0),
+                superseded: 0,
+            })
+            .await;
+        });
+        let mut seen_boundary = false;
+        while let Some(item) = rx.recv().await {
+            if let SeedItem::SeedComplete(c) = item {
+                assert_eq!(c.superseded, 0);
+                seen_boundary = true;
+                break;
+            }
+        }
+        assert!(seen_boundary, "the boundary is never among the dropped");
+        boundary.await.expect("boundary task");
+    }
 }
