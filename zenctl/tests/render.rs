@@ -727,6 +727,27 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
         "probe is the call plus one provenance line:\n{probe}"
     );
     assert!(call.contains("attachment (18 B)"), "the clause probe lost");
+
+    // R5: a silent call's note names the wait, and the document states it —
+    // it used to say "the timeout too short" about a timeout the report
+    // never carried (O5). The probe inherits both by delegation.
+    let silent = zenkey_fleet::report::CallReport {
+        answers: vec![],
+        ..fx::call_report()
+    };
+    let n = notes(&silent);
+    assert!(n.contains("within 5s"), "{n}");
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["timeout_s"], 5);
+    let silent_probe = zenkey_fleet::report::ProbeReport {
+        call: silent,
+        ..fx::probe_report()
+    };
+    assert!(notes(&silent_probe).contains("within 5s"));
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&silent_probe).lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["timeout_s"], 5);
 }
 
 #[test]

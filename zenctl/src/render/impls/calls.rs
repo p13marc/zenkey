@@ -38,6 +38,9 @@ impl Render for CallReport {
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut e = serde_json::Map::new();
         e.insert("key".into(), self.key.clone().into());
+        // R5: the wait is part of the coverage claim (GetReport is the
+        // model) — the silence note names it, so the document must state it.
+        e.insert("timeout_s".into(), self.timeout_s.into());
         e.insert("answers".into(), self.answers.len().into());
         e
     }
@@ -66,11 +69,13 @@ impl Render for CallReport {
 
     fn notes(&self) -> Vec<Note> {
         match self.answers.len() {
+            // R5: the note used to say "the timeout" without stating it —
+            // now it names the wait the report itself carries.
             0 => vec![Note::silence(format!(
-                "no replies to {}. The origin may be down, the procedure \
+                "no replies to {} within {}s. The origin may be down, the procedure \
                  unregistered, or the timeout too short — `zenctl node list` says \
                  who is up",
-                self.key
+                self.key, self.timeout_s
             ))],
             n => vec![Note::summary(format!(
                 "{n} repl{}",
@@ -89,6 +94,8 @@ impl Render for ProbeReport {
         e.insert("origin".into(), self.origin.clone().into());
         e.insert("via".into(), self.via.clone().into());
         e.insert("key".into(), self.call.key.clone().into());
+        // Inherited from the delegated call (R5), like the silence note.
+        e.insert("timeout_s".into(), self.call.timeout_s.into());
         e
     }
 

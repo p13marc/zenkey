@@ -793,6 +793,7 @@ pub fn blob_fetch() -> BlobFetchReport {
 pub fn call_report() -> CallReport {
     CallReport {
         key: "v1/*/@rpc/sysinfo/processes".to_string(),
+        timeout_s: 5,
         answers: vec![
             CallAnswer {
                 origin: ORIGIN.into(),

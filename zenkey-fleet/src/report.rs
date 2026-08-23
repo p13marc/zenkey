@@ -529,6 +529,12 @@ pub struct CallAnswer {
 #[derive(Debug, Clone, Serialize)]
 pub struct CallReport {
     pub key: String,
+    /// Seconds the GET waited — the other half of the coverage claim
+    /// (zenctl's `GetReport` is the model), and what makes a silent result
+    /// legible: the renderer's silence note used to name a timeout the
+    /// document never stated (RFC 09 §5.1 O5, review finding R5). Additive,
+    /// so scripts on the old shape keep parsing.
+    pub timeout_s: u64,
     pub answers: Vec<CallAnswer>,
 }
 
@@ -999,6 +1005,7 @@ mod tests {
     fn call_exit_codes() {
         let mut r = CallReport {
             key: "k".into(),
+            timeout_s: 5,
             answers: vec![],
         };
         assert_eq!(r.exit_code(), 2, "silence is its own exit code");

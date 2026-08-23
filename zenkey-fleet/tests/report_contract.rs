@@ -329,14 +329,22 @@ fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
     );
 
     // Silence is exit 2 and an empty answer list — never an error reply.
+    // R5: `timeout_s` is new in the report-honesty batch — the silence note
+    // named a timeout the document never stated. Additive; old consumers
+    // keep parsing.
     let silent = CallReport {
         key: "v1/*/@rpc/sysinfo/introspect".into(),
+        timeout_s: 5,
         answers: vec![],
     };
     assert_eq!(silent.exit_code(), 2);
     assert_eq!(
         serde_json::to_value(&silent).unwrap(),
-        json!({"key": "v1/*/@rpc/sysinfo/introspect", "answers": []})
+        json!({
+            "key": "v1/*/@rpc/sysinfo/introspect",
+            "timeout_s": 5,
+            "answers": [],
+        })
     );
     assert_eq!(
         CallReport {

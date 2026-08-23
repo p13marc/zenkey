@@ -423,6 +423,7 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
         target: "*".into(),
         outcome: Some(Ok(CallReport {
             key: "v1/*/@rpc/netring/introspect".into(),
+            timeout_s: 5,
             answers: vec![CallAnswer {
                 origin: "h-aaaaaaaaaaaa".into(),
                 ok: true,
@@ -1130,7 +1131,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
             evidence: "registry version differs: served 1.0, local 2.0".into(),
             citation: Some("RFC 08 §6".into()),
         }],
-        synced: vec![],
+        synced: None,
         introspect_answered: 1,
         live_producers: 1,
         describe_served: 0,
@@ -1206,7 +1207,7 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
 
     let report = DoctorReport {
         findings: vec![],
-        synced: vec![],
+        synced: None,
         introspect_answered: 1,
         live_producers: 1,
         describe_served: 0,
