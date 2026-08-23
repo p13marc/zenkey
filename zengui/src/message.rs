@@ -66,6 +66,10 @@ pub enum BusMsg {
     SlicesLoaded(Result<Arc<SliceSet>, String>),
     /// The §6.1 union arrived: (set, from_bus, dirs_only, disagreements).
     SlicesUnionLoaded(Result<(Arc<SliceSet>, usize, usize, usize), String>),
+    /// One bounded validation batch finished (#164): per checked key, the
+    /// payload-conformance verdict of its newest sample. Lands in the
+    /// verdict cache; the render paths only look up.
+    VerdictsChecked(Vec<(String, zenkey::schema::validate::Verdict)>),
 }
 
 /// What the app is pointed at, and the coverage that follows (#176).
@@ -229,8 +233,9 @@ pub enum SubjectMsg {
     /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
     ValueFetched(String, Result<Arc<FetchOutcome>, String>),
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
-    /// (key, declared type if any, rendering).
-    ValueDecoded(String, Option<String>, Arc<zenkey_fleet::decode::Rendering>),
+    /// (key, the whole decoded sample — rendering, verdict and the decode
+    /// error behind an `Undecodable`, #164).
+    ValueDecoded(String, Arc<zenkey_fleet::decode::DecodedSample>),
     /// Point the whole workspace at something (#181).
     ///
     /// One message where there were three — `SelectKey`, `SelectPath` and the

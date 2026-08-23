@@ -150,6 +150,18 @@ impl ThemeColors<'_> {
     pub fn coverage(&self, kind: CoverageTone) -> Color {
         self.tone(kind.tone())
     }
+
+    /// The payload-conformance verdict scale (#164) — the GUI face of
+    /// [`zenkey::schema::validate::Verdict`]'s three states.
+    pub fn verdict(&self, kind: VerdictTone) -> Color {
+        self.tone(kind.tone())
+    }
+
+    /// The why-ladder rung scale (#214) — Established / NotEstablished /
+    /// NotAsked, the three answers a rung may give.
+    pub fn rung(&self, kind: RungTone) -> Color {
+        self.tone(kind.tone())
+    }
 }
 
 /// The swatch scale every badge resolves through (#193).
@@ -298,6 +310,79 @@ impl RegistrationTone {
     }
 }
 
+/// How a payload-conformance verdict should read (#164) — the same
+/// discipline as [`RegistrationTone`]: three states, never a boolean, and
+/// `NotValidated` is [`Tone::Neutral`] because "not checked" must never wear
+/// either answer's swatch (RFC 09 §5.1 O4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerdictTone {
+    Valid,
+    Invalid,
+    NotValidated,
+}
+
+impl VerdictTone {
+    /// Every state of the scale, for the uniqueness tests.
+    pub const ALL: [Self; 3] = [Self::Valid, Self::Invalid, Self::NotValidated];
+
+    /// The swatch this state resolves through.
+    pub fn tone(self) -> Tone {
+        match self {
+            Self::Valid => Tone::Positive,
+            Self::Invalid => Tone::Negative,
+            Self::NotValidated => Tone::Neutral,
+        }
+    }
+
+    /// The badge glyph, carried by the type (#193): checked-and-passed,
+    /// checked-and-failed, and not checked — the CLI's own three marks.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Self::Valid => "✓",
+            Self::Invalid => "✗",
+            Self::NotValidated => "·",
+        }
+    }
+}
+
+/// How one why-ladder rung's answer should read (#214).
+///
+/// `NotAsked` is [`Tone::Neutral`] and its own glyph: a rung whose input was
+/// never fetched must not look like "asked, and the answer was no" — printing
+/// `No` where it means `NotAsked` is the exact failure the ladder was built
+/// to replace (RFC 09 §5.1 O4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RungTone {
+    Established,
+    NotEstablished,
+    NotAsked,
+}
+
+impl RungTone {
+    /// Every state of the scale, for the uniqueness tests.
+    pub const ALL: [Self; 3] = [Self::Established, Self::NotEstablished, Self::NotAsked];
+
+    /// The swatch this state resolves through. `NotEstablished` is a verdict
+    /// *obtained* — caution, not danger: for five of the ten rungs it is the
+    /// explanation the user came for, not an error.
+    pub fn tone(self) -> Tone {
+        match self {
+            Self::Established => Tone::Positive,
+            Self::NotEstablished => Tone::Caution,
+            Self::NotAsked => Tone::Neutral,
+        }
+    }
+
+    /// The badge glyph, carried by the type (#193).
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Self::Established => "✓",
+            Self::NotEstablished => "✗",
+            Self::NotAsked => "·",
+        }
+    }
+}
+
 /// How a liveliness presence should read (#61) — same discipline as
 /// [`RegistrationTone`]: "unknown" must not look like a verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -390,6 +475,29 @@ mod tests {
         all_distinct("presence", &PresenceTone::ALL.map(PresenceTone::glyph));
         all_distinct("severity", &SeverityTone::ALL.map(SeverityTone::glyph));
         all_distinct("coverage", &CoverageTone::ALL.map(CoverageTone::glyph));
+        all_distinct("verdict", &VerdictTone::ALL.map(VerdictTone::glyph));
+        all_distinct("rung", &RungTone::ALL.map(RungTone::glyph));
+    }
+
+    /// #164's and #214's shared honesty: the not-checked / not-asked state of
+    /// each new scale is `Neutral`, never a verdict's swatch.
+    #[test]
+    fn not_checked_and_not_asked_resolve_neutral() {
+        assert_eq!(VerdictTone::NotValidated.tone(), Tone::Neutral);
+        assert_eq!(RungTone::NotAsked.tone(), Tone::Neutral);
+        for theme in [iced::Theme::Light, iced::Theme::Dark] {
+            let c = colors(&theme);
+            assert_ne!(
+                c.verdict(VerdictTone::NotValidated),
+                c.verdict(VerdictTone::Invalid),
+                "not checked must not read as checked-and-failed"
+            );
+            assert_ne!(
+                c.rung(RungTone::NotAsked),
+                c.rung(RungTone::NotEstablished),
+                "not asked must not read as answered-no"
+            );
+        }
     }
 
     /// "Not asked" must not share a swatch with any verdict (#193): `Neutral`

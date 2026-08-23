@@ -35,8 +35,9 @@ sub_state! {
         pub(crate) selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
         /// The last on-demand fetch: (key, outcome-or-error).
         pub(crate) fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
-        /// The decode of the last fetched value.
-        pub(crate) decoded: Option<(Option<String>, zenkey_fleet::decode::Rendering)>,
+        /// The decode of the last fetched value — the whole
+        /// [`zenkey_fleet::decode::DecodedSample`], verdict included (#164).
+        pub(crate) decoded: Option<Arc<zenkey_fleet::decode::DecodedSample>>,
         /// The timeline's scroll position + viewport height, driving its
         /// virtual window (#183).
         ///

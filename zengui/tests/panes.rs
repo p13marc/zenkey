@@ -145,6 +145,7 @@ fn the_tree_renders_the_registration_state() {
     let keys = [REGISTERED, UNREGISTERED, FOREIGN];
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
         sp: sp(),
         flat: &flat,
@@ -153,6 +154,7 @@ fn the_tree_renders_the_registration_state() {
         scroll_y: 0.0,
         viewport_h: 600.0,
         facts: &facts,
+        verdicts: &verdicts,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -192,6 +194,7 @@ fn density_changes_the_grid_never_the_claims() {
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
     for density in Density::ALL {
+        let verdicts = zengui::verdict::VerdictCache::default();
         let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
             sp: Spacing::of(density),
             flat: &flat,
@@ -200,6 +203,7 @@ fn density_changes_the_grid_never_the_claims() {
             scroll_y: 0.0,
             viewport_h: 600.0,
             facts: &facts,
+            verdicts: &verdicts,
             watches: tree::Watches {
                 mine: &watches,
                 seeding: &watches,
@@ -223,6 +227,7 @@ fn an_unresolved_tree_claims_neither_way() {
     let keys = [REGISTERED];
     let (flat, facts) = render(&keys, false);
     let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
         sp: sp(),
         flat: &flat,
@@ -231,6 +236,7 @@ fn an_unresolved_tree_claims_neither_way() {
         scroll_y: 0.0,
         viewport_h: 600.0,
         facts: &facts,
+        verdicts: &verdicts,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -254,6 +260,7 @@ fn foreign_keys_render_without_convention_labels() {
     let keys = [FOREIGN];
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
         sp: sp(),
         flat: &flat,
@@ -262,6 +269,7 @@ fn foreign_keys_render_without_convention_labels() {
         scroll_y: 0.0,
         viewport_h: 600.0,
         facts: &facts,
+        verdicts: &verdicts,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -286,6 +294,7 @@ fn the_empty_tree_explains_itself() {
     let flat = tree::Flattened::empty();
     let facts = FactsIndex::default();
     let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
         sp: sp(),
         flat: &flat,
@@ -294,6 +303,7 @@ fn the_empty_tree_explains_itself() {
         scroll_y: 0.0,
         viewport_h: 600.0,
         facts: &facts,
+        verdicts: &verdicts,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -708,11 +718,17 @@ fn the_detail_pane_tags_decode_provenance() {
             source: ValueSource::Storage,
         })));
 
-    // Structural fallback with a declared type: the honest <T?> tag.
-    let decoded = (
-        Some("TelemetryPoint".to_string()),
-        Rendering::Structural(r#"{"value":42.0}"#.to_string()),
-    );
+    // Structural fallback with a declared type: the honest <T?> tag — and
+    // the verdict rides the sample now (#164): an undecodable payload under
+    // a present schema is `NotValidated(Undecodable)`, worded as itself.
+    let decoded = zenkey_fleet::decode::DecodedSample {
+        type_name: Some("TelemetryPoint".to_string()),
+        rendering: Rendering::Structural(r#"{"value":42.0}"#.to_string()),
+        verdict: zenkey::schema::validate::Verdict::NotValidated(
+            zenkey::schema::validate::NotValidated::Undecodable,
+        ),
+        decode_error: Some("wrong wire kind".to_string()),
+    };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
         sp: sp(),
         key,
@@ -3162,5 +3178,141 @@ fn the_inspector_places_a_registered_type_in_the_vocabulary() {
     assert!(
         ui.find("sysinfo · state mode").is_ok(),
         "interface_show names the other carrier of the same type"
+    );
+}
+
+/// #164: the decoded pane renders the verdict in three states, never a
+/// boolean — and the two silences keep their own words: `NoRegistry`'s
+/// "nobody looked" must not wear `NoSchema`'s "asked, and the type has none"
+/// (#246; RFC 09 §5.1 O4).
+#[test]
+fn the_decoded_pane_renders_three_verdict_states_and_keeps_the_silences_apart() {
+    use std::sync::Arc;
+    use zengui::view::detail::{DetailData, Fetched, section};
+    use zenkey::schema::validate::{NotValidated, Verdict};
+    use zenkey_fleet::decode::{DecodedSample, Rendering};
+    use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
+
+    let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+    let fetched: Result<Arc<FetchOutcome>, String> =
+        Ok(Arc::new(FetchOutcome::Value(FetchedValue {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(br#"{"status":"ok"}"#.to_vec()),
+            encoding: "application/json".into(),
+            timestamp: None,
+            attachment: None,
+            source: ValueSource::Storage,
+        })));
+    let render = |verdict: Verdict| {
+        // Leaked so the simulator may outlive the block — a test-only cost,
+        // bounded by the four calls below.
+        let decoded: &'static DecodedSample = Box::leak(Box::new(DecodedSample {
+            type_name: None,
+            rendering: Rendering::Structural(r#"{"status":"ok"}"#.to_string()),
+            verdict,
+            decode_error: None,
+        }));
+        simulator::<Message, _, _>(section(DetailData {
+            key,
+            facts: None,
+            fetched: Fetched::Landed(&fetched),
+            decoded: Some(decoded),
+            series: None,
+            history_entries: None,
+            observed: None,
+            latency: None,
+            sp: sp(),
+        }))
+    };
+
+    let mut ui = render(Verdict::Valid);
+    assert!(ui.find("valid").is_ok(), "checked-and-passed says so");
+
+    let mut ui = render(Verdict::Invalid(vec![
+        "/status: not a number".into(),
+        "/extra: unexpected".into(),
+    ]));
+    assert!(ui.find("invalid (2 violations)").is_ok());
+    assert!(
+        ui.find("violation: /status: not a number").is_ok(),
+        "each violation is a sentence with its path"
+    );
+
+    // The two silences: distinct badge words AND the full reason sentence.
+    let mut ui = render(Verdict::NotValidated(NotValidated::NoRegistry));
+    assert!(ui.find("not validated (no registry)").is_ok());
+    assert!(
+        ui.find("no registry loaded, so no type was looked up")
+            .is_ok(),
+        "NoRegistry is 'nobody looked', spelled out"
+    );
+    let mut ui = render(Verdict::NotValidated(NotValidated::NoSchema));
+    assert!(ui.find("not validated (no schema served)").is_ok());
+    assert!(
+        ui.find("no schema served for this type").is_ok(),
+        "NoSchema is 'asked, and the type has none', spelled out"
+    );
+}
+
+/// #164: echo rows badge the *cached* verdict — a lookup, never a decode —
+/// and a key never checked renders the third state in words: "not validated
+/// (not yet checked)", never a blank that could read as fine and never a
+/// borrowed verdict.
+#[test]
+fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
+    use std::time::Instant;
+    use zengui::echo::EchoRing;
+    use zengui::verdict::VerdictCache;
+    use zengui::view::echo::{EchoView, section};
+    use zenkey::schema::validate::Verdict;
+    use zenkey_fleet::SampleView;
+
+    let sample = |key: &str| SampleView {
+        key: key.to_string(),
+        payload: zenoh::bytes::ZBytes::from(br#"{"v":1}"#.to_vec()),
+        encoding: "application/json".into(),
+        kind: zenoh::sample::SampleKind::Put,
+        timestamp: None,
+        stamped_by: None,
+        attachment: None,
+        priority: zenoh::qos::Priority::Data,
+        congestion_control: zenoh::qos::CongestionControl::Drop,
+        reliability: zenoh::qos::Reliability::BestEffort,
+        express: false,
+        source: None,
+        received: Instant::now(),
+    };
+    let mut ring = EchoRing::new(10);
+    ring.push(&sample("v1/h-3fa9c2d41b7e/state/sysinfo/health"));
+    ring.push(&sample("v1/h-3fa9c2d41b7e/state/sysinfo/unchecked"));
+
+    let mut verdicts = VerdictCache::default();
+    verdicts.record(
+        "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+        Verdict::Invalid(vec!["/v: wrong type".into()]),
+    );
+
+    let view = EchoView::new();
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &ring,
+        &view,
+        None,
+        ring.next_seq(),
+        (0.0, 600.0),
+        &verdicts,
+        sp(),
+    ))));
+    assert!(
+        ui.find("invalid (1 violation)").is_ok(),
+        "the checked key wears its cached verdict"
+    );
+    assert!(
+        ui.find("not validated (not yet checked)").is_ok(),
+        "an unchecked key says so — the third state, never a blank"
+    );
+    assert!(
+        ui.find("verdicts: 1 key checked (each badge is the key's most recently checked sample)")
+            .is_ok(),
+        "the strip scopes what a badge claims"
     );
 }

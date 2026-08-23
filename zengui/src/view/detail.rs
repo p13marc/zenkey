@@ -19,7 +19,7 @@
 
 use iced::widget::{Column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet::decode::Rendering;
+use zenkey_fleet::decode::{DecodedSample, Rendering};
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
 use crate::message::{Message, PaneMsg};
@@ -63,9 +63,10 @@ pub struct DetailData<'a> {
     pub key: &'a str,
     pub facts: Option<&'a KeyFacts>,
     pub fetched: Fetched<'a>,
-    /// The decode of the fetched value, when it has completed:
-    /// (declared type name if any, rendering).
-    pub decoded: Option<&'a (Option<String>, Rendering)>,
+    /// The decode of the fetched value, when it has completed — the whole
+    /// [`DecodedSample`]: rendering, verdict, and the decode error behind an
+    /// `Undecodable` (#164).
+    pub decoded: Option<&'a DecodedSample>,
     /// The plotted series (issue #64). Owned rather than borrowed: they are
     /// derived per frame from the history ring, and a pane cannot borrow a
     /// per-frame local.
@@ -552,9 +553,17 @@ fn hex_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
         .into()
 }
 
-/// The decoded side, tagged with how it was produced.
+/// How many `Invalid` violation sentences render before the list stops and
+/// says so — a schema with a hundred failed clauses is one bad payload, not a
+/// hundred rows of pane.
+const VIOLATION_ROWS: usize = 8;
+
+/// The decoded side, tagged with how it was produced — and with the payload's
+/// conformance verdict (#164): three states, never a boolean, and each
+/// not-validated *reason* spelled (`NoRegistry`'s "nobody looked" never wears
+/// `NoSchema`'s "asked, and the type has none" — #246).
 fn decoded_pane<'a>(
-    decoded: Option<&'a (Option<String>, Rendering)>,
+    decoded: Option<&'a DecodedSample>,
     payload_len: usize,
     sp: Spacing,
 ) -> Element<'a, Message> {
@@ -563,33 +572,65 @@ fn decoded_pane<'a>(
         None => {
             col = col.push(kit::muted("decoding…"));
         }
-        Some((type_name, rendering)) => match rendering {
-            Rendering::Typed(d) => {
-                col = col.push(kit::tone_badge(
-                    RegistrationTone::Registered,
-                    format!("schema-decoded <{}>", type_name.as_deref().unwrap_or("?")),
-                ));
-                col = col.push(kit::mono(
-                    serde_json::to_string_pretty(&d.value).unwrap_or_default(),
-                ));
-                for note in &d.notes {
-                    col = col.push(kit::muted(format!("note: {note}")));
+        Some(sample) => {
+            match &sample.rendering {
+                Rendering::Typed(d) => {
+                    col = col.push(kit::tone_badge(
+                        RegistrationTone::Registered,
+                        format!(
+                            "schema-decoded <{}>",
+                            sample.type_name.as_deref().unwrap_or("?")
+                        ),
+                    ));
+                    col = col.push(kit::mono(
+                        serde_json::to_string_pretty(&d.value).unwrap_or_default(),
+                    ));
+                    for note in &d.notes {
+                        col = col.push(kit::muted(format!("note: {note}")));
+                    }
+                }
+                Rendering::Structural(s) => {
+                    // The honest ladder: typed-but-undecoded vs plain structural.
+                    let tag = match &sample.type_name {
+                        Some(t) => format!("<{t}?> structural (schema did not decode)"),
+                        None => "structural (no schema resolves — RFC 08 §7's fallback)".into(),
+                    };
+                    col = col.push(kit::muted(tag));
+                    col = col.push(kit::mono(if s.is_empty() {
+                        format!("<{payload_len} bytes>")
+                    } else {
+                        s.clone()
+                    }));
                 }
             }
-            Rendering::Structural(s) => {
-                // The honest ladder: typed-but-undecoded vs plain structural.
-                let tag = match type_name {
-                    Some(t) => format!("<{t}?> structural (schema did not decode)"),
-                    None => "structural (no schema resolves — RFC 08 §7's fallback)".into(),
-                };
-                col = col.push(kit::muted(tag));
-                col = col.push(kit::mono(if s.is_empty() {
-                    format!("<{payload_len} bytes>")
-                } else {
-                    s.clone()
-                }));
+            // The verdict, glyph and word (#164/#193).
+            col = col.push(kit::badge_verdict(
+                crate::verdict::tone(&sample.verdict),
+                crate::verdict::label(&sample.verdict),
+            ));
+            match &sample.verdict {
+                zenkey::schema::validate::Verdict::Invalid(errors) => {
+                    for e in errors.iter().take(VIOLATION_ROWS) {
+                        col = col.push(kit::muted(format!("violation: {e}")));
+                    }
+                    if errors.len() > VIOLATION_ROWS {
+                        col = col.push(kit::muted(format!(
+                            "+{} more not shown (display bound)",
+                            errors.len() - VIOLATION_ROWS
+                        )));
+                    }
+                }
+                zenkey::schema::validate::Verdict::NotValidated(reason) => {
+                    // The full sentence under the compact badge, so the
+                    // reason is never only a parenthetical.
+                    col = col.push(kit::muted(reason.to_string()));
+                }
+                zenkey::schema::validate::Verdict::Valid => {}
             }
-        },
+            if let Some(e) = &sample.decode_error {
+                col = col.push(kit::muted(format!("decode error: {e}")));
+            }
+        }
     }
     iced::widget::container(col)
         .width(Length::FillPortion(1))

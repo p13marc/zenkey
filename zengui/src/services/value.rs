@@ -33,11 +33,15 @@ pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
 /// what the *selection* asked for and is what the landing message is keyed by;
 /// the second is what the reply actually carried. They are usually equal and
 /// the code must not assume it.
+///
+/// `slices: None` = no registry was loaded; the decode still runs, so the
+/// verdict is `NotValidated(NoRegistry)` — "nobody looked" rendered as
+/// itself, never omitted and never dressed as `NoSchema` (#164, #246).
 #[allow(clippy::too_many_arguments)]
 pub fn decode(
     store: Arc<zenkey_fleet::decode::SchemaStore>,
     session: zenoh::Session,
-    slices: Arc<zenkey_fleet::SliceSet>,
+    slices: Option<Arc<zenkey_fleet::SliceSet>>,
     base: String,
     fetched_key: String,
     wire_key: String,
@@ -46,26 +50,57 @@ pub fn decode(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            // `Some`: the caller only schedules a decode once slices have
-            // loaded (`update/subject.rs`), so the registry was always asked
-            // here — with none loaded the pane shows the fetch undecoded and
-            // claims nothing, which is `NoRegistry`'s honesty (#246) by
-            // omission rather than by verdict.
             let d = zenkey_fleet::decode::decode_sample(
                 &store,
                 &session,
-                Some(&slices),
+                slices.as_deref(),
                 &base,
                 &wire_key,
                 Some(&encoding),
                 &bytes.to_bytes(),
             )
             .await;
-            // The verdict rides the sample (#159); the detail pane learns to
-            // render it in #164.
-            (fetched_key, d.type_name, Arc::new(d.rendering))
+            // The verdict rides the sample (#159) and lands whole: the
+            // Inspector renders it, and the cache learns it (#164).
+            (fetched_key, Arc::new(d))
         },
-        |(k, t, r)| Message::Subject(SubjectMsg::ValueDecoded(k, t, r)),
+        |(k, d)| Message::Subject(SubjectMsg::ValueDecoded(k, d)),
+    )
+}
+
+/// Validate one bounded batch of observed samples (#164).
+///
+/// The verdict cache's fill path: `update/bus.rs` picks at most
+/// [`crate::verdict::VALIDATE_PER_TICK`] keys from the tick's samples and
+/// hands their payloads here — a `Task`, because `decode_sample` may fetch a
+/// producer's `describe` on a first miss. The render paths only ever *read*
+/// the cache this lands in.
+pub fn validate(
+    store: Arc<zenkey_fleet::decode::SchemaStore>,
+    session: zenoh::Session,
+    slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    base: String,
+    batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let mut out = Vec::with_capacity(batch.len());
+            for (key, encoding, bytes) in batch {
+                let d = zenkey_fleet::decode::decode_sample(
+                    &store,
+                    &session,
+                    slices.as_deref(),
+                    &base,
+                    &key,
+                    Some(&encoding),
+                    &bytes.to_bytes(),
+                )
+                .await;
+                out.push((key, d.verdict));
+            }
+            out
+        },
+        |out| Message::Bus(crate::message::BusMsg::VerdictsChecked(out)),
     )
 }
 
