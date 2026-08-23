@@ -37,8 +37,8 @@ use crate::view;
 /// of splits, ratios and roles is what survives, and it is all that matters.
 pub(crate) struct DockGrid {
     pub(crate) grid: pane_grid::State<DockRole>,
-    /// The dock last clicked — where a restored dock anchors, and what #190's
-    /// dock-focus keys will move.
+    /// The dock last clicked (`DockFocused`) or summoned by its Alt-letter
+    /// (`FocusDock`, #190) — where a restored dock anchors.
     pub(crate) focus: Option<pane_grid::Pane>,
 }
 

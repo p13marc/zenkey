@@ -60,10 +60,15 @@ pub(crate) fn update(
 
 /// One key press, in context.
 ///
+/// The modifier-less keys arrive as the [`Chord`](crate::shortcuts::Chord)
+/// the shortcut table names (#190) — never the raw key, so a bare key the
+/// app answers cannot exist outside `shortcuts.rs`. What each chord *means*
+/// is still decided here, because it depends on what is open:
+///
 /// **Esc layering** (#75): palette first, then a tree selection, then
 /// nothing — one layer per press, so Esc never does two things at once.
-/// The arrows drive the overlay only while one is open, which is what
-/// keeps them available to the panes the rest of the time.
+/// The arrows and Enter drive the overlay only while one is open, which is
+/// what keeps them available to the panes the rest of the time.
 fn update_key(
     chrome: &mut Chrome,
     dep: &Deployment,
@@ -72,30 +77,35 @@ fn update_key(
     key: &iced::keyboard::Key,
     modifiers: iced::keyboard::Modifiers,
 ) -> Task<Message> {
-    use iced::keyboard::{Key, key::Named};
-    use view::palette::PaletteMsg;
+    use crate::shortcuts::Chord;
+    use view::palette::{Overlay, PaletteMsg};
 
-    if crate::shortcuts::is_escape(key) {
-        if chrome.palette.is_open() {
-            chrome.palette.close();
-        } else if sub.current != Subject::None {
-            return Task::done(Message::Subject(SubjectMsg::Select(Subject::None)));
+    match crate::shortcuts::chord(key) {
+        Some(Chord::Escape) => {
+            if chrome.palette.is_open() {
+                chrome.palette.close();
+            } else if sub.current != Subject::None {
+                return Task::done(Message::Subject(SubjectMsg::Select(Subject::None)));
+            }
+            return Task::none();
         }
-        return Task::none();
-    }
-    if chrome.palette.is_open() {
-        match key {
-            Key::Named(Named::ArrowDown) => {
-                return update_palette(chrome, dep, work, PaletteMsg::CursorDown);
-            }
-            Key::Named(Named::ArrowUp) => {
-                return update_palette(chrome, dep, work, PaletteMsg::CursorUp);
-            }
-            Key::Named(Named::Enter) => {
-                return update_palette(chrome, dep, work, PaletteMsg::Activate);
-            }
-            _ => {}
+        Some(Chord::Down) if chrome.palette.is_open() => {
+            return update_palette(chrome, dep, work, PaletteMsg::CursorDown);
         }
+        Some(Chord::Up) if chrome.palette.is_open() => {
+            return update_palette(chrome, dep, work, PaletteMsg::CursorUp);
+        }
+        Some(Chord::Enter) if chrome.palette.is_open() => {
+            return update_palette(chrome, dep, work, PaletteMsg::Activate);
+        }
+        // `?` reaches here only when no text input consumed it, so it is
+        // safe bare — the one key every tool in this family answers.
+        Some(Chord::Help) => {
+            return Task::done(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+                Overlay::Help,
+            ))));
+        }
+        _ => {}
     }
     match crate::shortcuts::resolve(key, modifiers) {
         Some(message) => Task::done(message),

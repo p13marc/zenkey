@@ -774,6 +774,47 @@ fn pane_selection_is_dock_reveal_not_a_tab_swap() {
     assert!(app.work.docks.is_open(DockRole::Inspector));
 }
 
+/// Alt+A's message (#190), driven through `update`: focusing a closed dock
+/// restores it first — a focus nothing renders is a control that does
+/// nothing — and only the restore bends the layout. Moving the focus alone
+/// owes the prefs no write.
+#[test]
+fn a_dock_focus_key_restores_and_focuses() {
+    use crate::message::WorkspaceMsg;
+    use crate::prefs::DockRole;
+
+    let mut app = test_app();
+    // The default layout is Explore, which opens no Activity dock.
+    assert!(!app.work.docks.is_open(DockRole::Activity));
+
+    let _ = app.update(Message::Workspace(WorkspaceMsg::FocusDock(
+        DockRole::Activity,
+    )));
+    assert!(
+        app.work.docks.is_open(DockRole::Activity),
+        "focusing a closed dock restores it"
+    );
+    assert_eq!(
+        app.work.docks.focus,
+        app.work.docks.pane_of(DockRole::Activity)
+    );
+    assert_eq!(
+        app.chrome.prefs.layout.preset, None,
+        "the restore bends the layout"
+    );
+
+    // An open dock: the focus moves, and nothing is owed a write.
+    app.chrome.prefs_dirty = false;
+    let _ = app.update(Message::Workspace(WorkspaceMsg::FocusDock(
+        DockRole::Locator,
+    )));
+    assert_eq!(
+        app.work.docks.focus,
+        app.work.docks.pane_of(DockRole::Locator)
+    );
+    assert!(!app.chrome.prefs_dirty, "focus alone owes no write");
+}
+
 /// The key-expression editor's chain (#187), driven through `update`:
 /// opening seeds the draft from the deployment's truth, a fork copies the
 /// resolved selectors through `scope::selectors`, and an invalid draft is

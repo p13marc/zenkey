@@ -131,6 +131,17 @@ pub(crate) fn update(
             work.docks.focus = Some(pane);
             Task::none()
         }
+        WorkspaceMsg::FocusDock(role) => {
+            // Alt+L/I/A (#190): focus follows the key the way it follows a
+            // click (`DockFocused`), and a closed dock comes back first —
+            // `restore` anchors it at its home edge and only that layout
+            // change is persisted; moving the focus alone owes no write.
+            if work.docks.restore(role) {
+                persist_custom(chrome, work);
+            }
+            work.docks.focus = work.docks.pane_of(role);
+            Task::none()
+        }
         WorkspaceMsg::DockToggled(role) => {
             if work.docks.toggle(role) {
                 persist_custom(chrome, work);
