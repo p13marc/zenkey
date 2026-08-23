@@ -463,7 +463,7 @@ fn topology<'a>(
     ));
     col = col.push(
         row![
-            button(kit::caption("copy graphviz (dot)"))
+            kit::action(kit::caption("copy graphviz (dot)"))
                 .padding(2)
                 .on_press(msg(AdminMsg::CopyDot)),
             kit::muted(

@@ -783,6 +783,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         f.resolve(&slices);
         f
     };
+    #[allow(clippy::too_many_arguments)]
     fn data<'a>(
         subject: &'a Subject,
         facts: Option<&'a KeyFacts>,
@@ -2904,6 +2905,7 @@ fn the_settings_overlay_labels_live_against_reconnect_and_states_each_cost() {
     // The apply and the reconnect it labels toward are both offered.
     assert!(ui.find("apply").is_ok());
     assert!(ui.find("reconnect now").is_ok());
+}
 
 // ── The engine's projections, consumed (#234) ────────────────────────────
 
@@ -2964,6 +2966,7 @@ fn projection_fixture() -> (SliceSet, zengui::nodes::NodeRoster, KeyTreeSnapshot
     (slices, roster, KeyTreeSnapshot::build(&stats))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn projection_inspector<'a>(
     subject: &'a zengui::message::Subject,
     facts: Option<&'a KeyFacts>,
