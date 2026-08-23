@@ -455,7 +455,10 @@ fn floated(content: Element<'_, Message>) -> Element<'_, Message> {
 }
 
 /// The `?` overlay — rendered from [`crate::shortcuts::map`], which is also
-/// what dispatches. There is no second list to keep in step.
+/// what dispatches. There is no second list to keep in step: the trailing
+/// lines that used to restate `Ctrl P`, `Ctrl K` and `?` by hand are gone
+/// (#190) — the table holds the modifier-less bindings now, Esc included,
+/// so the overlay renders exactly the table and nothing else.
 fn help<'a>() -> Element<'a, Message> {
     let mut body = Column::new().spacing(2);
     for b in crate::shortcuts::map() {
@@ -469,9 +472,6 @@ fn help<'a>() -> Element<'a, Message> {
             .spacing(space::SM),
         );
     }
-    body = body.push(kit::muted("Ctrl P  command palette"));
-    body = body.push(kit::muted("Ctrl K  jump to key"));
-    body = body.push(kit::muted("?       this list · Esc closes"));
 
     container(column![kit::section_header("Shortcuts", None), body].spacing(space::SM))
         .padding(space::MD)

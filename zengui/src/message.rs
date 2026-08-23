@@ -283,6 +283,13 @@ pub enum WorkspaceMsg {
     /// Close an open dock, or restore a closed one at its home edge (#180) —
     /// the dock strip's toggles and each title bar's `×` both speak this.
     DockToggled(crate::prefs::DockRole),
+    /// Put the keyboard in a dock (#190): Alt+L/I/A name the Locator, the
+    /// Inspector and the Activity dock by initial. Focus follows the key the
+    /// way it follows a click ([`DockFocused`](WorkspaceMsg::DockFocused)) —
+    /// this is that click's role-addressed form, because a shortcut table
+    /// cannot hold a runtime pane id — and a closed dock is restored first:
+    /// focusing an invisible region is a control that does nothing.
+    FocusDock(crate::prefs::DockRole),
     /// Apply a saved layout (#180): Explore, Watch or Diagnose, on Alt+1/2/3.
     LayoutPreset(crate::prefs::LayoutPreset),
     /// Open every prefix of a path so its subtree is visible, and reflatten.
@@ -498,8 +505,9 @@ impl ActivityTab {
 /// The pane vocabulary `PaneSelected` speaks — since #180 no longer a tab
 /// strip's list but still one list: `Inspector` names the Inspector dock, and
 /// the other three are the Workbench dock's tools. #184 merged `Call` and
-/// `Publish` into `Send`; #190's keyboard map v2 may shrink it further, and
-/// until then it is the remnant the workbench's own tool strip iterates.
+/// `Publish` into `Send`; #190's keyboard map v2 left it alone — the
+/// dock-focus keys speak `DockRole`, not this — and it stays the remnant the
+/// workbench's own tool strip iterates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPane {
     /// Publish and call, one form with a mode toggle (#184).

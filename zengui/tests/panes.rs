@@ -1361,8 +1361,9 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
         );
     }
 
-    // The `?` overlay renders the shortcut map itself, so it cannot drift
-    // from what `resolve` dispatches.
+    // The `?` overlay renders the shortcut map itself — modifier-less
+    // chords included (#190) — so it cannot drift from what the app
+    // dispatches.
     state.open(Overlay::Help);
     {
         let element = overlay(
@@ -1383,6 +1384,14 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
                 binding.what
             );
         }
+        // …and nothing else: the hardcoded trailing lines that restated
+        // `Ctrl P`, `Ctrl K` and `?` by hand are gone (#190) — the table's
+        // own rows for Esc and `?` are what remains.
+        assert!(
+            ui.find("this list · Esc closes").is_err(),
+            "the help must render exactly the table"
+        );
+        assert!(ui.find("Esc").is_ok(), "Esc is a row of the table now");
     }
 
     // The Connect overlay is the connection pane, floated (#185) — same
