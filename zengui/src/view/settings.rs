@@ -19,7 +19,7 @@
 use std::path::PathBuf;
 
 use iced::Element;
-use iced::widget::{button, checkbox, column, row, text, text_input};
+use iced::widget::{column, row, text};
 
 use crate::message::{ChromeMsg, DeploymentMsg, Message, PaneMsg, PrefsMsg};
 use crate::view::kit;
@@ -138,19 +138,19 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         // ── Window (issue #73's chrome preferences, grouped here) ──
         kit::caption("window"),
         row![
-            button(kit::caption(format!("theme: {}", d.theme)))
+            kit::action(kit::caption(format!("theme: {}", d.theme)))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)))
                 .padding(4),
-            button(kit::caption("-"))
+            kit::action(kit::caption("-"))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)))
                 .padding(4),
-            button(kit::caption(format!(
+            kit::action(kit::caption(format!(
                 "{}%",
                 (d.zoom * 100.0).round() as i32
             )))
             .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)))
             .padding(4),
-            button(kit::caption("+"))
+            kit::action(kit::caption("+"))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)))
                 .padding(4),
         ]
@@ -219,7 +219,7 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         .style(muted),
     );
     col = col.push(
-        checkbox(d.form.eager)
+        kit::check(d.form.eager)
             .label("eager — observe the scope immediately on connect")
             .on_toggle(|b| msg(SettingsMsg::EagerToggled(b)))
             .text_size(font::CAPTION),
@@ -253,10 +253,10 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
 
     col = col.push(
         row![
-            button(kit::caption("apply"))
+            kit::action(kit::caption("apply"))
                 .on_press(msg(SettingsMsg::Apply))
                 .padding(4),
-            button(kit::caption("reconnect now"))
+            kit::action(kit::caption("reconnect now"))
                 .on_press(Message::Deployment(DeploymentMsg::Reconnect))
                 .padding(4),
         ]
@@ -331,7 +331,7 @@ fn input_row<'a>(
 ) -> Element<'a, Message> {
     row![
         kit::caption(label).width(iced::Length::Fixed(110.0)),
-        text_input(placeholder, value)
+        kit::input(placeholder, value)
             .on_input(move |t| msg(on_input(t)))
             .on_submit(msg(SettingsMsg::Apply))
             .size(font::CAPTION),

@@ -112,7 +112,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
         Message::Deployment(DeploymentMsg::ScopeSelected(s))
     })
     .text_size(tokens::font::CAPTION);
-    let selectors_chip = button(kit::caption("selectors…"))
+    let selectors_chip = kit::action(kit::caption("selectors…"))
         .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
             Overlay::Selectors,
         ))))
@@ -234,7 +234,7 @@ fn controls<'a>(
         iced::widget::space::horizontal(),
         // The Settings overlay (#188): the launch knobs, and the same
         // chrome preferences the buttons beside it move.
-        button(kit::caption("settings…"))
+        kit::action(kit::caption("settings…"))
             .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
                 Overlay::Settings
             ))))

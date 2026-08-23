@@ -19,7 +19,7 @@
 //! the editor states it inline rather than trusting a tooltip.
 
 use iced::Element;
-use iced::widget::{Column, button, column, row, text, text_input};
+use iced::widget::{Column, column, row, text};
 
 use crate::message::{Message, PaneMsg};
 use crate::scope::ScopePreset;
@@ -123,7 +123,7 @@ fn resolved<'a>(mut col: Column<'a, Message>, d: &ScopeEditorData<'_>) -> Column
         col = col.push(selector_row(sel));
     }
     col.push(
-        button(kit::caption("fork into custom and edit"))
+        kit::action(kit::caption("fork into custom and edit"))
             .on_press(msg(ScopeMsg::Fork))
             .padding(4),
     )
@@ -145,12 +145,12 @@ fn editing<'a>(mut col: Column<'a, Message>, form: &'a ScopeForm) -> Column<'a, 
     for (i, sel) in form.rows.iter().enumerate() {
         col = col.push(
             row![
-                text_input("key expression, e.g. demo/**", sel)
+                kit::input("key expression, e.g. demo/**", sel)
                     .on_input(move |t| msg(ScopeMsg::RowChanged(i, t)))
                     .on_submit(msg(ScopeMsg::Apply))
                     .font(iced::Font::MONOSPACE)
                     .size(font::CAPTION),
-                button(kit::caption("remove"))
+                kit::action(kit::caption("remove"))
                     .on_press(msg(ScopeMsg::RowRemoved(i)))
                     .padding(4),
             ]
@@ -170,10 +170,10 @@ fn editing<'a>(mut col: Column<'a, Message>, form: &'a ScopeForm) -> Column<'a, 
     }
     col.push(
         row![
-            button(kit::caption("add selector"))
+            kit::action(kit::caption("add selector"))
                 .on_press(msg(ScopeMsg::RowAdded))
                 .padding(4),
-            button(kit::caption("apply — the scope becomes custom"))
+            kit::action(kit::caption("apply — the scope becomes custom"))
                 .on_press(msg(ScopeMsg::Apply))
                 .padding(4),
         ]
