@@ -25,6 +25,9 @@ use crate::message::{ChromeMsg, DeploymentMsg, Message, PaneMsg, PrefsMsg};
 use crate::view::kit;
 use crate::view::status::keys_text;
 use crate::view::theme::colors;
+// Chrome spacing (#192): this pane floats from the palette like Connect —
+// window chrome, not a dock — so it spends the `space::` constants and does
+// not take a density-resolved `Spacing`.
 use crate::view::tokens::{font, space};
 
 /// The overlay's editable state (owned by the app, like the Connect form).
@@ -140,19 +143,19 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         row![
             kit::action(kit::caption(format!("theme: {}", d.theme)))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)))
-                .padding(4),
+                .padding(space::XS),
             kit::action(kit::caption("-"))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)))
-                .padding(4),
+                .padding(space::XS),
             kit::action(kit::caption(format!(
                 "{}%",
                 (d.zoom * 100.0).round() as i32
             )))
             .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)))
-            .padding(4),
+            .padding(space::XS),
             kit::action(kit::caption("+"))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)))
-                .padding(4),
+                .padding(space::XS),
         ]
         .spacing(space::SM),
         // ── The bounds that apply live ──
@@ -255,10 +258,10 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         row![
             kit::action(kit::caption("apply"))
                 .on_press(msg(SettingsMsg::Apply))
-                .padding(4),
+                .padding(space::XS),
             kit::action(kit::caption("reconnect now"))
                 .on_press(Message::Deployment(DeploymentMsg::Reconnect))
-                .padding(4),
+                .padding(space::XS),
         ]
         .spacing(space::SM),
     );

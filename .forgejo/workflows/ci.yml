@@ -60,6 +60,10 @@ jobs:
       # and the focus ring are handled once, and a raw widget constructor at
       # a call site is exactly the per-site styling that rule closed.
       - run: ./scripts/check-interactive.sh
+      # The spacing grid (#192): every .padding()/.spacing() takes the scale
+      # (sp.* in a dock, space::* in the chrome) — density can only multiply
+      # what goes through the tokens.
+      - run: ./scripts/check-spacing.sh
 
   clippy:
     runs-on: ubuntu-24.04

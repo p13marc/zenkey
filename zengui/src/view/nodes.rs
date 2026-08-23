@@ -14,7 +14,7 @@ use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
 use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
 use crate::view::kit;
 use crate::view::theme::{PresenceTone, colors};
-use crate::view::tokens::space;
+use crate::view::tokens::Spacing;
 
 /// The pane's interactions, nested per the `CallMsg` precedent.
 #[derive(Debug, Clone)]
@@ -42,6 +42,8 @@ pub struct NodesData<'a> {
     /// The loaded registry, for the roster→slice join (#234). `None` = not
     /// asked, and the rows then claim nothing about apps or versions.
     pub slices: Option<&'a SliceSet>,
+    /// The dock's resolved spacing grid (#192).
+    pub sp: Spacing,
 }
 
 /// Wrap one of this pane's messages for the app (#176).
@@ -54,7 +56,8 @@ fn msg(m: NodesMsg) -> Message {
 }
 
 pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
-    let mut col = column![kit::section_header("nodes", None)].spacing(space::SM);
+    let sp = d.sp;
+    let mut col = column![kit::section_header("nodes", None)].spacing(sp.sm);
 
     // The catalog line comes first, always, by name: "catalog dead" and
     // "no entities" must never look alike (D4 / RFC 04 §5).
@@ -94,7 +97,8 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
         .live_map()
         .map(|m| zenkey_fleet::node_rows(&m, d.slices));
 
-    let mut cards = column![].spacing(space::SM);
+    // MD between cards (#192): the rule, not a taste — SM is for inside one.
+    let mut cards = column![].spacing(sp.md);
     for (origin, producers) in d.roster.iter() {
         let selected = d.selected == Some(origin.as_str());
         cards = cards.push(origin_card(
@@ -103,6 +107,7 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
             selected,
             d.detail,
             joined.as_ref(),
+            sp,
         ));
     }
     col = col.push(scrollable(cards).height(Length::Fill));
@@ -115,12 +120,13 @@ fn origin_card<'a>(
     selected: bool,
     detail: &'a DetailState,
     joined: Option<&NodeList>,
+    sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut body = column![].spacing(space::XS);
+    let mut body = column![].spacing(sp.xs);
 
     let header = row![
         kit::link(kit::emphasis(origin).font(iced::Font::MONOSPACE))
-            .padding(0)
+            .padding(iced::Padding::ZERO)
             // Straight to the workspace's subject rather than to this pane
             // (#181): a card is one of several ways to point the window at an
             // origin, and the pane is not the owner of what is being looked at.
@@ -133,19 +139,19 @@ fn origin_card<'a>(
             }))),
         iced::widget::space::horizontal(),
         kit::action(kit::caption("show in tree"))
-            .padding(2)
+            .padding([0.0, sp.xs])
             .on_press(msg(NodesMsg::ShowInTree(origin.to_string()))),
     ]
-    .spacing(space::SM)
+    .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
     body = body.push(header);
 
-    for row in presence_rows(origin, producers, joined) {
+    for row in presence_rows(origin, producers, joined, sp) {
         body = body.push(row);
     }
 
     if selected {
-        body = body.push(detail_section(detail));
+        body = body.push(detail_section(detail, sp));
     }
     kit::card(body)
 }
@@ -163,6 +169,7 @@ fn presence_rows<'a>(
     origin: &'a str,
     producers: &'a std::collections::BTreeMap<String, ProducerPresence>,
     joined: Option<&NodeList>,
+    sp: Spacing,
 ) -> Vec<Element<'a, Message>> {
     producers
         .iter()
@@ -196,7 +203,7 @@ fn presence_rows<'a>(
                 tone,
                 format!("{producer}: {presence_label}")
             )]
-            .spacing(space::SM)
+            .spacing(sp.sm)
             .align_y(iced::Alignment::Center);
             if let Some(declared) = declared {
                 r = r.push(kit::muted(declared));
@@ -217,6 +224,7 @@ pub fn presence_section<'a>(
     roster: &'a NodeRoster,
     origin: &'a str,
     joined: Option<&NodeList>,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     let Some((_, producers)) = roster.iter().find(|(o, _)| o.as_str() == origin) else {
         return kit::empty_state(
@@ -225,15 +233,15 @@ pub fn presence_section<'a>(
              a verdict (RFC 05 §3.1)",
         );
     };
-    let mut col = column![].spacing(space::XS);
-    for row in presence_rows(origin, producers, joined) {
+    let mut col = column![].spacing(sp.xs);
+    for row in presence_rows(origin, producers, joined, sp) {
         col = col.push(row);
     }
     col.into()
 }
 
 /// The `node_info` one-shot, rendered — the pane's only data-plane cost.
-pub fn detail_section(detail: &DetailState) -> Element<'_, Message> {
+pub fn detail_section(detail: &DetailState, sp: Spacing) -> Element<'_, Message> {
     match detail {
         DetailState::NotAsked => kit::muted("select to ask node_info"),
         DetailState::Loading(origin) => kit::muted(format!("asking node_info for {origin}…")),
@@ -243,7 +251,7 @@ pub fn detail_section(detail: &DetailState) -> Element<'_, Message> {
             })
             .into(),
         DetailState::Loaded(_, Ok(info)) => {
-            let mut col = column![].spacing(space::XS);
+            let mut col = column![].spacing(sp.xs);
             if info.producers.is_empty() {
                 col = col.push(kit::muted(
                     "no introspect reply — capabilities unknown, not absent",

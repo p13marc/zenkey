@@ -21,7 +21,7 @@ use iced::widget::{Column, column, row, text};
 use zenkey_fleet::{SampleView, SliceSet, WatchId};
 
 use super::kit;
-use super::tokens::{font, space};
+use super::tokens::{Spacing, font};
 use crate::message::{Message, PaneMsg};
 
 /// Media pane interactions.
@@ -161,8 +161,12 @@ fn msg(m: MediaMsg) -> Message {
 
 /// The Inspector's `@media`-plane sections (#182). See
 /// [`super::detail::section`] for why this is a `Column`.
-pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Column<'a, Message> {
-    let mut col = column![kit::section_header("Media", None)].spacing(space::SM);
+pub fn section<'a>(
+    state: &'a MediaState,
+    slices: Option<&'a SliceSet>,
+    sp: Spacing,
+) -> Column<'a, Message> {
+    let mut col = column![kit::section_header("Media", None)].spacing(sp.sm);
 
     // Declared streams, off the bus (#77): the enumeration RFC 07 §1's
     // no-wildcard rule depends on. No registry loaded = "not asked" (O4).
@@ -205,7 +209,7 @@ pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Colum
                                     producer: slice.name.clone(),
                                     path: m.path.clone(),
                                 }))
-                                .padding(2),
+                                .padding([0.0, sp.xs]),
                         );
                     } else {
                         col = col.push(kit::muted(label));
@@ -234,13 +238,13 @@ pub fn section<'a>(state: &'a MediaState, slices: Option<&'a SliceSet>) -> Colum
         match &state.viewing {
             None => kit::action(kit::caption("view"))
                 .on_press(msg(MediaMsg::View))
-                .padding(4),
+                .padding(sp.xs),
             Some(_) => kit::action(kit::caption("stop"))
                 .on_press(msg(MediaMsg::Stop))
-                .padding(4),
+                .padding(sp.xs),
         },
     ]
-    .spacing(space::SM)
+    .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
     col = col.push(controls);
 

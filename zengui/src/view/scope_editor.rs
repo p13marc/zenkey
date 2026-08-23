@@ -25,6 +25,9 @@ use crate::message::{Message, PaneMsg};
 use crate::scope::ScopePreset;
 use crate::view::kit;
 use crate::view::theme::colors;
+// Chrome spacing (#192): this pane floats from the palette like Connect —
+// window chrome, not a dock — so it spends the `space::` constants and does
+// not take a density-resolved `Spacing`.
 use crate::view::tokens::{font, space};
 
 /// The editor's draft state (owned by the app, like the Connect form).
@@ -125,7 +128,7 @@ fn resolved<'a>(mut col: Column<'a, Message>, d: &ScopeEditorData<'_>) -> Column
     col.push(
         kit::action(kit::caption("fork into custom and edit"))
             .on_press(msg(ScopeMsg::Fork))
-            .padding(4),
+            .padding(space::XS),
     )
 }
 
@@ -136,7 +139,7 @@ fn selector_row<'a>(sel: String) -> Element<'a, Message> {
         kit::caption(sel).font(iced::Font::MONOSPACE),
         kit::muted(format!("  cannot see: {spot}")),
     ]
-    .spacing(1)
+    .spacing(space::XS)
     .into()
 }
 
@@ -152,7 +155,7 @@ fn editing<'a>(mut col: Column<'a, Message>, form: &'a ScopeForm) -> Column<'a, 
                     .size(font::CAPTION),
                 kit::action(kit::caption("remove"))
                     .on_press(msg(ScopeMsg::RowRemoved(i)))
-                    .padding(4),
+                    .padding(space::XS),
             ]
             .spacing(space::SM)
             .align_y(iced::Alignment::Center),
@@ -172,10 +175,10 @@ fn editing<'a>(mut col: Column<'a, Message>, form: &'a ScopeForm) -> Column<'a, 
         row![
             kit::action(kit::caption("add selector"))
                 .on_press(msg(ScopeMsg::RowAdded))
-                .padding(4),
+                .padding(space::XS),
             kit::action(kit::caption("apply — the scope becomes custom"))
                 .on_press(msg(ScopeMsg::Apply))
-                .padding(4),
+                .padding(space::XS),
         ]
         .spacing(space::SM),
     )

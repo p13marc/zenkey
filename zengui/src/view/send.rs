@@ -46,7 +46,7 @@ use std::sync::Arc;
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
-use crate::view::tokens::{font, space};
+use crate::view::tokens::{Spacing, font};
 
 /// How many send-log lines the pane keeps. Bounded on purpose: a 5 Hz stream
 /// left running overnight is 150k lines, and an explorer that grows without
@@ -406,8 +406,9 @@ pub fn pane<'a>(
     form: &'a SendForm,
     slices: Option<&'a SliceSet>,
     roster: &'a crate::nodes::NodeRoster,
+    sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut modes = row![].spacing(space::XS);
+    let mut modes = row![].spacing(sp.xs);
     for m in SendMode::ALL {
         modes = modes.push(kit::tab(
             m.label(),
@@ -415,11 +416,11 @@ pub fn pane<'a>(
             msg(SendMsg::ModeSelected(m)),
         ));
     }
-    let mut col = column![kit::section_header("Send", None), modes].spacing(space::SM);
+    let mut col = column![kit::section_header("Send", None), modes].spacing(sp.sm);
 
     col = match form.mode {
-        SendMode::Publish => publish_body(col, form, slices.is_some()),
-        SendMode::Call => call_body(col, form, slices, roster),
+        SendMode::Publish => publish_body(col, form, slices.is_some(), sp),
+        SendMode::Call => call_body(col, form, slices, roster, sp),
     };
 
     iced::widget::scrollable(col).height(Length::Fill).into()
@@ -431,6 +432,7 @@ fn publish_body<'a>(
     mut col: Column<'a, Message>,
     form: &'a SendForm,
     slices_loaded: bool,
+    sp: Spacing,
 ) -> Column<'a, Message> {
     let key = kit::input("key: full wire key to publish on", &form.key)
         .on_input(|t| msg(SendMsg::KeyChanged(t)))
@@ -438,14 +440,16 @@ fn publish_body<'a>(
 
     // KeyFacts feedback as you type — the same classification ladder the tree
     // renders, so a key that will not refine says so *before* the send.
-    let mut facts_col = Column::new().spacing(2);
+    let mut facts_col = Column::new().spacing(sp.xs);
     match (&form.facts, form.key.trim().is_empty()) {
         (_, true) => {
             facts_col = facts_col.push(kit::muted(
                 "a full wire key, base included — this session is un-namespaced (RFC 09 §5)",
             ));
         }
-        (Some(f), false) => facts_col = facts_col.push(crate::view::detail::facts_section(f)),
+        (Some(f), false) => {
+            facts_col = facts_col.push(crate::view::detail::facts_section(f, sp));
+        }
         (None, false) => {}
     }
     if !slices_loaded && !form.key.trim().is_empty() {
@@ -505,22 +509,22 @@ fn publish_body<'a>(
     } else {
         "send"
     }))
-    .padding(4);
+    .padding(sp.xs);
     if ready {
         send = send.on_press(msg(SendMsg::Send));
     }
-    let mut controls = row![send].spacing(space::SM);
+    let mut controls = row![send].spacing(sp.sm);
     if form.armed {
         controls = controls.push(
             kit::action(kit::caption("stop"))
-                .padding(4)
+                .padding(sp.xs)
                 .on_press(msg(SendMsg::Stop)),
         );
     }
     // Retire (#115): a tombstone, not an empty put. Off the state class it
     // is the v1.12 operator act and stays disabled until confirmed.
     let needs_i_know = retire_needs_i_know(form.facts.as_ref());
-    let mut retire = kit::action(kit::caption("retire")).padding(4);
+    let mut retire = kit::action(kit::caption("retire")).padding(sp.xs);
     if ready && (!needs_i_know || form.retire_i_know) {
         retire = retire.on_press(msg(SendMsg::Retire));
     }
@@ -538,14 +542,14 @@ fn publish_body<'a>(
     col = col.push(key);
     col = col.push(facts_col);
     col = col.push(body);
-    col = col.push(row![qos, encoding].spacing(space::SM));
+    col = col.push(row![qos, encoding].spacing(sp.sm));
     if let Some(line) = qos_source {
         col = col.push(line);
     }
     col = col.push(attachment);
     col = col.push(
         row![raw, repeat, interval]
-            .spacing(space::SM)
+            .spacing(sp.sm)
             .align_y(iced::Alignment::Center),
     );
     col = col.push(controls);
@@ -569,7 +573,7 @@ fn publish_body<'a>(
     if form.armed {
         col = col.push(kit::muted(matching_sentence(form.matching)));
     }
-    col.push(log_view(form))
+    col.push(log_view(form, sp))
 }
 
 /// How the last body reached the wire. Encoded and as-typed must never look
@@ -604,12 +608,12 @@ fn matching_sentence(matching: Option<bool>) -> String {
 /// Split out of the pane so verifying a publish does not mean leaving the
 /// form. The form asks a question; the log is what came back, and those are
 /// two different regions of the workspace.
-pub fn log_section(form: &SendForm) -> Element<'_, Message> {
-    log_view(form)
+pub fn log_section(form: &SendForm, sp: Spacing) -> Element<'_, Message> {
+    log_view(form, sp)
 }
 
-fn log_view(form: &SendForm) -> Element<'_, Message> {
-    let mut col = Column::new().spacing(2);
+fn log_view(form: &SendForm, sp: Spacing) -> Element<'_, Message> {
+    let mut col = Column::new().spacing(sp.xs);
     if form.log.is_empty() {
         return col.push(kit::muted("no sends yet")).into();
     }
@@ -642,6 +646,7 @@ fn call_body<'a>(
     form: &'a SendForm,
     slices: Option<&'a SliceSet>,
     roster: &'a crate::nodes::NodeRoster,
+    sp: Spacing,
 ) -> Column<'a, Message> {
     let Some(slices) = slices else {
         return col.push(kit::empty_state(
@@ -698,7 +703,7 @@ fn call_body<'a>(
         .map(|d| d.fanout.as_deref() == Some("forbidden"))
         .unwrap_or(false);
 
-    let mut meta = Column::new().spacing(2);
+    let mut meta = Column::new().spacing(sp.xs);
     if let Some(Err(e)) = info.as_ref() {
         // Unreachable while the picker feeds from the same slices, but a
         // projection that answers with an error is rendered, not swallowed.
@@ -750,10 +755,10 @@ fn call_body<'a>(
                                 .join(", ")
                         )),
                         kit::action(kit::caption("scaffold body"))
-                            .padding(2)
+                            .padding([0.0, sp.xs])
                             .on_press(msg(SendMsg::ScaffoldBody)),
                     ]
-                    .spacing(space::SM)
+                    .spacing(sp.sm)
                     .align_y(iced::Alignment::Center),
                 ),
                 Some(_) => meta.push(kit::muted(format!(
@@ -800,14 +805,14 @@ fn call_body<'a>(
     } else {
         "call"
     }))
-    .padding(4);
+    .padding(sp.xs);
     if ready {
         submit = submit.on_press(msg(SendMsg::Submit));
     }
 
     col = col.push(
         row![producer_pick, procedure_pick]
-            .spacing(space::SM)
+            .spacing(sp.sm)
             .align_y(iced::Alignment::Center),
     );
     col = col.push(meta);
@@ -818,7 +823,7 @@ fn call_body<'a>(
     col = col.push(submit);
 
     if let Some(outcome) = &form.outcome {
-        col = col.push(outcome_view(outcome, form, roster));
+        col = col.push(outcome_view(outcome, form, roster, sp));
     }
     col
 }
@@ -853,6 +858,7 @@ fn outcome_view<'a>(
     outcome: &'a Result<CallReport, String>,
     form: &'a SendForm,
     roster: &'a crate::nodes::NodeRoster,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     match outcome {
         Err(e) => kit::body(format!("refused / failed: {e}"))
@@ -861,7 +867,7 @@ fn outcome_view<'a>(
             })
             .into(),
         Ok(report) => {
-            let mut col = Column::new().spacing(2);
+            let mut col = Column::new().spacing(sp.xs);
             col = col.push(kit::mono(format!("→ {}", report.key)));
             if report.answers.is_empty() {
                 // Exit-code 2's meaning, rendered: silence is not a verdict.

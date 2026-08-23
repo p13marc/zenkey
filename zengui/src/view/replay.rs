@@ -22,7 +22,7 @@ use zenkey_fleet::RetentionStats;
 
 use super::kit;
 use super::theme::colors;
-use super::tokens::{font, space};
+use super::tokens::{Spacing, font, space};
 use crate::message::{Message, WorkspaceMsg};
 use crate::replay::{ReplaySource, ReplayState};
 use crate::state::workspace::ReplayMode;
@@ -201,7 +201,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
             ReplaySource::Retained { .. } => "back to live",
         }))
         .on_press(msg(ReplayMsg::Exit))
-        .padding(4),
+        .padding(space::XS),
     );
 
     iced::widget::column![meta].spacing(space::XS).into()
@@ -213,12 +213,12 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
 /// indicator and stays between the location bar and the panes, where it cannot be
 /// put away; the transport is a stream control and lives in the dock's Replay
 /// tab.
-pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
+pub fn scrubber(state: &ReplayState, sp: Spacing) -> Element<'_, Message> {
     let (pos, span) = state.clock();
     let mut transport = row![
         kit::action(kit::caption(if state.playing { "pause" } else { "play" }))
             .on_press(msg(ReplayMsg::Toggled))
-            .padding(4),
+            .padding(sp.xs),
         kit::picker(SPEEDS, Some(Speed(state.speed)), |s| msg(
             ReplayMsg::SpeedSelected(s)
         ))
@@ -234,7 +234,7 @@ pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
         // observer's arrival offsets — not the publishers' HLC.
         kit::muted(format!("{pos:.1}s / {span:.1}s (capture clock t)")),
     ]
-    .spacing(space::SM)
+    .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
     // A retained window can become a file (#217): through the ordinary
     // writer, so the result is indistinguishable from a deliberate capture.
@@ -242,7 +242,7 @@ pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
         transport = transport.push(
             kit::action(kit::caption("save window as .zrec"))
                 .on_press(msg(ReplayMsg::SaveWindow))
-                .padding(4),
+                .padding(sp.xs),
         );
     }
 
@@ -259,7 +259,7 @@ pub fn loading_note(path: &str) -> String {
 }
 
 /// The open row: a path box, shown on demand from the location bar.
-pub fn open_row(path: &str) -> Element<'_, Message> {
+pub fn open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
     row![
         kit::caption("replay file"),
         kit::input(".zrec path", path)
@@ -269,12 +269,12 @@ pub fn open_row(path: &str) -> Element<'_, Message> {
             .width(Length::Fill),
         kit::action(kit::caption("open"))
             .on_press(msg(ReplayMsg::Open))
-            .padding(4),
+            .padding(sp.xs),
         kit::action(kit::caption("cancel"))
             .on_press(msg(ReplayMsg::OpenToggled))
-            .padding(4),
+            .padding(sp.xs),
     ]
-    .spacing(space::SM)
+    .spacing(sp.sm)
     .align_y(iced::Alignment::Center)
     .into()
 }

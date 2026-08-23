@@ -236,7 +236,7 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
             picker,
             kit::action(kit::caption("load into editor"))
                 .on_press(msg(ContextMsg::Load))
-                .padding(4),
+                .padding(space::XS),
         ]
         .spacing(space::SM)
         .align_y(iced::Alignment::Center),
@@ -317,13 +317,13 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         row![
             kit::action(kit::caption("save"))
                 .on_press(msg(ContextMsg::Save))
-                .padding(4),
+                .padding(space::XS),
             kit::action(kit::caption("save + switch to it"))
                 .on_press(msg(ContextMsg::SaveAndSelect))
-                .padding(4),
+                .padding(space::XS),
             kit::action(kit::caption("isolated-verification preset"))
                 .on_press(msg(ContextMsg::Isolate))
-                .padding(4),
+                .padding(space::XS),
         ]
         .spacing(space::SM),
     );
@@ -367,7 +367,7 @@ fn scouting_help<'a>() -> Element<'a, Message> {
         .style(muted)
         .into(),
     ])
-    .spacing(2)
+    .spacing(space::XS)
     .into()
 }
 

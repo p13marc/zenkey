@@ -453,6 +453,8 @@ pub enum Message {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrefsMsg {
     ThemeToggled,
+    /// Ctrl+Shift+D (#192): comfortable ⇄ compact, globally, persisted.
+    DensityToggled,
     ZoomIn,
     ZoomOut,
     ZoomReset,

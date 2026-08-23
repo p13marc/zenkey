@@ -17,6 +17,7 @@ use iced_test::simulator;
 use zengui::history::HistoryRecorder;
 use zengui::keyfacts::KeyFacts;
 use zengui::message::Message;
+use zengui::view::tokens::Spacing;
 use zengui::view::tree::{self, FactsIndex};
 use zenkey_fleet::stats::StatsTable;
 use zenkey_fleet::{KeyTreeSnapshot, SliceSet};
@@ -35,6 +36,12 @@ fn snapshot(keys: &[&str]) -> zenkey_fleet::skeleton::MergedNode {
     // Pane tests watch everything: rows read Observed, as the bootstrap did.
     let skel = zenkey_fleet::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
     zenkey_fleet::skeleton::merge(&skel, &observed, &["**".to_string()])
+}
+
+/// The comfortable grid — panes render the same claims at either density
+/// (#192), so the honesty tests pin them at the default.
+fn sp() -> Spacing {
+    Spacing::default()
 }
 
 fn slices() -> SliceSet {
@@ -139,6 +146,7 @@ fn the_tree_renders_the_registration_state() {
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        sp: sp(),
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
@@ -171,6 +179,43 @@ fn the_tree_renders_the_registration_state() {
     }
 }
 
+/// #192's acceptance, from the render side: density moves the grid and the
+/// row heights, never the words or their sizes. The same pane at Comfortable
+/// and Compact makes the same claims — and the type side is pinned
+/// structurally in `view/tokens.rs` (`Spacing` has no font field; every
+/// `.size(` is gated onto `font::`, whose constants take no density).
+#[test]
+fn density_changes_the_grid_never_the_claims() {
+    use zengui::prefs::Density;
+
+    let keys = [REGISTERED, UNREGISTERED, FOREIGN];
+    let (flat, facts) = render(&keys, true);
+    let watches = BTreeSet::new();
+    for density in Density::ALL {
+        let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+            sp: Spacing::of(density),
+            flat: &flat,
+            pivot: tree::Pivot::Chunks,
+            search: "",
+            scroll_y: 0.0,
+            viewport_h: 600.0,
+            facts: &facts,
+            watches: tree::Watches {
+                mine: &watches,
+                seeding: &watches,
+            },
+            selected: None,
+        }));
+        for claim in ["registered", "unregistered", "TelemetryPoint"] {
+            assert!(
+                ui.find(claim).is_ok(),
+                "{claim:?} must survive {} density",
+                density.label()
+            );
+        }
+    }
+}
+
 /// Before a registry is loaded, nothing may be badged either way — that would
 /// report a verdict never obtained (RFC 09 §5.1 O4).
 #[test]
@@ -179,6 +224,7 @@ fn an_unresolved_tree_claims_neither_way() {
     let (flat, facts) = render(&keys, false);
     let watches = BTreeSet::new();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        sp: sp(),
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
@@ -209,6 +255,7 @@ fn foreign_keys_render_without_convention_labels() {
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        sp: sp(),
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
@@ -240,6 +287,7 @@ fn the_empty_tree_explains_itself() {
     let facts = FactsIndex::default();
     let watches = BTreeSet::new();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        sp: sp(),
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
@@ -306,7 +354,7 @@ fn the_call_mode_labels_forbidden_fanout() {
         ..SendForm::default()
     };
     let roster = zengui::nodes::NodeRoster::default();
-    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
     assert!(
         ui.find("fanout = \"forbidden\" — a fleet (*) target is refused (RFC 05 §2.1)")
             .is_ok(),
@@ -331,7 +379,7 @@ fn the_call_mode_labels_forbidden_fanout() {
         mode: SendMode::Call,
         ..SendForm::default()
     };
-    let mut ui = simulator::<Message, _, _>(pane(&empty, None, &roster));
+    let mut ui = simulator::<Message, _, _>(pane(&empty, None, &roster, sp()));
     assert!(ui.find("No registry loaded").is_ok());
 }
 
@@ -393,7 +441,7 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
         media: vec![],
         deprecated: vec![],
     }]);
-    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
     assert!(
         ui.find("did not answer, though alive: h-bbbbbbbbbbbb")
             .is_ok(),
@@ -442,7 +490,7 @@ fn the_call_mode_distinguishes_an_unasked_schema_from_an_empty_one() {
         ..SendForm::default()
     };
     {
-        let mut ui = simulator::<Message, _, _>(pane(&unasked, Some(&slices), &roster));
+        let mut ui = simulator::<Message, _, _>(pane(&unasked, Some(&slices), &roster, sp()));
         assert!(
             ui.find("CaptureSpec: schema not asked yet — pick the procedure again once connected to scaffold from it")
                 .is_ok(),
@@ -466,7 +514,7 @@ fn the_call_mode_distinguishes_an_unasked_schema_from_an_empty_one() {
         ..unasked
     };
     {
-        let mut ui = simulator::<Message, _, _>(pane(&asked, Some(&slices), &roster));
+        let mut ui = simulator::<Message, _, _>(pane(&asked, Some(&slices), &roster, sp()));
         assert!(
             ui.find("CaptureSpec fields: iface: string*, seconds: integer")
                 .is_ok(),
@@ -500,7 +548,7 @@ fn the_publish_mode_says_how_the_body_reached_the_wire() {
         ..SendForm::default()
     };
     {
-        let mut ui = simulator::<Message, _, _>(pane(&base, Some(&slices), &roster));
+        let mut ui = simulator::<Message, _, _>(pane(&base, Some(&slices), &roster, sp()));
         assert!(
             ui.find("encoded as TelemetryPoint → application/protobuf")
                 .is_ok()
@@ -514,7 +562,7 @@ fn the_publish_mode_says_how_the_body_reached_the_wire() {
         ..base.clone()
     };
     {
-        let mut ui = simulator::<Message, _, _>(pane(&as_typed, Some(&slices), &roster));
+        let mut ui = simulator::<Message, _, _>(pane(&as_typed, Some(&slices), &roster, sp()));
         assert!(ui.find("sent as typed → (no encoding set)").is_ok());
         assert!(
             ui.find("sysinfo serves no schema for TelemetryPoint")
@@ -528,7 +576,7 @@ fn the_publish_mode_says_how_the_body_reached_the_wire() {
         raw: true,
         ..base.clone()
     };
-    let mut ui = simulator::<Message, _, _>(pane(&raw, Some(&slices), &roster));
+    let mut ui = simulator::<Message, _, _>(pane(&raw, Some(&slices), &roster, sp()));
     assert!(ui.find("sent raw — bytes verbatim, not encoded").is_ok());
 }
 
@@ -548,7 +596,7 @@ fn the_publish_mode_bounds_its_log_and_never_invents_a_matcher() {
         ..SendForm::default()
     };
     {
-        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
         assert!(ui.find("matching: not asked").is_ok());
     }
     // The five profiles, and only those (RFC 04 §3's closed vocabulary).
@@ -564,7 +612,7 @@ fn the_publish_mode_bounds_its_log_and_never_invents_a_matcher() {
 
     form.matching = Some(false);
     {
-        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
         assert!(
             ui.find(
                 "matching: no subscriber currently matches this publication — a routing \
@@ -580,7 +628,7 @@ fn the_publish_mode_bounds_its_log_and_never_invents_a_matcher() {
         form.log(true, format!("sent {i} bytes"));
     }
     {
-        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
         assert!(
             ui.find(format!(
                 "send log — {LOG_LINES} shown, 3 dropped (bounded at {LOG_LINES})"
@@ -591,7 +639,7 @@ fn the_publish_mode_bounds_its_log_and_never_invents_a_matcher() {
     }
 
     // With no registry the pane says "not asked", never "unregistered".
-    let mut ui = simulator::<Message, _, _>(pane(&form, None, &roster));
+    let mut ui = simulator::<Message, _, _>(pane(&form, None, &roster, sp()));
     assert!(
         ui.find(
             "no registry loaded — the body cannot be schema-checked, and that is \
@@ -613,7 +661,7 @@ fn the_send_pane_offers_both_modes_over_one_form() {
     let roster = zengui::nodes::NodeRoster::default();
     let mut form = SendForm::default();
     {
-        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
         assert!(ui.find("put / publish").is_ok());
         assert!(
             ui.find("get / call").is_ok(),
@@ -631,7 +679,7 @@ fn the_send_pane_offers_both_modes_over_one_form() {
         );
     }
     form.mode = SendMode::Call;
-    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
     assert!(ui.find("put / publish").is_ok(), "…and the way back too");
 }
 
@@ -666,6 +714,7 @@ fn the_detail_pane_tags_decode_provenance() {
         Rendering::Structural(r#"{"value":42.0}"#.to_string()),
     );
     let mut ui = simulator::<Message, _, _>(section(DetailData {
+        sp: sp(),
         key,
         facts: Some(&facts),
         fetched: Fetched::Landed(&fetched),
@@ -688,6 +737,7 @@ fn the_detail_pane_tags_decode_provenance() {
         attempted: ["get", "@adv cache", "subscribe window"],
     }));
     let mut ui = simulator::<Message, _, _>(section(DetailData {
+        sp: sp(),
         key,
         facts: Some(&facts),
         fetched: Fetched::Landed(&none),
@@ -718,6 +768,7 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
 
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
     let data = |fetched| DetailData {
+        sp: sp(),
         key,
         facts: None,
         fetched,
@@ -795,6 +846,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         observed: &'a KeyTreeSnapshot,
     ) -> InspectorData<'a> {
         InspectorData {
+            sp: sp(),
             subject,
             facts,
             fetched: Fetched::NotAsked,
@@ -928,6 +980,7 @@ fn the_nodes_pane_marks_retraction_suspect_and_names_the_catalog() {
     );
 
     let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        sp: sp(),
         roster: &roster,
         selected: None,
         detail: &DetailState::NotAsked,
@@ -960,6 +1013,7 @@ fn the_nodes_pane_distinguishes_not_asked_from_empty() {
 
     let roster = NodeRoster::default();
     let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        sp: sp(),
         roster: &roster,
         selected: None,
         detail: &DetailState::NotAsked,
@@ -1009,6 +1063,7 @@ fn the_node_detail_reports_freshness_honestly() {
     };
     let detail = DetailState::Loaded("h-3fa9c2d41b7e".to_string(), Ok(Arc::new(info)));
     let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        sp: sp(),
         roster: &roster,
         selected: Some("h-3fa9c2d41b7e"),
         detail: &detail,
@@ -1032,7 +1087,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
     use zenkey_fleet::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
     let state = DoctorState::default();
-    let mut ui = simulator::<Message, _, _>(section(&state, ""));
+    let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
     assert!(
         ui.find("no doctor run yet").is_ok(),
         "never-run must not read as a clean fleet (O4)"
@@ -1064,7 +1119,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
         }),
         "",
     );
-    let mut ui = simulator::<Message, _, _>(section(&state, ""));
+    let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
     assert!(ui.find("slice-sync").is_ok(), "the stable check id renders");
     assert!(ui.find("RFC 08 §6").is_ok(), "the citation renders");
     assert!(
@@ -1098,7 +1153,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
         }),
         "",
     );
-    let mut ui = simulator::<Message, _, _>(section(&state, ""));
+    let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
     assert!(
         ui.find("vs previous run: 1 new · 1 fixed · 0 unchanged")
             .is_ok(),
@@ -1148,7 +1203,7 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
         }),
         "",
     );
-    let mut ui = simulator::<Message, _, _>(section(&state, ""));
+    let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
     assert!(
         ui.find(
             "listened 10s over 2 scopes: 42 samples on 7 keys, 3 dropped \
@@ -1467,6 +1522,7 @@ fn the_history_pane_says_why_it_is_empty() {
 
     // Nothing selected.
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        sp: sp(),
         key: None,
         recorder: None,
         watched: false,
@@ -1477,6 +1533,7 @@ fn the_history_pane_says_why_it_is_empty() {
     // Selected, but no watch covers it — the two must not read alike.
     let rec = recording(REGISTERED, 8, &[]);
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        sp: sp(),
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: false,
@@ -1493,6 +1550,7 @@ fn the_history_pane_says_why_it_is_empty() {
 
     // Watched and genuinely quiet: a different sentence, and not a verdict.
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        sp: sp(),
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
@@ -1523,6 +1581,7 @@ fn the_history_pane_diffs_consecutive_payloads() {
         ],
     );
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        sp: sp(),
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
@@ -1563,6 +1622,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
     rec.selected = Some(1);
     {
         let mut ui = simulator::<Message, _, _>(section(HistoryData {
+            sp: sp(),
             key: Some(REGISTERED),
             recorder: Some(&rec),
             watched: true,
@@ -1583,6 +1643,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
     rec.selected = Some(2);
     {
         let mut ui = simulator::<Message, _, _>(section(HistoryData {
+            sp: sp(),
             key: Some(REGISTERED),
             recorder: Some(&rec),
             watched: true,
@@ -1610,6 +1671,7 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
         ],
     );
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        sp: sp(),
         key: Some(FOREIGN),
         recorder: Some(&rec),
         watched: true,
@@ -1633,6 +1695,7 @@ fn the_history_pane_counts_what_it_evicted() {
     let rec = recording(REGISTERED, 3, &borrowed);
 
     let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        sp: sp(),
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
@@ -1663,6 +1726,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
+        sp: sp(),
         key: FOREIGN,
         facts: None,
         fetched: Fetched::NotAsked,
@@ -1706,6 +1770,7 @@ fn the_detail_pane_labels_the_series_it_plots() {
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
+        sp: sp(),
         key: REGISTERED,
         facts: None,
         fetched: Fetched::NotAsked,
@@ -1749,7 +1814,7 @@ fn the_doctor_pane_offers_the_schema_re_ask_and_reports_it() {
 
     let mut state = DoctorState::default();
     {
-        let mut ui = simulator::<Message, _, _>(section(&state, ""));
+        let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
         assert!(ui.find("re-ask schemas").is_ok());
         assert!(
             ui.find(
@@ -1763,7 +1828,7 @@ fn the_doctor_pane_offers_the_schema_re_ask_and_reports_it() {
 
     state.schemas_forgotten = 1;
     {
-        let mut ui = simulator::<Message, _, _>(section(&state, ""));
+        let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
         assert!(
             ui.find("schema cache cleared 1 time — the next decode asks the bus again")
                 .is_ok()
@@ -1771,7 +1836,7 @@ fn the_doctor_pane_offers_the_schema_re_ask_and_reports_it() {
     }
     state.schemas_forgotten = 3;
     {
-        let mut ui = simulator::<Message, _, _>(section(&state, ""));
+        let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
         assert!(
             ui.find("schema cache cleared 3 times — the next decode asks the bus again")
                 .is_ok()
@@ -1836,7 +1901,7 @@ mod blob {
     #[test]
     fn the_blob_pane_never_reports_what_it_did_not_ask() {
         let state = BlobState::default();
-        let mut ui = simulator::<Message, _, _>(section(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false, sp()));
         assert!(ui.find("no registry loaded").is_ok());
         assert!(ui.find("no probe yet").is_ok());
         assert!(
@@ -1875,7 +1940,7 @@ mod blob {
             }),
             ..Default::default()
         };
-        let mut ui = simulator::<Message, _, _>(section(&state, true));
+        let mut ui = simulator::<Message, _, _>(section(&state, true, sp()));
         assert!(ui.find("netring").is_ok());
         assert!(
             ui.find(
@@ -1908,7 +1973,7 @@ mod blob {
             vec!["ab12".into()],
         );
 
-        let mut ui = simulator::<Message, _, _>(section(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false, sp()));
         assert!(ui.find("h-aaaaaaaaaaaa").is_ok());
         assert!(ui.find("h-bbbbbbbbbbbb").is_ok());
         assert!(
@@ -1925,7 +1990,7 @@ mod blob {
 
         // Chosen: the button names the single origin it will talk to.
         state.holder = Some(1);
-        let mut ui = simulator::<Message, _, _>(section(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false, sp()));
         assert!(
             ui.find("fetch from h-bbbbbbbbbbbb").is_ok(),
             "the control names the one origin, so 'from where?' is never guessed"
@@ -1946,7 +2011,7 @@ mod blob {
             ],
             vec!["ab12".into(), "cd34".into()],
         );
-        let mut ui = simulator::<Message, _, _>(section(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false, sp()));
         assert!(ui.find("2 distinct content roots under one id").is_ok());
         assert!(
             ui.find(
@@ -1977,7 +2042,7 @@ mod blob {
             roots: vec![],
             declared_by: vec!["logs".into()],
         }));
-        let mut ui = simulator::<Message, _, _>(section(&state, false));
+        let mut ui = simulator::<Message, _, _>(section(&state, false, sp()));
         assert!(ui.find("not probed").is_ok());
         assert!(
             ui.find("no origin answered").is_err(),
@@ -2197,7 +2262,7 @@ mod admin {
             })),
             "",
         );
-        let mut ui = simulator::<Message, _, _>(pane(&state));
+        let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
         // #131: the origin join's evidence distinction reaches the caption —
         // attached-by-declaration vs reported-only vs outside the mesh.
         assert!(
@@ -2237,7 +2302,7 @@ mod admin {
 
         // And the unanswered mesh stays a reading.
         let empty = sweep(vec![], vec![], vec![], None, None);
-        let mut ui = simulator::<Message, _, _>(pane(&empty));
+        let mut ui = simulator::<Message, _, _>(pane(&empty, sp()));
         assert!(
             ui.find(
                 "no admin space answered @/*/* — adminspace.enabled defaults off; this is a \
@@ -2272,7 +2337,7 @@ mod admin {
     #[test]
     fn the_admin_pane_never_reports_a_sweep_it_did_not_run() {
         let state = AdminState::default();
-        let mut ui = simulator::<Message, _, _>(pane(&state));
+        let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
         assert!(ui.find("admin space not swept yet").is_ok());
         assert!(
             ui.find(
@@ -2306,7 +2371,7 @@ mod admin {
                  or wait for the bus registry (RFC 08 §6).",
             ),
         );
-        let mut ui = simulator::<Message, _, _>(pane(&state));
+        let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
         // Verbatim from the CLI, so the two tools cannot disagree.
         assert!(
             ui.find(
@@ -2359,7 +2424,7 @@ mod admin {
             Some(DeclaredEntities::default()),
             None,
         );
-        let mut ui = simulator::<Message, _, _>(pane(&state));
+        let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
         assert!(ui.find("covered by latest@z1").is_ok());
         assert!(ui.find("PARTIAL via one@z1").is_ok());
         assert!(ui.find("uncovered").is_ok());
@@ -2402,7 +2467,7 @@ mod admin {
             Some(DeclaredEntities::default()),
             None,
         );
-        let mut ui = simulator::<Message, _, _>(pane(&state));
+        let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
         assert!(
             ui.find("declared entities: 0 — the admin space answered and declared none")
                 .is_ok()
@@ -2461,7 +2526,7 @@ fn the_replay_banner_says_everything() {
         "the scrubber is a stream control, not part of the mode banner"
     );
 
-    let mut ui = simulator::<Message, _, _>(zengui::view::replay::scrubber(&state));
+    let mut ui = simulator::<Message, _, _>(zengui::view::replay::scrubber(&state, sp()));
     assert!(
         ui.find("0.6s / 2.0s (capture clock t)").is_ok(),
         "the scrubber axis names which clock it plots"
@@ -2517,7 +2582,7 @@ fn the_media_pane_lists_declared_streams_honestly() {
     let state = MediaState::default();
 
     // Not asked ≠ nothing declared.
-    let mut ui = simulator::<Message, _, _>(section(&state, None));
+    let mut ui = simulator::<Message, _, _>(section(&state, None, sp()));
     assert!(
         ui.find(
             "no registry loaded — declared streams unknown (not asked, O4); \
@@ -2544,7 +2609,7 @@ encoding = "video/*"
     )
     .unwrap();
     let slices = SliceSet::from_slices(vec![slice]);
-    let mut ui = simulator::<Message, _, _>(section(&state, Some(&slices)));
+    let mut ui = simulator::<Message, _, _>(section(&state, Some(&slices), sp()));
     assert!(ui.find("parallax declares:").is_ok());
     assert!(
         ui.find("  {stream}/preview/png (image/png)").is_ok(),
@@ -2592,7 +2657,7 @@ fn a_media_viewing_reports_what_it_cannot_render() {
         viewing: Some(viewing),
         ..MediaState::default()
     };
-    let mut ui = simulator::<Message, _, _>(section(&state, None));
+    let mut ui = simulator::<Message, _, _>(section(&state, None, sp()));
     assert!(
         ui.find(
             "frame arrived: 4096 B as video/h264 — no decode story for this \
@@ -3004,6 +3069,7 @@ fn projection_inspector<'a>(
         node_detail,
         base: "",
         observed,
+        sp: sp(),
     }
 }
 

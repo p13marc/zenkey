@@ -82,7 +82,9 @@ pub fn tab<'a, M: Clone + 'a>(
     on_press: M,
 ) -> Element<'a, M> {
     button(caption(label.into()))
-        .padding([2, 8])
+        // Half-XS vertical, SM horizontal: a tab is a chip, and its anatomy
+        // is the constructor's to own (#193) — on the scale, not off it.
+        .padding([space::XS / 2.0, space::SM])
         .style(move |theme: &iced::Theme, status| {
             let c = colors(theme);
             let mut style = button::Style {

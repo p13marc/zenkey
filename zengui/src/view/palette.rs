@@ -196,6 +196,10 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
             message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)),
         },
         Action {
+            label: "toggle density (comfortable/compact)".into(),
+            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled)),
+        },
+        Action {
             label: "zoom in".into(),
             message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)),
         },
@@ -345,7 +349,7 @@ fn list<'a>(
         .on_submit(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Activate)))
         .size(font::BODY);
 
-    let mut body = Column::new().spacing(1);
+    let mut body = Column::new().spacing(space::XS);
     if rows.is_empty() {
         body = body.push(kit::muted("nothing matches"));
     }
@@ -361,7 +365,7 @@ fn list<'a>(
                 selected,
             )
             .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Pick(i))))
-            .padding(2),
+            .padding([0.0, space::XS]),
         );
     }
 
@@ -460,7 +464,7 @@ fn floated(content: Element<'_, Message>) -> Element<'_, Message> {
 /// (#190) — the table holds the modifier-less bindings now, Esc included,
 /// so the overlay renders exactly the table and nothing else.
 fn help<'a>() -> Element<'a, Message> {
-    let mut body = Column::new().spacing(2);
+    let mut body = Column::new().spacing(space::XS);
     for b in crate::shortcuts::map() {
         body = body.push(
             row![

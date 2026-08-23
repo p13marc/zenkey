@@ -13,7 +13,7 @@ use crate::doctor::{DoctorState, finding_target};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::{SeverityTone, colors};
-use crate::view::tokens::{font, space};
+use crate::view::tokens::{Spacing, font};
 
 /// The panel's interactions, nested per the `CallMsg` precedent.
 #[derive(Debug, Clone)]
@@ -57,13 +57,13 @@ fn msg(m: DoctorMsg) -> Message {
 /// command, and this is where its verdict lands. That is the honest shape,
 /// because a doctor run is a thing you do to a session, not a view of the
 /// subject.
-pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message> {
+pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Element<'a, Message> {
     let run_label = if state.in_flight {
         "running…"
     } else {
         "run doctor"
     };
-    let mut run = kit::action(kit::caption(run_label)).padding(4);
+    let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
         run = run.on_press(msg(DoctorMsg::Run));
     }
@@ -82,13 +82,13 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message
     // The schema cache's escape hatch lives here because it is the same kind
     // of thing as the run button: an explicit, costed re-ask, never ambient.
     let reask = kit::action(kit::caption("re-ask schemas"))
-        .padding(4)
+        .padding(sp.xs)
         .on_press(msg(DoctorMsg::ReaskSchemas));
 
     let mut col = column![
         kit::section_header("doctor", None),
         row![run, deep, listen]
-            .spacing(space::MD)
+            .spacing(sp.md)
             .align_y(iced::Alignment::Center),
         row![
             reask,
@@ -102,10 +102,10 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message
                 ),
             }),
         ]
-        .spacing(space::MD)
+        .spacing(sp.md)
         .align_y(iced::Alignment::Center),
     ]
-    .spacing(space::SM);
+    .spacing(sp.sm);
 
     if let Some(e) = &state.error {
         col = col.push(kit::body(format!("doctor run failed: {e}")).style(
@@ -169,7 +169,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message
         )));
     }
 
-    let mut list = column![].spacing(space::SM);
+    let mut list = column![].spacing(sp.sm);
     for severity in [
         DoctorSeverity::Error,
         DoctorSeverity::Warning,
@@ -189,7 +189,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message
             None,
         ));
         for (i, f) in group {
-            list = list.push(finding_row(state, f, i, base));
+            list = list.push(finding_row(state, f, i, base, sp));
         }
     }
     if let Some(d) = &state.delta
@@ -212,6 +212,7 @@ fn finding_row<'a>(
     f: &'a DoctorFinding,
     index: usize,
     base: &str,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     let is_new = state
         .delta
@@ -221,7 +222,7 @@ fn finding_row<'a>(
         kit::badge_severity(tone(f.severity), &f.check),
         kit::mono(f.subject.clone()),
     ]
-    .spacing(space::SM)
+    .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
     if is_new {
         header = header.push(kit::badge_severity(SeverityTone::Warning, "new"));
@@ -230,11 +231,11 @@ fn finding_row<'a>(
         header = header.push(iced::widget::space::horizontal());
         header = header.push(kit::muted(c.clone()));
     }
-    let mut body = column![header, kit::muted(f.evidence.clone())].spacing(space::XS);
+    let mut body = column![header, kit::muted(f.evidence.clone())].spacing(sp.xs);
     if finding_target(f, base).is_some() {
         body = body.push(
             kit::action(kit::caption("go to subject"))
-                .padding(2)
+                .padding([0.0, sp.xs])
                 .on_press(msg(DoctorMsg::FindingClicked(index))),
         );
     }

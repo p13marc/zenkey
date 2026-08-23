@@ -28,7 +28,7 @@ use crate::message::Message;
 use crate::series::Series;
 use crate::view::kit;
 use crate::view::theme::{SeriesTone, colors};
-use crate::view::tokens::space;
+use crate::view::tokens::Spacing;
 
 /// The plot's height. Small on purpose — this is a shape, not a dashboard.
 const HEIGHT: f32 = 44.0;
@@ -47,9 +47,10 @@ pub fn chart<'a>(
     tone: SeriesTone,
     unit: Option<&str>,
     cache: &'a canvas::Cache,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     let caption = caption(label, series, tone, unit);
-    let mut col = iced::widget::Column::new().spacing(2);
+    let mut col = iced::widget::Column::new().spacing(sp.xs);
     col = col.push(kit::muted(caption));
     if series.has_data() {
         col = col.push(
@@ -65,7 +66,7 @@ pub fn chart<'a>(
             .height(Length::Fixed(HEIGHT)),
         );
     }
-    col.spacing(space::XS).into()
+    col.spacing(sp.xs).into()
 }
 
 /// What the chart says in words — the whole of it, for a reader and for a test.

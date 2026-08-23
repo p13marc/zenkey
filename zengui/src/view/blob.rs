@@ -26,7 +26,7 @@ use crate::blob::{BlobState, Fetch, Probe};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::{SeverityTone, colors};
-use crate::view::tokens::{font, space};
+use crate::view::tokens::{Spacing, font};
 
 /// The pane's interactions, nested per the `DoctorMsg` precedent.
 #[derive(Debug, Clone)]
@@ -64,14 +64,14 @@ fn msg(m: BlobMsg) -> Message {
 
 /// The Inspector's `@blob`-plane sections (#182). See
 /// [`super::detail::section`] for why this is a `Column`.
-pub fn section<'a>(state: &'a BlobState, slices_loaded: bool) -> Column<'a, Message> {
-    let mut col = column![kit::section_header("Blobs", None)].spacing(space::SM);
+pub fn section<'a>(state: &'a BlobState, slices_loaded: bool, sp: Spacing) -> Column<'a, Message> {
+    let mut col = column![kit::section_header("Blobs", None)].spacing(sp.sm);
 
-    col = col.push(tier_matrix(state.list.as_ref(), slices_loaded));
+    col = col.push(tier_matrix(state.list.as_ref(), slices_loaded, sp));
     col = col.push(kit::section_header("probe", None));
-    col = col.push(target_row(state));
-    col = col.push(holders(state));
-    col = col.push(fetch_form(state));
+    col = col.push(target_row(state, sp));
+    col = col.push(holders(state, sp));
+    col = col.push(fetch_form(state, sp));
 
     col
 }
@@ -79,7 +79,11 @@ pub fn section<'a>(state: &'a BlobState, slices_loaded: bool) -> Column<'a, Mess
 /// What the registry says: which producers serve which tiers. A capability
 /// claim, and labelled as one — the mistake this table invites is reading it
 /// as possession.
-fn tier_matrix<'a>(list: Option<&'a BlobList>, slices_loaded: bool) -> Element<'a, Message> {
+fn tier_matrix<'a>(
+    list: Option<&'a BlobList>,
+    slices_loaded: bool,
+    sp: Spacing,
+) -> Element<'a, Message> {
     let Some(list) = list.filter(|_| slices_loaded) else {
         return kit::empty_state(
             "no registry loaded",
@@ -98,7 +102,7 @@ fn tier_matrix<'a>(list: Option<&'a BlobList>, slices_loaded: bool) -> Element<'
         );
     }
 
-    let mut rows = column![].spacing(space::XS);
+    let mut rows = column![].spacing(sp.xs);
     for t in &list.tiers {
         let mut header = row![
             kit::mono(t.producer.clone()),
@@ -111,12 +115,12 @@ fn tier_matrix<'a>(list: Option<&'a BlobList>, slices_loaded: bool) -> Element<'
                 t.tier.clone()
             ),
         ]
-        .spacing(space::SM)
+        .spacing(sp.sm)
         .align_y(iced::Alignment::Center);
         if !t.known_tier {
             header = header.push(kit::muted("tier token this build does not reserve"));
         }
-        let mut body = column![header].spacing(2);
+        let mut body = column![header].spacing(sp.xs);
         if !t.endpoints.is_empty() {
             body = body.push(kit::muted(format!("endpoints  {}", t.endpoints.join(", "))));
         }
@@ -148,11 +152,11 @@ fn tier_matrix<'a>(list: Option<&'a BlobList>, slices_loaded: bool) -> Element<'
         ),
         rows,
     ]
-    .spacing(space::XS)
+    .spacing(sp.xs)
     .into()
 }
 
-fn target_row(state: &BlobState) -> Element<'_, Message> {
+fn target_row(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
     let field = kit::input(
         "artifact id, or tree/<hex>, or store/<algo>/<hex>",
         &state.target_input,
@@ -164,13 +168,13 @@ fn target_row(state: &BlobState) -> Element<'_, Message> {
         Probe::InFlight => "probing…",
         _ => "probe",
     }))
-    .padding(4);
+    .padding(sp.xs);
     let can_probe = matches!(state.target, Some(Ok(_))) && !matches!(state.probe, Probe::InFlight);
     if can_probe {
         probe = probe.on_press(msg(BlobMsg::Probe));
     }
 
-    let mut col = column![field, row![probe].spacing(space::SM)].spacing(space::XS);
+    let mut col = column![field, row![probe].spacing(sp.sm)].spacing(sp.xs);
 
     match &state.target {
         Some(Err(e)) => {
@@ -198,7 +202,7 @@ fn target_row(state: &BlobState) -> Element<'_, Message> {
     col.into()
 }
 
-fn holders(state: &BlobState) -> Element<'_, Message> {
+fn holders(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
     match &state.probe {
         // O4: never probed is not "no holders".
         Probe::NotAsked => kit::empty_state(
@@ -212,7 +216,7 @@ fn holders(state: &BlobState) -> Element<'_, Message> {
             })
             .into(),
         Probe::Done(report) => {
-            let mut col = column![].spacing(space::XS);
+            let mut col = column![].spacing(sp.xs);
 
             // O5: the coverage claim is exactly what was asked.
             if let Some(why) = &report.not_probed {
@@ -252,7 +256,7 @@ fn holders(state: &BlobState) -> Element<'_, Message> {
                              will refuse anything else."
                         ),
                     ]
-                    .spacing(space::XS),
+                    .spacing(sp.xs),
                 ));
             }
 
@@ -260,14 +264,20 @@ fn holders(state: &BlobState) -> Element<'_, Message> {
             // a verdict there and a category error on the tier-2 rows.
             let tier1 = report.tier == "artifact";
             for (i, h) in report.holders.iter().enumerate() {
-                col = col.push(holder_row(h, i, state.holder == Some(i), tier1));
+                col = col.push(holder_row(h, i, state.holder == Some(i), tier1, sp));
             }
             col.into()
         }
     }
 }
 
-fn holder_row(h: &BlobHolder, index: usize, selected: bool, tier1: bool) -> Element<'_, Message> {
+fn holder_row<'a>(
+    h: &'a BlobHolder,
+    index: usize,
+    selected: bool,
+    tier1: bool,
+    sp: Spacing,
+) -> Element<'a, Message> {
     let summary = match (&h.availability, &h.manifest) {
         (Some(a), Some(m)) => format!(
             "{}/{} chunks · {} · root {}",
@@ -295,16 +305,16 @@ fn holder_row(h: &BlobHolder, index: usize, selected: bool, tier1: bool) -> Elem
             } else {
                 "○ choose"
             }))
-            .padding(2)
+            .padding([0.0, sp.xs])
             .on_press(msg(BlobMsg::HolderPicked(index))),
             kit::mono(h.origin.clone()),
             kit::muted(summary),
         ]
-        .spacing(space::SM)
+        .spacing(sp.sm)
         .align_y(iced::Alignment::Center),
         kit::muted(h.key.clone()),
     ]
-    .spacing(2);
+    .spacing(sp.xs);
 
     if let Some(n) = &h.note {
         body = body.push(kit::badge_severity(SeverityTone::Warning, n.clone()));
@@ -324,13 +334,13 @@ fn holder_row(h: &BlobHolder, index: usize, selected: bool, tier1: bool) -> Elem
     kit::card(body)
 }
 
-fn fetch_form(state: &BlobState) -> Element<'_, Message> {
-    let mut col = column![kit::section_header("fetch", None)].spacing(space::XS);
+fn fetch_form(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
+    let mut col = column![kit::section_header("fetch", None)].spacing(sp.xs);
 
     let dest = kit::input("destination path", &state.dest_input)
         .on_input(|t| msg(BlobMsg::DestChanged(t)))
         .size(font::CAPTION);
-    let mut dest_row = row![dest].spacing(space::SM);
+    let mut dest_row = row![dest].spacing(sp.sm);
     if state
         .selected()
         .and_then(|h| h.manifest.as_ref())
@@ -339,7 +349,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
     {
         dest_row = dest_row.push(
             kit::action(kit::caption("use suggested name"))
-                .padding(2)
+                .padding([0.0, sp.xs])
                 .on_press(msg(BlobMsg::UseSuggestedName)),
         );
     }
@@ -369,16 +379,16 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
         Some(h) => format!("fetch from {}", h.origin),
         None => "fetch".to_string(),
     };
-    let mut go = kit::action(kit::caption(label)).padding(4);
+    let mut go = kit::action(kit::caption(label)).padding(sp.xs);
     match state.fetch_ready() {
         Ok(()) => go = go.on_press(msg(BlobMsg::Fetch)),
         Err(why) => col = col.push(kit::muted(why)),
     }
-    let mut controls = row![go].spacing(space::SM);
+    let mut controls = row![go].spacing(sp.sm);
     if matches!(state.fetch, Fetch::InFlight { .. }) {
         controls = controls.push(
             kit::action(kit::caption("stop"))
-                .padding(4)
+                .padding(sp.xs)
                 .on_press(msg(BlobMsg::Cancel)),
         );
     }
@@ -431,7 +441,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
                         r.origin, r.priority
                     )),
                 ]
-                .spacing(2),
+                .spacing(sp.xs),
             );
         }
         Fetch::Done(r) => {
@@ -450,7 +460,7 @@ fn fetch_form(state: &BlobState) -> Element<'_, Message> {
                     "trust-on-first-use — this origin chose the content (RFC 07 §2.1)".to_string()
                 }),
             ]
-            .spacing(2);
+            .spacing(sp.xs);
             if r.rejected > 0 {
                 // The transfer succeeded, which is the point of verifying
                 // before disk — but a replier served bytes that did not check

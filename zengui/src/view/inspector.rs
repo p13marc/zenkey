@@ -51,7 +51,7 @@ use crate::message::{Message, Subject};
 use crate::nodes::NodeRoster;
 use crate::view::media::MediaState;
 use crate::view::nodes::DetailState;
-use crate::view::tokens::space;
+use crate::view::tokens::Spacing;
 
 /// Everything the Inspector may show, for whatever the subject turns out to
 /// be.
@@ -88,6 +88,9 @@ pub struct InspectorData<'a> {
     /// declared-subjects section joins the registry's claims against it, so
     /// a subject declared and never seen is loud rather than invisible.
     pub observed: &'a KeyTreeSnapshot,
+    /// The dock's resolved spacing grid (#192) — Comfortable by default: a
+    /// form wants air.
+    pub sp: Spacing,
 }
 
 /// Which plane a key sits on, when it sits on one at all.
@@ -110,7 +113,7 @@ pub fn pane<'a>(d: InspectorData<'a>) -> Element<'a, Message> {
         Subject::Prefix(prefix) => prefix_sections(prefix),
         Subject::Origin(origin) => origin_sections(origin, &d),
     };
-    scrollable(body.spacing(space::MD).padding(space::SM))
+    scrollable(body.spacing(d.sp.md).padding(d.sp.sm))
         .height(Length::Fill)
         .into()
 }
@@ -156,6 +159,7 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         history_entries: d.history.map(|r| r.ring.len()),
         observed: d.history.and_then(|r| r.ring.newest()),
         latency: d.latency.clone(),
+        sp: d.sp,
     });
 
     // The declared type's place in the registry vocabulary (#234) — the
@@ -168,10 +172,10 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     // the more specific fact, so it reads after the general one.
     match plane(d.facts) {
         Some(ClassKind::Blob) => {
-            col = col.push(blob::section(d.blob, d.slices.is_some()));
+            col = col.push(blob::section(d.blob, d.slices.is_some(), d.sp));
         }
         Some(ClassKind::Media) => {
-            col = col.push(media::section(d.media, d.slices));
+            col = col.push(media::section(d.media, d.slices, d.sp));
         }
         _ => {}
     }
@@ -181,6 +185,7 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         recorder: d.history,
         watched: d.watched,
         scroll: d.history_scroll,
+        sp: d.sp,
     }))
 }
 
@@ -198,8 +203,8 @@ fn origin_sections<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Mes
         // The subject, restated in the pane. The one TITLE lives in the
         // location bar since #185.
         kit::emphasis(origin).font(iced::Font::MONOSPACE),
-        nodes::presence_section(d.roster, origin, joined.as_ref()),
-        nodes::detail_section(d.node_detail),
+        nodes::presence_section(d.roster, origin, joined.as_ref(), d.sp),
+        nodes::detail_section(d.node_detail, d.sp),
     ]
     .push(declared_subjects(origin, d))
 }
@@ -220,7 +225,7 @@ const DECLARED_ROWS: usize = 40;
 /// not observed — with the ledger rows included, because "which hosts still
 /// serve a deprecated subject" is RFC 08 §6's headline buy.
 fn declared_subjects<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
-    let mut col = column![kit::section_header("declared subjects", None)].spacing(2);
+    let mut col = column![kit::section_header("declared subjects", None)].spacing(d.sp.xs);
     let Some(slices) = d.slices else {
         return col.push(kit::muted(
             "no registry loaded — what this origin's producers declare is \
@@ -275,6 +280,7 @@ fn declared_subjects<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, M
             col = col.push(declared_row(
                 row,
                 subject_observed(d.observed, d.base, origin, producer, row),
+                d.sp,
             ));
         }
     }
@@ -289,7 +295,7 @@ fn declared_subjects<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, M
 /// "Not observed by this session" is worded to what the evidence supports:
 /// the tree holds only what watches let through, so absence there is a fact
 /// about this window's coverage, never proof nothing publishes (O4/O5).
-fn declared_row<'a>(row: &TopicRow, observed: bool) -> Element<'a, Message> {
+fn declared_row<'a>(row: &TopicRow, observed: bool, sp: Spacing) -> Element<'a, Message> {
     if row.deprecated {
         return kit::muted(format!(
             "{} DEPRECATED{}{}",
@@ -318,7 +324,7 @@ fn declared_row<'a>(row: &TopicRow, observed: bool) -> Element<'a, Message> {
         kit::mono(format!("{} {} ({})", row.class, row.path, row.type_name)),
         kit::muted(status),
     ]
-    .spacing(space::SM)
+    .spacing(sp.sm)
     .align_y(iced::Alignment::Center)
     .into()
 }
@@ -367,7 +373,7 @@ fn type_section<'a>(d: &InspectorData<'a>) -> Option<Column<'a, Message>> {
         return None;
     };
     let type_name = subject.type_name.as_str();
-    let mut col = column![kit::section_header("Type", None)].spacing(2);
+    let mut col = column![kit::section_header("Type", None)].spacing(d.sp.xs);
     let vocabulary = slices.interface_list();
     let carriers = vocabulary
         .types
