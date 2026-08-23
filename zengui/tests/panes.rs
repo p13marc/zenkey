@@ -265,11 +265,12 @@ fn the_empty_tree_explains_itself() {
     );
 }
 
-/// The call pane scaffolds from slices and labels the fanout refusal
-/// (issue #60): the visual layer of the three-layer guard.
+/// The Send pane's call mode scaffolds from slices and labels the fanout
+/// refusal (issue #60, merged by #184): the visual layer of the three-layer
+/// guard.
 #[test]
-fn the_call_pane_labels_forbidden_fanout() {
-    use zengui::view::call::{CallForm, pane};
+fn the_call_mode_labels_forbidden_fanout() {
+    use zengui::view::send::{SendForm, SendMode, pane};
     use zenkey::slice::{ProcedureDecl, RegistrySlice};
 
     let slice = RegistrySlice {
@@ -297,11 +298,12 @@ fn the_call_pane_labels_forbidden_fanout() {
     };
     let slices = SliceSet::from_slices(vec![slice]);
 
-    let form = CallForm {
+    let form = SendForm {
+        mode: SendMode::Call,
         producer: Some("netring".into()),
         procedure: Some("capture/trigger".into()),
         target: "*".into(),
-        ..CallForm::default()
+        ..SendForm::default()
     };
     let roster = zengui::nodes::NodeRoster::default();
     let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
@@ -312,7 +314,10 @@ fn the_call_pane_labels_forbidden_fanout() {
     );
 
     // Without a registry the pane says "not asked", not empty dropdowns.
-    let empty = CallForm::default();
+    let empty = SendForm {
+        mode: SendMode::Call,
+        ..SendForm::default()
+    };
     let mut ui = simulator::<Message, _, _>(pane(&empty, None, &roster));
     assert!(ui.find("No registry loaded").is_ok());
 }
@@ -321,8 +326,8 @@ fn the_call_pane_labels_forbidden_fanout() {
 /// alive and running the producer, that did not reply, is listed. RFC 05 §3.1
 /// says "no reply" is not one condition — this is the join that says which.
 #[test]
-fn the_call_pane_names_the_origins_that_did_not_answer() {
-    use zengui::view::call::{CallForm, pane};
+fn the_call_mode_names_the_origins_that_did_not_answer() {
+    use zengui::view::send::{SendForm, SendMode, pane};
     use zenkey_fleet::report::{CallAnswer, CallReport};
 
     let mut roster = zengui::nodes::NodeRoster::default();
@@ -333,7 +338,8 @@ fn the_call_pane_names_the_origins_that_did_not_answer() {
         ("h-cccccccccccc".to_string(), vec!["sysinfo".to_string()]),
     ]));
 
-    let form = CallForm {
+    let form = SendForm {
+        mode: SendMode::Call,
         producer: Some("netring".into()),
         procedure: Some("introspect".into()),
         target: "*".into(),
@@ -349,7 +355,7 @@ fn the_call_pane_names_the_origins_that_did_not_answer() {
                 error: None,
             }],
         })),
-        ..CallForm::default()
+        ..SendForm::default()
     };
     let slices = SliceSet::from_slices(vec![zenkey::slice::RegistrySlice {
         version: "1.0".into(),
@@ -386,8 +392,8 @@ fn the_call_pane_names_the_origins_that_did_not_answer() {
 /// schema has not been fetched reads as "not asked", never as "takes
 /// nothing" (O4) — and once fetched, the fields are on screen.
 #[test]
-fn the_call_pane_distinguishes_an_unasked_schema_from_an_empty_one() {
-    use zengui::view::call::{CallForm, SchemaField, pane};
+fn the_call_mode_distinguishes_an_unasked_schema_from_an_empty_one() {
+    use zengui::view::send::{SchemaField, SendForm, SendMode, pane};
     use zenkey::slice::{ProcedureDecl, RegistrySlice};
 
     let slice = RegistrySlice {
@@ -416,10 +422,11 @@ fn the_call_pane_distinguishes_an_unasked_schema_from_an_empty_one() {
     let slices = SliceSet::from_slices(vec![slice]);
     let roster = zengui::nodes::NodeRoster::default();
 
-    let unasked = CallForm {
+    let unasked = SendForm {
+        mode: SendMode::Call,
         producer: Some("netring".into()),
         procedure: Some("capture/start".into()),
-        ..CallForm::default()
+        ..SendForm::default()
     };
     {
         let mut ui = simulator::<Message, _, _>(pane(&unasked, Some(&slices), &roster));
@@ -430,7 +437,7 @@ fn the_call_pane_distinguishes_an_unasked_schema_from_an_empty_one() {
         );
     }
 
-    let asked = CallForm {
+    let asked = SendForm {
         request_fields: Some(vec![
             SchemaField {
                 name: "iface".into(),
@@ -460,39 +467,41 @@ fn the_call_pane_distinguishes_an_unasked_schema_from_an_empty_one() {
     assert_eq!(body["seconds"], serde_json::json!(0));
 }
 
-/// The publish pane's three provenances must never look alike (#60/#97):
+/// The publish mode's three provenances must never look alike (#60/#97):
 /// encoded, sent as typed, and sent raw are different facts about what is on
 /// the wire, and a user who cannot tell them apart cannot trust any of them.
 #[test]
-fn the_publish_pane_says_how_the_body_reached_the_wire() {
-    use zengui::view::publish::{PublishForm, pane};
+fn the_publish_mode_says_how_the_body_reached_the_wire() {
+    use zengui::view::send::{SendForm, pane};
     use zenkey_fleet::BodySource;
 
-    let base = PublishForm {
+    let slices = slices();
+    let roster = zengui::nodes::NodeRoster::default();
+    let base = SendForm {
         key: "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used".into(),
         body: "{\"value\": 1}".into(),
         encoding_used: Some("application/protobuf".into()),
         source: Some(BodySource::Encoded {
             type_name: "TelemetryPoint".into(),
         }),
-        ..PublishForm::default()
+        ..SendForm::default()
     };
     {
-        let mut ui = simulator::<Message, _, _>(pane(&base, true));
+        let mut ui = simulator::<Message, _, _>(pane(&base, Some(&slices), &roster));
         assert!(
             ui.find("encoded as TelemetryPoint → application/protobuf")
                 .is_ok()
         );
     }
 
-    let as_typed = PublishForm {
+    let as_typed = SendForm {
         source: Some(BodySource::AsTyped),
         encoding_used: None,
         note: Some("sysinfo serves no schema for TelemetryPoint".into()),
         ..base.clone()
     };
     {
-        let mut ui = simulator::<Message, _, _>(pane(&as_typed, true));
+        let mut ui = simulator::<Message, _, _>(pane(&as_typed, Some(&slices), &roster));
         assert!(ui.find("sent as typed → (no encoding set)").is_ok());
         assert!(
             ui.find("sysinfo serves no schema for TelemetryPoint")
@@ -501,30 +510,32 @@ fn the_publish_pane_says_how_the_body_reached_the_wire() {
         );
     }
 
-    let raw = PublishForm {
+    let raw = SendForm {
         source: Some(BodySource::Raw),
         raw: true,
         ..base.clone()
     };
-    let mut ui = simulator::<Message, _, _>(pane(&raw, true));
+    let mut ui = simulator::<Message, _, _>(pane(&raw, Some(&slices), &roster));
     assert!(ui.find("sent raw — bytes verbatim, not encoded").is_ok());
 }
 
-/// The publish pane's honesty surfaces: the closed QoS vocabulary, the O4
+/// The publish mode's honesty surfaces: the closed QoS vocabulary, the O4
 /// matching badge, and the O6 bounded log.
 #[test]
-fn the_publish_pane_bounds_its_log_and_never_invents_a_matcher() {
-    use zengui::view::publish::{LOG_LINES, PublishForm, pane};
+fn the_publish_mode_bounds_its_log_and_never_invents_a_matcher() {
+    use zengui::view::send::{LOG_LINES, SendForm, pane};
 
-    let mut form = PublishForm {
+    let slices = slices();
+    let roster = zengui::nodes::NodeRoster::default();
+    let mut form = SendForm {
         key: "demo/foreign/key".into(),
         armed: true,
         // Armed, but the status could not be asked: "not asked" (O4).
         matching: None,
-        ..PublishForm::default()
+        ..SendForm::default()
     };
     {
-        let mut ui = simulator::<Message, _, _>(pane(&form, true));
+        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
         assert!(ui.find("matching: not asked").is_ok());
     }
     // The five profiles, and only those (RFC 04 §3's closed vocabulary).
@@ -540,7 +551,7 @@ fn the_publish_pane_bounds_its_log_and_never_invents_a_matcher() {
 
     form.matching = Some(false);
     {
-        let mut ui = simulator::<Message, _, _>(pane(&form, true));
+        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
         assert!(
             ui.find(
                 "matching: no subscriber currently matches this publication — a routing \
@@ -556,7 +567,7 @@ fn the_publish_pane_bounds_its_log_and_never_invents_a_matcher() {
         form.log(true, format!("sent {i} bytes"));
     }
     {
-        let mut ui = simulator::<Message, _, _>(pane(&form, true));
+        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
         assert!(
             ui.find(format!(
                 "send log — {LOG_LINES} shown, 3 dropped (bounded at {LOG_LINES})"
@@ -567,7 +578,7 @@ fn the_publish_pane_bounds_its_log_and_never_invents_a_matcher() {
     }
 
     // With no registry the pane says "not asked", never "unregistered".
-    let mut ui = simulator::<Message, _, _>(pane(&form, false));
+    let mut ui = simulator::<Message, _, _>(pane(&form, None, &roster));
     assert!(
         ui.find(
             "no registry loaded — the body cannot be schema-checked, and that is \
@@ -575,6 +586,40 @@ fn the_publish_pane_bounds_its_log_and_never_invents_a_matcher() {
         )
         .is_ok()
     );
+}
+
+/// #184's acceptance: one pane, one form, both modes. The mode strip is on
+/// screen whichever mode is showing, and switching is a message the strip
+/// itself emits — not a second pane wearing a toggle.
+#[test]
+fn the_send_pane_offers_both_modes_over_one_form() {
+    use zengui::message::PaneMsg;
+    use zengui::view::send::{SendForm, SendMode, SendMsg, pane};
+
+    let slices = slices();
+    let roster = zengui::nodes::NodeRoster::default();
+    let mut form = SendForm::default();
+    {
+        let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+        assert!(ui.find("put / publish").is_ok());
+        assert!(
+            ui.find("get / call").is_ok(),
+            "the other mode is one click away, not another pane"
+        );
+        ui.click("get / call").expect("the mode tab is a button");
+        let messages: Vec<String> = ui.into_messages().map(|m| format!("{m:?}")).collect();
+        let want = format!(
+            "{:?}",
+            Message::Pane(PaneMsg::Send(SendMsg::ModeSelected(SendMode::Call)))
+        );
+        assert!(
+            messages.contains(&want),
+            "clicking the tab switches the mode, got: {messages:?}"
+        );
+    }
+    form.mode = SendMode::Call;
+    let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster));
+    assert!(ui.find("put / publish").is_ok(), "…and the way back too");
 }
 
 /// The detail pane (§6.4 item 5 + #66): the decoded side is tagged with HOW

@@ -15,16 +15,15 @@ use crate::update::Ctx;
 
 pub(crate) mod admin;
 pub(crate) mod blob;
-pub(crate) mod call;
 pub(crate) mod context;
 pub(crate) mod detail;
 pub(crate) mod doctor;
 pub(crate) mod echo;
 pub(crate) mod media;
 pub(crate) mod nodes;
-pub(crate) mod publish;
 pub(crate) mod replay;
 pub(crate) mod scope_editor;
+pub(crate) mod send;
 pub(crate) mod settings;
 
 /// One pane-shaped surface.
@@ -39,7 +38,7 @@ pub(crate) fn update(
     // one. What differs between the arms is only what each pane may *move*.
     let cx = Ctx { dep, obs, sub };
     match msg {
-        PaneMsg::Call(msg) => call::update(&mut work.bench.call_form, msg, cx),
+        PaneMsg::Send(msg) => send::update(&mut work.bench, msg, cx),
         PaneMsg::Nodes(msg) => nodes::update(&mut work.verdicts, msg, cx),
         PaneMsg::Doctor(msg) => doctor::update(&mut work.verdicts, msg, cx),
         PaneMsg::Blob(msg) => blob::update(&mut work.verdicts.blob, msg, cx),
@@ -47,7 +46,6 @@ pub(crate) fn update(
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
         PaneMsg::Detail(msg) => detail::update(sub, dep, msg),
         PaneMsg::History(msg) => detail::history(sub, msg),
-        PaneMsg::Publish(msg) => publish::update(&mut work.bench, msg, cx),
         PaneMsg::Echo(msg) => echo::update(&mut work.echo, msg, cx),
         PaneMsg::Context(msg) => context::update(&mut work.bench.context_form, msg),
         PaneMsg::Scope(msg) => scope_editor::update(&mut work.bench.scope_form, msg, cx),

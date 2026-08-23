@@ -166,7 +166,7 @@ fn activity<'a>(
             .then(|| sub.current.key())
             .flatten(),
         next_seq: work.echo.echo.next_seq(),
-        publish: &work.bench.publish_form,
+        publish: &work.bench.send_form,
         doctor: &work.verdicts.doctor,
         base: dep.base(),
         replay: &work.replay,
@@ -175,10 +175,10 @@ fn activity<'a>(
     })
 }
 
-/// The tools dock: call, publish, nodes, admin behind its own small strip —
-/// the remnant of the eleven-tab workspace, honest here the way the Activity
-/// dock's strip is: four different tools, of which a human uses one at a
-/// time. #184 merges the first two into Send; #190 gives the strip keys.
+/// The tools dock: send, nodes, admin behind its own small strip — the
+/// remnant of the eleven-tab workspace, honest here the way the Activity
+/// dock's strip is: three different tools, of which a human uses one at a
+/// time. #184 merged publish and call into Send; #190 gives the strip keys.
 fn workbench<'a>(
     dep: &'a Deployment,
     sub: &'a SubjectState,
@@ -197,12 +197,11 @@ fn workbench<'a>(
         ));
     }
     let body: Element<'a, Message> = match work.right_pane {
-        RightPane::Call => view::call::pane(
-            &work.bench.call_form,
+        RightPane::Send => view::send::pane(
+            &work.bench.send_form,
             dep.slices.as_deref(),
             &work.verdicts.roster,
         ),
-        RightPane::Publish => view::publish::pane(&work.bench.publish_form, dep.slices.is_some()),
         RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
             roster: &work.verdicts.roster,
             selected: sub.current.origin(),

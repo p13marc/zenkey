@@ -59,8 +59,8 @@ fn switching_base_forgets_every_node_that_was_open() {
 #[test]
 fn switching_base_keeps_what_the_user_typed() {
     let mut app = test_app();
-    app.work.bench.publish_form.body = "{\"celsius\": 21.5}".into();
-    app.work.bench.call_form.params = "origin=h-3fa9c2d41b7e".into();
+    app.work.bench.send_form.body = "{\"celsius\": 21.5}".into();
+    app.work.bench.send_form.params = "origin=h-3fa9c2d41b7e".into();
     app.work.bench.context_form.connect = "tcp/10.0.0.1:7447".into();
     app.tree.tree_search = "sysinfo".into();
     app.sub.current = Subject::Key("v1/h-3fa9c2d41b7e/state/sysinfo/health".into());
@@ -68,8 +68,8 @@ fn switching_base_keeps_what_the_user_typed() {
 
     update::deployment::forget(&mut app.dep, &mut app.obs, &mut app.tree, &mut app.work);
 
-    assert_eq!(app.work.bench.publish_form.body, "{\"celsius\": 21.5}");
-    assert_eq!(app.work.bench.call_form.params, "origin=h-3fa9c2d41b7e");
+    assert_eq!(app.work.bench.send_form.body, "{\"celsius\": 21.5}");
+    assert_eq!(app.work.bench.send_form.params, "origin=h-3fa9c2d41b7e");
     assert_eq!(app.work.bench.context_form.connect, "tcp/10.0.0.1:7447");
     assert_eq!(app.tree.tree_search, "sysinfo");
     assert_eq!(

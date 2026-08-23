@@ -1,5 +1,5 @@
-//! Writing to the bus: the call pane's request and the publish pane's stream
-//! (#175).
+//! Writing to the bus: the Send pane's call request and publish stream
+//! (#175, #184).
 //!
 //! Everything here goes through the engine — `prepare_publish` for the body
 //! (#97's encode ladder) and `declare_publication` for the write (P7: a
@@ -14,8 +14,7 @@ use zenkey::qos::QosProfile;
 use zenkey_fleet::{Publication, SliceSet};
 
 use crate::message::{Message, PaneMsg, PublishOutcome};
-use crate::view::call::CallMsg;
-use crate::view::publish::PublishMsg;
+use crate::view::send::SendMsg;
 
 /// One RPC, whose target the engine parses (a bad target is an answer, not a
 /// panic).
@@ -51,7 +50,7 @@ pub fn call(
             .map(Arc::new)
             .map_err(|e| e.to_string())
         },
-        |r| Message::Pane(PaneMsg::Call(CallMsg::Done(r))),
+        |r| Message::Pane(PaneMsg::Send(SendMsg::Done(r))),
     )
 }
 
@@ -134,7 +133,7 @@ pub fn publish(p: Publish) -> Task<Message> {
                 attachment,
             }))
         },
-        |r| Message::Pane(PaneMsg::Publish(PublishMsg::Ready(r))),
+        |r| Message::Pane(PaneMsg::Send(SendMsg::Ready(r))),
     )
 }
 
@@ -155,7 +154,7 @@ pub fn repeat(
                 .map(|()| bytes.len())
                 .map_err(|e| e.to_string())
         },
-        |r| Message::Pane(PaneMsg::Publish(PublishMsg::Sent(r))),
+        |r| Message::Pane(PaneMsg::Send(SendMsg::Sent(r))),
     )
 }
 
@@ -163,7 +162,7 @@ pub fn repeat(
 pub fn undeclare(publication: Publication) -> Task<Message> {
     Task::perform(
         async move { publication.undeclare().await.map_err(|e| e.to_string()) },
-        |r| Message::Pane(PaneMsg::Publish(PublishMsg::Stopped(r))),
+        |r| Message::Pane(PaneMsg::Send(SendMsg::Stopped(r))),
     )
 }
 
@@ -182,6 +181,6 @@ pub fn retire(session: zenoh::Session, key: String) -> Task<Message> {
             publication.undeclare().await.map_err(|e| e.to_string())?;
             Ok(matching)
         },
-        |r| Message::Pane(PaneMsg::Publish(PublishMsg::Retired(r))),
+        |r| Message::Pane(PaneMsg::Send(SendMsg::Retired(r))),
     )
 }

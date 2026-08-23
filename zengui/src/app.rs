@@ -143,12 +143,12 @@ impl Zengui {
         }
         // The repeat clock for a sustained publish (#60). It exists only while
         // a publication is armed, so an idle pane costs nothing.
-        if self.work.bench.publish_form.armed {
+        if self.work.bench.send_form.armed {
             let period =
-                std::time::Duration::from_secs_f64(self.work.bench.publish_form.interval_secs());
+                std::time::Duration::from_secs_f64(self.work.bench.send_form.interval_secs());
             subs.push(
                 iced::time::every(period)
-                    .map(|_| Message::Pane(PaneMsg::Publish(view::publish::PublishMsg::Tick))),
+                    .map(|_| Message::Pane(PaneMsg::Send(view::send::SendMsg::Tick))),
             );
         }
         // Window geometry, for the next launch (issue #73).
