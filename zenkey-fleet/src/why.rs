@@ -124,7 +124,7 @@ const CAUSE_IDS: [&str; 5] = [
 /// A rung's judgement is over **its own question** (the rung's fact), not
 /// over "is there a finding?" — which of its poles constitutes a finding is
 /// per-rung policy, and [`is_cause`] is where that policy lives. The rungs
-/// currently never answer [`Judgement::Unobservable`]: an observation the
+/// currently never answer [`Unobservable`](crate::judgement::Judgement::Unobservable): an observation the
 /// ladder could not obtain degrades the rung to `NotAsked` and rides
 /// [`WhyReport::impairments`] instead.
 ///

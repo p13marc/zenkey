@@ -179,10 +179,9 @@ impl Render for CutoverReport {
     }
 
     fn notes(&self) -> Vec<Note> {
-        let mut notes = Vec::new();
         // The verdict word is on stdout beside the evidence; the sentence that
         // says what it *means* is a note, so a script gets it too.
-        notes.push(match self.verdict {
+        vec![match self.verdict {
             CutoverVerdict::Pass => Note::coverage(
                 "the retired family is silent while the new plane carries traffic — \
                  both halves",
@@ -197,8 +196,7 @@ impl Render for CutoverReport {
                 "the old root was silent but so was the new plane: a dead fleet \
                  passes the silence half for free. Bring the fleet up and run it again",
             ),
-        });
-        notes
+        }]
     }
 }
 
