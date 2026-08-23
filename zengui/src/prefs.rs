@@ -445,12 +445,9 @@ impl Prefs {
         self
     }
 
-    /// Persist, best-effort — a preference that cannot be saved must not fail
-    /// the action the user actually took.
-    pub fn save(&self) {
-        let _ = self.save_to(&Self::path());
-    }
-
+    /// Persist. The only caller outside tests is [`crate::services::prefs`]
+    /// (#255): the write runs as a task, never on the update thread, and
+    /// stays best-effort — its failure is noted, not raised.
     pub fn save_to(&self, path: &std::path::Path) -> std::io::Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;

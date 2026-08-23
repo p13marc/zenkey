@@ -91,9 +91,14 @@ fn replay_stream<'a>(
             col = col.push(kit::muted(format!("could not open: {note}")));
         }
     }
+    // A parse in flight is its own state (#255, RFC 09 §5.1 O4): "loading"
+    // is neither "no file open" nor a hung window, and the tab says which.
+    if let Some(path) = &r.replay_loading {
+        col = col.push(kit::muted(replay::loading_note(path)));
+    }
     match &r.replay {
         Some(state) => col = col.push(replay::scrubber(state)),
-        None if r.replay_open.is_none() => {
+        None if r.replay_open.is_none() && r.replay_loading.is_none() => {
             col = col.push(kit::muted(
                 "no file open — the location bar's \"replay…\" opens a .zrec, \
                  and \"record\" writes one from the current watches",

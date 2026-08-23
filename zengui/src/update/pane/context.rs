@@ -11,10 +11,17 @@
 //! writing the link state here. With that and the deployment rewrite both
 //! raised as messages, this is the only handler in the app that takes no
 //! [`Ctx`](crate::update::Ctx) at all: one form, and nothing else.
+//!
+//! Since #255 it touches no disk either: every read and write of the store
+//! goes through [`services::context`] and lands back here as a message —
+//! `update` runs on the thread iced renders from, and a TOML read on a click
+//! was a frame the window did not paint. What stays synchronous is what is
+//! pure: validation, and every `form.status` write.
 
 use iced::Task;
 
 use crate::message::{BusMsg, DeploymentMsg, Message};
+use crate::services;
 use crate::view::contexts::{ContextForm, ContextMsg};
 
 /// The connection pane (#67). Contexts are read and written through the
@@ -83,125 +90,112 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
                 form.status = Some(Err("pick a context first".into()));
                 return Task::none();
             };
-            match zenkey_fleet::context_store::load() {
-                Ok(config) => match config.contexts.get(&name) {
-                    Some(stored) => {
-                        form.load_from(&name, stored);
-                        form.status = Some(Ok(format!("loaded {name}")));
-                    }
-                    None => {
-                        form.status = Some(Err(format!("{name} is no longer in the config")));
-                    }
-                },
-                Err(e) => form.status = Some(Err(e.to_string())),
-            }
+            services::context::load(name)
+        }
+        ContextMsg::Loaded(Ok((name, stored))) => {
+            form.load_from(&name, &stored);
+            form.status = Some(Ok(format!("loaded {name}")));
+            Task::none()
+        }
+        ContextMsg::Loaded(Err(e)) => {
+            form.status = Some(Err(e));
             Task::none()
         }
         ContextMsg::Save => {
-            save_context(form, false);
-            Task::none()
-        }
-        ContextMsg::SaveAndSelect => {
-            if !save_context(form, true) {
+            // Validate before touching the store, so a rejected form leaves
+            // it be — pure, so it stays on the click, where the red text
+            // appears next to the field still holding the typo.
+            if let Err(e) = form.to_stored() {
+                form.status = Some(Err(e));
                 return Task::none();
             }
-            let stored = match form.to_stored() {
-                Ok(s) => s,
-                Err(e) => {
-                    form.status = Some(Err(e));
+            services::context::save(form.clone(), false)
+        }
+        ContextMsg::SaveAndSelect => {
+            if let Err(e) = form.to_stored() {
+                form.status = Some(Err(e));
+                return Task::none();
+            }
+            // The switch waits for `Saved`: applying a context whose write
+            // then failed would point the session at a config the store
+            // does not hold.
+            services::context::save(form.clone(), true)
+        }
+        ContextMsg::Saved {
+            name,
+            select,
+            result,
+        } => match result {
+            Ok(known) => {
+                form.known = known;
+                form.active = Some(name.clone());
+                form.status = Some(Ok(format!(
+                    "saved {name} to {}",
+                    zenkey_fleet::context_store::config_path().display()
+                )));
+                if !select {
                     return Task::none();
                 }
-            };
+                // Re-validated rather than carried in the message: the form
+                // is the source of truth the user may have kept typing into.
+                let stored = match form.to_stored() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        form.status = Some(Err(e));
+                        return Task::none();
+                    }
+                };
+                Task::done(Message::Deployment(DeploymentMsg::ContextApplied {
+                    name: Some(name),
+                    stored: Box::new(stored),
+                }))
+            }
+            Err(e) => {
+                form.status = Some(Err(e));
+                Task::none()
+            }
+        },
+        ContextMsg::Selected(name) => {
+            // The picker answers on the click; the store's read and the
+            // shared-pointer write land on `Activated`.
+            form.active = Some(name.clone());
+            services::context::select(name)
+        }
+        ContextMsg::Activated(name, Ok((stored, pointer))) => {
+            form.load_from(&name, &stored);
+            // The store's own pointer moved too, not just this window's
+            // memory of it: the store is shared, and picking a context here
+            // used to leave `zenctl context show` naming the old one
+            // (issue #189).
+            form.status = Some(match pointer {
+                None => Ok(format!("switched to {name}")),
+                Some(e) => Err(format!(
+                    "switched to {name}, but the shared `current` pointer \
+                     could not be written: {e}"
+                )),
+            });
             Task::done(Message::Deployment(DeploymentMsg::ContextApplied {
-                name: Some(form.name.trim().to_string()),
-                stored: Box::new(stored),
+                name: Some(name),
+                stored,
             }))
         }
-        ContextMsg::Selected(name) => {
-            form.active = Some(name.clone());
-            match zenkey_fleet::context_store::load() {
-                Ok(mut config) => match config.contexts.get(&name).cloned() {
-                    Some(stored) => {
-                        form.load_from(&name, &stored);
-                        // Move the store's own pointer too, not just this
-                        // window's memory of it: the store is shared, and
-                        // picking a context here left `zenctl context show`
-                        // still naming the old one (issue #189).
-                        config.current = Some(name.clone());
-                        form.status = match zenkey_fleet::context_store::save(&config) {
-                            Ok(()) => Some(Ok(format!("switched to {name}"))),
-                            Err(e) => Some(Err(format!(
-                                "switched to {name}, but the shared `current` \
-                                     pointer could not be written: {e}"
-                            ))),
-                        };
-                        return Task::done(Message::Deployment(DeploymentMsg::ContextApplied {
-                            name: Some(name),
-                            stored: Box::new(stored),
-                        }));
-                    }
-                    None => {
-                        form.status = Some(Err(format!("{name} is no longer in the config")));
-                    }
-                },
-                Err(e) => form.status = Some(Err(e.to_string())),
+        ContextMsg::Activated(_, Err(e)) => {
+            form.status = Some(Err(e));
+            Task::none()
+        }
+        ContextMsg::Refreshed(Ok((known, current))) => {
+            form.known = known;
+            if form.active.is_none() {
+                form.active = current;
             }
             Task::none()
         }
-    }
-}
-
-/// Re-read the context names from the shared config.
-pub(crate) fn refresh_contexts(form: &mut ContextForm) {
-    if let Ok(config) = zenkey_fleet::context_store::load() {
-        form.known = config.contexts.keys().cloned().collect();
-        if form.active.is_none() {
-            form.active = config.current.clone();
+        ContextMsg::Refreshed(Err(e)) => {
+            // Best-effort like the sync re-read it replaces — but logged,
+            // not vanished (#255): the picker quietly missing a context is
+            // exactly the symptom worth a trace.
+            tracing::warn!("could not re-read the shared context config: {e}");
+            Task::none()
         }
     }
-}
-
-/// Write the editor to the shared config. Returns whether it landed.
-///
-/// Through `upsert`, not `insert`: the store is shared with zenctl, and
-/// replacing the whole entry deleted every field this form has no widget
-/// for (issue #194). The form now covers all of them, so this is the guard
-/// for the next field somebody adds to `StoredContext`.
-fn save_context(form: &mut ContextForm, select: bool) -> bool {
-    // Validate before touching the store, so a rejected form leaves it be.
-    if let Err(e) = form.to_stored() {
-        form.status = Some(Err(e));
-        return false;
-    }
-    let name = form.name.trim().to_string();
-    let mut config = match zenkey_fleet::context_store::load() {
-        Ok(c) => c,
-        Err(e) => {
-            form.status = Some(Err(e.to_string()));
-            return false;
-        }
-    };
-    // A snapshot, because `upsert`'s closure and the status writes below both
-    // want the form and only one of them can borrow it.
-    let snapshot = form.clone();
-    let mut applied = Ok(());
-    zenkey_fleet::context_store::upsert(&mut config, &name, |c| applied = snapshot.apply_to(c));
-    if let Err(e) = applied {
-        form.status = Some(Err(e));
-        return false;
-    }
-    if select {
-        config.current = Some(name.clone());
-    }
-    if let Err(e) = zenkey_fleet::context_store::save(&config) {
-        form.status = Some(Err(e.to_string()));
-        return false;
-    }
-    refresh_contexts(form);
-    form.active = Some(name.clone());
-    form.status = Some(Ok(format!(
-        "saved {name} to {}",
-        zenkey_fleet::context_store::config_path().display()
-    )));
-    true
 }

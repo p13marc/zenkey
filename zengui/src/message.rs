@@ -323,13 +323,18 @@ pub enum ChromeMsg {
     Key(iced::keyboard::Key, iced::keyboard::Modifiers),
     /// Command-palette / overlay interactions (issue #75).
     Palette(crate::view::palette::PaletteMsg),
-    /// A persisted-preference change (issue #73). Each one saves.
+    /// A persisted-preference change (issue #73). Each one marks the prefs
+    /// dirty; the settle timer writes (#255).
     Prefs(PrefsMsg),
     /// The window was resized — remembered for the next launch (issue #73).
     WindowResized(f32, f32),
-    /// The resize settled: write the geometry once, rather than per pixel
-    /// (issue #189).
+    /// The settle timer fired (issue #189): write whatever is dirty once,
+    /// rather than per pixel of a drag or per zoom keypress (#255).
     WindowSettled,
+    /// The preferences write landed (#255). Still best-effort — the `Err`
+    /// goes to the status strip's prefs note and a `tracing::warn!`, never
+    /// into the way of what the user was doing.
+    PrefsSaved(Result<(), String>),
 }
 
 /// A message from a pane-shaped surface (#176): the right-hand panes, the
