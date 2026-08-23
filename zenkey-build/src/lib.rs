@@ -196,9 +196,12 @@ pub(crate) enum Compat {
     None,
 }
 
-/// The RFC-defined framework state subjects a `common = "..."` field may name
-/// (RFC 04 §1.2/§5, RFC 06 §4/§5), with the `zenkey::CommonState` constructor
-/// and the variable names the subject pattern must bind.
+/// The framework state subjects a `common = "..."` field may name — the
+/// RFC 04 §1.4 table (v1.25; the `@catalog` trio per RFC 06 §5, `errors`
+/// per RFC 11 §2's profile-extension rule) — with the `zenkey::CommonState`
+/// constructor and the **canonical subject pattern** the entry's `path`
+/// MUST spell exactly (04 §1.4: "the spelling is the table's" — the token
+/// is a claim that this entry *is* that framework subject).
 ///
 /// The cross-producer subset of this vocabulary also lives in
 /// `zenkey::CommonFamily` (#168), which drives `selector::common_family`.
@@ -206,18 +209,35 @@ pub(crate) enum Compat {
 /// codegen-specific, and the three `@catalog` rows are one service's
 /// subjects, not families across producers — but must agree where they
 /// overlap; a test below pins that.
-pub(crate) const COMMON_STATE: &[(&str, &str, &[&str])] = &[
-    ("health", "Health", &[]),
-    ("errors", "Errors", &[]),
-    ("sensor", "Sensor", &[]),
-    ("alert", "Alert { alert_key }", &["alert_key"]),
-    ("evidence_self", "EvidenceSelf", &[]),
-    ("evidence_device", "EvidenceDevice { device }", &["device"]),
-    ("evidence_names", "EvidenceNames { ip_slug }", &["ip_slug"]),
-    ("entity", "CatalogEntity { entity_id }", &["entity_id"]),
-    ("alias", "CatalogAlias { old_id }", &["old_id"]),
-    ("pdns", "CatalogPdns { ip_slug }", &["ip_slug"]),
+pub(crate) const COMMON_STATE: &[(&str, &str, &str)] = &[
+    ("health", "Health", "health"),
+    ("errors", "Errors", "errors"),
+    ("sensor", "Sensor", "sensor"),
+    ("alert", "Alert { alert_key }", "alert/{alert_key}"),
+    ("evidence_self", "EvidenceSelf", "evidence/self"),
+    (
+        "evidence_device",
+        "EvidenceDevice { device }",
+        "evidence/device/{device}",
+    ),
+    (
+        "evidence_names",
+        "EvidenceNames { ip_slug }",
+        "evidence/names/{ip_slug}",
+    ),
+    (
+        "entity",
+        "CatalogEntity { entity_id }",
+        "entity/{entity_id}",
+    ),
+    ("alias", "CatalogAlias { old_id }", "alias/{old_id}"),
+    ("pdns", "CatalogPdns { ip_slug }", "pdns/{ip_slug}"),
 ];
+
+/// The rows of [`COMMON_STATE`] that are one *service's* subjects — the
+/// `@catalog` trio (RFC 04 §1.4, RFC 06 §5) — claimable only by a
+/// `[service]` registry file, never by an ordinary producer.
+pub(crate) const COMMON_SERVICE_TOKENS: &[&str] = &["entity", "alias", "pdns"];
 
 /// Builder for one codegen run. See the crate docs for the two-line consumer
 /// integration.
@@ -740,7 +760,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
             if let Some(c) = &common {
-                let Some((_, _, want_vars)) = COMMON_STATE.iter().find(|(n, _, _)| n == c) else {
+                let Some((_, _, canonical)) = COMMON_STATE.iter().find(|(n, _, _)| n == c) else {
                     let known: Vec<&str> = COMMON_STATE.iter().map(|(n, _, _)| *n).collect();
                     return Err(lint(
                         &fname,
@@ -756,19 +776,41 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                         format!("{spath:?}: common = {c:?} is only valid on class = \"state\""),
                     ));
                 }
-                let have: Vec<String> = chunks
-                    .iter()
-                    .filter_map(|ch| match ch {
-                        Chunk::Var(v) | Chunk::Rest(v) => Some(snake(v)),
-                        Chunk::Literal(_) => None,
-                    })
-                    .collect();
-                let want: Vec<String> = want_vars.iter().map(|v| v.to_string()).collect();
-                if have != want {
+                // RFC 04 §1.4 (v1.25): the `@catalog` trio is one service's
+                // state, not a family across producers — an ordinary
+                // producer file cannot claim a service token.
+                if COMMON_SERVICE_TOKENS.contains(&c.as_str()) && service_origin.is_none() {
                     return Err(lint(
                         &fname,
                         format!(
-                            "{spath:?}: common = {c:?} needs pattern variables {want:?}, found {have:?}"
+                            "{spath:?}: common = {c:?} is a service subject (RFC 04 §1.4, \
+                             RFC 06 §5) — only a [service] registry may claim it"
+                        ),
+                    ));
+                }
+                // RFC 04 §1.4 (v1.25): "the spelling is the table's" — the
+                // entry's path must be the token's canonical pattern, chunk
+                // for chunk: same literals, same variable names.
+                let canonical_chunks = parse_pattern(&fname, canonical)
+                    .expect("COMMON_STATE canonical patterns parse");
+                let matches = chunks.len() == canonical_chunks.len()
+                    && chunks
+                        .iter()
+                        .zip(&canonical_chunks)
+                        .all(|(a, b)| match (a, b) {
+                            (Chunk::Literal(x), Chunk::Literal(y)) => x == y,
+                            (Chunk::Var(x), Chunk::Var(y)) | (Chunk::Rest(x), Chunk::Rest(y)) => {
+                                snake(x) == snake(y)
+                            }
+                            _ => false,
+                        });
+                if !matches {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: common = {c:?} claims the framework subject \
+                             {canonical:?} and must spell it exactly (RFC 04 §1.4: the \
+                             spelling is the table's)"
                         ),
                     ));
                 }
@@ -1628,8 +1670,7 @@ fn check_conditional_ledger(
         let file = files.iter().find(|f| f.name == producer);
         let live = file.is_some_and(|f| f.subjects.iter().any(|s| s.path == spath));
         if !live {
-            let retired =
-                file.is_some_and(|f| f.deprecated.iter().any(|d| d == spath));
+            let retired = file.is_some_and(|f| f.deprecated.iter().any(|d| d == spath));
             return Err(lint(
                 "conditional.lock",
                 format!(
@@ -1726,18 +1767,27 @@ mod tests {
     /// #168 put the cross-producer family table in zenkey
     /// (`CommonFamily`, driving `selector::common_family`); this lint's own
     /// [`COMMON_STATE`] table must agree with it — same registry tokens,
-    /// same wanted pattern variables — wherever they overlap, or a subject
-    /// the lint accepts would fall outside the selector the runtime builds.
+    /// same canonical patterns (fixed chunks and the trailing population
+    /// variable, RFC 04 §1.4) — wherever they overlap, or a subject the
+    /// lint accepts would fall outside the selector the runtime builds.
     #[test]
     fn common_state_table_agrees_with_zenkey_common_family() {
         use zenkey::CommonFamily;
         for f in CommonFamily::ALL {
-            let (_, _, vars) = COMMON_STATE
+            let (_, _, canonical) = COMMON_STATE
                 .iter()
                 .find(|(n, _, _)| *n == f.token())
                 .unwrap_or_else(|| panic!("COMMON_STATE has no row for {:?}", f.token()));
-            let want: Vec<&str> = f.var().into_iter().collect();
-            assert_eq!(*vars, &want[..], "pattern variables for {:?}", f.token());
+            let mut want: Vec<String> = f.prefix().iter().map(|c| (*c).to_string()).collect();
+            if let Some(v) = f.var() {
+                want.push(format!("{{{v}}}"));
+            }
+            assert_eq!(
+                *canonical,
+                want.join("/"),
+                "canonical pattern for {:?}",
+                f.token()
+            );
         }
         // And the rows zenkey does *not* know are exactly the `@catalog`
         // three — one service's subjects, not families across producers.
@@ -1795,6 +1845,52 @@ mod tests {
         );
         let err = lint_one(&shaped).unwrap_err();
         assert!(err.to_string().contains("RFC 04 §3"), "{err}");
+    }
+
+    /// RFC 04 §1.4 (v1.25): a `common` token is a claim that this entry *is*
+    /// that framework subject, so the path must be the token's canonical
+    /// pattern — literals included. Before v1.25 the lint checked only the
+    /// variable names, and `common = "health"` on `path = "wellness"`
+    /// passed.
+    #[test]
+    fn common_token_requires_the_canonical_spelling() {
+        let subject = |path: &str, common: &str| {
+            format!(
+                "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"{path}\"\nclass = \"state\"\ntype = \"T\"\ncommon = \"{common}\"\nttl_s = 900\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+            )
+        };
+        // The audit's example: right variables (none), wrong literal.
+        let err = lint_one(&subject("wellness", "health")).unwrap_err();
+        assert!(err.to_string().contains("RFC 04 §1.4"), "{err}");
+        assert!(err.to_string().contains("\"health\""), "{err}");
+        // Same shape and variable names, wrong leading literal.
+        let err = lint_one(&subject("alarm/{alert_key}", "alert")).unwrap_err();
+        assert!(err.to_string().contains("alert/{alert_key}"), "{err}");
+        // A wrong variable name is still refused, as before.
+        let err = lint_one(&subject("alert/{key}", "alert")).unwrap_err();
+        assert!(err.to_string().contains("RFC 04 §1.4"), "{err}");
+        // The canonical spellings pass.
+        lint_one(&subject("health", "health")).unwrap();
+        lint_one(&subject("evidence/device/{device}", "evidence_device")).unwrap();
+    }
+
+    /// RFC 04 §1.4 (v1.25): `entity`/`alias`/`pdns` are the `@catalog`
+    /// service's state (RFC 06 §5) — an ordinary producer file cannot claim
+    /// them; a `[service]` file can.
+    #[test]
+    fn service_tokens_are_service_only() {
+        let err = lint_one(&format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"entity/{{entity_id}}\"\nclass = \"state\"\ntype = \"T\"\ncommon = \"entity\"\nttl_s = 900\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("service subject"), "{err}");
+        assert!(err.to_string().contains("[service]"), "{err}");
+
+        // The passing form: the same entry under a [service] registry.
+        lint_one(&format!(
+            "{HEADER}[service]\nname = \"catalog\"\norigin = \"@catalog\"\ndescription = \"d\"\n\n[[subject]]\npath = \"pdns/{{ip_slug}}\"\nclass = \"state\"\ntype = \"T\"\ncommon = \"pdns\"\nttl_s = 900\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+        ))
+        .unwrap();
     }
 
     /// RFC 08 §2's field table marks `reply` required: errors ride
@@ -2307,7 +2403,10 @@ mod tests {
             .registry_dir(&dir)
             .write_compat_lock(false)
             .unwrap();
-        let lint = Config::new().registry_dir(&dir).no_rerun_if_changed().lint();
+        let lint = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint();
         let entries = lint.and_then(|()| {
             Config::new()
                 .registry_dir(&dir)
