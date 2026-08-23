@@ -71,8 +71,9 @@ controller publishes `state/<producer>/desired/<topic>` (LWW,
 storage-backed), producers converge on (re)connect.
 
 **Decision: (a), with (b) as the sanctioned escape hatch.** No shipped
-control channel needs durability (checked against the full mapping,
-[05-control-rpc.md §5](05-control-rpc.md)), and (b) is already
+control channel needs durability (checked against the full mapping —
+[11-zensight-profile.md §5](11-zensight-profile.md) since v1.25, the
+pattern in [05-control-rpc.md §5](05-control-rpc.md)), and (b) is already
 expressible in the grammar with zero new mechanism — which is exactly why
 it does not need to be pre-built. The permanently forbidden third option
 is durable pub/sub *commands* — fire-and-forget imperatives with no

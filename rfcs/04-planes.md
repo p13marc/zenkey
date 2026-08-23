@@ -292,7 +292,7 @@ choice, exactly as QoS profiles are enforceable by router config:
 | Entitlement | Registry field | Meaning | Class defaults |
 |---|---|---|---|
 | **Seed** | `seed = none \| latest \| tail(n)` | what a late joiner may obtain per key without waiting out a cadence | `state`: `latest` (mandatory) · `telemetry`: `none` (a blank chart until the next cadence conforms) · `events`: n/a (see replay) |
-| **Miss detection** | `detect_s` (live `state` only; default = `ttl_s`) | the maximum time within which a consumer can *detect* a missed transition | baseline meets `detect_s = ttl_s` for free (refresh + aging + liveliness); smaller values need the advanced tier (§3.3) |
+| **Miss detection** | `detect_s` (`state` only; default = `ttl_s`) | the maximum time within which a consumer can *detect* a missed transition | baseline meets `detect_s = ttl_s` for free (refresh + aging + liveliness); smaller values need the advanced tier (§3.3) |
 | **Replay** | `replay = none \| window(t)` (`events` only) | how far back events are queryable | satisfied at deployment level by the events storage |
 | **Tombstone visibility** | (from `ttl_s`) | a delete is observable ≥ TTL (§1.2) | enforced by storage GC sizing ([09-operations.md §2.3](09-operations.md)) |
 

@@ -575,11 +575,12 @@ one-to-many stream in the deployed fleet chose `@media` instead. (An
 earlier draft of this paragraph claimed every blob-declaring registry
 entry *excludes* the token; corrected in v1.25 — the codegen regression
 corpus's one artifact entry deliberately **declares** `fanout`, precisely
-to pin that the token stays legal in `endpoints` per D5. Declared-but-
-unserved is the accurate description, and it is D5's point.) A normative endpoint table should describe what is served;
-keeping an endpoint every declaring producer excludes makes the table
-aspirational, and aspirational normative text is how a second implementer
-ends up building something nobody will speak to. Demotion costs nothing to
+to pin that the token stays legal in `endpoints` per D5.
+Declared-but-unserved is the accurate description, and it is D5's point.)
+A normative endpoint table should describe what is served; keeping an
+endpoint that no declaring producer serves makes the table aspirational,
+and aspirational normative text is how a second implementer ends up
+building something nobody will speak to. Demotion costs nothing to
 reverse: if a real one-to-many customer appears — firmware rollout is the
 plausible one — promotion back into §2.2 is a one-line amendment.
 
