@@ -127,9 +127,9 @@ Conceptual correspondence (shipped grammar per
 | `zensight/<proto>/<source>/<metric>` | `…/<origin>/telemetry/<proto>/[<device>/]<metric>` | `<source>` → origin (host-local) or first subject chunk (proxy) |
 | `…/<source>/@/health` `@/errors` `@/status` | `…/<origin>/state/<proto>/health` etc. | status doc merges into health/registration |
 | `…/<source>/@/alive` (+ devices) | `…/state/<proto>/alive`, `…/device/<d>/alive` | token keys mirror state grammar ([04-planes.md §5](04-planes.md)) |
-| `…/<proto>/@/alerts/<key>` | `…/<origin>/state/<proto>/alert/<key>` | key function **changes**: shipped = `<rule>-<16hex>` of FNV-1a(source+rule+labels), case-preserving; convention = 16 lowercase hex of FNV-1a(rule+labels) — source dropped (origin+producer are in the key), rule prefix dropped (uppercase rules violate the charset). Normative definition: [04-planes.md §1.2](04-planes.md) |
+| `…/<proto>/@/alerts/<key>` | `…/<origin>/state/<proto>/alert/<key>` | key function **changes**: shipped = `<rule>-<16hex>` of FNV-1a(source+rule+labels), case-preserving; convention = 16 lowercase hex of FNV-1a(rule+labels) — source dropped (origin+producer are in the key), rule prefix dropped (uppercase rules violate the charset). The neutral requirement (stable, origin-excluded, byte-precise per profile) is [04-planes.md §1.2](04-planes.md); the byte-precise recipe is §3.1 below |
 | `…/<proto>/@/query/alerts` | GET `…/*/state/*/alert/*` | seed = state itself ([05 §4](05-control-rpc.md)) |
-| `…/@/commands/<t>` + `@/status/<t>` + `@/query/<t>` | `…/<origin>/@rpc/<proto>/…` | full table in [05-control-rpc.md §5](05-control-rpc.md) |
+| `…/@/commands/<t>` + `@/status/<t>` + `@/query/<t>` | `…/<origin>/@rpc/<proto>/…` | mapping pattern in [05-control-rpc.md §5](05-control-rpc.md); full table in §5 below |
 | `…/@/artifact/{request,status,cancel}` | `@rpc` + `state/<proto>/artifact/<kind>` | long-running pattern ([05 §3](05-control-rpc.md)) |
 | `…/@/artifact/blob/<id>/**`, `…/@/store/**`, `…/@/tree/**` | `…/<origin>/@blob/{artifact,store,tree}/…` | one plane ([07-bulk-planes.md](07-bulk-planes.md)) |
 | `…/<source>/@media/<stream>/…` | `…/<origin>/@media/parallax/<stream>/…` | producer chunk added |
@@ -159,6 +159,55 @@ fleet-wide commands — are both expressed by `*`-origin RPC selectors.
 The `@/status` running/offline flag lands in the `health` document's
 status field.)
 
+### 3.1 The alert key, byte-precise (moved from 04 §1.2 in v1.25)
+
+[04-planes.md §1.2](04-planes.md) requires an alert key to be a stable,
+origin-excluded hash of rule identity + discriminating labels, and leaves
+the bytes to the profile. This is ZenSight's binding — byte-precise in the
+manner of the origin derivation ([06-identity.md §1](06-identity.md)):
+two independent implementations MUST mint the same key for the same
+alert.
+
+```
+input      = rule_name
+             ++ ( "\n" ++ label_name ++ "=" ++ label_value )*   for each
+             discriminating label, ascending by label_name (byte order)
+alert_key  = lowercase_hex(fnv1a_64(utf8(input)))               16 chars, all 64 bits
+```
+
+- **Hash.** FNV-1a, 64-bit: offset basis `0xcbf29ce484222325`, prime
+  `0x100000001b3`, over the UTF-8 bytes of `input`.
+- **Discriminating labels** are the labels that distinguish instances of
+  one rule (`peer`, `port`, `unit`…). Host-scoped labels — the label
+  named `host`, and any label the producer documents as host-scoped —
+  are excluded *before* sorting: the origin already scopes the key
+  ([04-planes.md §1.2](04-planes.md)), and hashing the host in would
+  break the one property the exclusion exists for (the same alert on two
+  hosts is the same key under two origins).
+- **Framing.** Labels sort by `label_name` under ascending byte
+  (memcmp) collation; each contributes `\n` (0x0a) + name + `=` (0x3d)
+  + value. The framing is injective because label names are
+  `snake_case` identifiers (no `\n`, no `=` can appear) and label values
+  MUST NOT contain `\n`; a rule with no discriminating labels hashes the
+  bare rule name.
+- **Test vector** (implementations MUST reproduce this). Rule
+  `link_down`, labels `{peer: "r2", port: "eth0",
+  host: "h-3fa9c2d41b7e"}`. The `host` label is host-scoped and drops
+  out; `peer` sorts before `port`. The input, byte for byte:
+
+  ```
+  link_down\npeer=r2\nport=eth0
+  (27 bytes: 6c696e6b5f646f776e 0a 706565723d7232 0a 706f72743d65746830)
+  ```
+
+  FNV-1a-64 of those bytes is `0xa659f813308ad1da`, so
+  `alert_key = a659f813308ad1da` and the full key is
+  `…/state/netlink/alert/a659f813308ad1da`.
+
+(This deliberately differs from the incumbent `alert_key`, which prefixes
+the rule name and hashes the source — the §3 table row above records both
+halves of the change and why.)
+
 ## 4. What ZenSight-specific knowledge remains
 
 For other adopters, the checklist of what they would replace: the base
@@ -169,3 +218,33 @@ implementation behind `@catalog`; and the application salt constant of the
 origin derivation (ZenSight's is `"zensight-host-id-v1"`, compiled-in and
 non-configurable — [06-identity.md §1](06-identity.md)). Everything else
 in chapters 02–10 transfers unchanged.
+
+## 5. Mapping the incumbent control channels (moved from 05 §5 in v1.25)
+
+The row-by-row mapping of every shipped ZenSight control channel onto the
+`@rpc` plane — normative for ZenSight's migration, illustrative for other
+adopters. Each row instantiates the neutral pattern of
+[05-control-rpc.md §5](05-control-rpc.md). `P` = the producer chunk.
+
+| Incumbent key (protocol- or host-scoped) | Convention location |
+|---|---|
+| `…/@/commands/<topic>` + `…/@/status/<topic>` | `@rpc/P/<topic>/set` (write, ack reply) + `@rpc/P/<topic>` (read current) |
+| `…/@/query/<topic>` | `@rpc/P/<topic>` (read) |
+| `…/@/query/alerts` (firing seed) | GET on `state/*/alert/*` selector ([05 §4](05-control-rpc.md)) |
+| `…/@/artifact/request` (pub/sub) | `@rpc/P/artifact/request` (write → `{id}` or error reply) |
+| `…/@/artifact/status` (queryable) | `state/P/artifact/<kind>` (observable LWW status) |
+| `…/@/artifact/cancel` (pub/sub) | `@rpc/P/artifact/cancel?id=` (write) |
+| `…/@/artifact/blob/<id>/**`, `…/@/store/**`, `…/@/tree/**` | `@blob/…` ([07-bulk-planes.md](07-bulk-planes.md)) |
+| logs `@/query/events?since=;max=;host=` | `@rpc/logs/events?since=;max=;source=` (`source=` filters the *observed* device — a centralized syslog receiver holds many sources' lines; origin targeting selects the receiver, not the line's source) |
+| netlink `@/commands/expectations` | `@rpc/netlink/expectations/set` + read at `@rpc/netlink/expectations` |
+| netring `@/commands/capture_disk` (`capture_now`) | `@rpc/netring/capture/trigger` (write) + `state/netring/capture` (mode/occupancy) + `events/netring/capture/<ulid>` |
+| systemd `@/commands/action` (gated) | `@rpc/systemd/action` (write; gate unchanged, plus per-key ACL) |
+| parallax `@/commands/stream` (`OpenStream`…) | `@rpc/parallax/stream/open`, `…/stream/close`, `…/stream/keyframe` (writes) |
+| parallax `@/query/streams`, `@/status/streams` | `state/parallax/stream/<stream>` (catalogue + status as LWW docs; a closed stream keeps its doc with `open: false` — tombstone on *removal from config*, not on close, or the UI loses the "openable streams" catalogue) |
+
+The generic first row covers, by name, every shipped config-style topic not
+listed individually: logs `filter` → `@rpc/logs/filter/set` + read at
+`@rpc/logs/filter`; netlink `collection` → `@rpc/netlink/collection/set`;
+netring `detectors`, `capture_filter`, `threat_intel` →
+`@rpc/netring/<topic>/set` — each with the read procedure at the same key
+minus `/set`.

@@ -143,7 +143,11 @@ unrefreshed:
   is the registry's, authoritative for both sides
   ([04-planes.md §1.2](04-planes.md); the reference registry sets 900 s).
 - `evidence/names/<ip-slug>` is **population-keyed state** and carries the
-  mandatory cardinality budget of [04-planes.md §1.2](04-planes.md): the
+  mandatory cardinality budget of [04-planes.md §1.2](04-planes.md) —
+  profile-sourced material, kept here as the worked example of that
+  budget: the passive-DNS family is the reference application's
+  ([11-zensight-profile.md](11-zensight-profile.md)), not an obligation on
+  every adopter. The
   registry entry declares the expected population bound, and the publisher
   tombstones entries whose observation has aged past TTL. An
   internet-facing sensor MUST aggregate or sample before publishing — the
@@ -206,6 +210,11 @@ Contract:
    broadcast.
 
 ### 5.2 The historical tier is a storage choice
+
+*(Profile-sourced: the passive-DNS family is the reference application's
+([11-zensight-profile.md](11-zensight-profile.md)); it stands here as the
+worked example of the storage-as-history pattern, not as a contract every
+catalog must offer.)*
 
 `state/pdns/<ip-slug>` is LWW state (the latest accumulated name-set per
 IP). Pointing a time-series storage at

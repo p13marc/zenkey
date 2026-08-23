@@ -203,33 +203,32 @@ replies. *How* to seed correctly (subscribe-first, timestamp merge, the
 two seed paths and their composition) is the delivery contract's seed
 discipline, defined once in [04-planes.md §3.2](04-planes.md).
 
-## 5. Mapping the incumbent channels
+## 5. Mapping incumbent channels (the pattern)
 
-Reference-application mapping (normative for its migration, illustrative
-for other adopters). `P` = the producer chunk.
+An application migrating onto this convention re-homes each of its
+existing control channels by *mechanism*, not by name — the row-by-row
+table for the reference application's channels is profile material and
+lives in [11-zensight-profile.md §5](11-zensight-profile.md) (moved there
+in v1.25). The neutral pattern, which any adopter's table instantiates:
 
-| Incumbent key (protocol- or host-scoped) | Convention location |
-|---|---|
-| `…/@/commands/<topic>` + `…/@/status/<topic>` | `@rpc/P/<topic>/set` (write, ack reply) + `@rpc/P/<topic>` (read current) |
-| `…/@/query/<topic>` | `@rpc/P/<topic>` (read) |
-| `…/@/query/alerts` (firing seed) | GET on `state/*/alert/*` selector (§4) |
-| `…/@/artifact/request` (pub/sub) | `@rpc/P/artifact/request` (write → `{id}` or error reply) |
-| `…/@/artifact/status` (queryable) | `state/P/artifact/<kind>` (observable LWW status) |
-| `…/@/artifact/cancel` (pub/sub) | `@rpc/P/artifact/cancel?id=` (write) |
-| `…/@/artifact/blob/<id>/**`, `…/@/store/**`, `…/@/tree/**` | `@blob/…` ([07-bulk-planes.md](07-bulk-planes.md)) |
-| logs `@/query/events?since=;max=;host=` | `@rpc/logs/events?since=;max=;source=` (`source=` filters the *observed* device — a centralized syslog receiver holds many sources' lines; origin targeting selects the receiver, not the line's source) |
-| netlink `@/commands/expectations` | `@rpc/netlink/expectations/set` + read at `@rpc/netlink/expectations` |
-| netring `@/commands/capture_disk` (`capture_now`) | `@rpc/netring/capture/trigger` (write) + `state/netring/capture` (mode/occupancy) + `events/netring/capture/<ulid>` |
-| systemd `@/commands/action` (gated) | `@rpc/systemd/action` (write; gate unchanged, plus per-key ACL) |
-| parallax `@/commands/stream` (`OpenStream`…) | `@rpc/parallax/stream/open`, `…/stream/close`, `…/stream/keyframe` (writes) |
-| parallax `@/query/streams`, `@/status/streams` | `state/parallax/stream/<stream>` (catalogue + status as LWW docs; a closed stream keeps its doc with `open: false` — tombstone on *removal from config*, not on close, or the UI loses the "openable streams" catalogue) |
-
-The generic first row covers, by name, every shipped config-style topic not
-listed individually: logs `filter` → `@rpc/logs/filter/set` + read at
-`@rpc/logs/filter`; netlink `collection` → `@rpc/netlink/collection/set`;
-netring `detectors`, `capture_filter`, `threat_intel` →
-`@rpc/netring/<topic>/set` — each with the read procedure at the same key
-minus `/set`.
+- **A command/status/query triple becomes its three native planes.** A
+  config-style topic `<topic>` maps to `@rpc/<producer>/<topic>/set`
+  (write, ack reply) + `@rpc/<producer>/<topic>` (read current); an
+  observable status is a `state` document, not a queryable.
+- **Seed queryables dissolve into state selectors** (§4): a "current
+  alerts" endpoint becomes a GET on the `state/*/alert/*` selector.
+- **Long-running work is the §3 idiom**: request/cancel are `@rpc`
+  writes, progress is `state/<producer>/<job>/<kind>`, completion may
+  emit an `events` record, bytes ride `@blob`
+  ([07-bulk-planes.md](07-bulk-planes.md)).
+- **A stream catalogue is per-stream state.** Streams and their status
+  are LWW documents at `state/<producer>/stream/<stream>` — one document
+  per stream, control via `@rpc` writes ([§3](#3-read-write-and-long-running-procedures)),
+  the offered tiers advertised in the document
+  ([07-bulk-planes.md §1](07-bulk-planes.md)). A closed stream keeps its
+  document (with `open: false`); the tombstone marks *removal from
+  config*, not closing, or consumers lose the "openable streams"
+  catalogue.
 
 Two systematic effects of the mapping:
 

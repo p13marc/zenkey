@@ -92,13 +92,19 @@ rules for deciding where a given piece of information belongs.
 
 **Alerts are state.** An alert has a stable identity key
 `state/<producer>/alert/<alert_key>`, transitions firing → resolved on that
-one key, and is retired by tombstone. `<alert_key>` is normatively: the
-FNV-1a 64-bit hash of the rule name and the sorted discriminating labels
-(host-scoped labels excluded), rendered as 16 lowercase hex chars. The
-producing source is *not* hashed — origin and producer are already in the
-key, which is what makes the key origin-scoped. (This deliberately differs
-from the incumbent `alert_key`, which prefixes the rule name and hashes the
-source; see [11-zensight-profile.md §3](11-zensight-profile.md).) Modelling
+one key, and is retired by tombstone. `<alert_key>` is normatively: **a
+stable, origin-excluded hash of rule identity + discriminating labels,
+byte-precise per application profile** — stable, so that
+firing → resolved → retired is one key's history; origin-excluded (the
+producing source is *not* hashed, and host-scoped labels are excluded with
+it), because origin and producer are already in the key, which is what
+makes the key origin-scoped. The hash function, its exact input framing,
+and the rendered width are **profile constants**: an application's profile
+chapter fixes them with the same byte precision
+[06-identity.md §1](06-identity.md) gives the origin derivation, so two
+producers of one application mint the same key for the same alert (the
+reference profile's recipe and test vector:
+[11-zensight-profile.md §3.1](11-zensight-profile.md)). Modelling
 alerts as events would force every consumer to re-derive "what is firing
 now" from an unbounded log — the exact query the class system should answer
 with one selector: `<base>/v1/*/state/*/alert/*`.
