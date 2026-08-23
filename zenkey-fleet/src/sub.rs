@@ -295,17 +295,32 @@ impl MonitorCore {
     /// Ingest one sample: stats update + retention + broadcast. Hot path —
     /// two short locks, no tree work (that happens on the tick).
     pub fn ingest(&self, view: SampleView, sn: Option<u32>) {
-        self.ingest_at(Arc::new(view), sn, Instant::now());
+        self.ingest_at(
+            Arc::new(view),
+            sn,
+            Instant::now(),
+            std::time::SystemTime::now(),
+        );
     }
 
-    /// [`MonitorCore::ingest`] with the clock injected (#217).
+    /// [`MonitorCore::ingest`] with **both** clocks injected (#217).
     ///
-    /// Replay rebuilds feed this with the **capture clock** (the row's `t`
-    /// offset from the load epoch) rather than the wall clock, which is what
-    /// makes a rebuild deterministic down to the EWMA rates: the same rows at
-    /// the same instants fold to bit-identical statistics, however fast the
-    /// rebuild loop runs.
-    pub fn ingest_at(&self, view: Arc<SampleView>, sn: Option<u32>, now: Instant) {
+    /// Replay rebuilds feed this with the **capture clock** — the row's `t`
+    /// offset from the load epoch, on both axes: `now` for the monotonic
+    /// fold, `wall` for the skewed-latency subtraction — rather than the
+    /// live clocks, which is what makes a rebuild deterministic down to the
+    /// EWMA rates and the latency window: the same rows at the same instants
+    /// fold to bit-identical statistics, however fast the rebuild loop runs.
+    /// (Before `wall` was threaded, the latency read the *live* wall clock
+    /// even under an injected `now`, so a rebuild folded arrival-time
+    /// garbage — deep-review D2.)
+    pub fn ingest_at(
+        &self,
+        view: Arc<SampleView>,
+        sn: Option<u32>,
+        now: Instant,
+        wall: std::time::SystemTime,
+    ) {
         {
             // Observed *skewed* latency (#119): our wall clock minus the
             // sample's HLC — both halves this crate deliberately never mixes
@@ -319,7 +334,7 @@ impl MonitorCore {
             // things must not land in one median.
             let latency = view.timestamp.as_ref().map(|t| {
                 let stamped = t.get_time().to_system_time();
-                let us = match std::time::SystemTime::now().duration_since(stamped) {
+                let us = match wall.duration_since(stamped) {
                     Ok(d) => i64::try_from(d.as_micros()).unwrap_or(i64::MAX),
                     // The stamping node's clock is ahead of ours: negative,
                     // and shown as such — that *is* the skew evidence.
@@ -820,6 +835,51 @@ mod tests {
         let snap = core.tree();
         assert_eq!(snap.keys, 1);
         assert_eq!(snap.root.subtree_count, 1);
+    }
+
+    /// Deep-review D2: `ingest_at` measures the skewed latency (#119) from
+    /// the **injected** wall clock, never `SystemTime::now()` — so a replay
+    /// rebuild that injects the capture clock on both axes folds the same
+    /// latencies every time, exactly (the #217 bit-identical promise), and
+    /// the number itself is `wall − HLC`, not `rebuild-time − HLC`.
+    #[test]
+    fn injected_wall_clock_drives_the_latency_fold_deterministically() {
+        let stamp_epoch = Duration::from_secs(1_000_000);
+        let ts = zenoh::time::Timestamp::new(
+            zenoh::time::NTP64::from(stamp_epoch),
+            zenoh::time::TimestampId::rand(),
+        );
+        let key = "zs/v1/h-a/telemetry/x/m";
+        let stamped_view = || {
+            let mut v = view(key, 4);
+            v.timestamp = Some(ts);
+            v.stamped_by = Some(StampProvenance::Unattributable {
+                stamper: *ts.get_id(),
+            });
+            v
+        };
+        let now = Instant::now();
+        // The injected wall clock says the sample arrived 5 ms after its
+        // stamp — regardless of what the live wall clock reads (it is a
+        // million seconds past this epoch already).
+        let wall = ts.get_time().to_system_time() + Duration::from_millis(5);
+
+        let fold = || {
+            let core = MonitorCore::new(8);
+            core.ingest_at(Arc::new(stamped_view()), None, now, wall);
+            core.with_stats(|s| s.get(key).expect("recorded").latency())
+                .expect("a stamped sample has a latency window")
+        };
+        let a = fold();
+        let summary = a.unattributable.expect("unattributable population");
+        assert_eq!(summary.samples, 1);
+        assert_eq!(
+            summary.median_us, 5_000,
+            "the latency is wall − HLC, on the injected wall clock"
+        );
+        // A second rebuild with the same injected clocks folds identically —
+        // a live `SystemTime::now()` read in between would not.
+        assert_eq!(a, fold());
     }
 
     /// The bounded-channel honesty contract: a lagging receiver is told how

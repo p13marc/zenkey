@@ -133,6 +133,13 @@ pub struct ReplayState {
     /// and "save window as `.zrec`" writes rows against it, so a saved
     /// window keeps the pacing the ring preserved (#217).
     pub(crate) fold_epoch: Instant,
+    /// The same zero on the **wall** clock, fixed once at construction and
+    /// fed as `ingest_at`'s wall axis (`wall_epoch + t`). Injecting both
+    /// clocks is what keeps a rebuild deterministic through the latency
+    /// fold too: reading the live wall clock mid-scrub would subtract a
+    /// different "now" from each rebuild's HLCs (RFC 09 §5.2's two-clocks
+    /// rule, applied to the second clock).
+    wall_epoch: std::time::SystemTime,
 }
 
 /// A qos profile name back to wire axes, for display in the panes.
@@ -229,6 +236,10 @@ impl ReplayState {
             cursor: 0,
             core: MonitorCore::new(1024),
             fold_epoch: loaded_at,
+            // Fixed at load: file rows carry no resurrectable HLC, so no
+            // latency is ever computed from this — it is the epoch's wall
+            // twin, kept for the injection contract.
+            wall_epoch: std::time::SystemTime::now(),
         })
     }
 
@@ -252,6 +263,11 @@ impl ReplayState {
         taken: RetentionStats,
     ) -> ReplayState {
         let epoch = window.first().map_or_else(Instant::now, |v| v.received);
+        // The window's oldest arrival, mapped onto the wall clock once —
+        // ring rows keep their HLCs, so the rebuild's latency fold subtracts
+        // this stable epoch (+ each row's `t`), reproducing the arrival-time
+        // measurement instead of re-reading a moving "now" per scrub.
+        let wall_epoch = std::time::SystemTime::now() - epoch.elapsed();
         let rows: Vec<ReplayRow> = window
             .into_iter()
             .map(|view| ReplayRow {
@@ -274,6 +290,7 @@ impl ReplayState {
             cursor: 0,
             core: MonitorCore::new(1024),
             fold_epoch: epoch,
+            wall_epoch,
         }
     }
 
@@ -315,14 +332,16 @@ impl ReplayState {
             .is_some_and(|r| r.t_us <= self.position_us)
         {
             let row = &self.rows[self.cursor];
-            // The capture clock, not the wall clock (#217): the fold — EWMA
-            // rates included — is then a function of the rows alone, so the
-            // same window folds bit-identically however it arrived (ring or
-            // file) and however fast this loop runs.
+            // The capture clock on both axes, never the live clocks (#217):
+            // the fold — EWMA rates and the latency window included — is
+            // then a function of the rows and the two fixed epochs alone, so
+            // the same window folds bit-identically however it arrived (ring
+            // or file) and however fast this loop runs.
             self.core.ingest_at(
                 Arc::clone(&row.view),
                 None,
                 self.fold_epoch + Duration::from_micros(row.t_us),
+                self.wall_epoch + Duration::from_micros(row.t_us),
             );
             if samples.len() < BATCH_CAP {
                 samples.push(Arc::clone(&row.view));
