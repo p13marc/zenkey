@@ -212,7 +212,7 @@ fn blob_origins_distinguish_not_asked_from_nobody_answered() {
         encoding: None,
         since: None,
         description: None,
-        origins: None,
+        origins: Asked::NotAsked,
     };
     let not_asked = serde_json::to_value(&base).unwrap();
     assert_eq!(
@@ -229,7 +229,7 @@ fn blob_origins_distinguish_not_asked_from_nobody_answered() {
     );
 
     let asked_silent = BlobTierRow {
-        origins: Some(vec![]),
+        origins: Asked::Asked(vec![]),
         ..base.clone()
     };
     assert_eq!(
@@ -239,7 +239,7 @@ fn blob_origins_distinguish_not_asked_from_nobody_answered() {
     );
 
     let alive = BlobTierRow {
-        origins: Some(vec!["h-3fa9c2d41b7e".into()]),
+        origins: Asked::Asked(vec!["h-3fa9c2d41b7e".into()]),
         ..base
     };
     assert_eq!(
@@ -387,9 +387,9 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
         key: "v1/h-a/telemetry/p/m".into(),
         count: 12,
         bytes: 480,
-        sn_gaps: Some(0),
+        sn_gaps: Asked::Asked(0),
         latency: None,
-        unstamped: Some(12),
+        unstamped: Asked::Asked(12),
     };
     assert_eq!(
         serde_json::to_value(&quiet).unwrap(),
@@ -404,8 +404,8 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
     );
 
     let unasked = RateRow {
-        sn_gaps: None,
-        unstamped: None,
+        sn_gaps: Asked::NotAsked,
+        unstamped: Asked::NotAsked,
         ..quiet.clone()
     };
     assert_eq!(
@@ -433,7 +433,7 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
             stampers: vec![],
             stampers_dropped: 0,
         }),
-        unstamped: Some(1),
+        unstamped: Asked::Asked(1),
         ..quiet
     };
     assert_eq!(
@@ -615,10 +615,10 @@ fn a_retired_entry_omits_every_fact_that_was_never_asked() {
         since: None,
         replaced_by: None,
         selector: "v1/*/*/logs/logs/errors_total".into(),
-        wire_samples: None,
+        wire_samples: Asked::NotAsked,
         still_declared: None,
         subscribers: None,
-        replacement_samples: None,
+        replacement_samples: Asked::NotAsked,
         verdict: CutoverVerdict::Unproven,
     };
     assert_eq!(
@@ -637,9 +637,9 @@ fn a_retired_entry_omits_every_fact_that_was_never_asked() {
     let report = RetiredReport {
         registries: vec!["registry".into()],
         entries: vec![],
-        window_s: None,
-        plane_samples: None,
-        dropped: None,
+        window_s: Asked::NotAsked,
+        plane_samples: Asked::NotAsked,
+        dropped: Asked::NotAsked,
         introspect_answered: 0,
         admin_entities: None,
         verdict: CutoverVerdict::Pass,

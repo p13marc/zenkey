@@ -1134,7 +1134,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
             evidence: "registry version differs: served 1.0, local 2.0".into(),
             citation: Some("RFC 08 §6".into()),
         }],
-        synced: None,
+        synced: zenkey_fleet::report::Asked::NotAsked,
         introspect_answered: 1,
         live_producers: 1,
         describe_served: 0,
@@ -1210,7 +1210,7 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
 
     let report = DoctorReport {
         findings: vec![],
-        synced: None,
+        synced: zenkey_fleet::report::Asked::NotAsked,
         introspect_answered: 1,
         live_producers: 1,
         describe_served: 0,
@@ -1977,7 +1977,7 @@ mod blob {
                     encoding: None,
                     since: None,
                     description: None,
-                    origins: None,
+                    origins: zenkey_fleet::report::Asked::NotAsked,
                 }],
                 source: BlobListSource::RegistryDirs,
                 slices_considered: 3,

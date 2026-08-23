@@ -134,8 +134,8 @@ fn tier_matrix<'a>(
         }
         // Three facts, three sentences. An empty roster is not a fleet
         // verdict (RFC 05 §3.1), and an unasked one is not an empty one (O4).
-        body = body.push(kit::muted(match &t.origins {
-            Some(o) if o.is_empty() => {
+        body = body.push(kit::muted(match t.origins.as_deref() {
+            Some([]) => {
                 "origins  — no liveliness token answered; silence is not a verdict".to_string()
             }
             Some(o) => format!("origins  {}", o.join(" ")),

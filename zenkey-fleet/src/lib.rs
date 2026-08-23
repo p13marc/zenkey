@@ -21,6 +21,7 @@ pub mod diff;
 pub mod discover;
 pub mod facts;
 pub mod ingest;
+pub mod judgement;
 pub mod project;
 pub mod query;
 pub mod record;
@@ -101,6 +102,7 @@ pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use discover::{AliveToken, DiscoveredBase, discover_bases};
 pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use ingest::{IngestRow, SampleRow, StreamLine, parse_row, parse_stream_line};
+pub use judgement::{Judgement, judgement_exit_code};
 pub use query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
     StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_stored, fetch_value,

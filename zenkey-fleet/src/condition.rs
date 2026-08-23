@@ -16,6 +16,9 @@
 //! The semantic core is three tiny rules — [`judge_shortfall`],
 //! [`judge_excess`], [`judge_silence`] — shared with [`crate::expect`], so
 //! the watchdog and the CI assertion cannot drift about what a drop means.
+//! Since RFC 13 (v1.24; the material was RFC 09 §5.1 pre-v1.24) the rules
+//! speak the four-pole [`Judgement`] core, and [`CondState`] is this
+//! module's serde-stable **wire projection** of it — see its mapping doc.
 //!
 //! [`run_watchdog`] is the continuous observer over the vocabulary:
 //! **foreground, explicitly launched, single-purpose, one process per
@@ -32,21 +35,55 @@ use serde::Serialize;
 use zenoh::Session;
 
 use crate::decode::SchemaStore;
+use crate::judgement::Judgement;
 use crate::registry::SliceSet;
 use crate::report::DoctorReport;
 
-/// One condition's evaluation state. Three, not two (RFC 09 §5.1 O4/O6):
-/// `unobservable` is "I could not tell", which is neither "fine" nor "fire".
+/// One condition's evaluation state — the watchdog's serde-stable **wire
+/// projection** of the [`Judgement`] core (RFC 13, v1.24; RFC 09 §5.1
+/// pre-v1.24). Three states, not two: `unobservable` is "I could not tell",
+/// which is neither "fine" nor "fire".
+///
+/// The mapping (see [`From<Judgement>`](#impl-From<Judgement>-for-CondState)),
+/// with the **polarity note spelled out**: a [`Condition`] names what
+/// *firing* means, so `CondState::Ok` means **the condition does not hold**
+/// — it is `Established(no)` / [`Judgement::NotEstablished`], not a bare
+/// "fine". `Firing` is `Established(yes)`; both `NotAsked` and
+/// `Unobservable` project to `unobservable`, because this wire vocabulary
+/// predates the NotAsked pole and the watchdog evaluates every declared rule
+/// every tick — it never leaves one unasked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CondState {
-    /// The condition conclusively does not hold.
+    /// The condition conclusively does not hold ([`Judgement::NotEstablished`]
+    /// — note the polarity: `ok` is the *established-clean* pole).
     Ok,
-    /// The condition conclusively holds.
+    /// The condition conclusively holds ([`Judgement::Established`]).
     Firing,
     /// The observation cannot carry the claim: a drop under a completeness
-    /// claim, a window shorter than the claim's span, or an ask that failed.
+    /// claim, a window shorter than the claim's span, or an ask that failed
+    /// ([`Judgement::Unobservable`]; a hypothetical [`Judgement::NotAsked`]
+    /// also lands here — the wire cannot say more).
     Unobservable,
+}
+
+/// The documented wire projection (RFC 13, v1.24): `Established` → `firing`,
+/// `NotEstablished` → `ok` (the polarity note on [`CondState`]), both
+/// unestablished poles → `unobservable`.
+impl From<&Judgement> for CondState {
+    fn from(j: &Judgement) -> CondState {
+        match j {
+            Judgement::Established => CondState::Firing,
+            Judgement::NotEstablished { .. } => CondState::Ok,
+            Judgement::NotAsked | Judgement::Unobservable { .. } => CondState::Unobservable,
+        }
+    }
+}
+
+impl From<Judgement> for CondState {
+    fn from(j: Judgement) -> CondState {
+        CondState::from(&j)
+    }
 }
 
 /// The closed condition vocabulary (#227), over the existing observation
@@ -186,7 +223,7 @@ impl Condition {
         };
         Some(match self {
             Condition::RateAbove { hz, .. } => {
-                let state = judge_excess(rate > *hz, w.dropped);
+                let state = CondState::from(judge_excess(rate > *hz, w.dropped));
                 let evidence = match state {
                     CondState::Unobservable => format!(
                         "{rate:.2} Hz observed but {} sample(s) dropped — the true rate \
@@ -202,7 +239,7 @@ impl Condition {
                 Eval { state, evidence }
             }
             Condition::RateBelow { hz, .. } => {
-                let state = judge_shortfall(rate < *hz, w.dropped);
+                let state = CondState::from(judge_shortfall(rate < *hz, w.dropped));
                 let evidence = match state {
                     CondState::Unobservable => format!(
                         "{rate:.2} Hz observed with {} sample(s) dropped — the drops \
@@ -221,7 +258,7 @@ impl Condition {
                 let sample_within = w.last_sample_ago_s.map(|ago| ago < *for_s) == Some(true);
                 let span_observed = w.observed_s >= *for_s;
                 let drop_free = w.last_drop_ago_s.map(|ago| ago >= *for_s) != Some(false);
-                let state = judge_silence(sample_within, span_observed, drop_free);
+                let state = CondState::from(judge_silence(sample_within, span_observed, drop_free));
                 let evidence = match state {
                     CondState::Ok => format!(
                         "a sample rode {:.1}s ago, inside the {for_s:.1}s span{synth}",
@@ -369,43 +406,68 @@ impl std::fmt::Display for Condition {
     }
 }
 
-// ─── the three-state rules (the vocabulary's semantic core) ─────────────────
+// ─── the judgement rules (the vocabulary's semantic core) ───────────────────
+//
+// The three judges return the four-pole [`Judgement`] core (RFC 13, v1.24;
+// RFC 09 §5.1 pre-v1.24). None of them ever answers `NotAsked` — a judge is
+// only called when the question was put — but the pole exists in the currency
+// so a caller that *skipped* a judge can say so in the same vocabulary. The
+// watchdog projects each judgement onto [`CondState`] for the wire.
 
 /// The shortfall rule ([`Condition::RateBelow`]; `expect`'s count floor and
-/// rate floor): too little was seen. Enough seen is conclusive `ok` even
+/// rate floor): too little was seen. Enough seen is conclusively clean even
 /// under drops — a drop can only hide *more*. A shortfall with drops is
 /// unobservable: the dropped samples could have filled it (RFC 09 §5.1 O6).
-pub fn judge_shortfall(short: bool, dropped: u64) -> CondState {
+pub fn judge_shortfall(short: bool, dropped: u64) -> Judgement {
     match (short, dropped) {
-        (false, _) => CondState::Ok,
-        (true, 0) => CondState::Firing,
-        (true, _) => CondState::Unobservable,
+        (false, _) => Judgement::NotEstablished {
+            reason: "enough was seen — a drop only hides more".into(),
+        },
+        (true, 0) => Judgement::Established,
+        (true, _) => Judgement::Unobservable {
+            reason: format!("{dropped} dropped sample(s) could have filled the shortfall (O6)"),
+        },
     }
 }
 
 /// The excess rule ([`Condition::RateAbove`]; `expect`'s rate ceiling): too
-/// much was seen. Firing is positive evidence, conclusive under drops. `ok`
-/// is a completeness claim — it counts what did NOT happen — so under drops
-/// it is unobservable, never `ok` (O6).
-pub fn judge_excess(over: bool, dropped: u64) -> CondState {
+/// much was seen. An excess is positive evidence, conclusive under drops.
+/// "No excess" is a completeness claim — it counts what did NOT happen — so
+/// under drops it is unobservable, never clean (O6).
+pub fn judge_excess(over: bool, dropped: u64) -> Judgement {
     match (over, dropped) {
-        (true, _) => CondState::Firing,
-        (false, 0) => CondState::Ok,
-        (false, _) => CondState::Unobservable,
+        (true, _) => Judgement::Established,
+        (false, 0) => Judgement::NotEstablished {
+            reason: "no excess was counted, on a clean observation".into(),
+        },
+        (false, _) => Judgement::Unobservable {
+            reason: format!(
+                "{dropped} sample(s) dropped — \"did not exceed\" is a completeness \
+                 claim (O6)"
+            ),
+        },
     }
 }
 
 /// The silence rule ([`Condition::SilentFor`]; `expect --absent`): a sample
-/// inside the span is conclusive `ok`; silence is provable only over a span
-/// the observer actually watched (O4) drop-free (O6) — otherwise
-/// unobservable, never `ok`.
-pub fn judge_silence(sample_within: bool, span_observed: bool, drop_free: bool) -> CondState {
+/// inside the span conclusively breaks the silence; silence is provable only
+/// over a span the observer actually watched (O4) drop-free (O6) — otherwise
+/// unobservable, never clean.
+pub fn judge_silence(sample_within: bool, span_observed: bool, drop_free: bool) -> Judgement {
     if sample_within {
-        CondState::Ok
+        Judgement::NotEstablished {
+            reason: "a sample rode inside the span".into(),
+        }
     } else if span_observed && drop_free {
-        CondState::Firing
+        Judgement::Established
+    } else if !span_observed {
+        Judgement::Unobservable {
+            reason: "the observer has not watched the whole claimed span (O4)".into(),
+        }
     } else {
-        CondState::Unobservable
+        Judgement::Unobservable {
+            reason: "the observer dropped inside the span — silence is unprovable (O6)".into(),
+        }
     }
 }
 
@@ -854,7 +916,7 @@ mod tests {
                     citation: None,
                 })
                 .collect(),
-            synced: None,
+            synced: crate::report::Asked::NotAsked,
             introspect_answered: 0,
             live_producers: 0,
             describe_served: 0,
@@ -895,24 +957,52 @@ mod tests {
     }
 
     /// The acceptance rule of #227: a drop under a completeness claim yields
-    /// `unobservable`, **never** `ok` — across all three core judges.
+    /// `unobservable`, **never** `ok` — across all three core judges, now
+    /// spoken in the [`Judgement`] core and projected onto [`CondState`]
+    /// (RFC 13, v1.24).
     #[test]
     fn a_drop_under_a_completeness_claim_is_unobservable_never_ok() {
+        let wire = CondState::from;
         // Excess: the "did not exceed" side counts what did not happen.
-        assert_eq!(judge_excess(false, 1), CondState::Unobservable);
-        assert_eq!(judge_excess(false, 0), CondState::Ok);
+        assert!(judge_excess(false, 1).is_unobservable());
+        assert_eq!(wire(judge_excess(false, 0)), CondState::Ok);
         // …while firing is positive evidence, conclusive under drops.
-        assert_eq!(judge_excess(true, 7), CondState::Firing);
+        assert_eq!(judge_excess(true, 7), Judgement::Established);
         // Shortfall: the drops could have carried the difference.
-        assert_eq!(judge_shortfall(true, 1), CondState::Unobservable);
-        assert_eq!(judge_shortfall(true, 0), CondState::Firing);
+        assert!(judge_shortfall(true, 1).is_unobservable());
+        assert_eq!(judge_shortfall(true, 0), Judgement::Established);
         // …while "enough seen" is conclusive: a drop only hides more.
-        assert_eq!(judge_shortfall(false, 9), CondState::Ok);
+        assert_eq!(wire(judge_shortfall(false, 9)), CondState::Ok);
         // Silence: unprovable over a dropped or unwatched span.
-        assert_eq!(judge_silence(false, true, false), CondState::Unobservable);
-        assert_eq!(judge_silence(false, false, true), CondState::Unobservable);
-        assert_eq!(judge_silence(false, true, true), CondState::Firing);
-        assert_eq!(judge_silence(true, true, false), CondState::Ok);
+        assert!(judge_silence(false, true, false).is_unobservable());
+        assert!(judge_silence(false, false, true).is_unobservable());
+        assert_eq!(judge_silence(false, true, true), Judgement::Established);
+        assert_eq!(wire(judge_silence(true, true, false)), CondState::Ok);
+    }
+
+    /// The wire projection's documented mapping, polarity note included:
+    /// `NotEstablished` (established-clean) is `ok`, `Established` (the
+    /// condition holds) is `firing`, and **both** unestablished poles land
+    /// on `unobservable` — the wire cannot say more (RFC 13, v1.24).
+    #[test]
+    fn cond_state_is_the_documented_projection_of_the_judgement_core() {
+        assert_eq!(CondState::from(Judgement::Established), CondState::Firing);
+        assert_eq!(
+            CondState::from(Judgement::NotEstablished {
+                reason: "clean".into()
+            }),
+            CondState::Ok
+        );
+        assert_eq!(
+            CondState::from(Judgement::NotAsked),
+            CondState::Unobservable
+        );
+        assert_eq!(
+            CondState::from(Judgement::Unobservable {
+                reason: "drops".into()
+            }),
+            CondState::Unobservable
+        );
     }
 
     /// The window judges apply those rules: `rate-above` firing survives

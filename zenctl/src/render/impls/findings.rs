@@ -11,7 +11,7 @@ use zenkey_fleet::report::{
     SchemaDump,
 };
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 impl Render for DoctorReport {
     const FAMILY: &'static str = "doctor";
@@ -35,7 +35,7 @@ impl Render for DoctorReport {
 
     fn table(&self, t: &mut Table) {
         let mut grid = Grid::unheaded(2);
-        for s in self.synced.iter().flatten() {
+        for s in self.synced.as_deref().into_iter().flatten() {
             grid.row([
                 Cell::styled("✓", crate::render::style::PASS),
                 Cell::text(format!("{s}: in sync")),
@@ -70,7 +70,7 @@ impl Render for DoctorReport {
         // R1: the degradation used to be a bare eprintln in `cmd/doctor.rs`,
         // invisible to `--format json` — a machine consumer read "no synced
         // slices" where the truth was "the diff never ran".
-        if self.synced.is_none() {
+        if self.synced.is_not_asked() {
             notes.push(
                 Note::coverage(
                     "no local registry given — the served-vs-declared diff never ran; \
@@ -79,8 +79,9 @@ impl Render for DoctorReport {
                 .cite("RFC 09 §5.1 O4"),
             );
         }
-        // The listen phase's scope statement (#161): what was watched, for how
-        // long, and what the bounded observer missed.
+        // The listen phase's scope statement (#161): what was watched, for
+        // how long, and what rode. Its costs — drops, evictions, refusals —
+        // are declared in `bounds()` and the emit path writes them.
         if let Some(obs) = &self.observation {
             let mut text = format!(
                 "listened {:.0}s over {} scope(s): {} sample(s) on {} key(s), {} dropped",
@@ -90,32 +91,13 @@ impl Render for DoctorReport {
                 obs.keys_seen,
                 obs.dropped
             );
-            if obs.dropped > 0 {
-                text.push_str(" — findings cover only what was seen");
-            }
             if obs.synthetic_marked > 0 {
                 text.push_str(&format!(
                     "; {} sample(s) carried the synthetic marker",
                     obs.synthetic_marked
                 ));
             }
-            if obs.facts_evicted > 0 {
-                // The bounded facts cache (#107) retired projections: the
-                // key population figures cover the retained keys only (O6).
-                text.push_str(&format!(
-                    "; the facts cache retired {} key projection(s) at its bound",
-                    obs.facts_evicted
-                ));
-            }
-            if obs.field_paths_dropped > 0 {
-                // The field-intelligence path table (#223) is bounded like
-                // everything else here, and its cost is part of the claim.
-                text.push_str(&format!(
-                    "; the field path table refused {} path observation(s) at its bound",
-                    obs.field_paths_dropped
-                ));
-            }
-            notes.push(Note::bound(text));
+            notes.push(Note::coverage(text).cite("RFC 09 §5.1 O5"));
         }
         notes.push(Note::coverage(format!(
             "{} introspect repl(y|ies) from {} live producer(s); {} producer(s) serve \
@@ -142,6 +124,42 @@ impl Render for DoctorReport {
             ))
         });
         notes
+    }
+
+    /// The listen phase's costs (#161, #107, #223) — migrated from clauses
+    /// inside a composite note onto the closed O6 vocabulary.
+    fn bounds(&self) -> Vec<BoundCost> {
+        let Some(obs) = &self.observation else {
+            return Vec::new();
+        };
+        vec![
+            BoundCost::new(
+                BoundKind::Missed,
+                obs.dropped,
+                "sample(s) dropped while behind during the listen phase — \
+                 findings cover only what was seen",
+            ),
+            BoundCost::new(
+                BoundKind::Retired,
+                obs.facts_evicted,
+                "key projection(s) retired by the bounded facts cache — key \
+                 population figures cover the retained keys only",
+            ),
+            BoundCost::new(
+                BoundKind::Refused,
+                obs.field_paths_dropped,
+                "path observation(s) refused at the field path table's bound",
+            ),
+        ]
+    }
+
+    /// The listen phase is the one subscription this report carries; the
+    /// control-plane sweeps state their coverage in `notes()`.
+    fn scope(&self) -> Option<ObservedScope> {
+        self.observation.as_ref().map(|obs| ObservedScope {
+            asked: obs.scopes.clone(),
+            window_s: Some(obs.window_s),
+        })
     }
 }
 
@@ -216,7 +234,7 @@ impl Render for RegistryDiff {
 /// obtainable at all: "not listened" is not silence, "no admin space" is not
 /// zero subscribers (RFC 09 §5.1 O4).
 fn retired_facts(e: &RetiredEntry) -> String {
-    let wire = match e.wire_samples {
+    let wire = match e.wire_samples.get() {
         None => "wire not listened".to_string(),
         Some(0) => "wire silent".to_string(),
         Some(n) => format!("wire {n} sample(s)"),
@@ -230,7 +248,7 @@ fn retired_facts(e: &RetiredEntry) -> String {
         None => "subscribers unknown".to_string(),
         Some(n) => format!("{n} subscriber(s)"),
     };
-    let replacement = match (&e.replaced_by, e.replacement_samples) {
+    let replacement = match (&e.replaced_by, e.replacement_samples.get()) {
         (None, _) => "no replacement declared".to_string(),
         (Some(p), None) => format!("→ {p}: not listened"),
         (Some(p), Some(n)) => format!("→ {p}: {n} sample(s)"),
@@ -299,7 +317,7 @@ impl Render for RetiredReport {
             ))
             .cite("RFC 09 §5.1 O5"),
         );
-        match (self.window_s, self.plane_samples) {
+        match (self.window_s.get(), self.plane_samples.get()) {
             (Some(w), Some(p)) => notes.push(Note::coverage(format!(
                 "listened {w}s: {p} sample(s) on the v1 plane — the proof-of-life \
                  half for entries with no declared replacement"
@@ -312,16 +330,6 @@ impl Render for RetiredReport {
                 )
                 .cite("RFC 09 §5.1 O4"),
             ),
-        }
-        // R6: `dropped` rides only when a window ran — an unconditional `0`
-        // used to claim a clean observation on runs that never observed.
-        if let Some(dropped) = self.dropped
-            && dropped > 0
-        {
-            notes.push(Note::bound(format!(
-                "{dropped} sample(s) dropped while behind — every silence claim \
-                 covers only what was seen"
-            )));
         }
         notes.push(match self.admin_entities {
             Some(n) => Note::coverage(format!(
@@ -361,6 +369,25 @@ impl Render for RetiredReport {
         });
         notes
     }
+
+    /// R6, restated as data: `dropped` rides only when a window ran (it is
+    /// `NotAsked` otherwise), so an unlistened run declares a zero cost and
+    /// no note claims a clean observation nobody made.
+    fn bounds(&self) -> Vec<BoundCost> {
+        vec![BoundCost::new(
+            BoundKind::Missed,
+            self.dropped.get().unwrap_or(0),
+            "sample(s) dropped while behind — every silence claim covers only \
+             what was seen",
+        )]
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: self.entries.iter().map(|e| e.selector.clone()).collect(),
+            window_s: self.window_s.get().map(|w| w as f64),
+        })
+    }
 }
 
 impl Render for SchemaDump {
@@ -375,7 +402,7 @@ impl Render for SchemaDump {
         }
         // Present exactly when totality was checked — `[]` is the clean
         // bill, absence is "not asked" (RFC 09 §5.1 O4).
-        if let Some(missing) = &self.missing {
+        if let Some(missing) = self.missing.as_option() {
             e.insert("missing".into(), serde_json::json!(missing));
         }
         e
@@ -438,7 +465,7 @@ impl Render for SchemaDump {
         if self.types.is_empty() {
             notes.push(Note::coverage("the served set declares no matching types"));
         }
-        match &self.missing {
+        match self.missing.as_deref() {
             // Not asked is not answered no: with no registry loaded, an
             // empty gap would be vacuous, so the sentence says what was
             // not checked instead (#246).

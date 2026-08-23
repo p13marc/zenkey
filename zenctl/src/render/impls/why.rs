@@ -5,7 +5,7 @@
 
 use zenkey_fleet::why::{RungAnswer, WhyReport, WhyVerdict, is_cause};
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 impl Render for WhyReport {
     const FAMILY: &'static str = "why";
@@ -42,9 +42,18 @@ impl Render for WhyReport {
                 }
                 RungAnswer::NotEstablished { .. } => Cell::text("·"),
                 RungAnswer::NotAsked => Cell::styled("?", crate::render::style::UNPROVEN),
+                // The ladder degrades an uncarriable observation to NotAsked
+                // today; the pole exists in the core (RFC 13, v1.24) and a
+                // future rung that emits it draws as the absence of a
+                // verdict, never as a `✗`.
+                RungAnswer::Unobservable { .. } => {
+                    Cell::styled("!", crate::render::style::UNPROVEN)
+                }
             };
             grid.row([mark, Cell::text(r.id), Cell::text(r.question)]);
-            if let RungAnswer::NotEstablished { reason } = &r.answer {
+            if let RungAnswer::NotEstablished { reason } | RungAnswer::Unobservable { reason } =
+                &r.answer
+            {
                 grid.detail([format!("      ↳ {reason}")]);
             }
             grid.detail(r.evidence.iter().map(|e| format!("      {e}")));
@@ -96,5 +105,14 @@ impl Render for WhyReport {
             ),
         });
         notes
+    }
+
+    /// The asked key; the window is the opt-in listen (`None` = the run
+    /// cost the control plane only, and there was no window).
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.key.clone()],
+            window_s: self.listened_s,
+        })
     }
 }

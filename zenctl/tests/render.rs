@@ -275,7 +275,7 @@ fn a_doctor_run_carries_its_coverage_and_its_bound_into_every_format() {
     // degradation is a note in the report — it used to be a bare eprintln in
     // the command, invisible to every machine format.
     let unchecked = zenkey_fleet::report::DoctorReport {
-        synced: None,
+        synced: zenkey_fleet::report::Asked::NotAsked,
         ..fx::doctor_report()
     };
     let n = notes(&unchecked);
@@ -522,7 +522,7 @@ served schema (RFC 08 §7):
     assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
     // …and asked-with-silence is the third state, distinct from both.
     let silent = zenkey_fleet::report::InterfaceShow {
-        schemas: Some(vec![]),
+        schemas: zenkey_fleet::report::Asked::Asked(vec![]),
         ..fx::interface_show_unasked()
     };
     let envelope: serde_json::Value =
@@ -843,8 +843,12 @@ fn a_field_report_states_its_bound_and_its_stuck_caveat() {
 "#]]
     );
     let stderr = notes(&fx::field_report());
+    // Deliberately reworded by the bounds() migration (RFC 13, v1.24):
+    // the cost is now an auto-appended bound note — count first, wording
+    // from the declared BoundCost; `max_paths` and the refused examples
+    // ride the document.
     assert!(
-        stderr.contains("path table full at 2: 3 path observation(s) refused"),
+        stderr.contains("3 path observation(s) refused at the path-table bound"),
         "the bound's cost is stated (O6): {stderr}"
     );
     assert!(
@@ -1332,6 +1336,81 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
          moving with it — and the moment to write its snapshot is now, while \
          you still remember what it draws"
     );
+}
+
+/// The other half of the mechanical floor (RFC 13, v1.24): every family
+/// whose verb subscribes or GETs states its observed scope — what was asked,
+/// and over what window — as data (`Render::scope`), not only as prose in a
+/// note. The checklist below is the list of observing families; adding an
+/// observing verb means adding its fixture here, which is the moment to
+/// decide what its scope claim is.
+#[test]
+fn every_observing_family_states_its_scope() {
+    fn scoped<R: Render>(r: &R) -> zenctl::render::ObservedScope {
+        r.scope().unwrap_or_else(|| {
+            panic!(
+                "{} subscribes or GETs and must state its observed scope",
+                R::FAMILY
+            )
+        })
+    }
+
+    // Window-bearing subscribers.
+    let s = scoped(&fx::expect_report());
+    assert_eq!(s.asked, ["acme/v1/**/state/**"]);
+    assert_eq!(s.window_s, Some(5.0));
+    let s = scoped(&fx::cutover_report());
+    assert_eq!(s.asked.len(), 2, "both halves of the claim: {:?}", s.asked);
+    let s = scoped(&fx::field_report());
+    assert_eq!(s.window_s, Some(30.0));
+    let s = scoped(&zenctl::render::RateView {
+        report: &fx::rate_report(),
+        bandwidth: false,
+    });
+    assert_eq!(s.window_s, Some(10.0));
+    scoped(&fx::record_report());
+    // The doctor's scope is its listen phase; the fixture ran one.
+    let s = scoped(&fx::doctor_report());
+    assert_eq!(s.asked, ["v1/**"]);
+    // The burn-down: one asked selector per ledger entry.
+    let s = scoped(&fx::retired_report());
+    assert_eq!(s.asked.len(), 3);
+    assert_eq!(s.window_s, Some(30.0));
+
+    // GET-shaped asks: the wait is the window (R5/P1's `timeout_s`).
+    let s = scoped(&fx::call_report());
+    assert_eq!(s.window_s, Some(5.0));
+    let s = scoped(&fx::probe_report());
+    assert_eq!(s.window_s, Some(5.0), "the probe's observation IS the call");
+    let s = scoped(&zenctl::render::GetReport {
+        selector: "acme/v1/**/state/**".into(),
+        timeout_s: 5,
+        answers: vec![],
+    });
+    assert_eq!(s.asked, ["acme/v1/**/state/**"]);
+    scoped(&fx::bench_report());
+    scoped(&fx::why_report());
+
+    // Sweeps: asked is the claim; a one-shot sweep has no window.
+    scoped(&fx::scout_report());
+    let s = scoped(&fx::router_list());
+    assert_eq!(s.window_s, None);
+    let report = fx::topology();
+    let attachments = fx::attachments();
+    scoped(&zenctl::render::TopologyView {
+        report: &report,
+        attachments: &attachments,
+    });
+    let s = scoped(&fx::blob_probe());
+    assert_eq!(
+        s.asked.len(),
+        2,
+        "probe wide: both selectors state themselves"
+    );
+
+    // And the deliberate negative: replay *publishes*; it observes nothing,
+    // so a scope claim would be an invented observation.
+    assert!(fx::replay_report().scope().is_none());
 }
 
 /// The context family, which until #242 had no machine surface at all.

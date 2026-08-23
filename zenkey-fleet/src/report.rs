@@ -12,6 +12,103 @@ use serde::Serialize;
 
 use crate::facts::{KeyDescription, KeyShape, Registration};
 
+/// "Was the question even put?" — the RFC 09 §5.1 O4 split (#246 / P1),
+/// made nominal (RFC 13, v1.24).
+///
+/// A generation of report fields spelled "not asked" as `Option::None`,
+/// which conflated it with every *other* absence the moment a field also had
+/// an asked-but-absent reading. This type carries exactly the not-asked
+/// distinction and nothing else:
+///
+/// * [`Asked::NotAsked`] — the flag was not passed, the sweep was not made,
+///   the question does not exist for this subject. On the wire it is
+///   **absence** (the field carries `skip_serializing_if` +
+///   `default`), byte-identical to the `Option` it replaced.
+/// * [`Asked::Asked`] — the question was put; the payload is the answer,
+///   serialized transparently (again exactly as `Some` did).
+///
+/// The split is the point: a field whose `None` means *asked and nothing
+/// was there* (an unstamped sample's age, a producer with no served slice)
+/// **stays `Option`** — wrapping it here would re-conflate in the other
+/// direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Asked<T> {
+    /// The question was not put. Serializes as absence — not zero, not null,
+    /// not `[]` (RFC 09 §5.1 O4).
+    #[default]
+    NotAsked,
+    /// The question was put, and this is what came back — an empty answer
+    /// (`Asked(vec![])`, `Asked(0)`) is a real answer, distinct from
+    /// `NotAsked` on the wire and in the type.
+    Asked(T),
+}
+
+impl<T> Asked<T> {
+    /// The `skip_serializing_if` predicate: not-asked is absence.
+    pub fn is_not_asked(&self) -> bool {
+        matches!(self, Asked::NotAsked)
+    }
+
+    pub fn is_asked(&self) -> bool {
+        !self.is_not_asked()
+    }
+
+    /// The answer, if the question was put.
+    pub fn as_option(&self) -> Option<&T> {
+        match self {
+            Asked::NotAsked => None,
+            Asked::Asked(v) => Some(v),
+        }
+    }
+
+    pub fn into_option(self) -> Option<T> {
+        match self {
+            Asked::NotAsked => None,
+            Asked::Asked(v) => Some(v),
+        }
+    }
+
+    /// `Asked<Vec<T>>` → `Option<&[T]>` and friends, mirroring
+    /// `Option::as_deref`.
+    pub fn as_deref(&self) -> Option<&T::Target>
+    where
+        T: std::ops::Deref,
+    {
+        self.as_option().map(|v| v.deref())
+    }
+}
+
+impl<T: Copy> Asked<T> {
+    /// The answer by value, for `Copy` payloads.
+    pub fn get(&self) -> Option<T> {
+        self.as_option().copied()
+    }
+}
+
+/// `Option`'s not-asked reading, named: `None` → `NotAsked`, `Some` →
+/// `Asked` — the mechanical migration step for gated facts built with
+/// `flag.then(...)`.
+impl<T> From<Option<T>> for Asked<T> {
+    fn from(o: Option<T>) -> Asked<T> {
+        match o {
+            None => Asked::NotAsked,
+            Some(v) => Asked::Asked(v),
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for Asked<T> {
+    /// `Asked` is transparent; `NotAsked` serializes as `null` — reached
+    /// only if a field forgets its `skip_serializing_if`, in which case it
+    /// degrades exactly as the `Option` it replaced would have.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Asked::NotAsked => s.serialize_none(),
+            Asked::Asked(v) => v.serialize(s),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TopicRow {
     pub producer: String,
@@ -355,13 +452,13 @@ pub struct InterfaceShow {
     pub type_name: String,
     pub carriers: Vec<CarrierRow>,
     /// What each producer serving this type name says its schema is
-    /// (issue #51). `None` = `--schema` was not passed, so the bus was never
-    /// asked; `Some(vec![])` = asked and no carrier served one — the empty
-    /// `Vec` used to conflate the two (RFC 09 §5.1 O4, review finding R4).
-    /// Two rows with different hashes *is* the RFC 08 §7 drift finding,
+    /// (issue #51). `NotAsked` = `--schema` was not passed, so the bus was
+    /// never asked; `Asked(vec![])` = asked and no carrier served one — the
+    /// empty `Vec` used to conflate the two (RFC 09 §5.1 O4, review finding
+    /// R4). Two rows with different hashes *is* the RFC 08 §7 drift finding,
     /// visible right here rather than only in `doctor`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub schemas: Option<Vec<SchemaRow>>,
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub schemas: Asked<Vec<SchemaRow>>,
 }
 
 /// One type's schema entry as one producer serves it (issue #51).
@@ -453,11 +550,11 @@ pub struct SchemaDump {
     pub types: Vec<SchemaRow>,
     /// Registry-declared type names this producer's set does **not** cover —
     /// RFC 08 §7's totality clause, checked where the user is already looking.
-    /// `None` = no registry was loaded, so totality was never checked — not
-    /// asked is not answered no (RFC 09 §5.1 O4); `Some(vec![])` is the
+    /// `NotAsked` = no registry was loaded, so totality was never checked —
+    /// not asked is not answered no (RFC 09 §5.1 O4); `Asked(vec![])` is the
     /// actual clean bill.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub missing: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub missing: Asked<Vec<String>>,
 }
 
 /// One producer on one origin — row-shaped so a `--watch` loop can diff it
@@ -610,24 +707,28 @@ pub struct RateRow {
     pub key: String,
     pub count: u64,
     pub bytes: u64,
-    /// Source-sequence gaps. `None` = `--loss` was not asked — the same gate
-    /// the report-level `sn_gaps` always had; the row used to serialize an
-    /// uncaveated `0` regardless (#238's twin, review finding R3). Even when
-    /// present, zero also means "publishers attach no SourceInfo" — an
+    /// Source-sequence gaps. `NotAsked` = `--loss` was not asked — the same
+    /// gate the report-level `sn_gaps` always had; the row used to serialize
+    /// an uncaveated `0` regardless (#238's twin, review finding R3). Even
+    /// when asked, zero also means "publishers attach no SourceInfo" — an
     /// observation, not proof of losslessness.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sn_gaps: Option<u64>,
-    /// Observed **skewed** latency over the window (#119) — absent when no
-    /// sample was HLC-stamped, which is not zero latency. Split by who
-    /// stamped it (#213): the three populations measure from different
-    /// clocks and are never folded into one median.
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub sn_gaps: Asked<u64>,
+    /// Observed **skewed** latency over the window (#119). Gated on
+    /// `--latency` like `unstamped` (#238), but deliberately still `Option`
+    /// — the [`Asked`] split's other half: even when asked, it is absent
+    /// when **no sample was HLC-stamped**, which is asked-but-absent (not
+    /// zero latency, and not "not asked"). Whether the gate was on is what
+    /// `unstamped` being `Asked(_)` says. Split by who stamped it (#213):
+    /// the three populations measure from different clocks and are never
+    /// folded into one median.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency: Option<crate::stats::LatencyReport>,
     /// Samples that carried no HLC — the other half of the latency
-    /// observation, so it rides the same gate: `None` = `--latency` was not
-    /// asked (R3, matching #238's fix for `latency` itself).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unstamped: Option<u64>,
+    /// observation, so it rides the same gate: `NotAsked` = `--latency` was
+    /// not asked (R3, matching #238's fix for `latency` itself).
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub unstamped: Asked<u64>,
 }
 
 /// The `topic hz` / `topic bw` report (issue #46) — measured counts plus the
@@ -651,9 +752,9 @@ pub struct RateReport {
     pub evicted: u64,
     /// The bound the table ran under.
     pub max_keys: usize,
-    /// Total source-sequence gaps (`None` = `--loss` was not asked).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sn_gaps: Option<u64>,
+    /// Total source-sequence gaps (`NotAsked` = `--loss` was not asked).
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub sn_gaps: Asked<u64>,
 }
 
 /// What a scouting round heard, and what it could have heard (#236).
@@ -728,13 +829,14 @@ pub struct DoctorReport {
     /// Producer slices confirmed in sync with the local registry
     /// (`origin/producer`).
     ///
-    /// `None` = no local registry was given, so the served-vs-declared diff
-    /// **never ran** — which must not read like "ran, none in sync"
-    /// (RFC 09 §5.1 O4). `Some(vec![])` = the diff ran and confirmed nothing;
-    /// the findings say why. The `Vec` used to skip-if-empty, which conflated
-    /// the two (review finding R1).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub synced: Option<Vec<String>>,
+    /// `NotAsked` = no local registry was given, so the served-vs-declared
+    /// diff **never ran** — which must not read like "ran, none in sync"
+    /// (RFC 09 §5.1 O4). `Asked(vec![])` = the diff ran and confirmed
+    /// nothing; the findings say why. The `Vec` used to skip-if-empty, which
+    /// conflated the two (review finding R1); the `Option` that fixed it is
+    /// now [`Asked`], wire-identically (#246 / P1).
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub synced: Asked<Vec<String>>,
     /// Introspect replies received across the fleet.
     pub introspect_answered: usize,
     /// Producers on the liveliness roster.
@@ -852,14 +954,14 @@ pub struct BlobTierRow {
     pub description: Option<String>,
     /// Origins whose liveliness roster names this producer.
     ///
-    /// `None` means the roster was never asked — an offline `--registry` read
-    /// learns nothing about who is up, and rendering that as "no origin serves
-    /// this tier" would report a verdict nobody obtained (RFC 09 §5.1 O4).
-    /// Even when present it is a *capability* claim: a producer that declares
-    /// a tier is saying it serves the endpoints, never that it holds any
-    /// particular blob. Only a probe answers that.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub origins: Option<Vec<String>>,
+    /// `NotAsked` means the roster was never asked — an offline `--registry`
+    /// read learns nothing about who is up, and rendering that as "no origin
+    /// serves this tier" would report a verdict nobody obtained (RFC 09 §5.1
+    /// O4). Even when asked it is a *capability* claim: a producer that
+    /// declares a tier is saying it serves the endpoints, never that it holds
+    /// any particular blob. Only a probe answers that.
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub origins: Asked<Vec<String>>,
 }
 
 /// Which producers declare which `@blob` tiers (RFC 07 §2.7 / 08 §2).
@@ -1146,7 +1248,7 @@ mod tests {
             }],
             // R1: `Option` since the report-honesty batch — `Some` serializes
             // exactly as the old non-empty `Vec` did.
-            synced: Some(vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()]),
+            synced: Asked::Asked(vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()]),
             introspect_answered: 2,
             live_producers: 3,
             describe_served: 1,
@@ -1184,7 +1286,7 @@ mod tests {
         // deliberate: a no-registry run serialized nothing here before, and
         // still does — only the ran-and-empty case gains a visible `[]`.
         let unchecked = DoctorReport {
-            synced: None,
+            synced: Asked::NotAsked,
             ..report.clone()
         };
         let json = serde_json::to_value(&unchecked).unwrap();
@@ -1194,7 +1296,7 @@ mod tests {
              runs serialized"
         );
         let ran_empty = DoctorReport {
-            synced: Some(vec![]),
+            synced: Asked::Asked(vec![]),
             ..report.clone()
         };
         let json = serde_json::to_value(&ran_empty).unwrap();
@@ -1394,6 +1496,46 @@ pub enum CutoverVerdict {
     Unproven,
 }
 
+impl CutoverVerdict {
+    /// The [`Judgement`](crate::judgement::Judgement) mapping (RFC 13,
+    /// v1.24). The judged claim is the finding — "the retired family still
+    /// speaks":
+    ///
+    /// | verdict | judgement | exit (RFC 13) |
+    /// |---|---|---|
+    /// | `OldStillSpeaks` | `Established` (finding) | 1 |
+    /// | `Pass` | `NotEstablished` (clean) | 0 |
+    /// | `Unproven` | `Unobservable` | 2 |
+    pub fn to_judgement(self) -> crate::judgement::Judgement {
+        use crate::judgement::Judgement;
+        match self {
+            CutoverVerdict::OldStillSpeaks => Judgement::Established,
+            CutoverVerdict::Pass => Judgement::NotEstablished {
+                reason: "the retired family is silent while the new plane carries traffic".into(),
+            },
+            CutoverVerdict::Unproven => Judgement::Unobservable {
+                reason: "both planes were silent — a dead fleet passes the silence half \
+                         for free (RFC 05 §3.1)"
+                    .into(),
+            },
+        }
+    }
+}
+
+/// The inverse of [`CutoverVerdict::to_judgement`]. Both unestablished poles
+/// fold to `Unproven`: a question that was not put (or could not be carried)
+/// proves no migration.
+impl From<crate::judgement::Judgement> for CutoverVerdict {
+    fn from(j: crate::judgement::Judgement) -> CutoverVerdict {
+        use crate::judgement::Judgement;
+        match j {
+            Judgement::Established => CutoverVerdict::OldStillSpeaks,
+            Judgement::NotEstablished { .. } => CutoverVerdict::Pass,
+            Judgement::NotAsked | Judgement::Unobservable { .. } => CutoverVerdict::Unproven,
+        }
+    }
+}
+
 /// The `zenctl cutover` report (issue #59; RFC 09 §6 half one).
 #[derive(Debug, Clone, Serialize)]
 pub struct CutoverReport {
@@ -1445,9 +1587,10 @@ pub struct RetiredEntry {
     /// reach a verbatim plane.
     pub selector: String,
     /// Fact 1: samples heard on the retired family over the listen window.
-    /// `None` = no window ran — not listened is not absent (RFC 09 §5.1 O4).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wire_samples: Option<u64>,
+    /// `NotAsked` = no window ran — not listened is not absent (RFC 09 §5.1
+    /// O4).
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub wire_samples: Asked<u64>,
     /// Fact 2: a live producer's served introspect slice still declares the
     /// retired path as an **active** subject — the RFC 08 §6.1 lie, a finding
     /// in its own right. `None` = no served slice for this producer answered
@@ -1459,9 +1602,11 @@ pub struct RetiredEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subscribers: Option<usize>,
     /// Fact 4: samples heard on `replaced_by` over the window — the per-entry
-    /// `cutover` pair. `None` = not listened, or no replacement declared.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub replacement_samples: Option<u64>,
+    /// `cutover` pair. `NotAsked` = not listened, or no replacement declared
+    /// (a question that does not exist for this entry was not put — the
+    /// [`Asked`] reading covers both).
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub replacement_samples: Asked<u64>,
     pub verdict: CutoverVerdict,
 }
 
@@ -1477,22 +1622,24 @@ pub struct RetiredReport {
     /// fleet totality.
     pub registries: Vec<String>,
     pub entries: Vec<RetiredEntry>,
-    /// The listen window, when one ran. `None` = wire facts were not asked.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub window_s: Option<u64>,
+    /// The listen window, when one ran. `NotAsked` = wire facts were not
+    /// asked.
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub window_s: Asked<u64>,
     /// Samples heard under `<base>/v1/` over the window — the fleet's proof
     /// of life, which is what lets a silent no-replacement entry pass rather
     /// than a dead fleet passing every silence check for free (RFC 05 §3.1).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub plane_samples: Option<u64>,
+    /// Gated with `window_s`.
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub plane_samples: Asked<u64>,
     /// Samples the bounded observer missed during the window (O6): non-zero
-    /// weakens every silence claim and the report says so. `None` = no listen
-    /// window ran, so there was no observer to miss anything — matching its
-    /// sibling wire facts (`window_s`/`plane_samples`); an unconditional `0`
-    /// used to claim a clean observation nobody made (RFC 09 §5.1 O4, review
-    /// finding R6).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dropped: Option<u64>,
+    /// weakens every silence claim and the report says so. `NotAsked` = no
+    /// listen window ran, so there was no observer to miss anything —
+    /// matching its sibling wire facts (`window_s`/`plane_samples`); an
+    /// unconditional `0` used to claim a clean observation nobody made
+    /// (RFC 09 §5.1 O4, review finding R6).
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub dropped: Asked<u64>,
     /// Served introspect slices that answered (RFC 08 §6).
     pub introspect_answered: usize,
     /// Declared entities the admin sweep returned; `None` = no admin space
@@ -1518,6 +1665,45 @@ pub enum ExpectVerdict {
     /// The observation cannot carry the claim (drops under a completeness
     /// claim, or a shortfall the dropped samples could have filled).
     Impaired,
+}
+
+impl ExpectVerdict {
+    /// The [`Judgement`](crate::judgement::Judgement) mapping (RFC 13,
+    /// v1.24). The judged claim is the finding — "the expectation was
+    /// violated" — so `Met` is the established-**clean** pole:
+    ///
+    /// | verdict | judgement | exit (RFC 13 = this family's own contract) |
+    /// |---|---|---|
+    /// | `NotMet` | `Established` (finding) | 1 |
+    /// | `Met` | `NotEstablished` (clean) | 0 |
+    /// | `Impaired` | `Unobservable` | 2 |
+    pub fn to_judgement(self) -> crate::judgement::Judgement {
+        use crate::judgement::Judgement;
+        match self {
+            ExpectVerdict::NotMet => Judgement::Established,
+            ExpectVerdict::Met => Judgement::NotEstablished {
+                reason: "the expectation held within the window".into(),
+            },
+            ExpectVerdict::Impaired => Judgement::Unobservable {
+                reason: "the observation cannot carry the claim (RFC 09 §5.1 O6)".into(),
+            },
+        }
+    }
+}
+
+/// The inverse of [`ExpectVerdict::to_judgement`] — what lets `expect` fold
+/// a judge's answer straight into its verdict without hand-mapping. Both
+/// unestablished poles are `Impaired`: an assertion that was not (or could
+/// not be) observed is not met and not violated.
+impl From<crate::judgement::Judgement> for ExpectVerdict {
+    fn from(j: crate::judgement::Judgement) -> ExpectVerdict {
+        use crate::judgement::Judgement;
+        match j {
+            Judgement::Established => ExpectVerdict::NotMet,
+            Judgement::NotEstablished { .. } => ExpectVerdict::Met,
+            Judgement::NotAsked | Judgement::Unobservable { .. } => ExpectVerdict::Impaired,
+        }
+    }
 }
 
 /// The `zenctl expect` report (#160) — the window, what rode through it,

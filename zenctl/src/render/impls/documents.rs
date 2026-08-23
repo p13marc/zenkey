@@ -12,7 +12,7 @@ use zenkey_fleet::report::{
     BlobFetchReport, BlobProbeReport, BlobTreeIndexReport, InterfaceShow, TopicInfo,
 };
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 /// The struct, as an envelope. Used by the families whose whole content is
 /// report-level facts — deriving it from the serialization rather than
@@ -132,7 +132,7 @@ impl Render for InterfaceShow {
         // R4: the count rides only when `--schema` asked — the envelope used
         // to write an unconditional `"schemas": 0`, which read as "asked,
         // none served" on a run that never asked (RFC 09 §5.1 O4).
-        if let Some(schemas) = &self.schemas {
+        if let Some(schemas) = self.schemas.as_option() {
             e.insert("schemas".into(), schemas.len().into());
         }
         e
@@ -145,7 +145,7 @@ impl Render for InterfaceShow {
         for c in &self.carriers {
             out(Row::of("carrier", c));
         }
-        for s in self.schemas.iter().flatten() {
+        for s in self.schemas.as_deref().into_iter().flatten() {
             out(Row::of("schema", s));
         }
     }
@@ -431,6 +431,15 @@ impl Render for BlobProbeReport {
             g.detail(detail);
         }
         t.grid(g);
+    }
+
+    /// The selectors actually asked; an unissued probe (`not_probed`) asked
+    /// nothing, and its scope says exactly that.
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: self.asked.clone(),
+            window_s: None,
+        })
     }
 
     fn notes(&self) -> Vec<Note> {

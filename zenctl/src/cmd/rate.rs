@@ -55,7 +55,7 @@ pub async fn run(
                     // report-level `sn_gaps` always was — the row used to
                     // serialize an uncaveated `"sn_gaps": 0` without
                     // `--loss`.
-                    sn_gaps: loss.then_some(s.sn_gaps),
+                    sn_gaps: loss.then_some(s.sn_gaps).into(),
                     // #238: only when asked. It used to be unconditional,
                     // so `--format json` carried a latency distribution
                     // nobody requested — and without the O7 caveat naming
@@ -64,7 +64,7 @@ pub async fn run(
                     latency: latency.then(|| s.latency()).flatten(),
                     // The other half of the latency observation rides the
                     // same gate (R3).
-                    unstamped: latency.then_some(s.unstamped),
+                    unstamped: latency.then_some(s.unstamped).into(),
                 })
                 .collect::<Vec<_>>();
             rows.sort_by_key(|r| std::cmp::Reverse(r.count));
@@ -78,7 +78,9 @@ pub async fn run(
             keys: stats.len(),
             evicted: stats.evicted(),
             max_keys: stats.max_keys(),
-            sn_gaps: loss.then(|| stats.iter().map(|(_, s)| s.sn_gaps).sum()),
+            sn_gaps: loss
+                .then(|| stats.iter().map(|(_, s)| s.sn_gaps).sum())
+                .into(),
         }
     });
     monitor.stop();

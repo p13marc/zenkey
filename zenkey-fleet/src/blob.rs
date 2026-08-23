@@ -250,7 +250,8 @@ pub fn blob_list(
                 description: decl.description.clone(),
                 origins: by_producer
                     .as_ref()
-                    .map(|m| m.get(slice.name.as_str()).cloned().unwrap_or_default()),
+                    .map(|m| m.get(slice.name.as_str()).cloned().unwrap_or_default())
+                    .into(),
             });
         }
     }
@@ -432,7 +433,7 @@ mod tests {
         assert_eq!(list.slices_considered, 2);
         assert_eq!(list.slices_without_blob, 1);
         // O4: nobody asked who is up, so this is not "no origin serves it".
-        assert!(list.tiers[0].origins.is_none());
+        assert!(list.tiers[0].origins.is_not_asked());
 
         let roster = BTreeMap::from([("h-3fa9c2d41b7e".to_string(), vec!["netring".to_string()])]);
         let joined = blob_list(&slices, Some(&roster), BlobListSource::Bus);

@@ -14,7 +14,7 @@
 use zenkey_fleet::report::{CutoverReport, CutoverVerdict, ExpectReport, ExpectVerdict};
 use zenkey_fleet::{RecordReport, ReplayReport};
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
 /// The struct as its own envelope.
 fn envelope_of<T: serde::Serialize>(v: &T) -> serde_json::Map<String, serde_json::Value> {
@@ -45,15 +45,20 @@ impl Render for RecordReport {
         ));
     }
 
-    fn notes(&self) -> Vec<Note> {
-        if self.dropped == 0 {
-            return Vec::new();
-        }
-        vec![Note::bound(format!(
-            "{} sample(s) dropped while behind — recorded as in-file drop records \
+    fn bounds(&self) -> Vec<BoundCost> {
+        vec![BoundCost::new(
+            BoundKind::Missed,
+            self.dropped,
+            "sample(s) dropped while behind — recorded as in-file drop records \
              where the gaps happened; the capture is a partial view and says so",
-            self.dropped
-        ))]
+        )]
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: self.header.selectors.clone(),
+            window_s: Some(self.duration_ms as f64 / 1000.0),
+        })
     }
 }
 
@@ -88,18 +93,19 @@ impl Render for ReplayReport {
         }
     }
 
+    fn bounds(&self) -> Vec<BoundCost> {
+        // Migrated from a hand-written note (which cited RFC 09 §5.2); the
+        // auto-appended bound note carries the standard O6 citation.
+        vec![BoundCost::new(
+            BoundKind::Missed,
+            self.capture_dropped,
+            "sample(s) dropped at record time — this replay is a partial view \
+             of a partial view",
+        )]
+    }
+
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
-        if self.capture_dropped > 0 {
-            notes.push(
-                Note::bound(format!(
-                    "the capture dropped {} sample(s) at record time — this replay is \
-                     a partial view of a partial view",
-                    self.capture_dropped
-                ))
-                .cite("RFC 09 §5.2"),
-            );
-        }
         if self.malformed > 0 || self.refused > 0 {
             notes.push(Note::coverage(format!(
                 "{} malformed row(s), {} refused delete row(s) — counted, not silently \
@@ -156,18 +162,26 @@ impl Render for CutoverReport {
         t.line_styled(word, style);
     }
 
+    fn bounds(&self) -> Vec<BoundCost> {
+        vec![BoundCost::new(
+            BoundKind::Missed,
+            self.dropped,
+            "sample(s) dropped while behind — the silence claim covers only \
+             what was seen",
+        )]
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.old_root.clone(), format!("{}**", self.new_prefix)],
+            window_s: Some(self.window_s as f64),
+        })
+    }
+
     fn notes(&self) -> Vec<Note> {
-        let mut notes = Vec::new();
-        if self.dropped > 0 {
-            notes.push(Note::bound(format!(
-                "{} sample(s) dropped while behind — the silence claim covers only \
-                 what was seen",
-                self.dropped
-            )));
-        }
         // The verdict word is on stdout beside the evidence; the sentence that
         // says what it *means* is a note, so a script gets it too.
-        notes.push(match self.verdict {
+        vec![match self.verdict {
             CutoverVerdict::Pass => Note::coverage(
                 "the retired family is silent while the new plane carries traffic — \
                  both halves",
@@ -182,8 +196,7 @@ impl Render for CutoverReport {
                 "the old root was silent but so was the new plane: a dead fleet \
                  passes the silence half for free. Bring the fleet up and run it again",
             ),
-        });
-        notes
+        }]
     }
 }
 
@@ -247,14 +260,23 @@ impl Render for ExpectReport {
         }
     }
 
+    fn bounds(&self) -> Vec<BoundCost> {
+        vec![BoundCost::new(
+            BoundKind::Missed,
+            self.dropped,
+            "sample(s) dropped while behind — counted into the verdict",
+        )]
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: vec![self.selector.clone()],
+            window_s: Some(self.window_s),
+        })
+    }
+
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
-        if self.dropped > 0 {
-            notes.push(Note::bound(format!(
-                "{} sample(s) dropped while behind — counted into the verdict",
-                self.dropped
-            )));
-        }
         if matches!(self.verdict, ExpectVerdict::Impaired) {
             // Impaired is not a third degree of failure: it is the absence of
             // a verdict, and the machine formats have to be able to tell.

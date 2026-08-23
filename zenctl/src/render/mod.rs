@@ -204,6 +204,62 @@ impl Note {
     }
 }
 
+/// What a bounded observer paid, O6's closed vocabulary (RFC 09 §5.1 O6;
+/// the judgement shape it feeds is RFC 13, v1.24).
+///
+/// Five kinds and no sixth: a new way for a bound to cost something is a new
+/// variant, argued for the way a new doctor check id is — not a free-text
+/// note somebody remembers to write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundKind {
+    /// The observer failed to see samples that rode (dropped while behind).
+    Missed,
+    /// A bounded table evicted entries to stay within its bound; totals
+    /// cover the retained set.
+    Retired,
+    /// Distinct events were merged into fewer; counts are of the merged.
+    Coalesced,
+    /// Observations the bound refused to admit at all.
+    Refused,
+    /// Spans or scopes the observer never watched.
+    Unwatched,
+}
+
+/// One non-zero cost a bounded observation paid ([`Render::bounds`]).
+///
+/// The emit path turns each one into a [`Note::bound`] as
+/// `"{n} {what}"` — the count leads, the wording rides `what`, and the O6
+/// citation is appended by [`Note::bound`] itself. A zero-`n` cost emits
+/// nothing, so impls declare their costs unconditionally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoundCost {
+    pub kind: BoundKind,
+    /// How many. Zero = the bound cost nothing this run, and no note rides.
+    pub n: u64,
+    /// The wording after the count, e.g. `"sample(s) dropped while behind —
+    /// the claim covers only what was seen"`.
+    pub what: &'static str,
+}
+
+impl BoundCost {
+    pub fn new(kind: BoundKind, n: u64, what: &'static str) -> BoundCost {
+        BoundCost { kind, n, what }
+    }
+}
+
+/// What one observing report actually watched ([`Render::scope`]) — the
+/// RFC 09 §5.1 O5 coverage claim as data rather than as prose scattered
+/// through notes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservedScope {
+    /// The selectors (or asks) actually put to the bus — coverage is exactly
+    /// this list and no wider.
+    pub asked: Vec<String>,
+    /// The window or wait the observation spanned, seconds. `None` = the ask
+    /// had no time dimension (a one-shot sweep).
+    pub window_s: Option<f64>,
+}
+
 /// One ndjson row: a JSON object that carries its own kind tag.
 #[derive(Debug, Clone)]
 pub struct Row(serde_json::Map<String, serde_json::Value>);
@@ -282,8 +338,31 @@ pub trait Render: Serialize {
     fn table(&self, t: &mut Table);
 
     /// What is true about this report.
+    ///
+    /// Bound costs do **not** belong here — declare them in
+    /// [`bounds`](Render::bounds) and the emit path writes the note; a
+    /// hand-written bound note would ride even when its count is zero, or
+    /// worse, be forgotten.
     fn notes(&self) -> Vec<Note> {
         Vec::new()
+    }
+
+    /// What this report's bounded observation cost (RFC 09 §5.1 O6).
+    ///
+    /// Declared as data, not prose: the emit path appends one
+    /// [`Note::bound`] per **non-zero** cost, in every format — so a report
+    /// can no longer ship a silent bound by forgetting a sentence. Declare
+    /// every cost unconditionally; a zero emits nothing.
+    fn bounds(&self) -> Vec<BoundCost> {
+        Vec::new()
+    }
+
+    /// What this report actually watched (RFC 09 §5.1 O5) — `Some` for every
+    /// family whose verb subscribes or GETs and whose report carries the
+    /// facts; the render floor test keeps the checklist. `None` for a purely
+    /// local computation.
+    fn scope(&self) -> Option<ObservedScope> {
+        None
     }
 }
 
@@ -441,6 +520,7 @@ impl<'a> Sink<'a> {
 
     /// Put one whole report through.
     pub fn report<R: Render>(&mut self, r: &R) -> Result<()> {
+        let report_notes = notes_with_bounds(r);
         let notes = match self.mode {
             Mode::Table => {
                 let mut table = Table::new();
@@ -457,7 +537,7 @@ impl<'a> Sink<'a> {
                 // the reader just looked at — then the report's, which are
                 // about the fleet.
                 let mut notes = table.rendering_notes().to_vec();
-                notes.extend(r.notes());
+                notes.extend(report_notes);
                 notes
             }
             Mode::Json => {
@@ -468,7 +548,7 @@ impl<'a> Sink<'a> {
                 if !rows.is_empty() {
                     doc.insert("rows".into(), serde_json::Value::Array(rows));
                 }
-                let notes = r.notes();
+                let notes = report_notes;
                 insert_notes(&mut doc, &notes);
                 writeln!(
                     self.out,
@@ -480,7 +560,7 @@ impl<'a> Sink<'a> {
             Mode::Ndjson => {
                 let mut envelope = r.envelope();
                 envelope.insert("report".into(), R::FAMILY.into());
-                let notes = r.notes();
+                let notes = report_notes;
                 insert_notes(&mut envelope, &notes);
                 writeln!(
                     self.out,
@@ -555,6 +635,23 @@ pub fn to_string_with<R: Render>(
     let mut err = Vec::new();
     Sink::with_color(&mut out, &mut err, format, width, color).report(r)?;
     Ok((String::from_utf8(out)?, String::from_utf8(err)?))
+}
+
+/// The report's notes, plus one auto-appended [`Note::bound`] per non-zero
+/// declared [`Render::bounds`] cost, as `"{n} {what}"`.
+///
+/// Every rendering path — [`Sink::report`] and the watch loop's tty redraw —
+/// goes through this, which is what makes a silent bound impossible: an impl
+/// declares its costs as data and no path can forget the sentence.
+pub fn notes_with_bounds<R: Render>(r: &R) -> Vec<Note> {
+    let mut notes = r.notes();
+    notes.extend(
+        r.bounds()
+            .into_iter()
+            .filter(|c| c.n > 0)
+            .map(|c| Note::bound(format!("{} {}", c.n, c.what))),
+    );
+    notes
 }
 
 fn insert_notes(doc: &mut serde_json::Map<String, serde_json::Value>, notes: &[Note]) {

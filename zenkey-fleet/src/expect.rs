@@ -33,7 +33,7 @@ use std::time::Duration;
 use anyhow::Result;
 use zenoh::Session;
 
-use crate::condition::{self, CondState};
+use crate::condition;
 use crate::decode::SchemaStore;
 use crate::registry::SliceSet;
 use crate::report::{ExpectReport, ExpectVerdict};
@@ -281,7 +281,7 @@ pub async fn run_expect(
         if met_states
             .into_iter()
             .flatten()
-            .any(|s| s == CondState::Unobservable)
+            .any(|j| j.is_unobservable())
         {
             unmet.push(format!(
                 "{dropped} sample(s) dropped while the claim needs completeness (O6)"
@@ -292,15 +292,18 @@ pub async fn run_expect(
         }
     } else if positive {
         ExpectVerdict::NotMet
-    } else if condition::judge_shortfall(count_short || rate_short, dropped)
-        == CondState::Unobservable
-    {
-        unmet.push(format!(
-            "{dropped} sample(s) dropped — the shortfall may not be real (O6)"
-        ));
-        ExpectVerdict::Impaired
     } else {
-        ExpectVerdict::NotMet
+        // A pure shortfall (no positive evidence): the judge's answer folds
+        // through the documented RFC 13 mapping — an established shortfall
+        // is `NotMet`, an unobservable one `Impaired` — rather than being
+        // hand-mapped here.
+        let shortfall = condition::judge_shortfall(count_short || rate_short, dropped);
+        if shortfall.is_unobservable() {
+            unmet.push(format!(
+                "{dropped} sample(s) dropped — the shortfall may not be real (O6)"
+            ));
+        }
+        ExpectVerdict::from(shortfall)
     };
 
     Ok(ExpectReport {
