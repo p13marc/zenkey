@@ -12,7 +12,7 @@
 //! reported, so [`EchoView::paused_gap`] exists and the strip renders it —
 //! RFC 09 §5.1 O6, applied to a scrollback the user deliberately stopped.
 
-use iced::widget::{Column, button, column, row, text, text_input};
+use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
 
 use crate::echo::{EchoLine, EchoRing};
@@ -276,15 +276,15 @@ pub fn section<'a>(
     scroll: (f32, f32),
 ) -> Column<'a, Message> {
     let controls = row![
-        text_input("filter payload/key…", &view.filter)
+        kit::input("filter payload/key…", &view.filter)
             .on_input(|t| msg(EchoMsg::FilterChanged(t)))
             .size(font::CAPTION)
             .width(Length::Fixed(170.0)),
-        text_input("key expr, e.g. v1/*/state/**", &view.key_filter)
+        kit::input("key expr, e.g. v1/*/state/**", &view.key_filter)
             .on_input(|t| msg(EchoMsg::KeyFilterChanged(t)))
             .size(font::CAPTION)
             .width(Length::Fixed(190.0)),
-        button(kit::caption(if view.following {
+        kit::action(kit::caption(if view.following {
             "pause"
         } else {
             "follow"
@@ -293,17 +293,17 @@ pub fn section<'a>(
         .padding(4),
         // The publish-verification loop in one control (#183): pin the stream
         // to whatever the window is looking at, or read the whole scope.
-        button(kit::caption(if view.follow_subject {
+        kit::action(kit::caption(if view.follow_subject {
             "pinned to subject"
         } else {
             "pin to subject"
         }),)
         .on_press(msg(EchoMsg::FollowSubjectToggled))
         .padding(4),
-        button(kit::caption("ndjson"))
+        kit::action(kit::caption("ndjson"))
             .on_press(msg(EchoMsg::Export))
             .padding(4),
-        button(kit::caption("clear"))
+        kit::action(kit::caption("clear"))
             .on_press(msg(EchoMsg::Clear))
             .padding(4),
     ]
@@ -452,8 +452,9 @@ fn line_view(line: &EchoLine) -> Element<'_, Message> {
         });
 
     // The whole row is the click target: drilling in is the common action,
-    // and a hairline button next to a monospace key is not.
-    button(
+    // and a hairline button next to a monospace key is not. `row_button`
+    // paints the hover wash, so the line under the cursor is legible (#193).
+    kit::row_button(
         column![
             row![
                 key,
@@ -464,11 +465,10 @@ fn line_view(line: &EchoLine) -> Element<'_, Message> {
             preview,
         ]
         .spacing(1),
+        false,
     )
     .on_press_with(|| msg(EchoMsg::LineClicked(line.key.clone())))
-    .style(iced::widget::button::text)
     .padding(iced::Padding::from([2.0, 0.0]))
-    .width(Length::Fill)
     .into()
 }
 

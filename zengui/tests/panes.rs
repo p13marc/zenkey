@@ -74,6 +74,63 @@ fn render(keys: &[&str], with_slices: bool) -> (tree::Flattened, FactsIndex) {
     (flat, index(keys, with_slices))
 }
 
+/// #193's acceptance: the five `Registration` states render five *distinct*
+/// glyph + word pairs. The glyph comes from the tone type — no call site can
+/// omit it or give two states the same one — so colour is structurally never
+/// the only carrier.
+#[test]
+fn the_five_registration_states_render_five_distinct_glyph_word_pairs() {
+    use zengui::keyfacts::{Registration, SubjectFacts};
+    use zengui::view::tree::{registration_label, tone};
+
+    let states = [
+        Registration::Registered(Box::new(SubjectFacts {
+            path: "disk/{mount}/used".into(),
+            type_name: "TelemetryPoint".into(),
+            vars: vec![],
+            unit: None,
+            qos: None,
+            encoding: None,
+            ttl_s: None,
+            rate: None,
+            cardinality: None,
+        })),
+        Registration::Unregistered,
+        Registration::NoSliceForProducer,
+        Registration::Unknown,
+        Registration::NotApplicable,
+    ];
+
+    let pairs: Vec<(&str, &str)> = states
+        .iter()
+        .map(|r| (tone(r).glyph(), registration_label(r)))
+        .collect();
+    for (i, a) in pairs.iter().enumerate() {
+        for b in &pairs[i + 1..] {
+            assert_ne!(
+                a, b,
+                "two registration states render the same glyph + word pair"
+            );
+        }
+    }
+
+    // …and each pair actually reaches the screen, through the same
+    // `tone_badge` every pane uses.
+    let badges = iced::widget::Column::with_children(
+        states
+            .iter()
+            .map(|r| zengui::view::kit::tone_badge::<Message>(tone(r), registration_label(r))),
+    );
+    let mut ui = simulator::<Message, _, _>(badges);
+    for &(glyph, word) in &pairs {
+        assert!(
+            ui.find(glyph).is_ok(),
+            "glyph {glyph:?} must reach the screen"
+        );
+        assert!(ui.find(word).is_ok(), "word {word:?} must reach the screen");
+    }
+}
+
 /// The registration tri-state must actually reach the screen, and its states
 /// must read differently (RFC 09 §5.1 O4).
 #[test]

@@ -18,7 +18,7 @@
 //! [`super::status::Status`].
 
 use iced::Element;
-use iced::widget::{button, column, pick_list, row};
+use iced::widget::{column, row};
 
 use crate::config::BaseChoice;
 use crate::message::{ChromeMsg, DeploymentMsg, Message, Subject, SubjectMsg, WorkspaceMsg};
@@ -87,7 +87,7 @@ pub fn segments(subject: &Subject, base: &str) -> Vec<Segment> {
 
 /// The breadcrumb itself: context ▸ base ▸ scope ▸ key.
 pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
-    let context_chip = button(kit::caption(match d.context {
+    let context_chip = kit::action(kit::caption(match d.context {
         Some(name) => format!("context: {name}"),
         None => "no context".to_string(),
     }))
@@ -98,7 +98,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
 
     // The picker displays each base by its label, so the empty base reads as
     // the bus-root deployment it is, never as a blank row (#185).
-    let base_picker = pick_list(d.base_options, Some(BaseChoice::new(d.base)), |c| {
+    let base_picker = kit::picker(d.base_options, Some(BaseChoice::new(d.base)), |c| {
         Message::Deployment(DeploymentMsg::BaseSelected(c.base))
     })
     .placeholder("base")
@@ -112,14 +112,14 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
         ScopePreset::State,
         ScopePreset::Events,
     ];
-    let scope_picker = pick_list(&SCOPES[..], Some(d.scope), |s| {
+    let scope_picker = kit::picker(&SCOPES[..], Some(d.scope), |s| {
         Message::Deployment(DeploymentMsg::ScopeSelected(s))
     })
     .text_size(tokens::font::CAPTION);
 
     // Observation is opt-in and labelled by its cost (issue #85); it rides
     // beside the scope it observes.
-    let observe = button(kit::caption(if d.observing {
+    let observe = kit::action(kit::caption(if d.observing {
         "stop observing scope"
     } else {
         "observe scope"
@@ -150,8 +150,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
             }
             bar = bar.push(match seg.select {
                 Some(subtree) => Element::from(
-                    button(kit::caption(seg.label).font(iced::Font::MONOSPACE))
-                        .style(button::text)
+                    kit::link(kit::caption(seg.label).font(iced::Font::MONOSPACE))
                         .on_press(Message::Subject(SubjectMsg::Select(subtree)))
                         .padding(2),
                 ),
@@ -216,7 +215,7 @@ fn controls<'a>(
         kit::muted(dep.settings.scope.label()),
         // Capture and replay (#74): record writes the current watches to a
         // .zrec; replay feeds the panes from one.
-        button(kit::caption(if work.replay.recording.is_some() {
+        kit::action(kit::caption(if work.replay.recording.is_some() {
             "stop recording"
         } else {
             "record"
@@ -225,7 +224,7 @@ fn controls<'a>(
             ReplayMsg::RecordToggled
         )))
         .padding(4),
-        button(kit::caption("replay…"))
+        kit::action(kit::caption("replay…"))
             .on_press(Message::Workspace(WorkspaceMsg::Replay(
                 ReplayMsg::OpenToggled
             )))
@@ -233,7 +232,7 @@ fn controls<'a>(
         iced::widget::space::horizontal(),
         // Window preferences (issue #73): the theme name is the button, so
         // the label says what you get rather than what you have.
-        button(kit::caption(format!(
+        kit::action(kit::caption(format!(
             "theme: {}",
             chrome.prefs.theme.label()
         )))
@@ -241,12 +240,12 @@ fn controls<'a>(
             crate::message::PrefsMsg::ThemeToggled
         )))
         .padding(4),
-        button(kit::caption("-"))
+        kit::action(kit::caption("-"))
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomOut
             )))
             .padding(4),
-        button(kit::caption(format!(
+        kit::action(kit::caption(format!(
             "{}%",
             (chrome.prefs.zoom * 100.0).round() as i32
         )))
@@ -254,12 +253,12 @@ fn controls<'a>(
             crate::message::PrefsMsg::ZoomReset
         )))
         .padding(4),
-        button(kit::caption("+"))
+        kit::action(kit::caption("+"))
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomIn
             )))
             .padding(4),
-        button(kit::caption("reconnect"))
+        kit::action(kit::caption("reconnect"))
             .on_press(Message::Deployment(DeploymentMsg::Reconnect))
             .padding(4),
     ]

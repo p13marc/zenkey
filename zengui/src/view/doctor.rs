@@ -5,7 +5,7 @@
 //! Never ambient: a doctor run fans real queries across the fleet, so it
 //! costs exactly one button press (the laziness ground rule).
 
-use iced::widget::{checkbox, column, row, scrollable, text};
+use iced::widget::{column, row, scrollable, text};
 use iced::{Element, Length};
 use zenkey_fleet::report::{DoctorFinding, DoctorSeverity};
 
@@ -63,25 +63,25 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str) -> Element<'a, Message
     } else {
         "run doctor"
     };
-    let mut run = iced::widget::button(kit::caption(run_label)).padding(4);
+    let mut run = kit::action(kit::caption(run_label)).padding(4);
     if !state.in_flight {
         run = run.on_press(msg(DoctorMsg::Run));
     }
-    let deep = checkbox(state.deep)
+    let deep = kit::check(state.deep)
         .label("deep: freshness + storage sweeps (adds query load)")
         .size(font::CAPTION)
         .text_size(font::CAPTION)
         .on_toggle(|b| msg(DoctorMsg::DeepToggled(b)));
     // The listen window (#161): off by default — a passive phase still holds
     // subscribers open, and ambient cost is the thing this panel refuses.
-    let listen = iced::widget::text_input("listen (s, empty = off)", &state.listen)
+    let listen = kit::input("listen (s, empty = off)", &state.listen)
         .on_input(|t| msg(DoctorMsg::ListenChanged(t)))
         .size(font::CAPTION)
         .width(Length::Fixed(140.0));
 
     // The schema cache's escape hatch lives here because it is the same kind
     // of thing as the run button: an explicit, costed re-ask, never ambient.
-    let reask = iced::widget::button(kit::caption("re-ask schemas"))
+    let reask = kit::action(kit::caption("re-ask schemas"))
         .padding(4)
         .on_press(msg(DoctorMsg::ReaskSchemas));
 
@@ -233,7 +233,7 @@ fn finding_row<'a>(
     let mut body = column![header, kit::muted(f.evidence.clone())].spacing(space::XS);
     if finding_target(f, base).is_some() {
         body = body.push(
-            iced::widget::button(kit::caption("go to subject"))
+            kit::action(kit::caption("go to subject"))
                 .padding(2)
                 .on_press(msg(DoctorMsg::FindingClicked(index))),
         );

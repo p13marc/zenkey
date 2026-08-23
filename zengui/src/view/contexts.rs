@@ -21,7 +21,7 @@
 //! other direction, how someone concludes a fleet is down when they have merely
 //! isolated themselves from it. The pane spends the words.
 
-use iced::widget::{Column, button, checkbox, column, pick_list, row, text, text_input};
+use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
 use zenkey_fleet::StoredContext;
 
@@ -204,7 +204,7 @@ impl ContextForm {
 }
 
 pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message> {
-    let picker = pick_list(form.known.clone(), form.active.clone(), |n| {
+    let picker = kit::picker(form.known.clone(), form.active.clone(), |n| {
         msg(ContextMsg::Selected(n))
     })
     .placeholder("context")
@@ -215,7 +215,7 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         row![
             kit::caption("context"),
             picker,
-            button(kit::caption("load into editor"))
+            kit::action(kit::caption("load into editor"))
                 .on_press(msg(ContextMsg::Load))
                 .padding(4),
         ]
@@ -247,27 +247,27 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
 
     col = col.push(kit::section_header("Edit", None));
     col = col.push(
-        text_input("name", &form.name)
+        kit::input("name", &form.name)
             .on_input(|t| msg(ContextMsg::NameChanged(t)))
             .size(font::CAPTION),
     );
     col = col.push(
-        text_input("base (empty = the bus root, keys start at v1/)", &form.base)
+        kit::input("base (empty = the bus root, keys start at v1/)", &form.base)
             .on_input(|t| msg(ContextMsg::BaseChanged(t)))
             .size(font::CAPTION),
     );
     col = col.push(
-        text_input("connect: tcp/127.0.0.1:7447 …", &form.connect)
+        kit::input("connect: tcp/127.0.0.1:7447 …", &form.connect)
             .on_input(|t| msg(ContextMsg::ConnectChanged(t)))
             .size(font::CAPTION),
     );
     col = col.push(
-        text_input("listen: tcp/0.0.0.0:7448 …", &form.listen)
+        kit::input("listen: tcp/0.0.0.0:7448 …", &form.listen)
             .on_input(|t| msg(ContextMsg::ListenChanged(t)))
             .size(font::CAPTION),
     );
     col = col.push(
-        text_input(
+        kit::input(
             "zenoh config file (JSON5) — reaches a secured bus; knobs above apply on top",
             &form.zenoh_config,
         )
@@ -275,7 +275,7 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         .size(font::CAPTION),
     );
     col = col.push(
-        text_input(
+        kit::input(
             "registry dirs (registry/*.toml), space-separated — offline slices, RFC 08 §6",
             &form.registry,
         )
@@ -283,12 +283,12 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         .size(font::CAPTION),
     );
     col = col.push(
-        text_input("query timeout in seconds (empty = 5)", &form.timeout)
+        kit::input("query timeout in seconds (empty = 5)", &form.timeout)
             .on_input(|t| msg(ContextMsg::TimeoutChanged(t)))
             .size(font::CAPTION),
     );
     col = col.push(
-        checkbox(form.scouting)
+        kit::check(form.scouting)
             .label("multicast scouting")
             .on_toggle(|b| msg(ContextMsg::ScoutingToggled(b)))
             .text_size(font::CAPTION),
@@ -296,13 +296,13 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     col = col.push(scouting_help());
     col = col.push(
         row![
-            button(kit::caption("save"))
+            kit::action(kit::caption("save"))
                 .on_press(msg(ContextMsg::Save))
                 .padding(4),
-            button(kit::caption("save + switch to it"))
+            kit::action(kit::caption("save + switch to it"))
                 .on_press(msg(ContextMsg::SaveAndSelect))
                 .padding(4),
-            button(kit::caption("isolated-verification preset"))
+            kit::action(kit::caption("isolated-verification preset"))
                 .on_press(msg(ContextMsg::Isolate))
                 .padding(4),
         ]

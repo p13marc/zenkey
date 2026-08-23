@@ -16,7 +16,7 @@
 //! consumer plotting a time axis states which clock it plotted
 //! (RFC 09 §5.2).
 
-use iced::widget::{button, pick_list, row, slider, text};
+use iced::widget::{row, text};
 use iced::{Element, Length};
 use zenkey_fleet::RetentionStats;
 
@@ -192,7 +192,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     meta = meta.push(iced::widget::space::horizontal());
     meta = meta.push(kit::muted("live link off"));
     meta = meta.push(
-        button(kit::caption(match &state.source {
+        kit::action(kit::caption(match &state.source {
             ReplaySource::File { .. } => "exit replay",
             ReplaySource::Retained { .. } => "back to live",
         }))
@@ -212,14 +212,14 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
 pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
     let (pos, span) = state.clock();
     let mut transport = row![
-        button(kit::caption(if state.playing { "pause" } else { "play" }))
+        kit::action(kit::caption(if state.playing { "pause" } else { "play" }))
             .on_press(msg(ReplayMsg::Toggled))
             .padding(4),
-        pick_list(SPEEDS, Some(Speed(state.speed)), |s| msg(
+        kit::picker(SPEEDS, Some(Speed(state.speed)), |s| msg(
             ReplayMsg::SpeedSelected(s)
         ))
         .text_size(font::CAPTION),
-        slider(
+        kit::scrub(
             0.0..=(state.span_us.max(1) as f64 / 1e6),
             state.position_us as f64 / 1e6,
             |secs: f64| msg(ReplayMsg::Scrubbed((secs * 1e6) as u64)),
@@ -236,7 +236,7 @@ pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
     // writer, so the result is indistinguishable from a deliberate capture.
     if let ReplaySource::Retained { .. } = &state.source {
         transport = transport.push(
-            button(kit::caption("save window as .zrec"))
+            kit::action(kit::caption("save window as .zrec"))
                 .on_press(msg(ReplayMsg::SaveWindow))
                 .padding(4),
         );
@@ -249,15 +249,15 @@ pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
 pub fn open_row(path: &str) -> Element<'_, Message> {
     row![
         kit::caption("replay file"),
-        iced::widget::text_input(".zrec path", path)
+        kit::input(".zrec path", path)
             .on_input(|s| msg(ReplayMsg::PathChanged(s)))
             .on_submit(msg(ReplayMsg::Open))
             .size(font::CAPTION)
             .width(Length::Fill),
-        button(kit::caption("open"))
+        kit::action(kit::caption("open"))
             .on_press(msg(ReplayMsg::Open))
             .padding(4),
-        button(kit::caption("cancel"))
+        kit::action(kit::caption("cancel"))
             .on_press(msg(ReplayMsg::OpenToggled))
             .padding(4),
     ]

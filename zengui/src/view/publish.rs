@@ -23,7 +23,7 @@
 
 use std::collections::VecDeque;
 
-use iced::widget::{Column, button, checkbox, column, pick_list, row, text, text_input};
+use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
 use zenkey::qos::QosProfile;
 use zenkey_fleet::{BodySource, KeyFacts};
@@ -234,7 +234,7 @@ fn msg(m: PublishMsg) -> Message {
 }
 
 pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Message> {
-    let key = text_input("key: full wire key to publish on", &form.key)
+    let key = kit::input("key: full wire key to publish on", &form.key)
         .on_input(|t| msg(PublishMsg::KeyChanged(t)))
         .size(font::CAPTION);
 
@@ -257,14 +257,14 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
         ));
     }
 
-    let body = text_input(
+    let body = kit::input(
         "body: JSON (encoded for the wire by the engine)",
         &form.body,
     )
     .on_input(|t| msg(PublishMsg::BodyChanged(t)))
     .size(font::CAPTION);
 
-    let qos = pick_list(qos_choices(), Some(form.qos), |q| {
+    let qos = kit::picker(qos_choices(), Some(form.qos), |q| {
         msg(PublishMsg::QosPicked(q))
     })
     .placeholder("qos")
@@ -275,32 +275,32 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
         && declared_qos(form.facts.as_ref()) == Some(form.qos.0))
     .then(|| kit::muted(format!("qos {} (declared)", form.qos.0.name())));
 
-    let encoding = text_input("encoding override (optional)", &form.encoding)
+    let encoding = kit::input("encoding override (optional)", &form.encoding)
         .on_input(|t| msg(PublishMsg::EncodingChanged(t)))
         .size(font::CAPTION);
 
-    let attachment = text_input(
+    let attachment = kit::input(
         "attachment (optional — ships verbatim, never schema-encoded)",
         &form.attachment,
     )
     .on_input(|t| msg(PublishMsg::AttachmentChanged(t)))
     .size(font::CAPTION);
 
-    let raw = checkbox(form.raw)
+    let raw = kit::check(form.raw)
         .label("send raw")
         .on_toggle(|b| msg(PublishMsg::RawToggled(b)))
         .text_size(font::CAPTION);
-    let repeat = checkbox(form.repeat)
+    let repeat = kit::check(form.repeat)
         .label("repeat")
         .on_toggle(|b| msg(PublishMsg::RepeatToggled(b)))
         .text_size(font::CAPTION);
-    let interval = text_input("interval (s)", &form.interval)
+    let interval = kit::input("interval (s)", &form.interval)
         .on_input(|t| msg(PublishMsg::IntervalChanged(t)))
         .size(font::CAPTION)
         .width(Length::Fixed(90.0));
 
     let ready = !form.key.trim().is_empty() && !form.in_flight;
-    let mut send = button(kit::caption(if form.in_flight {
+    let mut send = kit::action(kit::caption(if form.in_flight {
         "sending…"
     } else if form.armed {
         "re-send"
@@ -314,7 +314,7 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
     let mut controls = row![send].spacing(space::SM);
     if form.armed {
         controls = controls.push(
-            button(kit::caption("stop"))
+            kit::action(kit::caption("stop"))
                 .padding(4)
                 .on_press(msg(PublishMsg::Stop)),
         );
@@ -322,7 +322,7 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
     // Retire (#115): a tombstone, not an empty put. Off the state class it
     // is the v1.12 operator act and stays disabled until confirmed.
     let needs_i_know = retire_needs_i_know(form.facts.as_ref());
-    let mut retire = button(kit::caption("retire")).padding(4);
+    let mut retire = kit::action(kit::caption("retire")).padding(4);
     if ready && (!needs_i_know || form.retire_i_know) {
         retire = retire.on_press(msg(PublishMsg::Retire));
     }
@@ -330,7 +330,7 @@ pub fn pane<'a>(form: &'a PublishForm, slices_loaded: bool) -> Element<'a, Messa
     let i_know_row: Option<Element<'a, Message>> = (needs_i_know
         && !form.key.trim().is_empty())
     .then(|| {
-        checkbox(form.retire_i_know)
+        kit::check(form.retire_i_know)
             .label("--i-know: not state-shaped — retiring is an operator cleanup (RFC 04 §1.2, v1.12)")
             .on_toggle(|b| msg(PublishMsg::RetireIKnowToggled(b)))
             .text_size(font::CAPTION)
