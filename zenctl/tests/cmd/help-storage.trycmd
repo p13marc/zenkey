@@ -33,7 +33,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)

@@ -286,6 +286,41 @@ pub fn parse_row(line: &str) -> Result<IngestRow, String> {
     })
 }
 
+/// One line of an explorer ndjson **stream**, as the input side reads it.
+///
+/// A stream interleaves its samples with tagged non-sample rows — `{"row":
+/// "dropped",…}` where the bus outran the observer (RFC 09 §5.1 O6),
+/// `{"row":"seed",…}` at the seed boundary — and a consumer that wants the
+/// samples must tell those apart from a row it cannot parse: metadata is
+/// *skipped and counted as skipped*, a malformed row is an error naming the
+/// reason. Before this split, echo's own honesty lines poisoned the
+/// `echo | pub --from ndjson` round trip the dialect exists for (#235).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamLine {
+    /// A publishable sample row.
+    Sample(IngestRow),
+    /// A tagged non-sample row; the value is the `"row"` tag (`"dropped"`,
+    /// `"seed"`, …). Stream metadata — skip it, count the skip.
+    Meta(String),
+}
+
+/// Parse one line of an explorer stream: [`parse_row`], with the stream's
+/// tagged meta rows told apart from its samples.
+///
+/// The `"row"` key is the explorers' kind tag (zenctl's `render::Row`
+/// convention: every non-sample line of a heterogeneous stream carries one).
+/// A sample row never carries the tag today; `"sample"` is reserved so a
+/// future writer that tags its samples still round-trips.
+pub fn parse_stream_line(line: &str) -> Result<StreamLine, String> {
+    if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(line)
+        && let Some(tag) = obj.get("row").and_then(serde_json::Value::as_str)
+        && tag != "sample"
+    {
+        return Ok(StreamLine::Meta(tag.to_string()));
+    }
+    parse_row(line).map(StreamLine::Sample)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +492,30 @@ mod tests {
             "a key that did not parse carries no origin/subject, an unstamped \
              sample carries no timestamp, and an undecoded one carries no type"
         );
+    }
+
+    /// The stream reader's three-way split: a tagged non-sample row is Meta
+    /// (skipped, not malformed), an untagged sample row is a Sample, and a
+    /// line that is neither is still an error naming the reason.
+    #[test]
+    fn tagged_meta_rows_are_skipped_not_malformed() {
+        assert_eq!(
+            parse_stream_line(r#"{"dropped":7,"row":"dropped"}"#).unwrap(),
+            StreamLine::Meta("dropped".into())
+        );
+        assert_eq!(
+            parse_stream_line(r#"{"row":"seed","seed_complete":{"superseded":0}}"#).unwrap(),
+            StreamLine::Meta("seed".into())
+        );
+        // A tag whose value is not a string is not the convention's tag: the
+        // line falls through to the row parser and errors like any other.
+        assert!(parse_stream_line(r#"{"row":7}"#).is_err());
+        assert!(matches!(
+            parse_stream_line(r#"{"key":"k","value":1}"#).unwrap(),
+            StreamLine::Sample(r) if r.key == "k"
+        ));
+        let err = parse_stream_line(r#"{"key":"k"}"#).unwrap_err();
+        assert!(err.contains("value"), "{err}");
     }
 
     /// Attachments ride the same value rules (#117).

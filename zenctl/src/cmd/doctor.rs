@@ -103,8 +103,14 @@ async fn watch_loop(
             Err(e) => watch.observe(Err(&e.to_string()), &at),
         };
         for t in &transitions {
-            if let Ok(line) = serde_json::to_string(t) {
-                let _ = writeln!(out, "{line}");
+            // Tagged (`"row":"transition"`) like every non-sample line of an
+            // explorer stream — the same kind tag `watchdog` writes.
+            if let Ok(v) = serde_json::to_value(t) {
+                let _ = writeln!(
+                    out,
+                    "{}",
+                    crate::render::Row::tagged("transition", v).into_line()
+                );
             }
         }
         let _ = out.flush();

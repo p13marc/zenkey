@@ -145,8 +145,10 @@ pub(crate) struct GenArgs {
     /// wrong-qos, missing-encoding, unstamped. Each perturbs one dimension
     /// post-synthesis; the plan states the delta per key, and every
     /// faulted sample's marker carries fault=<kind> (RFC 09 §5.3).
-    /// DOUBLE-GUARDED: requires --i-know AND an explicit endpoint or
-    /// --base — faults must never land on the ambient context default.
+    /// DOUBLE-GUARDED: requires --i-know AND an endpoint or --base TYPED on
+    /// this command line — an exported ZENCTL_BASE or context default is the
+    /// ambient bus the shell was pointed at, which is exactly what faults
+    /// must never land on.
     #[arg(long = "fault", value_name = "KIND", value_delimiter = ',')]
     pub(crate) fault: Vec<String>,
     /// SchemaSet JSON document (RFC 08 §7) for payload shapes when the
@@ -219,7 +221,9 @@ pub(crate) enum Command {
         #[arg(long)]
         hex: bool,
         /// Per-reply line template — the `topic echo` % vocabulary
-        /// (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c}).
+        /// (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c}). %T renders `-`
+        /// and %q/%S render empty here: a reply carries no arrival stamp,
+        /// QoS axes or SourceInfo — those are subscription-side facts (#120).
         #[arg(long, value_name = "TEMPLATE")]
         fmt: Option<String>,
         /// Skip schema decode; render structurally.
@@ -390,8 +394,8 @@ pub(crate) enum Command {
     /// invocation, no shared state; not a daemon. Each --rule is one
     /// condition from a CLOSED vocabulary (no expressions, no templating);
     /// every genuine state change prints one line
-    /// {"rule":…,"from":…,"to":…,"at":…,"evidence":…} and an unchanged tick
-    /// prints nothing. Three states, not two (RFC 09 §5.1 O4/O6):
+    /// {"row":"transition","rule":…,"from":…,"to":…,"at":…,"evidence":…} and
+    /// an unchanged tick prints nothing. Three states, not two (RFC 09 §5.1 O4/O6):
     /// ok / firing / unobservable — a drop under a completeness claim is
     /// "could not tell", never "ok", which is what keeps a 3am page honest.
     /// The first evaluation states each rule's baseline once, from null.
@@ -578,12 +582,14 @@ pub(crate) enum Command {
         #[arg(long = "static")]
         static_only: bool,
     },
-    /// Diff what the fleet *serves* against local registry files.
+    /// Check the fleet against the contracts it claims (RFC 08 §6): drift,
+    /// freshness, QoS, coverage.
     ///
     /// RFC 08 §6: "A disagreement between introspection and the checked-in TOML
-    /// is a finding, not an ambiguity." This prints the findings. The local
-    /// truth comes from `--registry <dir>`; without it only the
-    /// roster-vs-introspect check runs.
+    /// is a finding, not an ambiguity." This prints the findings — `registry
+    /// diff` shows the two registries side by side; doctor *judges* the
+    /// deployment. The local truth comes from `--registry <dir>`; without it
+    /// only the roster-vs-introspect check runs.
     Doctor {
         /// Additionally GET current state to check freshness against each
         /// subject's ttl (RFC 04 §1.2) and judge storage coverage — adds
@@ -1141,13 +1147,21 @@ pub(crate) enum TopicCmd {
         /// row shape `topic echo --format ndjson` (and the zengui export)
         /// emits — key + value per row, optionally encoding/qos/delete/
         /// attachment. One shape, both directions; malformed rows are
-        /// counted and reported, never silently skipped.
+        /// counted and reported, never silently skipped, and echo's tagged
+        /// meta lines (`"row":"dropped"`/`"row":"seed"`) are skipped as
+        /// stream metadata — counted as skipped, not malformed.
         #[arg(long, value_enum)]
         from: Option<PubSource>,
         /// With --from: delete rows on keys that are not state-shaped are
         /// refused (and counted) unless this is passed — RFC 04 §1.2
         /// (v1.12) prices the off-state tombstone even in a pipe.
-        #[arg(long = "i-know")]
+        // `conflicts_with = "key"`, not `requires = "from"`: on the
+        // positional-key shape there is nothing this flag can acknowledge,
+        // and an accepted-but-inert flag is a mis-shape — refused at exit 2
+        // like every other one here. (`requires` cannot say it: clap resolves
+        // the requirement through the `source` group, so the positional key
+        // satisfies it.)
+        #[arg(long = "i-know", conflicts_with = "key")]
         i_know: bool,
         /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
         /// Defaults to the subject's declared profile when the key refines
@@ -1254,7 +1268,6 @@ pub(crate) enum TopicCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum NodeCmd {
-    /// List live producers from the liveliness roster (on-bus).
     /// One node's full story: producers, versions, capabilities, freshness
     /// (issue #49; RFC 08 §6's capability-and-version inventory, per node).
     Info {
@@ -1264,6 +1277,7 @@ pub(crate) enum NodeCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// List live producers from the liveliness roster (on-bus).
     List {
         /// Join each producer against its served introspect slice (app +
         /// registry version).
@@ -1399,9 +1413,10 @@ pub(crate) struct BusArgs {
     /// (default: the file's `current` pointer; env `ZENCTL_CONTEXT`).
     #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
     pub(crate) context: Option<String>,
-    /// Local registry directory (`registry/*.toml`), repeatable. When given,
-    /// registry-sourced commands answer offline from these files instead of
-    /// the live bus.
+    /// Local registry directory (`registry/*.toml`), repeatable. Joined with
+    /// the live bus as a union (RFC 08 §6.1): a producer's served slice wins,
+    /// these files fill the gaps, and a disagreement is reported — never
+    /// silently overwritten. With the bus unreachable they answer alone.
     #[arg(long, value_name = "DIR")]
     pub(crate) registry: Vec<PathBuf>,
     /// Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
@@ -1485,4 +1500,67 @@ pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
                 .exit();
         }
     }
+}
+
+/// `--format json` promises **one document**, and a stream never has one —
+/// `topic echo`, `serve`, `watchdog` and `doctor --watch` emit rows as they
+/// happen (bounded runs included: `echo --count N` is N rows, not a
+/// document). Answering ndjson to a request for json is a silent lie, so a
+/// *typed* `--format json` on a streaming verb is refused here, at the same
+/// edge and on the same terms as [`refuse_foreign_format`]: an exported
+/// `ZENCTL_FORMAT=json` is a preference, not a request, and falls back to
+/// rows exactly as `auto` piped would.
+pub(crate) fn refuse_stream_json(matches: &clap::ArgMatches) {
+    use clap::CommandFactory as _;
+    use clap::parser::ValueSource;
+
+    let mut m = matches;
+    let mut path: Vec<&str> = Vec::new();
+    while let Some((name, sub)) = m.subcommand() {
+        path.push(name);
+        m = sub;
+    }
+    let streaming = match path.as_slice() {
+        ["topic", "echo"] | ["serve"] | ["watchdog"] => true,
+        // Plain `doctor` is a report and renders json honestly; only the
+        // transition stream cannot.
+        ["doctor"] => m.get_flag("watch"),
+        _ => false,
+    };
+    if !streaming {
+        return;
+    }
+    let typed_json = m.ids().any(|i| i.as_str() == "format")
+        && m.value_source("format") == Some(ValueSource::CommandLine)
+        && m.get_one::<crate::render::Format>("format") == Some(&crate::render::Format::Json);
+    if typed_json {
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::InvalidValue,
+                "`--format json` promises one document, and a stream has no single \
+                 document to emit — use `--format ndjson` (one object per line).",
+            )
+            .exit();
+    }
+}
+
+/// Whether the bus target was **typed on this command line** — the fact
+/// `gen --fault`'s second guard needs (#163). By the time the derive struct
+/// exists, clap has folded `ZENCTL_BASE` into `--base`, and an exported env
+/// var is exactly "whatever bus the shell was pointed at": the ambient
+/// default the guard refuses. Same `ValueSource` question as
+/// [`refuse_foreign_format`], asked at the same edge.
+pub(crate) fn gen_target_typed(matches: &clap::ArgMatches) -> bool {
+    use clap::parser::ValueSource;
+
+    let mut m = matches;
+    while let Some((_, sub)) = m.subcommand() {
+        m = sub;
+    }
+    ["base", "connect", "listen", "zenoh_config"]
+        .into_iter()
+        .any(|id| {
+            m.ids().any(|i| i.as_str() == id)
+                && m.value_source(id) == Some(ValueSource::CommandLine)
+        })
 }

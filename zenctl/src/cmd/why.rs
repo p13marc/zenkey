@@ -23,11 +23,14 @@ use crate::Bus;
 use crate::cli::WhyArgs;
 
 pub async fn run(args: WhyArgs) -> Result<()> {
-    let bus = Bus::resolve(&args.bus)?;
+    // A verdict verb: every pre-run failure is `asked`'s exit 2, never 1 —
+    // exit 1 here means "no cause found and everything looks healthy", which
+    // a bus that would not open has no standing to claim.
+    let bus = super::asked("why", Bus::resolve(&args.bus));
     // The registry through the one degradation door (#210): unavailable is
     // `None` — announced once, and rendered as "not asked" by the rung.
-    let slices = bus.slices_optional().await?;
-    let session = bus.session().await?;
+    let slices = super::asked("why", bus.slices_optional().await);
+    let session = super::asked("why", bus.session().await);
 
     // Stated before the window opens, not after (O5): a user watching a
     // silence deserves to know what is being watched, and that the window is
@@ -44,8 +47,10 @@ pub async fn run(args: WhyArgs) -> Result<()> {
         timeout: bus.timeout(),
         listen: args.listen.map(std::time::Duration::from_secs_f64),
     };
-    let report =
-        zenkey_fleet::run_why(&session, bus.base(), &args.key, slices.as_ref(), &spec).await?;
+    let report = super::asked(
+        "why",
+        zenkey_fleet::run_why(&session, bus.base(), &args.key, slices.as_ref(), &spec).await,
+    );
     crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())?;
 
     // A library returns a verdict, a command exits with it (the `cutover`

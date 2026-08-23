@@ -34,13 +34,15 @@ pub async fn run(
         anyhow::bail!("--within must be a positive number of seconds");
     }
 
-    let session = args.session().await?;
+    // A session that will not open is the impaired exit (`asked`'s 2), never
+    // 1 — "not met" is a claim about a window that was actually watched.
+    let session = super::asked("expect", args.session().await);
     // Slices enrich: `--valid-payload` and `--qos declared` degrade to
     // explained violations when nothing is loaded, and the report says why.
     // `None` stays `None` into the engine so each violation names the
     // missing registry (`no registry loaded…`) rather than claiming
     // `no schema served` about types nobody looked up (RFC 09 §5.1 O4; #246).
-    let slices = args.slices_optional().await?;
+    let slices = super::asked("expect", args.slices_optional().await);
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let spec = zenkey_fleet::ExpectSpec {
         selector: selector.to_string(),

@@ -9,8 +9,9 @@
 //! §5.3 synthetic marker via the engine.
 //!
 //! Fault injection is **double-guarded** (#163, RFC 09 §5.3): it requires
-//! `--i-know` *and* an explicit endpoint or `--base` — never the ambient
-//! named-context default — because a fault injector publishes deliberately
+//! `--i-know` *and* an endpoint or `--base` typed on the command line —
+//! never the ambient default, env-exported or context-named — because a fault
+//! injector publishes deliberately
 //! non-conforming traffic and must not land on whatever bus the shell was
 //! pointed at. Each fault perturbs one dimension of a synthesized sample
 //! post-synthesis, so the plan prints exactly what deviates per key, and
@@ -38,16 +39,15 @@ impl From<Pattern> for GenPattern {
     }
 }
 
-pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
-    // The fault-injection double-guard's second half (#163): an explicit
-    // endpoint or an explicit --base/ZENCTL_BASE, never the ambient named
-    // context. Computed on the raw flags, because the resolved `Bus` has
-    // already folded the context in and can no longer tell "you asked for
-    // this bus" from "your shell was pointed at it".
-    let explicit_target = cli.bus.base.is_some()
-        || !cli.bus.connect.is_empty()
-        || !cli.bus.listen.is_empty()
-        || cli.bus.zenoh_config.is_some();
+pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
+    // The fault-injection double-guard's second half (#163): a target TYPED
+    // on this command line — endpoint flags, or --base as
+    // `ValueSource::CommandLine` — never the ambient default. The raw flags
+    // cannot answer this: clap folds `ZENCTL_BASE` into `--base` before the
+    // derive struct exists, and an exported env var is exactly "whatever bus
+    // the shell was pointed at". So the answer comes from the parse seam
+    // (`cli::gen_target_typed`, the `refuse_foreign_format` approach).
+    let explicit_target = target_typed;
     let bus = Bus::resolve(&cli.bus)?;
     let args = &bus;
     let crate::cli::GenArgs {
@@ -85,9 +85,10 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         }
         if !explicit_target {
             anyhow::bail!(
-                "--fault refuses the ambient context: name the bus explicitly with \
-                 --base or an endpoint (--connect/--listen/--zenoh-config), so faults \
-                 cannot land on whatever bus your shell happened to be pointed at."
+                "--fault refuses the ambient target: type the bus on this command \
+                 line with --base or an endpoint (--connect/--listen/--zenoh-config). \
+                 An exported ZENCTL_BASE or a named context is whatever bus the \
+                 shell was pointed at, and faults must never land there by default."
             );
         }
     }

@@ -29,9 +29,11 @@ pub async fn coverage(
         // `slices_optional` has already said why, once.
         Ok(None) => Vec::new(),
         // A source the user named, failing: not this function's to swallow,
-        // but not worth losing the storages over either — they are the answer.
+        // but not worth losing the storages over either — they are the
+        // answer. Rendered through the one error shape (`errors::render`),
+        // like every other error this tool prints.
         Err(e) => {
-            eprintln!("error: {e:#}");
+            eprintln!("{}", crate::errors::render(&e));
             Vec::new()
         }
     }

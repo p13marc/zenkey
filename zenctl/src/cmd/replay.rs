@@ -61,12 +61,19 @@ pub async fn run(
             encoding,
         } => {
             if ndjson {
+                // Tagged (`"row":"would"`) like every non-sample line of an
+                // explorer stream, so the preview cannot be mistaken for
+                // publishable rows by a reader of the row dialect.
                 println!(
                     "{}",
-                    serde_json::json!({
-                        "would": "put", "key": key, "bytes": bytes,
-                        "encoding": encoding,
-                    })
+                    crate::render::Row::tagged(
+                        "would",
+                        serde_json::json!({
+                            "would": "put", "key": key, "bytes": bytes,
+                            "encoding": encoding,
+                        })
+                    )
+                    .into_line()
                 );
             } else {
                 println!(
@@ -77,7 +84,14 @@ pub async fn run(
         }
         ReplayEvent::WouldRetire { key } => {
             if ndjson {
-                println!("{}", serde_json::json!({"would": "retire", "key": key}));
+                println!(
+                    "{}",
+                    crate::render::Row::tagged(
+                        "would",
+                        serde_json::json!({"would": "retire", "key": key})
+                    )
+                    .into_line()
+                );
             } else {
                 println!("would retire {key}  (tombstone)");
             }

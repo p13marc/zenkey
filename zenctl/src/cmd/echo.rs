@@ -95,7 +95,16 @@ pub async fn run(
             zenkey_fleet::StreamItem::Dropped(n) => {
                 dropped_total += n;
                 if ndjson {
-                    println!("{}", serde_json::json!({ "dropped": n }));
+                    // Tagged (`"row":"dropped"`) so the pipe's other end —
+                    // `topic pub --from ndjson`, via `parse_stream_line` —
+                    // skips it as stream metadata instead of counting a
+                    // malformed row. A bare `{"dropped":n}` poisoned the
+                    // round trip the row dialect exists for (#235).
+                    println!(
+                        "{}",
+                        crate::render::Row::tagged("dropped", serde_json::json!({ "dropped": n }))
+                            .into_line()
+                    );
                 } else {
                     eprintln!("-- dropped {n} sample(s): the bus outran us --");
                 }
@@ -108,7 +117,15 @@ pub async fn run(
                 // The boundary, rendered per O4: which paths ran and what
                 // each yielded — zeros are observations, not verdicts.
                 if ndjson {
-                    println!("{}", serde_json::json!({ "seed_complete": coverage }));
+                    // Tagged for the same reason as the dropped line above.
+                    println!(
+                        "{}",
+                        crate::render::Row::tagged(
+                            "seed",
+                            serde_json::json!({ "seed_complete": coverage })
+                        )
+                        .into_line()
+                    );
                 } else {
                     let path = |n: Option<usize>, what: &str| match n {
                         Some(n) => format!("{n} {what}"),
@@ -314,4 +331,47 @@ pub async fn run(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    /// The pipe round trip, meta lines included (#235's symmetry, kept): the
+    /// exact tagged lines this verb prints between its sample rows read back
+    /// as stream metadata — skipped, not malformed — and a sample row still
+    /// reads back as a row.
+    #[test]
+    fn echo_meta_lines_read_back_as_meta_and_samples_as_samples() {
+        use zenkey_fleet::StreamLine;
+
+        // The two meta lines exactly as the ndjson arm above spells them.
+        let dropped =
+            crate::render::Row::tagged("dropped", serde_json::json!({ "dropped": 3 })).into_line();
+        let seed = crate::render::Row::tagged(
+            "seed",
+            serde_json::json!({ "seed_complete": { "superseded": 0 } }),
+        )
+        .into_line();
+        // A sample row as the same arm writes one.
+        let mut row = zenkey_fleet::SampleRow::of_key("v1/h-3fa9c2d41b7e/state/p/health", "");
+        row.value = Some(serde_json::json!({"status": "ok"}));
+        let sample = row.to_line();
+
+        let stream = [sample.as_str(), dropped.as_str(), seed.as_str()];
+        let parsed: Vec<StreamLine> = stream
+            .iter()
+            .map(|l| zenkey_fleet::parse_stream_line(l).expect("every echo line parses"))
+            .collect();
+        assert!(
+            matches!(&parsed[0], StreamLine::Sample(r) if r.key == "v1/h-3fa9c2d41b7e/state/p/health"),
+            "the sample row is a row"
+        );
+        assert_eq!(
+            &parsed[1..],
+            [
+                StreamLine::Meta("dropped".into()),
+                StreamLine::Meta("seed".into())
+            ],
+            "meta lines are skipped as metadata, never counted malformed"
+        );
+    }
 }
