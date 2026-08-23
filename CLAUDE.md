@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 
-- `rfcs/` — the **normative RFC set** (v1.18, ratified 2026-08-15). Chapters 02–10 are
-  application-neutral; chapter 11 is the ZenSight reference profile. Wire-contract
+- `rfcs/` — the **normative RFC set** (v1.18, ratified 2026-08-15). Chapters 02–10
+  and 13 (observer conformance, v1.24) are application-neutral; chapter 11 is the
+  ZenSight reference profile. Wire-contract
   changes go through these RFCs, amendment-style (see the changelog in
   `rfcs/00-index.md` — each amendment records what changed *and* what deliberately
   did not).

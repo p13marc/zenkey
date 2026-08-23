@@ -1,11 +1,47 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.23** (2026-08-23, the alert profile is declared, not defaulted;
+**Status: v1.24** (2026-08-23, the observer-conformance chapter below;
 ratified at v1.18, 2026-08-15; v1.0 2026-07-12; adopted for ZenSight,
 migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the enforcement
 crate `zenkey`).
 
+> **v1.24 (2026-08-23, the observer-conformance chapter)** — the honesty
+> material outgrows its carve-out. Chapter
+> [13](13-observer-conformance.md) *(new, normative)* is now the home of
+> what a tool that judges the bus owes its user, and chapter
+> [09](09-operations.md) returns to being the purely informative cookbook
+> its header always claimed. **Appended, not renumbered**: every existing
+> chapter keeps its number, and 09 keeps a tombstone at each moved section
+> — deliberately, because several hundred code comments across the
+> reference crates cite "RFC 09 §5.1 O4" and friends, and every one of
+> them still resolves through the tombstones. Those citations are *not*
+> rewritten in this amendment (a follow-up sweep will); new text cites 13.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **P1** | [13 §3](13-observer-conformance.md) ← 09 §5.1 | **O1–O7 and the frugality note move, wording and numbering untouched** — "09 §5.1 O4" and "13 §3 O4" are the same rule. Promotion adds what the carve-out never carried: for each rule, its observable consequence per output medium (table cell / report field / note, drawn from how the reference implementation renders — the `—` that is not an empty string, skip-if-not-asked serialization, cited coverage notes) and its conformance-test shape (what a per-report checklist row asserts, in the two-corpus contract/render pattern). A tool can now be *checked* against the rules, not merely exhorted by them. |
+> | **P2** | [13 §1](13-observer-conformance.md) *(new)* | **The judgment shape.** Every tool verdict MUST be expressible as `Established(yes \| no)` vs `Unestablished(NotAsked \| Unobservable{reason})`, with the two Unestablished kinds normatively distinct — not-asked is cured by asking, unobservable by fixing the named impediment, and the reference implementation had rediscovered that split ad hoc in five verdict vocabularies and mis-folded it in one before it was named here once. Domain vocabularies (`OldStillSpeaks`, `Impaired`, `Unproven`, the `NotValidated` reasons…) stay free as surface namings, but each MUST document its mapping onto the shape, including the **polarity line**: a condition-fires vocabulary inverts which Established pole is the finding, and the inversion survives code review because both readings look honest. Exit-code projection stated: 0 = established-clean, 1 = established-finding, 2 = unestablished (either kind; the report distinguishes). |
+> | **P3** | [13 §2](13-observer-conformance.md), [05 §3.1](05-control-rpc.md) | **The silence rule generalizes by cross-reference.** 13 §2 states the general rule — unattributable silence is never Established(no) — and cites 05 §3.1 as its reply-set instance. **05 §3.1 does not move**: it is the RPC instance, normative where the RPC lives. |
+> | **P4** | [13 §4](13-observer-conformance.md) ← 09 §5.2 | **Capture/replay moves, plus the one substantive change of the cut**: a minimal normative `.zrec` contract (13 §4.1) — header fields including the base, row fields (`key`, `delete`, `t`, lossless `bytes` vs the non-round-trippable `value`), drop-record placement where the gap happened, and the reader/replayer obligations (re-stamp, retire-gate every tombstone, refuse a foreign base). One screen; everything not listed stays reference-implementation-defined and the section says so. Before v1.24 the code was normative for the whole format — a floor two interchanging tools can hold each other to is now text. |
+> | **P5** | [13 §5](13-observer-conformance.md) ← 09 §5.3 | **The synthetic marker moves verbatim**: same attachment shape, same deliberate non-marking of replayed-real traffic and of `spray`. |
+> | **P6** | [13 §6](13-observer-conformance.md) ← 09 §6 | **Cutover acceptance moves** — it is a judgment procedure, and it reads on P2's shape directly (`Unproven` is the Unestablished pole the reference verdict vocabulary already carried). Both halves, the plain-version-chunk costing note, and the concrete-key probe rule are unchanged. |
+>
+> **What did *not* change.** No O-rule's wording or number; no obligation
+> was added to or removed from any moved rule. [05 §3.1](05-control-rpc.md)
+> stays where it is. The synthetic marker and every `.zrec` obligation
+> carry over verbatim — the only newly-normative material is 13 §1–§2 and
+> §4.1's format minimum, and §4.1 binds what interchanging tools already
+> did. No key, wire, registry, or QoS change of any kind: this amendment
+> moves and names obligations on *tools*. Chapter numbers 01–12 are
+> untouched, and 09's recipes (§0–§5) stand unedited — only its header and
+> intro changed, to name the move.
+>
+> **Provenance.** The Explorer Suite 2.0 report-honesty review (epic
+> zenkey #174; the audit batch that landed as PR #293 found eight O4/O5
+> gaps across the pre-sweep report families) — auditing every report
+> family against §5.1 is what surfaced both the five-times-rediscovered
+> verdict split and the absence of a stated conformance shape.
 > **v1.23 (2026-08-23, the alert profile is declared, not defaulted)** —
 > [04 §3](04-planes.md)'s profile table has bound the `alert` profile to the
 > **family** `state/*/alert/*` since v1.0, but the registry's default
@@ -812,6 +848,9 @@ Chapters are numbered for reference, not reading. Suggested paths:
   replace-this checklist.
 - **Operating a deployment**: 09, with 04 for the class semantics behind
   the recipes.
+- **Building a tool that reads or judges the bus**: 13, with
+  05 §3.1 for the reply-set instance of its silence rule and 08 §6–§7 for
+  the registry surface a tool renders.
 
 ## Chapters
 
@@ -826,10 +865,11 @@ Chapters are numbered for reference, not reading. Suggested paths:
 | 06 | [06-identity.md](06-identity.md) | origin minting, observed devices, evidence, the `@catalog` contract |
 | 07 | [07-bulk-planes.md](07-bulk-planes.md) | `@media` (live frames) and `@blob` (bulk/content-addressed transfer) |
 | 08 | [08-registry.md](08-registry.md) | the subject registry: format, versioning policy + compatibility lock (§3.1), naming rules, ownership |
-| 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy, **observer obligations (§5.1, normative for tools)**, capture/replay etiquette (§5.2) |
+| 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy, base discovery; tombstones for the tool material moved to 13 (v1.24) |
 | 10 | [10-prior-art.md](10-prior-art.md) | Keelson, uProtocol/automotive, rmw_zenoh, Sparkplug, OTel, NATS, Zenoh guidance, D-Bus, Homie, OPC UA — took/rejected per system |
 | 11 | [11-zensight-profile.md](11-zensight-profile.md) | the reference application: profile constants, worked keys per sensor, full shipped-family mapping |
 | 12 | [12-open-questions.md](12-open-questions.md) | the decision record: all six former open questions decided, each with its alternatives and revisit trigger; §9 carries the matching-badge adoption note (v1.14) |
+| 13 | [13-observer-conformance.md](13-observer-conformance.md) | **observer conformance** (normative, v1.24): the judgment shape and its exit-code projection, the general silence rule, observer obligations O1–O7 with per-medium consequences and conformance-test shapes, `.zrec` capture/replay (format minimum + etiquette), the synthetic marker, cutover acceptance |
 
 ## Scope
 
