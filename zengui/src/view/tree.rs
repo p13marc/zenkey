@@ -38,9 +38,11 @@ use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
 use crate::patharena::{ChunkId, PathArena, PathId};
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::{RegistrationTone, colors};
-use crate::view::tokens::{font, space};
+use crate::view::tokens::{Spacing, font};
 
-/// Fixed row height — what makes the scroll window arithmetic exact.
+/// Fixed row height — what makes the scroll window arithmetic exact. The
+/// *comfortable* baseline: the pane renders at `sp.row(ROW_HEIGHT)` (#192),
+/// so density scales the rows and the window arithmetic together.
 pub const ROW_HEIGHT: f32 = 24.0;
 
 /// What a chunk means, when the subtree is conforming.
@@ -1302,6 +1304,9 @@ pub struct TreeData<'a> {
     pub watches: Watches<'a>,
     /// The selected wire key, if any.
     pub selected: Option<&'a str>,
+    /// The dock's resolved spacing grid (#192). The Locator defaults to
+    /// Compact — a tree wants rows — so this is usually the tight grid.
+    pub sp: Spacing,
 }
 
 /// What clicking the row body does (issue #93): concrete entries select
@@ -1334,15 +1339,6 @@ fn under_seeding(row_path: &str, seeding: &BTreeSet<String>) -> bool {
         .any(|p| row_path == p || row_path.starts_with(&format!("{p}/")))
 }
 
-/// The visible row window for a scroll position: `(first, last)` indices
-/// into the flattened rows, with overscan.
-///
-/// Delegates to [`kit::window`], which History and Echo also use since #183 —
-/// three virtualized lists, one idea of "visible".
-pub fn window(rows: usize, scroll_y: f32, viewport_h: f32) -> (usize, usize) {
-    kit::window(rows, scroll_y, viewport_h, ROW_HEIGHT)
-}
-
 /// Render the rows.
 ///
 /// Takes the same [`TreeData`] as [`pane`], which formally hands it `pivot` and
@@ -1367,10 +1363,13 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
         );
     }
 
-    let (first, last) = window(flat.rows.len(), d.scroll_y, d.viewport_h);
+    // The density-scaled row height (#192): the window arithmetic and the
+    // fixed row containers must agree on it, or the scrollbar lies.
+    let row_h = d.sp.row(ROW_HEIGHT, crate::view::tokens::CAPTION_LINE);
+    let (first, last) = kit::window(flat.rows.len(), d.scroll_y, d.viewport_h, row_h);
     let mut col = Column::new();
     if first > 0 {
-        col = col.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * ROW_HEIGHT)));
+        col = col.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * row_h)));
     }
     // The one place a `TreeRow` is built now: ~40 per frame, joined against
     // this tick's numbers, rather than 50,000 per tick of which the window
@@ -1386,14 +1385,15 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
                 d.facts,
                 d.selected,
                 d.watches,
+                d.sp,
             ))
-            .height(Length::Fixed(ROW_HEIGHT)),
+            .height(Length::Fixed(row_h)),
         );
     }
     if last < flat.rows.len() {
         col = col.push(
             iced::widget::Space::new()
-                .height(Length::Fixed((flat.rows.len() - last) as f32 * ROW_HEIGHT)),
+                .height(Length::Fixed((flat.rows.len() - last) as f32 * row_h)),
         );
     }
     if flat.truncated > 0 {
@@ -1430,6 +1430,7 @@ fn row_view<'a>(
     facts: &'a FactsIndex,
     selected: Option<&'a str>,
     watches: Watches<'a>,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     let indent = iced::widget::Space::new().width(Length::Fixed(r.depth as f32 * 14.0));
 
@@ -1437,7 +1438,9 @@ fn row_view<'a>(
     // that is also a prefix of deeper keys keeps body-click = select.
     let marker: Element<'a, Message> = match marker_press(shape, arena) {
         Some(msg) => kit::link(kit::caption(if r.expanded { "▾" } else { "▸" }))
-            .padding(2)
+            // Horizontal only: a fixed-height row has no vertical air to
+            // spend, at either density.
+            .padding([0.0, sp.xs])
             .on_press(msg)
             .into(),
         None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
@@ -1454,9 +1457,7 @@ fn row_view<'a>(
             }),
         });
 
-    let mut line = row![name]
-        .spacing(space::XS)
-        .align_y(iced::Alignment::Center);
+    let mut line = row![name].spacing(sp.xs).align_y(iced::Alignment::Center);
 
     // Freshness dot (issue #65): green = seen just now, fades to dim.
     if let Some(age) = r.age_s {
@@ -1554,7 +1555,7 @@ fn row_view<'a>(
                 "○"
             };
             kit::link(kit::caption(watch_label))
-                .padding(2)
+                .padding([0.0, sp.xs])
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(t.clone())))
                 .into()
         }
@@ -1564,10 +1565,10 @@ fn row_view<'a>(
     // The hover wash is what makes a 40k-row list trackable with the mouse
     // (#193); selection additionally paints the stronger shade.
     let body = kit::row_button(line, is_selected)
-        .padding(2)
+        .padding([0.0, sp.xs])
         .on_press(row_press(shape, arena));
     row![watch, indent, marker, body]
-        .spacing(space::XS)
+        .spacing(sp.xs)
         .align_y(iced::Alignment::Center)
         .into()
 }
@@ -1583,7 +1584,7 @@ pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
         .size(font::CAPTION)
         .on_input(|v| Message::Workspace(WorkspaceMsg::TreeSearchChanged(v)));
     let mut header = row![pivot_picker, find]
-        .spacing(space::SM)
+        .spacing(d.sp.sm)
         .align_y(iced::Alignment::Center);
     if flat.filtered {
         // A filtered tree is a partial view; say what it hides (O5's spirit).
@@ -1593,8 +1594,9 @@ pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
             flat.total_keys
         )));
     }
+    let sp = d.sp;
     column![kit::section_header("Keys", None), header, tree_view(d)]
-        .spacing(space::SM)
+        .spacing(sp.sm)
         .into()
 }
 
@@ -2371,7 +2373,7 @@ mod tests {
         assert_eq!(piv.total_keys, 50_000);
 
         // The frame cost is the window, not the row count.
-        let (first, last) = window(flat.rows.len(), 25_000.0 * ROW_HEIGHT, 900.0);
+        let (first, last) = kit::window(flat.rows.len(), 25_000.0 * ROW_HEIGHT, 900.0, ROW_HEIGHT);
         println!(
             "window at mid-scroll: rows {first}..{last} of {}",
             flat.rows.len()
@@ -2382,18 +2384,18 @@ mod tests {
     /// The scroll window is exact row arithmetic with overscan, clamped.
     #[test]
     fn the_window_is_bounded_and_covers_the_viewport() {
-        let (first, last) = window(50_000, 0.0, 600.0);
+        let (first, last) = kit::window(50_000, 0.0, 600.0, ROW_HEIGHT);
         assert_eq!(first, 0);
         assert!(
             (26..=60).contains(&last),
             "viewport rows + overscan: {last}"
         );
 
-        let (first, last) = window(50_000, 25_000.0 * ROW_HEIGHT, 600.0);
+        let (first, last) = kit::window(50_000, 25_000.0 * ROW_HEIGHT, 600.0, ROW_HEIGHT);
         assert!((25_000 - kit::OVERSCAN..=25_000).contains(&first));
         assert!(last > 25_000);
 
-        let (first, last) = window(10, 1_000_000.0, 600.0);
+        let (first, last) = kit::window(10, 1_000_000.0, 600.0, ROW_HEIGHT);
         assert_eq!((first, last), (10, 10), "clamped past the end");
     }
 }

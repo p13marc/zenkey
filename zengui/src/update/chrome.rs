@@ -61,6 +61,9 @@ pub(crate) fn update(
             use crate::message::PrefsMsg;
             match msg {
                 PrefsMsg::ThemeToggled => chrome.prefs.theme = chrome.prefs.theme.toggled(),
+                PrefsMsg::DensityToggled => {
+                    chrome.prefs.density = chrome.prefs.density.toggled();
+                }
                 PrefsMsg::ZoomIn => chrome.prefs.zoom_in(),
                 PrefsMsg::ZoomOut => chrome.prefs.zoom_out(),
                 PrefsMsg::ZoomReset => chrome.prefs.zoom_reset(),

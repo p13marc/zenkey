@@ -65,6 +65,42 @@ impl ThemeChoice {
     }
 }
 
+/// How tightly the workspace packs (#192): a multiplier on the spacing grid
+/// and the virtualized row heights — **never** on a font size. Shrinking type
+/// is not density, it is illegibility, and it would undo the type-scale work
+/// (#191) in one keystroke.
+///
+/// The stored value is the *global* mode, toggled by Ctrl+Shift+D. What a
+/// dock actually renders at is [`DockRole::density`]: Compact takes the whole
+/// window dense; Comfortable restores each dock's own default — which for the
+/// Locator is Compact, because a tree wants rows however airy the rest is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Density {
+    #[default]
+    Comfortable,
+    Compact,
+}
+
+impl Density {
+    pub const ALL: [Density; 2] = [Density::Comfortable, Density::Compact];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Density::Comfortable => "comfortable",
+            Density::Compact => "compact",
+        }
+    }
+
+    /// The other one — what Ctrl+Shift+D switches to.
+    pub fn toggled(self) -> Density {
+        match self {
+            Density::Comfortable => Density::Compact,
+            Density::Compact => Density::Comfortable,
+        }
+    }
+}
+
 /// The four dock roles the workspace grid arranges (#180, epic #172).
 ///
 /// A role, not a pane: the Workbench shows whichever tool `right_pane`
@@ -100,6 +136,22 @@ impl DockRole {
             DockRole::Inspector => "inspector",
             DockRole::Activity => "activity",
             DockRole::Workbench => "workbench",
+        }
+    }
+
+    /// What the dock renders at under `global` (#192).
+    ///
+    /// Compact is a floor, not a suggestion: the global toggle takes every
+    /// dock dense. Comfortable gives each dock its own default — Compact in
+    /// the Locator (a 40,000-key tree wants rows), Comfortable everywhere a
+    /// form wants air. That is why Ctrl+Shift+D visibly moves the Inspector
+    /// and leaves the Locator alone: the tree was already as dense as the
+    /// grid goes.
+    pub fn density(self, global: Density) -> Density {
+        match (global, self) {
+            (Density::Compact, _) => Density::Compact,
+            (Density::Comfortable, DockRole::Locator) => Density::Compact,
+            (Density::Comfortable, _) => Density::Comfortable,
         }
     }
 }
@@ -342,6 +394,8 @@ pub struct Prefs {
     pub max_keys: Option<usize>,
     /// Whether to observe the scope immediately on connect (#188).
     pub eager: Option<bool>,
+    /// The global density mode (#192), toggled by Ctrl+Shift+D.
+    pub density: Density,
 }
 
 impl Default for Prefs {
@@ -358,6 +412,7 @@ impl Default for Prefs {
             history_entries: None,
             max_keys: None,
             eager: None,
+            density: Density::default(),
         }
     }
 }
@@ -495,6 +550,7 @@ mod tests {
             history_entries: Some(400),
             max_keys: Some(100_000),
             eager: Some(true),
+            density: Density::Compact,
         };
         prefs.save_to(&path).unwrap();
         let (back, note) = Prefs::load_from(&path);
@@ -675,6 +731,52 @@ mod tests {
     fn the_theme_toggle_is_an_involution() {
         for t in ThemeChoice::ALL {
             assert_eq!(t.toggled().toggled(), t);
+        }
+    }
+
+    #[test]
+    fn the_density_toggle_is_an_involution() {
+        for d in Density::ALL {
+            assert_eq!(d.toggled().toggled(), d);
+        }
+    }
+
+    /// The acceptance's persistence half (#192): the toggled mode is a field
+    /// like any other, so the round-trip test above carries it — this one
+    /// pins the *file spelling*, because a hand-editable file is an API.
+    #[test]
+    fn density_survives_restart_as_a_plain_word() {
+        let path = tmp("density.toml");
+        let prefs = Prefs {
+            density: Density::Compact,
+            ..Prefs::default()
+        };
+        prefs.save_to(&path).unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("density = \"compact\""),
+        );
+        let (back, note) = Prefs::load_from(&path);
+        assert!(note.is_none());
+        assert_eq!(back.density, Density::Compact);
+    }
+
+    /// Global Compact takes every dock dense; global Comfortable restores
+    /// each dock's own default — and the Locator's default *is* Compact,
+    /// because a tree wants rows (#192).
+    #[test]
+    fn compact_is_a_floor_and_the_locator_never_rises_above_it() {
+        for role in DockRole::ALL {
+            assert_eq!(role.density(Density::Compact), Density::Compact);
+        }
+        assert_eq!(
+            DockRole::Locator.density(Density::Comfortable),
+            Density::Compact,
+            "the locator's default is Compact"
+        );
+        for role in [DockRole::Inspector, DockRole::Activity, DockRole::Workbench] {
+            assert_eq!(role.density(Density::Comfortable), Density::Comfortable);
         }
     }
 

@@ -24,7 +24,7 @@ use crate::history::{HistoryEntry, HistoryRecorder};
 use crate::message::{Message, PaneMsg, SubjectMsg};
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
-use crate::view::tokens::space;
+use crate::view::tokens::{CAPTION_LINE, Spacing};
 
 /// How many field changes one diff lists before the rest are counted.
 const MAX_CHANGES: usize = 50;
@@ -59,6 +59,8 @@ pub struct HistoryData<'a> {
     pub watched: bool,
     /// Scroll position + viewport height, driving the virtual window (#183).
     pub scroll: (f32, f32),
+    /// The dock's resolved spacing grid (#192).
+    pub sp: Spacing,
 }
 
 /// One timeline row's height. Two lines — the head and the payload preview —
@@ -68,6 +70,10 @@ pub struct HistoryData<'a> {
 /// a two-line button and the container below pins it. A preview that wrapped
 /// would silently break the window's arithmetic, which is why the preview is
 /// pre-truncated by the recorder rather than by the layout.
+///
+/// The comfortable baseline: the section renders at
+/// `sp.row(ROW_HEIGHT, 2.0 * CAPTION_LINE)` (#192) — two lines of text and
+/// almost no air, so this is the row density compacts the least.
 pub const ROW_HEIGHT: f32 = 34.0;
 
 /// The Inspector's history sections (#182). See [`super::detail::section`]
@@ -83,16 +89,17 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
                  earlier samples are never backfilled.",
             ),
         ]
-        .spacing(space::SM);
+        .spacing(data.sp.sm);
     };
 
-    let mut col = Column::new().spacing(space::SM);
+    let sp = data.sp;
+    let mut col = Column::new().spacing(sp.sm);
     col = col.push(kit::section_header(
         "History",
         Some(
             kit::action(kit::caption("clear"))
                 .on_press(msg(HistoryMsg::Clear))
-                .padding(4)
+                .padding(sp.xs)
                 .into(),
         ),
     ));
@@ -108,7 +115,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
         col = col.push(
             kit::action(kit::caption("watch this key"))
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(key.to_string())))
-                .padding(4),
+                .padding(sp.xs),
         );
         return col;
     }
@@ -147,22 +154,23 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     // History never got it, and the asymmetry was invisible because both
     // *bounds* were honest and neither said what drawing cost.
     let total = rec.ring.len();
-    let (first, last) = kit::window(total, data.scroll.0, data.scroll.1, ROW_HEIGHT);
+    // Two lines of text per row: density shaves the row's air, not its type
+    // (#192) — the window arithmetic and the containers share the result.
+    let row_h = sp.row(ROW_HEIGHT, 2.0 * CAPTION_LINE);
+    let (first, last) = kit::window(total, data.scroll.0, data.scroll.1, row_h);
     let mut rows = Column::new();
     if first > 0 {
-        rows =
-            rows.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * ROW_HEIGHT)));
+        rows = rows.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * row_h)));
     }
     for entry in rec.ring.iter().skip(first).take(last - first) {
         rows = rows.push(
-            iced::widget::container(row_view(entry, newest, Some(entry.seq) == focus, rec))
-                .height(Length::Fixed(ROW_HEIGHT)),
+            iced::widget::container(row_view(entry, newest, Some(entry.seq) == focus, rec, sp))
+                .height(Length::Fixed(row_h)),
         );
     }
     if last < total {
-        rows = rows.push(
-            iced::widget::Space::new().height(Length::Fixed((total - last) as f32 * ROW_HEIGHT)),
-        );
+        rows = rows
+            .push(iced::widget::Space::new().height(Length::Fixed((total - last) as f32 * row_h)));
     }
     col = col.push(
         iced::widget::scrollable(rows)
@@ -176,7 +184,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
             }),
     );
 
-    col = col.push(diff_section(rec, focus));
+    col = col.push(diff_section(rec, focus, sp));
     col
 }
 
@@ -186,6 +194,7 @@ fn row_view<'a>(
     newest: u64,
     focused: bool,
     rec: &HistoryRecorder,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     // t-0 is the newest; the label counts back from it, which is how a reader
     // asks the question ("what did it look like two samples ago").
@@ -209,15 +218,14 @@ fn row_view<'a>(
             }),
         }),
     ]
-    .spacing(space::SM);
+    .spacing(sp.sm);
 
-    kit::row_button(
-        column![head, kit::mono(entry.preview.clone())].spacing(1),
-        false,
-    )
-    .on_press(msg(HistoryMsg::Select(entry.seq)))
-    .padding(iced::Padding::from([2.0, 0.0]))
-    .into()
+    // No spacing and no padding on the two-line body: the row is pinned to
+    // `sp.row(..)`, which already spends all the air the density allows —
+    // spacing here would only push the preview past the clip.
+    kit::row_button(column![head, kit::mono(entry.preview.clone())], false)
+        .on_press(msg(HistoryMsg::Select(entry.seq)))
+        .into()
 }
 
 /// The row's time, labelled with the clock that produced it.
@@ -242,8 +250,12 @@ fn stamp(entry: &HistoryEntry, rec: &HistoryRecorder) -> String {
 }
 
 /// The diff panel: the focused row against the one before it.
-fn diff_section<'a>(rec: &HistoryRecorder, focus: Option<u64>) -> Element<'a, Message> {
-    let mut col = Column::new().spacing(2);
+fn diff_section<'a>(
+    rec: &HistoryRecorder,
+    focus: Option<u64>,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
     let Some((prev, entry)) = focus.and_then(|s| rec.ring.pair(s)) else {
         return col.push(kit::muted("no row selected")).into();
     };
@@ -288,14 +300,14 @@ fn diff_section<'a>(rec: &HistoryRecorder, focus: Option<u64>) -> Element<'a, Me
                     ))
                     .into();
             }
-            col.push(changes_view(&d)).into()
+            col.push(changes_view(&d, sp)).into()
         }
-        _ => col.push(bytes_view(prev, entry)).into(),
+        _ => col.push(bytes_view(prev, entry, sp)).into(),
     }
 }
 
-fn changes_view<'a>(d: &ValueDiff) -> Element<'a, Message> {
-    let mut col = Column::new().spacing(1);
+fn changes_view<'a>(d: &ValueDiff, sp: Spacing) -> Element<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
     for change in &d.changes {
         let (line, tone) = match change {
             Change::Changed { path, old, new } => (
@@ -332,7 +344,7 @@ enum Tone {
 }
 
 /// The honest fallback when at least one side is not a document.
-fn bytes_view<'a>(prev: &HistoryEntry, entry: &HistoryEntry) -> Element<'a, Message> {
+fn bytes_view<'a>(prev: &HistoryEntry, entry: &HistoryEntry, sp: Spacing) -> Element<'a, Message> {
     let old = prev.payload.to_bytes();
     let new = entry.payload.to_bytes();
     let d = zenkey_fleet::diff::byte_diff(&old, &new);
@@ -342,7 +354,7 @@ fn bytes_view<'a>(prev: &HistoryEntry, entry: &HistoryEntry) -> Element<'a, Mess
         (false, true) => "the previous sample has no structural form",
         (true, true) => unreachable!("two structural values are diffed as fields above"),
     };
-    let mut col = Column::new().spacing(1);
+    let mut col = Column::new().spacing(sp.xs);
     col = col.push(kit::muted(format!(
         "{which} — compared as bytes, not as fields"
     )));

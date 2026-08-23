@@ -188,7 +188,14 @@ impl Zengui {
         // the Inspector, the Activity dock (#183), the workbench — is a pane
         // of it, resizable and rearrangeable, and a closed dock gives its
         // space back structurally.
-        let workspace = view::panes::grid(&self.dep, &self.obs, &self.sub, &self.tree, &self.work);
+        let workspace = view::panes::grid(
+            &self.dep,
+            &self.obs,
+            &self.sub,
+            &self.tree,
+            &self.work,
+            self.chrome.prefs.density,
+        );
 
         let mut layout = column![view::location::bar(
             &self.chrome,

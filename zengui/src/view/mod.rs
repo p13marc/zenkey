@@ -41,6 +41,21 @@
 //! and its own scroll offset; none supplies its own idea of what "visible"
 //! means. Before #183 only the tree had a window at all.
 //!
+//! ## One grid, four numbers, and a density (#192)
+//!
+//! Spacing comes off the 8pt scale in [`tokens`], by role: `SM` inside a
+//! card, `MD` between cards and for dock padding, `LG` between sections,
+//! `XL` page-level, `XS` for tight icon/label gaps. Inside a workspace dock
+//! the numbers are a [`tokens::Spacing`] resolved once per dock in
+//! `panes::grid` from the global density and the dock's own default
+//! (Compact in the Locator, Comfortable elsewhere) and threaded like theme —
+//! a surface takes `sp` and spends it, never asking which mode it is in. The
+//! window chrome (location bar, status strip, palette) stays on the
+//! `space::` constants: it is one row tall and has no rows to trade for air.
+//! Density multiplies the grid and the virtualized row heights only — never
+//! a font size — and `scripts/check-spacing.sh` greps the rule the same way
+//! the type scale and the interactive seam are gated.
+//!
 //! A surface with more than a few inputs takes one borrowed-fields struct by
 //! value — [`detail::DetailData`], [`nodes::NodesData`], [`history::HistoryData`],
 //! [`status::Status`], [`tree::TreeData`] — rather than a long argument list.

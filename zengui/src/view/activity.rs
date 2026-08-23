@@ -25,7 +25,7 @@ use iced::widget::{Column, column, row};
 use iced::{Element, Length};
 use zenkey_fleet::SliceSet;
 
-use super::tokens::space;
+use super::tokens::Spacing;
 use super::{doctor, echo, kit, replay, send};
 use crate::echo::EchoRing;
 use crate::message::{ActivityTab, Message, WorkspaceMsg};
@@ -50,12 +50,14 @@ pub(crate) struct ActivityData<'a> {
     /// `None` before a monitor exists, which is "not asked", not "empty"
     /// (O4).
     pub retention: Option<zenkey_fleet::RetentionStats>,
+    /// The dock's resolved spacing grid (#192).
+    pub sp: Spacing,
 }
 
 pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
     // Putting the dock away is the grid's `×` since #180 — the strip is
     // only the stream switch now.
-    let mut tabs = row![].spacing(space::XS);
+    let mut tabs = row![].spacing(d.sp.xs);
     for t in ActivityTab::ALL {
         tabs = tabs.push(kit::tab(
             t.label(),
@@ -63,19 +65,23 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
             Message::Workspace(WorkspaceMsg::ActivityTab(t)),
         ));
     }
-    let strip = row![tabs]
-        .spacing(space::SM)
-        .align_y(iced::Alignment::Center);
+    let strip = row![tabs].spacing(d.sp.sm).align_y(iced::Alignment::Center);
 
     let body: Element<'a, Message> = match d.dock.tab {
-        ActivityTab::Echo => {
-            echo::section(d.echo, d.echo_view, d.follow, d.next_seq, d.echo_scroll).into()
-        }
-        ActivityTab::Publish => send::log_section(d.publish),
-        ActivityTab::Doctor => doctor::section(d.doctor, d.base),
-        ActivityTab::Replay => replay_stream(d.replay, d.slices, d.retention),
+        ActivityTab::Echo => echo::section(
+            d.echo,
+            d.echo_view,
+            d.follow,
+            d.next_seq,
+            d.echo_scroll,
+            d.sp,
+        )
+        .into(),
+        ActivityTab::Publish => send::log_section(d.publish, d.sp),
+        ActivityTab::Doctor => doctor::section(d.doctor, d.base, d.sp),
+        ActivityTab::Replay => replay_stream(d.replay, d.slices, d.retention, d.sp),
     };
-    column![strip, body].spacing(space::SM).into()
+    column![strip, body].spacing(d.sp.sm).into()
 }
 
 /// The scrubber and the capture line — replay's *stream*, not its banner.
@@ -83,10 +89,11 @@ fn replay_stream<'a>(
     r: &'a ReplayMode,
     _slices: Option<&'a SliceSet>,
     retention: Option<zenkey_fleet::RetentionStats>,
+    sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut col: Column<'a, Message> = column![].spacing(space::SM);
+    let mut col: Column<'a, Message> = column![].spacing(sp.sm);
     if let Some(path) = &r.replay_open {
-        col = col.push(replay::open_row(path));
+        col = col.push(replay::open_row(path, sp));
         if let Some(note) = &r.replay_note {
             col = col.push(kit::muted(format!("could not open: {note}")));
         }
@@ -97,7 +104,7 @@ fn replay_stream<'a>(
         col = col.push(kit::muted(replay::loading_note(path)));
     }
     match &r.replay {
-        Some(state) => col = col.push(replay::scrubber(state)),
+        Some(state) => col = col.push(replay::scrubber(state, sp)),
         None if r.replay_open.is_none() && r.replay_loading.is_none() => {
             col = col.push(kit::muted(
                 "no file open — the location bar's \"replay…\" opens a .zrec, \
@@ -118,14 +125,14 @@ fn replay_stream<'a>(
                     .on_press(Message::Workspace(WorkspaceMsg::Replay(
                         replay::ReplayMsg::RetainedToggled,
                     )))
-                    .padding(4),
+                    .padding(sp.xs),
                 kit::muted(format!(
                     "holds {:.1}s of watched traffic · budget {}",
                     taken.span.as_secs_f64(),
                     replay::budget_label(taken.budget),
                 )),
             ]
-            .spacing(space::SM)
+            .spacing(sp.sm)
             .align_y(iced::Alignment::Center),
         );
     }

@@ -19,10 +19,10 @@ use iced::widget::{column, pane_grid, row};
 use iced::{Element, Length};
 
 use crate::message::{Message, RightPane, WorkspaceMsg};
-use crate::prefs::DockRole;
+use crate::prefs::{Density, DockRole};
 use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
 use crate::view;
-use crate::view::tokens::space;
+use crate::view::tokens::{Spacing, space};
 use crate::view::{kit, theme};
 
 /// Whether any active watch selector covers this exact key.
@@ -43,20 +43,28 @@ pub(crate) fn key_is_watched(watched: &[String], key: &str) -> bool {
 }
 
 /// The workspace: the open docks, arranged and sized as the user left them.
+///
+/// `density` is the *global* mode (#192); this closure is the one place a
+/// dock's effective density is resolved ([`DockRole::density`]) and spent
+/// ([`Spacing::of`]) — every pane below takes the resolved grid and never
+/// asks which mode it is in, the same way it takes `theme::colors` and never
+/// asks which theme.
 pub(crate) fn grid<'a>(
     dep: &'a Deployment,
     obs: &'a Observation,
     sub: &'a SubjectState,
     tree: &'a TreeState,
     work: &'a Workspace,
+    density: Density,
 ) -> Element<'a, Message> {
-    pane_grid::PaneGrid::new(&work.docks.grid, |pane, role, _maximized| {
+    pane_grid::PaneGrid::new(&work.docks.grid, move |pane, role, _maximized| {
         let focused = work.docks.focus == Some(pane);
+        let sp = Spacing::of(role.density(density));
         let body: Element<'a, Message> = match role {
-            DockRole::Locator => locator(dep, obs, sub, tree),
-            DockRole::Inspector => inspector(dep, obs, sub, work),
-            DockRole::Activity => activity(dep, obs, sub, work),
-            DockRole::Workbench => workbench(dep, sub, work),
+            DockRole::Locator => locator(dep, obs, sub, tree, sp),
+            DockRole::Inspector => inspector(dep, obs, sub, work, sp),
+            DockRole::Activity => activity(dep, obs, sub, work, sp),
+            DockRole::Workbench => workbench(dep, sub, work, sp),
         };
         pane_grid::Content::new(body).title_bar(title_bar(*role, focused))
     })
@@ -84,7 +92,7 @@ fn title_bar<'a>(role: DockRole, focused: bool) -> pane_grid::TitleBar<'a, Messa
     })
     .controls(pane_grid::Controls::new(
         kit::link(kit::caption("×"))
-            .padding([0, 4])
+            .padding([0.0, space::XS])
             .on_press(Message::Workspace(WorkspaceMsg::DockToggled(role))),
     ))
     .padding(space::XS)
@@ -99,6 +107,7 @@ fn locator<'a>(
     obs: &'a Observation,
     sub: &'a SubjectState,
     tree: &'a TreeState,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     view::tree::pane(view::tree::TreeData {
         flat: &tree.flat,
@@ -112,6 +121,7 @@ fn locator<'a>(
             seeding: &obs.seeding_paths,
         },
         selected: sub.current.path(),
+        sp,
     })
 }
 
@@ -120,6 +130,7 @@ fn inspector<'a>(
     obs: &'a Observation,
     sub: &'a SubjectState,
     work: &'a Workspace,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     view::inspector::pane(view::inspector::InspectorData {
         subject: &sub.current,
@@ -147,6 +158,7 @@ fn inspector<'a>(
         node_detail: &work.verdicts.node_detail,
         base: dep.base(),
         observed: &obs.observed,
+        sp,
     })
 }
 
@@ -155,6 +167,7 @@ fn activity<'a>(
     obs: &'a Observation,
     sub: &'a SubjectState,
     work: &'a Workspace,
+    sp: Spacing,
 ) -> Element<'a, Message> {
     view::activity::dock(view::activity::ActivityData {
         dock: &work.activity,
@@ -174,6 +187,7 @@ fn activity<'a>(
         replay: &work.replay,
         slices: dep.slices.as_deref(),
         retention: obs.retention,
+        sp,
     })
 }
 
@@ -185,8 +199,9 @@ fn workbench<'a>(
     dep: &'a Deployment,
     sub: &'a SubjectState,
     work: &'a Workspace,
+    sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut tools = row![].spacing(space::XS);
+    let mut tools = row![].spacing(sp.xs);
     for p in RightPane::ALL {
         if p == RightPane::Inspector {
             // A dock of its own since #180, not a tool of this one.
@@ -203,14 +218,16 @@ fn workbench<'a>(
             &work.bench.send_form,
             dep.slices.as_deref(),
             &work.verdicts.roster,
+            sp,
         ),
         RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
             roster: &work.verdicts.roster,
             selected: sub.current.origin(),
             detail: &work.verdicts.node_detail,
             slices: dep.slices.as_deref(),
+            sp,
         }),
-        RightPane::Admin => view::admin::pane(&work.verdicts.admin),
+        RightPane::Admin => view::admin::pane(&work.verdicts.admin, sp),
         // Unreachable by construction — `PaneSelected(Inspector)` restores
         // the Inspector dock instead of writing `right_pane`, and the
         // default is `Call` — but a match must say what it would mean, and
@@ -224,7 +241,7 @@ fn workbench<'a>(
         // or Ctrl+Shift+C.
     };
     column![tools, body]
-        .spacing(space::XS)
+        .spacing(sp.xs)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

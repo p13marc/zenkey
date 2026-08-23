@@ -26,7 +26,7 @@ use crate::admin::{AdminState, AdminSweep, router_row_id, storage_row_id};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::{CoverageTone, colors};
-use crate::view::tokens::space;
+use crate::view::tokens::Spacing;
 
 /// How many declared entities the list renders before it stops and says so.
 ///
@@ -54,20 +54,20 @@ fn msg(m: AdminMsg) -> Message {
     Message::Pane(PaneMsg::Admin(m))
 }
 
-pub fn pane(state: &AdminState) -> Element<'_, Message> {
+pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
     let run_label = if state.in_flight {
         "sweeping…"
     } else {
         "sweep admin space"
     };
-    let mut run = kit::action(kit::caption(run_label)).padding(4);
+    let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
         run = run.on_press(msg(AdminMsg::Run));
     }
 
     let mut col = column![
         kit::section_header("admin & storage", None),
-        row![run].spacing(space::SM),
+        row![run].spacing(sp.sm),
         kit::muted(
             "the admin space is queried on demand — routers, the storage-manager subtree \
              and the declared entities, one press, never ambient",
@@ -77,7 +77,7 @@ pub fn pane(state: &AdminState) -> Element<'_, Message> {
              namespaced session's @ selector is rewritten and matches nothing",
         ),
     ]
-    .spacing(space::SM);
+    .spacing(sp.sm);
 
     if let Some(e) = &state.error {
         col = col.push(
@@ -94,24 +94,20 @@ pub fn pane(state: &AdminState) -> Element<'_, Message> {
             "nothing has been asked — this is \"not asked\", not \"no routers\" \
              (RFC 09 §5.1 O4)",
         ));
-        return scrollable(col.padding(space::SM))
-            .height(Length::Fill)
-            .into();
+        return scrollable(col.padding(sp.sm)).height(Length::Fill).into();
     };
 
-    col = col.push(topology(sweep, &state.mesh_cache));
-    col = col.push(routers(&sweep.routers, state));
-    col = col.push(storages(&sweep.storage, state));
-    col = col.push(coverage(&sweep.storage, sweep.coverage_note.as_deref()));
-    col = col.push(entities(sweep));
+    col = col.push(topology(sweep, &state.mesh_cache, sp));
+    col = col.push(routers(&sweep.routers, state, sp));
+    col = col.push(storages(&sweep.storage, state, sp));
+    col = col.push(coverage(&sweep.storage, sweep.coverage_note.as_deref(), sp));
+    col = col.push(entities(sweep, sp));
 
-    scrollable(col.padding(space::SM))
-        .height(Length::Fill)
-        .into()
+    scrollable(col.padding(sp.sm)).height(Length::Fill).into()
 }
 
-fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState) -> Element<'a, Message> {
-    let mut col = column![kit::section_header("routers", None)].spacing(space::XS);
+fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState, sp: Spacing) -> Element<'a, Message> {
+    let mut col = column![kit::section_header("routers", None)].spacing(sp.xs);
     if rows.is_empty() {
         // Verbatim from `zenctl admin routers`, so the two tools say one thing.
         col = col.push(kit::muted(
@@ -128,7 +124,7 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState) -> Element<'a, Mes
                 kit::mono(r.zid.clone()),
                 kit::muted(r.version.clone().unwrap_or_else(|| "-".into())),
             ]
-            .spacing(space::SM)
+            .spacing(sp.sm)
             .align_y(iced::Alignment::Center),
             kit::muted(if r.locators.is_empty() {
                 // Normal on zenoh 1.10+: loopback listen endpoints are
@@ -148,9 +144,9 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState) -> Element<'a, Mes
             } else {
                 r.locators.join("  ")
             }),
-            raw_toggle(&id, state),
+            raw_toggle(&id, state, sp),
         ]
-        .spacing(2);
+        .spacing(sp.xs);
         if state.expanded_raw.contains(&id) {
             body = body.push(kit::mono(raw_text(&r.raw)));
         }
@@ -159,8 +155,8 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState) -> Element<'a, Mes
     col.into()
 }
 
-fn storages<'a>(list: &'a StorageList, state: &'a AdminState) -> Element<'a, Message> {
-    let mut col = column![kit::section_header("storages", None)].spacing(space::XS);
+fn storages<'a>(list: &'a StorageList, state: &'a AdminState, sp: Spacing) -> Element<'a, Message> {
+    let mut col = column![kit::section_header("storages", None)].spacing(sp.xs);
     if list.storages.is_empty() {
         // Verbatim from `zenctl storage list`.
         col = col.push(kit::muted(
@@ -170,12 +166,12 @@ fn storages<'a>(list: &'a StorageList, state: &'a AdminState) -> Element<'a, Mes
         return col.into();
     }
     for s in &list.storages {
-        col = col.push(storage_row(s, state));
+        col = col.push(storage_row(s, state, sp));
     }
     col.into()
 }
 
-fn storage_row<'a>(s: &'a StorageInfo, state: &'a AdminState) -> Element<'a, Message> {
+fn storage_row<'a>(s: &'a StorageInfo, state: &'a AdminState, sp: Spacing) -> Element<'a, Message> {
     let id = storage_row_id(&s.name, &s.zid);
     // `-` where the layout did not say. Absent is not empty: a storage with no
     // strip_prefix and one whose document omits the field are different facts.
@@ -185,16 +181,16 @@ fn storage_row<'a>(s: &'a StorageInfo, state: &'a AdminState) -> Element<'a, Mes
             kit::mono(format!("{} @{}", s.name, s.zid)),
             kit::muted(dash(&s.key_expr)),
         ]
-        .spacing(space::SM)
+        .spacing(sp.sm)
         .align_y(iced::Alignment::Center),
         kit::muted(format!(
             "strip {}  ·  volume {}",
             dash(&s.strip_prefix),
             dash(&s.volume)
         )),
-        raw_toggle(&id, state),
+        raw_toggle(&id, state, sp),
     ]
-    .spacing(2);
+    .spacing(sp.xs);
     if state.expanded_raw.contains(&id) {
         body = body.push(kit::mono(raw_text(&s.raw)));
     }
@@ -208,12 +204,12 @@ fn storage_row<'a>(s: &'a StorageInfo, state: &'a AdminState) -> Element<'a, Mes
 /// the whole point. "No registry loaded, so nothing was judged" and "judged,
 /// and nothing covers it" are different facts, and only one of them is a
 /// finding.
-fn coverage<'a>(list: &'a StorageList, note: Option<&'a str>) -> Element<'a, Message> {
+fn coverage<'a>(list: &'a StorageList, note: Option<&'a str>, sp: Spacing) -> Element<'a, Message> {
     let mut col = column![kit::section_header(
         "declared state families vs storage coverage",
         None
     )]
-    .spacing(space::XS);
+    .spacing(sp.xs);
 
     if let Some(why) = note {
         col = col.push(kit::empty_state("coverage not judged", why.to_string()));
@@ -231,7 +227,7 @@ fn coverage<'a>(list: &'a StorageList, note: Option<&'a str>) -> Element<'a, Mes
         if matches!(r.coverage, Coverage::Uncovered) {
             uncovered += 1;
         }
-        col = col.push(coverage_row(r));
+        col = col.push(coverage_row(r, sp));
     }
 
     if uncovered > 0 {
@@ -252,7 +248,7 @@ fn coverage<'a>(list: &'a StorageList, note: Option<&'a str>) -> Element<'a, Mes
     col.into()
 }
 
-fn coverage_row(r: &CoverageRow) -> Element<'_, Message> {
+fn coverage_row(r: &CoverageRow, sp: Spacing) -> Element<'_, Message> {
     // Detail strings verbatim from `zenctl storage list`.
     let (tone, detail) = match &r.coverage {
         Coverage::Covered(s) => (CoverageTone::Covered, format!("covered by {s}")),
@@ -267,12 +263,12 @@ fn coverage_row(r: &CoverageRow) -> Element<'_, Message> {
         row![
             kit::badge_coverage(tone, detail),
             kit::action(kit::caption(r.producer.clone()))
-                .padding(2)
+                .padding([0.0, sp.xs])
                 .on_press(msg(AdminMsg::FilterProducer(r.producer.clone()))),
             kit::mono(r.path.clone()),
             kit::muted(ttl),
         ]
-        .spacing(space::SM)
+        .spacing(sp.sm)
         .align_y(iced::Alignment::Center),
     )
 }
@@ -280,8 +276,8 @@ fn coverage_row(r: &CoverageRow) -> Element<'_, Message> {
 /// Declared entities — load-bearing, not decoration: the `Option` here is the
 /// only thing separating "the admin space is reachable and empty" from "the
 /// admin space is unreachable", which is #70's explicit reachability ask.
-fn entities(sweep: &AdminSweep) -> Element<'_, Message> {
-    let mut col = column![kit::section_header("declared entities", None)].spacing(space::XS);
+fn entities(sweep: &AdminSweep, sp: Spacing) -> Element<'_, Message> {
+    let mut col = column![kit::section_header("declared entities", None)].spacing(sp.xs);
     let Some(declared) = &sweep.declared else {
         col = col.push(kit::muted(
             "declared entities: n/a — nothing answered the admin sweep. zenoh's \
@@ -307,7 +303,7 @@ fn entities(sweep: &AdminSweep) -> Element<'_, Message> {
                 kit::mono(e.keyexpr.clone()),
                 kit::muted(e.node_zid.clone()),
             ]
-            .spacing(space::SM)
+            .spacing(sp.sm)
             .align_y(iced::Alignment::Center),
         );
     }
@@ -320,14 +316,14 @@ fn entities(sweep: &AdminSweep) -> Element<'_, Message> {
     col.into()
 }
 
-fn raw_toggle<'a>(id: &str, state: &AdminState) -> Element<'a, Message> {
+fn raw_toggle<'a>(id: &str, state: &AdminState, sp: Spacing) -> Element<'a, Message> {
     let shown = state.expanded_raw.contains(id);
     kit::action(kit::caption(if shown {
         "hide raw document"
     } else {
         "show raw document"
     }))
-    .padding(2)
+    .padding([0.0, sp.xs])
     .on_press(msg(AdminMsg::RawToggled(id.to_string())))
     .into()
 }
@@ -369,8 +365,9 @@ struct MeshOrigin {
 fn topology<'a>(
     sweep: &'a AdminSweep,
     mesh_cache: &'a iced::widget::canvas::Cache,
+    sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut col = column![kit::section_header("topology", None)].spacing(space::XS);
+    let mut col = column![kit::section_header("topology", None)].spacing(sp.xs);
     let report = &sweep.topology;
     if report.answered == 0 {
         // Verbatim posture from `zenctl admin graph`: a reading about
@@ -464,14 +461,14 @@ fn topology<'a>(
     col = col.push(
         row![
             kit::action(kit::caption("copy graphviz (dot)"))
-                .padding(2)
+                .padding([0.0, sp.xs])
                 .on_press(msg(AdminMsg::CopyDot)),
             kit::muted(
                 "the engine's render_dot — the same graph `zenctl admin graph` \
                  emits, so one `dot` invocation reads both explorers",
             ),
         ]
-        .spacing(space::SM)
+        .spacing(sp.sm)
         .align_y(iced::Alignment::Center),
     );
     // The caption *is* the testable surface: a bounded node roll-call.

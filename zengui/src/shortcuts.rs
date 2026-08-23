@@ -105,6 +105,11 @@ pub fn map() -> Vec<Binding> {
             action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled))),
         },
         Binding {
+            keys: "Ctrl Shift D",
+            what: "toggle density (comfortable/compact)",
+            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled))),
+        },
+        Binding {
             keys: "Ctrl R",
             what: "reconnect",
             action: Action::Emit(|| Message::Deployment(DeploymentMsg::Reconnect)),
@@ -247,6 +252,12 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
             "c" | "C" if mods.shift() => Some(Message::Chrome(ChromeMsg::Palette(
                 PaletteMsg::Open(Overlay::Connect),
             ))),
+            // Ctrl+Shift+D toggles density (#192). Plain Ctrl+D stays
+            // unbound — the shifted chord is deliberate for a key that
+            // reflows the whole window.
+            "d" | "D" if mods.shift() => {
+                Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled)))
+            }
             // `+` normally needs Shift on `=`; accept both spellings rather
             // than making the user find the numpad.
             "+" | "=" => Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn))),
@@ -519,6 +530,19 @@ mod tests {
                 chord(&Key::Character(c.into())).is_none(),
                 "{c} must not be a chord"
             );
+        }
+    }
+
+    /// Ctrl+Shift+D toggles density (#192); plain Ctrl+D does nothing — a
+    /// chord that reflows the whole window is not given to an unshifted slip.
+    #[test]
+    fn density_answers_the_shifted_chord_only() {
+        for c in ["d", "D"] {
+            assert!(matches!(
+                press(c, Modifiers::CTRL | Modifiers::SHIFT),
+                Some(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled)))
+            ));
+            assert!(press(c, ctrl()).is_none(), "Ctrl+{c} must stay unbound");
         }
     }
 

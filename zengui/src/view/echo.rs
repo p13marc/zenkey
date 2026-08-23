@@ -19,13 +19,16 @@ use crate::echo::{EchoLine, EchoRing};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
-use crate::view::tokens::{font, space};
+use crate::view::tokens::{CAPTION_LINE, Spacing, font};
 
 /// One echo line's height, so the window can do arithmetic on it (#183).
 ///
 /// This pane used to cap *drawing* at 300 rows and disclose the cap in its
 /// own strip — honest, and still a truncation: past 300 matches, scrolling
 /// reached nothing. A window draws about forty and reaches all of them.
+///
+/// The comfortable baseline; the section renders at
+/// `sp.row(ROW_HEIGHT, CAPTION_LINE)` (#192).
 pub const ROW_HEIGHT: f32 = 20.0;
 
 /// The pane's view state (owned by the app).
@@ -274,6 +277,7 @@ pub fn section<'a>(
     selection: Option<&'a str>,
     next_seq: u64,
     scroll: (f32, f32),
+    sp: Spacing,
 ) -> Column<'a, Message> {
     let controls = row![
         kit::input("filter payload/key…", &view.filter)
@@ -290,7 +294,7 @@ pub fn section<'a>(
             "follow"
         }))
         .on_press(msg(EchoMsg::FollowToggled))
-        .padding(4),
+        .padding(sp.xs),
         // The publish-verification loop in one control (#183): pin the stream
         // to whatever the window is looking at, or read the whole scope.
         kit::action(kit::caption(if view.follow_subject {
@@ -299,35 +303,34 @@ pub fn section<'a>(
             "pin to subject"
         }),)
         .on_press(msg(EchoMsg::FollowSubjectToggled))
-        .padding(4),
+        .padding(sp.xs),
         kit::action(kit::caption("ndjson"))
             .on_press(msg(EchoMsg::Export))
-            .padding(4),
+            .padding(sp.xs),
         kit::action(kit::caption("clear"))
             .on_press(msg(EchoMsg::Clear))
-            .padding(4),
+            .padding(sp.xs),
     ]
-    .spacing(space::SM)
+    .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
 
     let header = kit::section_header("Echo", Some(controls.into()));
 
     let (lines, matched) = visible(ring, view, selection);
-    // O(visible) (#183), the same window the tree and the timeline use.
-    let (first, last) = kit::window(lines.len(), scroll.0, scroll.1, ROW_HEIGHT);
+    // O(visible) (#183), the same window the tree and the timeline use —
+    // at the density-scaled row height (#192).
+    let row_h = sp.row(ROW_HEIGHT, CAPTION_LINE);
+    let (first, last) = kit::window(lines.len(), scroll.0, scroll.1, row_h);
     let mut body = Column::new();
     if first > 0 {
-        body =
-            body.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * ROW_HEIGHT)));
+        body = body.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * row_h)));
     }
     for line in &lines[first..last] {
-        body =
-            body.push(iced::widget::container(line_view(line)).height(Length::Fixed(ROW_HEIGHT)));
+        body = body.push(iced::widget::container(line_view(line, sp)).height(Length::Fixed(row_h)));
     }
     if last < lines.len() {
         body = body.push(
-            iced::widget::Space::new()
-                .height(Length::Fixed((lines.len() - last) as f32 * ROW_HEIGHT)),
+            iced::widget::Space::new().height(Length::Fixed((lines.len() - last) as f32 * row_h)),
         );
     }
     let drawn = last - first;
@@ -364,7 +367,7 @@ pub fn section<'a>(
     }
     col = col.push(state_strip(ring, view, matched, drawn, next_seq));
     col = col.push(loss_strip(ring));
-    col.push(content).spacing(space::SM)
+    col.push(content).spacing(sp.sm)
 }
 
 /// What the view is doing to the ring: how much of it is on screen, and — the
@@ -427,7 +430,7 @@ fn loss_strip<'a>(ring: &EchoRing) -> Element<'a, Message> {
         .into()
 }
 
-fn line_view(line: &EchoLine) -> Element<'_, Message> {
+fn line_view(line: &EchoLine, sp: Spacing) -> Element<'_, Message> {
     // Both texts borrow, and the click message is built on the click (#178).
     // Up to 300 rows are drawn per frame and each was cloning two `String`s
     // for a rendering identical to the last one's; `on_press_with` moves the
@@ -454,6 +457,9 @@ fn line_view(line: &EchoLine) -> Element<'_, Message> {
     // The whole row is the click target: drilling in is the common action,
     // and a hairline button next to a monospace key is not. `row_button`
     // paints the hover wash, so the line under the cursor is legible (#193).
+    // No spacing and no padding on the body: the row is pinned to
+    // `sp.row(..)` (#192), which already spends all the air the density
+    // allows.
     kit::row_button(
         column![
             row![
@@ -461,14 +467,12 @@ fn line_view(line: &EchoLine) -> Element<'_, Message> {
                 iced::widget::space::horizontal(),
                 kit::muted(human_bytes(line.len as u64)),
             ]
-            .spacing(space::SM),
+            .spacing(sp.sm),
             preview,
-        ]
-        .spacing(1),
+        ],
         false,
     )
     .on_press_with(|| msg(EchoMsg::LineClicked(line.key.clone())))
-    .padding(iced::Padding::from([2.0, 0.0]))
     .into()
 }
 

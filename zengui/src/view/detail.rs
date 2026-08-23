@@ -27,7 +27,7 @@ use crate::series::{NumericLeaves, Series};
 use crate::view::kit;
 use crate::view::spark;
 use crate::view::theme::{RegistrationTone, SeriesTone, colors};
-use crate::view::tokens::space;
+use crate::view::tokens::Spacing;
 
 /// How much payload the hex view shows before truncating (with a note).
 const HEX_VIEW_BYTES: usize = 1024;
@@ -82,6 +82,8 @@ pub struct DetailData<'a> {
     /// refreshed per bus tick (#119). Absent = nothing stamped, which is
     /// not zero latency.
     pub latency: Option<(zenkey_fleet::LatencyReport, u64)>,
+    /// The dock's resolved spacing grid (#192).
+    pub sp: Spacing,
 }
 
 /// Microseconds humanised with the sign kept — a negative latency is the
@@ -147,7 +149,7 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
     if declared.is_none() && observed.is_none() {
         return None;
     }
-    let mut col = Column::new().spacing(2);
+    let mut col = Column::new().spacing(data.sp.xs);
     col = col.push(kit::muted("QoS — declared vs observed (RFC 04 §3)"));
     match &declared {
         Some(q) => col = col.push(kit::mono(format!("declared: {q}"))),
@@ -234,7 +236,8 @@ fn msg(m: DetailMsg) -> Message {
 /// with other sections into one surface: a scrollable nested inside a
 /// scrollable is a layout bug, so exactly one caller owns the scroll.
 pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
-    let mut col = Column::new().spacing(space::SM);
+    let sp = data.sp;
+    let mut col = Column::new().spacing(sp.sm);
     col = col.push(kit::section_header("Detail", None));
     // The subject's key, restated where its facts are. The window's one
     // TITLE moved to the location bar (#185) — the bar is where "where am I"
@@ -249,7 +252,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
             ));
         }
         Some(f) => {
-            col = col.push(facts_section(f));
+            col = col.push(facts_section(f, sp));
         }
     }
     if let Some(qos) = qos_section(&data) {
@@ -321,7 +324,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
                 let bytes = v.payload.to_bytes();
                 let len = bytes.len();
                 col = col.push(
-                    row![hex_pane(&bytes), decoded_pane(data.decoded, len)].spacing(space::MD),
+                    row![hex_pane(&bytes, sp), decoded_pane(data.decoded, len, sp)].spacing(sp.md),
                 );
                 // The attachment, when the value carried one (#117): rendered
                 // structurally beside its hex — the registry does not describe
@@ -335,10 +338,10 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
                     )));
                     col = col.push(
                         row![
-                            hex_pane(&abytes),
+                            hex_pane(&abytes, sp),
                             kit::mono(zenkey_fleet::decode::structural(&abytes))
                         ]
-                        .spacing(space::MD),
+                        .spacing(sp.md),
                     );
                 }
             }
@@ -347,7 +350,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
 
     // — Series: sparklines over the recorded history (issue #64).
     if let Some(series) = data.series
-        && let Some(section) = series_section(series)
+        && let Some(section) = series_section(series, sp)
     {
         col = col.push(section);
     }
@@ -370,12 +373,12 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
 /// Returning `None` is the point: a payload that carries no number is an
 /// ordinary fact, and rendering an empty chart or an error for it would invent
 /// a problem (#64's second acceptance line).
-fn series_section<'a>(data: &'a SeriesData) -> Option<Element<'a, Message>> {
+fn series_section<'a>(data: &'a SeriesData, sp: Spacing) -> Option<Element<'a, Message>> {
     let plottable = !data.leaves.leaves.is_empty();
     if !plottable && !data.rate.has_data() {
         return None;
     }
-    let mut col = Column::new().spacing(space::XS);
+    let mut col = Column::new().spacing(sp.xs);
     col = col.push(kit::section_header("Series", None));
     col = col.push(kit::muted(
         "plotted from the recorded history's structural values — a schema decode \
@@ -386,7 +389,7 @@ fn series_section<'a>(data: &'a SeriesData) -> Option<Element<'a, Message>> {
     if plottable {
         // The leaf picker. Small buttons rather than a dropdown: the list is
         // short by construction and the choice is one click either way.
-        let mut picker = row![].spacing(space::XS);
+        let mut picker = row![].spacing(sp.xs);
         for (path, _) in &data.leaves.leaves {
             let active = data.leaf.as_deref() == Some(path.as_str());
             picker = picker.push(kit::tab(
@@ -409,6 +412,7 @@ fn series_section<'a>(data: &'a SeriesData) -> Option<Element<'a, Message>> {
             SeriesTone::Value,
             data.unit.as_deref(),
             &data.caches.value,
+            sp,
         ));
     }
 
@@ -418,12 +422,13 @@ fn series_section<'a>(data: &'a SeriesData) -> Option<Element<'a, Message>> {
         SeriesTone::Rate,
         None,
         &data.caches.rate,
+        sp,
     ));
     Some(col.into())
 }
 
-pub(crate) fn facts_section(f: &KeyFacts) -> Element<'_, Message> {
-    let mut col = Column::new().spacing(2);
+pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
+    let mut col = Column::new().spacing(sp.xs);
     match &f.shape {
         KeyShape::V1(v) => {
             col = col.push(kit::muted(format!(
@@ -530,10 +535,10 @@ pub fn hex_dump(bytes: &[u8]) -> String {
     out
 }
 
-fn hex_pane<'a>(bytes: &[u8]) -> Element<'a, Message> {
+fn hex_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
     let shown = &bytes[..bytes.len().min(HEX_VIEW_BYTES)];
     let out = hex_dump(shown);
-    let mut col = Column::new().spacing(2);
+    let mut col = Column::new().spacing(sp.xs);
     col = col.push(kit::muted("hex"));
     col = col.push(kit::mono(out));
     if bytes.len() > HEX_VIEW_BYTES {
@@ -551,8 +556,9 @@ fn hex_pane<'a>(bytes: &[u8]) -> Element<'a, Message> {
 fn decoded_pane<'a>(
     decoded: Option<&'a (Option<String>, Rendering)>,
     payload_len: usize,
+    sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut col = Column::new().spacing(2);
+    let mut col = Column::new().spacing(sp.xs);
     match decoded {
         None => {
             col = col.push(kit::muted("decoding…"));

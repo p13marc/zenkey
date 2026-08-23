@@ -94,7 +94,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
     .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
         Overlay::Connect,
     ))))
-    .padding(4);
+    .padding(space::XS);
 
     // The picker displays each base by its label, so the empty base reads as
     // the bus-root deployment it is, never as a blank row (#185).
@@ -116,7 +116,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
         .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
             Overlay::Selectors,
         ))))
-        .padding(4);
+        .padding(space::XS);
 
     // Observation is opt-in and labelled by its cost (issue #85); it rides
     // beside the scope it observes.
@@ -126,7 +126,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
         "observe scope"
     }))
     .on_press(Message::Deployment(DeploymentMsg::ScopeWatchToggled))
-    .padding(4);
+    .padding(space::XS);
 
     let mut bar = row![
         context_chip,
@@ -154,7 +154,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
                 Some(subtree) => Element::from(
                     kit::link(kit::caption(seg.label).font(iced::Font::MONOSPACE))
                         .on_press(Message::Subject(SubjectMsg::Select(subtree)))
-                        .padding(2),
+                        .padding([0.0, space::XS]),
                 ),
                 // The final chunk: where the window is — the one TITLE (#191).
                 None => kit::title(seg.label).font(iced::Font::MONOSPACE).into(),
@@ -225,12 +225,12 @@ fn controls<'a>(
         .on_press(Message::Workspace(WorkspaceMsg::Replay(
             ReplayMsg::RecordToggled
         )))
-        .padding(4),
+        .padding(space::XS),
         kit::action(kit::caption("replay…"))
             .on_press(Message::Workspace(WorkspaceMsg::Replay(
                 ReplayMsg::OpenToggled
             )))
-            .padding(4),
+            .padding(space::XS),
         iced::widget::space::horizontal(),
         // The Settings overlay (#188): the launch knobs, and the same
         // chrome preferences the buttons beside it move.
@@ -238,7 +238,7 @@ fn controls<'a>(
             .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
                 Overlay::Settings
             ))))
-            .padding(4),
+            .padding(space::XS),
         // Window preferences (issue #73): the theme name is the button, so
         // the label says what you get rather than what you have.
         kit::action(kit::caption(format!(
@@ -248,12 +248,22 @@ fn controls<'a>(
         .on_press(Message::Chrome(ChromeMsg::Prefs(
             crate::message::PrefsMsg::ThemeToggled
         )))
-        .padding(4),
+        .padding(space::XS),
+        // Density (#192): the same chip shape as the theme's, one button
+        // over. Ctrl+Shift+D sends the same message.
+        kit::action(kit::caption(format!(
+            "density: {}",
+            chrome.prefs.density.label()
+        )))
+        .on_press(Message::Chrome(ChromeMsg::Prefs(
+            crate::message::PrefsMsg::DensityToggled
+        )))
+        .padding(space::XS),
         kit::action(kit::caption("-"))
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomOut
             )))
-            .padding(4),
+            .padding(space::XS),
         kit::action(kit::caption(format!(
             "{}%",
             (chrome.prefs.zoom * 100.0).round() as i32
@@ -261,15 +271,15 @@ fn controls<'a>(
         .on_press(Message::Chrome(ChromeMsg::Prefs(
             crate::message::PrefsMsg::ZoomReset
         )))
-        .padding(4),
+        .padding(space::XS),
         kit::action(kit::caption("+"))
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomIn
             )))
-            .padding(4),
+            .padding(space::XS),
         kit::action(kit::caption("reconnect"))
             .on_press(Message::Deployment(DeploymentMsg::Reconnect))
-            .padding(4),
+            .padding(space::XS),
     ]
     .spacing(space::SM)
     .align_y(iced::Alignment::Center)

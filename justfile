@@ -129,10 +129,11 @@ ci:
     # The update thread does not touch the disk (#255): a handler that needs
     # the filesystem needs a services:: function and a landing message.
     ./scripts/check-fs-seam.sh
-    # The type scale by role (#191) and the interactive seam (#193) — both
-    # run as CI's type-scale job.
+    # The type scale by role (#191), the interactive seam (#193) and the
+    # spacing grid (#192) — all run as CI's type-scale job.
     ./scripts/check-type-scale.sh
     ./scripts/check-interactive.sh
+    ./scripts/check-spacing.sh
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo build --workspace --all-targets --locked
     cargo test --workspace --locked
