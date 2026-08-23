@@ -33,6 +33,14 @@
 //! authored. Codegen is normative in both directions (RFC 08 §1): an
 //! unregistered subject does not construct, and a metric name refines into a
 //! typed subject with named variables instead of positional `split('/')`.
+//!
+//! Two ledgers ride beside the TOMLs, both checked here: the append-only
+//! `deprecated.lock` (RFC 08 §3 — retirements never un-happen) and the
+//! deliberately non-append-only `conditional.lock` (RFC 08 §6.1, v1.25 —
+//! one `<producer>\t<path>\t<condition>` line per subject whose emission is
+//! gated; a line naming no registry subject fails the build, and a
+//! consumer's emitted-surface check reads the validated set through
+//! [`Config::conditional_subjects`] to exempt exactly those).
 
 mod emit;
 #[cfg(feature = "export")]
@@ -222,6 +230,9 @@ pub struct Config {
     /// The RFC 08 §3.1 compatibility lock
     /// (default `<registry_dir>/registry.lock`).
     compat_lock: Option<PathBuf>,
+    /// The RFC 08 §6.1 conditional-subject ledger
+    /// (default `<registry_dir>/conditional.lock`).
+    conditional: Option<PathBuf>,
     emit_rerun_if_changed: bool,
 }
 
@@ -239,6 +250,7 @@ impl Config {
             zenkey_path: "::zenkey".to_string(),
             ledger: None,
             compat_lock: None,
+            conditional: None,
             emit_rerun_if_changed: true,
         }
     }
@@ -277,6 +289,18 @@ impl Config {
     /// and fails as stale until regenerated).
     pub fn compat_lock(mut self, f: impl AsRef<Path>) -> Self {
         self.compat_lock = Some(f.as_ref().to_path_buf());
+        self
+    }
+
+    /// The conditional-subject ledger (RFC 08 §6.1, v1.25; default
+    /// `<registry_dir>/conditional.lock` — a missing file is an empty
+    /// ledger: no subject is conditional).
+    ///
+    /// Unlike its sibling [`ledger`](Self::ledger), this file is **not**
+    /// append-only: a line leaves when its gating condition does, and the
+    /// subject re-enters the emitted-surface check by deletion.
+    pub fn conditional_ledger(mut self, f: impl AsRef<Path>) -> Self {
+        self.conditional = Some(f.as_ref().to_path_buf());
         self
     }
 
@@ -326,6 +350,9 @@ impl Config {
             if let Some(l) = &self.ledger {
                 println!("cargo::rerun-if-changed={}", l.display());
             }
+            if let Some(c) = &self.conditional {
+                println!("cargo::rerun-if-changed={}", c.display());
+            }
         }
         let files = load_registry(&self.registry_dir)?;
         let ledger = self
@@ -333,6 +360,7 @@ impl Config {
             .clone()
             .unwrap_or_else(|| self.registry_dir.join("deprecated.lock"));
         check_deprecation_ledger(&ledger, &files)?;
+        check_conditional_ledger(&self.conditional_path(), &files)?;
         check_type_table(&self.registry_dir, &files)?;
         // The compatibility lock (RFC 08 §3.1): opting out is legal and loud.
         for f in files.iter().filter(|f| f.compat == Compat::None) {
@@ -352,6 +380,31 @@ impl Config {
         self.compat_lock
             .clone()
             .unwrap_or_else(|| self.registry_dir.join("registry.lock"))
+    }
+
+    fn conditional_path(&self) -> PathBuf {
+        self.conditional
+            .clone()
+            .unwrap_or_else(|| self.registry_dir.join("conditional.lock"))
+    }
+
+    /// The conditional subjects of this registry, validated (RFC 08 §6.1,
+    /// v1.25) — the exemption half of the ledger's two-direction check.
+    ///
+    /// A subject listed here is **exempt** from the emitted-surface check: a
+    /// consumer's build- or test-time check of "the build contains code that
+    /// can publish it" MUST NOT require the build's mappers to cover a
+    /// ledgered subject unconditionally. The slice entry itself still exists
+    /// and is served through `introspect` unmarked — the ledger *conditions*
+    /// an entry, it does not replace one, and the RFC 08 §6 slice format
+    /// deliberately carries no conditional field (the `feature`/`when`
+    /// schema design stays deferred, zenkey #171).
+    ///
+    /// Returns the same [`Error`] the build would: a line naming no registry
+    /// subject fails here exactly as it fails `generate()`.
+    pub fn conditional_subjects(&self) -> Result<Vec<ConditionalSubject>, Error> {
+        let files = load_registry(&self.registry_dir)?;
+        check_conditional_ledger(&self.conditional_path(), &files)
     }
 
     /// Write (or update) the RFC 08 §3.1 compatibility lock — the
@@ -1510,6 +1563,96 @@ pub struct CompatLockUpdate {
     pub forced: Vec<String>,
 }
 
+/// One `conditional.lock` line (RFC 08 §6.1, v1.25): a registered subject
+/// whose emission is gated — by a compile-time feature, an operator switch,
+/// or a host capability — recorded so the emitted-surface check can exempt
+/// it instead of silently not asking.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConditionalSubject {
+    /// The producer whose registry file declares the subject.
+    pub producer: String,
+    /// The subject `path`, exactly as the registry entry spells it.
+    pub path: String,
+    /// The gating condition, as **free text** for the human deciding whether
+    /// the gate still exists — deliberately not a machine-readable
+    /// expression (the field-level `feature`/`when` design stays deferred,
+    /// zenkey #171).
+    pub condition: String,
+}
+
+/// The RFC 08 §6.1 (v1.25) conditional-subject ledger, checked in the
+/// direction zenkey-build can observe: every line must name a registry
+/// subject that still exists — "the entry was retired or renamed, and the
+/// line must follow it or leave". A missing file is an empty ledger.
+///
+/// The other direction — the exemption from the emitted-surface check —
+/// belongs to the consumer's own build- or test-time coverage check, which
+/// reads the validated set via [`Config::conditional_subjects`]. Unlike
+/// `deprecated.lock`, this ledger is **not** append-only: a line leaves when
+/// its condition does, and the subject re-enters the emitted-surface check
+/// by deletion.
+fn check_conditional_ledger(
+    path: &Path,
+    files: &[RegistryFile],
+) -> Result<Vec<ConditionalSubject>, Error> {
+    let ledger = std::fs::read_to_string(path).unwrap_or_default();
+    let mut entries = Vec::new();
+    for line in ledger
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+    {
+        // Producer and path name the registry entry exactly as a
+        // `deprecated.lock` line does; the condition is free text (which may
+        // itself contain tabs — everything after the second is the text).
+        let mut fields = line.splitn(3, '\t');
+        let (Some(producer), Some(spath), Some(condition)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            return Err(lint(
+                "conditional.lock",
+                format!(
+                    "bad ledger line {line:?} — expected \
+                     <producer>\\t<path>\\t<condition> (RFC 08 §6.1)"
+                ),
+            ));
+        };
+        if condition.trim().is_empty() {
+            return Err(lint(
+                "conditional.lock",
+                format!(
+                    "ledger line {line:?} has an empty condition — the gate is \
+                     the point of the line (RFC 08 §6.1)"
+                ),
+            ));
+        }
+        let file = files.iter().find(|f| f.name == producer);
+        let live = file.is_some_and(|f| f.subjects.iter().any(|s| s.path == spath));
+        if !live {
+            let retired =
+                file.is_some_and(|f| f.deprecated.iter().any(|d| d == spath));
+            return Err(lint(
+                "conditional.lock",
+                format!(
+                    "ledger line {line:?} names no registry subject{} — the entry \
+                     was retired or renamed, and the line must follow it or \
+                     leave (RFC 08 §6.1)",
+                    if retired {
+                        " (it is retired through [[deprecated]])"
+                    } else {
+                        ""
+                    }
+                ),
+            ));
+        }
+        entries.push(ConditionalSubject {
+            producer: producer.to_string(),
+            path: spath.to_string(),
+            condition: condition.to_string(),
+        });
+    }
+    Ok(entries)
+}
+
 fn check_deprecation_ledger(ledger_path: &Path, files: &[RegistryFile]) -> Result<(), Error> {
     let ledger = std::fs::read_to_string(ledger_path).unwrap_or_default();
     let mut ledger_entries: Vec<(&str, &str)> = Vec::new();
@@ -2151,5 +2294,132 @@ mod tests {
         .to_string();
         assert!(err.contains("compat"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A one-producer registry dir with a `conditional.lock`, linted — the
+    /// RFC 08 §6.1 (v1.25) harness, mirroring `lint_one`.
+    fn lint_conditional(ledger: &str) -> Result<Vec<ConditionalSubject>, Error> {
+        let dir = lock_dir("conditional");
+        let toml = format!("{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}");
+        std::fs::write(dir.join("t.toml"), toml).unwrap();
+        std::fs::write(dir.join("conditional.lock"), ledger).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+        let lint = Config::new().registry_dir(&dir).no_rerun_if_changed().lint();
+        let entries = lint.and_then(|()| {
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .conditional_subjects()
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        entries
+    }
+
+    /// An absent ledger is an empty ledger: no subject is conditional
+    /// (RFC 08 §6.1 — the file is optional, its absence is a statement).
+    #[test]
+    fn conditional_ledger_absent_is_empty() {
+        let dir = lock_dir("conditional-absent");
+        let toml = format!("{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}");
+        std::fs::write(dir.join("t.toml"), toml).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .is_ok()
+        );
+        assert_eq!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .conditional_subjects()
+                .unwrap(),
+            []
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The passing form: `#` comments, blank lines, one tab-separated line
+    /// per conditional subject, condition as free text (tabs included — the
+    /// third field runs to end of line).
+    #[test]
+    fn conditional_ledger_parses_and_conditions_a_live_entry() {
+        let entries = lint_conditional(
+            "# gated surfaces (RFC 08 §6.1)\n\nt\thealth\tfeature wireguard\tand a tab\n",
+        )
+        .unwrap();
+        assert_eq!(
+            entries,
+            [ConditionalSubject {
+                producer: "t".into(),
+                path: "health".into(),
+                condition: "feature wireguard\tand a tab".into(),
+            }]
+        );
+    }
+
+    /// Direction B of the two-direction check: a ledger line naming no
+    /// registry subject fails the build with the line quoted — the entry was
+    /// retired or renamed, and the line must follow it or leave.
+    #[test]
+    fn conditional_ledger_line_naming_no_subject_fails() {
+        let err = lint_conditional("t\tvanished\tfeature ebpf\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("conditional.lock"), "{err}");
+        assert!(err.contains("t\\tvanished\\tfeature ebpf"), "{err}");
+        assert!(err.contains("names no registry subject"), "{err}");
+
+        // A wrong producer fails the same way.
+        let err = lint_conditional("u\thealth\tfeature ebpf\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("names no registry subject"), "{err}");
+    }
+
+    /// A malformed line (fewer than three tab-separated fields) and an empty
+    /// condition are both refused — a gate with no condition is the decay the
+    /// RFC's two-direction rule exists to prevent.
+    #[test]
+    fn conditional_ledger_refuses_malformed_lines() {
+        let err = lint_conditional("t\thealth\n").unwrap_err().to_string();
+        assert!(err.contains("bad ledger line"), "{err}");
+
+        let err = lint_conditional("t\thealth\t \n").unwrap_err().to_string();
+        assert!(err.contains("empty condition"), "{err}");
+    }
+
+    /// A subject that left the registry through `[[deprecated]]` does not
+    /// keep its conditional line: the ledger is not append-only, and the
+    /// error says the entry is retired so the fix is obvious.
+    #[test]
+    fn conditional_ledger_line_for_retired_subject_fails_naming_retirement() {
+        let dir = lock_dir("conditional-retired");
+        let toml = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}\n[[deprecated]]\npath = \"old\"\ngone = \"1.1\"\n"
+        );
+        std::fs::write(dir.join("t.toml"), toml).unwrap();
+        std::fs::write(dir.join("deprecated.lock"), "t\told\n").unwrap();
+        std::fs::write(dir.join("conditional.lock"), "t\told\tfeature ebpf\n").unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(false)
+            .unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .unwrap_err()
+            .to_string();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(err.contains("retired through [[deprecated]]"), "{err}");
     }
 }
