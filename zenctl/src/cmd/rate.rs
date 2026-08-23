@@ -49,15 +49,20 @@ pub async fn run(
                     key: k.to_string(),
                     count: s.count,
                     bytes: s.bytes,
-                    sn_gaps: s.sn_gaps,
+                    // R3 (#238's twin): only when asked, like the
+                    // report-level `sn_gaps` always was — the row used to
+                    // serialize an uncaveated `"sn_gaps": 0` without
+                    // `--loss`.
+                    sn_gaps: loss.then_some(s.sn_gaps),
                     // #238: only when asked. It used to be unconditional,
                     // so `--format json` carried a latency distribution
                     // nobody requested — and without the O7 caveat naming
                     // which clock it came from, which printed only under
-                    // `--latency`. `sn_gaps` on the next line had it right
-                    // all along.
+                    // `--latency`.
                     latency: latency.then(|| s.latency()).flatten(),
-                    unstamped: s.unstamped,
+                    // The other half of the latency observation rides the
+                    // same gate (R3).
+                    unstamped: latency.then_some(s.unstamped),
                 })
                 .collect::<Vec<_>>();
             rows.sort_by_key(|r| std::cmp::Reverse(r.count));

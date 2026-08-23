@@ -966,21 +966,24 @@ pub fn rate_report() -> RateReport {
         max_keys: 50_000,
         sn_gaps: Some(0),
         rows: vec![
+            // R3: the row-level counters ride the same ask-gates as their
+            // report-level siblings — this fixture is a `--loss --latency`
+            // run where nothing was stamped.
             RateRow {
                 key: format!("v1/{ORIGIN}/telemetry/sysinfo/disk/var-log/used"),
                 count: 50,
                 bytes: 2_250,
-                sn_gaps: 0,
+                sn_gaps: Some(0),
                 latency: None,
-                unstamped: 50,
+                unstamped: Some(50),
             },
             RateRow {
                 key: format!("v1/{ORIGIN}/state/sysinfo/health"),
                 count: 50,
                 bytes: 1_800,
-                sn_gaps: 0,
+                sn_gaps: Some(0),
                 latency: None,
-                unstamped: 0,
+                unstamped: Some(0),
             },
         ],
     }

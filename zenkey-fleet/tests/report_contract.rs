@@ -353,13 +353,18 @@ fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
 /// tripped bound still says so (O6).
 #[test]
 fn a_rate_row_keeps_its_latency_populations_apart() {
+    // R3 (#238's twin): `sn_gaps`/`unstamped` are Options since the
+    // report-honesty batch — present iff `--loss`/`--latency` asked, exactly
+    // like the report-level `sn_gaps` and the row's own `latency`. The pin
+    // change is the visible act: a row from an unasked run used to serialize
+    // an uncaveated `"sn_gaps": 0`.
     let quiet = RateRow {
         key: "v1/h-a/telemetry/p/m".into(),
         count: 12,
         bytes: 480,
-        sn_gaps: 0,
+        sn_gaps: Some(0),
         latency: None,
-        unstamped: 12,
+        unstamped: Some(12),
     };
     assert_eq!(
         serde_json::to_value(&quiet).unwrap(),
@@ -371,6 +376,21 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
             "unstamped": 12,
         }),
         "nothing stamped: the latency key is absent, which is not zero latency"
+    );
+
+    let unasked = RateRow {
+        sn_gaps: None,
+        unstamped: None,
+        ..quiet.clone()
+    };
+    assert_eq!(
+        serde_json::to_value(&unasked).unwrap(),
+        json!({
+            "key": "v1/h-a/telemetry/p/m",
+            "count": 12,
+            "bytes": 480,
+        }),
+        "no --loss and no --latency: both counters are absent (O4), never zero"
     );
 
     let dist = zenkey_fleet::LatencySummary {
@@ -388,7 +408,7 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
             stampers: vec![],
             stampers_dropped: 0,
         }),
-        unstamped: 1,
+        unstamped: Some(1),
         ..quiet
     };
     assert_eq!(

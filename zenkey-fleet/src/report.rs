@@ -551,17 +551,24 @@ pub struct RateRow {
     pub key: String,
     pub count: u64,
     pub bytes: u64,
-    /// Source-sequence gaps (zero also means "publishers attach no
-    /// SourceInfo" — an observation, not proof of losslessness).
-    pub sn_gaps: u64,
+    /// Source-sequence gaps. `None` = `--loss` was not asked — the same gate
+    /// the report-level `sn_gaps` always had; the row used to serialize an
+    /// uncaveated `0` regardless (#238's twin, review finding R3). Even when
+    /// present, zero also means "publishers attach no SourceInfo" — an
+    /// observation, not proof of losslessness.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sn_gaps: Option<u64>,
     /// Observed **skewed** latency over the window (#119) — absent when no
     /// sample was HLC-stamped, which is not zero latency. Split by who
     /// stamped it (#213): the three populations measure from different
     /// clocks and are never folded into one median.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency: Option<crate::stats::LatencyReport>,
-    /// Samples that carried no HLC — the other half of the observation.
-    pub unstamped: u64,
+    /// Samples that carried no HLC — the other half of the latency
+    /// observation, so it rides the same gate: `None` = `--latency` was not
+    /// asked (R3, matching #238's fix for `latency` itself).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unstamped: Option<u64>,
 }
 
 /// The `topic hz` / `topic bw` report (issue #46) — measured counts plus the

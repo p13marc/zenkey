@@ -69,14 +69,16 @@ impl Render for RateView<'_> {
                 continue;
             }
             let mut tail = row.key.clone();
-            if self.report.sn_gaps.is_some() {
-                tail.push_str(&format!("  ({} sn gap(s))", row.sn_gaps));
+            // R3: the gate moved onto the row itself — a row without `--loss`
+            // carries no count at all, so there is nothing to draw either.
+            if let Some(gaps) = row.sn_gaps {
+                tail.push_str(&format!("  ({gaps} sn gap(s))"));
             }
-            match &row.latency {
+            match (&row.latency, row.unstamped) {
                 // One clause per population, never one median across them: a
                 // publisher-stamped sample and a router-stamped one measure
                 // from different clocks (#213).
-                Some(l) => {
+                (Some(l), unstamped) => {
                     for (label, s) in l.populations() {
                         tail.push_str(&format!(
                             "  lat[{label}] med {} p95 {} (min {} max {}, {})",
@@ -87,13 +89,14 @@ impl Render for RateView<'_> {
                             s.samples,
                         ));
                     }
-                    tail.push_str(&format!("  ({} unstamped)", row.unstamped));
+                    tail.push_str(&format!("  ({} unstamped)", unstamped.unwrap_or(0)));
                 }
-                None if row.unstamped > 0 => tail.push_str(&format!(
-                    "  lat — ({} unstamped: no HLC, no latency — not zero)",
-                    row.unstamped
+                (None, Some(unstamped)) if unstamped > 0 => tail.push_str(&format!(
+                    "  lat — ({unstamped} unstamped: no HLC, no latency — not zero)",
                 )),
-                None => {}
+                // `--latency` not asked (both absent, R3), or asked and every
+                // sample was stamped into a population above.
+                (None, _) => {}
             }
             g.row([
                 Cell::text(format!("{:.2} Hz", row.count as f64 / secs)),
