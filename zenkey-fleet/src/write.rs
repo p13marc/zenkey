@@ -591,6 +591,7 @@ mod tests {
                 encoding: None,
                 fanout: fanout.map(str::to_string),
                 idempotent: Some(false),
+                cardinality: None,
                 since: None,
                 description: None,
             }],

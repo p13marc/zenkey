@@ -110,6 +110,10 @@ pub(crate) struct ProcedureEntry {
     pub fanout: Fanout,
     /// Whether a retried call is safe (RFC 05 §3).
     pub idempotent: bool,
+    /// Key-population bound — RFC 08 §2 requires it on any `{var}`-bearing
+    /// procedure path, the same budget rule as `[[subject]]` and `[[media]]`.
+    #[allow(dead_code)] // linted here; served verbatim through introspect
+    pub cardinality: Option<i64>,
     /// Optional declared payload encoding (RFC 08 §2, v1.5).
     pub encoding: Option<String>,
 }
@@ -828,6 +832,29 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 .get("idempotent")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            // `reply` is required (RFC 08 §2's field table): errors ride
+            // `reply_err`, but a *success* reply always has a declared type —
+            // a procedure whose reply nobody can decode is not registered.
+            let reply = entry.get("reply").and_then(|v| v.as_str());
+            if reply.is_none() {
+                return Err(lint(
+                    &fname,
+                    format!("procedure {ppath:?}: missing reply type (RFC 08 §2)"),
+                ));
+            }
+            // `{var}`-bearing procedure paths carry the same key-population
+            // budget as subjects and media (RFC 08 §2/§5): the expansions are
+            // real keys, and the budget review needs the bound declared.
+            let cardinality = entry.get("cardinality").and_then(|v| v.as_integer());
+            let has_var = chunks.iter().any(|c| matches!(c, Chunk::Var(_)));
+            if has_var && cardinality.is_none() {
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "procedure {ppath:?}: {{var}} pattern needs integer cardinality (RFC 08 §2)"
+                    ),
+                ));
+            }
             let refs: Vec<&str> = ppath.split('/').collect();
             procedures.push(ProcedureEntry {
                 path: ppath.to_string(),
@@ -838,12 +865,10 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     .get("request")
                     .and_then(|v| v.as_str())
                     .map(str::to_string),
-                reply: entry
-                    .get("reply")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
+                reply: reply.map(str::to_string),
                 fanout,
                 idempotent,
+                cardinality,
                 encoding: entry
                     .get("encoding")
                     .and_then(|v| v.as_str())
@@ -1562,6 +1587,41 @@ mod tests {
             "{HEADER}[producer]\nname = \"t\"\n\n[[procedure]]\npath = \"x/set\"\nkind = \"write\"\nreply = \"Ack\"\nfanout = \"allowed\"\nidempotent = true\nsince = \"1.0\"\ndescription = \"d\"\n"
         );
         lint_one(&toml).unwrap();
+    }
+
+    /// RFC 08 §2's field table marks `reply` required: errors ride
+    /// `reply_err`, but a success reply always has a declared type.
+    #[test]
+    fn a_procedure_without_a_reply_type_is_refused() {
+        let toml = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[procedure]]\npath = \"x/set\"\nkind = \"write\"\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        let err = lint_one(&toml).unwrap_err();
+        assert!(err.to_string().contains("missing reply"), "{err}");
+        assert!(err.to_string().contains("RFC 08 §2"), "{err}");
+    }
+
+    /// RFC 08 §2: a `{var}`-bearing procedure path carries the same
+    /// key-population budget as a subject or media pattern — its expansions
+    /// are real keys, and the budget review needs the declared bound.
+    #[test]
+    fn a_var_procedure_needs_a_cardinality() {
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n");
+        let err = lint_one(&format!(
+            "{base}[[procedure]]\npath = \"port/{{port}}/drain\"\nkind = \"write\"\nreply = \"Ack\"\nsince = \"1.0\"\ndescription = \"d\"\n"
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("cardinality"), "{err}");
+        assert!(err.to_string().contains("RFC 08 §2"), "{err}");
+        // Declared, it parses; literal-only paths still need none.
+        lint_one(&format!(
+            "{base}[[procedure]]\npath = \"port/{{port}}/drain\"\nkind = \"write\"\nreply = \"Ack\"\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+        ))
+        .unwrap();
+        lint_one(&format!(
+            "{base}[[procedure]]\npath = \"x/set\"\nkind = \"write\"\nreply = \"Ack\"\nsince = \"1.0\"\ndescription = \"d\"\n"
+        ))
+        .unwrap();
     }
 
     #[test]
