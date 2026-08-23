@@ -87,6 +87,25 @@ pub enum ContextMsg {
     /// into `ContextForm::status`, beside the picker that started it, and
     /// nowhere else. It is this pane's async result like any other.
     Switched(Result<zenoh::Session, String>),
+    /// The session-open re-read of the shared config landed (#67, #255):
+    /// the known names, and the store's own `current` pointer.
+    Refreshed(Result<(Vec<String>, Option<String>), String>),
+    /// [`ContextMsg::Load`]'s answer (#255): the named context's values,
+    /// ready for the editor.
+    Loaded(Result<(String, Box<StoredContext>), String>),
+    /// [`ContextMsg::Selected`]'s answer (#255): the stored context, plus —
+    /// inside `Ok` — why the shared `current` pointer could not be written,
+    /// when it could not (the switch itself still proceeds).
+    Activated(String, Result<(Box<StoredContext>, Option<String>), String>),
+    /// The editor's write to the shared config landed (#255), with the
+    /// re-read name list. `select` is the save-and-switch flow: the context
+    /// is applied only once its write actually did (its failure aborts the
+    /// switch, exactly as it did synchronously).
+    Saved {
+        name: String,
+        select: bool,
+        result: Result<Vec<String>, String>,
+    },
 }
 
 fn msg(m: ContextMsg) -> Message {

@@ -168,14 +168,17 @@ pub(crate) fn update(
             dep.session = Some(session.clone());
             // The context list is read from the shared file, not cached at
             // launch: `zenctl context create` on the other side of the
-            // screen should show up here without a restart (#67).
-            super::pane::context::refresh_contexts(&mut work.bench.context_form);
+            // screen should show up here without a restart (#67). As a task
+            // (#255): the re-read is right, and a TOML read on the path of
+            // every session open — launch and each reconnect — sat a disk
+            // access on a frame. Its answer lands on `ContextMsg::Refreshed`.
+            let contexts = services::context::refresh();
             dep.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
                 dep.base(),
                 dep.timeout(),
             )));
             let discover = services::link::discover_bases(&session, dep.timeout());
-            Task::batch([discover, start_monitor(dep), load_slices(dep)])
+            Task::batch([discover, contexts, start_monitor(dep), load_slices(dep)])
         }
         BusMsg::SessionOpened(Err(e)) => {
             obs.link = LinkState::Failed(e);

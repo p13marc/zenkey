@@ -12,6 +12,7 @@
 use iced::Task;
 
 use crate::message::{ChromeMsg, Message, RightPane, Subject, SubjectMsg};
+use crate::services;
 use crate::state::{Chrome, Deployment, SubjectState, Workspace};
 use crate::view;
 
@@ -37,7 +38,21 @@ pub(crate) fn update(
         ChromeMsg::WindowSettled => {
             if chrome.prefs_dirty {
                 remember(chrome, dep, work);
+                chrome.prefs_dirty = false;
+                // The write itself is a task (#255): the settle timer
+                // decides *when* a write is owed; the disk never runs on
+                // the update thread.
+                return services::prefs::save(chrome.prefs.clone());
             }
+            Task::none()
+        }
+        ChromeMsg::PrefsSaved(Ok(())) => Task::none(),
+        ChromeMsg::PrefsSaved(Err(e)) => {
+            // Best-effort, but not silent (#255): the note the status strip
+            // already shows for an unreadable prefs file is the surface for
+            // an unwritable one too.
+            tracing::warn!("preferences not saved: {e}");
+            chrome.prefs_note = Some(format!("preferences not saved: {e}"));
             Task::none()
         }
         ChromeMsg::Key(key, modifiers) => update_key(chrome, dep, sub, work, &key, modifiers),
@@ -50,8 +65,10 @@ pub(crate) fn update(
                 PrefsMsg::ZoomOut => chrome.prefs.zoom_out(),
                 PrefsMsg::ZoomReset => chrome.prefs.zoom_reset(),
             }
-            // Saved on every change rather than at exit: a GUI is killed,
-            // not quit, more often than anyone admits.
+            // On the settle timer rather than per change (#255): a held
+            // zoom key wrote the file once per keypress, which is #189's
+            // per-pixel lesson wearing a keyboard. The 700 ms window is the
+            // exposure a kill -9 already had between change and write.
             remember(chrome, dep, work);
             Task::none()
         }
@@ -243,9 +260,13 @@ fn run_palette_row(
     Task::done(message)
 }
 
-/// Persist what the window looks like now. Best-effort by construction
-/// (see `Prefs::save`) — a preference that cannot be written must not fail
-/// whatever the user was actually doing.
+/// Record what the window looks like now, and mark the prefs dirty — the
+/// settle timer's `WindowSettled` does the actual write, as a task (#255).
+///
+/// No disk here, deliberately: `remember` is called from the update thread
+/// on every theme toggle, zoom step, scope change and context switch, and
+/// each used to be a synchronous file write on a frame. The debounce seam
+/// is `prefs_dirty` (#189), and now every preference rides it.
 pub(crate) fn remember(chrome: &mut Chrome, dep: &Deployment, work: &Workspace) {
     chrome.prefs.scope = dep.settings.scope;
     // The selectors that give a custom scope its meaning travel with it
@@ -258,6 +279,5 @@ pub(crate) fn remember(chrome: &mut Chrome, dep: &Deployment, work: &Workspace) 
         .active
         .clone()
         .or(chrome.prefs.context.take());
-    chrome.prefs_dirty = false;
-    chrome.prefs.save();
+    chrome.prefs_dirty = true;
 }
