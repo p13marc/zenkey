@@ -259,7 +259,14 @@ Two universal rules, mechanism-independent:
   subject** — a latest-value storage covering `state/**`
   ([09-operations.md §2](09-operations.md)), publisher-side caches (§3.3),
   or both. A deployment with neither has no late-joiner story at all,
-  which does not conform.
+  which does not conform. The burden this MUST creates is allocated in two
+  halves (v1.25): *which* mechanism discharges it is the **deployment's**
+  choice — the deployment is the party that knows whether a storage runs
+  (§3.5 states the default) — while the registry's per-subject `seed`
+  declaration is how a **producer** knows what is asked of it: in a
+  deployment that runs no latest-value storage, the producer of a
+  seed-entitled subject is the only possible seed source, and MUST cache
+  that subject (§3.3).
 
 Telemetry loss needs no detection machinery: a dropped sample is priced
 into the `sampled` profile and superseded by the next cadence — spending
@@ -298,8 +305,9 @@ seed *procedures* no longer exist):
   `@adv` caches — no storage needed, reconcile internal. (2) A plain GET
   on the state selector is answered only by a router storage — publisher
   caches live under the verbatim `@adv` sidecar a plain GET cannot reach.
-  They differ in *coverage*: a cache dies with its publisher, a storage
-  does not. A consumer whose correctness depends on state from **crashed**
+  Which path is the deployment's default is §3.5's one rule (storage
+  where one runs; caches where none does). They differ in *coverage*: a
+  cache dies with its publisher, a storage does not. A consumer whose correctness depends on state from **crashed**
   producers (a UI rendering the firing alert of a dead host — the case
   §1.2's TTL retirement exists for) MUST include the storage seed where
   one is deployed; cache seeding alone suffices only where dead producers'
@@ -359,7 +367,9 @@ Where the tier earns its cost:
 - **Router-less / storage-less meshes**, where publisher caches are the
   *only* possible seed source: `cache(1)` on state subjects (no miss
   detection unless `detect_s` demands it), consumers seed with
-  `history()`.
+  `history()`. This is where §3.1's seeding burden lands on the producer,
+  and the one deployment shape in which the tier is the *normative* seed
+  mechanism rather than an opt-in (§3.5).
 - **Chart-tail seeding without a telemetry storage**: `cache(n)` on the
   handful of subjects whose registry says `seed = tail(n)` — not across a
   wide telemetry fan.
@@ -406,31 +416,53 @@ denied recovery, indistinguishable from "nothing to recover";
 The split mirrors §3's QoS design: **entitlements in the registry,
 mechanisms in deployment/build config.** A subject's row in the registry
 says what consumers may rely on; whether a cache or a storage delivers it
-is invisible to the keys and to the wire contract.
+is invisible to the keys and to the wire contract. The table's first
+column is also the seeding decision (§3.5): the row a deployment sits in
+names its seed source.
 
-### 3.5 Late-joiner seeding is delegated for volatile state (v1.5)
+### 3.5 Seeding, one story: storage first, caches where no storage runs (v1.5, narrowed in v1.25)
 
-The middleware's advanced tier (§3.3) is now the **normative seeding
-mechanism for volatile state**: a publisher of `refreshed`/`transition`
-state (and last-value telemetry, where seeded at all) meets its `seed`
-entitlement with the advanced publisher's **cache** and the subscriber's
-**history/recovery** — the mechanism the middleware ecosystem has
-consolidated on (its older cache/querying-subscriber APIs are deprecated
-upstream, and the seeding entitlement predates that consolidation).
-Storage-backed seeding remains correct where a deployment already runs the
-storage for *durable* reasons; what changes is the default answer to "how
-does a late joiner see current state" — a producer-side cache, not a
-router deployment dependency.
+The seed entitlement (§3.1) has two conforming mechanisms, and the choice
+between them is a fact about the *deployment*, not a preference:
+
+- **Where a latest-value storage covers `state/**` ([09-operations.md
+  §2](09-operations.md)), the storage seed is the default.** It answers
+  §3.2's plain GET, it outlives every publisher — the coverage the
+  crashed-producer case in §3.2 turns on, since a cache dies with its
+  publisher — and it costs the fleet nothing per key. A deployment that
+  runs the storage anyway, for durable at-rest reasons (§4), has already
+  paid for its seed source.
+- **Where no such storage exists — the router-less mesh of §3.4's second
+  row — publisher-side caches are the normative mechanism**: the advanced
+  tier's cache + history/recovery (§3.3), which is the mechanism the
+  middleware ecosystem has consolidated on (its older
+  cache/querying-subscriber APIs are deprecated upstream). In a
+  storage-less deployment the producer *is* the seed source for every
+  subject whose registry entry carries a seed entitlement — that is
+  §3.1's burden allocation, read from the producer's side.
+
+The v1.5 form of this section declared the advanced tier "the normative
+seeding mechanism for volatile state" outright. That sentence is
+**narrowed** here (v1.25), not repudiated: read as a universal default it
+contradicted §3.3's own rule — the tier is opt-in per subject, never a
+class default — and §3.4's first row, which sends the normal fleet to the
+baseline; and it would have re-imported, as a default, exactly the
+per-key cost the §3.3 box prices. What v1.5 correctly decided survives in
+the second bullet: *when a cache is the answer, the middleware's advanced
+tier is the cache* — the convention defines no seeding mechanism of its
+own, and §3.3's opt-in and cost box stand as the no-storage answer's
+price list.
 
 **What does not change:** the storage-manager remains authoritative for
 durable at-rest data (§4 — event logs, state history, the catalog);
 `seed`/`detect_s` registry semantics are untouched (entitlements in the
-registry, mechanisms in deployment — §3.4's split holds); and local
-durability layers (a constrained leaf's on-disk backfill store) are a
-different concern entirely. The hard dependency this rests on is the
-plain version chunk: the advanced tier's `@adv` liveliness tokens must
-remain structurally parseable ([03-grammar.md §1.2](03-grammar.md)) —
-the enforcement crate pins it with executable tests.
+registry, mechanisms in deployment — §3.4's split holds); §3.2's seed
+discipline binds both paths; and local durability layers (a constrained
+leaf's on-disk backfill store) are a different concern entirely. The hard
+dependency this rests on is the plain version chunk: the advanced tier's
+`@adv` liveliness tokens must remain structurally parseable
+([03-grammar.md §1.2](03-grammar.md)) — the enforcement crate pins it
+with executable tests.
 
 ---
 
