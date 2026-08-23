@@ -273,7 +273,7 @@ pub fn doctor_report() -> DoctorReport {
                 citation: Some("RFC 09 §5.1 O7".into()),
             },
         ],
-        synced: vec![format!("{ORIGIN}/catalog (registry 1.1)")],
+        synced: Some(vec![format!("{ORIGIN}/catalog (registry 1.1)")]),
         introspect_answered: 2,
         live_producers: 3,
         describe_served: 1,

@@ -854,7 +854,7 @@ mod tests {
                     citation: None,
                 })
                 .collect(),
-            synced: vec![],
+            synced: None,
             introspect_answered: 0,
             live_producers: 0,
             describe_served: 0,

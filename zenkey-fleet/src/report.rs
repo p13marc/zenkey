@@ -652,9 +652,15 @@ pub struct DoctorFinding {
 pub struct DoctorReport {
     pub findings: Vec<DoctorFinding>,
     /// Producer slices confirmed in sync with the local registry
-    /// (`origin/producer`), when `--registry` was given.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub synced: Vec<String>,
+    /// (`origin/producer`).
+    ///
+    /// `None` = no local registry was given, so the served-vs-declared diff
+    /// **never ran** — which must not read like "ran, none in sync"
+    /// (RFC 09 §5.1 O4). `Some(vec![])` = the diff ran and confirmed nothing;
+    /// the findings say why. The `Vec` used to skip-if-empty, which conflated
+    /// the two (review finding R1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced: Option<Vec<String>>,
     /// Introspect replies received across the fleet.
     pub introspect_answered: usize,
     /// Producers on the liveliness roster.
@@ -1060,7 +1066,9 @@ mod tests {
                 evidence: "registry version differs: served 1.0, local 2.0".into(),
                 citation: Some("RFC 08 §6".into()),
             }],
-            synced: vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()],
+            // R1: `Option` since the report-honesty batch — `Some` serializes
+            // exactly as the old non-empty `Vec` did.
+            synced: Some(vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()]),
             introspect_answered: 2,
             live_producers: 3,
             describe_served: 1,
@@ -1091,6 +1099,31 @@ mod tests {
                 "deep": false,
             }),
             "without --listen-for the document is byte-identical to pre-#161"
+        );
+        // R1 (report-honesty batch): `synced` is three-state. Absent = the
+        // served-vs-declared diff never ran (no registry, O4); `[]` = it ran
+        // and confirmed nothing; non-empty pins above. The wire change is
+        // deliberate: a no-registry run serialized nothing here before, and
+        // still does — only the ran-and-empty case gains a visible `[]`.
+        let unchecked = DoctorReport {
+            synced: None,
+            ..report.clone()
+        };
+        let json = serde_json::to_value(&unchecked).unwrap();
+        assert!(
+            !json.as_object().unwrap().contains_key("synced"),
+            "diff never ran: the key is absent, exactly as pre-R1 no-registry \
+             runs serialized"
+        );
+        let ran_empty = DoctorReport {
+            synced: Some(vec![]),
+            ..report.clone()
+        };
+        let json = serde_json::to_value(&ran_empty).unwrap();
+        assert_eq!(
+            json["synced"],
+            serde_json::json!([]),
+            "ran and confirmed nothing is `[]`, not absence"
         );
         // With the listen phase, the observation section pins too. Note
         // `field_paths_dropped` (#223) is absent at zero — appended, like

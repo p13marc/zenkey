@@ -257,19 +257,48 @@ fn a_doctor_run_carries_its_coverage_and_its_bound_into_every_format() {
 
     let envelope: serde_json::Value =
         serde_json::from_str(ndjson(&fx::doctor_report()).lines().next().unwrap()).unwrap();
-    let notes = envelope["notes"]
+    let envelope_notes = envelope["notes"]
         .as_array()
         .expect("notes ride the envelope");
     assert!(
-        notes
+        envelope_notes
             .iter()
             .any(|n| n["text"].as_str().unwrap().contains("dropped")),
-        "the bound reaches a script too: {notes:?}"
+        "the bound reaches a script too: {envelope_notes:?}"
     );
     assert!(
         !envelope.as_object().unwrap().contains_key("findings"),
         "findings are rows, not an envelope field"
     );
+
+    // R1: with no registry the served-vs-declared diff never ran, and the
+    // degradation is a note in the report — it used to be a bare eprintln in
+    // the command, invisible to every machine format.
+    let unchecked = zenkey_fleet::report::DoctorReport {
+        synced: None,
+        ..fx::doctor_report()
+    };
+    let n = notes(&unchecked);
+    assert!(n.contains("diff never ran"), "{n}");
+    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&unchecked).lines().next().unwrap()).unwrap();
+    assert!(
+        !envelope.as_object().unwrap().contains_key("synced"),
+        "diff never ran: the key is absent (O4), never an empty list"
+    );
+    assert!(
+        envelope["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|note| note["text"].as_str().unwrap().contains("diff never ran")),
+        "the degradation reaches a script too: {envelope}"
+    );
+    // …and the fixture's checked run keeps the key.
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&fx::doctor_report()).lines().next().unwrap()).unwrap();
+    assert!(envelope["synced"].is_array(), "{envelope}");
 }
 
 /// The `why` ladder (#214): one line per rung, the three answer states drawn

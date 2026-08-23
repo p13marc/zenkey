@@ -137,6 +137,16 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
         report.routers,
     )));
 
+    // R1: `synced: None` means the served-vs-declared diff never ran (no
+    // registry loaded) — which must not read as "nothing out of sync"
+    // (RFC 09 §5.1 O4).
+    if report.synced.is_none() {
+        col = col.push(kit::muted(
+            "no registry loaded — the served-vs-declared diff never ran; \
+             \"not checked\" is not \"in sync\" (RFC 09 §5.1 O4)",
+        ));
+    }
+
     if let Some(d) = &state.delta {
         col = col.push(kit::muted(format!(
             "vs previous run: {} new · {} fixed · {} unchanged",

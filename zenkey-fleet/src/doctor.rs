@@ -380,7 +380,10 @@ pub async fn run_doctor(
 
     Ok(DoctorReport {
         findings,
-        synced,
+        // `None` when no local registry was given: the served-vs-declared
+        // diff never ran, and the report must say so rather than looking
+        // like "ran, none in sync" (RFC 09 §5.1 O4, review finding R1).
+        synced: (!locals.is_empty()).then_some(synced),
         introspect_answered: answered,
         live_producers: live,
         describe_served: described.len(),
