@@ -283,6 +283,16 @@ pub enum WorkspaceMsg {
     /// Close an open dock, or restore a closed one at its home edge (#180) —
     /// the dock strip's toggles and each title bar's `×` both speak this.
     DockToggled(crate::prefs::DockRole),
+    /// Tear a dock off into its own window (#186) — the title bar's `⇱`.
+    /// The Locator never tears off (there is one bus, and one tree of it),
+    /// and a dock already torn gets its window focused instead of a second
+    /// one.
+    TearOff(crate::prefs::DockRole),
+    /// A window closed (#186, `window::close_events`). A torn-off dock's
+    /// window restores its role to the grid; the main window exits the
+    /// application — a daemon does not stop with its last window, so this
+    /// message is where "close means quit" is decided.
+    WindowClosed(iced::window::Id),
     /// Put the keyboard in a dock (#190): Alt+L/I/A name the Locator, the
     /// Inspector and the Activity dock by initial. Focus follows the key the
     /// way it follows a click ([`DockFocused`](WorkspaceMsg::DockFocused)) —
@@ -326,8 +336,14 @@ pub enum ChromeMsg {
     /// A persisted-preference change (issue #73). Each one marks the prefs
     /// dirty; the settle timer writes (#255).
     Prefs(PrefsMsg),
-    /// The window was resized — remembered for the next launch (issue #73).
-    WindowResized(f32, f32),
+    /// A window was resized (issue #73; window-aware since #186): the main
+    /// window's size is remembered for the next launch, a torn-off dock's
+    /// in the named layout its window belongs to.
+    WindowResized(iced::window::Id, f32, f32),
+    /// A window was moved (#186). Only a torn-off dock's position is
+    /// remembered — "echo on the second monitor" should come back on the
+    /// second monitor — and only where the platform reports one.
+    WindowMoved(iced::window::Id, f32, f32),
     /// The settle timer fired (issue #189): write whatever is dirty once,
     /// rather than per pixel of a drag or per zoom keypress (#255).
     WindowSettled,

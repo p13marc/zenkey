@@ -13,6 +13,7 @@ use iced::Task;
 
 use crate::message::{ChromeMsg, Message, RightPane, Subject, SubjectMsg};
 use crate::services;
+use crate::state::workspace::ClosedWindow;
 use crate::state::{Chrome, Deployment, SubjectState, Workspace};
 use crate::view;
 
@@ -25,14 +26,46 @@ pub(crate) fn update(
     msg: ChromeMsg,
 ) -> Task<Message> {
     match msg {
-        ChromeMsg::WindowResized(w, h) => {
+        ChromeMsg::WindowResized(id, w, h) => {
             // Not on every pixel of a drag — the prefs file would be
             // rewritten hundreds of times per resize. Recorded here and
             // marked dirty; a settle timer writes it once the drag stops
             // (issue #189). "Written on the next real change" meant a
             // resize-then-quit lost the geometry entirely.
-            chrome.prefs.window = Some((w, h));
-            chrome.prefs_dirty = true;
+            //
+            // Window-aware since #186: a torn-off dock's size belongs to
+            // the named layout its window is part of, the main window's to
+            // the next launch as before. An id naming neither is a close
+            // racing its last resize, and owes nothing.
+            match work.windows.classify(id) {
+                ClosedWindow::Torn(_) => {
+                    if let Some(t) = work.windows.torn.iter_mut().find(|t| t.id == id) {
+                        t.size = Some((w, h));
+                    }
+                    super::workspace::persist_custom(chrome, work);
+                }
+                ClosedWindow::Main => {
+                    chrome.prefs.window = Some((w, h));
+                    chrome.prefs_dirty = true;
+                }
+                // A resize racing a close: the window is gone, and writing
+                // its size over the main window's would be the bug.
+                ClosedWindow::Unknown => {}
+            }
+            Task::none()
+        }
+        ChromeMsg::WindowMoved(id, x, y) => {
+            // Only a torn-off dock's position is remembered (#186): "echo
+            // on the second monitor" should reopen there. The main window
+            // keeps its platform-default placement, as it always has — and
+            // platforms that never report a move (Wayland) simply never
+            // send this.
+            if work.windows.role_of(id).is_some() {
+                if let Some(t) = work.windows.torn.iter_mut().find(|t| t.id == id) {
+                    t.position = Some((x, y));
+                }
+                super::workspace::persist_custom(chrome, work);
+            }
             Task::none()
         }
         ChromeMsg::WindowSettled => {

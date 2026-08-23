@@ -238,6 +238,46 @@ impl LayoutNode {
     }
 }
 
+/// A dock torn off into its own window (#186), as the named layout keeps it:
+/// the role, and the geometry its window had. The list this sits in is the
+/// layout's other half — [`WorkspaceLayout::root`] says where the docked
+/// regions are, `torn` says which regions left the grid for a window of
+/// their own, so a restart rebuilds both.
+///
+/// Geometry is remembered only while the dock *is* torn: closing the window
+/// re-docks the role and drops the entry, the same way closing a dock in the
+/// grid forgets the splits that held it (#180).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TornDock {
+    pub role: DockRole,
+    /// Window size in logical pixels, once a resize reported one.
+    #[serde(default)]
+    pub size: Option<(f32, f32)>,
+    /// Window position, when the platform reports one (Wayland never does,
+    /// so `None` stays the honest common case).
+    #[serde(default)]
+    pub position: Option<(f32, f32)>,
+}
+
+/// The smallest torn-off window worth restoring: below this a stored size is
+/// a hand edit, and it is dropped rather than kept — the same posture as the
+/// main window's 320×240 floor.
+const MIN_TORN: (f32, f32) = (200.0, 120.0);
+
+impl TornDock {
+    /// Field-by-field sanity, like the zoom clamp: a silly size or position
+    /// is dropped, never a reason to refuse the entry beside it.
+    fn sanitised(mut self) -> TornDock {
+        self.size = self.size.filter(|(w, h)| {
+            w.is_finite() && h.is_finite() && *w >= MIN_TORN.0 && *h >= MIN_TORN.1
+        });
+        self.position = self
+            .position
+            .filter(|(x, y)| x.is_finite() && y.is_finite());
+        self
+    }
+}
+
 /// The three saved layouts (epic #172), on Alt+1/2/3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -312,6 +352,9 @@ impl LayoutPreset {
         WorkspaceLayout {
             preset: Some(self),
             root: self.root(),
+            // A preset is one of the three named arrangements, and all three
+            // are fully docked: applying one re-docks every torn window.
+            torn: Vec::new(),
         }
     }
 }
@@ -336,6 +379,11 @@ pub struct WorkspaceLayout {
     /// preset by `sanitised`, which regenerates a named layout's tree anyway.
     #[serde(default = "explore_root")]
     pub root: LayoutNode,
+    /// Docks torn off into windows of their own (#186), with the geometry
+    /// each window had — a restart reopens them. Absent in an older file, so
+    /// it defaults to the fully-docked reading that file was written under.
+    #[serde(default)]
+    pub torn: Vec<TornDock>,
 }
 
 fn explore_root() -> LayoutNode {
@@ -349,9 +397,36 @@ impl Default for WorkspaceLayout {
 }
 
 impl WorkspaceLayout {
-    /// A layout that is no preset any more.
+    /// A layout that is no preset any more, fully docked.
     pub fn custom(root: LayoutNode) -> WorkspaceLayout {
-        WorkspaceLayout { preset: None, root }
+        WorkspaceLayout {
+            preset: None,
+            root,
+            torn: Vec::new(),
+        }
+    }
+
+    /// The torn entries a hand-edited file cannot be trusted to keep sane:
+    /// the Locator is never torn (it *is* the navigation, #186), a role
+    /// cannot be both docked and torn, and no role is torn twice. Dropped
+    /// entry by entry, like an invalid selector — never a refused launch.
+    fn sanitise_torn(&mut self) {
+        let docked = self.root.roles();
+        let mut seen: Vec<DockRole> = Vec::new();
+        let torn = std::mem::take(&mut self.torn);
+        self.torn = torn
+            .into_iter()
+            .filter(|t| {
+                let keep = t.role != DockRole::Locator
+                    && !docked.contains(&t.role)
+                    && !seen.contains(&t.role);
+                if keep {
+                    seen.push(t.role);
+                }
+                keep
+            })
+            .map(TornDock::sanitised)
+            .collect();
     }
 }
 
@@ -476,7 +551,13 @@ impl Prefs {
         self.layout = match self.layout.preset {
             Some(preset) => preset.layout(),
             None if self.layout.root.is_sane() => {
-                WorkspaceLayout::custom(self.layout.root.clamped())
+                let mut layout = WorkspaceLayout {
+                    preset: None,
+                    root: self.layout.root.clamped(),
+                    torn: self.layout.torn,
+                };
+                layout.sanitise_torn();
+                layout
             }
             // A tree naming one dock twice cannot be closed or restored
             // coherently — degrade to the default, like a broken file does.
@@ -778,6 +859,86 @@ mod tests {
         for role in [DockRole::Inspector, DockRole::Activity, DockRole::Workbench] {
             assert_eq!(role.density(Density::Comfortable), Density::Comfortable);
         }
+    }
+
+    /// A torn-off dock rides the named layout (#186): the role and its
+    /// window's geometry round-trip, and the file spelling is pinned — a
+    /// hand-editable file is an API.
+    #[test]
+    fn a_torn_dock_rides_the_layout_round_trip() {
+        let path = tmp("torn-round-trip.toml");
+        let mut layout = WorkspaceLayout::custom(LayoutNode::Split {
+            axis: LayoutAxis::Vertical,
+            ratio: 0.3,
+            a: Box::new(LayoutNode::Dock(DockRole::Locator)),
+            b: Box::new(LayoutNode::Dock(DockRole::Inspector)),
+        });
+        layout.torn = vec![TornDock {
+            role: DockRole::Activity,
+            size: Some((960.0, 380.0)),
+            position: Some((1920.0, 0.0)),
+        }];
+        let prefs = Prefs {
+            layout: layout.clone(),
+            ..Prefs::default()
+        };
+        prefs.save_to(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[[layout.torn]]"), "{text}");
+        assert!(text.contains("role = \"activity\""), "{text}");
+        let (back, note) = Prefs::load_from(&path);
+        assert!(note.is_none());
+        assert_eq!(back.layout, layout);
+    }
+
+    /// The torn list a hand edit cannot be trusted to keep sane (#186):
+    /// the Locator is never torn, a role cannot be docked and torn at once,
+    /// no role twice, and a silly size drops to the role's default — entry
+    /// by entry, like an invalid selector, never a refused launch.
+    #[test]
+    fn hand_edited_torn_entries_degrade_entry_by_entry() {
+        let path = tmp("torn-nonsense.toml");
+        std::fs::write(
+            &path,
+            "[layout]\n\
+             [layout.root.split]\naxis = \"vertical\"\nratio = 0.5\n\
+             [layout.root.split.a]\ndock = \"locator\"\n\
+             [layout.root.split.b]\ndock = \"inspector\"\n\
+             [[layout.torn]]\nrole = \"locator\"\n\
+             [[layout.torn]]\nrole = \"inspector\"\n\
+             [[layout.torn]]\nrole = \"activity\"\nsize = [8.0, 8.0]\n\
+             [[layout.torn]]\nrole = \"activity\"\n\
+             [[layout.torn]]\nrole = \"workbench\"\nsize = [520.0, 700.0]\n",
+        )
+        .unwrap();
+        let (prefs, note) = Prefs::load_from(&path);
+        assert!(note.is_none(), "it parsed; the entries were just wrong");
+        assert_eq!(
+            prefs.layout.torn.iter().map(|t| t.role).collect::<Vec<_>>(),
+            [DockRole::Activity, DockRole::Workbench],
+            "locator never tears off; inspector is docked; activity once"
+        );
+        assert_eq!(
+            prefs.layout.torn[0].size, None,
+            "an 8x8 window is a hand edit, dropped to the default"
+        );
+        assert_eq!(prefs.layout.torn[1].size, Some((520.0, 700.0)));
+    }
+
+    /// `preset = "watch"` is fully docked: the three presets are the three
+    /// named arrangements, and naming one re-docks whatever was torn.
+    #[test]
+    fn a_named_preset_wipes_the_torn_list_on_load() {
+        let path = tmp("torn-preset.toml");
+        std::fs::write(
+            &path,
+            "[layout]\npreset = \"watch\"\n\
+             [[layout.torn]]\nrole = \"activity\"\n",
+        )
+        .unwrap();
+        let (prefs, _) = Prefs::load_from(&path);
+        assert_eq!(prefs.layout, LayoutPreset::Watch.layout());
+        assert!(prefs.layout.torn.is_empty());
     }
 
     /// Each preset is sane, and the three trees are three different layouts —

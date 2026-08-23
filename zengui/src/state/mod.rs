@@ -188,6 +188,12 @@ mod tests {
                     // Its *persisted form* lives in `chrome.prefs.layout`,
                     // exactly as the scope does (#180).
                     "docks",
+                    // The windows are the same kind of fact one level up
+                    // (#186): which docks left the grid for windows of
+                    // their own, and which ids those windows carry. Runtime
+                    // half of `chrome.prefs.layout.torn`, like `docks` is
+                    // of `layout.root`.
+                    "windows",
                     "right_pane",
                     "verdicts",
                     "activity",
