@@ -619,27 +619,7 @@ async fn observe_traffic(
         ));
     }
     capped(&mut findings, "payload-invalid", invalid.len(), FINDING_CAP);
-    for (key, (declared, bad, total)) in qos_bad.iter().take(FINDING_CAP) {
-        if *bad > 0 {
-            findings.push(finding(
-                DoctorSeverity::Warning,
-                "qos-observed-mismatch",
-                key.clone(),
-                format!(
-                    "{bad} of {total} sample(s) did not ride the declared {declared} — this \
-                     is what actually rode: an interceptor MAY rewrite QoS, so it is a \
-                     deviation, not proof of the publisher"
-                ),
-                Some("RFC 04 §3"),
-            ));
-        }
-    }
-    capped(
-        &mut findings,
-        "qos-observed-mismatch",
-        qos_bad.values().filter(|(_, bad, _)| *bad > 0).count(),
-        FINDING_CAP.min(qos_bad.len()),
-    );
+    findings.extend(judge_qos_observed(&qos_bad));
     if !foreign_stampers.is_empty() {
         let mut named: Vec<String> = foreign_stampers
             .iter()
@@ -763,6 +743,50 @@ fn field_context_from(
         ctx.insert(key.to_string(), c);
     }
     ctx
+}
+
+/// The `qos-observed-mismatch` findings from the listen window's per-key
+/// aggregates: `key → (declared profile, mismatched, judged)` — pure, so
+/// the cap arithmetic is testable without a bus.
+///
+/// Filter **then** cap, [`judge_cardinality`]'s pattern (deep-review D4):
+/// the map holds every judged key, most of them clean, so capping the map
+/// *entries* first silently dropped violators past the first
+/// [`FINDING_CAP`] keys and made the remainder note miscount. The cap
+/// bounds the findings; the filter decides what a finding is.
+fn judge_qos_observed(
+    qos_bad: &std::collections::BTreeMap<String, (String, u64, u64)>,
+) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+    let violators: Vec<(&String, &(String, u64, u64))> =
+        qos_bad.iter().filter(|(_, (_, bad, _))| *bad > 0).collect();
+    let total_violators = violators.len();
+    for (key, (declared, bad, total)) in violators.into_iter().take(FINDING_CAP) {
+        findings.push(finding(
+            DoctorSeverity::Warning,
+            "qos-observed-mismatch",
+            key.clone(),
+            format!(
+                "{bad} of {total} sample(s) did not ride the declared {declared} — this \
+                 is what actually rode: an interceptor MAY rewrite QoS, so it is a \
+                 deviation, not proof of the publisher"
+            ),
+            Some("RFC 04 §3"),
+        ));
+    }
+    if total_violators > FINDING_CAP {
+        findings.push(finding(
+            DoctorSeverity::Info,
+            "qos-observed-mismatch",
+            "fleet",
+            format!(
+                "… and {} more key(s) with the same finding",
+                total_violators - FINDING_CAP
+            ),
+            None,
+        ));
+    }
+    findings
 }
 
 /// Judge introspect coverage — "alive ⇒ callable" (RFC 04 §5) — against the
@@ -1132,6 +1156,63 @@ mod tests {
         assert!(!is_synthetic_marker(br#"{"tool":"zenctl gen"}"#));
         assert!(!is_synthetic_marker(b"meta"));
         assert!(!is_synthetic_marker(b""));
+    }
+
+    /// Deep-review D4: the qos-observed-mismatch cap bounds *violators*, not
+    /// map entries. 30 judged keys where the first 5 (in map order) are
+    /// clean and the remaining 25 violate: every violator is counted — the
+    /// first 20 as findings, the other 5 in a remainder note that counts
+    /// correctly. Capping before filtering used to drop the violators past
+    /// the first 20 map entries and miscount the note.
+    #[test]
+    fn qos_mismatch_cap_bounds_violators_not_map_entries() {
+        let mut qos_bad: std::collections::BTreeMap<String, (String, u64, u64)> =
+            std::collections::BTreeMap::new();
+        for i in 0..30u32 {
+            // k00..k04 sort first and are clean; k05..k29 are violators.
+            let bad = if i < 5 { 0 } else { 1 };
+            qos_bad.insert(
+                format!("v1/h-a/telemetry/x/k{i:02}"),
+                ("tel".into(), bad, 10),
+            );
+        }
+        let findings = judge_qos_observed(&qos_bad);
+        let per_key: Vec<&DoctorFinding> = findings
+            .iter()
+            .filter(|f| f.severity == DoctorSeverity::Warning)
+            .collect();
+        assert_eq!(per_key.len(), FINDING_CAP, "the cap bounds the findings");
+        assert!(
+            per_key.iter().all(|f| f.evidence.starts_with("1 of 10")),
+            "only violators become findings: {findings:#?}"
+        );
+        assert!(
+            per_key.iter().any(|f| f.subject.ends_with("k24")),
+            "violators past the first {FINDING_CAP} map entries (k20..k24) are \
+             not dropped: {findings:#?}"
+        );
+        let note = findings
+            .iter()
+            .find(|f| f.severity == DoctorSeverity::Info)
+            .expect("a remainder note");
+        assert_eq!(
+            note.evidence, "… and 5 more key(s) with the same finding",
+            "the note counts violators (25 − 20), not map entries"
+        );
+
+        // At or under the cap: every violator is a finding, no note.
+        let few: std::collections::BTreeMap<String, (String, u64, u64)> = qos_bad
+            .iter()
+            .take(10)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let findings = judge_qos_observed(&few);
+        assert_eq!(findings.len(), 5, "{findings:#?}");
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.severity == DoctorSeverity::Warning)
+        );
     }
 
     fn roster_of(entries: &[(&str, &[&str])]) -> std::collections::BTreeMap<String, Vec<String>> {
