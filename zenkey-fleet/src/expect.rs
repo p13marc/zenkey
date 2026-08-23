@@ -20,11 +20,11 @@
 //!
 //! Since #227 the three-state judgement is spelled in the closed condition
 //! vocabulary ([`crate::condition`]): the count and rate floors ride
-//! [`condition::judge_shortfall`](crate::condition::judge_shortfall)
+//! [`crate::condition::judge_shortfall`]
 //! (`rate-below`'s rule), the rate ceiling rides
-//! [`condition::judge_excess`](crate::condition::judge_excess)
+//! [`crate::condition::judge_excess`]
 //! (`rate-above`'s), and `--absent` is `silent-for` over the whole window
-//! ([`condition::judge_silence`](crate::condition::judge_silence)) — so
+//! ([`crate::condition::judge_silence`]) — so
 //! `expect` and `zenctl watchdog` cannot drift about what a drop means.
 
 use std::collections::BTreeSet;

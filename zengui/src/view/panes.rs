@@ -2,7 +2,7 @@
 //!
 //! One `match` over [`DockRole`], and it is the only place in the crate that
 //! knows the mapping from a role to a pane function — the successor of the
-//! old `match` over [`RightPane`], which lives on inside [`workbench`] for
+//! old `match` over [`RightPane`], which lives on inside `workbench` for
 //! the four tools that are not docks of their own. The grid replaces the
 //! fixed `FillPortion(1)`/`FillPortion(1)` row: splitters drag, docks
 //! drag-reorder, a title-bar `×` closes, and the shape is persisted as

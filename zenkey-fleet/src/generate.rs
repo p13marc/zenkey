@@ -44,7 +44,7 @@ pub fn synthetic_marker(tool: &str, origin: &str, fault: Option<&str>) -> Vec<u8
 /// Fault injection is a *mode of the generator*, not a sibling tool: it reuses
 /// the whole registry walk, synthesis, scheduling, and guard machinery, then
 /// perturbs one dimension of the output **after synthesis** — so the delta
-/// from valid is always known, printable ([`Fault::delta`]), and stamped into
+/// from valid is always known, printable (`Fault::delta`), and stamped into
 /// the marker (`"fault": "<kind>"`, RFC 09 §5.3). The point is
 /// consumer-robustness testing: a consumer that crashes on a truncated payload
 /// fails RFC 09 §5.1 O1's spirit — a non-conforming sample is a fact to
