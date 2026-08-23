@@ -82,7 +82,7 @@ pub fn section(state: &WhyState, sp: Spacing) -> Column<'_, Message> {
     let mut col = Column::new().spacing(sp.sm);
 
     let run_label = if state.in_flight { "asking…" } else { "why?" };
-    let mut run = kit::action(kit::caption(run_label)).padding(4);
+    let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
         run = run.on_press(msg(WhyMsg::Run));
     }
