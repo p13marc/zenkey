@@ -390,7 +390,7 @@ This convention narrows it:
 | `telemetry`, `state`, `events` | 4 | data classes |
 | `@rpc`, `@media`, `@blob` | 4 | verbatim planes |
 | `artifact`, `tree`, `store` | 5 (under `@blob` only) | blob tiers ([07-bulk-planes.md](07-bulk-planes.md)); MUST NOT be producer names |
-| `alive` | subject leaf under `state` | liveliness-token keys only ([04-planes.md §5](04-planes.md)); MUST NOT be registered as a data subject |
+| `alive` | any position, any registered pattern (widened in v1.25) | liveliness-token keys only ([04-planes.md §5](04-planes.md)). Reserved wherever an application names keys: `alive` MUST NOT appear as a literal chunk at **any** position of **any** registered pattern — subject, procedure, or media — nor in a built data-class key. v1.0 reserved only the `state` subject-leaf case; the reference registry lint has always refused the wider rule, and the wider rule is right — `telemetry/foo/alive` or an `@rpc/…/alive` procedure would read as presence to every human and selector that greps for the token. The runtime builder still enforces only the `state`-class case; it aligns in a separate change |
 
 Applications MAY register further service origins and MUST NOT redefine the
 tokens above. New class or plane tokens are a convention-major change.

@@ -198,6 +198,19 @@ endpoint being unconsumed today is an argument about tables describing
 what is served — it is not, by itself, an argument for removing the one
 write affordance the plane has.
 
+**A manifest's `filename` is advisory, never a path (v1.25).** A manifest
+MAY carry a suggested filename for the artifact. A consumer MUST NOT join
+that name — or any other server-supplied name — into a filesystem path:
+where fetched bytes land is decided on the consumer's side (its user, or
+its own naming rule such as the target's own id/hash spelling), never by
+the party serving them. A remote name joined to a local path is a
+path-traversal vector (`../…`) on exactly the plane where a tool defaults
+a destination, and the manifest travels over the same bus as the blob —
+§2.1 anchors the *bytes*, nothing anchors the *name*. The advisory name
+MAY pre-fill an operator-editable destination field; it never becomes a
+path on its own. Both reference frontends enforce this; the rule was
+enforced code, stated nowhere, until now.
+
 Resume is a persisted **chunk bitfield**: the client re-requests exactly the
 holes it is missing, as a chunk-range selector on the same wildcard GET. A
 missing chunk in the middle no longer re-streams everything after it.
@@ -556,11 +569,14 @@ behind a feature gate, a registry MAY accept its declaration
 it.*
 
 The demotion is an observation, not a redesign. After a full release cycle
-of v1.7's table, adoption was zero: no producer declared `fanout`, no
-consumer enabled the reference client's feature (every registry entry that
-declares a blob tier excludes it, with the reason written in the TOML), and
-the one genuinely one-to-many stream in the deployed fleet chose `@media`
-instead. A normative endpoint table should describe what is served;
+of v1.7's table, adoption was zero: no consumer enabled the reference
+client's feature, no producer *serves* the endpoint, and the one genuinely
+one-to-many stream in the deployed fleet chose `@media` instead. (An
+earlier draft of this paragraph claimed every blob-declaring registry
+entry *excludes* the token; corrected in v1.25 — the codegen regression
+corpus's one artifact entry deliberately **declares** `fanout`, precisely
+to pin that the token stays legal in `endpoints` per D5. Declared-but-
+unserved is the accurate description, and it is D5's point.) A normative endpoint table should describe what is served;
 keeping an endpoint every declaring producer excludes makes the table
 aspirational, and aspirational normative text is how a second implementer
 ends up building something nobody will speak to. Demotion costs nothing to
