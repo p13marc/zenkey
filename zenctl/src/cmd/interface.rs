@@ -28,8 +28,11 @@ pub async fn show(type_name: &str, schema: bool, full: bool, args: &Bus) -> Resu
         let producers = super::schema::carriers_of(&slices, type_name);
         let session = args.session().await?;
         let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
-        report.schemas =
-            zenkey_fleet::schemas_for_type(&store, &session, &producers, type_name, full).await;
+        // `Some` even when nothing answered: asked-and-unserved is a
+        // different fact from never-asked (O4, R4).
+        report.schemas = Some(
+            zenkey_fleet::schemas_for_type(&store, &session, &producers, type_name, full).await,
+        );
     }
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }

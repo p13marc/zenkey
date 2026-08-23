@@ -355,11 +355,13 @@ pub struct InterfaceShow {
     pub type_name: String,
     pub carriers: Vec<CarrierRow>,
     /// What each producer serving this type name says its schema is
-    /// (issue #51). Empty = nothing asked or nothing served; two rows with
-    /// different hashes *is* the RFC 08 §7 drift finding, visible right here
-    /// rather than only in `doctor`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub schemas: Vec<SchemaRow>,
+    /// (issue #51). `None` = `--schema` was not passed, so the bus was never
+    /// asked; `Some(vec![])` = asked and no carrier served one — the empty
+    /// `Vec` used to conflate the two (RFC 09 §5.1 O4, review finding R4).
+    /// Two rows with different hashes *is* the RFC 08 §7 drift finding,
+    /// visible right here rather than only in `doctor`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub schemas: Option<Vec<SchemaRow>>,
 }
 
 /// One type's schema entry as one producer serves it (issue #51).

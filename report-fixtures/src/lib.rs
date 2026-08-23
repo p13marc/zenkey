@@ -487,7 +487,8 @@ pub fn interface_show() -> InterfaceShow {
                 path: "health".into(),
             },
         ],
-        schemas: vec![
+        // `Some` = `--schema` was asked (R4); `None` is the unasked run.
+        schemas: Some(vec![
             SchemaRow {
                 producer: "sysinfo".into(),
                 type_name: "HealthSnapshot".into(),
@@ -502,7 +503,16 @@ pub fn interface_show() -> InterfaceShow {
                 hash: "sha256:bbbb".into(),
                 document: None,
             },
-        ],
+        ]),
+    }
+}
+
+/// The same type without `--schema` — the bus was never asked, and the report
+/// says so instead of an empty list that reads as "none served" (R4).
+pub fn interface_show_unasked() -> InterfaceShow {
+    InterfaceShow {
+        schemas: None,
+        ..interface_show()
     }
 }
 

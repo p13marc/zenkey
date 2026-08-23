@@ -506,6 +506,29 @@ served schema (RFC 08 §7):
 "#]]
     );
     assert!(notes(&fx::interface_show()).contains("disagree about"));
+
+    // R4: without --schema the bus was never asked, and the document must not
+    // carry the old unconditional `"schemas": 0` — an unasked bus is not one
+    // serving nothing (O4).
+    let unasked = fx::interface_show_unasked();
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&unasked).lines().next().unwrap()).unwrap();
+    assert!(
+        !envelope.as_object().unwrap().contains_key("schemas"),
+        "not asked: the count is absent, never 0 — {envelope}"
+    );
+    let n = notes(&unasked);
+    assert!(n.contains("not asked"), "{n}");
+    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
+    // …and asked-with-silence is the third state, distinct from both.
+    let silent = zenkey_fleet::report::InterfaceShow {
+        schemas: Some(vec![]),
+        ..fx::interface_show_unasked()
+    };
+    let envelope: serde_json::Value =
+        serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["schemas"], 0, "asked, none served: a real zero");
+    assert!(notes(&silent).contains("no carrier served one"));
 }
 
 /// The empty base is a real deployment, not a missing value, so it renders
