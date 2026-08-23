@@ -1300,6 +1300,13 @@ pub struct TreeData<'a> {
     pub viewport_h: f32,
     /// Per-key projections, for the row badges.
     pub facts: &'a FactsIndex,
+    /// Per-key payload-conformance verdicts (#164) — the cache the tick's
+    /// bounded validation batches fill, looked up here, never computed here.
+    pub verdicts: &'a crate::verdict::VerdictCache,
+    /// Per-subtree budget badges (#221): `None` = no registry loaded (or the
+    /// join has not run) — with no declarations there is no budget to be
+    /// over, and no badge claims otherwise.
+    pub budgets: Option<&'a crate::budget::BudgetBadges>,
     /// The pair this struct exists for.
     pub watches: Watches<'a>,
     /// The selected wire key, if any.
@@ -1381,11 +1388,15 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
             iced::widget::container(row_view(
                 shape,
                 &r,
-                &flat.arena,
-                d.facts,
-                d.selected,
-                d.watches,
-                d.sp,
+                RowContext {
+                    arena: &flat.arena,
+                    facts: d.facts,
+                    verdicts: d.verdicts,
+                    budgets: d.budgets,
+                    selected: d.selected,
+                    watches: d.watches,
+                    sp: d.sp,
+                },
             ))
             .height(Length::Fixed(row_h)),
         );
@@ -1423,15 +1434,36 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
 /// a `Copy` field, and the one that looks like a borrow (`facts.get`) borrows
 /// `facts`. That is what lets `tree_view` hand these in as per-frame
 /// temporaries.
-fn row_view<'a>(
-    shape: &RowShape,
-    r: &TreeRow,
-    arena: &PathArena,
+/// What every row reads besides its own shape and numbers — the lookup
+/// tables and the selection, one `Copy` bundle so `row_view` stays under the
+/// argument lint the same way [`TreeData`] keeps `tree_view` there (#250's
+/// precedent: adjacent same-typed parameters are how a transposition
+/// compiles).
+#[derive(Clone, Copy)]
+struct RowContext<'a> {
+    arena: &'a PathArena,
     facts: &'a FactsIndex,
+    /// Per-key payload verdicts (#164) — looked up, never computed here.
+    verdicts: &'a crate::verdict::VerdictCache,
+    /// Per-subtree budget badges (#221); `None` = no registry loaded.
+    budgets: Option<&'a crate::budget::BudgetBadges>,
     selected: Option<&'a str>,
     watches: Watches<'a>,
+    /// The dock's resolved spacing grid (#192) — rows spend it, they never
+    /// resolve it.
     sp: Spacing,
-) -> Element<'a, Message> {
+}
+
+fn row_view<'a>(shape: &RowShape, r: &TreeRow, cx: RowContext<'a>) -> Element<'a, Message> {
+    let RowContext {
+        arena,
+        facts,
+        verdicts,
+        budgets,
+        selected,
+        watches,
+        sp,
+    } = cx;
     let indent = iced::widget::Space::new().width(Length::Fixed(r.depth as f32 * 14.0));
 
     // The expand marker is its own affordance (issue #93): a concrete key
@@ -1509,6 +1541,19 @@ fn row_view<'a>(
         line = line.push(kit::muted(ty.clone()));
     }
 
+    // The key-population budget (#221), on the offending family's subtree
+    // row. Over-declared is a warning with its numbers; a `{path...}` family
+    // is exempt and says so (never a silent pass); under-declared draws
+    // nothing — a window proves a lower bound, not the population (O4/O6).
+    // `budgets` is `None` with no registry loaded: no declarations, no badge.
+    if let Some(b) = budgets.and_then(|b| b.get(r.target.as_deref().unwrap_or(&r.path))) {
+        let severity = match b {
+            crate::budget::BudgetBadge::Over { .. } => crate::view::theme::SeverityTone::Warning,
+            crate::budget::BudgetBadge::Exempt => crate::view::theme::SeverityTone::Info,
+        };
+        line = line.push(kit::badge_severity(severity, b.label()));
+    }
+
     line = line.push(iced::widget::space::horizontal());
 
     // A collapsed node reports its whole subtree; an expanded leaf reports
@@ -1533,6 +1578,17 @@ fn row_view<'a>(
             if let Some(ty) = f.type_name() {
                 line = line.push(kit::muted(ty.to_string()));
             }
+        }
+        // The payload verdict of the most recently checked sample (#164) —
+        // a cache lookup, never a decode. A leaf with no entry draws no
+        // badge: either no sample has been checked yet or none carried a
+        // payload to check, and a badge would claim a check nobody ran —
+        // the checked states, `NotValidated` included, all render.
+        if let Some(entry) = r.target.as_deref().and_then(|t| verdicts.get(t)) {
+            line = line.push(kit::badge_verdict(
+                crate::verdict::tone(&entry.verdict),
+                crate::verdict::label(&entry.verdict),
+            ));
         }
     } else if !r.expanded && r.subtree_count > 0 {
         line = line.push(kit::muted(format!(

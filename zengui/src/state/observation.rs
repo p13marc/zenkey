@@ -59,6 +59,11 @@ sub_state! {
         /// which is not "empty" (O4) — and left stale during replay, when
         /// the strip does not show it.
         pub(crate) retention: Option<zenkey_fleet::RetentionStats>,
+        /// The key-population budget join (#221): declared `cardinality`
+        /// against the observed tree, recomputed on a throttled cadence.
+        /// `None` = not computed (no registry loaded, or the first join has
+        /// not landed), which draws no badge — never a pass.
+        pub(crate) budgets: Option<Arc<crate::budget::BudgetBadges>>,
     }
 }
 
@@ -82,6 +87,7 @@ impl Default for Observation {
             keys_unwatched: 0,
             totals: (0, 0, 0.0),
             retention: None,
+            budgets: None,
         }
     }
 }
@@ -105,5 +111,7 @@ impl Observation {
         // what the departing monitor retained for the departing watches, and
         // "not asked yet" is the honest strip line until the new one ticks.
         self.retention = None;
+        // The budget join described the departing fleet's population (#221).
+        self.budgets = None;
     }
 }

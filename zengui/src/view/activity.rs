@@ -39,6 +39,9 @@ pub(crate) struct ActivityData<'a> {
     pub echo_scroll: (f32, f32),
     /// The subject key, when Echo is pinned to follow it.
     pub follow: Option<&'a str>,
+    /// The payload-verdict cache (#164) — echo rows look their badges up in
+    /// it; nothing in the dock decodes.
+    pub verdicts: &'a crate::verdict::VerdictCache,
     pub next_seq: u64,
     pub publish: &'a send::SendForm,
     pub doctor: &'a crate::doctor::DoctorState,
@@ -74,6 +77,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
             d.follow,
             d.next_seq,
             d.echo_scroll,
+            d.verdicts,
             d.sp,
         )
         .into(),

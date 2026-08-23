@@ -19,12 +19,14 @@ pub(crate) mod context;
 pub(crate) mod detail;
 pub(crate) mod doctor;
 pub(crate) mod echo;
+pub(crate) mod fields;
 pub(crate) mod media;
 pub(crate) mod nodes;
 pub(crate) mod replay;
 pub(crate) mod scope_editor;
 pub(crate) mod send;
 pub(crate) mod settings;
+pub(crate) mod why;
 
 /// One pane-shaped surface.
 pub(crate) fn update(
@@ -46,6 +48,10 @@ pub(crate) fn update(
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
         PaneMsg::Detail(msg) => detail::update(sub, dep, msg),
         PaneMsg::History(msg) => detail::history(sub, msg),
+        // Two more windows onto the subject (#223, #214) — like Detail and
+        // History they take the subject state and the deployment, not `cx`.
+        PaneMsg::Fields(msg) => fields::update(sub, dep, msg),
+        PaneMsg::Why(msg) => why::update(sub, dep, msg),
         PaneMsg::Echo(msg) => echo::update(&mut work.echo, msg, cx),
         PaneMsg::Context(msg) => context::update(&mut work.bench.context_form, msg),
         PaneMsg::Scope(msg) => scope_editor::update(&mut work.bench.scope_form, msg, cx),

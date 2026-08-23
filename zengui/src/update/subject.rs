@@ -85,13 +85,16 @@ pub(crate) fn update(
                 sub.fetched = Some((key, outcome));
                 return Task::none();
             }
-            let decode_task = match (&outcome, &dep.session, &dep.schema_store, &dep.slices) {
-                (Ok(out), Some(session), Some(store), Some(slices)) => {
+            // The decode runs with or without a registry: `slices: None`
+            // yields `NotValidated(NoRegistry)` — "nobody looked" rendered
+            // as itself rather than by omission (#164, #246).
+            let decode_task = match (&outcome, &dep.session, &dep.schema_store) {
+                (Ok(out), Some(session), Some(store)) => {
                     if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
                         services::value::decode(
                             Arc::clone(store),
                             session.clone(),
-                            Arc::clone(slices),
+                            dep.slices.clone(),
                             dep.base().to_string(),
                             key.clone(),
                             v.key.clone(),
@@ -107,10 +110,15 @@ pub(crate) fn update(
             sub.fetched = Some((key, outcome));
             Task::batch([reveal, decode_task])
         }
-        SubjectMsg::ValueDecoded(key, type_name, rendering) => {
-            // Stale guard: only the current subject's decode lands.
+        SubjectMsg::ValueDecoded(key, sample) => {
+            // The verdict cache learns every decode, current subject or not
+            // (#164): the check ran and its result is a fact about the key,
+            // not about the selection.
+            work.verdicts.payloads.record(&key, sample.verdict.clone());
+            // Stale guard: only the current subject's decode lands in the
+            // pane.
             if sub.current.key() == Some(key.as_str()) {
-                sub.decoded = Some((type_name, (*rendering).clone()));
+                sub.decoded = Some(sample);
             }
             Task::none()
         }
@@ -151,6 +159,10 @@ fn select(
     // empty, and stop being fed when it goes away.
     sub.rate_series = crate::series::RateSampler::new();
     sub.series_leaf = None;
+    // The field observation (#223) and the why ladder (#214) explained the
+    // old key; their window inputs survive, their reports do not.
+    sub.fields.forget_subject();
+    sub.why.forget_subject();
     sub.refresh_series(dep);
 
     let Some(session) = dep.session.clone() else {

@@ -187,6 +187,13 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
             label: "run doctor".into(),
             message: Message::Pane(PaneMsg::Doctor(crate::view::doctor::DoctorMsg::Run)),
         },
+        // The why ladder (#214): the same message the Inspector's "why?"
+        // button sends, run on the current subject key at the frugal
+        // default (no listen).
+        Action {
+            label: "why is this key silent?".into(),
+            message: Message::Pane(PaneMsg::Why(crate::view::why::WhyMsg::Run)),
+        },
         Action {
             label: "reconnect".into(),
             message: Message::Deployment(DeploymentMsg::Reconnect),

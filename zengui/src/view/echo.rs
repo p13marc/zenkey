@@ -271,12 +271,17 @@ fn msg(m: EchoMsg) -> Message {
 }
 
 /// Render the echo pane.
+///
+/// `verdicts` is the #164 cache — every row *looks up* its key's verdict;
+/// the pane never decodes (this file's own rule: the sync structural decode
+/// only, never the bus-touching `decode_sample`).
 pub fn section<'a>(
     ring: &'a EchoRing,
     view: &'a EchoView,
     selection: Option<&'a str>,
     next_seq: u64,
     scroll: (f32, f32),
+    verdicts: &'a crate::verdict::VerdictCache,
     sp: Spacing,
 ) -> Column<'a, Message> {
     let controls = row![
@@ -326,7 +331,10 @@ pub fn section<'a>(
         body = body.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * row_h)));
     }
     for line in &lines[first..last] {
-        body = body.push(iced::widget::container(line_view(line, sp)).height(Length::Fixed(row_h)));
+        body = body.push(
+            iced::widget::container(line_view(line, verdicts.get(&line.key), sp))
+                .height(Length::Fixed(row_h)),
+        );
     }
     if last < lines.len() {
         body = body.push(
@@ -367,6 +375,7 @@ pub fn section<'a>(
     }
     col = col.push(state_strip(ring, view, matched, drawn, next_seq));
     col = col.push(loss_strip(ring));
+    col = col.push(verdict_strip(verdicts));
     col.push(content).spacing(sp.sm)
 }
 
@@ -430,7 +439,44 @@ fn loss_strip<'a>(ring: &EchoRing) -> Element<'a, Message> {
         .into()
 }
 
-fn line_view(line: &EchoLine, sp: Spacing) -> Element<'_, Message> {
+/// The verdict cache's own account (#164): what has been checked, and what
+/// the bound cost (RFC 09 §5.1 O6). Always rendered — the rows below carry
+/// per-key badges, so the strip that scopes them must be present.
+fn verdict_strip<'a>(verdicts: &crate::verdict::VerdictCache) -> Element<'a, Message> {
+    let mut msg = format!(
+        "verdicts: {} checked (each badge is the key's most recently checked \
+         sample)",
+        kit::plural(verdicts.keys_checked(), "key"),
+    );
+    if verdicts.refused() > 0 {
+        msg.push_str(&format!(
+            " · {} refused (cache bound {})",
+            verdicts.refused(),
+            verdicts.capacity()
+        ));
+    }
+    kit::muted(msg)
+}
+
+fn line_view<'a>(
+    line: &'a EchoLine,
+    verdict: Option<&'a crate::verdict::CachedVerdict>,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    // The #164 badge: the cached verdict for this line's key — of the most
+    // recently checked sample, which the strip above says. A key never
+    // checked renders the third state in words, not a blank that could read
+    // as "fine" (RFC 09 §5.1 O4).
+    let badge = match verdict {
+        Some(entry) => kit::badge_verdict(
+            crate::verdict::tone(&entry.verdict),
+            crate::verdict::label(&entry.verdict),
+        ),
+        None => kit::badge_verdict(
+            crate::view::theme::VerdictTone::NotValidated,
+            crate::verdict::UNCHECKED_LABEL,
+        ),
+    };
     // Both texts borrow, and the click message is built on the click (#178).
     // Up to 300 rows are drawn per frame and each was cloning two `String`s
     // for a rendering identical to the last one's; `on_press_with` moves the
@@ -465,6 +511,7 @@ fn line_view(line: &EchoLine, sp: Spacing) -> Element<'_, Message> {
             row![
                 key,
                 iced::widget::space::horizontal(),
+                badge,
                 kit::muted(human_bytes(line.len as u64)),
             ]
             .spacing(sp.sm),

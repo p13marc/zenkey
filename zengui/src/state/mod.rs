@@ -146,6 +146,11 @@ mod tests {
                     // tick, invalidated with the monitor like everything
                     // else here.
                     "retention",
+                    // Declared cardinality joined against the observed
+                    // population (#221): a fact about what arrived, judged
+                    // under the loaded registry — cleared with the coverage,
+                    // because it described the departing fleet's keys.
+                    "budgets",
                 ],
             ),
             // The selection and everything derived from it.
@@ -161,6 +166,11 @@ mod tests {
                     "rate_series",
                     "series_leaf",
                     "series",
+                    // The field-observation window (#223) and the why
+                    // ladder (#214): both are evidence about one key, both
+                    // dropped when the subject moves.
+                    "fields",
+                    "why",
                 ],
             ),
             // The rows, how they are grouped, and what is open. `flat` and
@@ -204,7 +214,17 @@ mod tests {
             ),
             (
                 "work.verdicts",
-                &["roster", "node_detail", "doctor", "blob", "admin"],
+                // `payloads` (#164) is here because a payload verdict is a
+                // verdict about a fleet — judged under its served schemas —
+                // and must drop with the rest when the window points away.
+                &[
+                    "roster",
+                    "node_detail",
+                    "doctor",
+                    "blob",
+                    "admin",
+                    "payloads",
+                ],
             ),
             (
                 "work.bench",
@@ -270,7 +290,8 @@ mod tests {
         // …plus `obs.retention`, the retained window's account (#217), plus
         // the two overlay drafts (#187, #188) and the replay loading claim
         // (#255); minus one when #184 merged `call_form` and `publish_form`
-        // into `send_form`.
-        assert_eq!(leaves, 68, "the split must place every field exactly once");
+        // into `send_form`; plus the verdict cache (#164), the budget join
+        // (#221) and the subject's fields and why sections (#223, #214).
+        assert_eq!(leaves, 72, "the split must place every field exactly once");
     }
 }

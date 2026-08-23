@@ -32,6 +32,10 @@ pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message>
             if let Some(store) = cx.dep.schema_store.as_ref() {
                 store.forget_all();
                 v.doctor.schemas_forgotten += 1;
+                // The cached payload verdicts were judged under the schemas
+                // just forgotten (#164) — the third door a schema hash can
+                // change through, and like the other two it clears.
+                v.payloads.clear();
             }
             Task::none()
         }

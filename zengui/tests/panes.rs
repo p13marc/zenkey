@@ -145,6 +145,7 @@ fn the_tree_renders_the_registration_state() {
     let keys = [REGISTERED, UNREGISTERED, FOREIGN];
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
         sp: sp(),
         flat: &flat,
@@ -153,6 +154,8 @@ fn the_tree_renders_the_registration_state() {
         scroll_y: 0.0,
         viewport_h: 600.0,
         facts: &facts,
+        verdicts: &verdicts,
+        budgets: None,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -192,6 +195,7 @@ fn density_changes_the_grid_never_the_claims() {
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
     for density in Density::ALL {
+        let verdicts = zengui::verdict::VerdictCache::default();
         let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
             sp: Spacing::of(density),
             flat: &flat,
@@ -200,6 +204,8 @@ fn density_changes_the_grid_never_the_claims() {
             scroll_y: 0.0,
             viewport_h: 600.0,
             facts: &facts,
+            verdicts: &verdicts,
+            budgets: None,
             watches: tree::Watches {
                 mine: &watches,
                 seeding: &watches,
@@ -223,6 +229,7 @@ fn an_unresolved_tree_claims_neither_way() {
     let keys = [REGISTERED];
     let (flat, facts) = render(&keys, false);
     let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
         sp: sp(),
         flat: &flat,
@@ -231,6 +238,8 @@ fn an_unresolved_tree_claims_neither_way() {
         scroll_y: 0.0,
         viewport_h: 600.0,
         facts: &facts,
+        verdicts: &verdicts,
+        budgets: None,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -254,6 +263,7 @@ fn foreign_keys_render_without_convention_labels() {
     let keys = [FOREIGN];
     let (flat, facts) = render(&keys, true);
     let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
         sp: sp(),
         flat: &flat,
@@ -262,6 +272,8 @@ fn foreign_keys_render_without_convention_labels() {
         scroll_y: 0.0,
         viewport_h: 600.0,
         facts: &facts,
+        verdicts: &verdicts,
+        budgets: None,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -286,6 +298,7 @@ fn the_empty_tree_explains_itself() {
     let flat = tree::Flattened::empty();
     let facts = FactsIndex::default();
     let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
     let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
         sp: sp(),
         flat: &flat,
@@ -294,6 +307,8 @@ fn the_empty_tree_explains_itself() {
         scroll_y: 0.0,
         viewport_h: 600.0,
         facts: &facts,
+        verdicts: &verdicts,
+        budgets: None,
         watches: tree::Watches {
             mine: &watches,
             seeding: &watches,
@@ -708,11 +723,17 @@ fn the_detail_pane_tags_decode_provenance() {
             source: ValueSource::Storage,
         })));
 
-    // Structural fallback with a declared type: the honest <T?> tag.
-    let decoded = (
-        Some("TelemetryPoint".to_string()),
-        Rendering::Structural(r#"{"value":42.0}"#.to_string()),
-    );
+    // Structural fallback with a declared type: the honest <T?> tag — and
+    // the verdict rides the sample now (#164): an undecodable payload under
+    // a present schema is `NotValidated(Undecodable)`, worded as itself.
+    let decoded = zenkey_fleet::decode::DecodedSample {
+        type_name: Some("TelemetryPoint".to_string()),
+        rendering: Rendering::Structural(r#"{"value":42.0}"#.to_string()),
+        verdict: zenkey::schema::validate::Verdict::NotValidated(
+            zenkey::schema::validate::NotValidated::Undecodable,
+        ),
+        decode_error: Some("wrong wire kind".to_string()),
+    };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
         sp: sp(),
         key,
@@ -861,6 +882,8 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             slices: Some(slices),
             roster,
             node_detail,
+            fields: Box::leak(Box::default()),
+            why: Box::leak(Box::default()),
             base: "",
             observed,
         }
@@ -3067,6 +3090,8 @@ fn projection_inspector<'a>(
         slices: Some(slices),
         roster,
         node_detail,
+        fields: Box::leak(Box::default()),
+        why: Box::leak(Box::default()),
         base: "",
         observed,
         sp: sp(),
@@ -3162,5 +3187,389 @@ fn the_inspector_places_a_registered_type_in_the_vocabulary() {
     assert!(
         ui.find("sysinfo · state mode").is_ok(),
         "interface_show names the other carrier of the same type"
+    );
+}
+
+/// #164: the decoded pane renders the verdict in three states, never a
+/// boolean — and the two silences keep their own words: `NoRegistry`'s
+/// "nobody looked" must not wear `NoSchema`'s "asked, and the type has none"
+/// (#246; RFC 09 §5.1 O4).
+#[test]
+fn the_decoded_pane_renders_three_verdict_states_and_keeps_the_silences_apart() {
+    use std::sync::Arc;
+    use zengui::view::detail::{DetailData, Fetched, section};
+    use zenkey::schema::validate::{NotValidated, Verdict};
+    use zenkey_fleet::decode::{DecodedSample, Rendering};
+    use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
+
+    let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+    let fetched: Result<Arc<FetchOutcome>, String> =
+        Ok(Arc::new(FetchOutcome::Value(FetchedValue {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(br#"{"status":"ok"}"#.to_vec()),
+            encoding: "application/json".into(),
+            timestamp: None,
+            attachment: None,
+            source: ValueSource::Storage,
+        })));
+    let render = |verdict: Verdict| {
+        // Leaked so the simulator may outlive the block — a test-only cost,
+        // bounded by the four calls below.
+        let decoded: &'static DecodedSample = Box::leak(Box::new(DecodedSample {
+            type_name: None,
+            rendering: Rendering::Structural(r#"{"status":"ok"}"#.to_string()),
+            verdict,
+            decode_error: None,
+        }));
+        simulator::<Message, _, _>(section(DetailData {
+            key,
+            facts: None,
+            fetched: Fetched::Landed(&fetched),
+            decoded: Some(decoded),
+            series: None,
+            history_entries: None,
+            observed: None,
+            latency: None,
+            sp: sp(),
+        }))
+    };
+
+    let mut ui = render(Verdict::Valid);
+    assert!(ui.find("valid").is_ok(), "checked-and-passed says so");
+
+    let mut ui = render(Verdict::Invalid(vec![
+        "/status: not a number".into(),
+        "/extra: unexpected".into(),
+    ]));
+    assert!(ui.find("invalid (2 violations)").is_ok());
+    assert!(
+        ui.find("violation: /status: not a number").is_ok(),
+        "each violation is a sentence with its path"
+    );
+
+    // The two silences: distinct badge words AND the full reason sentence.
+    let mut ui = render(Verdict::NotValidated(NotValidated::NoRegistry));
+    assert!(ui.find("not validated (no registry)").is_ok());
+    assert!(
+        ui.find("no registry loaded, so no type was looked up")
+            .is_ok(),
+        "NoRegistry is 'nobody looked', spelled out"
+    );
+    let mut ui = render(Verdict::NotValidated(NotValidated::NoSchema));
+    assert!(ui.find("not validated (no schema served)").is_ok());
+    assert!(
+        ui.find("no schema served for this type").is_ok(),
+        "NoSchema is 'asked, and the type has none', spelled out"
+    );
+}
+
+/// #164: echo rows badge the *cached* verdict — a lookup, never a decode —
+/// and a key never checked renders the third state in words: "not validated
+/// (not yet checked)", never a blank that could read as fine and never a
+/// borrowed verdict.
+#[test]
+fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
+    use std::time::Instant;
+    use zengui::echo::EchoRing;
+    use zengui::verdict::VerdictCache;
+    use zengui::view::echo::{EchoView, section};
+    use zenkey::schema::validate::Verdict;
+    use zenkey_fleet::SampleView;
+
+    let sample = |key: &str| SampleView {
+        key: key.to_string(),
+        payload: zenoh::bytes::ZBytes::from(br#"{"v":1}"#.to_vec()),
+        encoding: "application/json".into(),
+        kind: zenoh::sample::SampleKind::Put,
+        timestamp: None,
+        stamped_by: None,
+        attachment: None,
+        priority: zenoh::qos::Priority::Data,
+        congestion_control: zenoh::qos::CongestionControl::Drop,
+        reliability: zenoh::qos::Reliability::BestEffort,
+        express: false,
+        source: None,
+        received: Instant::now(),
+    };
+    let mut ring = EchoRing::new(10);
+    ring.push(&sample("v1/h-3fa9c2d41b7e/state/sysinfo/health"));
+    ring.push(&sample("v1/h-3fa9c2d41b7e/state/sysinfo/unchecked"));
+
+    let mut verdicts = VerdictCache::default();
+    verdicts.record(
+        "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+        Verdict::Invalid(vec!["/v: wrong type".into()]),
+    );
+
+    let view = EchoView::new();
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &ring,
+        &view,
+        None,
+        ring.next_seq(),
+        (0.0, 600.0),
+        &verdicts,
+        sp(),
+    ))));
+    assert!(
+        ui.find("invalid (1 violation)").is_ok(),
+        "the checked key wears its cached verdict"
+    );
+    assert!(
+        ui.find("not validated (not yet checked)").is_ok(),
+        "an unchecked key says so — the third state, never a blank"
+    );
+    assert!(
+        ui.find("verdicts: 1 key checked (each badge is the key's most recently checked sample)")
+            .is_ok(),
+        "the strip scopes what a badge claims"
+    );
+}
+
+/// #221: the tree badges an over-budget `{var}` family on its subtree row
+/// with the numbers; under-declared draws nothing; a `{path...}` family is
+/// exempt and says so — never a silent pass.
+#[test]
+fn the_tree_badges_the_budget_join() {
+    use zengui::budget;
+    use zenkey_fleet::stats::StatsTable;
+
+    // A registry that declares a tight budget (2) on the disk family and a
+    // rest-variable family beside it.
+    let subject = |path: &str, class: &str, cardinality: Option<i64>| zenkey::slice::SubjectDecl {
+        path: path.into(),
+        class: class.into(),
+        type_name: "T".into(),
+        common: None,
+        since: None,
+        description: None,
+        qos: None,
+        ttl_s: None,
+        unit: None,
+        rate: None,
+        cardinality,
+        encoding: None,
+    };
+    let tight = SliceSet::from_slices(vec![zenkey::slice::RegistrySlice {
+        version: "1.0".into(),
+        app: "t".into(),
+        convention: 1,
+        name: "sysinfo".into(),
+        service_origin: None,
+        description: None,
+        subjects: vec![
+            subject("disk/{mount}/used", "telemetry", Some(2)),
+            subject("log/{path...}", "events", Some(1)),
+        ],
+        procedures: vec![],
+        blob: vec![],
+        media: vec![],
+        deprecated: vec![],
+    }]);
+
+    let over = [
+        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/used",
+        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var/used",
+        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/tmp/used",
+        "v1/h-3fa9c2d41b7e/events/sysinfo/log/var/log/syslog",
+    ];
+    let mut stats = StatsTable::new();
+    let now = std::time::Instant::now();
+    for k in &over {
+        stats.record(k, 1, None, now, None, None);
+    }
+    let badges = budget::badges("", &tight, &KeyTreeSnapshot::build(&stats));
+
+    let (flat, facts) = render(&over, true);
+    let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
+    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
+        flat: &flat,
+        pivot: tree::Pivot::Chunks,
+        search: "",
+        scroll_y: 0.0,
+        viewport_h: 600.0,
+        facts: &facts,
+        verdicts: &verdicts,
+        budgets: Some(&badges),
+        watches: tree::Watches {
+            mine: &watches,
+            seeding: &watches,
+        },
+        selected: None,
+        sp: sp(),
+    }));
+    assert!(
+        ui.find("over budget: observed 3 of 2 declared").is_ok(),
+        "the offending family's subtree carries the numbers"
+    );
+    assert!(
+        ui.find("exempt: rest-variable").is_ok(),
+        "a rest-variable family is exempt and says so, never a silent pass"
+    );
+}
+
+/// #223: the Fields section states its window, its coverage, and every
+/// bound's cost — and never-run is not "no fields" (O4).
+#[test]
+fn the_fields_section_states_its_window_and_its_bounds() {
+    use std::sync::Arc;
+    use zengui::view::fields::{FieldsState, section};
+    use zenkey_fleet::report::{FieldReport, FieldRow};
+
+    // Never run: the section explains its cost instead of claiming absence.
+    let state = FieldsState::default();
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        sp(),
+    ))));
+    assert!(
+        ui.find(
+            "no field observation yet — the button subscribes to exactly this \
+             key for the window, then releases; nothing ambient"
+        )
+        .is_ok(),
+        "never-run states the cost, not an empty table"
+    );
+
+    // A landed report: coverage, the path bound's refusals, and the
+    // no-registry caveat all render.
+    let report = Some(Ok(Arc::new(FieldReport {
+        selector: "v1/h-a/telemetry/sysinfo/cpu".into(),
+        window_s: 10.0,
+        samples: 40,
+        keys_seen: 1,
+        dropped: 2,
+        undocumented: 3,
+        registry_loaded: false,
+        paths: 512,
+        max_paths: 512,
+        paths_dropped: 7,
+        paths_dropped_examples: vec!["v1/h-a/telemetry/sysinfo/cpu · f99".into()],
+        rows: vec![FieldRow {
+            key: "v1/h-a/telemetry/sysinfo/cpu".into(),
+            path: "temperature_c".into(),
+            seen: 40,
+            documents: 40,
+            kinds: vec!["number".into()],
+            changes: 0,
+            last_change_s: None,
+            min: Some(21.5),
+            max: Some(21.5),
+            last: Some(21.5),
+            values: None,
+        }],
+        findings: vec![],
+    })));
+    let state = FieldsState {
+        report,
+        ..FieldsState::default()
+    };
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        sp(),
+    ))));
+    assert!(
+        ui.find(
+            "watched v1/h-a/telemetry/sysinfo/cpu for 10s: 40 samples on \
+             1 key · 2 dropped · 3 without a structural document"
+        )
+        .is_ok(),
+        "the window and its coverage are stated (O5/O6)"
+    );
+    assert!(
+        ui.find(
+            "512 paths tracked (bound 512) · 7 refused for the bound — \
+             e.g. v1/h-a/telemetry/sysinfo/cpu · f99"
+        )
+        .is_ok(),
+        "the path table's bound reports and names what it refused"
+    );
+    assert!(
+        ui.find(
+            "no registry loaded — declared ttl_s and types are unknown, so \
+             field-stuck and field-new are unjudgeable here (O4), not clean"
+        )
+        .is_ok(),
+        "no registry reads as unjudgeable, never as clean"
+    );
+    assert!(
+        ui.find(
+            "temperature_c · seen 40/40 · number · unchanged in the window \
+             · min 21.5 · max 21.5 · last 21.5"
+        )
+        .is_ok(),
+        "an unchanged path is scoped to the window, not 'never'"
+    );
+}
+
+/// #214: the Why section renders every rung, and a rung whose input was not
+/// fetched reads "not asked" — never "no". The impaired verdict refuses to
+/// claim health over questions it could not ask.
+#[test]
+fn the_why_section_renders_not_asked_and_never_no() {
+    use std::sync::Arc;
+    use zengui::view::why::{WhyState, section};
+    use zenkey_fleet::why::{RungAnswer, WhyInputs, ladder};
+
+    // Never run: the section states the frugal default's cost.
+    let state = WhyState::default();
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        sp(),
+    ))));
+    assert!(
+        ui.find(
+            "not asked yet — \"why?\" runs the silence ladder on this key: \
+             control-plane sweeps and one bounded GET, no subscriber \
+             (RFC v1.18 frugality)"
+        )
+        .is_ok(),
+    );
+
+    // A ladder over nothing fetched: rungs degrade to NotAsked, and the
+    // report is impaired rather than healthy.
+    let report = ladder(&WhyInputs {
+        base: "",
+        key: "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+        slices: None,
+        roster: None,
+        entities: None,
+        admin_answered: None,
+        storages: None,
+        stored: None,
+        wire: None,
+    });
+    assert!(
+        report
+            .rungs
+            .iter()
+            .any(|r| matches!(r.answer, RungAnswer::NotAsked)),
+        "setup: some rung must be NotAsked"
+    );
+    let state = WhyState {
+        report: Some(Ok(Arc::new(report))),
+        ..WhyState::default()
+    };
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        sp(),
+    ))));
+    assert!(
+        ui.find("not asked").is_ok(),
+        "an unfetched input renders 'not asked', never 'no'"
+    );
+    assert!(
+        ui.find("wire-heard").is_ok(),
+        "every rung renders, the unasked ones included"
+    );
+    assert!(
+        ui.find(
+            "no cause established, and the observation was impaired — \
+             \"healthy\" cannot be claimed over questions that could not be \
+             asked"
+        )
+        .is_ok(),
+        "impaired refuses to over-claim"
     );
 }

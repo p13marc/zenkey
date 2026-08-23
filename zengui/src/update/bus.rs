@@ -29,6 +29,9 @@ pub(crate) fn apply_tick(
     work: &mut Workspace,
     tick: &BusTick,
 ) {
+    // The verdict cache's logical clock (#164): one advance per tick —
+    // replayed ticks included, harmlessly (revalidation staleness only).
+    work.verdicts.payloads.advance();
     // Decided *before* the fields below are overwritten (#177).
     let held = shape_held(
         (obs.keys, obs.keys_evicted, obs.keys_unwatched),
@@ -230,6 +233,7 @@ pub(crate) fn update(
             dep.slices = Some(slices);
             reresolve_registrations(dep);
             refresh_blob_list(dep, work);
+            forget_judgements(obs, work);
             // The skeleton is built FROM the slices — (re)build it now.
             build_skeleton(dep)
         }
@@ -242,6 +246,7 @@ pub(crate) fn update(
             dep.slices = Some(slices);
             reresolve_registrations(dep);
             refresh_blob_list(dep, work);
+            forget_judgements(obs, work);
             build_skeleton(dep)
         }
         BusMsg::SlicesUnionLoaded(Err(e)) => {
@@ -258,9 +263,87 @@ pub(crate) fn update(
         }
         BusMsg::Tick(tick) => {
             apply_tick(dep, obs, sub, tree, work, &tick);
+            // Live ticks only, deliberately: replay feeds `apply_tick` from
+            // a file (`update/pane/replay.rs`) and never reaches this arm —
+            // validating file data against a live bus, or re-judging a live
+            // budget under file keys, would put one world's verdicts under
+            // the other's data (O4 in miniature).
+            Task::batch([
+                schedule_validation(dep, work, &tick),
+                schedule_budget(dep, obs, work),
+            ])
+        }
+        BusMsg::VerdictsChecked(batch) => {
+            // The bounded validation batch lands (#164): render paths only
+            // ever look these up.
+            for (key, verdict) in batch {
+                work.verdicts.payloads.record(&key, verdict);
+            }
+            Task::none()
+        }
+        BusMsg::BudgetJoined(badges) => {
+            obs.budgets = Some(badges);
             Task::none()
         }
     }
+}
+
+/// Pick this tick's bounded validation batch (#164): the newest sample per
+/// distinct key, keys the cache wants checked first-come, capped at
+/// [`crate::verdict::VALIDATE_PER_TICK`] — a hot bus costs a fixed slice of
+/// CPU per tick, never a proportional one. Tombstones carry no payload to
+/// validate, and payloads past [`crate::verdict::VALIDATE_LIMIT`] stay
+/// unchecked (which renders as unchecked, not as fine).
+fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Task<Message> {
+    let (Some(session), Some(store)) = (dep.session.clone(), dep.schema_store.clone()) else {
+        return Task::none();
+    };
+    // Newest per key: later samples in the tick supersede earlier ones.
+    let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet::SampleView>> =
+        std::collections::HashMap::new();
+    for sample in &tick.samples {
+        if sample.kind == zenoh::sample::SampleKind::Delete
+            || sample.payload.len() > crate::verdict::VALIDATE_LIMIT
+        {
+            continue;
+        }
+        newest.insert(sample.key.as_str(), sample);
+    }
+    let cache = &work.verdicts.payloads;
+    let batch: Vec<(String, String, zenoh::bytes::ZBytes)> = newest
+        .into_values()
+        .filter(|s| cache.should_check(&s.key))
+        .take(crate::verdict::VALIDATE_PER_TICK)
+        .map(|s| (s.key.clone(), s.encoding.clone(), s.payload.clone()))
+        .collect();
+    if batch.is_empty() {
+        return Task::none();
+    }
+    services::value::validate(
+        store,
+        session,
+        dep.slices.clone(),
+        dep.base().to_string(),
+        batch,
+    )
+}
+
+/// Every this-many ticks (~4 s), re-join the budget (#221). Throttled: the
+/// join is O(observed keys × refinement) and a population does not explode
+/// per frame. Only where a registry is loaded — with no declarations there
+/// is no budget, and `obs.budgets` stays `None`, which draws no badge.
+const BUDGET_EVERY_TICKS: u64 = 16;
+
+fn schedule_budget(dep: &Deployment, obs: &Observation, work: &Workspace) -> Task<Message> {
+    let Some(slices) = dep.slices.clone() else {
+        return Task::none();
+    };
+    // The verdict cache's logical clock is the tick count — one counter,
+    // advanced in `apply_tick`, shared by both throttles.
+    if work.verdicts.payloads.tick_count() % BUDGET_EVERY_TICKS != 1 {
+        return Task::none();
+    }
+    services::sweep::budget(dep.base().to_string(), slices, Arc::clone(&obs.observed))
 }
 
 /// (Re)build the skeleton: slices are already loaded; roster + admin are
@@ -327,6 +410,16 @@ pub(crate) fn refresh_blob_list(dep: &Deployment, work: &mut Workspace) {
         work.verdicts.roster.live_map().as_ref(),
         source,
     ));
+}
+
+/// A registry (re)load invalidates everything judged under the old one: the
+/// payload verdicts (#164 — the `(key, schema hash)` discipline, kept by
+/// clearing at every door a hash can change through) and the budget join
+/// (#221 — declared bounds are the registry's). Both refill on the ordinary
+/// cadences; until then "not yet checked" and no-badge are the honest reads.
+pub(crate) fn forget_judgements(obs: &mut Observation, work: &mut Workspace) {
+    work.verdicts.payloads.clear();
+    obs.budgets = None;
 }
 
 pub(crate) fn reresolve_registrations(dep: &mut Deployment) {

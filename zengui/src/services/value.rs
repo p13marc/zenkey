@@ -33,11 +33,15 @@ pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
 /// what the *selection* asked for and is what the landing message is keyed by;
 /// the second is what the reply actually carried. They are usually equal and
 /// the code must not assume it.
+///
+/// `slices: None` = no registry was loaded; the decode still runs, so the
+/// verdict is `NotValidated(NoRegistry)` — "nobody looked" rendered as
+/// itself, never omitted and never dressed as `NoSchema` (#164, #246).
 #[allow(clippy::too_many_arguments)]
 pub fn decode(
     store: Arc<zenkey_fleet::decode::SchemaStore>,
     session: zenoh::Session,
-    slices: Arc<zenkey_fleet::SliceSet>,
+    slices: Option<Arc<zenkey_fleet::SliceSet>>,
     base: String,
     fetched_key: String,
     wire_key: String,
@@ -46,26 +50,114 @@ pub fn decode(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            // `Some`: the caller only schedules a decode once slices have
-            // loaded (`update/subject.rs`), so the registry was always asked
-            // here — with none loaded the pane shows the fetch undecoded and
-            // claims nothing, which is `NoRegistry`'s honesty (#246) by
-            // omission rather than by verdict.
             let d = zenkey_fleet::decode::decode_sample(
                 &store,
                 &session,
-                Some(&slices),
+                slices.as_deref(),
                 &base,
                 &wire_key,
                 Some(&encoding),
                 &bytes.to_bytes(),
             )
             .await;
-            // The verdict rides the sample (#159); the detail pane learns to
-            // render it in #164.
-            (fetched_key, d.type_name, Arc::new(d.rendering))
+            // The verdict rides the sample (#159) and lands whole: the
+            // Inspector renders it, and the cache learns it (#164).
+            (fetched_key, Arc::new(d))
         },
-        |(k, t, r)| Message::Subject(SubjectMsg::ValueDecoded(k, t, r)),
+        |(k, d)| Message::Subject(SubjectMsg::ValueDecoded(k, d)),
+    )
+}
+
+/// Validate one bounded batch of observed samples (#164).
+///
+/// The verdict cache's fill path: `update/bus.rs` picks at most
+/// [`crate::verdict::VALIDATE_PER_TICK`] keys from the tick's samples and
+/// hands their payloads here — a `Task`, because `decode_sample` may fetch a
+/// producer's `describe` on a first miss. The render paths only ever *read*
+/// the cache this lands in.
+pub fn validate(
+    store: Arc<zenkey_fleet::decode::SchemaStore>,
+    session: zenoh::Session,
+    slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    base: String,
+    batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let mut out = Vec::with_capacity(batch.len());
+            for (key, encoding, bytes) in batch {
+                let d = zenkey_fleet::decode::decode_sample(
+                    &store,
+                    &session,
+                    slices.as_deref(),
+                    &base,
+                    &key,
+                    Some(&encoding),
+                    &bytes.to_bytes(),
+                )
+                .await;
+                out.push((key, d.verdict));
+            }
+            out
+        },
+        |out| Message::Bus(crate::message::BusMsg::VerdictsChecked(out)),
+    )
+}
+
+/// One bounded field-observation window on the subject key (#223).
+///
+/// The Inspector's "observe fields" button — an explicit, costed act, never
+/// ambient: `run_field` declares one subscriber on exactly this key, holds it
+/// for the window, and provably releases it. The per-path table is bounded
+/// by the engine's `DEFAULT_MAX_PATHS` and the report states its drops (O6).
+pub fn field(
+    session: zenoh::Session,
+    base: String,
+    slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    store: Arc<zenkey_fleet::decode::SchemaStore>,
+    key: String,
+    window: std::time::Duration,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let spec = zenkey_fleet::field::FieldSpec {
+                selector: key,
+                window,
+                max_paths: zenkey_fleet::field::DEFAULT_MAX_PATHS,
+            };
+            zenkey_fleet::field::run_field(&session, &base, slices.as_deref(), &store, &spec)
+                .await
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+        },
+        |out| Message::Pane(PaneMsg::Fields(crate::view::fields::FieldsMsg::Done(out))),
+    )
+}
+
+/// The why ladder for one key (#214), at its frugal default.
+///
+/// Control-plane only (the RFC v1.18 frugality note): the liveliness sweep,
+/// the admin sweeps and one bounded GET on the asked key — no subscriber, so
+/// the `wire-heard` rung lands `NotAsked` and says so rather than "silent".
+pub fn why(
+    session: zenoh::Session,
+    base: String,
+    slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    key: String,
+    timeout: std::time::Duration,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let spec = zenkey_fleet::why::WhySpec {
+                timeout,
+                listen: None,
+            };
+            zenkey_fleet::why::run_why(&session, &base, &key, slices.as_deref(), &spec)
+                .await
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+        },
+        |out| Message::Pane(PaneMsg::Why(crate::view::why::WhyMsg::Done(out))),
     )
 }
 

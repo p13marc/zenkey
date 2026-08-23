@@ -66,6 +66,13 @@ pub enum BusMsg {
     SlicesLoaded(Result<Arc<SliceSet>, String>),
     /// The §6.1 union arrived: (set, from_bus, dirs_only, disagreements).
     SlicesUnionLoaded(Result<(Arc<SliceSet>, usize, usize, usize), String>),
+    /// One bounded validation batch finished (#164): per checked key, the
+    /// payload-conformance verdict of its newest sample. Lands in the
+    /// verdict cache; the render paths only look up.
+    VerdictsChecked(Vec<(String, zenkey::schema::validate::Verdict)>),
+    /// The throttled budget join finished (#221): declared `cardinality`
+    /// against the observed tree, keyed by subtree display path.
+    BudgetJoined(Arc<crate::budget::BudgetBadges>),
 }
 
 /// What the app is pointed at, and the coverage that follows (#176).
@@ -229,8 +236,9 @@ pub enum SubjectMsg {
     /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
     ValueFetched(String, Result<Arc<FetchOutcome>, String>),
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
-    /// (key, declared type if any, rendering).
-    ValueDecoded(String, Option<String>, Arc<zenkey_fleet::decode::Rendering>),
+    /// (key, the whole decoded sample — rendering, verdict and the decode
+    /// error behind an `Undecodable`, #164).
+    ValueDecoded(String, Arc<zenkey_fleet::decode::DecodedSample>),
     /// Point the whole workspace at something (#181).
     ///
     /// One message where there were three — `SelectKey`, `SelectPath` and the
@@ -398,6 +406,12 @@ pub enum PaneMsg {
     Blob(crate::view::blob::BlobMsg),
     /// Inspector `@media`-section interactions (issue #69).
     Media(crate::view::media::MediaMsg),
+    /// Inspector Fields-section interactions (#223): the bounded field
+    /// observation window on the subject key.
+    Fields(crate::view::fields::FieldsMsg),
+    /// Inspector Why-section interactions (#214): the why ladder on the
+    /// subject key.
+    Why(crate::view::why::WhyMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
     /// Echo pane interactions (issue #72, echo v2).
@@ -426,9 +440,12 @@ impl PaneMsg {
     pub fn pane(&self) -> Option<RightPane> {
         Some(match self {
             PaneMsg::Send(_) => RightPane::Send,
-            PaneMsg::Detail(_) | PaneMsg::History(_) | PaneMsg::Blob(_) | PaneMsg::Media(_) => {
-                RightPane::Inspector
-            }
+            PaneMsg::Detail(_)
+            | PaneMsg::History(_)
+            | PaneMsg::Blob(_)
+            | PaneMsg::Media(_)
+            | PaneMsg::Fields(_)
+            | PaneMsg::Why(_) => RightPane::Inspector,
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
             // The Activity dock's streams (#183), and the Connect (#185),
@@ -676,6 +693,8 @@ mod tests {
             PaneMsg::History(view::history::HistoryMsg::Clear),
             PaneMsg::Blob(view::blob::BlobMsg::Probe),
             PaneMsg::Media(view::media::MediaMsg::Stop),
+            PaneMsg::Fields(view::fields::FieldsMsg::Run),
+            PaneMsg::Why(view::why::WhyMsg::Run),
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Context(view::contexts::ContextMsg::Load),
             PaneMsg::Scope(view::scope_editor::ScopeMsg::Apply),
@@ -698,19 +717,19 @@ mod tests {
             "every pane in the strip owes `PaneMsg` a variant, and vice versa"
         );
 
-        // And the two foldings are themselves claims. Four variants name the
-        // Inspector — the four tabs it replaced (#182); five name no pane at
-        // all — the two streams that moved to the dock (#183) and the
-        // Connect (#185), Selectors (#187) and Settings (#188) overlays.
-        // Without these, a further variant quietly joining either group
-        // would go unnoticed.
+        // And the two foldings are themselves claims. Six variants name the
+        // Inspector — the four tabs it replaced (#182) plus the Fields (#223)
+        // and Why (#214) sections; five name no pane at all — the two
+        // streams that moved to the dock (#183) and the Connect (#185),
+        // Selectors (#187) and Settings (#188) overlays. Without these, a
+        // further variant quietly joining either group would go unnoticed.
         let folded = one_per_pane
             .iter()
             .filter(|m| m.pane() == Some(RightPane::Inspector))
             .count();
         assert_eq!(
-            folded, 4,
-            "Detail, History, Blob and Media are the Inspector's sections"
+            folded, 6,
+            "Detail, History, Blob, Media, Fields and Why are the Inspector's sections"
         );
         let docked = one_per_pane.iter().filter(|m| m.pane().is_none()).count();
         assert_eq!(

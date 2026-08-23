@@ -35,6 +35,7 @@
 pub mod admin;
 pub mod app;
 pub mod blob;
+pub mod budget;
 pub mod config;
 pub mod doctor;
 pub mod echo;
@@ -53,4 +54,5 @@ pub mod services;
 pub mod shortcuts;
 pub(crate) mod state;
 pub(crate) mod update;
+pub mod verdict;
 pub mod view;

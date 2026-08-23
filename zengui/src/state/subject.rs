@@ -35,8 +35,9 @@ sub_state! {
         pub(crate) selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
         /// The last on-demand fetch: (key, outcome-or-error).
         pub(crate) fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
-        /// The decode of the last fetched value.
-        pub(crate) decoded: Option<(Option<String>, zenkey_fleet::decode::Rendering)>,
+        /// The decode of the last fetched value — the whole
+        /// [`zenkey_fleet::decode::DecodedSample`], verdict included (#164).
+        pub(crate) decoded: Option<Arc<zenkey_fleet::decode::DecodedSample>>,
         /// The timeline's scroll position + viewport height, driving its
         /// virtual window (#183).
         ///
@@ -64,6 +65,13 @@ sub_state! {
         /// rebuild point; everything that can change the chart calls it, and
         /// nothing else may write this field.
         pub(crate) series: Option<view::detail::SeriesData>,
+        /// The bounded field observation on the subject key (#223): run on
+        /// demand, dropped with the subject — its report is evidence about
+        /// one key's window.
+        pub(crate) fields: view::fields::FieldsState,
+        /// The why ladder's state for the subject key (#214): run on demand
+        /// at the frugal default, dropped with the subject.
+        pub(crate) why: view::why::WhyState,
     }
 }
 

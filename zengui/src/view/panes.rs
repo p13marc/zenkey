@@ -90,7 +90,7 @@ fn body<'a>(
     sp: Spacing,
 ) -> Element<'a, Message> {
     match role {
-        DockRole::Locator => locator(dep, obs, sub, tree, sp),
+        DockRole::Locator => locator(dep, obs, sub, tree, work, sp),
         DockRole::Inspector => inspector(dep, obs, sub, work, sp),
         DockRole::Activity => activity(dep, obs, sub, work, sp),
         DockRole::Workbench => workbench(dep, sub, work, sp),
@@ -156,6 +156,7 @@ fn locator<'a>(
     obs: &'a Observation,
     sub: &'a SubjectState,
     tree: &'a TreeState,
+    work: &'a Workspace,
     sp: Spacing,
 ) -> Element<'a, Message> {
     view::tree::pane(view::tree::TreeData {
@@ -165,6 +166,8 @@ fn locator<'a>(
         scroll_y: tree.tree_scroll.0,
         viewport_h: tree.tree_scroll.1,
         facts: &dep.facts,
+        verdicts: &work.verdicts.payloads,
+        budgets: obs.budgets.as_deref(),
         watches: view::tree::Watches {
             mine: &obs.my_watch_paths,
             seeding: &obs.seeding_paths,
@@ -191,7 +194,7 @@ fn inspector<'a>(
             }
             Some(_) => view::detail::Fetched::Superseded,
         },
-        decoded: sub.decoded.as_ref(),
+        decoded: sub.decoded.as_deref(),
         series: sub.series.as_ref(),
         history: sub.history.as_ref(),
         history_scroll: sub.history_scroll,
@@ -205,6 +208,8 @@ fn inspector<'a>(
         slices: dep.slices.as_deref(),
         roster: &work.verdicts.roster,
         node_detail: &work.verdicts.node_detail,
+        fields: &sub.fields,
+        why: &sub.why,
         base: dep.base(),
         observed: &obs.observed,
         sp,
@@ -229,6 +234,7 @@ fn activity<'a>(
             .follow_subject
             .then(|| sub.current.key())
             .flatten(),
+        verdicts: &work.verdicts.payloads,
         next_seq: work.echo.echo.next_seq(),
         publish: &work.bench.send_form,
         doctor: &work.verdicts.doctor,

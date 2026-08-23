@@ -209,6 +209,37 @@ pub fn badge_coverage<'a, M: 'a>(
     })
 }
 
+/// A payload-conformance verdict badge (#164) — theme-resolved like
+/// [`tone_badge`], glyph from the tone. Three states, never a boolean, and
+/// the call sites derive the tone from a [`zenkey::schema::validate::Verdict`]
+/// through [`crate::verdict::tone`] so "not validated" can never be collapsed
+/// into either answer.
+pub fn badge_verdict<'a, M: 'a>(
+    tone: super::theme::VerdictTone,
+    label: impl Into<String>,
+) -> Element<'a, M> {
+    glyph_badge(tone.glyph(), label, move |theme: &iced::Theme| {
+        text::Style {
+            color: Some(colors(theme).verdict(tone)),
+        }
+    })
+}
+
+/// A why-ladder rung badge (#214) — theme-resolved like [`tone_badge`],
+/// glyph from the tone. `NotAsked` gets its own mark and swatch, because a
+/// rung that prints `No` where it means "not asked" is the failure the
+/// ladder was built to replace (RFC 09 §5.1 O4).
+pub fn badge_rung<'a, M: 'a>(
+    tone: super::theme::RungTone,
+    label: impl Into<String>,
+) -> Element<'a, M> {
+    glyph_badge(tone.glyph(), label, move |theme: &iced::Theme| {
+        text::Style {
+            color: Some(colors(theme).rung(tone)),
+        }
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Interactive constructors (#193)
 // ---------------------------------------------------------------------------

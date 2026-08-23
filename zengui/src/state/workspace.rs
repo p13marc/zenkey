@@ -323,6 +323,11 @@ sub_state! {
         pub(crate) blob: crate::blob::BlobState,
         /// The admin & storage panel's state (#70) — swept on demand.
         pub(crate) admin: crate::admin::AdminState,
+        /// The payload-conformance verdict cache (#164): per-key verdicts of
+        /// the tick's bounded validation batches. Filed here because a
+        /// verdict about a payload is a verdict about a fleet — judged under
+        /// its schemas — and dropped with the rest of them.
+        pub(crate) payloads: crate::verdict::VerdictCache,
     }
 }
 
@@ -339,6 +344,8 @@ impl Verdicts {
         self.doctor.clear();
         self.blob.clear();
         self.admin.clear();
+        // The verdicts were judged under the old fleet's schemas (#164).
+        self.payloads.clear();
     }
 }
 
