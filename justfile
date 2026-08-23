@@ -126,6 +126,9 @@ ci:
     # (#209, #210).
     ./scripts/check-dispatch.sh
     ./scripts/check-degradation.sh
+    # The update thread does not touch the disk (#255): a handler that needs
+    # the filesystem needs a services:: function and a landing message.
+    ./scripts/check-fs-seam.sh
     # The type scale by role (#191) and the interactive seam (#193) — both
     # run as CI's type-scale job.
     ./scripts/check-type-scale.sh

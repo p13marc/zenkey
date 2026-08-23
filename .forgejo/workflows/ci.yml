@@ -42,6 +42,10 @@ jobs:
       # One door out of a missing registry (#210). Multiline-aware, because the
       # single-line grep the issue proposed passes straight over `service info`.
       - run: ./scripts/check-degradation.sh
+      # The update thread does not touch the disk (#255): a handler that
+      # needs the filesystem needs a services:: function returning a Task and
+      # a message for the result to land on.
+      - run: ./scripts/check-fs-seam.sh
 
   # The type scale, by role (#191): `.size(` outside `kit.rs`/`tokens.rs`
   # must take a `font::` constant, and a bare `text(` must not appear outside
