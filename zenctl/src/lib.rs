@@ -566,6 +566,15 @@ pub async fn run() -> Result<()> {
             let bus = Bus::resolve(&bus)?;
             cmd::watchdog::run(&rules, tick, ticks, &bus).await
         }
+        Command::Field {
+            selector,
+            window,
+            max_paths,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::field::run(&selector, window, max_paths, &bus).await
+        }
         Command::Probe {
             target,
             producer,

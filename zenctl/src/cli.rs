@@ -391,6 +391,35 @@ pub(crate) enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Field intelligence over a window (#223): per-dotted-path statistics —
+    /// presence, type stability, change count, numeric range, small-domain
+    /// values — plus the three findings per-sample validation cannot see.
+    ///
+    /// The stuck sensor that passes every check: a key publishing at its
+    /// declared rate with a perfectly valid payload whose temperature_c has
+    /// not moved in four hours. field-stuck flags a numeric unchanged over a
+    /// span long relative to the subject's declared ttl_s (an observation
+    /// with a stated window, never a verdict); field-vanished a path SEEN
+    /// then absent while later payloads still parse (a schema that declares
+    /// it optional reads Valid without it by construction); field-new a path
+    /// the served schema never declared — schema drift at field granularity.
+    /// The path table is bounded and reports what it dropped (RFC 09
+    /// §5.1 O6); with no registry loaded, stuck/new are unjudgeable and the
+    /// report says so (O4). Findings are output, not verdicts — exit 0.
+    Field {
+        /// Full wire selector to watch (this session is un-namespaced,
+        /// RFC 09 §5).
+        #[arg(add = ArgValueCandidates::new(completion::keys))]
+        selector: String,
+        /// Observation window, seconds.
+        #[arg(long, default_value_t = 30.0)]
+        window: f64,
+        /// Bound on the per-path table, across every key the window sees.
+        #[arg(long, value_name = "N", default_value_t = 512)]
+        max_paths: usize,
+        #[command(flatten)]
+        bus: BusArgs,
+    },
     /// Cutover acceptance, half two (RFC 09 §6): a consumer-shaped,
     /// CONCRETE-KEY probe.
     ///

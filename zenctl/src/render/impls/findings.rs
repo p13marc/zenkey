@@ -87,6 +87,14 @@ impl Render for DoctorReport {
                     obs.synthetic_marked
                 ));
             }
+            if obs.field_paths_dropped > 0 {
+                // The field-intelligence path table (#223) is bounded like
+                // everything else here, and its cost is part of the claim.
+                text.push_str(&format!(
+                    "; the field path table refused {} path observation(s) at its bound",
+                    obs.field_paths_dropped
+                ));
+            }
             notes.push(Note::bound(text));
         }
         notes.push(Note::coverage(format!(

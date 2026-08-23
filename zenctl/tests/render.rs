@@ -643,6 +643,59 @@ FAIL
     );
 }
 
+/// The field window (#223): per-path stats beside their findings, the path
+/// table's bound stated in every format, and the stuck caveat — an
+/// observation with a window, not a verdict — where a reader will see it.
+#[test]
+fn a_field_report_states_its_bound_and_its_stuck_caveat() {
+    assert_data_eq!(
+        table(&fx::field_report()),
+        str![[r#"
+40/40  v1/h-3fa9c2d41b7e/state/sysinfo/health · temperature_c  number  unchanged  min 21.5 max 21.5 last 21.5  values {21.5}
+40/40  v1/h-3fa9c2d41b7e/state/sysinfo/health · status         string  1 change(s), last at 12.0s  values {"degraded", "ok"}
+
+⚠  field-stuck: v1/h-3fa9c2d41b7e/state/sysinfo/health · temperature_c — value 21.5 unchanged across 40 sample(s) spanning 29.5s — at least 3× the declared ttl_s 5s — while the key kept publishing. An observation over this 30s window, not a verdict: a constant-by-design field always reads this way  [RFC 04 §1.2]
+
+"#]]
+    );
+    let stderr = notes(&fx::field_report());
+    assert!(
+        stderr.contains("path table full at 2: 3 path observation(s) refused"),
+        "the bound's cost is stated (O6): {stderr}"
+    );
+    assert!(
+        stderr.contains("2 sample(s) carried no structural document"),
+        "undocumented is counted apart from absence (O4): {stderr}"
+    );
+    assert!(
+        stderr.contains("not a verdict"),
+        "the stuck caveat rides every rendering: {stderr}"
+    );
+
+    // The envelope leads the ndjson with the bound claim; rows and findings
+    // ride behind it, tagged apart.
+    let out = ndjson(&fx::field_report());
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["report"], "field");
+    assert_eq!(envelope["paths_dropped"], 3);
+    assert!(
+        !envelope.as_object().unwrap().contains_key("rows"),
+        "rows are rows, not an envelope field"
+    );
+    let kinds: Vec<&str> = out
+        .lines()
+        .skip(1)
+        .map(|l| {
+            serde_json::from_str::<serde_json::Value>(l).unwrap()["row"]
+                .as_str()
+                .unwrap()
+                .to_string()
+                .leak() as &str
+        })
+        .collect();
+    assert_eq!(kinds, ["path", "path", "finding"]);
+}
+
 /// `IMPAIRED` is the absence of a verdict, and the note says so in every
 /// format.
 #[test]
@@ -1034,6 +1087,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cutover",
         "doctor",
         "expect",
+        "field",
         "gen",
         "gen-plan",
         "get",
