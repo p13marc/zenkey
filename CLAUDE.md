@@ -45,9 +45,16 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   one per pane), where a signature is the exhaustive list of sub-states it can
   move; every bus call in `services/` as a free `fn -> Task<Message>`. Nothing
   but `update` takes `&mut Zengui`, and nothing under `view/` names it at all.
-  The window follows **one `Subject`** (#181, `message.rs`) — a key, a subtree
-  prefix, an origin, or nothing — and `view/inspector.rs` is the one surface
-  that dispatches on it (#182). Under `view/`, a `pane` returns an `Element`
+  The workspace holds **subject slots** (#181, #257, `message.rs`): each slot
+  is one `Subject` — a key, a subtree prefix, an origin, or nothing — plus
+  everything derived from it (`state/subject.rs`, `SubjectSlot`); slot 0
+  (`SlotId::FOLLOW`) is the one the tree and location bar drive, and every
+  further slot is a *pin*. The one bus tick fans out to every slot's recorder
+  — a pin costs a bounded ring, never a second subscription — and the four
+  slot sections (Detail, History, Fields, Why) carry a `SlotId` on their
+  `PaneMsg` so two Inspectors never write into each other's state.
+  `view/inspector.rs` is the one surface that dispatches on a subject
+  (#182). Under `view/`, a `pane` returns an `Element`
   and owns its scroll; a `section` returns a `Column` and is a piece of one; a
   `dock` (`view/activity.rs`, #183) is a region holding the session's parallel
   streams — echo, the publish log, doctor verdicts, replay transport — with its
@@ -66,9 +73,16 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   it *is* the navigation. A role has one home: a torn dock leaves the grid,
   every reveal path focuses its window, closing the window re-docks it, and
   closing the **main** window exits explicitly (a daemon never stops on its
-  own). The torn set and each window's geometry ride the named layout
-  (`WorkspaceLayout::torn`); the replay locks are per-application and hold
-  across every window.
+  own). **A torn Inspector IS a pin (#257)**: tearing it off pins the current
+  subject into a slot of its own (evidence carried whole), the docked
+  Inspector goes on following the selection, and the one-home rule reads on
+  the claim — reveal paths ask `WindowSet::follow_window_of`, so a pinned
+  window is never focused as the selection's home; closing it unpins,
+  dropping exactly its slot. Pins are session-only: only follow-bound torn
+  windows persist, because a pin's evidence cannot (persisting the identity
+  alone would be the freeze the issue rejects). The torn set and each
+  window's geometry ride the named layout (`WorkspaceLayout::torn`); the
+  replay locks are per-application and hold across every window.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus
