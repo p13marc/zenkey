@@ -25,6 +25,7 @@ pub(crate) mod nodes;
 pub(crate) mod publish;
 pub(crate) mod replay;
 pub(crate) mod scope_editor;
+pub(crate) mod settings;
 
 /// One pane-shaped surface.
 pub(crate) fn update(
@@ -50,5 +51,6 @@ pub(crate) fn update(
         PaneMsg::Echo(msg) => echo::update(&mut work.echo, msg, cx),
         PaneMsg::Context(msg) => context::update(&mut work.bench.context_form, msg),
         PaneMsg::Scope(msg) => scope_editor::update(&mut work.bench.scope_form, msg, cx),
+        PaneMsg::Settings(msg) => settings::update(&mut work.bench.settings_form, msg),
     }
 }

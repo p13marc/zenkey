@@ -1197,6 +1197,22 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             form,
         }
     }
+    let cfg = launch_settings();
+    let settings_form = zengui::view::settings::SettingsForm::default();
+    fn settings<'a>(
+        settings: &'a zengui::config::Settings,
+        form: &'a zengui::view::settings::SettingsForm,
+    ) -> zengui::view::settings::SettingsData<'a> {
+        zengui::view::settings::SettingsData {
+            settings,
+            form,
+            theme: "dark",
+            zoom: 1.0,
+            echo: (0, 0, 0),
+            history: None,
+            keys: (0, 0),
+        }
+    }
     let keys = [
         "v1/h-3fa9c2d41b7e/state/sysinfo/health".to_string(),
         "demo/example/foo".to_string(),
@@ -1210,6 +1226,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             &form,
             false,
             scope(&scope_form),
+            settings(&cfg, &settings_form),
             keys.iter().map(String::as_str),
         )
         .expect("commands overlay");
@@ -1238,6 +1255,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             &form,
             false,
             scope(&scope_form),
+            settings(&cfg, &settings_form),
             keys.iter().map(String::as_str),
         )
         .expect("commands overlay");
@@ -1259,6 +1277,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             &form,
             false,
             scope(&scope_form),
+            settings(&cfg, &settings_form),
             keys.iter().map(String::as_str),
         )
         .expect("keys overlay");
@@ -1279,6 +1298,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             &form,
             false,
             scope(&scope_form),
+            settings(&cfg, &settings_form),
             keys.iter().map(String::as_str),
         )
         .expect("help overlay");
@@ -1302,6 +1322,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             &form,
             false,
             scope(&scope_form),
+            settings(&cfg, &settings_form),
             keys.iter().map(String::as_str),
         )
         .expect("connect overlay");
@@ -1321,6 +1342,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             &form,
             false,
             scope(&scope_form),
+            settings(&cfg, &settings_form),
             keys.iter().map(String::as_str)
         )
         .is_none()
@@ -2663,4 +2685,129 @@ fn the_selector_editor_validates_each_row_as_typed() {
         ui.find("fork into custom and edit").is_err(),
         "already editing — nothing to fork"
     );
+}
+
+// ── The Settings overlay (#188) ──────────────────────────────────────────
+
+/// A `Settings` for the overlay tests, spelled out — the same shape
+/// `app.rs`'s `test_app` uses.
+fn launch_settings() -> zengui::config::Settings {
+    zengui::config::Settings {
+        base: String::new(),
+        connect: vec![],
+        listen: vec![],
+        scouting: None,
+        zenoh_config: None,
+        registry: vec![],
+        timeout_secs: 5,
+        scope: zengui::scope::ScopePreset::Everything,
+        selectors: vec![],
+        eager: false,
+        echo_lines: 2000,
+        history_entries: 200,
+        max_keys: 50_000,
+    }
+}
+
+/// The Settings overlay (#188): every knob it controls is labelled live or
+/// on-reconnect, each bound states the cost of raising it — the key table in
+/// the status strip's own words — and every `Settings` field it does not
+/// control is documented as owned elsewhere.
+#[test]
+fn the_settings_overlay_labels_live_against_reconnect_and_states_each_cost() {
+    use zengui::view::settings::{self, SettingsData, SettingsForm};
+
+    let cfg = launch_settings();
+    let mut form = SettingsForm::default();
+    form.seed(&cfg);
+    let mut ui = simulator::<Message, _, _>(settings::pane(SettingsData {
+        settings: &cfg,
+        form: &form,
+        theme: "dark",
+        zoom: 1.0,
+        echo: (1200, 34, 5),
+        history: Some((80, 3)),
+        keys: (120, 7),
+    }));
+
+    // The groups, and the live-vs-reconnect split.
+    assert!(ui.find("bounds — applied live").is_ok());
+    assert!(ui.find("bounds — take effect on reconnect").is_ok());
+
+    // Each bound's cost, in the voice the status strip already uses — the
+    // key table literally through `status::keys_text`.
+    assert!(
+        ui.find(format!(
+            "takes effect on reconnect — a larger key table is more memory. \
+             now: {}",
+            zengui::view::status::keys_text(120, 7),
+        ))
+        .is_ok(),
+        "the key-table bound must state its cost in the strip's words"
+    );
+    assert!(
+        ui.find(
+            "applies live — a larger ring is more memory and a longer filter \
+             scan. now: 1200 lines held (+34 evicted, 5 lagged)"
+        )
+        .is_ok(),
+        "the echo bound must state memory and the filter scan"
+    );
+    assert!(
+        ui.find(
+            "applies live — history keeps whole payloads so it can diff them: \
+             the costliest bound per entry. now: 80 entries (+3 evicted)"
+        )
+        .is_ok()
+    );
+    // The invariant, stated where the bounds are set.
+    assert!(ui.find(settings::BOUND_INVARIANT).is_ok());
+
+    // Eager is labelled, not silently inert.
+    assert!(
+        ui.find(
+            "takes effect on reconnect — the live equivalent is the location \
+             bar's observe-scope toggle (#85)"
+        )
+        .is_ok()
+    );
+
+    // The registry names its blast radius and its path.
+    assert!(
+        ui.find(
+            "a registry change re-runs the slice union and can change every \
+             registration badge in the tree — applying it takes the same \
+             forget path a base change does: every verdict about the old \
+             slices is dropped rather than left on screen (O4). To keep it \
+             across launches, save it into a context (Connect)."
+        )
+        .is_ok()
+    );
+
+    // Every field the overlay does not control is documented as owned
+    // elsewhere — base, session setup, scope.
+    assert!(
+        ui.find("base: (empty — keys start at v1/) — the location bar's base picker owns it")
+            .is_ok()
+    );
+    assert!(
+        ui.find(
+            "connect (none), listen (none), scouting (unset — off unless a \
+             config file says otherwise), zenoh config (none) — session \
+             setup, owned by the Connect overlay (Ctrl+Shift+C); a change \
+             there reopens the session"
+        )
+        .is_ok()
+    );
+    assert!(
+        ui.find(
+            "scope (everything, 0 custom selectors) — the location bar's \
+             scope picker and its selectors editor own them"
+        )
+        .is_ok()
+    );
+
+    // The apply and the reconnect it labels toward are both offered.
+    assert!(ui.find("apply").is_ok());
+    assert!(ui.find("reconnect now").is_ok());
 }

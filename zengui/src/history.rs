@@ -152,6 +152,16 @@ impl HistoryRing {
         }
     }
 
+    /// Re-bound the ring in place (#188) — the Settings overlay's live apply,
+    /// same contract as [`crate::echo::EchoRing::resize`]: raising never
+    /// discards the eviction count that reported the old bound's cost, and a
+    /// shrink's trim is counted like any other eviction (RFC 09 §5.1 O6).
+    pub fn resize(&mut self, max_entries: usize) {
+        self.max_entries = max_entries.max(1);
+        self.max_bytes = self.max_entries.saturating_mul(BYTES_PER_ENTRY);
+        self.trim();
+    }
+
     pub fn push(&mut self, view: &SampleView) {
         let entry = HistoryEntry::render(self.next_seq, view);
         self.next_seq += 1;
@@ -308,6 +318,30 @@ mod tests {
             ring.len()
         );
         assert_eq!(ring.evicted(), 20 - ring.len() as u64);
+    }
+
+    /// The #188 invariant, on the recorder's ring: a live resize keeps the
+    /// eviction count — raising a bound never un-loses what the old bound
+    /// cost, and a shrink's trim is itself counted.
+    #[test]
+    fn resizing_keeps_the_eviction_count() {
+        let mut ring = HistoryRing::new(4);
+        for i in 0..10 {
+            ring.push(&put("k", format!("{{\"v\":{i}}}").as_bytes()));
+        }
+        assert_eq!((ring.len(), ring.evicted()), (4, 6));
+
+        ring.resize(2);
+        assert_eq!(ring.len(), 2);
+        assert_eq!(ring.evicted(), 8, "the shrink's trim is counted");
+
+        ring.resize(100);
+        assert_eq!(ring.evicted(), 8, "raising must not clear the count");
+        for i in 10..16 {
+            ring.push(&put("k", format!("{{\"v\":{i}}}").as_bytes()));
+        }
+        assert_eq!(ring.len(), 8, "the raised bound holds them");
+        assert_eq!(ring.evicted(), 8);
     }
 
     #[test]

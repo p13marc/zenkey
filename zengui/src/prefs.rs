@@ -329,6 +329,19 @@ pub struct Prefs {
     pub selectors: Vec<String>,
     /// The workspace grid (#180), superseding the scalar `split`.
     pub layout: WorkspaceLayout,
+    /// How many echo lines to retain (#188). `None` until set in the
+    /// Settings overlay: a command-line flag is a one-launch choice and is
+    /// deliberately not written back here — only the overlay's apply is,
+    /// so a flag never silently becomes the new default.
+    pub echo_lines: Option<usize>,
+    /// How many history entries the selected key's recorder retains (#188).
+    pub history_entries: Option<usize>,
+    /// How many distinct keys the monitor tracks statistics for (#188).
+    /// Applied on the next (re)connect, and remembered here so the raise
+    /// survives the restart it takes effect through.
+    pub max_keys: Option<usize>,
+    /// Whether to observe the scope immediately on connect (#188).
+    pub eager: Option<bool>,
 }
 
 impl Default for Prefs {
@@ -341,6 +354,10 @@ impl Default for Prefs {
             scope: ScopePreset::Everything,
             selectors: Vec::new(),
             layout: WorkspaceLayout::default(),
+            echo_lines: None,
+            history_entries: None,
+            max_keys: None,
+            eager: None,
         }
     }
 }
@@ -419,6 +436,12 @@ impl Prefs {
         // that leaves of a remembered custom scope is `config.rs`'s question.
         self.selectors
             .retain(|s| crate::scope::validate_selector(s).is_ok());
+        // A remembered zero bound is a hand edit, not a choice the overlay
+        // can make (the boundary rejects zeros): drop it to unset rather
+        // than refuse the launch a typed `--echo-lines 0` rightly refuses.
+        self.echo_lines = self.echo_lines.filter(|n| *n > 0);
+        self.history_entries = self.history_entries.filter(|n| *n > 0);
+        self.max_keys = self.max_keys.filter(|n| *n > 0);
         self
     }
 
@@ -471,6 +494,10 @@ mod tests {
             scope: ScopePreset::Deployment,
             selectors: vec!["demo/**".into(), "v1/*/state/**".into()],
             layout: LayoutPreset::Watch.layout(),
+            echo_lines: Some(5000),
+            history_entries: Some(400),
+            max_keys: Some(100_000),
+            eager: Some(true),
         };
         prefs.save_to(&path).unwrap();
         let (back, note) = Prefs::load_from(&path);
@@ -617,6 +644,19 @@ mod tests {
             ["demo/**"],
             "the `$*` row (RFC 03 §2) and the empty row are dropped"
         );
+    }
+
+    /// A hand-edited zero bound unsets rather than strands (#188): the CLI
+    /// boundary rejects a *typed* zero, but a stale file must never refuse
+    /// the launch — same soft/hard split as the selectors above.
+    #[test]
+    fn a_remembered_zero_bound_is_dropped_not_fatal() {
+        let path = tmp("zero-bounds.toml");
+        std::fs::write(&path, "echo_lines = 0\nmax_keys = 40000\n").unwrap();
+        let (prefs, note) = Prefs::load_from(&path);
+        assert!(note.is_none());
+        assert_eq!(prefs.echo_lines, None, "zero unsets");
+        assert_eq!(prefs.max_keys, Some(40_000), "the good field survives");
     }
 
     #[test]

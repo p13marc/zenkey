@@ -31,11 +31,13 @@ use crate::view::tokens::{font, space};
 /// How many rows the overlay renders. A palette that draws a 50k-key list is
 /// the same bug as a tree that does.
 ///
-/// Twenty rather than a tighter bound because the unfiltered list starts with
-/// the panes and the scopes: at twelve, a fresh palette showed *only* those
-/// and nothing else — which reads as "this is all there is" rather than "type
-/// to see more".
-const MAX_ROWS: usize = 20;
+/// Generous rather than tight because the unfiltered list starts with the
+/// panes and the scopes: at twelve, a fresh palette showed *only* those and
+/// nothing else — which reads as "this is all there is" rather than "type to
+/// see more". Twenty-four since #187/#188 grew the fixed vocabulary (custom
+/// scope, the two overlay entries): the bound must keep the first verbs —
+/// run doctor, reconnect — inside the first screenful.
+const MAX_ROWS: usize = 24;
 
 /// Which overlay is open, if any. One field rather than three booleans, so
 /// "two overlays at once" has no representation — which is also the layering
@@ -59,6 +61,9 @@ pub enum Overlay {
     /// chip: the resolved selectors of the current scope, and the way to
     /// fork them into a custom set.
     Selectors,
+    /// Ctrl+, — the launch knobs, surfaced (#188): the bounds and their
+    /// costs, live-applied where the engine allows it.
+    Settings,
 }
 
 /// The overlay's state (owned by the app).
@@ -167,6 +172,12 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
         Action {
             label: "edit scope selectors".into(),
             message: Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Selectors))),
+        },
+        // The Settings overlay (#188): the same message the location bar's
+        // settings chip and Ctrl+, send.
+        Action {
+            label: "settings — bounds and launch knobs".into(),
+            message: Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings))),
         },
         Action {
             label: "observe scope (start/stop)".into(),
@@ -284,6 +295,7 @@ pub fn overlay<'a>(
     form: &'a crate::view::contexts::ContextForm,
     unreachable: bool,
     scope: crate::view::scope_editor::ScopeEditorData<'a>,
+    settings: crate::view::settings::SettingsData<'a>,
     keys: impl Iterator<Item = &'a str>,
 ) -> Option<Element<'a, Message>> {
     match state.overlay {
@@ -291,6 +303,7 @@ pub fn overlay<'a>(
         Overlay::Help => Some(help()),
         Overlay::Connect => Some(connect(form, unreachable)),
         Overlay::Selectors => Some(selectors(scope)),
+        Overlay::Settings => Some(floated(crate::view::settings::pane(settings))),
         Overlay::Commands => {
             let items = actions(&form.known);
             let order = rank(&items, &state.query, |a| a.label.as_str());
@@ -412,10 +425,17 @@ fn connect<'a>(
 /// floated the same way Connect is — the scope is about what the window
 /// watches, not about the subject, so it is a session-scoped modal too.
 fn selectors(scope: crate::view::scope_editor::ScopeEditorData<'_>) -> Element<'_, Message> {
+    floated(crate::view::scope_editor::pane(scope))
+}
+
+/// The shared frame of the Selectors (#187) and Settings (#188) modals:
+/// Connect's shape — fixed, bordered, on the surface color — with the modal's
+/// content scrolling inside it.
+fn floated(content: Element<'_, Message>) -> Element<'_, Message> {
     container(
         column![
-            kit::muted("scope selectors — Esc closes"),
-            iced::widget::scrollable(crate::view::scope_editor::pane(scope)).height(Length::Fill),
+            kit::muted("Esc closes"),
+            iced::widget::scrollable(content).height(Length::Fill),
         ]
         .spacing(space::SM),
     )
@@ -485,6 +505,40 @@ mod tests {
         }
     }
 
+    /// A Settings data set over one settings value and one form, likewise.
+    fn settings_data<'a>(
+        settings: &'a crate::config::Settings,
+        form: &'a crate::view::settings::SettingsForm,
+    ) -> crate::view::settings::SettingsData<'a> {
+        crate::view::settings::SettingsData {
+            settings,
+            form,
+            theme: "dark",
+            zoom: 1.0,
+            echo: (0, 0, 0),
+            history: None,
+            keys: (0, 0),
+        }
+    }
+
+    fn test_settings() -> crate::config::Settings {
+        crate::config::Settings {
+            base: String::new(),
+            connect: vec![],
+            listen: vec![],
+            scouting: None,
+            zenoh_config: None,
+            registry: vec![],
+            timeout_secs: 5,
+            scope: crate::scope::ScopePreset::Everything,
+            selectors: vec![],
+            eager: false,
+            echo_lines: 100,
+            history_entries: 10,
+            max_keys: 1000,
+        }
+    }
+
     /// #110: only the jump-to overlay may read the key iterator — a closed
     /// palette, the command list, the help sheet and the modals must cost the
     /// cache nothing. The iterator panics on first pull to prove it.
@@ -496,6 +550,7 @@ mod tests {
             Some(Overlay::Help),
             Some(Overlay::Connect),
             Some(Overlay::Selectors),
+            Some(Overlay::Settings),
         ] {
             let mut state = PaletteState::default();
             if let Some(o) = open {
@@ -506,7 +561,16 @@ mod tests {
             });
             let form = crate::view::contexts::ContextForm::default();
             let scope_form = crate::view::scope_editor::ScopeForm::default();
-            let _ = overlay(&state, &form, false, scope_data(&scope_form), poisoned);
+            let settings = test_settings();
+            let settings_form = crate::view::settings::SettingsForm::default();
+            let _ = overlay(
+                &state,
+                &form,
+                false,
+                scope_data(&scope_form),
+                settings_data(&settings, &settings_form),
+                poisoned,
+            );
         }
     }
 
@@ -542,6 +606,15 @@ mod tests {
                 )
             );
         }
+        // The Settings overlay: the same message the location bar's settings
+        // chip and Ctrl+, send (#188).
+        assert_eq!(
+            find("settings — bounds and launch knobs"),
+            format!(
+                "{:?}",
+                Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings)))
+            )
+        );
         // The key-expression editor: the same message the location bar's
         // selectors chip sends (#187).
         assert_eq!(

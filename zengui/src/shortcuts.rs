@@ -71,6 +71,13 @@ pub fn map() -> Vec<Binding> {
             what: "connect — contexts and endpoints",
             message: || Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Connect))),
         },
+        // The launch knobs, surfaced (#188) — the family's usual chord for a
+        // settings surface.
+        Binding {
+            keys: "Ctrl ,",
+            what: "settings — bounds and launch knobs",
+            message: || Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings))),
+        },
     ];
     // The saved layouts, in preset order — so the numbers on screen and the
     // numbers under the fingers are the same list.
@@ -130,6 +137,9 @@ pub fn resolve(key: &Key, mods: Modifiers) -> Option<Message> {
             )))),
             "k" | "K" => Some(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
                 Overlay::Keys,
+            )))),
+            "," => Some(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+                Overlay::Settings,
             )))),
             _ => None,
         };

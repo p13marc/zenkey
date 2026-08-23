@@ -232,6 +232,13 @@ fn controls<'a>(
             )))
             .padding(4),
         iced::widget::space::horizontal(),
+        // The Settings overlay (#188): the launch knobs, and the same
+        // chrome preferences the buttons beside it move.
+        button(kit::caption("settings…"))
+            .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
+                Overlay::Settings
+            ))))
+            .padding(4),
         // Window preferences (issue #73): the theme name is the button, so
         // the label says what you get rather than what you have.
         kit::action(kit::caption(format!(

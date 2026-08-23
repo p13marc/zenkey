@@ -90,25 +90,29 @@ pub struct Cli {
     #[arg(long)]
     pub eager: bool,
 
-    /// How many echo lines to retain.
-    #[arg(long, default_value_t = 2000)]
-    pub echo_lines: usize,
+    /// How many echo lines to retain (default 2000; the Settings overlay
+    /// changes it live, and remembers the change — a flag beats the memory
+    /// for this launch without becoming it).
+    #[arg(long)]
+    pub echo_lines: Option<usize>,
 
-    /// How many samples of the selected key's history to retain (issue #63).
+    /// How many samples of the selected key's history to retain (issue #63;
+    /// default 200, remembered like `--echo-lines` since #188).
     ///
     /// Smaller than the echo ring on purpose: history keeps whole payloads so
     /// it can diff them, where echo keeps a one-line preview. Entries dropped
     /// to respect this bound are counted and displayed (RFC 09 §5.1 O6).
-    #[arg(long, default_value_t = 200)]
-    pub history_entries: usize,
+    #[arg(long)]
+    pub history_entries: Option<usize>,
 
-    /// How many distinct keys to keep statistics for.
+    /// How many distinct keys to keep statistics for (default
+    /// `zenkey_fleet::stats::DEFAULT_MAX_KEYS`; remembered since #188).
     ///
     /// Least-recently-seen keys are retired past this, and the retirements are
     /// counted and displayed — a long-running observer is bounded, and says so
     /// (RFC 09 §5.1 O6). Raise it on a bus with a very wide key population.
-    #[arg(long, default_value_t = zenkey_fleet::stats::DEFAULT_MAX_KEYS)]
-    pub max_keys: usize,
+    #[arg(long)]
+    pub max_keys: Option<usize>,
 }
 
 /// Resolved, owned settings. No `Option` gymnastics past this point.
@@ -196,13 +200,29 @@ impl Cli {
         if scope == ScopePreset::Custom && selectors.is_empty() {
             anyhow::bail!("--scope custom needs at least one --selector");
         }
-        if self.echo_lines == 0 {
+        // The bounds resolve flag > remembered (#188) > documented default.
+        // The same soft/hard split as the selectors: a *typed* zero is an
+        // error, a remembered zero was already dropped by `Prefs::sanitised`
+        // and is re-dropped here for a `Prefs` handed in directly.
+        let echo_lines = self
+            .echo_lines
+            .or(prefs.echo_lines.filter(|n| *n > 0))
+            .unwrap_or(2000);
+        let history_entries = self
+            .history_entries
+            .or(prefs.history_entries.filter(|n| *n > 0))
+            .unwrap_or(200);
+        let max_keys = self
+            .max_keys
+            .or(prefs.max_keys.filter(|n| *n > 0))
+            .unwrap_or(zenkey_fleet::stats::DEFAULT_MAX_KEYS);
+        if echo_lines == 0 {
             anyhow::bail!("--echo-lines must be at least 1");
         }
-        if self.history_entries == 0 {
+        if history_entries == 0 {
             anyhow::bail!("--history-entries must be at least 1");
         }
-        if self.max_keys == 0 {
+        if max_keys == 0 {
             anyhow::bail!("--max-keys must be at least 1");
         }
         Ok(Settings {
@@ -233,10 +253,12 @@ impl Cli {
             timeout_secs: self.timeout.or(context.timeout).unwrap_or(5),
             scope,
             selectors,
-            eager: self.eager,
-            echo_lines: self.echo_lines,
-            history_entries: self.history_entries,
-            max_keys: self.max_keys,
+            // The flag can only assert, so it wins by OR: `--eager` over a
+            // remembered lazy is eager; there is no `--no-eager` to lose.
+            eager: self.eager || prefs.eager.unwrap_or(false),
+            echo_lines,
+            history_entries,
+            max_keys,
         })
     }
 }
@@ -421,6 +443,37 @@ mod tests {
                 .is_unreachable()
         );
         assert!(!parse(&["--scouting"]).unwrap().is_unreachable());
+    }
+
+    /// The bounds the Settings overlay persists come back on the next
+    /// launch, and a typed flag beats the memory without becoming it (#188).
+    #[test]
+    fn remembered_bounds_fill_in_and_a_flag_still_wins() {
+        let remembered = Prefs {
+            echo_lines: Some(5000),
+            history_entries: Some(400),
+            max_keys: Some(100_000),
+            eager: Some(true),
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &remembered).unwrap();
+        assert_eq!(s.echo_lines, 5000);
+        assert_eq!(s.history_entries, 400);
+        assert_eq!(s.max_keys, 100_000);
+        assert!(s.eager, "a remembered eager connects observing");
+
+        let s = parse_remembering(&["--echo-lines", "100"], &remembered).unwrap();
+        assert_eq!(s.echo_lines, 100, "the typed flag wins this launch");
+        assert_eq!(s.max_keys, 100_000, "the others stay remembered");
+
+        // A remembered zero is a hand edit: dropped to the default, never a
+        // refusal — where the typed zero stays fatal (the tests above).
+        let stale = Prefs {
+            echo_lines: Some(0),
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &stale).expect("must still start");
+        assert_eq!(s.echo_lines, 2000);
     }
 
     /// Context supplies defaults; flags override (issue #35).

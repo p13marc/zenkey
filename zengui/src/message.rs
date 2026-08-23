@@ -111,6 +111,13 @@ pub enum DeploymentMsg {
         stored: Box<zenkey_fleet::StoredContext>,
     },
     ScopeSelected(ScopePreset),
+    /// A validated Settings-overlay apply (#188): re-bound the rings live,
+    /// store what needs a reconnect, and route a registry change through the
+    /// same forget path a base change takes. Here rather than under `Pane`
+    /// for the same reason `CustomSelectorsApplied` is: its body moves the
+    /// deployment and the observation, and only its *status line* lands in
+    /// the form.
+    TuningApplied(crate::view::settings::Tuning),
     /// A validated custom selector set from the key-expression editor (#187):
     /// the scope becomes [`ScopePreset::Custom`] over exactly these. Here
     /// rather than under `Pane` because its body is `ScopeSelected`'s —
@@ -370,6 +377,8 @@ pub enum PaneMsg {
     Context(crate::view::contexts::ContextMsg),
     /// Key-expression-editor interactions (#187) — the Selectors overlay.
     Scope(crate::view::scope_editor::ScopeMsg),
+    /// Settings-overlay interactions (#188).
+    Settings(crate::view::settings::SettingsMsg),
 }
 
 impl PaneMsg {
@@ -394,13 +403,15 @@ impl PaneMsg {
             }
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
-            // The Activity dock's streams (#183), and the Connect (#185) and
-            // Selectors (#187) overlays: regions of the window, but not
-            // right-hand panes, and answering a pane for one would put a
-            // message in the strip that the strip cannot select.
-            PaneMsg::Echo(_) | PaneMsg::Doctor(_) | PaneMsg::Context(_) | PaneMsg::Scope(_) => {
-                return None;
-            }
+            // The Activity dock's streams (#183), and the Connect (#185),
+            // Selectors (#187) and Settings (#188) overlays: regions of the
+            // window, but not right-hand panes, and answering a pane for one
+            // would put a message in the strip that the strip cannot select.
+            PaneMsg::Echo(_)
+            | PaneMsg::Doctor(_)
+            | PaneMsg::Context(_)
+            | PaneMsg::Scope(_)
+            | PaneMsg::Settings(_) => return None,
         })
     }
 }
@@ -640,6 +651,7 @@ mod tests {
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Context(view::contexts::ContextMsg::Load),
             PaneMsg::Scope(view::scope_editor::ScopeMsg::Apply),
+            PaneMsg::Settings(view::settings::SettingsMsg::Apply),
         ];
         // Coverage in both directions, and neither a bijection nor total.
         // #182 made four variants sections of the Inspector, so `Detail`,
@@ -659,10 +671,11 @@ mod tests {
         );
 
         // And the two foldings are themselves claims. Four variants name the
-        // Inspector — the four tabs it replaced (#182); four name no pane at
-        // all — the two streams that moved to the dock (#183), the Connect
-        // overlay (#185) and the Selectors overlay (#187). Without these, a
-        // further variant quietly joining either group would go unnoticed.
+        // Inspector — the four tabs it replaced (#182); five name no pane at
+        // all — the two streams that moved to the dock (#183) and the
+        // Connect (#185), Selectors (#187) and Settings (#188) overlays.
+        // Without these, a further variant quietly joining either group
+        // would go unnoticed.
         let folded = one_per_pane
             .iter()
             .filter(|m| m.pane() == Some(RightPane::Inspector))
@@ -673,9 +686,9 @@ mod tests {
         );
         let docked = one_per_pane.iter().filter(|m| m.pane().is_none()).count();
         assert_eq!(
-            docked, 4,
-            "Echo and Doctor are Activity streams and Connect and the \
-             selector editor are overlays, not right-hand panes"
+            docked, 5,
+            "Echo and Doctor are Activity streams; Connect, the selector \
+             editor and Settings are overlays — none is a right-hand pane"
         );
     }
 }

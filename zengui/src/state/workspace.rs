@@ -238,6 +238,8 @@ sub_state! {
         pub(crate) context_form: view::contexts::ContextForm,
         /// The key-expression editor's draft (#187) — the Selectors overlay.
         pub(crate) scope_form: view::scope_editor::ScopeForm,
+        /// The Settings overlay's draft (#188).
+        pub(crate) settings_form: view::settings::SettingsForm,
 
         pub(crate) call_form: view::call::CallForm,
         pub(crate) publish_form: view::publish::PublishForm,

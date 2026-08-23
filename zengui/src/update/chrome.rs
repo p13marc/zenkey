@@ -121,13 +121,16 @@ fn update_palette(
     use view::palette::PaletteMsg;
     match msg {
         PaletteMsg::Open(overlay) => {
-            // The key-expression editor opens on the deployment's current
-            // truth — a draft left from last time must not masquerade as the
-            // active scope (#187).
+            // The modal editors open on the deployment's current truth — a
+            // draft left from last time must not masquerade as the active
+            // scope (#187) or the settings in force (#188).
             if overlay == view::palette::Overlay::Selectors {
                 work.bench
                     .scope_form
                     .seed(dep.settings.scope, &dep.settings.selectors);
+            }
+            if overlay == view::palette::Overlay::Settings {
+                work.bench.settings_form.seed(&dep.settings);
             }
             chrome.palette.open(overlay);
             Task::none()

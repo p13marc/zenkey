@@ -209,6 +209,9 @@ mod tests {
                     // owes it nothing, and applying it is a Deployment
                     // message.
                     "scope_form",
+                    // The Settings overlay's draft (#188): same placement,
+                    // same reasoning.
+                    "settings_form",
                     "call_form",
                     "publish_form",
                     "publication",
@@ -256,7 +259,8 @@ mod tests {
             .map(|(g, f)| if *g == "work" { 1 } else { f.len() })
             .sum();
         // …plus `obs.retention`, the retained window's account (#217), plus
-        // `work.bench.scope_form`, the key-expression editor's draft (#187).
-        assert_eq!(leaves, 67, "the split must place every field exactly once");
+        // the two overlay drafts: `work.bench.scope_form` (#187) and
+        // `work.bench.settings_form` (#188).
+        assert_eq!(leaves, 68, "the split must place every field exactly once");
     }
 }

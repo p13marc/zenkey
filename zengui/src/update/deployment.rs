@@ -63,14 +63,7 @@ pub(crate) fn update(
             // skeleton, and watch selectors are base-relative: a fresh
             // monitor is the obviously-correct restart. Everything the old
             // base taught us is evidence about a different deployment (O4).
-            forget(dep, obs, tree, work);
-            dep.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
-                dep.base(),
-                dep.timeout(),
-            )));
-            sub.decoded = None;
-            tree.reflatten(dep, obs);
-            Task::batch([super::bus::start_monitor(dep), super::bus::load_slices(dep)])
+            repoint(dep, obs, sub, tree, work)
         }
         DeploymentMsg::ScopeSelected(scope) => {
             if scope == dep.settings.scope {
@@ -122,11 +115,97 @@ pub(crate) fn update(
             }
             Task::none()
         }
+        DeploymentMsg::TuningApplied(t) => {
+            let mut applied: Vec<String> = Vec::new();
+            if t.echo_lines != dep.settings.echo_lines {
+                dep.settings.echo_lines = t.echo_lines;
+                // Live, no reconnect (#188): the ring re-bounds in place,
+                // and its resize keeps every loss counter — raising a bound
+                // never un-loses what the old bound cost.
+                work.echo.echo.resize(t.echo_lines);
+                applied.push(format!("echo ring {} lines (live)", t.echo_lines));
+            }
+            if t.history_entries != dep.settings.history_entries {
+                dep.settings.history_entries = t.history_entries;
+                // The recorder in flight resizes too; the next selection
+                // starts at the new bound anyway.
+                if let Some(rec) = sub.history.as_mut() {
+                    rec.ring.resize(t.history_entries);
+                }
+                applied.push(format!("history {} entries (live)", t.history_entries));
+            }
+            if t.timeout_secs != dep.settings.timeout_secs {
+                dep.settings.timeout_secs = t.timeout_secs;
+                applied.push(format!("timeout {}s (from the next query)", t.timeout_secs));
+            }
+            if t.max_keys != dep.settings.max_keys {
+                dep.settings.max_keys = t.max_keys;
+                applied.push(format!("max keys {} (on reconnect)", t.max_keys));
+            }
+            if t.eager != dep.settings.eager {
+                dep.settings.eager = t.eager;
+                applied.push(format!(
+                    "eager {} (on reconnect)",
+                    if t.eager { "on" } else { "off" }
+                ));
+            }
+            let registry_changed = t.registry != dep.settings.registry;
+            if registry_changed {
+                dep.settings.registry = t.registry;
+                applied.push(
+                    "registry changed — re-pointing: verdicts about the old slices are dropped"
+                        .to_string(),
+                );
+            }
+            work.bench.settings_form.status = Some(Ok(if applied.is_empty() {
+                "nothing changed".to_string()
+            } else {
+                applied.join(" · ")
+            }));
+            // The overlay's knobs are remembered (#188) — written on the
+            // settle timer like a splitter drag, and only from here: a
+            // command-line flag never becomes the new default by itself.
+            chrome.prefs.echo_lines = Some(dep.settings.echo_lines);
+            chrome.prefs.history_entries = Some(dep.settings.history_entries);
+            chrome.prefs.max_keys = Some(dep.settings.max_keys);
+            chrome.prefs.eager = Some(dep.settings.eager);
+            chrome.prefs_dirty = true;
+            if registry_changed {
+                // The registry is a `SliceSource` input: changing it re-runs
+                // the union and can change every registration badge in the
+                // tree — so it takes the same forget path a base change
+                // does, rather than layering new slices over old verdicts.
+                return repoint(dep, obs, sub, tree, work);
+            }
+            Task::none()
+        }
         DeploymentMsg::Reconnect => {
             forget(dep, obs, tree, work);
             super::bus::start_monitor(dep)
         }
     }
+}
+
+/// Point the session at different coverage: forget the old deployment's
+/// evidence, rebuild the schema store, and restart the monitor and the slice
+/// load. The shared tail of a base change and a registry change (#188) — the
+/// latter goes through the *same* path deliberately, because new slices over
+/// old verdicts is how a stale registration badge survives a registry swap.
+fn repoint(
+    dep: &mut Deployment,
+    obs: &mut Observation,
+    sub: &mut SubjectState,
+    tree: &mut TreeState,
+    work: &mut Workspace,
+) -> Task<Message> {
+    forget(dep, obs, tree, work);
+    dep.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+        dep.base(),
+        dep.timeout(),
+    )));
+    sub.decoded = None;
+    tree.reflatten(dep, obs);
+    Task::batch([super::bus::start_monitor(dep), super::bus::load_slices(dep)])
 }
 
 /// Everything a session learned about one deployment, forgotten.
