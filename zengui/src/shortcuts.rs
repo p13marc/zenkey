@@ -107,7 +107,7 @@ pub fn map() -> Vec<Binding> {
         Binding {
             keys: "Ctrl Shift D",
             what: "toggle density (comfortable/compact)",
-            message: || Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled)),
+            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled))),
         },
         Binding {
             keys: "Ctrl R",
