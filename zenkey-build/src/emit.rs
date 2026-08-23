@@ -1261,7 +1261,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
 
     let _ = writeln!(
         out,
-        "/// The `@blob` tiers this build serves (RFC 07 §2, RFC 08 §2).\n///\n/// App-level rather than per-producer: a blob key carries **no producer\n/// chunk** — the position after `@blob` is a reserved tier token, because\n/// content-addressed data has no owning component.\npub mod blob {{\n    #[allow(unused_imports)]\n    use {zk}::grammar::{{BlobTier, ContentHash, KeyError}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key}};\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::context::BlobProbePrefix;\n"
+        "/// The `@blob` tiers this build serves (RFC 07 §2, RFC 08 §2).\n///\n/// App-level rather than per-producer: a blob key carries **no producer\n/// chunk** — the position after `@blob` is a reserved tier token, because\n/// content-addressed data has no owning component.\npub mod blob {{\n    #[allow(unused_imports)]\n    use {zk}::grammar::{{BlobTier, ContentHash, KeyError}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key}};\n    #[allow(unused_imports)]\n    use {zk}::slug::ulid_slug;\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::context::BlobProbePrefix;\n"
     );
 
     // The tier-prefix helper every builder routes through, so the one place a
@@ -1411,7 +1411,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
             "artifact" => {
                 let _ = writeln!(
                     out,
-                    "    /// Tier-1 artifact prefix at one host: `…/@blob/artifact/<id>`.\n    ///\n    /// `id` is the ULID minted by the RPC that created the artifact\n    /// (RFC 07 §2.2), slugged at the boundary.\n    pub fn artifact_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        Key::from_canonical(artifact_prefix(o, id))\n    }}\n\n    fn artifact_prefix(o: &impl HostOrigin, id: impl AsRef<str>) -> String {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"artifact\");\n        k.push('/');\n        k.push_str(Chunk::slug(id).as_str());\n        k\n    }}\n"
+                    "    /// Tier-1 artifact prefix at one host: `…/@blob/artifact/<id>`.\n    ///\n    /// `id` is the ULID minted by the RPC that created the artifact\n    /// (RFC 07 §2.2). A ULID-shaped id is **lowercased at key-build time**\n    /// (RFC 03 §2: Crockford base32 decodes case-insensitively, so both\n    /// cases name one chunk — escaping the canonical uppercase form would\n    /// mint a different key no holder answers); anything else is slugged at\n    /// the boundary.\n    pub fn artifact_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        Key::from_canonical(artifact_prefix(o, id))\n    }}\n\n    fn artifact_prefix(o: &impl HostOrigin, id: impl AsRef<str>) -> String {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"artifact\");\n        k.push('/');\n        let id = id.as_ref();\n        match ulid_slug(id) {{\n            Some(lower) => k.push_str(&lower),\n            None => k.push_str(Chunk::slug(id).as_str()),\n        }}\n        k\n    }}\n"
                 );
                 for ep in &b.endpoints {
                     match ep.as_str() {

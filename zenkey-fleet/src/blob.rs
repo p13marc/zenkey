@@ -68,12 +68,16 @@ impl BlobTarget {
     /// A bare id is Tier-1, because that is the tier an operator has an id
     /// *for*: Tier-2 addresses are hashes, and nobody types one from memory.
     ///
-    /// An id that is not a valid RFC 03 §2 plain chunk is refused with the
-    /// citation rather than lowercased. A canonical ULID is uppercase Crockford
-    /// base32 and a key chunk has no uppercase spelling (RFC 07 §2.2 as
-    /// amended in v1.11) — but silently rewriting the caller's id would mean
-    /// probing for something they did not ask for and reporting holders of it,
-    /// which is worse than refusing.
+    /// A **ULID-shaped** id is lowercased at build time (RFC 03 §2: ULIDs
+    /// are key-encoded in lowercase, and Crockford base32 decodes
+    /// case-insensitively — the canonical uppercase display form and the
+    /// lowercase key spelling are the *same* id, so the probe still asks
+    /// for what the caller was given). Any other id that is not a valid
+    /// RFC 03 §2 plain chunk is refused with the citation: outside the
+    /// case-insensitive ULID domain, rewriting the caller's id would mean
+    /// probing for something they did not ask for and reporting holders of
+    /// it, which is worse than refusing (the v1.4 exemption for
+    /// case-sensitive domains).
     pub fn parse(spec: &str) -> Result<BlobTarget> {
         let spec = spec.trim().trim_matches('/');
         if spec.is_empty() {
@@ -112,9 +116,15 @@ impl BlobTarget {
     }
 
     fn artifact(id: &str) -> Result<BlobTarget> {
+        // RFC 03 §2: a ULID is key-encoded in lowercase, at build time —
+        // this is that build time. Both cases decode to the same id, so
+        // this probes for exactly what the caller was given.
+        if let Some(lower) = zenkey::slug::ulid_slug(id) {
+            return Ok(BlobTarget::Artifact { id: lower });
+        }
         if !grammar::is_valid_plain_chunk(id) {
             let hint = if id.chars().any(|c| c.is_ascii_uppercase()) {
-                " — a ULID is key-encoded in lowercase (RFC 03 §2, RFC 07 §2.2); lowercase it at the source rather than here, so the id you probe for is the id you were given"
+                " — key chunks have no uppercase spelling (RFC 03 §2, RFC 07 §2.2), and only a ULID-shaped id is safely lowercased for you; lowercase this one at the source, so the id you probe for is the id you were given"
             } else {
                 ""
             };
@@ -309,15 +319,38 @@ mod tests {
     }
 
     #[test]
-    fn an_uppercase_ulid_is_refused_with_the_citation() {
-        // The canonical display form of a ULID. RFC 03 §2 has no uppercase
-        // spelling, so this key cannot exist — and lowercasing it silently
-        // would probe for an id the caller never gave us.
+    fn an_uppercase_ulid_is_lowercased_at_build_time() {
+        // The canonical display form of a ULID. RFC 03 §2 keys ULIDs in
+        // lowercase, *lowercased at build time*: Crockford base32 decodes
+        // case-insensitively, so the lowercase key spelling names exactly
+        // the id the caller gave us — refusing it (or escaping it into
+        // `_xNN_` chunks, as the generated builders once did) would be
+        // manufacturing a second spelling for one id (G-07a).
+        let target = BlobTarget::parse("01JGXQZ4YQK8V6TXW3M9F2A7CD").unwrap();
+        assert_eq!(
+            target,
+            BlobTarget::Artifact {
+                id: "01jgxqz4yqk8v6txw3m9f2a7cd".into()
+            }
+        );
+        assert_eq!(
+            target,
+            BlobTarget::parse("01jgxqz4yqk8v6txw3m9f2a7cd").unwrap(),
+            "both cases of one ULID are one target"
+        );
+    }
+
+    #[test]
+    fn an_uppercase_non_ulid_is_refused_with_the_citation() {
+        // Uppercase but not ULID-shaped (16 chars): outside the
+        // case-insensitive ULID domain nothing is safely lowercased —
+        // refused with the pointer, not guessed at (RFC 03 §2, v1.4).
         let err = BlobTarget::parse("01HQXK8F9C2N4PZQ")
             .unwrap_err()
             .to_string();
         assert!(err.contains("RFC 03 §2"), "{err}");
         assert!(err.contains("lowercase"), "{err}");
+        assert!(err.contains("ULID-shaped"), "{err}");
     }
 
     #[test]

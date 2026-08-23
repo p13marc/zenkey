@@ -26,6 +26,29 @@ pub fn ip_slug_str(text: &str) -> Option<String> {
     text.parse::<IpAddr>().ok().map(ip_slug)
 }
 
+/// Lowercase a ULID-shaped identifier for key encoding — or refuse.
+///
+/// RFC 03 §2: identifiers whose canonical text form is uppercase MUST be
+/// **lowercased at key-build time** where the domain is case-insensitive —
+/// in particular ULIDs, whose Crockford base32 decodes case-insensitively
+/// (payloads MAY keep the canonical uppercase display form). Lowercasing a
+/// ULID therefore names the *same* identifier in its one key spelling;
+/// escaping its uppercase bytes (as [`chunk_slug`] would) mints a
+/// different chunk nobody serves.
+///
+/// Returns `Some(lowercased)` when `id` is ULID-shaped — 26 Crockford
+/// base32 characters (`0-9`, `A-Z` without `I`/`L`/`O`/`U`), either case —
+/// and `None` otherwise, so a caller refuses or falls back deliberately
+/// instead of lowercasing a value from a domain that might be
+/// case-sensitive (the v1.4 exemption).
+pub fn ulid_slug(id: &str) -> Option<String> {
+    fn crockford(b: u8) -> bool {
+        let b = b.to_ascii_uppercase();
+        b.is_ascii_digit() || (b.is_ascii_uppercase() && !matches!(b, b'I' | b'L' | b'O' | b'U'))
+    }
+    (id.len() == 26 && id.bytes().all(crockford)).then(|| id.to_ascii_lowercase())
+}
+
 /// Slug an arbitrary value (unit name, filename, device name) into a single
 /// legal chunk, losslessly (RFC 03 §2).
 ///
@@ -136,6 +159,28 @@ mod tests {
                 "illegal slug {s:?}"
             );
         }
+    }
+
+    /// RFC 03 §2: a ULID is key-encoded in lowercase — both cases of one
+    /// ULID name one chunk, and non-ULID shapes are refused rather than
+    /// guessed at.
+    #[test]
+    fn ulid_shapes_lowercase_and_others_refuse() {
+        let canonical = "01JGXQZ4YQK8V6TXW3M9F2A7CD";
+        assert_eq!(
+            ulid_slug(canonical).as_deref(),
+            Some("01jgxqz4yqk8v6txw3m9f2a7cd")
+        );
+        assert_eq!(
+            ulid_slug("01jgxqz4yqk8v6txw3m9f2a7cd").as_deref(),
+            Some("01jgxqz4yqk8v6txw3m9f2a7cd"),
+            "already-lowercase is the fixed point"
+        );
+        // Not ULID-shaped: wrong length, excluded letters, illegal bytes.
+        assert_eq!(ulid_slug("01HQXK8F9C2N4PZQ"), None, "16 chars");
+        assert_eq!(ulid_slug("01JGXQZ4YQK8V6TXW3M9F2A7CI"), None, "I excluded");
+        assert_eq!(ulid_slug("01jgxqz4yqk8v6txw3m9f2a7c."), None);
+        assert_eq!(ulid_slug(""), None);
     }
 
     /// The v1.4 erratum, by its own example: escaping must converge to an
