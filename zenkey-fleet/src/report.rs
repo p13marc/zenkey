@@ -629,7 +629,7 @@ pub enum DoctorSeverity {
 /// One machine-readable doctor finding (issue #46): what check fired, on
 /// what, with the evidence and the normative citation — the shape the GUI
 /// doctor panel renders as-is.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorFinding {
     pub severity: DoctorSeverity,
     /// Stable check id (kebab-case), e.g. `slice-sync`, `introspect-coverage`,
