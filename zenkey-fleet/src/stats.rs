@@ -144,10 +144,10 @@ pub struct KeyStats {
     /// Consecutive source-sequence-number gap count, when publishers attach
     /// SourceInfo (unstable API) — loss visibility, `--loss`. Wrap-safe:
     /// the SN is a `u32`, so `u32::MAX → 0` is the next sample, not a
-    /// 4-billion-sample gap (see [`SN_RESET_WINDOW`]).
+    /// 4-billion-sample gap (see the private `SN_RESET_WINDOW`).
     pub sn_gaps: u64,
     /// Times the sequence numbering restarted — a backwards or absurd jump
-    /// (beyond [`SN_RESET_WINDOW`]), which is a publisher restart, not
+    /// (beyond the private `SN_RESET_WINDOW`), which is a publisher restart, not
     /// loss. Its own number: folding a restart into `sn_gaps` would invent
     /// millions of "lost" samples nobody sent (RFC 09 §5.1 O6 — the kinds
     /// are never folded).
