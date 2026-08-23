@@ -62,7 +62,10 @@ pub fn rung_tone(answer: &RungAnswer) -> RungTone {
     match answer {
         RungAnswer::Established => RungTone::Established,
         RungAnswer::NotEstablished { .. } => RungTone::NotEstablished,
-        RungAnswer::NotAsked => RungTone::NotAsked,
+        // Both unestablished poles of the RFC 13 (v1.24) core wear the
+        // "absence of an answer" tone — an uncarriable observation is not a
+        // milder `✗`.
+        RungAnswer::NotAsked | RungAnswer::Unobservable { .. } => RungTone::NotAsked,
     }
 }
 
@@ -73,6 +76,7 @@ pub fn rung_label(answer: &RungAnswer) -> &'static str {
         RungAnswer::Established => "established",
         RungAnswer::NotEstablished { .. } => "not established",
         RungAnswer::NotAsked => "not asked",
+        RungAnswer::Unobservable { .. } => "unobservable",
     }
 }
 

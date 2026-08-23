@@ -42,9 +42,18 @@ impl Render for WhyReport {
                 }
                 RungAnswer::NotEstablished { .. } => Cell::text("·"),
                 RungAnswer::NotAsked => Cell::styled("?", crate::render::style::UNPROVEN),
+                // The ladder degrades an uncarriable observation to NotAsked
+                // today; the pole exists in the core (RFC 13, v1.24) and a
+                // future rung that emits it draws as the absence of a
+                // verdict, never as a `✗`.
+                RungAnswer::Unobservable { .. } => {
+                    Cell::styled("!", crate::render::style::UNPROVEN)
+                }
             };
             grid.row([mark, Cell::text(r.id), Cell::text(r.question)]);
-            if let RungAnswer::NotEstablished { reason } = &r.answer {
+            if let RungAnswer::NotEstablished { reason } | RungAnswer::Unobservable { reason } =
+                &r.answer
+            {
                 grid.detail([format!("      ↳ {reason}")]);
             }
             grid.detail(r.evidence.iter().map(|e| format!("      {e}")));

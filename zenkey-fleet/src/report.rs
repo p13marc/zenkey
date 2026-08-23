@@ -1394,6 +1394,46 @@ pub enum CutoverVerdict {
     Unproven,
 }
 
+impl CutoverVerdict {
+    /// The [`Judgement`](crate::judgement::Judgement) mapping (RFC 13,
+    /// v1.24). The judged claim is the finding — "the retired family still
+    /// speaks":
+    ///
+    /// | verdict | judgement | exit (RFC 13) |
+    /// |---|---|---|
+    /// | `OldStillSpeaks` | `Established` (finding) | 1 |
+    /// | `Pass` | `NotEstablished` (clean) | 0 |
+    /// | `Unproven` | `Unobservable` | 2 |
+    pub fn to_judgement(self) -> crate::judgement::Judgement {
+        use crate::judgement::Judgement;
+        match self {
+            CutoverVerdict::OldStillSpeaks => Judgement::Established,
+            CutoverVerdict::Pass => Judgement::NotEstablished {
+                reason: "the retired family is silent while the new plane carries traffic".into(),
+            },
+            CutoverVerdict::Unproven => Judgement::Unobservable {
+                reason: "both planes were silent — a dead fleet passes the silence half \
+                         for free (RFC 05 §3.1)"
+                    .into(),
+            },
+        }
+    }
+}
+
+/// The inverse of [`CutoverVerdict::to_judgement`]. Both unestablished poles
+/// fold to `Unproven`: a question that was not put (or could not be carried)
+/// proves no migration.
+impl From<crate::judgement::Judgement> for CutoverVerdict {
+    fn from(j: crate::judgement::Judgement) -> CutoverVerdict {
+        use crate::judgement::Judgement;
+        match j {
+            Judgement::Established => CutoverVerdict::OldStillSpeaks,
+            Judgement::NotEstablished { .. } => CutoverVerdict::Pass,
+            Judgement::NotAsked | Judgement::Unobservable { .. } => CutoverVerdict::Unproven,
+        }
+    }
+}
+
 /// The `zenctl cutover` report (issue #59; RFC 09 §6 half one).
 #[derive(Debug, Clone, Serialize)]
 pub struct CutoverReport {
@@ -1518,6 +1558,45 @@ pub enum ExpectVerdict {
     /// The observation cannot carry the claim (drops under a completeness
     /// claim, or a shortfall the dropped samples could have filled).
     Impaired,
+}
+
+impl ExpectVerdict {
+    /// The [`Judgement`](crate::judgement::Judgement) mapping (RFC 13,
+    /// v1.24). The judged claim is the finding — "the expectation was
+    /// violated" — so `Met` is the established-**clean** pole:
+    ///
+    /// | verdict | judgement | exit (RFC 13 = this family's own contract) |
+    /// |---|---|---|
+    /// | `NotMet` | `Established` (finding) | 1 |
+    /// | `Met` | `NotEstablished` (clean) | 0 |
+    /// | `Impaired` | `Unobservable` | 2 |
+    pub fn to_judgement(self) -> crate::judgement::Judgement {
+        use crate::judgement::Judgement;
+        match self {
+            ExpectVerdict::NotMet => Judgement::Established,
+            ExpectVerdict::Met => Judgement::NotEstablished {
+                reason: "the expectation held within the window".into(),
+            },
+            ExpectVerdict::Impaired => Judgement::Unobservable {
+                reason: "the observation cannot carry the claim (RFC 09 §5.1 O6)".into(),
+            },
+        }
+    }
+}
+
+/// The inverse of [`ExpectVerdict::to_judgement`] — what lets `expect` fold
+/// a judge's answer straight into its verdict without hand-mapping. Both
+/// unestablished poles are `Impaired`: an assertion that was not (or could
+/// not be) observed is not met and not violated.
+impl From<crate::judgement::Judgement> for ExpectVerdict {
+    fn from(j: crate::judgement::Judgement) -> ExpectVerdict {
+        use crate::judgement::Judgement;
+        match j {
+            Judgement::Established => ExpectVerdict::NotMet,
+            Judgement::NotEstablished { .. } => ExpectVerdict::Met,
+            Judgement::NotAsked | Judgement::Unobservable { .. } => ExpectVerdict::Impaired,
+        }
+    }
 }
 
 /// The `zenctl expect` report (#160) — the window, what rode through it,

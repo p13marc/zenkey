@@ -115,21 +115,23 @@ const CAUSE_IDS: [&str; 5] = [
     "sample-freshness",
 ];
 
-/// One rung's answer. The three states are the deliverable: a rung whose
-/// input was not fetched says [`NotAsked`](RungAnswer::NotAsked), never
+/// One rung's answer — the [`Judgement`](crate::judgement::Judgement) core
+/// (RFC 13, v1.24; RFC 09 §5.1 pre-v1.24), carried directly: since v1.24 the
+/// ladder's three shipped states *are* three of the core's four poles, and
+/// this alias is the fold. The serde tags are byte-identical to what #214
+/// shipped (`established` / `not_established` + `reason` / `not_asked`).
+///
+/// A rung's judgement is over **its own question** (the rung's fact), not
+/// over "is there a finding?" — which of its poles constitutes a finding is
+/// per-rung policy, and [`is_cause`] is where that policy lives. The rungs
+/// currently never answer [`Judgement::Unobservable`]: an observation the
+/// ladder could not obtain degrades the rung to `NotAsked` and rides
+/// [`WhyReport::impairments`] instead.
+///
+/// A rung whose input was not fetched says
+/// [`NotAsked`](crate::judgement::Judgement::NotAsked), never
 /// `NotEstablished` (RFC 09 §5.1 O4).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "answer", rename_all = "snake_case")]
-pub enum RungAnswer {
-    /// The rung's fact holds, with the evidence to back it.
-    Established,
-    /// The question was put and the fact does not hold — with the reason,
-    /// which is where the ladder's honesty lives.
-    NotEstablished { reason: String },
-    /// The question was not put — the input was not fetched, was not
-    /// requested, or does not exist for this key. The evidence says which.
-    NotAsked,
-}
+pub type RungAnswer = crate::judgement::Judgement;
 
 /// One rung of the ladder.
 #[derive(Debug, Clone, Serialize)]
@@ -157,6 +159,54 @@ pub enum WhyVerdict {
     /// No cause, and the observation was impaired: an input this ladder
     /// wanted could not be obtained, so "healthy" cannot be claimed (exit 2).
     Impaired,
+}
+
+impl WhyVerdict {
+    /// The [`Judgement`](crate::judgement::Judgement) mapping (RFC 13,
+    /// v1.24), and it is **THE inverted one — read this before wiring exit
+    /// codes**: `Explained` is *established-finding* (`Established`), because
+    /// the thing `why` establishes is a cause — a finding about the fleet —
+    /// even though this family's own historical CLI contract exits **0** for
+    /// it (the module doc's table). The RFC 13 exit projection
+    /// ([`crate::judgement::judgement_exit_code`]) therefore gives `why`'s
+    /// three verdicts 1 / 0 / 2 in this order — the flip between the two
+    /// contracts is carried **here, at the mapping**, never special-cased by
+    /// a consumer downstream.
+    ///
+    /// | verdict | judgement | RFC 13 exit | historical `zenctl why` exit |
+    /// |---|---|---|---|
+    /// | `Explained` | `Established` (finding) | 1 | 0 |
+    /// | `Healthy` | `NotEstablished` (clean) | 0 | 1 |
+    /// | `Impaired` | `Unobservable` | 2 | 2 |
+    pub fn to_judgement(self) -> crate::judgement::Judgement {
+        use crate::judgement::Judgement;
+        match self {
+            WhyVerdict::Explained => Judgement::Established,
+            WhyVerdict::Healthy => Judgement::NotEstablished {
+                reason: "no cause established, and everything checked looks healthy".into(),
+            },
+            WhyVerdict::Impaired => Judgement::Unobservable {
+                reason: "an input the ladder wanted could not be obtained — \"healthy\" \
+                         cannot be claimed over questions it could not ask"
+                    .into(),
+            },
+        }
+    }
+}
+
+/// The inverse of [`WhyVerdict::to_judgement`], same (inverted) polarity:
+/// an established finding is `Explained`, established-clean is `Healthy`,
+/// and both unestablished poles fold to `Impaired` — a ladder nobody asked
+/// is exactly a ladder that cannot claim health.
+impl From<crate::judgement::Judgement> for WhyVerdict {
+    fn from(j: crate::judgement::Judgement) -> WhyVerdict {
+        use crate::judgement::Judgement;
+        match j {
+            Judgement::Established => WhyVerdict::Explained,
+            Judgement::NotEstablished { .. } => WhyVerdict::Healthy,
+            Judgement::NotAsked | Judgement::Unobservable { .. } => WhyVerdict::Impaired,
+        }
+    }
 }
 
 /// The ladder, assembled. One rung per [`RUNG_IDS`] entry, in order, always —
@@ -198,7 +248,9 @@ pub fn is_cause(id: &str, answer: &RungAnswer) -> bool {
     match answer {
         RungAnswer::Established => id == "wire-heard",
         RungAnswer::NotEstablished { .. } => CAUSE_IDS.contains(&id),
-        RungAnswer::NotAsked => false,
+        // Neither unestablished pole is ever a cause: an unput or uncarried
+        // question explains nothing (RFC 13, v1.24).
+        RungAnswer::NotAsked | RungAnswer::Unobservable { .. } => false,
     }
 }
 
