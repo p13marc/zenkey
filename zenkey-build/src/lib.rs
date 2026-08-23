@@ -720,6 +720,40 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     ));
                 }
             }
+            // RFC 04 §3: the alert family (`state/*/alert/*`) rides the
+            // `alert` profile — reliable, blocking, interactive-high,
+            // **express**; alerts are the one family the express axis exists
+            // for. The class default above is per *class* and cannot see the
+            // family, so an undeclared alert subject would silently compile
+            // to `refreshed` — a drop-eligible firing flank. An alert-family
+            // subject therefore declares its profile, and of the five only
+            // `alert` is alert-or-stronger (v1.23; RFC 08 §2/§5).
+            let alert_family = common.as_deref() == Some("alert")
+                || (class == "state"
+                    && matches!(chunks.first(), Some(Chunk::Literal(l)) if l == "alert"));
+            if alert_family {
+                match entry.get("qos").and_then(|v| v.as_str()) {
+                    Some("alert") => {}
+                    Some(weaker) => {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "{spath:?}: alert state must use the alert profile or \
+                                 stronger, not {weaker:?} (RFC 04 §3)"
+                            ),
+                        ));
+                    }
+                    None => {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "{spath:?}: alert state must not fall to the class \
+                                 default — declare qos = \"alert\" (RFC 04 §3, v1.23)"
+                            ),
+                        ));
+                    }
+                }
+            }
             // `variant` overrides the derived name. Two patterns with the same
             // literal chunks but different arity (`cpu/usage` vs
             // `cpu/{core}/usage`) derive the same name and would otherwise trip
@@ -1587,6 +1621,37 @@ mod tests {
             "{HEADER}[producer]\nname = \"t\"\n\n[[procedure]]\npath = \"x/set\"\nkind = \"write\"\nreply = \"Ack\"\nfanout = \"allowed\"\nidempotent = true\nsince = \"1.0\"\ndescription = \"d\"\n"
         );
         lint_one(&toml).unwrap();
+    }
+
+    /// RFC 04 §3: the alert family rides the `alert` profile — the class
+    /// default (`refreshed`) is drop-eligible on the one family the express
+    /// axis exists for, so an alert-family subject declares its profile and
+    /// nothing weaker passes.
+    #[test]
+    fn alert_state_declares_the_alert_profile() {
+        let subject = |extra: &str| {
+            format!(
+                "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"alert/{{alert_key}}\"\nclass = \"state\"\ntype = \"Alert\"\ncommon = \"alert\"\n{extra}ttl_s = 900\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+            )
+        };
+        // Absent: the class default cannot see the family — refused with the
+        // fix spelled out.
+        let err = lint_one(&subject("")).unwrap_err();
+        assert!(err.to_string().contains("qos = \"alert\""), "{err}");
+        assert!(err.to_string().contains("RFC 04 §3"), "{err}");
+        // Declared weaker: refused.
+        let err = lint_one(&subject("qos = \"refreshed\"\n")).unwrap_err();
+        assert!(err.to_string().contains("alert profile"), "{err}");
+        // Declared right: passes.
+        lint_one(&subject("qos = \"alert\"\n")).unwrap();
+
+        // The family *shape* is linted even without `common = "alert"` — the
+        // selector `state/*/alert/*` does not read the common marker either.
+        let shaped = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"alert/{{key}}\"\nclass = \"state\"\ntype = \"Alert\"\nttl_s = 900\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        let err = lint_one(&shaped).unwrap_err();
+        assert!(err.to_string().contains("RFC 04 §3"), "{err}");
     }
 
     /// RFC 08 §2's field table marks `reply` required: errors ride

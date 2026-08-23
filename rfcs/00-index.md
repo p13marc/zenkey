@@ -1,9 +1,43 @@
 # Zenoh Semantic Convention RFC — Index
 
-**Status: v1.22** (2026-08-23, the errata sweep below; ratified at v1.18,
-2026-08-15; v1.0 2026-07-12; adopted for ZenSight, migration tracked in
+**Status: v1.23** (2026-08-23, the alert profile is declared, not defaulted;
+ratified at v1.18, 2026-08-15; v1.0 2026-07-12; adopted for ZenSight,
+migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the enforcement
 crate `zenkey`).
+
+> **v1.23 (2026-08-23, the alert profile is declared, not defaulted)** —
+> [04 §3](04-planes.md)'s profile table has bound the `alert` profile to the
+> **family** `state/*/alert/*` since v1.0, but the registry's default
+> mechanism resolves an omitted `qos` per *class* — and the class default for
+> `state` is `refreshed`. The reference codegen followed the mechanism, not
+> the table: a `common = "alert"` subject that declared no `qos` compiled
+> silently to `refreshed`, best-effort and drop-eligible, on the one family
+> the express axis exists for. A firing flank that a router may shed under
+> congestion is precisely the alert the reliable, express profile was
+> specified to carry.
+>
+> The amendment closes the gap on the registry side rather than by teaching
+> the default mechanism about families: an **alert-family** `state` entry —
+> `common = "alert"`, or a leading `alert` chunk, the same shape the
+> `state/*/alert/*` selector reads — MUST declare `qos = "alert"` or
+> stronger, and of the five profiles only `alert` qualifies (`frame` is
+> best-effort; the rest lack express). [08 §2](08-registry.md)'s field table
+> and [§5](08-registry.md)'s CI list carry the requirement; [04
+> §3](04-planes.md) gains the cross-referencing note. Declaring the profile
+> the family's whole point rides on is a one-line cost at registration time;
+> a silent per-family default would have fixed the compile and left every
+> reader of the TOML believing the class default applied.
+>
+> Code and RFC move together: `zenkey-build` refuses an alert-family subject
+> with an absent or weaker `qos` in the same release that adds this entry.
+>
+> **What did *not* change.** The profile vocabulary stays closed at five and
+> [04 §3](04-planes.md)'s table is untouched — `alert`'s axes, its family
+> binding, and every other class default stand exactly as ratified. No key,
+> wire, or payload change; a registry that already declared `qos = "alert"`
+> on its alert subjects (as the reference profile always has) compiles
+> unchanged.
 
 > **v1.22 (2026-08-23, the errata sweep)** — an editorial pass with no design
 > content: the places where the text had fallen behind its own amendments are

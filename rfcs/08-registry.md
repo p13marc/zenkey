@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17 and v1.20 — see [00-index.md](00-index.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20 and v1.23 — see [00-index.md](00-index.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -218,7 +218,7 @@ Normative field table (`[[subject]]`; `[[procedure]]`/`[[media]]` analogous):
 | `path` | pattern string | yes | subject pattern; see variable rules below |
 | `class` | enum `telemetry\|state\|events` | yes | data class ([04-planes.md §1](04-planes.md)) |
 | `type` | type-table name | yes | the one payload type of every expansion |
-| `qos` | enum, profiles of [04-planes.md §3](04-planes.md) | no (class default) | named QoS profile |
+| `qos` | enum, profiles of [04-planes.md §3](04-planes.md) | no (class default); **alert-family `state`** (`common = "alert"`, or a leading `alert` chunk) MUST declare it, `= "alert"` or stronger (v1.23) | named QoS profile |
 | `unit` | string | primitive numerics only | unit of the leaf value |
 | `cardinality` | integer | yes if `path` has any `{var}` | expected key-population bound (order of magnitude); the budget review enforces |
 | `ttl_s` | integer | live `state` only | staleness TTL; publishers refresh ≤ ttl/2, consumers age out at ttl |
@@ -553,7 +553,11 @@ job and is diagnosed from the wire, not from TOML.
   reserved token as a subject leaf); no `deprecated` path is re-registered
   and no `[[deprecated]]` entry is ever deleted; every `events` entry has
   a `rate`; every `{var}`-bearing entry has a `cardinality`; every live
-  `state` entry has a `ttl_s`.
+  `state` entry has a `ttl_s`; every **alert-family** `state` entry
+  (`common = "alert"`, or a leading `alert` chunk) declares
+  `qos = "alert"` or stronger — the per-class default cannot see a family,
+  and a silent fall to `refreshed` would drop-qualify the one family the
+  express axis exists for ([04-planes.md §3](04-planes.md), v1.23).
 - CI MUST enforce, for `[[blob]]` entries (v1.8) — these are closed
   vocabularies fixed by [07 §2](07-bulk-planes.md), so every one of them is
   decidable at build time and none is a matter of taste:
