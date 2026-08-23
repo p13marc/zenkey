@@ -101,6 +101,8 @@ fn the_five_registration_states_render_five_distinct_glyph_word_pairs() {
             ttl_s: None,
             rate: None,
             cardinality: None,
+            since: None,
+            description: None,
         })),
         Registration::Unregistered,
         Registration::NoSliceForProducer,

@@ -119,6 +119,62 @@ fn the_topic_verdict_vocabulary_is_snake_case_and_partial_reports_omit() {
     );
 }
 
+/// The NO-DEAD-FIELD PIN (report-honesty finding R2, third recurrence of the
+/// class: `cardinality` was declared and never filled until #221; `rate`
+/// reached `SubjectFacts` and died at the report boundary; `since` and
+/// `description` never left the slice at all).
+///
+/// The guard is structural: `fx::topic_info_full()` populates **every**
+/// `Option` the shape can serialize, and this test drives the one real
+/// constructor path — slice TOML → `describe_key` → `from_description` — and
+/// requires the two documents to be identical. A field added to `TopicInfo`
+/// that the constructor cannot fill fails here the day it lands, instead of
+/// serializing as a permanent absence that reads like "not declared" (O4).
+#[test]
+fn no_topic_info_field_is_dead_the_constructor_reaches_them_all() {
+    let toml = r#"
+        [registry]
+        version = "1.0"
+        app = "t"
+        convention = 1
+        [producer]
+        name = "sysinfo"
+        [[subject]]
+        path = "disk/{mount}/used"
+        class = "telemetry"
+        type = "TelemetryPoint"
+        unit = "bytes"
+        qos = "sampled"
+        ttl_s = 120
+        rate = "low"
+        cardinality = 16
+        encoding = "application/cbor"
+        since = "1.0"
+        description = "bytes used per mount"
+    "#;
+    let slices =
+        zenkey_fleet::SliceSet::from_slices(vec![zenkey::parse_slice(toml).expect("slice parses")]);
+    let described = zenkey_fleet::facts::describe_key(
+        "",
+        &format!("v1/{}/telemetry/sysinfo/disk/var-log/used", fx::ORIGIN),
+        Some(&slices),
+    );
+    let built = serde_json::to_value(TopicInfo::from_description(&described)).unwrap();
+    let full = serde_json::to_value(fx::topic_info_full()).unwrap();
+    for key in full.as_object().unwrap().keys() {
+        assert!(
+            built.get(key).is_some(),
+            "TopicInfo.{key} is dead: the fixture serializes it, but the \
+             constructor path never fills it"
+        );
+    }
+    assert_eq!(
+        built, full,
+        "the constructor's document IS the every-field fixture — no field \
+         reachable only by literal construction"
+    );
+}
+
 /// The flag that disambiguates the two `None`s beside it. Without it, "asked
 /// and nothing was served" and "never asked" are the same document.
 #[test]

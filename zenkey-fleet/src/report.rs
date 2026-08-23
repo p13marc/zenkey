@@ -228,6 +228,14 @@ impl TopicInfo {
                 // Declared since v1.0, dropped on this path until #221 — the
                 // field existed and was never filled.
                 info.cardinality = s.cardinality;
+                // R2, the third recurrence of the same class (cardinality
+                // pre-#221, then these): `rate` reached `SubjectFacts` and
+                // died at this boundary; `since`/`description` never even
+                // left the slice. The no-dead-field pin in
+                // `report_contract.rs` now guards the whole struct.
+                info.rate = s.rate.clone();
+                info.since = s.since.clone();
+                info.description = s.description.clone();
             }
             Registration::Unregistered => {
                 info.verdict = TopicVerdict::Unregistered;

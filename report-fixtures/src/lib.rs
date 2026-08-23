@@ -231,6 +231,36 @@ pub fn topic_info() -> TopicInfo {
     }
 }
 
+/// Every `Option` on the report populated — the NO-DEAD-FIELD PIN's fixture
+/// (report-honesty finding R2, third recurrence of the class: `cardinality`
+/// sat dead until #221, `rate`/`since`/`description` until this batch).
+/// `report_contract.rs` asserts the constructor path can reach every field
+/// this serializes; a field addable here but unreachable there is dead on
+/// arrival.
+pub fn topic_info_full() -> TopicInfo {
+    TopicInfo {
+        key: format!("v1/{ORIGIN}/telemetry/sysinfo/disk/var-log/used"),
+        verdict: TopicVerdict::Registered,
+        note: String::new(),
+        origin: Some(ORIGIN.into()),
+        producer: Some("sysinfo".into()),
+        class: Some("telemetry".into()),
+        subject: Some("disk/{mount}/used".into()),
+        variables: [("mount".to_string(), "var-log".to_string())]
+            .into_iter()
+            .collect(),
+        payload_type: Some("TelemetryPoint".into()),
+        unit: Some("bytes".into()),
+        qos: Some("sampled".into()),
+        ttl_s: Some(120),
+        rate: Some("low".into()),
+        cardinality: Some(16),
+        encoding: Some("application/cbor".into()),
+        since: Some("1.0".into()),
+        description: Some("bytes used per mount".into()),
+    }
+}
+
 /// A key that parses and that nothing declares — the rung above the bottom,
 /// and the one whose fields are absent rather than null.
 pub fn topic_info_unregistered() -> TopicInfo {

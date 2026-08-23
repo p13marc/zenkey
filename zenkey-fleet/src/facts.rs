@@ -129,6 +129,13 @@ pub struct SubjectFacts {
     /// The declared key-population bound (RFC 08 §2) — carried so observers
     /// can judge over-declared cardinality (#221).
     pub cardinality: Option<i64>,
+    /// Registry version the subject first appeared in, when declared.
+    ///
+    /// Carried since the report-honesty batch (R2): the slice always had it,
+    /// and `TopicInfo.since` sat dead because this projection dropped it.
+    pub since: Option<String>,
+    /// The declared human description, same provenance (R2).
+    pub description: Option<String>,
 }
 
 impl SubjectFacts {
@@ -223,6 +230,8 @@ impl KeyFacts {
                 ttl_s: decl.ttl_s,
                 rate: decl.rate.clone(),
                 cardinality: decl.cardinality,
+                since: decl.since.clone(),
+                description: decl.description.clone(),
             })),
             None => Registration::Unregistered,
         };
@@ -717,6 +726,8 @@ mod tests {
             ttl_s: None,
             rate: None,
             cardinality: None,
+            since: None,
+            description: None,
         };
         assert_eq!(
             facts(Some("transition")).declared_qos(),
