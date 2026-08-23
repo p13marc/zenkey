@@ -406,6 +406,9 @@ pub enum PaneMsg {
     Blob(crate::view::blob::BlobMsg),
     /// Inspector `@media`-section interactions (issue #69).
     Media(crate::view::media::MediaMsg),
+    /// Inspector Fields-section interactions (#223): the bounded field
+    /// observation window on the subject key.
+    Fields(crate::view::fields::FieldsMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
     /// Echo pane interactions (issue #72, echo v2).
@@ -434,9 +437,11 @@ impl PaneMsg {
     pub fn pane(&self) -> Option<RightPane> {
         Some(match self {
             PaneMsg::Send(_) => RightPane::Send,
-            PaneMsg::Detail(_) | PaneMsg::History(_) | PaneMsg::Blob(_) | PaneMsg::Media(_) => {
-                RightPane::Inspector
-            }
+            PaneMsg::Detail(_)
+            | PaneMsg::History(_)
+            | PaneMsg::Blob(_)
+            | PaneMsg::Media(_)
+            | PaneMsg::Fields(_) => RightPane::Inspector,
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
             // The Activity dock's streams (#183), and the Connect (#185),
@@ -684,6 +689,7 @@ mod tests {
             PaneMsg::History(view::history::HistoryMsg::Clear),
             PaneMsg::Blob(view::blob::BlobMsg::Probe),
             PaneMsg::Media(view::media::MediaMsg::Stop),
+            PaneMsg::Fields(view::fields::FieldsMsg::Run),
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Context(view::contexts::ContextMsg::Load),
             PaneMsg::Scope(view::scope_editor::ScopeMsg::Apply),
@@ -706,19 +712,19 @@ mod tests {
             "every pane in the strip owes `PaneMsg` a variant, and vice versa"
         );
 
-        // And the two foldings are themselves claims. Four variants name the
-        // Inspector — the four tabs it replaced (#182); five name no pane at
-        // all — the two streams that moved to the dock (#183) and the
-        // Connect (#185), Selectors (#187) and Settings (#188) overlays.
-        // Without these, a further variant quietly joining either group
-        // would go unnoticed.
+        // And the two foldings are themselves claims. Five variants name the
+        // Inspector — the four tabs it replaced (#182) plus the Fields
+        // section (#223); five name no pane at all — the two streams that
+        // moved to the dock (#183) and the Connect (#185), Selectors (#187)
+        // and Settings (#188) overlays. Without these, a further variant
+        // quietly joining either group would go unnoticed.
         let folded = one_per_pane
             .iter()
             .filter(|m| m.pane() == Some(RightPane::Inspector))
             .count();
         assert_eq!(
-            folded, 4,
-            "Detail, History, Blob and Media are the Inspector's sections"
+            folded, 5,
+            "Detail, History, Blob, Media and Fields are the Inspector's sections"
         );
         let docked = one_per_pane.iter().filter(|m| m.pane().is_none()).count();
         assert_eq!(

@@ -208,6 +208,7 @@ fn inspector<'a>(
         slices: dep.slices.as_deref(),
         roster: &work.verdicts.roster,
         node_detail: &work.verdicts.node_detail,
+        fields: &sub.fields,
         base: dep.base(),
         observed: &obs.observed,
         sp,

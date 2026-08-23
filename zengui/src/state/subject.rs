@@ -65,6 +65,10 @@ sub_state! {
         /// rebuild point; everything that can change the chart calls it, and
         /// nothing else may write this field.
         pub(crate) series: Option<view::detail::SeriesData>,
+        /// The bounded field observation on the subject key (#223): run on
+        /// demand, dropped with the subject — its report is evidence about
+        /// one key's window.
+        pub(crate) fields: view::fields::FieldsState,
     }
 }
 

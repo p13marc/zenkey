@@ -104,6 +104,36 @@ pub fn validate(
     )
 }
 
+/// One bounded field-observation window on the subject key (#223).
+///
+/// The Inspector's "observe fields" button — an explicit, costed act, never
+/// ambient: `run_field` declares one subscriber on exactly this key, holds it
+/// for the window, and provably releases it. The per-path table is bounded
+/// by the engine's `DEFAULT_MAX_PATHS` and the report states its drops (O6).
+pub fn field(
+    session: zenoh::Session,
+    base: String,
+    slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    store: Arc<zenkey_fleet::decode::SchemaStore>,
+    key: String,
+    window: std::time::Duration,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let spec = zenkey_fleet::field::FieldSpec {
+                selector: key,
+                window,
+                max_paths: zenkey_fleet::field::DEFAULT_MAX_PATHS,
+            };
+            zenkey_fleet::field::run_field(&session, &base, slices.as_deref(), &store, &spec)
+                .await
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+        },
+        |out| Message::Pane(PaneMsg::Fields(crate::view::fields::FieldsMsg::Done(out))),
+    )
+}
+
 /// The declared request type's schema, flattened into the Send form's fields
 /// (§6.4 item 3).
 ///

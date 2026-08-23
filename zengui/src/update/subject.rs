@@ -159,6 +159,9 @@ fn select(
     // empty, and stop being fed when it goes away.
     sub.rate_series = crate::series::RateSampler::new();
     sub.series_leaf = None;
+    // The field observation (#223) explained the old key; its window input
+    // survives, its report does not.
+    sub.fields.forget_subject();
     sub.refresh_series(dep);
 
     let Some(session) = dep.session.clone() else {

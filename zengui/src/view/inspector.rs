@@ -81,6 +81,8 @@ pub struct InspectorData<'a> {
     pub slices: Option<&'a SliceSet>,
     pub roster: &'a NodeRoster,
     pub node_detail: &'a DetailState,
+    /// The bounded field observation on the subject key (#223).
+    pub fields: &'a super::fields::FieldsState,
     /// The deployment base, for building the wire chunks the observed-tree
     /// lookups below need.
     pub base: &'a str,
@@ -179,6 +181,10 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         }
         _ => {}
     }
+
+    // The bounded field observation (#223): follows the subject, costs only
+    // what its button says.
+    col = col.push(super::fields::section(d.fields, d.sp));
 
     col.push(history::section(HistoryData {
         key: Some(key),

@@ -882,6 +882,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             slices: Some(slices),
             roster,
             node_detail,
+            fields: Box::leak(Box::default()),
             base: "",
             observed,
         }
@@ -3088,6 +3089,7 @@ fn projection_inspector<'a>(
         slices: Some(slices),
         roster,
         node_detail,
+        fields: Box::leak(Box::default()),
         base: "",
         observed,
         sp: sp(),
@@ -3402,5 +3404,99 @@ fn the_tree_badges_the_budget_join() {
     assert!(
         ui.find("exempt: rest-variable").is_ok(),
         "a rest-variable family is exempt and says so, never a silent pass"
+    );
+}
+
+/// #223: the Fields section states its window, its coverage, and every
+/// bound's cost — and never-run is not "no fields" (O4).
+#[test]
+fn the_fields_section_states_its_window_and_its_bounds() {
+    use std::sync::Arc;
+    use zengui::view::fields::{FieldsState, section};
+    use zenkey_fleet::report::{FieldReport, FieldRow};
+
+    // Never run: the section explains its cost instead of claiming absence.
+    let state = FieldsState::default();
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        sp(),
+    ))));
+    assert!(
+        ui.find(
+            "no field observation yet — the button subscribes to exactly this \
+             key for the window, then releases; nothing ambient"
+        )
+        .is_ok(),
+        "never-run states the cost, not an empty table"
+    );
+
+    // A landed report: coverage, the path bound's refusals, and the
+    // no-registry caveat all render.
+    let report = Some(Ok(Arc::new(FieldReport {
+        selector: "v1/h-a/telemetry/sysinfo/cpu".into(),
+        window_s: 10.0,
+        samples: 40,
+        keys_seen: 1,
+        dropped: 2,
+        undocumented: 3,
+        registry_loaded: false,
+        paths: 512,
+        max_paths: 512,
+        paths_dropped: 7,
+        paths_dropped_examples: vec!["v1/h-a/telemetry/sysinfo/cpu · f99".into()],
+        rows: vec![FieldRow {
+            key: "v1/h-a/telemetry/sysinfo/cpu".into(),
+            path: "temperature_c".into(),
+            seen: 40,
+            documents: 40,
+            kinds: vec!["number".into()],
+            changes: 0,
+            last_change_s: None,
+            min: Some(21.5),
+            max: Some(21.5),
+            last: Some(21.5),
+            values: None,
+        }],
+        findings: vec![],
+    })));
+    let state = FieldsState {
+        report,
+        ..FieldsState::default()
+    };
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        sp(),
+    ))));
+    assert!(
+        ui.find(
+            "watched v1/h-a/telemetry/sysinfo/cpu for 10s: 40 samples on \
+             1 key · 2 dropped · 3 without a structural document"
+        )
+        .is_ok(),
+        "the window and its coverage are stated (O5/O6)"
+    );
+    assert!(
+        ui.find(
+            "512 paths tracked (bound 512) · 7 refused for the bound — \
+             e.g. v1/h-a/telemetry/sysinfo/cpu · f99"
+        )
+        .is_ok(),
+        "the path table's bound reports and names what it refused"
+    );
+    assert!(
+        ui.find(
+            "no registry loaded — declared ttl_s and types are unknown, so \
+             field-stuck and field-new are unjudgeable here (O4), not clean"
+        )
+        .is_ok(),
+        "no registry reads as unjudgeable, never as clean"
+    );
+    assert!(
+        ui.find(
+            "temperature_c · seen 40/40 · number · unchanged in the window \
+             · min 21.5 · max 21.5 · last 21.5"
+        )
+        .is_ok(),
+        "an unchanged path is scoped to the window, not 'never'"
     );
 }
