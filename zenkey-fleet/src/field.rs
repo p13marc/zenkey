@@ -567,7 +567,9 @@ pub async fn run_field(
     let mut obs = FieldObservation::new(spec.max_paths);
     let mut samples: u64 = 0;
     let mut dropped: u64 = 0;
-    let mut facts: BTreeMap<String, crate::facts::KeyFacts> = BTreeMap::new();
+    // Bounded (#107): one projection per distinct key, LRU past the bound,
+    // evictions counted into the report (O6).
+    let mut facts = crate::facts::FactsCache::default();
 
     loop {
         let item = tokio::select! {
@@ -579,13 +581,7 @@ pub async fn run_field(
                 samples += 1;
                 let doc = crate::decode::structural_value(&s.payload.to_bytes());
                 obs.observe(&s.key, opened.elapsed().as_secs_f64(), doc.as_ref());
-                facts.entry(s.key.clone()).or_insert_with(|| {
-                    let mut f = crate::facts::KeyFacts::project(base, &s.key);
-                    if let Some(slices) = slices {
-                        f.resolve(slices);
-                    }
-                    f
-                });
+                facts.ensure(base, &s.key, slices);
             }
             Some(StreamItem::Dropped(n)) => dropped += n,
             Some(_) => continue,
@@ -631,6 +627,7 @@ pub async fn run_field(
         max_paths: obs.max_paths(),
         paths_dropped: obs.dropped_paths(),
         paths_dropped_examples: obs.dropped_examples().to_vec(),
+        facts_evicted: facts.evicted(),
         rows,
         findings,
     })
@@ -643,11 +640,11 @@ pub(crate) async fn field_context(
     session: &Session,
     store: &SchemaStore,
     slices: Option<&SliceSet>,
-    facts: &BTreeMap<String, crate::facts::KeyFacts>,
+    facts: &crate::facts::FactsCache,
 ) -> BTreeMap<String, KeyFieldContext> {
     let mut declared_cache: BTreeMap<(String, String), Option<DeclaredPaths>> = BTreeMap::new();
     let mut ctx = BTreeMap::new();
-    for (key, f) in facts {
+    for (key, f) in facts.iter() {
         let mut c = KeyFieldContext::default();
         if let crate::facts::Registration::Registered(sf) = &f.registration {
             c.ttl_s = sf.ttl_s;
@@ -670,7 +667,7 @@ pub(crate) async fn field_context(
                 c.declared = declared_cache.get(&cache_key).cloned().flatten();
             }
         }
-        ctx.insert(key.clone(), c);
+        ctx.insert(key.to_string(), c);
     }
     ctx
 }

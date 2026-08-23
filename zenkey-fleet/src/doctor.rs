@@ -464,7 +464,9 @@ async fn observe_traffic(
     let mut samples: u64 = 0;
     let mut dropped: u64 = 0;
     let mut synthetic: u64 = 0;
-    let mut facts_cache: BTreeMap<String, crate::facts::KeyFacts> = BTreeMap::new();
+    // Bounded (#107): one projection per distinct key, LRU past the bound,
+    // evictions counted into the observation summary (O6).
+    let mut facts_cache = crate::facts::FactsCache::default();
     let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
     // Per-key aggregates: key → count (+ what was wrong, first occurrence).
     let mut unregistered: BTreeMap<String, u64> = BTreeMap::new();
@@ -498,11 +500,8 @@ async fn observe_traffic(
                 }
                 let doc = crate::decode::structural_value(&s.payload.to_bytes());
                 fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
-                let facts = facts_cache.entry(s.key.clone()).or_insert_with(|| {
-                    let mut f = crate::facts::KeyFacts::project(base, &s.key);
-                    f.resolve(slices);
-                    f
-                });
+                facts_cache.ensure(base, &s.key, Some(slices));
+                let facts = facts_cache.get(&s.key).expect("just ensured this key");
                 match &facts.registration {
                     crate::facts::Registration::Unregistered => {
                         *unregistered.entry(s.key.clone()).or_default() += 1;
@@ -584,11 +583,7 @@ async fn observe_traffic(
     // Key-population budgets (#221): the window's distinct keys, grouped
     // into `{var}` families per origin, judged against each family's
     // declared `cardinality`.
-    let budgets = crate::budget::BudgetObservation::observe(
-        base,
-        slices,
-        facts_cache.keys().map(String::as_str),
-    );
+    let budgets = crate::budget::BudgetObservation::observe(base, slices, facts_cache.keys());
 
     let window_s = window.as_secs_f64();
     let mut findings = Vec::new();
@@ -732,6 +727,7 @@ async fn observe_traffic(
             // The per-path table is bounded like every other table here, and
             // its cost is a wire fact (RFC 09 §5.1 O6).
             field_paths_dropped: fields.dropped_paths(),
+            facts_evicted: facts_cache.evicted(),
         },
     ))
 }
@@ -742,13 +738,13 @@ async fn observe_traffic(
 fn field_context_from(
     slices: &crate::registry::SliceSet,
     described: &[(String, zenkey::schema::SchemaSet)],
-    facts: &std::collections::BTreeMap<String, crate::facts::KeyFacts>,
+    facts: &crate::facts::FactsCache,
 ) -> std::collections::BTreeMap<String, crate::field::KeyFieldContext> {
     use std::collections::BTreeMap;
     let mut declared_cache: BTreeMap<(String, String), Option<crate::field::DeclaredPaths>> =
         BTreeMap::new();
     let mut ctx = BTreeMap::new();
-    for (key, f) in facts {
+    for (key, f) in facts.iter() {
         let mut c = crate::field::KeyFieldContext::default();
         if let crate::facts::Registration::Registered(sf) = &f.registration {
             c.ttl_s = sf.ttl_s;
@@ -769,7 +765,7 @@ fn field_context_from(
                 c.declared = declared.clone();
             }
         }
-        ctx.insert(key.clone(), c);
+        ctx.insert(key.to_string(), c);
     }
     ctx
 }

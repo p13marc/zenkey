@@ -1220,6 +1220,7 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
             dropped: 3,
             synthetic_marked: 2,
             field_paths_dropped: 0,
+            facts_evicted: 0,
         }),
     };
     let mut state = DoctorState::default();
@@ -3463,6 +3464,7 @@ fn the_fields_section_states_its_window_and_its_bounds() {
         max_paths: 512,
         paths_dropped: 7,
         paths_dropped_examples: vec!["v1/h-a/telemetry/sysinfo/cpu · f99".into()],
+        facts_evicted: 0,
         rows: vec![FieldRow {
             key: "v1/h-a/telemetry/sysinfo/cpu".into(),
             path: "temperature_c".into(),

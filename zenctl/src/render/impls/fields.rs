@@ -129,6 +129,15 @@ impl Render for FieldReport {
                 self.max_paths, self.paths_dropped
             )));
         }
+        if self.facts_evicted > 0 {
+            // The bounded facts cache's cost (#107, O6): declared ttl/type
+            // context covers the retained keys only.
+            notes.push(Note::bound(format!(
+                "the facts cache retired {} key projection(s) at its bound — \
+                 declared ttl/type context covers the retained keys only",
+                self.facts_evicted
+            )));
+        }
         if self.findings.is_empty() {
             notes.push(Note::summary(format!(
                 "no findings over this {:.0}s window — which scopes the claim: a \

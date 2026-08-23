@@ -697,6 +697,13 @@ pub struct ObservationSummary {
     /// consumers see an unchanged document.
     #[serde(skip_serializing_if = "u64_is_zero")]
     pub field_paths_dropped: u64,
+    /// Key projections the bounded facts cache (#107) retired during the
+    /// window — non-zero means `keys_seen`, the budget sweep and the field
+    /// context cover the retained keys only, and the report says what the
+    /// bound cost (RFC 09 §5.1 O6). Absent when zero, so earlier JSON
+    /// consumers see an unchanged document.
+    #[serde(skip_serializing_if = "u64_is_zero", default)]
+    pub facts_evicted: u64,
 }
 
 /// `skip_serializing_if` helper: a zero here is "nothing dropped", which the
@@ -1098,6 +1105,7 @@ mod tests {
                 dropped: 0,
                 synthetic_marked: 3,
                 field_paths_dropped: 0,
+                facts_evicted: 0,
             }),
             ..report
         };
@@ -1124,6 +1132,23 @@ mod tests {
         };
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["observation"]["field_paths_dropped"], 2);
+        // The facts-cache eviction count (#107) follows the same append
+        // rule: absent at zero, pinned by name when the bound cost keys.
+        assert!(
+            !json["observation"]
+                .as_object()
+                .unwrap()
+                .contains_key("facts_evicted")
+        );
+        let report = DoctorReport {
+            observation: Some(ObservationSummary {
+                facts_evicted: 5,
+                ..report.observation.unwrap()
+            }),
+            ..report
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["observation"]["facts_evicted"], 5);
     }
 
     /// Same contract again for `zenctl field --format json` (#223): the
@@ -1143,6 +1168,7 @@ mod tests {
             max_paths: 512,
             paths_dropped: 0,
             paths_dropped_examples: vec![],
+            facts_evicted: 0,
             rows: vec![FieldRow {
                 key: "v1/h-3fa9c2d41b7e/state/demo/health".into(),
                 path: "temperature_c".into(),
@@ -1468,6 +1494,11 @@ pub struct FieldReport {
     /// Up to a handful of `key · path` names among the refused.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub paths_dropped_examples: Vec<String>,
+    /// Key projections the bounded facts cache (#107) retired during the
+    /// window — non-zero means the declared-ttl/type context covers the
+    /// retained keys only (RFC 09 §5.1 O6). Absent when zero.
+    #[serde(skip_serializing_if = "u64_is_zero", default)]
+    pub facts_evicted: u64,
     pub rows: Vec<FieldRow>,
     pub findings: Vec<DoctorFinding>,
 }

@@ -345,6 +345,13 @@ impl FactsCache {
         self.entries.keys().map(String::as_str)
     }
 
+    /// Every held projection, keyed. Unordered (the map is a `HashMap`) —
+    /// callers that need determinism collect into an ordered structure, which
+    /// is what both doctor and field context builders do.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &KeyFacts)> {
+        self.entries.iter().map(|(k, e)| (k.as_str(), &e.facts))
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }

@@ -114,6 +114,9 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
         transitions.len(),
         "the summary counts what was emitted"
     );
+    // The per-key facts cache is bounded (#107) and its cost is a summary
+    // fact (O6): this fixture's key set fits, so the ledger reads zero.
+    assert_eq!(summary.facts_evicted, 0);
 }
 
 /// `origin-down` judges the roster: an origin holding no alive token is a
