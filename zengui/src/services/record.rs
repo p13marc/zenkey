@@ -1,10 +1,11 @@
-//! Capturing the live stream to a `.zrec` file (#74).
+//! The `.zrec` file, both directions (#74): capturing the live stream to
+//! one, and loading one back (#255).
 //!
-//! One function, and it is here rather than in [`super::sweep`] because it is
-//! neither a query nor a write: it is a long-lived tap on the monitor that
-//! ends when the app says so. The `Notify` is the only way to stop it — a
-//! recording that could only be ended by closing the window would lose its
-//! trailer.
+//! Here rather than in [`super::sweep`] because none of it is a query or a
+//! bus write: the capture is a long-lived tap on the monitor that ends when
+//! the app says so — the `Notify` is the only way to stop it, and a recording
+//! that could only be ended by closing the window would lose its trailer —
+//! and the load is that tap read back.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -59,6 +60,24 @@ pub fn start(
             Ok((samples, dropped, path))
         },
         |r| Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::RecordFinished(r))),
+    )
+}
+
+/// Load a `.zrec` for replay, off the update thread (#255): the parse is
+/// bounded only by the file, so on the render thread it froze the window for
+/// as long as a capture took to read, with no upper limit and no sign that
+/// anything was happening. Lands on [`ReplayMsg::Loaded`] — whose handler
+/// clears the loading state the `Open` handler raised (RFC 09 §5.1 O4:
+/// "loading" is not "empty", and the Activity replay tab says which).
+pub fn load(path: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            let parsed = std::fs::File::open(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|f| crate::replay::ReplayState::load(&path, std::io::BufReader::new(f)));
+            (path, parsed.map(crate::replay::LoadedReplay::new))
+        },
+        |(path, r)| Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::Loaded(path, r))),
     )
 }
 

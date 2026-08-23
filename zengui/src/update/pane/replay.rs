@@ -46,6 +46,11 @@ pub(crate) fn update(
             Task::none()
         }
         ReplayMsg::Open => {
+            if work.replay.replay_loading.is_some() {
+                // One parse at a time: a second click while one is in
+                // flight would race two `Loaded` landings for one pane.
+                return Task::none();
+            }
             let Some(path) = work
                 .replay
                 .replay_open
@@ -56,13 +61,25 @@ pub(crate) fn update(
             else {
                 return Task::none();
             };
-            let loaded = std::fs::File::open(&path)
-                .map_err(|e| e.to_string())
-                .and_then(|f| crate::replay::ReplayState::load(&path, std::io::BufReader::new(f)));
-            match loaded {
-                Ok(mut state) => {
-                    work.replay.replay_open = None;
-                    work.replay.replay_note = None;
+            // The parse runs off the update thread (#255) — it is bounded
+            // only by the file, and it used to freeze the window for its
+            // whole length. Until `Loaded` lands, the loading claim below
+            // is what the replay tab shows: a load in flight is not an
+            // empty capture and not a hung window (RFC 09 §5.1 O4).
+            work.replay.replay_open = None;
+            work.replay.replay_note = None;
+            work.replay.replay_loading = Some(path.clone());
+            services::record::load(path)
+        }
+        ReplayMsg::Loaded(path, result) => {
+            work.replay.replay_loading = None;
+            match result {
+                Ok(loaded) => {
+                    let Some(mut state) = loaded.take() else {
+                        // A landing can only be consumed once, and this one
+                        // already was — nothing left to show.
+                        return Task::none();
+                    };
                     // Mode honesty: the panes now show the file, from
                     // its start — nothing live bleeds through.
                     work.echo.echo.clear();
@@ -72,7 +89,12 @@ pub(crate) fn update(
                     work.replay.replay = Some(state);
                     bus::apply_tick(dep, obs, sub, tree, work, &tick);
                 }
-                Err(e) => work.replay.replay_note = Some(e),
+                Err(e) => {
+                    // The open row comes back with the path that failed, so
+                    // the note renders beside the box holding the mistake.
+                    work.replay.replay_open = Some(path);
+                    work.replay.replay_note = Some(e);
+                }
             }
             Task::none()
         }

@@ -577,19 +577,33 @@ fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
     )
     .expect("the window writes");
     assert_eq!(samples, views.len() as u64);
-    let path = std::env::temp_dir().join(format!("zengui-217-{}.zrec", std::process::id()));
-    std::fs::write(&path, &bytes).expect("temp .zrec");
     let mut app_b = test_app();
     let open = |app: &mut Zengui, m: ReplayMsg| {
         let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(m)));
     };
     open(&mut app_b, ReplayMsg::OpenToggled);
+    open(&mut app_b, ReplayMsg::PathChanged("w.zrec".to_string()));
+    open(&mut app_b, ReplayMsg::Open);
+    // The parse runs as a task now (#255): headless, we assert the loading
+    // claim `Open` raised — a load in flight is a state the UI must say
+    // (O4) — then land its result through the same message the task sends.
+    assert_eq!(
+        app_b.work.replay.replay_loading.as_deref(),
+        Some("w.zrec"),
+        "an open in flight is an explicit loading state, not a blank tab"
+    );
+    let state = crate::replay::ReplayState::load("w.zrec", bytes.as_slice()).expect("parses");
     open(
         &mut app_b,
-        ReplayMsg::PathChanged(path.display().to_string()),
+        ReplayMsg::Loaded(
+            "w.zrec".to_string(),
+            Ok(crate::replay::LoadedReplay::new(state)),
+        ),
     );
-    open(&mut app_b, ReplayMsg::Open);
-    let _ = std::fs::remove_file(&path);
+    assert!(
+        app_b.work.replay.replay_loading.is_none(),
+        "the landing clears the loading claim"
+    );
 
     // The two windows agree about their own extent before any scrubbing.
     let span_us = app_a.work.replay.replay.as_ref().expect("retained").span_us;
@@ -619,6 +633,46 @@ fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
     }
     assert_eq!(app_a.obs.keys, 5, "a, b, c, m and the foreign key");
     assert_eq!(canonical(&app_a), canonical(&app_b));
+}
+
+/// A failed `.zrec` open lands like any other async result (#255): the
+/// loading claim clears, the open row comes back holding the path that
+/// failed, and the note renders beside the box with the mistake in it —
+/// the failure has a surface, it does not vanish into a blank tab.
+#[test]
+fn a_failed_zrec_open_restores_the_row_with_its_note() {
+    use crate::view::replay::ReplayMsg;
+
+    let mut app = test_app();
+    let open = |app: &mut Zengui, m: ReplayMsg| {
+        let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(m)));
+    };
+    open(&mut app, ReplayMsg::OpenToggled);
+    open(&mut app, ReplayMsg::PathChanged("missing.zrec".to_string()));
+    open(&mut app, ReplayMsg::Open);
+    assert_eq!(
+        app.work.replay.replay_loading.as_deref(),
+        Some("missing.zrec")
+    );
+    assert!(
+        app.work.replay.replay_open.is_none(),
+        "the row yields to the loading claim while the parse runs"
+    );
+    // A second Open while one is in flight is refused, not raced.
+    open(&mut app, ReplayMsg::Open);
+
+    open(
+        &mut app,
+        ReplayMsg::Loaded("missing.zrec".to_string(), Err("no such file".to_string())),
+    );
+    assert!(app.work.replay.replay_loading.is_none());
+    assert_eq!(
+        app.work.replay.replay_open.as_deref(),
+        Some("missing.zrec"),
+        "the row comes back with the path that failed"
+    );
+    assert_eq!(app.work.replay.replay_note.as_deref(), Some("no such file"));
+    assert!(app.work.replay.replay.is_none(), "no mode was entered");
 }
 
 /// The retained window keeps replay mode's whole posture (#217): while it

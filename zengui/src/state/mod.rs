@@ -223,6 +223,10 @@ mod tests {
                 &[
                     "replay",
                     "replay_open",
+                    // A parse in flight (#255): mode state like the row and
+                    // the note — invalidated by the load landing, nothing
+                    // the bus does.
+                    "replay_loading",
                     "replay_note",
                     "recording",
                     "recorded",
@@ -258,8 +262,9 @@ mod tests {
             .map(|(g, f)| if *g == "work" { 1 } else { f.len() })
             .sum();
         // …plus `obs.retention`, the retained window's account (#217), plus
-        // the two overlay drafts (#187, #188); minus one when #184 merged
-        // `call_form` and `publish_form` into `send_form`.
-        assert_eq!(leaves, 67, "the split must place every field exactly once");
+        // the two overlay drafts (#187, #188) and the replay loading claim
+        // (#255); minus one when #184 merged `call_form` and `publish_form`
+        // into `send_form`.
+        assert_eq!(leaves, 68, "the split must place every field exactly once");
     }
 }

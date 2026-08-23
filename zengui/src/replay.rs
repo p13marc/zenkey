@@ -43,6 +43,45 @@ pub struct ReplayRow {
     pub view: Arc<SampleView>,
 }
 
+/// A parsed [`ReplayState`] in transit from the load task to its handler
+/// (#255).
+///
+/// `Message` derives `Clone` (iced's widget callbacks require it), but a
+/// replay state is a single-owner thing — cloning one would share its fold
+/// core between two scrubbing owners. So the message carries this envelope
+/// instead: `Clone`/`PartialEq` by handle, and [`take`](LoadedReplay::take)
+/// hands the state itself out exactly once.
+pub struct LoadedReplay(Arc<std::sync::Mutex<Option<ReplayState>>>);
+
+impl LoadedReplay {
+    pub fn new(state: ReplayState) -> LoadedReplay {
+        LoadedReplay(Arc::new(std::sync::Mutex::new(Some(state))))
+    }
+
+    /// The state, the first time; `None` on any later ask.
+    pub fn take(&self) -> Option<ReplayState> {
+        self.0.lock().ok().and_then(|mut s| s.take())
+    }
+}
+
+impl Clone for LoadedReplay {
+    fn clone(&self) -> LoadedReplay {
+        LoadedReplay(Arc::clone(&self.0))
+    }
+}
+
+impl PartialEq for LoadedReplay {
+    fn eq(&self, other: &LoadedReplay) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for LoadedReplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LoadedReplay(..)")
+    }
+}
+
 /// Where the rows came from — the banner dispatches on this, because the
 /// two sources owe the user different honesty (#217).
 pub enum ReplaySource {

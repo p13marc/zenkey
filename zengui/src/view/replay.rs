@@ -32,8 +32,12 @@ use crate::state::workspace::ReplayMode;
 pub enum ReplayMsg {
     /// The path input changed (the open row's text box).
     PathChanged(String),
-    /// Load the typed path.
+    /// Load the typed path (off the update thread, #255 — lands on
+    /// [`ReplayMsg::Loaded`]).
     Open,
+    /// The parse finished (#255): the path it ran against, and the loaded
+    /// state or why not. Clears the loading claim either way.
+    Loaded(String, Result<crate::replay::LoadedReplay, String>),
     /// Show or hide the open row.
     OpenToggled,
     /// Play/pause.
@@ -245,6 +249,15 @@ pub fn scrubber(state: &ReplayState) -> Element<'_, Message> {
     transport.into()
 }
 
+/// What the replay tab says while a `.zrec` parses (#255). A pinned string,
+/// like [`retained_meta`], because it is an honesty statement: a load in
+/// flight is not an empty capture and not a hung window (RFC 09 §5.1 O4 —
+/// "loading" is a state the UI must say, not leave to be inferred from
+/// blankness).
+pub fn loading_note(path: &str) -> String {
+    format!("loading {path}\u{2026} — parsing the capture, the panes still show live")
+}
+
 /// The open row: a path box, shown on demand from the location bar.
 pub fn open_row(path: &str) -> Element<'_, Message> {
     row![
@@ -325,6 +338,16 @@ mod tests {
         assert!(note.contains("9 samples"), "{note}");
         assert!(note.contains("byte budget"), "{note}");
         assert!(note.contains("narrower"), "{note}");
+    }
+
+    /// #255's O4 statement, as text: a parse in flight names its file and
+    /// says the panes are still live — stated, never inferred from a blank
+    /// tab.
+    #[test]
+    fn the_loading_note_names_the_file_and_what_the_panes_show() {
+        let note = loading_note("cap.zrec");
+        assert!(note.starts_with("loading cap.zrec"), "{note}");
+        assert!(note.contains("still show live"), "{note}");
     }
 
     /// One spelling of the budget for every surface.
