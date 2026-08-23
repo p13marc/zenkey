@@ -40,6 +40,7 @@ Commands:
   cache        Inspect or clear the slice cache that feeds shell completion
   completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
   doctor       Diff what the fleet *serves* against local registry files
+  why          Why is this key silent — the non-verdict, itemised (#214)
   help         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -89,6 +90,7 @@ Commands:
   cache        Inspect or clear the slice cache that feeds shell completion
   completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
   doctor       Diff what the fleet *serves* against local registry files
+  why          Why is this key silent — the non-verdict, itemised (#214)
   help         Print this message or the help of the given subcommand(s)
 
 Options:

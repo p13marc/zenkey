@@ -1,0 +1,100 @@
+//! The `why` ladder (#214): one line per rung, evidence indented, and the
+//! three-state answer kept three-state all the way to the terminal — a rung
+//! whose input was not fetched draws `?` and says why, never `✗` (RFC 09
+//! §5.1 O4).
+
+use zenkey_fleet::why::{RungAnswer, WhyReport, WhyVerdict, is_cause};
+
+use crate::render::{Cell, Grid, Note, Render, Row, Table};
+
+impl Render for WhyReport {
+    const FAMILY: &'static str = "why";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        // Everything except the rungs themselves — the verdict and the
+        // impairments must survive a truncated pipe — plus the cause ids, so
+        // a script need not re-derive the exit-0 policy.
+        let mut e = match serde_json::to_value(self).expect("a report serializes") {
+            serde_json::Value::Object(m) => m,
+            _ => unreachable!("a report is an object"),
+        };
+        e.remove("rungs");
+        e.insert("causes".into(), serde_json::json!(self.causes()));
+        e
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for r in &self.rungs {
+            out(Row::of("rung", r));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        let mut grid = Grid::unheaded(3);
+        for r in &self.rungs {
+            // The word carries the distinction; the mark and its colour only
+            // repeat it (#200). `?` is dim rather than red: the absence of an
+            // answer, not a milder failure.
+            let mark = match &r.answer {
+                RungAnswer::Established => Cell::styled("✓", crate::render::style::PASS),
+                RungAnswer::NotEstablished { .. } if is_cause(r.id, &r.answer) => {
+                    Cell::styled("✗", crate::render::style::ERROR)
+                }
+                RungAnswer::NotEstablished { .. } => Cell::text("·"),
+                RungAnswer::NotAsked => Cell::styled("?", crate::render::style::UNPROVEN),
+            };
+            grid.row([mark, Cell::text(r.id), Cell::text(r.question)]);
+            if let RungAnswer::NotEstablished { reason } = &r.answer {
+                grid.detail([format!("      ↳ {reason}")]);
+            }
+            grid.detail(r.evidence.iter().map(|e| format!("      {e}")));
+        }
+        t.grid(grid);
+        let (word, style) = match self.verdict {
+            WhyVerdict::Explained => ("EXPLAINED", crate::render::style::PASS),
+            // Dim, not green: the absence of an explanation, honestly held.
+            WhyVerdict::Healthy => ("NO CAUSE ESTABLISHED", crate::render::style::UNPROVEN),
+            WhyVerdict::Impaired => ("IMPAIRED", crate::render::style::ERROR),
+        };
+        t.line_styled(word, style);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = vec![Note::silence(
+            "silence is never a verdict — this ladder itemises why the question \
+             \"is it publishing?\" is unanswerable rather than answering it",
+        )];
+        for impairment in &self.impairments {
+            notes.push(
+                Note::coverage(format!("{impairment} — not asked is not answered no"))
+                    .cite("RFC 09 §5.1 O4"),
+            );
+        }
+        match self.listened_s {
+            Some(s) => notes.push(Note::coverage(format!(
+                "listened {s:.0}s on the asked key — the run's one data-plane cost"
+            ))),
+            None => notes.push(Note::next_step(
+                "pass --listen-for <SECS> to add the wire-heard rung — the only \
+                 rung that costs the data plane",
+            )),
+        }
+        let causes = self.causes();
+        notes.push(match self.verdict {
+            WhyVerdict::Explained => Note::summary(format!(
+                "an explanation was established by: {} (exit 0).",
+                causes.join(", ")
+            )),
+            WhyVerdict::Healthy => Note::summary(
+                "no cause established and everything checked looks healthy (exit 1) \
+                 — a key nothing has published yet looks exactly like this \
+                 (publishers declare lazily, RFC 08 §6.1).",
+            ),
+            WhyVerdict::Impaired => Note::summary(
+                "no cause established, and the observation was impaired (exit 2) — \
+                 the unasked rungs above are why \"healthy\" cannot be claimed.",
+            ),
+        });
+        notes
+    }
+}

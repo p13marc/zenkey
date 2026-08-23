@@ -37,6 +37,7 @@ pub mod skeleton;
 pub mod stats;
 pub mod sub;
 pub mod tree;
+pub mod why;
 pub mod write;
 
 #[cfg(feature = "decode")]
@@ -102,8 +103,8 @@ pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, de
 pub use ingest::{IngestRow, SampleRow, parse_row};
 pub use query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
-    StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_value, fleet_get,
-    fleet_get_at, fleet_get_call, fleet_registry, state_snapshot,
+    StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_stored, fetch_value,
+    fleet_get, fleet_get_at, fleet_get_call, fleet_registry, state_snapshot,
 };
 pub use record::{
     RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplayTarget, ZREC_VERSION, ZrecHeader,
@@ -127,6 +128,7 @@ pub use sub::{
     StampProvenance, StreamItem, WatchId,
 };
 pub use tree::KeyTreeSnapshot;
+pub use why::{RUNG_IDS, Rung, RungAnswer, WhyInputs, WhyReport, WhySpec, WhyVerdict, run_why};
 pub use write::{
     CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire, declare_publication,
 };

@@ -1,4 +1,4 @@
-The twelve verbs that hang directly off the root rather than off a family.
+The thirteen verbs that hang directly off the root rather than off a family.
 
 `completions` is the only one here that answers without a bus; the rest need a
 fleet to say anything, so what is pinned is their interface, which is exactly
@@ -6,7 +6,9 @@ the part a renderer refactor can break without noticing.
 
 `doctor` is here for a second reason: its `--listen-for <SECS>` and the global
 `-l, --listen <LISTEN>` are two arguments that used to be one name, and the
-help below is where that would show again (#239).
+help below is where that would show again (#239). `why` (#214) spells its
+window `--listen-for` for exactly that reason, and its help pins the exit
+vocabulary: 0 = explained, 1 = healthy, 2 = impaired.
 
 ```console
 $ zenctl get --help
@@ -938,6 +940,78 @@ Options:
 
       --runs <N>
           With --watch: stop after N runs (default: run until interrupted)
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. When given, registry-sourced commands answer offline from these files instead of the live bus
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <TIMEOUT>
+          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+```console
+$ zenctl why --help
+Why is this key silent — the non-verdict, itemised (#214).
+
+A rung ladder over facts the engine already holds: scope reach, grammar, registry declaration, the liveliness roster, declared publishers, storage coverage, a stored value, freshness, admin reachability. Every rung answers established / not-established (with its reason) / NOT ASKED — "not asked" is never rendered as "no" (RFC 09 §5.1 O4), because silence is never a verdict (RFC 05 §3.1). "No publisher declared" never reads as a bug: publishers declare lazily, on the first publication (RFC 08 §6.1). The default run costs the control plane only; --listen-for adds the one data-plane rung. Exit 0 = an explanation was established; 1 = none was, and everything checked looks healthy; 2 = the observation was impaired.
+
+Usage: zenctl why [OPTIONS] <KEY>
+
+Arguments:
+  <KEY>
+          The key (or selector) whose silence to itemise — full wire form (this session is un-namespaced, RFC 09 §5)
+
+Options:
+      --listen-for <SECS>
+          Listen passively on the key for this many seconds — the one rung that costs the data plane (RFC 09 §5.1, the v1.18 frugality note). Without it the wire-heard rung reads "not asked", never "silent" (O4)
 
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.

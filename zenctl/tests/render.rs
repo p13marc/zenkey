@@ -272,6 +272,93 @@ fn a_doctor_run_carries_its_coverage_and_its_bound_into_every_format() {
     );
 }
 
+/// The `why` ladder (#214): one line per rung, the three answer states drawn
+/// as three marks — `✓` established, `✗`/`·` not-established (a cause / a
+/// mere fact), `?` NOT ASKED — reasons and evidence indented, verdict word
+/// last. The fixture is the acceptance posture: declared, alive, never
+/// published, under the `Healthy` verdict.
+#[test]
+fn a_why_ladder_draws_one_rung_per_line_with_its_three_states() {
+    assert_data_eq!(
+        table(&fx::why_report()),
+        str![[r#"
+✓  scope-reach         does a `**` explorer scope reach this key?
+      the `v1/**` explorer scope intersects this key
+✓  key-parse           does it parse as a v1 key under the base?
+      origin h-3fa9c2d41b7e (host), class telemetry, producer sysinfo, subject disk/root/used
+✓  registry-declared   does a loaded registry slice declare it?
+      declared as disk/{mount}/used (TelemetryPoint)
+✓  origin-alive        is the origin on the liveliness roster?
+      h-3fa9c2d41b7e is on the roster with producer(s): sysinfo
+·  publisher-declared  did any session declare a matching publisher?
+      ↳ declared, alive, never published — publishers declare lazily (RFC 08 §6.1): no publisher declaration exists until the first publication, so this is not evidence of a bug
+✓  storage-coverage    is a storage configured to capture it?
+      storage latest@aabbccdd (v1/*/telemetry/**) captures every key this expression names
+·  stored-value        does a stored value answer a bounded GET?
+      ↳ none of get, @adv cache returned a value — which is silence, not proof no value exists (RFC 05 §3.1)
+?  sample-freshness    is the last known sample within its declared ttl?
+      no sample in hand to age — the stored-value rung found none
+✓  admin-answered      is the admin space answering at all?
+      1 admin root document(s) answered @/*/*
+?  wire-heard          did the key speak during a listen window?
+      not listened — the data plane costs one deliberate action (RFC 09 §5.1, v1.18 frugality); pass --listen-for <SECS> to watch the wire
+NO CAUSE ESTABLISHED
+
+"#]]
+    );
+}
+
+/// The `why` notes carry the honesty sentences into every format: the
+/// RFC 05 §3.1 framing, the exit-code meaning, and the next step for the one
+/// rung that was not asked.
+#[test]
+fn a_why_ladders_notes_state_the_non_verdict_and_the_exit() {
+    let stderr = notes(&fx::why_report());
+    assert!(stderr.contains("silence is never a verdict"), "{stderr}");
+    assert!(stderr.contains("exit 1"), "{stderr}");
+    assert!(stderr.contains("--listen-for"), "{stderr}");
+}
+
+/// The `why` ndjson: the envelope leads with the verdict and the cause ids
+/// (so a script need not re-derive the exit-0 policy), then one tagged row
+/// per rung — `not_asked` rows carrying no `reason`.
+#[test]
+fn a_why_ladders_ndjson_leads_with_the_verdict_then_tags_every_rung() {
+    let out = ndjson(&fx::why_report());
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["report"], "why");
+    assert_eq!(envelope["verdict"], "healthy");
+    assert_eq!(envelope["causes"], serde_json::json!([]));
+    assert!(
+        !envelope.as_object().unwrap().contains_key("rungs"),
+        "rungs are rows, not an envelope field"
+    );
+    let rows: Vec<serde_json::Value> = out
+        .lines()
+        .skip(1)
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 10, "one row per rung");
+    let lazy = rows
+        .iter()
+        .find(|r| r["id"] == "publisher-declared")
+        .unwrap();
+    assert_eq!(lazy["answer"], "not_established");
+    assert!(
+        lazy["reason"]
+            .as_str()
+            .unwrap()
+            .contains("publishers declare lazily"),
+        "{lazy}"
+    );
+    let unasked = rows.iter().find(|r| r["id"] == "wire-heard").unwrap();
+    assert_eq!(unasked["answer"], "not_asked");
+    assert!(
+        unasked.get("reason").is_none(),
+        "not asked has no negative answer to spell (O4)"
+    );
+}
+
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -283,6 +370,7 @@ fn no_family_emits_trailing_whitespace() {
         table(&fx::storage_list()),
         table(&fx::topic_info()),
         table(&fx::doctor_report()),
+        table(&fx::why_report()),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -1113,6 +1201,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-list",
         "topic-info",
         "topic-list",
+        "why",
     ];
 
     fn families(dir: &std::path::Path, out: &mut Vec<String>) {

@@ -169,6 +169,28 @@ pub(crate) struct GenArgs {
     pub(crate) bus: BusArgs,
 }
 
+/// The `why` verb's flags (#214) — one struct, the `GenArgs` pattern, so the
+/// ladder's whole body lives in `cmd/why.rs` (#209's rule: `run()`
+/// dispatches, it does not compute).
+#[derive(clap::Args)]
+pub(crate) struct WhyArgs {
+    /// The key (or selector) whose silence to itemise — full wire form
+    /// (this session is un-namespaced, RFC 09 §5).
+    #[arg(add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) key: String,
+    /// Listen passively on the key for this many seconds — the one rung that
+    /// costs the data plane (RFC 09 §5.1, the v1.18 frugality note). Without
+    /// it the wire-heard rung reads "not asked", never "silent" (O4).
+    //
+    // `--listen-for`, not `--listen`, for `doctor`'s reason (#239):
+    // `-l/--listen` is the endpoint flag on every verb, and clap derives the
+    // id from the *field* name, so both are spelled out.
+    #[arg(id = "listen_for", long = "listen-for", value_name = "SECS")]
+    pub(crate) listen: Option<f64>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
 #[derive(Subcommand)]
 pub(crate) enum Command {
     /// Subjects: what data exists, and what it means.
@@ -607,6 +629,20 @@ pub(crate) enum Command {
         #[command(flatten)]
         bus: BusArgs,
     },
+    /// Why is this key silent — the non-verdict, itemised (#214).
+    ///
+    /// A rung ladder over facts the engine already holds: scope reach,
+    /// grammar, registry declaration, the liveliness roster, declared
+    /// publishers, storage coverage, a stored value, freshness, admin
+    /// reachability. Every rung answers established / not-established (with
+    /// its reason) / NOT ASKED — "not asked" is never rendered as "no"
+    /// (RFC 09 §5.1 O4), because silence is never a verdict (RFC 05 §3.1).
+    /// "No publisher declared" never reads as a bug: publishers declare
+    /// lazily, on the first publication (RFC 08 §6.1). The default run costs
+    /// the control plane only; --listen-for adds the one data-plane rung.
+    /// Exit 0 = an explanation was established; 1 = none was, and everything
+    /// checked looks healthy; 2 = the observation was impaired.
+    Why(WhyArgs),
 }
 
 #[derive(Subcommand)]
