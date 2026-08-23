@@ -131,6 +131,46 @@ with one selector: `<base>/v1/*/state/*/alert/*`.
   [12-open-questions.md §4](12-open-questions.md); the bus contract is
   only immutability + unique keys.
 
+### 1.4 The framework state set (normative, v1.25)
+
+A handful of `state` subjects recur on **every** producer — this chapter
+and [06](06-identity.md) have named each of them since v1.0, but the set
+itself was never written down in one place, and the registry's `common`
+field ([08-registry.md §2](08-registry.md)) needs a definition to point
+at. This is that place. The **framework state set** is:
+
+| Subject (under `state/<producer>/`) | `common` token | Defined |
+|---|---|---|
+| `health` | `health` | the producer health document (§1.2; the identity bridge rides it, [06 §6.2](06-identity.md)) |
+| `sensor` | `sensor` | the registration document (§5) |
+| `alert/{alert_key}` | `alert` | the alert family (§1.2) |
+| `evidence/self` | `evidence_self` | the producer's own identity claim ([06 §4](06-identity.md)) |
+| `evidence/device/{device}` | `evidence_device` | an observed device's identity claim ([06 §4](06-identity.md)) |
+| `evidence/names/{ip_slug}` | `evidence_names` | a passive-DNS name observation ([06 §4](06-identity.md)) |
+
+plus the `@catalog` **service** subjects — `entity/{entity_id}`,
+`alias/{old_id}`, `pdns/{ip_slug}` (tokens `entity`, `alias`, `pdns`;
+[06 §5](06-identity.md)) — which are one service's state rather than a
+family across producers. `alive` is deliberately **not** in the set: it
+is presence, not a state subject (§5, [03-grammar.md §3](03-grammar.md)),
+and has no `common` token.
+
+Three rules make the set usable rather than decorative:
+
+- **The spelling is the table's.** A registry entry declaring
+  `common = "<token>"` MUST use the token's subject pattern exactly as
+  written above — the token is a claim that this entry *is* that
+  framework subject, and the generated framework grouping
+  ([08-registry.md §2](08-registry.md)) dispatches on it.
+- **The neutral set is closed here.** New neutral tokens arrive by
+  amendment to this table (or to 06's, for catalog subjects), like any
+  other convention vocabulary.
+- **Profile tokens extend it, in the profile chapter.** A framework
+  subject an application adds beyond this set (ZenSight's `errors`,
+  [11-zensight-profile.md §2](11-zensight-profile.md)) is declared in
+  that application's profile chapter with the same table discipline; it
+  is real vocabulary for that application and invisible to every other.
+
 ---
 
 ## 2. Placement rules

@@ -117,6 +117,19 @@ zensight/v1/@catalog/state/pdns/93-184-216-34
 zensight/v1/@catalog/@rpc/names?ip=93.184.216.34
 ```
 
+**The profile's framework extension (v1.25).** The framework block above
+is the neutral set of [04-planes.md §1.4](04-planes.md) plus one
+profile-defined token:
+
+| Subject (under `state/<producer>/`) | `common` token | What |
+|---|---|---|
+| `errors` | `errors` | the rolling error window — the last N producer-side errors as one LWW document, refreshed like any state |
+
+`errors` appears in no neutral chapter — it is ZenSight's `sensor-core`
+convention, registered per producer with `common = "errors"` under
+04 §1.4's profile-extension rule. Another adopter neither inherits it nor
+collides with it.
+
 ## 3. Mapping: every shipped family → its convention home
 
 Conceptual correspondence (shipped grammar per

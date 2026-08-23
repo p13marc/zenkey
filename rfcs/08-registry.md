@@ -222,6 +222,7 @@ Normative field table (`[[subject]]`; `[[procedure]]`/`[[media]]` analogous):
 | `unit` | string | primitive numerics only | unit of the leaf value |
 | `cardinality` | integer | yes if `path` has any `{var}` | expected key-population bound (order of magnitude); the budget review enforces |
 | `ttl_s` | integer | live `state` only | staleness TTL; publishers refresh ≤ ttl/2, consumers age out at ttl |
+| `common` | framework token | no (`state` only, v1.25) | declares this entry as a framework state subject ([04-planes.md §1.4](04-planes.md)) and drives the generated framework grouping (the enforcement crate's `AnySubject::common_state()`). Closed vocabulary: the neutral per-producer tokens `health`, `sensor`, `alert`, `evidence_self`, `evidence_device`, `evidence_names`; the `@catalog` service tokens `entity`, `alias`, `pdns`; plus any token the application's profile chapter declares (ZenSight: `errors`, [11 §2](11-zensight-profile.md)). The entry's `path` MUST be the token's canonical spelling (04 §1.4's table) with its variables |
 | `rate` | `rare` \| `low` \| `burst(n/h)` | `events` only | rate class (CI-checked, [04-planes.md §1.3](04-planes.md)) |
 | `seed` | `none` \| `latest` \| `tail(n)` | no (class default: `state` → `latest`, `telemetry` → `none`) | late-joiner entitlement ([04-planes.md §3.1](04-planes.md)); *how* it is met (storage vs cache) is deployment config |
 | `detect_s` | integer | no (live `state` only; default = `ttl_s`) | max latency to detect a missed transition; values ≪ `ttl_s` require the advanced tier ([04-planes.md §3.3](04-planes.md)) |
@@ -557,7 +558,10 @@ job and is diagnosed from the wire, not from TOML.
   (`common = "alert"`, or a leading `alert` chunk) declares
   `qos = "alert"` or stronger — the per-class default cannot see a family,
   and a silent fall to `refreshed` would drop-qualify the one family the
-  express axis exists for ([04-planes.md §3](04-planes.md), v1.23).
+  express axis exists for ([04-planes.md §3](04-planes.md), v1.23); every
+  `common = "…"` value is in the framework vocabulary, on a `state`
+  entry, with the token's canonical pattern and variables
+  ([04-planes.md §1.4](04-planes.md), v1.25).
 - CI MUST enforce, for `[[blob]]` entries (v1.8) — these are closed
   vocabularies fixed by [07 §2](07-bulk-planes.md), so every one of them is
   decidable at build time and none is a matter of taste:
