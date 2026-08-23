@@ -485,6 +485,10 @@ fn the_three_state_verdicts_keep_their_third_state() {
 /// file is compiled without the `blob` feature, which is the proof.
 #[test]
 fn a_blob_probe_reports_what_it_asked_and_what_answered() {
+    // R7: `slices_considered` is new in the report-honesty batch —
+    // BlobList's own solution, so an empty `declared_by` no longer conflates
+    // "no slice declares this tier" with "no registry was loaded" (O4).
+    // Additive and unconditional, like BlobList's.
     let empty = BlobProbeReport {
         target: "01hq9k".into(),
         tier: "artifact".into(),
@@ -494,6 +498,7 @@ fn a_blob_probe_reports_what_it_asked_and_what_answered() {
         answered: 0,
         roots: vec![],
         declared_by: vec!["artifacts".into()],
+        slices_considered: 3,
     };
     assert_eq!(
         serde_json::to_value(&empty).unwrap(),
@@ -505,9 +510,24 @@ fn a_blob_probe_reports_what_it_asked_and_what_answered() {
             "answered": 0,
             "roots": [],
             "declared_by": ["artifacts"],
+            "slices_considered": 3,
         }),
         "asked but unanswered: the selector is on record, so silence is \
          visibly a non-verdict rather than an absent question"
+    );
+    let no_registry = BlobProbeReport {
+        declared_by: vec![],
+        slices_considered: 0,
+        ..empty
+    };
+    let v = serde_json::to_value(&no_registry).unwrap();
+    assert!(
+        v.get("declared_by").is_none(),
+        "an empty capability list stays absent"
+    );
+    assert_eq!(
+        v["slices_considered"], 0,
+        "…and the zero slice count is what says it was never a verdict (R7)"
     );
 
     let holder = BlobHolder {

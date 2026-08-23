@@ -670,6 +670,29 @@ target  tree/deadbeef  (tier tree)
 "#]]
     );
     assert!(notes(&fx::blob_probe_unissued()).contains("not probed"));
+
+    // R7: a silent probe over zero registry slices names the third silence —
+    // "nobody declares this tier" was never established either.
+    let silent_no_registry = zenkey_fleet::report::BlobProbeReport {
+        holders: vec![],
+        answered: 0,
+        roots: vec![],
+        declared_by: vec![],
+        slices_considered: 0,
+        ..fx::blob_probe()
+    };
+    let n = notes(&silent_no_registry);
+    assert!(n.contains("no registry loaded"), "{n}");
+    // …while a silent probe with slices read keeps the two-silence wording:
+    // an empty declared_by over a real sweep IS "nobody declares it".
+    let silent_swept = zenkey_fleet::report::BlobProbeReport {
+        declared_by: vec![],
+        slices_considered: 11,
+        ..silent_no_registry
+    };
+    let n = notes(&silent_swept);
+    assert!(!n.contains("no registry loaded"), "{n}");
+    assert!(n.contains("no replies"), "{n}");
 }
 
 #[test]

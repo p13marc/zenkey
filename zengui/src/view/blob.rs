@@ -235,11 +235,18 @@ fn holders(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
             }
 
             if report.holders.is_empty() {
-                col = col.push(kit::empty_state(
-                    "no origin answered",
+                // R7: with no registry read there is a third silence — whether
+                // anyone even declares the tier was never established.
+                let detail = if report.declared_by.is_empty() && report.slices_considered == 0 {
                     "silence is not a verdict (RFC 05 §3.1): nobody holds this id, \
-                     nobody is up, or the timeout was too short",
-                ));
+                     nobody is up, the timeout was too short — or, with no registry \
+                     loaded, whether anyone even declares this tier is unknown \
+                     (RFC 09 §5.1 O4)"
+                } else {
+                    "silence is not a verdict (RFC 05 §3.1): nobody holds this id, \
+                     nobody is up, or the timeout was too short"
+                };
+                col = col.push(kit::empty_state("no origin answered", detail));
                 return col.into();
             }
 

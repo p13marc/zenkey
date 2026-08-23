@@ -700,6 +700,8 @@ pub fn blob_probe() -> BlobProbeReport {
         answered: 2,
         roots: vec!["60e03a78c0e0".into(), "97ac2e30aa77".into()],
         declared_by: vec!["parallax".into()],
+        // R7: the count behind `declared_by` — same numbers as blob_list().
+        slices_considered: 11,
         holders: vec![
             BlobHolder {
                 origin: ORIGIN.into(),
@@ -750,6 +752,7 @@ pub fn blob_probe_unissued() -> BlobProbeReport {
         answered: 0,
         roots: vec![],
         declared_by: vec!["parallax".into()],
+        slices_considered: 11,
         holders: vec![],
     }
 }

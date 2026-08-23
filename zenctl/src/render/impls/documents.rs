@@ -441,10 +441,21 @@ impl Render for BlobProbeReport {
         if let Some(why) = &self.not_probed {
             notes.push(Note::coverage(format!("not probed: {why}")).cite("RFC 09 §5.1 O4"));
         } else if self.holders.is_empty() {
-            notes.push(Note::silence(
-                "no replies — no origin holds this object, or none that could answer \
-                 was up",
-            ));
+            // R7: the third silence — with no registry read, "nobody declares
+            // this tier" was never established either, and the note must not
+            // leave only the two bus-side readings on the table.
+            if self.declared_by.is_empty() && self.slices_considered == 0 {
+                notes.push(Note::silence(
+                    "no replies — no origin holds this object, none that could answer \
+                     was up, or (no registry loaded) whether anyone even declares \
+                     this tier is unknown",
+                ));
+            } else {
+                notes.push(Note::silence(
+                    "no replies — no origin holds this object, or none that could answer \
+                     was up",
+                ));
+            }
         }
         if !self.declared_by.is_empty() {
             notes.push(Note::coverage(format!(

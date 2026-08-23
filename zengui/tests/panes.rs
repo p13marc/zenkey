@@ -1934,6 +1934,7 @@ mod blob {
             holders,
             roots,
             declared_by: vec![],
+            slices_considered: 0,
         }));
     }
 
@@ -2082,6 +2083,7 @@ mod blob {
             answered: 0,
             roots: vec![],
             declared_by: vec!["logs".into()],
+            slices_considered: 2,
         }));
         let mut ui = simulator::<Message, _, _>(section(&state, false, sp()));
         assert!(ui.find("not probed").is_ok());

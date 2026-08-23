@@ -904,6 +904,12 @@ pub struct BlobProbeReport {
     /// silences).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub declared_by: Vec<String>,
+    /// How many registry slices the `declared_by` sweep read —
+    /// [`BlobList`]'s own solution, applied here (review finding R7). Without
+    /// it an empty `declared_by` conflates "no slice declares this tier" with
+    /// "no registry was loaded, so nobody was asked" (RFC 09 §5.1 O4) — the
+    /// third silence, beside the two above. Additive.
+    pub slices_considered: usize,
 }
 
 /// A fetch's progress, as the caller may render it.

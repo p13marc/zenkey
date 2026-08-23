@@ -82,7 +82,7 @@ pub async fn blob_probe(
     let declared = declared_by(slices, tier);
 
     let Some(id) = target.artifact_id() else {
-        return probe_tier2(session, base, target, declared, timeout).await;
+        return probe_tier2(session, base, target, declared, slices.len(), timeout).await;
     };
 
     // The wide form: `<base>/v1/*/@blob/artifact/<id>/{have,manifest}`. The
@@ -127,6 +127,9 @@ pub async fn blob_probe(
         holders,
         roots,
         declared_by: declared,
+        // R7: BlobList's own solution — an empty `declared_by` over zero
+        // slices is "nobody was asked", not "nobody declares" (O4).
+        slices_considered: slices.len(),
     })
 }
 
@@ -139,6 +142,7 @@ async fn probe_tier2(
     base: &str,
     target: &BlobTarget,
     declared: Vec<String>,
+    slices_considered: usize,
     timeout: Duration,
 ) -> Result<BlobProbeReport> {
     let tier = target.tier();
@@ -153,6 +157,7 @@ async fn probe_tier2(
             holders,
             roots: Vec::new(),
             declared_by: declared.clone(),
+            slices_considered,
         }
     };
 

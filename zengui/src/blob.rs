@@ -251,6 +251,7 @@ mod tests {
             holders,
             roots,
             declared_by: vec![],
+            slices_considered: 0,
         }));
     }
 
@@ -264,6 +265,7 @@ mod tests {
             holders,
             roots: vec![],
             declared_by: vec![],
+            slices_considered: 0,
         })
     }
 
