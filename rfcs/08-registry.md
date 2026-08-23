@@ -765,6 +765,42 @@ procedure declarations would let the slice carry this itself, and is the
 right eventual answer; it is deliberately deferred here rather than
 designed in the abstract.
 
+**The ledger, specified (v1.25).** v1.20 wrote the MUST above and stopped
+there; its siblings (`deprecated.lock`, §3; `registry.lock`, §3.1) are
+specified to the byte, and a ledger the check reads deserves the same. The
+file is **`conditional.lock`**, in the registry directory beside
+`deprecated.lock`, and shaped like it: `#` comment lines, then one
+tab-separated line per conditional subject —
+
+```
+<producer>	<path>	<condition>
+```
+
+`<producer>` and `<path>` name the registry entry exactly as a
+`deprecated.lock` line does. `<condition>` is the gating condition as
+**free text** — `feature wireguard`, `operator enables flow export`,
+`host exposes a TPM` — prose for the human deciding whether the gate
+still exists, deliberately not a machine-readable expression: the
+field-level `feature`/`when` design stays deferred (above; zenkey #171),
+and a ledger that grew its own condition grammar would be that design
+landing by the back door.
+
+The two-direction check of the paragraph above, concretely:
+
+- a subject listed in the ledger is **exempt** from the emitted-surface
+  check — the build- or test-time check of "Checking the two halves" MUST
+  NOT require the build's mappers to cover it;
+- a ledger line whose `<producer>`/`<path>` names no registry entry is an
+  **error** — the entry was retired or renamed, and the line must follow
+  it or leave.
+
+Both directions fail the consumer's build (reference implementation:
+`zenkey-build`). Unlike `deprecated.lock`, this ledger is **not**
+append-only: a line leaves when its condition does, and a subject that
+became unconditional re-enters the emitted-surface check by deletion —
+which is the honest direction of travel, and the mechanical form of the
+decay warning above.
+
 ## 7. Payload self-description (v1.5)
 
 *The gap this closes: the registry binds one payload **type name** per
