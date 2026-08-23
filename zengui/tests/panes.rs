@@ -1137,6 +1137,7 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
             keys_seen: 7,
             dropped: 3,
             synthetic_marked: 2,
+            field_paths_dropped: 0,
         }),
     };
     let mut state = DoctorState::default();

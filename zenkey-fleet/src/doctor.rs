@@ -20,7 +20,7 @@ use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// Every check id `run_doctor` can emit — the stable vocabulary, never
 /// renamed (see the module doc).
-pub const CHECK_IDS: [&str; 18] = [
+pub const CHECK_IDS: [&str; 21] = [
     "slice-parse",
     "slice-sync",
     "introspect-coverage",
@@ -42,6 +42,11 @@ pub const CHECK_IDS: [&str; 18] = [
     // Key-population budgets (#221): declared `cardinality` vs the observed
     // expansion count, per origin. `{path...}` families are exempt and say so.
     "cardinality-over-declared",
+    // Field intelligence (#223): per-dotted-path judgement over the listen
+    // window — the failure modes per-sample validation cannot see.
+    "field-vanished",
+    "field-stuck",
+    "field-new",
 ];
 
 /// What a doctor run should cost.
@@ -371,7 +376,7 @@ pub async fn run_doctor(
         Some(window) => {
             let store = crate::decode::SchemaStore::new(base, spec.timeout);
             let (listen_findings, summary) =
-                observe_traffic(session, base, &slice_set, &store, window).await?;
+                observe_traffic(session, base, &slice_set, &store, &described, window).await?;
             findings.extend(listen_findings);
             Some(summary)
         }
@@ -433,6 +438,7 @@ async fn observe_traffic(
     base: &str,
     slices: &crate::registry::SliceSet,
     store: &crate::decode::SchemaStore,
+    described: &[(String, zenkey::schema::SchemaSet)],
     window: Duration,
 ) -> Result<(Vec<DoctorFinding>, crate::report::ObservationSummary)> {
     use std::collections::BTreeMap;
@@ -448,8 +454,13 @@ async fn observe_traffic(
     for scope in &scopes {
         monitor.watch(scope).await?;
     }
-    let deadline = tokio::time::Instant::now() + window;
+    let started = tokio::time::Instant::now();
+    let deadline = started + window;
 
+    // Field intelligence (#223): per-dotted-path stats over the structural
+    // value — sync and schema-free, so it rides every sample within the
+    // decode budget's reach and beyond.
+    let mut fields = crate::field::FieldObservation::new(crate::field::DEFAULT_MAX_PATHS);
     let mut samples: u64 = 0;
     let mut dropped: u64 = 0;
     let mut synthetic: u64 = 0;
@@ -485,6 +496,8 @@ async fn observe_traffic(
                 if let Some(crate::StampProvenance::Foreign { stamper }) = s.stamped_by {
                     *foreign_stampers.entry(stamper.to_string()).or_default() += 1;
                 }
+                let doc = crate::decode::structural_value(&s.payload.to_bytes());
+                fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
                 let facts = facts_cache.entry(s.key.clone()).or_insert_with(|| {
                     let mut f = crate::facts::KeyFacts::project(base, &s.key);
                     f.resolve(slices);
@@ -701,6 +714,12 @@ async fn observe_traffic(
 
     findings.extend(judge_cardinality(slices, &budgets, window_s));
 
+    // Field intelligence (#223): the three field-granular checks, judged
+    // with what is known per key — declared `ttl_s`/type from the resolved
+    // facts, declared paths from the describe sets the GET phase gathered.
+    let field_ctx = field_context_from(slices, described, &facts_cache);
+    findings.extend(crate::field::judge_fields(&fields, window_s, &field_ctx));
+
     Ok((
         findings,
         crate::report::ObservationSummary {
@@ -710,8 +729,49 @@ async fn observe_traffic(
             keys_seen,
             dropped,
             synthetic_marked: synthetic,
+            // The per-path table is bounded like every other table here, and
+            // its cost is a wire fact (RFC 09 §5.1 O6).
+            field_paths_dropped: fields.dropped_paths(),
         },
     ))
+}
+
+/// The per-key context the field judges need (#223), built from the listen
+/// phase's resolved facts and the already-gathered describe sets — pure, so
+/// the join is testable without a bus.
+fn field_context_from(
+    slices: &crate::registry::SliceSet,
+    described: &[(String, zenkey::schema::SchemaSet)],
+    facts: &std::collections::BTreeMap<String, crate::facts::KeyFacts>,
+) -> std::collections::BTreeMap<String, crate::field::KeyFieldContext> {
+    use std::collections::BTreeMap;
+    let mut declared_cache: BTreeMap<(String, String), Option<crate::field::DeclaredPaths>> =
+        BTreeMap::new();
+    let mut ctx = BTreeMap::new();
+    for (key, f) in facts {
+        let mut c = crate::field::KeyFieldContext::default();
+        if let crate::facts::Registration::Registered(sf) = &f.registration {
+            c.ttl_s = sf.ttl_s;
+            c.type_name = Some(sf.type_name.clone());
+            if let Some(producer) = crate::field::producer_of(f, Some(slices))
+                && !sf.type_name.is_empty()
+            {
+                let declared = declared_cache
+                    .entry((producer.clone(), sf.type_name.clone()))
+                    .or_insert_with(|| {
+                        described
+                            .iter()
+                            .find(|(name, _)| *name == producer)
+                            .and_then(|(_, set)| set.get(&sf.type_name))
+                            .and_then(|schema| schema.json_document())
+                            .and_then(crate::field::DeclaredPaths::from_json_schema)
+                    });
+                c.declared = declared.clone();
+            }
+        }
+        ctx.insert(key.clone(), c);
+    }
+    ctx
 }
 
 /// Judge one state family's samples against its declared ttl — pure, so the
@@ -882,6 +942,10 @@ mod tests {
                 "timestamp-stamped-elsewhere",
                 // #221: appended likewise.
                 "cardinality-over-declared",
+                // #223: appended likewise — the field-granular checks.
+                "field-vanished",
+                "field-stuck",
+                "field-new",
             ]
         );
     }
