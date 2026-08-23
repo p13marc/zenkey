@@ -103,6 +103,11 @@ pub async fn run(
                 obj["attachment"] = super::sample::attachment_json(a);
                 obj["attachment_bytes"] = a.len().into();
             }
+            // Present only when the reply failed to send — the doc-promised
+            // surfacing of the reply path's error (never silently dropped).
+            if let Some(e) = &view.reply_error {
+                obj["reply_error"] = serde_json::Value::String(e.clone());
+            }
             println!("{}", crate::render::Row::tagged("query", obj).into_line());
         } else {
             let body = match &view.payload {
@@ -114,6 +119,11 @@ pub async fn run(
                 None => String::new(),
             };
             println!("[{served}] {}{body}", view.selector);
+            if let Some(e) = &view.reply_error {
+                // The ask is logged either way; a reply that never left says
+                // why, or the log reads as service.
+                eprintln!("  reply failed: {e}");
+            }
         }
         if count > 0 && served >= count {
             break;

@@ -61,8 +61,19 @@ pub async fn run(rules: &[String], tick: f64, ticks: Option<u64>, args: &Bus) ->
         }
     };
     eprintln!(
-        "watchdog: {} tick(s), {} transition(s)",
-        summary.ticks, summary.transitions
+        "watchdog: {} tick(s), {} transition(s){}",
+        summary.ticks,
+        summary.transitions,
+        // The bounded facts cache's cost (RFC 09 §5.1 O6): said when paid,
+        // silent when not.
+        if summary.facts_evicted > 0 {
+            format!(
+                ", {} key projection(s) retired at the cache bound",
+                summary.facts_evicted
+            )
+        } else {
+            String::new()
+        }
     );
     Ok(())
 }

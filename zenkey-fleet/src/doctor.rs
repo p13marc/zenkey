@@ -186,21 +186,16 @@ pub async fn run_doctor(
     // The roster is what makes silence legible (RFC 05 §3.1): a producer
     // that holds an `alive` token but did not answer `introspect` is a bug,
     // because producers MUST declare their @rpc queryables *before* their
-    // token — "alive ⇒ callable" (RFC 04 §5).
+    // token — "alive ⇒ callable" (RFC 04 §5). Coverage is judged over the
+    // producers that were actually *asked*: with `--registry` covering a
+    // subset, a live producer outside the locals was never queried, and
+    // "not asked" must not render as "did not answer" (RFC 09 §5.1 O4).
     let live: usize = roster.values().map(Vec::len).sum();
-    if answered < live {
-        findings.push(finding(
-            DoctorSeverity::Error,
-            "introspect-coverage",
-            "fleet",
-            format!(
-                "{} live producer(s) did not answer introspect — alive ⇒ callable, \
-                 so this is a finding, not a boot race",
-                live - answered
-            ),
-            Some("RFC 04 §5"),
-        ));
-    }
+    findings.extend(judge_introspect_coverage(
+        &roster,
+        (!locals.is_empty()).then_some(locals),
+        answered,
+    ));
 
     // --- admin reachability ------------------------------------------
     let routers = crate::routers(session, spec.timeout)
@@ -464,7 +459,9 @@ async fn observe_traffic(
     let mut samples: u64 = 0;
     let mut dropped: u64 = 0;
     let mut synthetic: u64 = 0;
-    let mut facts_cache: BTreeMap<String, crate::facts::KeyFacts> = BTreeMap::new();
+    // Bounded (#107): one projection per distinct key, LRU past the bound,
+    // evictions counted into the observation summary (O6).
+    let mut facts_cache = crate::facts::FactsCache::default();
     let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
     // Per-key aggregates: key → count (+ what was wrong, first occurrence).
     let mut unregistered: BTreeMap<String, u64> = BTreeMap::new();
@@ -498,11 +495,8 @@ async fn observe_traffic(
                 }
                 let doc = crate::decode::structural_value(&s.payload.to_bytes());
                 fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
-                let facts = facts_cache.entry(s.key.clone()).or_insert_with(|| {
-                    let mut f = crate::facts::KeyFacts::project(base, &s.key);
-                    f.resolve(slices);
-                    f
-                });
+                facts_cache.ensure(base, &s.key, Some(slices));
+                let facts = facts_cache.get(&s.key).expect("just ensured this key");
                 match &facts.registration {
                     crate::facts::Registration::Unregistered => {
                         *unregistered.entry(s.key.clone()).or_default() += 1;
@@ -584,11 +578,7 @@ async fn observe_traffic(
     // Key-population budgets (#221): the window's distinct keys, grouped
     // into `{var}` families per origin, judged against each family's
     // declared `cardinality`.
-    let budgets = crate::budget::BudgetObservation::observe(
-        base,
-        slices,
-        facts_cache.keys().map(String::as_str),
-    );
+    let budgets = crate::budget::BudgetObservation::observe(base, slices, facts_cache.keys());
 
     let window_s = window.as_secs_f64();
     let mut findings = Vec::new();
@@ -629,27 +619,7 @@ async fn observe_traffic(
         ));
     }
     capped(&mut findings, "payload-invalid", invalid.len(), FINDING_CAP);
-    for (key, (declared, bad, total)) in qos_bad.iter().take(FINDING_CAP) {
-        if *bad > 0 {
-            findings.push(finding(
-                DoctorSeverity::Warning,
-                "qos-observed-mismatch",
-                key.clone(),
-                format!(
-                    "{bad} of {total} sample(s) did not ride the declared {declared} — this \
-                     is what actually rode: an interceptor MAY rewrite QoS, so it is a \
-                     deviation, not proof of the publisher"
-                ),
-                Some("RFC 04 §3"),
-            ));
-        }
-    }
-    capped(
-        &mut findings,
-        "qos-observed-mismatch",
-        qos_bad.values().filter(|(_, bad, _)| *bad > 0).count(),
-        FINDING_CAP.min(qos_bad.len()),
-    );
+    findings.extend(judge_qos_observed(&qos_bad));
     if !foreign_stampers.is_empty() {
         let mut named: Vec<String> = foreign_stampers
             .iter()
@@ -732,6 +702,7 @@ async fn observe_traffic(
             // The per-path table is bounded like every other table here, and
             // its cost is a wire fact (RFC 09 §5.1 O6).
             field_paths_dropped: fields.dropped_paths(),
+            facts_evicted: facts_cache.evicted(),
         },
     ))
 }
@@ -742,13 +713,13 @@ async fn observe_traffic(
 fn field_context_from(
     slices: &crate::registry::SliceSet,
     described: &[(String, zenkey::schema::SchemaSet)],
-    facts: &std::collections::BTreeMap<String, crate::facts::KeyFacts>,
+    facts: &crate::facts::FactsCache,
 ) -> std::collections::BTreeMap<String, crate::field::KeyFieldContext> {
     use std::collections::BTreeMap;
     let mut declared_cache: BTreeMap<(String, String), Option<crate::field::DeclaredPaths>> =
         BTreeMap::new();
     let mut ctx = BTreeMap::new();
-    for (key, f) in facts {
+    for (key, f) in facts.iter() {
         let mut c = crate::field::KeyFieldContext::default();
         if let crate::facts::Registration::Registered(sf) = &f.registration {
             c.ttl_s = sf.ttl_s;
@@ -769,9 +740,124 @@ fn field_context_from(
                 c.declared = declared.clone();
             }
         }
-        ctx.insert(key.clone(), c);
+        ctx.insert(key.to_string(), c);
     }
     ctx
+}
+
+/// The `qos-observed-mismatch` findings from the listen window's per-key
+/// aggregates: `key → (declared profile, mismatched, judged)` — pure, so
+/// the cap arithmetic is testable without a bus.
+///
+/// Filter **then** cap, [`judge_cardinality`]'s pattern (deep-review D4):
+/// the map holds every judged key, most of them clean, so capping the map
+/// *entries* first silently dropped violators past the first
+/// [`FINDING_CAP`] keys and made the remainder note miscount. The cap
+/// bounds the findings; the filter decides what a finding is.
+fn judge_qos_observed(
+    qos_bad: &std::collections::BTreeMap<String, (String, u64, u64)>,
+) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+    let violators: Vec<(&String, &(String, u64, u64))> =
+        qos_bad.iter().filter(|(_, (_, bad, _))| *bad > 0).collect();
+    let total_violators = violators.len();
+    for (key, (declared, bad, total)) in violators.into_iter().take(FINDING_CAP) {
+        findings.push(finding(
+            DoctorSeverity::Warning,
+            "qos-observed-mismatch",
+            key.clone(),
+            format!(
+                "{bad} of {total} sample(s) did not ride the declared {declared} — this \
+                 is what actually rode: an interceptor MAY rewrite QoS, so it is a \
+                 deviation, not proof of the publisher"
+            ),
+            Some("RFC 04 §3"),
+        ));
+    }
+    if total_violators > FINDING_CAP {
+        findings.push(finding(
+            DoctorSeverity::Info,
+            "qos-observed-mismatch",
+            "fleet",
+            format!(
+                "… and {} more key(s) with the same finding",
+                total_violators - FINDING_CAP
+            ),
+            None,
+        ));
+    }
+    findings
+}
+
+/// Judge introspect coverage — "alive ⇒ callable" (RFC 04 §5) — against the
+/// producers that were actually asked. Pure, so the O4 boundary is testable
+/// without a bus.
+///
+/// `locals: Some` is the `--registry` run: only the producers the local
+/// slices name were queried, so only those count toward coverage — a live
+/// producer whose slice a *partial* registry does not carry was never asked,
+/// and counting it as "did not answer" would be a false finding (RFC 09
+/// §5.1 O4; deep-review D3). `None` is the wildcard sweep, where every
+/// roster producer was in the fan-in. Either way the evidence states the
+/// scope it checked.
+///
+/// Matching follows the roster's own conventions: an instance suffix shares
+/// its base slice (`sysinfo-2` → `sysinfo`, RFC 03 §1.5), and a service
+/// origin's token names the service as its producer (RFC 06 §5), matched by
+/// the slice's declared origin or name.
+fn judge_introspect_coverage(
+    roster: &std::collections::BTreeMap<String, Vec<String>>,
+    locals: Option<&[RegistrySlice]>,
+    answered: usize,
+) -> Option<DoctorFinding> {
+    let live: usize = roster.values().map(Vec::len).sum();
+    let (in_scope, scope) = match locals {
+        None => (
+            live,
+            "scope: the whole roster (fleet-wide wildcard sweep)".to_string(),
+        ),
+        Some(locals) => {
+            let named = |origin: &str, producer: &str| {
+                let base_name = zenkey::grammar::Producer::parse_chunk(producer)
+                    .map(|p| p.name().to_string())
+                    .unwrap_or_else(|_| producer.to_string());
+                locals
+                    .iter()
+                    .any(|l| l.name == base_name || l.service_origin.as_deref() == Some(origin))
+            };
+            let in_scope: usize = roster
+                .iter()
+                .map(|(origin, producers)| producers.iter().filter(|p| named(origin, p)).count())
+                .sum();
+            let mut names: Vec<&str> = locals.iter().map(|l| l.name.as_str()).collect();
+            names.sort_unstable();
+            names.dedup();
+            let not_asked = live - in_scope;
+            (
+                in_scope,
+                format!(
+                    "scope: the producer(s) the local registry names ({}); {} other \
+                     live producer(s) were not asked and are not counted (O4)",
+                    names.join(", "),
+                    not_asked
+                ),
+            )
+        }
+    };
+    (answered < in_scope).then(|| {
+        finding(
+            DoctorSeverity::Error,
+            "introspect-coverage",
+            "fleet",
+            format!(
+                "{} of {} live producer(s) in scope did not answer introspect — \
+                 alive ⇒ callable, so this is a finding, not a boot race; {scope}",
+                in_scope - answered,
+                in_scope
+            ),
+            Some("RFC 04 §5"),
+        )
+    })
 }
 
 /// Judge one state family's samples against its declared ttl — pure, so the
@@ -1070,6 +1156,150 @@ mod tests {
         assert!(!is_synthetic_marker(br#"{"tool":"zenctl gen"}"#));
         assert!(!is_synthetic_marker(b"meta"));
         assert!(!is_synthetic_marker(b""));
+    }
+
+    /// Deep-review D4: the qos-observed-mismatch cap bounds *violators*, not
+    /// map entries. 30 judged keys where the first 5 (in map order) are
+    /// clean and the remaining 25 violate: every violator is counted — the
+    /// first 20 as findings, the other 5 in a remainder note that counts
+    /// correctly. Capping before filtering used to drop the violators past
+    /// the first 20 map entries and miscount the note.
+    #[test]
+    fn qos_mismatch_cap_bounds_violators_not_map_entries() {
+        let mut qos_bad: std::collections::BTreeMap<String, (String, u64, u64)> =
+            std::collections::BTreeMap::new();
+        for i in 0..30u32 {
+            // k00..k04 sort first and are clean; k05..k29 are violators.
+            let bad = if i < 5 { 0 } else { 1 };
+            qos_bad.insert(
+                format!("v1/h-a/telemetry/x/k{i:02}"),
+                ("tel".into(), bad, 10),
+            );
+        }
+        let findings = judge_qos_observed(&qos_bad);
+        let per_key: Vec<&DoctorFinding> = findings
+            .iter()
+            .filter(|f| f.severity == DoctorSeverity::Warning)
+            .collect();
+        assert_eq!(per_key.len(), FINDING_CAP, "the cap bounds the findings");
+        assert!(
+            per_key.iter().all(|f| f.evidence.starts_with("1 of 10")),
+            "only violators become findings: {findings:#?}"
+        );
+        assert!(
+            per_key.iter().any(|f| f.subject.ends_with("k24")),
+            "violators past the first {FINDING_CAP} map entries (k20..k24) are \
+             not dropped: {findings:#?}"
+        );
+        let note = findings
+            .iter()
+            .find(|f| f.severity == DoctorSeverity::Info)
+            .expect("a remainder note");
+        assert_eq!(
+            note.evidence, "… and 5 more key(s) with the same finding",
+            "the note counts violators (25 − 20), not map entries"
+        );
+
+        // At or under the cap: every violator is a finding, no note.
+        let few: std::collections::BTreeMap<String, (String, u64, u64)> = qos_bad
+            .iter()
+            .take(10)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let findings = judge_qos_observed(&few);
+        assert_eq!(findings.len(), 5, "{findings:#?}");
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.severity == DoctorSeverity::Warning)
+        );
+    }
+
+    fn roster_of(entries: &[(&str, &[&str])]) -> std::collections::BTreeMap<String, Vec<String>> {
+        entries
+            .iter()
+            .map(|(origin, producers)| {
+                (
+                    origin.to_string(),
+                    producers.iter().map(|p| p.to_string()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    fn slice_named(name: &str) -> RegistrySlice {
+        zenkey::parse_slice(&format!(
+            "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\
+             [producer]\nname = \"{name}\"\n"
+        ))
+        .expect("fixture slice parses")
+    }
+
+    /// Deep-review D3: with `--registry` covering a subset of the fleet, a
+    /// live producer the locals do not name was never asked — so it must not
+    /// count as "did not answer" (O4). One local slice, answered by its one
+    /// origin, beside an extra live producer: no finding.
+    #[test]
+    fn a_partial_registry_does_not_count_unasked_producers_against_coverage() {
+        let roster = roster_of(&[("h-aaaaaaaaaaaa", &["sysinfo", "extra"])]);
+        let locals = [slice_named("sysinfo")];
+        assert_eq!(
+            judge_introspect_coverage(&roster, Some(&locals), 1),
+            None,
+            "the un-asked producer is out of scope, not silent"
+        );
+    }
+
+    /// …and when an in-scope producer really did not answer, the finding
+    /// fires and its evidence states the scope it checked — including that
+    /// the out-of-scope producer was not counted. An instance suffix shares
+    /// its base slice (RFC 03 §1.5), so `sysinfo-2` is in scope too.
+    #[test]
+    fn introspect_coverage_evidence_states_its_scope() {
+        let roster = roster_of(&[
+            ("h-aaaaaaaaaaaa", &["sysinfo", "extra"]),
+            ("h-bbbbbbbbbbbb", &["sysinfo-2"]),
+        ]);
+        let locals = [slice_named("sysinfo")];
+        let f = judge_introspect_coverage(&roster, Some(&locals), 1).expect("a finding");
+        assert_eq!(f.check, "introspect-coverage");
+        assert!(f.evidence.contains("1 of 2"), "{}", f.evidence);
+        assert!(
+            f.evidence.contains("the local registry names (sysinfo)"),
+            "{}",
+            f.evidence
+        );
+        assert!(
+            f.evidence
+                .contains("1 other live producer(s) were not asked"),
+            "{}",
+            f.evidence
+        );
+    }
+
+    /// A service origin's token names the service as its producer (RFC 06
+    /// §5); a local slice matches it by declared origin.
+    #[test]
+    fn a_service_slice_scopes_its_origin_into_coverage() {
+        let roster = roster_of(&[("@catalog", &["catalog"]), ("h-aaaaaaaaaaaa", &["extra"])]);
+        let locals = [zenkey::parse_slice(
+            "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\
+             [service]\nname = \"catalog\"\norigin = \"@catalog\"\n",
+        )
+        .expect("service slice parses")];
+        assert_eq!(judge_introspect_coverage(&roster, Some(&locals), 1), None);
+        let f = judge_introspect_coverage(&roster, Some(&locals), 0).expect("a finding");
+        assert!(f.evidence.contains("1 of 1"), "{}", f.evidence);
+    }
+
+    /// The wildcard sweep keeps the whole roster in scope, and says so.
+    #[test]
+    fn the_wildcard_sweep_judges_the_whole_roster() {
+        let roster = roster_of(&[("h-aaaaaaaaaaaa", &["sysinfo", "extra"])]);
+        let f = judge_introspect_coverage(&roster, None, 1).expect("a finding");
+        assert!(f.evidence.contains("1 of 2"), "{}", f.evidence);
+        assert!(f.evidence.contains("whole roster"), "{}", f.evidence);
+        assert_eq!(judge_introspect_coverage(&roster, None, 2), None);
     }
 
     #[test]

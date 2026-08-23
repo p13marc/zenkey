@@ -167,6 +167,15 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
                 String::new()
             },
         )));
+        if obs.facts_evicted > 0 {
+            // The bounded facts cache's cost (#107): the key figures cover
+            // the retained keys only (O6).
+            col = col.push(kit::muted(format!(
+                "{} retired at the facts-cache bound — key figures cover the \
+                 retained keys only (O6)",
+                kit::plural(obs.facts_evicted as usize, "key projection"),
+            )));
+        }
     }
 
     let mut list = column![].spacing(sp.sm);

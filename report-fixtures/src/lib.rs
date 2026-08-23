@@ -289,6 +289,7 @@ pub fn doctor_report() -> DoctorReport {
             dropped: 3,
             synthetic_marked: 0,
             field_paths_dropped: 0,
+            facts_evicted: 0,
         }),
     }
 }
@@ -310,6 +311,7 @@ pub fn field_report() -> FieldReport {
         max_paths: 2,
         paths_dropped: 3,
         paths_dropped_examples: vec![format!("{key} · debug.trace")],
+        facts_evicted: 0,
         rows: vec![
             FieldRow {
                 key: key.clone(),

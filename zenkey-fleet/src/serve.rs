@@ -30,6 +30,14 @@ pub struct ServedQuery {
     pub encoding: Option<String>,
     /// The query's attachment, when it carried one (#117).
     pub attachment: Option<zenoh::bytes::ZBytes>,
+    /// Why the reply failed to send, when it did — `None` is a sent reply.
+    ///
+    /// Surfaced, not swallowed (deep-review D7): the ask itself is still a
+    /// fact worth logging either way, but a responder whose answers never
+    /// leave the process must say so, or its log reads as service
+    /// (RFC 05 §3.1 — silence needs attribution, on the answering side
+    /// too).
+    pub reply_error: Option<String>,
 }
 
 /// A declared queryable answering every query with one static body.
@@ -71,16 +79,18 @@ pub async fn declare_responder(
 impl MockResponder {
     /// Answer the next query and return its view, or `None` once the
     /// queryable is gone. The reply is addressed to the query's own key —
-    /// concrete where the query was concrete — and errors on the reply
-    /// path surface in the view's place at the caller's log, not silently.
+    /// concrete where the query was concrete — and an error on the reply
+    /// path rides the view ([`ServedQuery::reply_error`]) at the caller's
+    /// log, not silently.
     pub async fn next(&self) -> Option<ServedQuery> {
         let query = self.queryable.recv_async().await.ok()?;
-        let view = ServedQuery {
+        let mut view = ServedQuery {
             selector: query.selector().to_string(),
             parameters: query.parameters().to_string(),
             payload: query.payload().cloned(),
             encoding: query.encoding().map(|e| e.to_string()),
             attachment: query.attachment().cloned(),
+            reply_error: None,
         };
         let key = query.key_expr().clone();
         let reply = query.reply(key, self.reply.clone());
@@ -88,9 +98,9 @@ impl MockResponder {
             Some(e) => reply.encoding(e.as_str()),
             None => reply,
         };
-        // A failed reply is the *asker's* silence, not ours to hide — but
-        // the view still surfaces so the log records the ask.
-        let _ = reply.await;
+        // The view still surfaces on failure so the log records the ask —
+        // but a reply that never left carries its reason with it (D7).
+        view.reply_error = reply.await.err().map(|e| e.to_string());
         Some(view)
     }
 

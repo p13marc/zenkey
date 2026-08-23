@@ -124,6 +124,15 @@ impl LatencyReport {
 /// question for `doctor`, not a per-key one.
 const MAX_STAMPERS: usize = 4;
 
+/// The largest wrapping SN advance still read as forward progress (loss),
+/// half the `u32` space. Beyond it the shorter way round is *backwards* —
+/// a duplicate burst or a restarted publisher — which is counted as a
+/// reset ([`KeyStats::sn_resets`]), never as a few billion lost samples.
+/// The heuristic is the standard serial-number-arithmetic split (the RFC
+/// 1982 shape): no real publisher legitimately skips 2^31 samples between
+/// two arrivals.
+const SN_RESET_WINDOW: u32 = u32::MAX / 2;
+
 /// One key's running statistics.
 #[derive(Debug, Clone)]
 pub struct KeyStats {
@@ -133,8 +142,16 @@ pub struct KeyStats {
     pub rate_hz: f64,
     pub last_seen: Instant,
     /// Consecutive source-sequence-number gap count, when publishers attach
-    /// SourceInfo (unstable API) — loss visibility, `--loss`.
+    /// SourceInfo (unstable API) — loss visibility, `--loss`. Wrap-safe:
+    /// the SN is a `u32`, so `u32::MAX → 0` is the next sample, not a
+    /// 4-billion-sample gap (see the private `SN_RESET_WINDOW`).
     pub sn_gaps: u64,
+    /// Times the sequence numbering restarted — a backwards or absurd jump
+    /// (beyond the private `SN_RESET_WINDOW`), which is a publisher restart, not
+    /// loss. Its own number: folding a restart into `sn_gaps` would invent
+    /// millions of "lost" samples nobody sent (RFC 09 §5.1 O6 — the kinds
+    /// are never folded).
+    pub sn_resets: u64,
     /// Samples that carried **no** HLC timestamp — an observation of their
     /// own, counted separately: an unstamped sample has no latency, which
     /// is not the same as zero latency (#119).
@@ -365,10 +382,20 @@ impl StatsTable {
             s.count += 1;
             s.bytes += payload_len as u64;
             s.last_seen = now;
-            if let (Some(prev), Some(cur)) = (s.last_sn, sn)
-                && cur > prev + 1
-            {
-                s.sn_gaps += u64::from(cur - prev - 1);
+            if let (Some(prev), Some(cur)) = (s.last_sn, sn) {
+                // Wrapping arithmetic (deep-review D6): `cur > prev + 1`
+                // overflowed in debug at `prev == u32::MAX` and read the
+                // wrap `u32::MAX → 0` as a ~2^32 gap in release. The
+                // wrapping delta makes the wrap a plain `1` (no gap);
+                // `0` is a duplicate (neither loss nor reset); anything
+                // past [`SN_RESET_WINDOW`] went backwards — a restart,
+                // counted as a reset, not loss.
+                let delta = cur.wrapping_sub(prev);
+                if delta > SN_RESET_WINDOW {
+                    s.sn_resets += 1;
+                } else if delta > 1 {
+                    s.sn_gaps += u64::from(delta - 1);
+                }
             }
             s.last_sn = sn;
             match latency {
@@ -393,6 +420,7 @@ impl StatsTable {
                     rate_hz: 0.0,
                     last_seen: now,
                     sn_gaps: 0,
+                    sn_resets: 0,
                     unstamped: u64::from(latency.is_none()),
                     last_sn: sn,
                     lat: latency.into_iter().collect(),

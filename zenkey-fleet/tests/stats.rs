@@ -109,6 +109,70 @@ fn a_sequence_gap_is_counted_and_a_contiguous_run_is_not() {
     assert_eq!(t.get(quiet).unwrap().sn_gaps, 0);
 }
 
+/// Deep-review D6: the gap arithmetic survives the `u32` wrap. The old
+/// `cur > prev + 1` overflowed in debug at `u32::MAX` and read the wrap as
+/// a ~2^32 gap in release; wrapping arithmetic makes `u32::MAX → 0` the
+/// next sample, a gap across the wrap the real count, and a backwards jump
+/// a counted *reset*, never invented loss.
+#[test]
+fn sequence_arithmetic_survives_the_wrap_and_counts_resets_apart() {
+    let mut t = StatsTable::new();
+    let now = Instant::now();
+
+    // The wrap itself is contiguous: no gap, no reset, no overflow panic.
+    let key = "v1/h-a/telemetry/p/wrap";
+    t.record(key, 4, Some(u32::MAX), now, None, None);
+    t.record(key, 4, Some(0), now, None, None);
+    let s = t.get(key).unwrap();
+    assert_eq!(
+        (s.sn_gaps, s.sn_resets),
+        (0, 0),
+        "u32::MAX → 0 lost nothing"
+    );
+
+    // A gap *across* the wrap counts what was actually missed.
+    let key = "v1/h-a/telemetry/p/wrapgap";
+    t.record(key, 4, Some(u32::MAX - 1), now, None, None);
+    t.record(key, 4, Some(2), now, None, None);
+    let s = t.get(key).unwrap();
+    assert_eq!(
+        (s.sn_gaps, s.sn_resets),
+        (3, 0),
+        "u32::MAX, 0 and 1 never arrived — three gaps, not four billion"
+    );
+
+    // A backwards jump is a publisher restart: one reset, zero loss.
+    let key = "v1/h-a/telemetry/p/restart";
+    t.record(key, 4, Some(500), now, None, None);
+    t.record(key, 4, Some(0), now, None, None);
+    let s = t.get(key).unwrap();
+    assert_eq!(
+        (s.sn_gaps, s.sn_resets),
+        (0, 1),
+        "a restart is a reset, not invented loss (O6: the kinds stay apart)"
+    );
+    // …and numbering picks up cleanly from the new epoch.
+    t.record(key, 4, Some(1), now, None, None);
+    t.record(key, 4, Some(3), now, None, None);
+    let s = t.get(key).unwrap();
+    assert_eq!(
+        (s.sn_gaps, s.sn_resets),
+        (1, 1),
+        "post-reset gaps still count"
+    );
+
+    // A duplicate is neither loss nor a reset.
+    let key = "v1/h-a/telemetry/p/dup";
+    t.record(key, 4, Some(7), now, None, None);
+    t.record(key, 4, Some(7), now, None, None);
+    let s = t.get(key).unwrap();
+    assert_eq!(
+        (s.sn_gaps, s.sn_resets),
+        (0, 0),
+        "a retransmit is not a gap"
+    );
+}
+
 /// #213 at the table level: the three stamp populations are summarised apart,
 /// and an unstamped sample is counted rather than folded in as zero.
 #[test]

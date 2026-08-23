@@ -572,6 +572,14 @@ pub struct WatchdogSpec {
 pub struct WatchdogSummary {
     pub ticks: u64,
     pub transitions: u64,
+    /// Key projections the bounded facts cache retired to stay within its
+    /// bound (RFC 09 §5.1 O6). The watchdog is the run-forever mode, so its
+    /// per-key cache is a [`crate::facts::FactsCache`], not a map that grows
+    /// one entry per distinct key ever seen — and a bound must count what it
+    /// cost. An evicted key re-observed is re-projected identically (the
+    /// projection is a pure function of key and slice set), so evictions
+    /// cost recompute, never a changed verdict.
+    pub facts_evicted: u64,
 }
 
 /// How many decode attempts each key gets per tick under an
@@ -649,12 +657,16 @@ pub async fn run_watchdog(
     let mut last_sample: Vec<Option<tokio::time::Instant>> = vec![None; spec.rules.len()];
     let mut last_drop: Option<tokio::time::Instant> = None;
     let mut dropped_tick: u64 = 0;
-    let mut facts_cache: BTreeMap<String, crate::facts::KeyFacts> = BTreeMap::new();
+    // Bounded (#107): the watchdog runs until stopped, so an unbounded
+    // per-key map here is a leak on any bus with churning keys. Evictions
+    // ride the summary (O6).
+    let mut facts_cache = crate::facts::FactsCache::default();
     let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
 
     let mut summary = WatchdogSummary {
         ticks: 0,
         transitions: 0,
+        facts_evicted: 0,
     };
     let mut last_eval = started;
     let mut closed = false;
@@ -720,11 +732,8 @@ pub async fn run_watchdog(
                                 }
                             }
                             Condition::QosMismatch { .. } => {
-                                let facts = facts_cache.entry(s.key.clone()).or_insert_with(|| {
-                                    let mut f = crate::facts::KeyFacts::project(base, &s.key);
-                                    f.resolve(slices);
-                                    f
-                                });
+                                facts_cache.ensure(base, &s.key, Some(slices));
+                                let facts = facts_cache.get(&s.key).expect("just ensured this key");
                                 if let crate::facts::Registration::Registered(sf) =
                                     &facts.registration
                                     && let Some(profile) = sf.declared_qos()
@@ -824,6 +833,7 @@ pub async fn run_watchdog(
         last_eval = now;
     }
     monitor.stop();
+    summary.facts_evicted = facts_cache.evicted();
     Ok(summary)
 }
 

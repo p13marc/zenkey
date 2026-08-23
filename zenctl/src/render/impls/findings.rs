@@ -87,6 +87,14 @@ impl Render for DoctorReport {
                     obs.synthetic_marked
                 ));
             }
+            if obs.facts_evicted > 0 {
+                // The bounded facts cache (#107) retired projections: the
+                // key population figures cover the retained keys only (O6).
+                text.push_str(&format!(
+                    "; the facts cache retired {} key projection(s) at its bound",
+                    obs.facts_evicted
+                ));
+            }
             if obs.field_paths_dropped > 0 {
                 // The field-intelligence path table (#223) is bounded like
                 // everything else here, and its cost is part of the claim.
