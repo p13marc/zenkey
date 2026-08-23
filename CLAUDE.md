@@ -52,7 +52,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `dock` (`view/activity.rs`, #183) is a region holding the session's parallel
   streams — echo, the publish log, doctor verdicts, replay transport — with its
   own tab strip. The three virtualized lists (tree, timeline, echo) share
-  `kit::window`.
+  `kit::window`. **Spacing (#192)** comes off the 8pt grid in `view/tokens.rs`
+  by role (SM inside a card, MD between cards / dock padding, LG between
+  sections, XL page-level); inside a dock it is a `Spacing` resolved once per
+  dock (`panes::grid`) from the persisted density — Ctrl+Shift+D, Compact
+  default in the Locator — which multiplies the grid and row heights, never a
+  font size. Gated by `scripts/check-spacing.sh`, like the type scale (#191)
+  and the interactive seam (#193).
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus
