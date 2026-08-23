@@ -69,6 +69,9 @@ sub_state! {
         /// demand, dropped with the subject — its report is evidence about
         /// one key's window.
         pub(crate) fields: view::fields::FieldsState,
+        /// The why ladder's state for the subject key (#214): run on demand
+        /// at the frugal default, dropped with the subject.
+        pub(crate) why: view::why::WhyState,
     }
 }
 

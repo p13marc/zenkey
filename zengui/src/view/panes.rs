@@ -209,6 +209,7 @@ fn inspector<'a>(
         roster: &work.verdicts.roster,
         node_detail: &work.verdicts.node_detail,
         fields: &sub.fields,
+        why: &sub.why,
         base: dep.base(),
         observed: &obs.observed,
         sp,

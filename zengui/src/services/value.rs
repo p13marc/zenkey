@@ -134,6 +134,33 @@ pub fn field(
     )
 }
 
+/// The why ladder for one key (#214), at its frugal default.
+///
+/// Control-plane only (the RFC v1.18 frugality note): the liveliness sweep,
+/// the admin sweeps and one bounded GET on the asked key — no subscriber, so
+/// the `wire-heard` rung lands `NotAsked` and says so rather than "silent".
+pub fn why(
+    session: zenoh::Session,
+    base: String,
+    slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    key: String,
+    timeout: std::time::Duration,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let spec = zenkey_fleet::why::WhySpec {
+                timeout,
+                listen: None,
+            };
+            zenkey_fleet::why::run_why(&session, &base, &key, slices.as_deref(), &spec)
+                .await
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+        },
+        |out| Message::Pane(PaneMsg::Why(crate::view::why::WhyMsg::Done(out))),
+    )
+}
+
 /// The declared request type's schema, flattened into the Send form's fields
 /// (§6.4 item 3).
 ///

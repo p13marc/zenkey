@@ -83,6 +83,8 @@ pub struct InspectorData<'a> {
     pub node_detail: &'a DetailState,
     /// The bounded field observation on the subject key (#223).
     pub fields: &'a super::fields::FieldsState,
+    /// The why ladder's state for the subject key (#214).
+    pub why: &'a super::why::WhyState,
     /// The deployment base, for building the wire chunks the observed-tree
     /// lookups below need.
     pub base: &'a str,
@@ -182,9 +184,11 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         _ => {}
     }
 
-    // The bounded field observation (#223): follows the subject, costs only
-    // what its button says.
+    // The bounded field observation (#223) and the why ladder (#214): both
+    // follow the subject, both cost only what their buttons say — and both
+    // spend the dock's resolved grid (#192).
     col = col.push(super::fields::section(d.fields, d.sp));
+    col = col.push(super::why::section(d.why, d.sp));
 
     col.push(history::section(HistoryData {
         key: Some(key),

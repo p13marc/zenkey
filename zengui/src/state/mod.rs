@@ -166,9 +166,11 @@ mod tests {
                     "rate_series",
                     "series_leaf",
                     "series",
-                    // The field-observation window (#223): evidence about
-                    // one key, dropped when the subject moves.
+                    // The field-observation window (#223) and the why
+                    // ladder (#214): both are evidence about one key, both
+                    // dropped when the subject moves.
                     "fields",
+                    "why",
                 ],
             ),
             // The rows, how they are grouped, and what is open. `flat` and
@@ -289,7 +291,7 @@ mod tests {
         // the two overlay drafts (#187, #188) and the replay loading claim
         // (#255); minus one when #184 merged `call_form` and `publish_form`
         // into `send_form`; plus the verdict cache (#164), the budget join
-        // (#221) and the subject's fields section (#223).
-        assert_eq!(leaves, 71, "the split must place every field exactly once");
+        // (#221) and the subject's fields and why sections (#223, #214).
+        assert_eq!(leaves, 72, "the split must place every field exactly once");
     }
 }

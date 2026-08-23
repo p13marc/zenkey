@@ -883,6 +883,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             roster,
             node_detail,
             fields: Box::leak(Box::default()),
+            why: Box::leak(Box::default()),
             base: "",
             observed,
         }
@@ -3090,6 +3091,7 @@ fn projection_inspector<'a>(
         roster,
         node_detail,
         fields: Box::leak(Box::default()),
+        why: Box::leak(Box::default()),
         base: "",
         observed,
         sp: sp(),
@@ -3498,5 +3500,76 @@ fn the_fields_section_states_its_window_and_its_bounds() {
         )
         .is_ok(),
         "an unchanged path is scoped to the window, not 'never'"
+    );
+}
+
+/// #214: the Why section renders every rung, and a rung whose input was not
+/// fetched reads "not asked" — never "no". The impaired verdict refuses to
+/// claim health over questions it could not ask.
+#[test]
+fn the_why_section_renders_not_asked_and_never_no() {
+    use std::sync::Arc;
+    use zengui::view::why::{WhyState, section};
+    use zenkey_fleet::why::{RungAnswer, WhyInputs, ladder};
+
+    // Never run: the section states the frugal default's cost.
+    let state = WhyState::default();
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        sp(),
+    ))));
+    assert!(
+        ui.find(
+            "not asked yet — \"why?\" runs the silence ladder on this key: \
+             control-plane sweeps and one bounded GET, no subscriber \
+             (RFC v1.18 frugality)"
+        )
+        .is_ok(),
+    );
+
+    // A ladder over nothing fetched: rungs degrade to NotAsked, and the
+    // report is impaired rather than healthy.
+    let report = ladder(&WhyInputs {
+        base: "",
+        key: "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+        slices: None,
+        roster: None,
+        entities: None,
+        admin_answered: None,
+        storages: None,
+        stored: None,
+        wire: None,
+    });
+    assert!(
+        report
+            .rungs
+            .iter()
+            .any(|r| matches!(r.answer, RungAnswer::NotAsked)),
+        "setup: some rung must be NotAsked"
+    );
+    let state = WhyState {
+        report: Some(Ok(Arc::new(report))),
+        ..WhyState::default()
+    };
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        sp(),
+    ))));
+    assert!(
+        ui.find("not asked").is_ok(),
+        "an unfetched input renders 'not asked', never 'no'"
+    );
+    assert!(
+        ui.find("wire-heard").is_ok(),
+        "every rung renders, the unasked ones included"
+    );
+    assert!(
+        ui.find(
+            "no cause established, and the observation was impaired — \
+             \"healthy\" cannot be claimed over questions that could not be \
+             asked"
+        )
+        .is_ok(),
+        "impaired refuses to over-claim"
     );
 }
