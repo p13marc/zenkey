@@ -35,6 +35,41 @@ use crate::scope::ScopePreset;
 /// The engine roster's shape: origin → live producer names.
 pub type LiveRoster = std::collections::BTreeMap<String, Vec<String>>;
 
+/// One of the workspace's subject slots (#257).
+///
+/// The workspace holds N subjects, not one: slot 0 — [`SlotId::FOLLOW`] —
+/// is the subject the tree and the location bar drive, and every further
+/// slot is a *pin*: a subject some pane holds while the selection moves on.
+/// A pane binds to a slot; the tick feeds every slot's recorder from the one
+/// monitor stream; dropping a slot drops exactly its evidence.
+///
+/// It exists because a pin is not a second `Option<String>`: six of the
+/// subject's fields are *derived* and rebuilt when it moves, so freezing only
+/// the identity would leave a pane titled with one key while its chart,
+/// history count and latency all described another — the O4 failure #181
+/// removed from the fetch path (`Fetched::Superseded`), reintroduced one
+/// panel over. A slot carries the whole derivation.
+///
+/// Ids are minted by the subject state and never reused within a session, so
+/// a message for a dropped slot misses rather than landing in a stranger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlotId(u32);
+
+impl SlotId {
+    /// Slot 0: the subject the tree drives. Always present, never dropped.
+    pub const FOLLOW: SlotId = SlotId(0);
+
+    /// Mint the id after this one — the subject state's counter speaks this.
+    pub(crate) fn next(self) -> SlotId {
+        SlotId(self.0 + 1)
+    }
+
+    /// Whether this is a pinned slot rather than the follow slot.
+    pub fn is_pin(self) -> bool {
+        self != SlotId::FOLLOW
+    }
+}
+
 /// Everything the bus, the monitor or a fleet sweep answered (#176).
 ///
 /// None of these is user intent: each is a `Task::perform` or a `link.rs`
@@ -152,15 +187,16 @@ pub enum DeploymentMsg {
 /// It also proposed `Key(PathId)`, and `PathId` is #251's path arena, which
 /// #177 deliberately deferred. A `String` until then.
 ///
-/// ## What one subject does not yet do
+/// ## One subject *per slot* since #257
 ///
-/// Pinning — a pane detaching to hold a *second* subject — is #257. It is not
-/// a second `Option<String>`: six fields of the subject sub-state are derived
-/// from the subject and rebuilt when it moves, so a real pin needs a second
-/// recorder fed by the same tick, a second fetch and a second decode. Freezing only the identity
-/// would leave a pane titled with one key while its chart described another,
-/// which is the failure [`Fetched::Superseded`](crate::view::detail::Fetched)
-/// exists to prevent, one panel over.
+/// Pinning — a pane detaching to hold a *second* subject — landed as the
+/// slot model: the workspace holds N subjects ([`SlotId`]), each with its own
+/// recorder, fetch and decode, all fed by the one tick. "Pinned" is nothing
+/// special — it is "bound to a slot the tree does not drive" — which is what
+/// keeps a torn-off Inspector window from being titled with one key while
+/// its chart describes another (the failure
+/// [`Fetched::Superseded`](crate::view::detail::Fetched) exists to prevent,
+/// one panel over).
 ///
 /// ## Why `Prefix` is separate from `Key`, which the issue did not have
 ///
@@ -397,21 +433,23 @@ pub enum PaneMsg {
     Nodes(crate::view::nodes::NodesMsg),
     /// Doctor panel interactions (issue #71).
     Doctor(crate::view::doctor::DoctorMsg),
-    /// Inspector history-section interactions (issue #63).
-    History(crate::view::history::HistoryMsg),
+    /// Inspector history-section interactions (issue #63). The [`SlotId`]
+    /// says *which* Inspector (#257): the docked one speaks the follow slot,
+    /// a pinned window its own — same message, routed at the update seam.
+    History(SlotId, crate::view::history::HistoryMsg),
     /// Inspector detail-section interactions (issue #64): which numeric leaf
-    /// is plotted.
-    Detail(crate::view::detail::DetailMsg),
+    /// is plotted, on the slot the emitting surface is bound to (#257).
+    Detail(SlotId, crate::view::detail::DetailMsg),
     /// Inspector `@blob`-section interactions (issue #68).
     Blob(crate::view::blob::BlobMsg),
     /// Inspector `@media`-section interactions (issue #69).
     Media(crate::view::media::MediaMsg),
     /// Inspector Fields-section interactions (#223): the bounded field
-    /// observation window on the subject key.
-    Fields(crate::view::fields::FieldsMsg),
+    /// observation window on the slot's key (#257).
+    Fields(SlotId, crate::view::fields::FieldsMsg),
     /// Inspector Why-section interactions (#214): the why ladder on the
-    /// subject key.
-    Why(crate::view::why::WhyMsg),
+    /// slot's key (#257).
+    Why(SlotId, crate::view::why::WhyMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
     /// Echo pane interactions (issue #72, echo v2).
@@ -440,12 +478,12 @@ impl PaneMsg {
     pub fn pane(&self) -> Option<RightPane> {
         Some(match self {
             PaneMsg::Send(_) => RightPane::Send,
-            PaneMsg::Detail(_)
-            | PaneMsg::History(_)
+            PaneMsg::Detail(..)
+            | PaneMsg::History(..)
             | PaneMsg::Blob(_)
             | PaneMsg::Media(_)
-            | PaneMsg::Fields(_)
-            | PaneMsg::Why(_) => RightPane::Inspector,
+            | PaneMsg::Fields(..)
+            | PaneMsg::Why(..) => RightPane::Inspector,
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
             // The Activity dock's streams (#183), and the Connect (#185),
@@ -687,14 +725,17 @@ mod tests {
         let one_per_pane = [
             PaneMsg::Echo(view::echo::EchoMsg::Clear),
             PaneMsg::Send(view::send::SendMsg::Submit),
-            PaneMsg::Detail(view::detail::DetailMsg::LeafSelected(String::new())),
+            PaneMsg::Detail(
+                SlotId::FOLLOW,
+                view::detail::DetailMsg::LeafSelected(String::new()),
+            ),
             PaneMsg::Nodes(view::nodes::NodesMsg::ShowInTree(String::new())),
             PaneMsg::Doctor(view::doctor::DoctorMsg::Run),
-            PaneMsg::History(view::history::HistoryMsg::Clear),
+            PaneMsg::History(SlotId::FOLLOW, view::history::HistoryMsg::Clear),
             PaneMsg::Blob(view::blob::BlobMsg::Probe),
             PaneMsg::Media(view::media::MediaMsg::Stop),
-            PaneMsg::Fields(view::fields::FieldsMsg::Run),
-            PaneMsg::Why(view::why::WhyMsg::Run),
+            PaneMsg::Fields(SlotId::FOLLOW, view::fields::FieldsMsg::Run),
+            PaneMsg::Why(SlotId::FOLLOW, view::why::WhyMsg::Run),
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Context(view::contexts::ContextMsg::Load),
             PaneMsg::Scope(view::scope_editor::ScopeMsg::Apply),

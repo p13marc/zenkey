@@ -25,7 +25,7 @@ use iced::widget::pane_grid;
 use iced::window;
 
 use crate::echo::EchoRing;
-use crate::message::{ActivityTab, RightPane};
+use crate::message::{ActivityTab, RightPane, SlotId};
 use crate::prefs::{DockRole, LayoutAxis, LayoutNode, TornDock};
 use crate::view;
 
@@ -176,6 +176,11 @@ impl DockGrid {
 pub(crate) struct TornWindow {
     pub(crate) id: window::Id,
     pub(crate) role: DockRole,
+    /// Which subject slot this window renders (#257). [`SlotId::FOLLOW`] for
+    /// every role but a pinned Inspector: tearing the Inspector off pins the
+    /// current subject into a slot of its own, and this is the binding. A
+    /// pinned window is session-only — see [`WindowSet::capture`].
+    pub(crate) slot: SlotId,
     /// The window's last reported size, for the persisted layout.
     pub(crate) size: Option<(f32, f32)>,
     /// The window's last reported position (`None` where the platform never
@@ -227,6 +232,23 @@ impl WindowSet {
         self.torn.iter().find(|t| t.role == role).map(|t| t.id)
     }
 
+    /// The window that is this role's *home* — bound to the follow slot —
+    /// if it has one (#186, #257). A pinned Inspector window is not the
+    /// Inspector's home: it holds its own subject, so the reveal paths must
+    /// not point the selection at it. Every role but the Inspector only ever
+    /// has follow-bound windows, so for them this is [`WindowSet::window_of`].
+    pub(crate) fn follow_window_of(&self, role: DockRole) -> Option<window::Id> {
+        self.torn
+            .iter()
+            .find(|t| t.role == role && t.slot == SlotId::FOLLOW)
+            .map(|t| t.id)
+    }
+
+    /// The slot the given window renders, when it is a torn dock's (#257).
+    pub(crate) fn slot_of(&self, id: window::Id) -> Option<SlotId> {
+        self.torn.iter().find(|t| t.id == id).map(|t| t.slot)
+    }
+
     pub(crate) fn classify(&self, id: window::Id) -> ClosedWindow {
         if self.main == Some(id) {
             ClosedWindow::Main
@@ -243,9 +265,17 @@ impl WindowSet {
 
     /// The serializable half, for the named layout — the same capture shape
     /// as [`DockGrid::capture`].
+    ///
+    /// Pinned windows are deliberately left out (#257): a pin's worth is its
+    /// evidence — the recorder, the fetch, the decode — and evidence is
+    /// session-lived. Persisting the identity alone would restore a window
+    /// titled with a key and empty of everything about it, which is the
+    /// identity-only freeze the issue rejects, one restart over. What
+    /// persists is the follow-bound torn state, exactly as #186 left it.
     pub(crate) fn capture(&self) -> Vec<TornDock> {
         self.torn
             .iter()
+            .filter(|t| t.slot == SlotId::FOLLOW)
             .map(|t| TornDock {
                 role: t.role,
                 size: t.size,
@@ -499,6 +529,7 @@ mod grid_tests {
         set.torn.push(TornWindow {
             id: torn,
             role: DockRole::Activity,
+            slot: SlotId::FOLLOW,
             size: None,
             position: None,
         });

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use iced::widget::{Column, row};
 use zenkey_fleet::report::{DoctorSeverity, FieldReport};
 
-use crate::message::{Message, PaneMsg};
+use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::Series;
 use crate::view::kit;
 use crate::view::theme::{SeriesTone, SeverityTone};
@@ -102,8 +102,8 @@ impl FieldsState {
     }
 }
 
-fn msg(m: FieldsMsg) -> Message {
-    Message::Pane(PaneMsg::Fields(m))
+fn msg(slot: SlotId, m: FieldsMsg) -> Message {
+    Message::Pane(PaneMsg::Fields(slot, m))
 }
 
 fn severity_tone(severity: DoctorSeverity) -> SeverityTone {
@@ -114,9 +114,11 @@ fn severity_tone(severity: DoctorSeverity) -> SeverityTone {
     }
 }
 
-/// The Fields section for a key subject. `sp` is the dock's resolved
-/// spacing grid (#192): a section spends it, it never resolves one.
-pub fn section(state: &FieldsState, sp: Spacing) -> Column<'_, Message> {
+/// The Fields section for a key subject. `slot` is the subject slot the
+/// surface is bound to (#257) — the messages carry it home. `sp` is the
+/// dock's resolved spacing grid (#192): a section spends it, it never
+/// resolves one.
+pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Message> {
     let mut col = Column::new().spacing(sp.sm);
 
     let run_label = if state.in_flight {
@@ -126,10 +128,10 @@ pub fn section(state: &FieldsState, sp: Spacing) -> Column<'_, Message> {
     };
     let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
-        run = run.on_press(msg(FieldsMsg::Run));
+        run = run.on_press(msg(slot, FieldsMsg::Run));
     }
     let window = kit::input("window (s)", &state.window)
-        .on_input(|t| msg(FieldsMsg::WindowChanged(t)))
+        .on_input(move |t| msg(slot, FieldsMsg::WindowChanged(t)))
         .size(font::CAPTION)
         .width(iced::Length::Fixed(80.0));
     col = col.push(kit::section_header(

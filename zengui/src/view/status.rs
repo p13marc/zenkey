@@ -136,7 +136,7 @@ impl<'a> Status<'a> {
             facts_evicted: dep.facts.evicted(),
             watched: &obs.watched,
             skeleton: dep.skeleton.as_deref().map(|s| s.coverage),
-            fetched: sub.fetched.as_ref(),
+            fetched: sub.follow().fetched.as_ref(),
             totals: obs.totals,
             slices: &dep.slice_source,
             seeding: obs.seeding.len(),

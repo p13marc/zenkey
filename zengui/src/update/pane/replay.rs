@@ -81,10 +81,14 @@ pub(crate) fn update(
                         return Task::none();
                     };
                     // Mode honesty: the panes now show the file, from
-                    // its start — nothing live bleeds through.
+                    // its start — nothing live bleeds through. Every slot's
+                    // recorder was of the live world (#257): the pins' drop
+                    // with the follow slot's.
                     work.echo.echo.clear();
-                    sub.history = None;
-                    sub.refresh_series(dep);
+                    for slot in sub.slots.iter_mut() {
+                        slot.history = None;
+                        slot.refresh_series(dep);
+                    }
                     let tick = state.scrub_to(0);
                     work.replay.replay = Some(state);
                     bus::apply_tick(dep, obs, sub, tree, work, &tick);
@@ -263,9 +267,12 @@ pub(crate) fn enter_retained(
         crate::replay::ReplayState::from_retained(window, Arc::clone(&obs.watched), taken);
     // Mode honesty, exactly as opening a file: the panes now show the
     // window — nothing live bleeds through, and the scrollback restarts.
+    // Every slot's recorder was of the live world (#257).
     work.echo.echo.clear();
-    sub.history = None;
-    sub.refresh_series(dep);
+    for slot in sub.slots.iter_mut() {
+        slot.history = None;
+        slot.refresh_series(dep);
+    }
     let tick = state.scrub_to(state.span_us);
     work.replay.replay = Some(state);
     bus::apply_tick(dep, obs, sub, tree, work, &tick);

@@ -182,7 +182,7 @@ pub(crate) fn bar<'a>(
             base_options: &dep.base_options,
             scope: dep.settings.scope,
             observing: !obs.scope_watches.is_empty(),
-            subject: &sub.current,
+            subject: &sub.follow().current,
         }),
         controls(chrome, dep, work),
     ]

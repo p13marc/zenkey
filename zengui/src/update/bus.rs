@@ -39,19 +39,22 @@ pub(crate) fn apply_tick(
         &obs.watched,
         &tick.watched,
     );
-    // Per tick, not per frame: one bounded lock for one key's latency
-    // summary (#119). None when unselected, unobserved, or unstamped.
-    sub.selected_latency = match (sub.current.key(), &obs.monitor) {
-        // During replay the live monitor's stats are about a different
-        // world than the panes are showing — consulting them would put
-        // live latency under file data (O4 in miniature).
-        (Some(_), Some(_)) if work.replay.replay.is_some() => None,
-        (Some(key), Some(monitor)) => monitor
-            .core()
-            .with_stats(|s| s.get(key).map(|k| (k.latency(), k.unstamped)))
-            .and_then(|(lat, unstamped)| lat.map(|l| (l, unstamped))),
-        _ => None,
-    };
+    // Per tick, not per frame: one bounded lock per *slot* for its key's
+    // latency summary (#119, #257 — the fan-out is bounded by the pin
+    // count, not the bus). None when unselected, unobserved, or unstamped.
+    for slot in sub.slots.iter_mut() {
+        slot.selected_latency = match (slot.current.key(), &obs.monitor) {
+            // During replay the live monitor's stats are about a different
+            // world than the panes are showing — consulting them would put
+            // live latency under file data (O4 in miniature).
+            (Some(_), Some(_)) if work.replay.replay.is_some() => None,
+            (Some(key), Some(monitor)) => monitor
+                .core()
+                .with_stats(|s| s.get(key).map(|k| (k.latency(), k.unstamped)))
+                .and_then(|(lat, unstamped)| lat.map(|l| (l, unstamped))),
+            _ => None,
+        };
+    }
     // The retained window's account of itself (#217), once per tick like
     // the latency lookup above — and only on *live* ticks: a replayed tick
     // must not read the live ring under file (or window) data, and the
@@ -82,22 +85,29 @@ pub(crate) fn apply_tick(
     // outran us vs. our own batch cap chose to coalesce.
     work.echo.echo.record_lag(tick.lagged);
     work.echo.echo.record_coalesced(tick.coalesced);
-    // One point per tick for the selected key's rate (issue #64). The
+    // One point per tick per slot key's rate (issue #64). The
     // count is what says whether the EWMA moved: it never decays on its
     // own, so an unchanged count is silence, and the sampler records a gap
     // rather than a confident flat line.
-    if let Some(rec) = sub.history.as_ref() {
-        let chunks: Vec<&str> = rec.key.split('/').collect();
-        let observed = tick.tree.node(&chunks).map(|n| (n.count, n.rate_hz));
-        sub.rate_series.tick(observed);
+    for slot in sub.slots.iter_mut() {
+        if let Some(rec) = slot.history.as_ref() {
+            let chunks: Vec<&str> = rec.key.split('/').collect();
+            let observed = tick.tree.node(&chunks).map(|n| (n.count, n.rate_hz));
+            slot.rate_series.tick(observed);
+        }
     }
     for sample in &tick.samples {
         ensure_facts(dep, &sample.key);
         work.echo.echo.push(sample);
         // History is per-key and costs no subscription of its own: these
         // samples are already flowing for an existing watch (issue #63).
-        if let Some(rec) = sub.history.as_mut() {
-            rec.observe(sample);
+        // Every slot's recorder is fed from this one stream (#257) — a pin
+        // costs a bounded ring, never a second subscription — and each
+        // recorder keeps only its own key's samples.
+        for slot in sub.slots.iter_mut() {
+            if let Some(rec) = slot.history.as_mut() {
+                rec.observe(sample);
+            }
         }
         // The media viewer's frames arrive on the exact key it watches
         // (issue #69) — same pipeline, no extra subscription.
@@ -120,9 +130,11 @@ pub(crate) fn apply_tick(
         .roster
         .refresh(&tick.tree, dep.base(), &tick.watched, now);
     // The chart's inputs all advanced above — the history ring, the rate
-    // sampler, the facts behind the unit. Rebuilt once here rather than
-    // once per frame (#178).
-    sub.refresh_series(dep);
+    // sampler, the facts behind the unit. Rebuilt once per slot here rather
+    // than once per frame (#178, #257).
+    for slot in sub.slots.iter_mut() {
+        slot.refresh_series(dep);
+    }
     // The tree's shape survived, so point it at this tick's numbers
     // instead of walking 50,000 nodes to move eight of them (#177).
     // `retarget` refuses a pivot, which is the other half of the

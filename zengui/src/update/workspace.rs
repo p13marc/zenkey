@@ -25,6 +25,18 @@
 //! is torn, every reveal path that would `restore` it into the grid focuses
 //! its window instead: a dock rendered in the grid *and* in a window would
 //! be one region making two claims.
+//!
+//! ## A torn Inspector is a pin (#257)
+//!
+//! Tearing off the Inspector pins the current subject into a slot of its
+//! own; the window binds to that slot and the docked Inspector goes on
+//! following the selection. The one-home rule then reads on the *claim*, not
+//! the role: a pinned window and the docked Inspector are two different
+//! claims, so the reveal paths ask
+//! [`follow_window_of`](crate::state::workspace::WindowSet::follow_window_of)
+//! — only a follow-bound window is the role's home. Closing a pinned window
+//! unpins:
+//! its slot, its recorder and its derived evidence drop with it.
 
 use iced::Task;
 use iced::widget::pane_grid;
@@ -111,7 +123,7 @@ pub(crate) fn update(
             // nothing. A *torn* dock is not invisible — it is elsewhere, so
             // the reveal is its window, focused (#186).
             work.activity.tab = tab;
-            if let Some(id) = work.windows.window_of(DockRole::Activity) {
+            if let Some(id) = work.windows.follow_window_of(DockRole::Activity) {
                 return iced::window::gain_focus(id);
             }
             if work.docks.restore(DockRole::Activity) {
@@ -130,8 +142,11 @@ pub(crate) fn update(
             };
             // A role has one home (#186): while its window is torn off,
             // restoring it into the grid would show the dock twice, so the
-            // reveal is that window.
-            if let Some(id) = work.windows.window_of(role) {
+            // reveal is that window. A *pinned* Inspector window is not that
+            // home (#257) — it holds its own subject, so revealing the
+            // selection there would show the wrong thing; the docked
+            // Inspector is restored instead.
+            if let Some(id) = work.windows.follow_window_of(role) {
                 return iced::window::gain_focus(id);
             }
             if work.docks.restore(role) {
@@ -165,8 +180,10 @@ pub(crate) fn update(
             // click (`DockFocused`), and a closed dock comes back first —
             // `restore` anchors it at its home edge and only that layout
             // change is persisted; moving the focus alone owes no write.
-            // A torn dock's focus is its window's (#186).
-            if let Some(id) = work.windows.window_of(role) {
+            // A torn dock's focus is its window's (#186) — its *follow*
+            // window's: a pinned Inspector is not where the selection lives
+            // (#257).
+            if let Some(id) = work.windows.follow_window_of(role) {
                 return iced::window::gain_focus(id);
             }
             if work.docks.restore(role) {
@@ -178,8 +195,10 @@ pub(crate) fn update(
         WorkspaceMsg::DockToggled(role) => {
             // While a dock is torn off, the strip's toggle points at its
             // window (#186): restoring the role into the grid beside its
-            // open window would render one region twice.
-            if let Some(id) = work.windows.window_of(role) {
+            // open window would render one region twice. A pinned Inspector
+            // window shows a *different* region (#257), so the toggle works
+            // the grid dock as usual beside it.
+            if let Some(id) = work.windows.follow_window_of(role) {
                 return iced::window::gain_focus(id);
             }
             if work.docks.toggle(role) {
@@ -207,11 +226,28 @@ pub(crate) fn update(
             if work.docks.is_open(role) && !work.docks.close(role) {
                 return Task::none();
             }
+            // Tearing off the Inspector IS the pin (#257): the window keeps
+            // the current subject as a slot of its own — recorder, fetch and
+            // decode carried whole, evolving independently — while the
+            // docked Inspector goes on following the selection. With no
+            // subject there is nothing to pin, so the window follows instead
+            // (exactly a boot-restored torn Inspector, whose pin — being
+            // session evidence — did not survive the restart). The window
+            // itself states which it is, which is where a pin's failure
+            // shows: on the surface the ⇱ produced.
+            let slot = if role == DockRole::Inspector
+                && sub.follow().current != crate::message::Subject::None
+            {
+                sub.pin_current(dep)
+            } else {
+                crate::message::SlotId::FOLLOW
+            };
             let (id, open) =
                 iced::window::open(crate::state::workspace::torn_settings(role, None, None));
             work.windows.torn.push(crate::state::workspace::TornWindow {
                 id,
                 role,
+                slot,
                 size: None,
                 position: None,
             });
@@ -239,8 +275,15 @@ pub(crate) fn update(
                 }
                 // A torn-off dock's window: the dock comes home. Restore,
                 // not toggle — the role cannot be in the grid while torn,
-                // and its home edge is where #180 put it.
+                // and its home edge is where #180 put it. A pinned window's
+                // close is also the unpin (#257): its slot goes with it —
+                // exactly its recorder and its derived evidence, nothing of
+                // the follow slot's — and the restore no-ops if the docked
+                // Inspector is already open beside it.
                 ClosedWindow::Torn(role) => {
+                    if let Some(slot) = work.windows.slot_of(id) {
+                        sub.unpin(slot);
+                    }
                     work.windows.remove(id);
                     work.docks.restore(role);
                     persist_custom(chrome, work);
@@ -258,13 +301,17 @@ pub(crate) fn update(
             // All three presets are fully docked, and the new grid already
             // holds every role — a torn window left open would show a dock
             // the grid also shows. Forgotten first, so each window's close
-            // event classifies as `Unknown` and cannot double-restore.
+            // event classifies as `Unknown` and cannot double-restore. The
+            // pins go with their windows (#257): forgetting the window here
+            // means its close event can no longer unpin, so the slots are
+            // dropped now, not left recording for nobody.
             let redocked: Vec<Task<Message>> = work
                 .windows
                 .torn
                 .drain(..)
                 .map(|t| iced::window::close(t.id))
                 .collect();
+            sub.drop_pins();
             // A preset is a stance, not just a shape (epic #172): Watch
             // opens on the echo stream, Diagnose pivots the locator by
             // origin and opens on the doctor.
