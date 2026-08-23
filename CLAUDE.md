@@ -9,8 +9,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 - `rfcs/` — the **normative RFC set** (v1.18, ratified 2026-08-15). Chapters 02–10
   and 13 (observer conformance, v1.24) are application-neutral; chapter 11 is the
   ZenSight reference profile. Wire-contract
-  changes go through these RFCs, amendment-style (see the changelog in
-  `rfcs/00-index.md` — each amendment records what changed *and* what deliberately
+  changes go through these RFCs, amendment-style (see `rfcs/CHANGELOG.md` —
+  each amendment records what changed *and* what deliberately
   did not).
 - `zenkey/` — the **runtime crate** (MIT, crates.io): typed key grammar, origin
   minting, `AppProfile`, slugs, QoS profiles, registry slices. Keys are built
@@ -172,7 +172,7 @@ never a verdict. Scouting is opt-in.
 - Conventional commits (`feat:`/`fix:`/`docs:`/`chore:`), scope by crate
   (`feat(zenctl): …`, `docs(rfc): …`).
 - RFC text is normative: when code and RFC disagree, either fix the code or amend
-  the RFC explicitly (with a changelog entry in `00-index.md`) — never silently
+  the RFC explicitly (with a changelog entry in `rfcs/CHANGELOG.md`) — never silently
   drift. Doc comments cite RFC sections (`RFC 03 §2`) and issues; keep that habit.
 - Publishing (crates.io, LIB CRATES ONLY): `zenkey` → `zenkey-build` →
   `zenkey-fleet` (in that order; zenkey-build version-locks to zenkey 0.x).
