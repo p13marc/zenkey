@@ -20,3 +20,18 @@ $ zenctl gen --fault truncate
 Error: --fault injects deliberately non-conforming traffic — that is consumer-robustness testing on a bus you own, not a default. Pass --i-know to mean it.
 
 ```
+
+The second guard: the target must be **typed on this command line**. This
+corpus exports `ZENCTL_BASE=` — a bus the shell was pointed at, exactly the
+ambient default the guard exists to refuse — and clap folds that env var into
+`--base` before the derive struct exists, so the guard asks the `ArgMatches`
+where the value came from (`ValueSource::CommandLine`, the
+`refuse_foreign_format` seam) rather than whether one exists. Before that fix,
+this invocation sailed past the guard on the strength of an exported variable.
+
+```console
+$ zenctl gen --fault truncate --i-know
+? 1
+Error: --fault refuses the ambient target: type the bus on this command line with --base or an endpoint (--connect/--listen/--zenoh-config). An exported ZENCTL_BASE or a named context is whatever bus the shell was pointed at, and faults must never land there by default.
+
+```

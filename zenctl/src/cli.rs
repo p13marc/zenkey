@@ -1147,7 +1147,13 @@ pub(crate) enum TopicCmd {
         /// With --from: delete rows on keys that are not state-shaped are
         /// refused (and counted) unless this is passed — RFC 04 §1.2
         /// (v1.12) prices the off-state tombstone even in a pipe.
-        #[arg(long = "i-know")]
+        // `conflicts_with = "key"`, not `requires = "from"`: on the
+        // positional-key shape there is nothing this flag can acknowledge,
+        // and an accepted-but-inert flag is a mis-shape — refused at exit 2
+        // like every other one here. (`requires` cannot say it: clap resolves
+        // the requirement through the `source` group, so the positional key
+        // satisfies it.)
+        #[arg(long = "i-know", conflicts_with = "key")]
         i_know: bool,
         /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
         /// Defaults to the subject's declared profile when the key refines
@@ -1485,4 +1491,66 @@ pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
                 .exit();
         }
     }
+}
+/// `--format json` promises **one document**, and a stream never has one —
+/// `topic echo`, `serve`, `watchdog` and `doctor --watch` emit rows as they
+/// happen (bounded runs included: `echo --count N` is N rows, not a
+/// document). Answering ndjson to a request for json is a silent lie, so a
+/// *typed* `--format json` on a streaming verb is refused here, at the same
+/// edge and on the same terms as [`refuse_foreign_format`]: an exported
+/// `ZENCTL_FORMAT=json` is a preference, not a request, and falls back to
+/// rows exactly as `auto` piped would.
+pub(crate) fn refuse_stream_json(matches: &clap::ArgMatches) {
+    use clap::CommandFactory as _;
+    use clap::parser::ValueSource;
+
+    let mut m = matches;
+    let mut path: Vec<&str> = Vec::new();
+    while let Some((name, sub)) = m.subcommand() {
+        path.push(name);
+        m = sub;
+    }
+    let streaming = match path.as_slice() {
+        ["topic", "echo"] | ["serve"] | ["watchdog"] => true,
+        // Plain `doctor` is a report and renders json honestly; only the
+        // transition stream cannot.
+        ["doctor"] => m.get_flag("watch"),
+        _ => false,
+    };
+    if !streaming {
+        return;
+    }
+    let typed_json = m.ids().any(|i| i.as_str() == "format")
+        && m.value_source("format") == Some(ValueSource::CommandLine)
+        && m.get_one::<crate::render::Format>("format") == Some(&crate::render::Format::Json);
+    if typed_json {
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::InvalidValue,
+                "`--format json` promises one document, and a stream has no single \
+                 document to emit — use `--format ndjson` (one object per line).",
+            )
+            .exit();
+    }
+}
+
+/// Whether the bus target was **typed on this command line** — the fact
+/// `gen --fault`'s second guard needs (#163). By the time the derive struct
+/// exists, clap has folded `ZENCTL_BASE` into `--base`, and an exported env
+/// var is exactly "whatever bus the shell was pointed at": the ambient
+/// default the guard refuses. Same `ValueSource` question as
+/// [`refuse_foreign_format`], asked at the same edge.
+pub(crate) fn gen_target_typed(matches: &clap::ArgMatches) -> bool {
+    use clap::parser::ValueSource;
+
+    let mut m = matches;
+    while let Some((_, sub)) = m.subcommand() {
+        m = sub;
+    }
+    ["base", "connect", "listen", "zenoh_config"]
+        .into_iter()
+        .any(|id| {
+            m.ids().any(|i| i.as_str() == id)
+                && m.value_source(id) == Some(ValueSource::CommandLine)
+        })
 }

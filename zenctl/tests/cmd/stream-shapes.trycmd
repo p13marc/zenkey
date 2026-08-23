@@ -1,0 +1,60 @@
+Two mis-shapes on the streaming surface, both refused at clap's exit 2 rather
+than silently reinterpreted.
+
+**`--format json` on a stream.** `json` promises one document; `topic echo`,
+`serve`, `watchdog` and `doctor --watch` emit rows as they happen and have no
+single document to emit — bounded runs included (`echo --count 3` is three
+rows, not a document). Answering ndjson to a typed request for json was a
+silent lie; an *exported* `ZENCTL_FORMAT=json` stays a preference and falls
+back to rows, on `refuse_foreign_format`'s terms.
+
+```console
+$ zenctl topic echo --format json
+? 2
+error: `--format json` promises one document, and a stream has no single document to emit — use `--format ndjson` (one object per line).
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
+
+$ zenctl serve k v --format json
+? 2
+error: `--format json` promises one document, and a stream has no single document to emit — use `--format ndjson` (one object per line).
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
+
+$ zenctl watchdog --rule dropped --format json
+? 2
+error: `--format json` promises one document, and a stream has no single document to emit — use `--format ndjson` (one object per line).
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
+
+$ zenctl doctor --watch --format json
+? 2
+error: `--format json` promises one document, and a stream has no single document to emit — use `--format ndjson` (one object per line).
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
+
+```
+
+**`topic pub --i-know` on the positional-key shape.** The flag prices delete
+rows in a `--from ndjson` pipe; beside a positional key there is nothing it can
+acknowledge, and an accepted-but-inert flag is a mis-shape — the same exit-2
+pattern as the verb's own `<--from|KEY>` group.
+
+```console
+$ zenctl topic pub v1/x body --i-know
+? 2
+error: the argument '[KEY]' cannot be used with '--i-know'
+
+Usage: zenctl topic pub --base <BASE> <--from <FROM>|KEY> <BODY>
+
+For more information, try '--help'.
+
+```

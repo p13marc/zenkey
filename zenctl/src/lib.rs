@@ -46,11 +46,18 @@ use crate::cli::{
 /// arrived, which is what lets `--format` conflict with a foreign document
 /// format only when both were typed — an exported `ZENCTL_FORMAT` is a
 /// preference, not a request (#243, and `cli::refuse_foreign_format`).
-fn parse() -> Cli {
+/// The second value is [`cli::gen_target_typed`]'s answer, carried out of the
+/// one scope that still holds the `ArgMatches`: whether the bus target was
+/// typed on this command line, which is the half of `gen --fault`'s double
+/// guard the derive struct cannot answer (#163 — clap folds `ZENCTL_BASE` in
+/// before the struct exists).
+fn parse() -> (Cli, bool) {
     let matches = <Cli as clap::CommandFactory>::command().get_matches();
     cli::refuse_foreign_format(&matches);
+    cli::refuse_stream_json(&matches);
+    let target_typed = cli::gen_target_typed(&matches);
     match <Cli as clap::FromArgMatches>::from_arg_matches(&matches) {
-        Ok(cli) => cli,
+        Ok(cli) => (cli, target_typed),
         // Unreachable in practice: `get_matches` has already exited on a bad
         // command line, so anything left is a derive bug, and printing it the
         // way clap prints its own errors is the most useful thing to do.
@@ -81,7 +88,7 @@ pub async fn run() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let cli = parse();
+    let (cli, gen_target_typed) = parse();
     match cli.command {
         Command::Topic(TopicCmd::List {
             producer,
@@ -537,7 +544,7 @@ pub async fn run() -> Result<()> {
             let bus = cmd::asked("cutover", Bus::resolve(&bus));
             cmd::cutover::run(&old_root, window, &bus).await
         }
-        Command::Gen(args) => cmd::generate::run(args).await,
+        Command::Gen(args) => cmd::generate::run(args, gen_target_typed).await,
         Command::Expect {
             selector,
             within,
