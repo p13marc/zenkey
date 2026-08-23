@@ -24,7 +24,7 @@ use zenkey::qos::QosProfile;
 use zenoh::Session;
 
 use crate::registry::SliceSet;
-use crate::report::{CallAnswer, CallError, CallReport};
+use crate::report::{CallAnswer, CallError, CallOutcome, CallReport};
 
 /// A declared publisher with its QoS profile applied — the only publish path.
 pub struct Publication {
@@ -412,42 +412,30 @@ pub async fn call(
                     }
                     None => (None, None),
                 };
-                match &a.answer {
+                let outcome = match &a.answer {
                     crate::query::Answer::Value(bytes) => {
                         let bytes = bytes.to_bytes();
                         match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            Ok(v) => CallAnswer {
-                                origin: a.origin.clone(),
-                                ok: true,
+                            Ok(v) => CallOutcome::Ok {
                                 value: Some(v),
                                 text: None,
-                                attachment: att,
-                                attachment_bytes: att_bytes,
-                                error: None,
                             },
-                            Err(_) => CallAnswer {
-                                origin: a.origin.clone(),
-                                ok: true,
+                            Err(_) => CallOutcome::Ok {
                                 value: None,
                                 text: Some(String::from_utf8_lossy(&bytes).to_string()),
-                                attachment: att,
-                                attachment_bytes: att_bytes,
-                                error: None,
                             },
                         }
                     }
-                    crate::query::Answer::Error { name, message } => CallAnswer {
-                        origin: a.origin.clone(),
-                        ok: false,
-                        value: None,
-                        text: None,
-                        attachment: att,
-                        attachment_bytes: att_bytes,
-                        error: Some(CallError {
-                            name: name.clone(),
-                            message: message.clone(),
-                        }),
-                    },
+                    crate::query::Answer::Error { name, message } => CallOutcome::Err(CallError {
+                        name: name.clone(),
+                        message: message.clone(),
+                    }),
+                };
+                CallAnswer {
+                    origin: a.origin.clone(),
+                    outcome,
+                    attachment: att,
+                    attachment_bytes: att_bytes,
                 }
             })
             .collect(),

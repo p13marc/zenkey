@@ -427,12 +427,12 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
             timeout_s: 5,
             answers: vec![CallAnswer {
                 origin: "h-aaaaaaaaaaaa".into(),
-                ok: true,
-                value: None,
-                text: Some("slice".into()),
+                outcome: zenkey_fleet::report::CallOutcome::Ok {
+                    value: None,
+                    text: Some("slice".into()),
+                },
                 attachment: Some(serde_json::json!({"who": "me"})),
                 attachment_bytes: Some(12),
-                error: None,
             }],
         })),
         ..SendForm::default()

@@ -800,24 +800,21 @@ pub fn call_report() -> CallReport {
         answers: vec![
             CallAnswer {
                 origin: ORIGIN.into(),
-                ok: true,
-                value: Some(serde_json::json!({"count": 214})),
-                text: None,
+                outcome: CallOutcome::Ok {
+                    value: Some(serde_json::json!({"count": 214})),
+                    text: None,
+                },
                 attachment: Some(serde_json::json!({"trace": "abc123"})),
                 attachment_bytes: Some(18),
-                error: None,
             },
             CallAnswer {
                 origin: "h-bbbbbbbbbbbb".into(),
-                ok: false,
-                value: None,
-                text: None,
-                attachment: None,
-                attachment_bytes: None,
-                error: Some(CallError {
+                outcome: CallOutcome::Err(CallError {
                     name: "unsupported".into(),
                     message: "this build serves no `processes`".into(),
                 }),
+                attachment: None,
+                attachment_bytes: None,
             },
         ],
     }

@@ -12,17 +12,27 @@
 //! `Format::Table` — which is what `table(&self, t: &mut Table)` taking a sink
 //! is for.
 
-use zenkey_fleet::report::{CallAnswer, CallReport, ProbeReport};
+use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport, ProbeReport};
 
 use crate::render::{Cell, Grid, Note, Render, Row, Table};
 
 /// One answer, as a person reads it: the value if it is JSON-shaped, the raw
 /// text otherwise, and the reply's attachment when the wire carried one.
 pub fn answer_text(a: &CallAnswer) -> String {
-    let mut out = match (&a.value, &a.text) {
-        (Some(v), _) => serde_json::to_string_pretty(v).unwrap_or_default(),
-        (None, Some(t)) => t.clone(),
-        _ => String::new(),
+    let mut out = match &a.outcome {
+        CallOutcome::Ok {
+            value: Some(v),
+            text: _,
+        } => serde_json::to_string_pretty(v).unwrap_or_default(),
+        CallOutcome::Ok {
+            value: None,
+            text: Some(t),
+        } => t.clone(),
+        CallOutcome::Ok {
+            value: None,
+            text: None,
+        } => String::new(),
+        CallOutcome::Err(e) => format!("✗ {} — {}", e.name, e.message),
     };
     // Present only when the wire carried one — absent, never
     // null-when-unknown (#117, #126). This clause is the one `probe` lost.
@@ -54,14 +64,20 @@ impl Render for CallReport {
     fn table(&self, t: &mut Table) {
         let mut g = Grid::unheaded(1);
         for a in &self.answers {
-            if a.ok {
-                g.row([Cell::text(format!("{}:", a.origin))]);
-                g.detail(answer_text(a).lines().map(str::to_string));
-            } else if let Some(e) = &a.error {
-                g.row([Cell::text(format!(
-                    "{}: ✗ {} — {}",
-                    a.origin, e.name, e.message
-                ))]);
+            // The outcome is an enum, so this match is total: the old
+            // `{ok, error: Option}` shape could spell an error-less failure,
+            // and this renderer silently dropped exactly that row.
+            match &a.outcome {
+                CallOutcome::Ok { .. } => {
+                    g.row([Cell::text(format!("{}:", a.origin))]);
+                    g.detail(answer_text(a).lines().map(str::to_string));
+                }
+                CallOutcome::Err(e) => {
+                    g.row([Cell::text(format!(
+                        "{}: ✗ {} — {}",
+                        a.origin, e.name, e.message
+                    ))]);
+                }
             }
         }
         t.grid(g);

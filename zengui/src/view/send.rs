@@ -880,13 +880,25 @@ fn outcome_view<'a>(
                 )));
             }
             for a in &report.answers {
-                let line = match (&a.error, &a.value, &a.text) {
-                    (Some(err), _, _) => format!("{}  ✗ {}: {}", a.origin, err.name, err.message),
-                    (None, Some(v), _) => format!("{}  ✓ {}", a.origin, v),
-                    (None, None, Some(t)) => {
+                // A total match on the outcome enum: the old flat shape
+                // could spell ok:false with no error, and that row fell
+                // through every arm.
+                use zenkey_fleet::report::CallOutcome;
+                let line = match &a.outcome {
+                    CallOutcome::Err(err) => {
+                        format!("{}  ✗ {}: {}", a.origin, err.name, err.message)
+                    }
+                    CallOutcome::Ok { value: Some(v), .. } => format!("{}  ✓ {}", a.origin, v),
+                    CallOutcome::Ok {
+                        value: None,
+                        text: Some(t),
+                    } => {
                         format!("{}  ✓ {}", a.origin, t.lines().next().unwrap_or(""))
                     }
-                    _ => format!("{}  ✓", a.origin),
+                    CallOutcome::Ok {
+                        value: None,
+                        text: None,
+                    } => format!("{}  ✓", a.origin),
                 };
                 col = col.push(kit::mono(line));
                 // A reply attachment is a wire fact, shown where the reply
