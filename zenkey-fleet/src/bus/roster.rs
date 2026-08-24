@@ -69,10 +69,14 @@ pub struct RosterWatch {
     events: crate::EventStream,
     roster: BTreeMap<String, Vec<String>>,
     base: String,
+    /// What [`next_change`](RosterWatch::next_change) has applied to `roster`
+    /// but not yet reported — the accumulator, held here rather than in the
+    /// poll's stack frame so a dropped poll cannot take it with it (#328).
+    pending: RosterChange,
 }
 
 /// What one coalesced burst of liveliness events did to the roster.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RosterChange {
     /// At least one producer appeared. The caller may want to re-read the
     /// registry — a new producer can serve a slice nothing has asked for yet —
@@ -119,6 +123,7 @@ impl RosterWatch {
             events,
             roster,
             base: fleet.base().to_string(),
+            pending: RosterChange::default(),
         })
     }
 
@@ -134,43 +139,24 @@ impl RosterWatch {
     ///
     /// Never returns for a burst that changed nothing, so a caller can render
     /// on every `Some` without checking.
+    ///
+    /// **Cancel-safe** (#328): [`apply_token`] mutates `self.roster` the moment
+    /// an event lands, and a burst is drained across an await — so a poll
+    /// dropped in that await had already changed the roster. The accumulator
+    /// therefore lives in `self.pending`, not on the stack: dropping this
+    /// future loses the *wait*, never the change, and the next call reports it
+    /// before it listens for anything further. A roster that moved while its
+    /// caller was told nothing is a hole in the window with no later event
+    /// bound to correct it — RFC 13 §3 O6, where an unreported gap converts
+    /// "I missed it" into "it never happened".
     pub async fn next_change(&mut self) -> Option<RosterChange> {
-        loop {
-            let mut change = RosterChange {
-                node_up: false,
-                node_down: false,
-            };
-            let mut pending = self.events.recv().await;
-            loop {
-                match pending {
-                    None => return None,
-                    Some(crate::StreamItem::Dropped(_)) => {}
-                    Some(crate::StreamItem::Event(ev)) => {
-                        let transition = match ev {
-                            crate::FleetEvent::NodeUp(key) => Some((key, true)),
-                            crate::FleetEvent::NodeDown(key) => Some((key, false)),
-                            _ => None,
-                        };
-                        if let Some((key, up)) = transition
-                            && apply_token(&mut self.roster, &self.base, &key, up)
-                        {
-                            if up {
-                                change.node_up = true;
-                            } else {
-                                change.node_down = true;
-                            }
-                        }
-                    }
-                }
-                match tokio::time::timeout(BURST_QUIET, self.events.recv()).await {
-                    Ok(next) => pending = next,
-                    Err(_) => break,
-                }
-            }
-            if change.node_up || change.node_down {
-                return Some(change);
-            }
-        }
+        next_change_in(
+            &mut self.events,
+            &mut self.roster,
+            &self.base,
+            &mut self.pending,
+        )
+        .await
     }
 
     /// Release the subscriptions.
@@ -181,6 +167,62 @@ impl RosterWatch {
     pub async fn stop(self) {
         self.monitor.stop();
     }
+}
+
+/// [`RosterWatch::next_change`]'s body over its four moving parts — the seam
+/// that lets the cancellation contract be tested against a bare
+/// [`crate::MonitorCore`], with no session and no bus.
+async fn next_change_in(
+    events: &mut crate::EventStream,
+    roster: &mut BTreeMap<String, Vec<String>>,
+    base: &str,
+    pending: &mut RosterChange,
+) -> Option<RosterChange> {
+    loop {
+        // First, whatever a previous — possibly cancelled — poll applied.
+        if let Some(change) = take_change(pending) {
+            return Some(change);
+        }
+        let mut item = events.recv().await;
+        loop {
+            match item {
+                // Closed: report this burst's work, and say so on the next
+                // call — the roster moved, and a closing stream is no reason
+                // to drop the last thing it said.
+                None => return take_change(pending),
+                Some(crate::StreamItem::Dropped(_)) => {}
+                Some(crate::StreamItem::Event(ev)) => {
+                    let transition = match ev {
+                        crate::FleetEvent::NodeUp(key) => Some((key, true)),
+                        crate::FleetEvent::NodeDown(key) => Some((key, false)),
+                        _ => None,
+                    };
+                    if let Some((key, up)) = transition
+                        && apply_token(roster, base, &key, up)
+                    {
+                        if up {
+                            pending.node_up = true;
+                        } else {
+                            pending.node_down = true;
+                        }
+                    }
+                }
+            }
+            match tokio::time::timeout(BURST_QUIET, events.recv()).await {
+                Ok(next) => item = next,
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+/// Take the accumulated change, leaving nothing behind. `None` when the burst
+/// moved nothing — a caller renders on every `Some` without checking.
+fn take_change(pending: &mut RosterChange) -> Option<RosterChange> {
+    if !pending.node_up && !pending.node_down {
+        return None;
+    }
+    Some(std::mem::take(pending))
 }
 
 /// Who a liveliness token names: `(origin, producer)`, or `None` when the key
@@ -654,6 +696,53 @@ mod tests {
         assert_eq!(
             joined.nodes[1].producer, "sysinfo-2",
             "the row keeps the suffix"
+        );
+    }
+
+    /// The cancellation contract (#328): a poll dropped mid-burst has already
+    /// mutated the roster, so the change it accumulated must survive the drop.
+    /// It used to live in the poll's stack frame and die with it — the roster
+    /// moved, the caller was told nothing, and the display stayed stale until
+    /// some unrelated later token happened to arrive.
+    ///
+    /// Time is paused, so the two windows below are exact rather than raced:
+    /// the token is ready immediately, and the poll is then dropped inside
+    /// [`BURST_QUIET`] while it waits for the rest of the burst.
+    #[tokio::test(start_paused = true)]
+    async fn a_cancelled_poll_keeps_the_change_it_already_applied() {
+        let core = crate::MonitorCore::new(16);
+        let mut events = core.events();
+        let mut roster: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut pending = RosterChange::default();
+
+        core.node_event("v1/h-3fa9c2d41b7e/state/sysinfo/alive".into(), true);
+
+        let cancelled = tokio::time::timeout(
+            BURST_QUIET / 2,
+            next_change_in(&mut events, &mut roster, "", &mut pending),
+        )
+        .await;
+        assert!(cancelled.is_err(), "the poll is still draining the burst");
+        assert!(
+            roster.contains_key("h-3fa9c2d41b7e"),
+            "the token was applied before the drop"
+        );
+
+        // …and the next call reports it, without waiting on the bus for a
+        // second event that may never come.
+        let change = tokio::time::timeout(
+            BURST_QUIET / 2,
+            next_change_in(&mut events, &mut roster, "", &mut pending),
+        )
+        .await
+        .expect("the applied change is reported, not waited on")
+        .expect("a change, not a closed stream");
+        assert_eq!(
+            change,
+            RosterChange {
+                node_up: true,
+                node_down: false
+            }
         );
     }
 }

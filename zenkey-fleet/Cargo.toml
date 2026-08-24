@@ -50,7 +50,9 @@ tracing = { workspace = true }
 # *is* (#201). A dev-dependency cycle — this crate depends on that one — which
 # cargo permits because the dev edge is cut when building the dependency.
 zenkey-report-fixtures = { workspace = true }
-tokio = { workspace = true }
+# `test-util` on top of the workspace features: paused time, so a cancellation
+# window is an exact number of milliseconds rather than a race (#328).
+tokio = { workspace = true, features = ["test-util"] }
 # The engine's hot paths are benched here rather than in a consumer, because
 # they are the paths BOTH explorers run per sample and per tick (#44).
 criterion = { workspace = true }
