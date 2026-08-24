@@ -463,8 +463,8 @@ impl Drop for Publications {
 /// re-derive what O3 says must not be re-derived; `i_know` is the operator
 /// saying the off-state cleanup is meant. Publishers are declared once per
 /// distinct key and undeclared on **every** way out — a failed row tears the
-/// set down before it reports, and a cancelled replay hands it to
-/// [`Publications`]'s drop guard (#327).
+/// set down before it reports, and a cancelled replay hands the remainder to
+/// a drop guard that undeclares them properly (#327).
 pub async fn replay<R: BufRead>(
     reader: &mut ZrecReader<R>,
     spec: ReplaySpec<'_>,

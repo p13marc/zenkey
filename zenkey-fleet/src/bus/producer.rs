@@ -282,6 +282,15 @@ impl LiveProducer {
     /// Retire in the reverse of bring-up: retract `alive` **first** (the
     /// roster must stop attributing silence to a producer that is going
     /// away), then undeclare the queryables, acknowledged.
+    ///
+    /// A token that will not retract still bails before the queryables, and
+    /// deliberately: "alive ⇒ callable" (RFC 04 §5) is a claim that outlives
+    /// this call, and stripping callability while presence stands would
+    /// manufacture exactly the false negative the ordering exists to prevent.
+    /// The queryables themselves drain (#346): one that will not undeclare
+    /// must not leave the rest declared, and the failures are reported
+    /// together — the `bus::teardown` shape, shared with the monitor and the
+    /// replayer.
     pub async fn retire(mut self) -> Result<()> {
         if let Some(token) = self.token.take() {
             token
@@ -289,9 +298,11 @@ impl LiveProducer {
                 .await
                 .map_err(|e| anyhow!("retract alive token: {e}"))?;
         }
-        for r in self.responders.drain(..) {
-            r.undeclare().await?;
-        }
-        Ok(())
+        let declared: Vec<(String, Responder)> = self
+            .responders
+            .drain(..)
+            .map(|r| (r.key.clone(), r))
+            .collect();
+        crate::bus::teardown::drain_undeclare(declared, Responder::undeclare).await
     }
 }

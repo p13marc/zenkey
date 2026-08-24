@@ -525,9 +525,21 @@ impl RepeatingRegistry {
         Ok(slices)
     }
 
+    /// Undeclare both queriers, acknowledged.
+    ///
+    /// Both, even when the first refuses (#346): the wildcard sweep and the
+    /// `@catalog` ask are one teardown, and leaving the second declared
+    /// because the first would not go is the half-torn-down state
+    /// [`crate::Monitor::shutdown`] refuses. Failures are reported together.
     pub async fn undeclare(self) -> Result<()> {
-        self.wildcard.undeclare().await?;
-        self.catalog.undeclare().await
+        crate::bus::teardown::drain_undeclare(
+            vec![
+                ("wildcard introspect".to_string(), self.wildcard),
+                ("@catalog introspect".to_string(), self.catalog),
+            ],
+            RepeatingQuery::undeclare,
+        )
+        .await
     }
 }
 

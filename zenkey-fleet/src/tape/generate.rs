@@ -504,7 +504,14 @@ pub async fn serve_describe(
     for (responder, (body, encoding)) in responders.into_iter().zip(bodies) {
         tasks.push(tokio::spawn(async move {
             while let Some(query) = responder.next().await {
-                let _ = responder.reply(&query, body.clone(), Some(encoding)).await;
+                // Surfaced, not swallowed (#346), for the same reason
+                // `MockResponder` carries `ServedQuery::reply_error`: a mock
+                // whose answers never leave the process must say so, or its
+                // silence reads as service on the asking side (RFC 05 §3.1 —
+                // silence needs attribution, on the answering side too).
+                if let Err(e) = responder.reply(&query, body.clone(), Some(encoding)).await {
+                    tracing::warn!(key = %responder.key(), "mock producer reply failed: {e}");
+                }
             }
         }));
     }
