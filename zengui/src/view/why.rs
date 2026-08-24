@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use iced::widget::{Column, row};
-use zenkey_fleet::why::{RungAnswer, WhyReport, WhyVerdict};
+use zenkey_fleet::judge::why::{RungAnswer, WhyReport, WhyVerdict};
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::view::kit;

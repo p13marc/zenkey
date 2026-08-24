@@ -1497,7 +1497,7 @@ pub enum CutoverVerdict {
 }
 
 impl CutoverVerdict {
-    /// The [`Judgement`](crate::judgement::Judgement) mapping (RFC 13,
+    /// The [`Judgement`](crate::judge::judgement::Judgement) mapping (RFC 13,
     /// v1.24). The judged claim is the finding — "the retired family still
     /// speaks":
     ///
@@ -1506,8 +1506,8 @@ impl CutoverVerdict {
     /// | `OldStillSpeaks` | `Established` (finding) | 1 |
     /// | `Pass` | `NotEstablished` (clean) | 0 |
     /// | `Unproven` | `Unobservable` | 2 |
-    pub fn to_judgement(self) -> crate::judgement::Judgement {
-        use crate::judgement::Judgement;
+    pub fn to_judgement(self) -> crate::judge::judgement::Judgement {
+        use crate::judge::judgement::Judgement;
         match self {
             CutoverVerdict::OldStillSpeaks => Judgement::Established,
             CutoverVerdict::Pass => Judgement::NotEstablished {
@@ -1525,9 +1525,9 @@ impl CutoverVerdict {
 /// The inverse of [`CutoverVerdict::to_judgement`]. Both unestablished poles
 /// fold to `Unproven`: a question that was not put (or could not be carried)
 /// proves no migration.
-impl From<crate::judgement::Judgement> for CutoverVerdict {
-    fn from(j: crate::judgement::Judgement) -> CutoverVerdict {
-        use crate::judgement::Judgement;
+impl From<crate::judge::judgement::Judgement> for CutoverVerdict {
+    fn from(j: crate::judge::judgement::Judgement) -> CutoverVerdict {
+        use crate::judge::judgement::Judgement;
         match j {
             Judgement::Established => CutoverVerdict::OldStillSpeaks,
             Judgement::NotEstablished { .. } => CutoverVerdict::Pass,
@@ -1668,7 +1668,7 @@ pub enum ExpectVerdict {
 }
 
 impl ExpectVerdict {
-    /// The [`Judgement`](crate::judgement::Judgement) mapping (RFC 13,
+    /// The [`Judgement`](crate::judge::judgement::Judgement) mapping (RFC 13,
     /// v1.24). The judged claim is the finding — "the expectation was
     /// violated" — so `Met` is the established-**clean** pole:
     ///
@@ -1677,8 +1677,8 @@ impl ExpectVerdict {
     /// | `NotMet` | `Established` (finding) | 1 |
     /// | `Met` | `NotEstablished` (clean) | 0 |
     /// | `Impaired` | `Unobservable` | 2 |
-    pub fn to_judgement(self) -> crate::judgement::Judgement {
-        use crate::judgement::Judgement;
+    pub fn to_judgement(self) -> crate::judge::judgement::Judgement {
+        use crate::judge::judgement::Judgement;
         match self {
             ExpectVerdict::NotMet => Judgement::Established,
             ExpectVerdict::Met => Judgement::NotEstablished {
@@ -1695,9 +1695,9 @@ impl ExpectVerdict {
 /// a judge's answer straight into its verdict without hand-mapping. Both
 /// unestablished poles are `Impaired`: an assertion that was not (or could
 /// not be) observed is not met and not violated.
-impl From<crate::judgement::Judgement> for ExpectVerdict {
-    fn from(j: crate::judgement::Judgement) -> ExpectVerdict {
-        use crate::judgement::Judgement;
+impl From<crate::judge::judgement::Judgement> for ExpectVerdict {
+    fn from(j: crate::judge::judgement::Judgement) -> ExpectVerdict {
+        use crate::judge::judgement::Judgement;
         match j {
             Judgement::Established => ExpectVerdict::NotMet,
             Judgement::NotEstablished { .. } => ExpectVerdict::Met,

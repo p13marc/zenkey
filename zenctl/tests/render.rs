@@ -1196,7 +1196,7 @@ fn a_get_with_no_replies_names_the_three_silences() {
 /// (RFC 09 §5.3).
 #[test]
 fn a_gen_plan_states_the_synthetic_marker_before_anything_is_published() {
-    let entries: Vec<zenkey_fleet::generate::GenPlanEntry> = vec![];
+    let entries: Vec<zenkey_fleet::tape::generate::GenPlanEntry> = vec![];
     let plan = zenctl::render::GenPlan {
         origin: "h-3fa9c2d41b7e",
         duration_s: 5.0,
@@ -1208,7 +1208,7 @@ fn a_gen_plan_states_the_synthetic_marker_before_anything_is_published() {
 
     // A faulted plan states each fault it will inject, per key and in the
     // notes — the tool says what it is about to do to the bus (#163).
-    let faulted = vec![zenkey_fleet::generate::GenPlanEntry {
+    let faulted = vec![zenkey_fleet::tape::generate::GenPlanEntry {
         key: "v1/h-3fa9c2d41b7e/state/demo/health".into(),
         class: "state".into(),
         producer: "demo".into(),
@@ -1220,7 +1220,7 @@ fn a_gen_plan_states_the_synthetic_marker_before_anything_is_published() {
         encoding: Some("application/json".into()),
         events_cap: None,
         note: None,
-        fault: Some(zenkey_fleet::generate::Fault::Truncate),
+        fault: Some(zenkey_fleet::tape::generate::Fault::Truncate),
         fault_delta: Some("payload truncated to half its encoded bytes — a partial frame".into()),
         schema: None,
         unique_chunk: None,
@@ -1235,7 +1235,7 @@ fn a_gen_plan_states_the_synthetic_marker_before_anything_is_published() {
     assert!(t.contains("partial frame"), "{t}");
     assert!(notes(&faulted_plan).contains("injecting fault(s): truncate"));
 
-    let report = zenkey_fleet::generate::GenReport {
+    let report = zenkey_fleet::tape::generate::GenReport {
         duration_s: 5.0,
         entries: 12,
         sent: 240,

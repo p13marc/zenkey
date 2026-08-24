@@ -28,7 +28,7 @@
 
 use crate::cli::Pattern;
 use anyhow::Result;
-use zenkey_fleet::generate::{Fault, GenPattern, GenSpec};
+use zenkey_fleet::tape::generate::{Fault, GenPattern, GenSpec};
 
 use crate::Bus;
 
@@ -169,7 +169,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
     };
 
     let fleet = args.fleet(&session);
-    let plan = zenkey_fleet::generate::build_plan(
+    let plan = zenkey_fleet::tape::generate::build_plan(
         Some(&fleet),
         &store,
         &slices,
@@ -211,7 +211,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
 
     // The RFC 08 halves for the impersonated producers, on request.
     let mock = if serve_describe {
-        let m = zenkey_fleet::generate::serve_describe(
+        let m = zenkey_fleet::tape::generate::serve_describe(
             &fleet,
             &origin,
             &slices,
@@ -229,7 +229,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         None
     };
 
-    let report = zenkey_fleet::generate::run_gen(&fleet, &plan, &spec).await?;
+    let report = zenkey_fleet::tape::generate::run_gen(&fleet, &plan, &spec).await?;
     drop(mock);
 
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;

@@ -25,9 +25,9 @@ pub async fn run(old_root: &str, for_secs: f64, args: &Bus) -> Result<()> {
     // silence deserves to know what was being watched (O5).
     eprintln!(
         "{}",
-        zenkey_fleet::cutover::scope_note(
+        zenkey_fleet::judge::cutover::scope_note(
             old_root,
-            &zenkey_fleet::cutover::new_prefix(&base),
+            &zenkey_fleet::judge::cutover::new_prefix(&base),
             window
         )
     );

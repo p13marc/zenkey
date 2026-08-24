@@ -499,7 +499,7 @@ async fn observe_traffic(
     // each declared service origin's three — `*` never matches an `@` chunk
     // (D4), so the service planes must be named to be seen. Shared with the
     // `topic list --budget` observation (#221).
-    let scopes = crate::budget::data_plane_scopes(base, slices);
+    let scopes = crate::judge::budget::data_plane_scopes(base, slices);
 
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
@@ -512,7 +512,8 @@ async fn observe_traffic(
     // Field intelligence (#223): per-dotted-path stats over the structural
     // value — sync and schema-free, so it rides every sample within the
     // decode budget's reach and beyond.
-    let mut fields = crate::field::FieldObservation::new(crate::field::DEFAULT_MAX_PATHS);
+    let mut fields =
+        crate::judge::field::FieldObservation::new(crate::judge::field::DEFAULT_MAX_PATHS);
     let mut samples: u64 = 0;
     let mut dropped: u64 = 0;
     let mut synthetic: u64 = 0;
@@ -634,7 +635,8 @@ async fn observe_traffic(
     // Key-population budgets (#221): the window's distinct keys, grouped
     // into `{var}` families per origin, judged against each family's
     // declared `cardinality`.
-    let budgets = crate::budget::BudgetObservation::observe(base, slices, facts_cache.keys());
+    let budgets =
+        crate::judge::budget::BudgetObservation::observe(base, slices, facts_cache.keys());
 
     let window_s = window.as_secs_f64();
     let mut findings = Vec::new();
@@ -734,7 +736,9 @@ async fn observe_traffic(
     // with what is known per key — declared `ttl_s`/type from the resolved
     // facts, declared paths from the describe sets the GET phase gathered.
     let field_ctx = field_context_from(slices, described, &facts_cache);
-    findings.extend(crate::field::judge_fields(&fields, window_s, &field_ctx));
+    findings.extend(crate::judge::field::judge_fields(
+        &fields, window_s, &field_ctx,
+    ));
 
     Ok((
         findings,
@@ -760,17 +764,17 @@ fn field_context_from(
     slices: &crate::model::registry::SliceSet,
     described: &[(String, zenkey::schema::SchemaSet)],
     facts: &crate::model::facts::FactsCache,
-) -> std::collections::BTreeMap<String, crate::field::KeyFieldContext> {
+) -> std::collections::BTreeMap<String, crate::judge::field::KeyFieldContext> {
     use std::collections::BTreeMap;
-    let mut declared_cache: BTreeMap<(String, String), Option<crate::field::DeclaredPaths>> =
+    let mut declared_cache: BTreeMap<(String, String), Option<crate::judge::field::DeclaredPaths>> =
         BTreeMap::new();
     let mut ctx = BTreeMap::new();
     for (key, f) in facts.iter() {
-        let mut c = crate::field::KeyFieldContext::default();
+        let mut c = crate::judge::field::KeyFieldContext::default();
         if let crate::model::facts::Registration::Registered(sf) = &f.registration {
             c.ttl_s = sf.ttl_s;
             c.type_name = Some(sf.type_name.clone());
-            if let Some(producer) = crate::field::producer_of(f, Some(slices))
+            if let Some(producer) = crate::judge::field::producer_of(f, Some(slices))
                 && !sf.type_name.is_empty()
             {
                 let declared = declared_cache
@@ -781,7 +785,7 @@ fn field_context_from(
                             .find(|(name, _)| *name == producer)
                             .and_then(|(_, set)| set.get(&sf.type_name))
                             .and_then(|schema| schema.json_document())
-                            .and_then(crate::field::DeclaredPaths::from_json_schema)
+                            .and_then(crate::judge::field::DeclaredPaths::from_json_schema)
                     });
                 c.declared = declared.clone();
             }
@@ -949,7 +953,7 @@ fn judge_state_samples(
 ///   populations are never summed into a fake violation.
 fn judge_cardinality(
     slices: &crate::model::registry::SliceSet,
-    observed: &crate::budget::BudgetObservation,
+    observed: &crate::judge::budget::BudgetObservation,
     window_s: f64,
 ) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
@@ -989,8 +993,10 @@ fn judge_cardinality(
                 if keys.len() as i64 <= declared {
                     continue; // under/at declared: not a finding (O4)
                 }
-                let examples =
-                    Examples::collect(crate::budget::EXAMPLE_CAP, keys.iter().map(String::as_str));
+                let examples = Examples::collect(
+                    crate::judge::budget::EXAMPLE_CAP,
+                    keys.iter().map(String::as_str),
+                );
                 let subject = if origin.starts_with('@') {
                     format!("{origin}/{}", s.path)
                 } else {
@@ -1085,8 +1091,11 @@ mod tests {
         let keys: Vec<String> = (0..40)
             .map(|i| format!("v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/m{i:02}/used"))
             .collect();
-        let obs =
-            crate::budget::BudgetObservation::observe("", &slices, keys.iter().map(String::as_str));
+        let obs = crate::judge::budget::BudgetObservation::observe(
+            "",
+            &slices,
+            keys.iter().map(String::as_str),
+        );
         let findings = judge_cardinality(&slices, &obs, 10.0);
         assert_eq!(findings.len(), 1, "{findings:?}");
         let f = &findings[0];
@@ -1115,7 +1124,7 @@ mod tests {
             // Two origins at 15 each must never be summed into a fake 30 > 16.
             "v1/h-bbbbbbbbbbbb/telemetry/sysinfo/disk/root/used",
         ];
-        let obs = crate::budget::BudgetObservation::observe("", &slices, keys);
+        let obs = crate::judge::budget::BudgetObservation::observe("", &slices, keys);
         assert!(judge_cardinality(&slices, &obs, 5.0).is_empty());
     }
 
@@ -1141,8 +1150,11 @@ mod tests {
         let keys: Vec<String> = (0..5)
             .map(|i| format!("v1/h-aaaaaaaaaaaa/telemetry/gnmi/sw1/if/eth{i}/rx"))
             .collect();
-        let obs =
-            crate::budget::BudgetObservation::observe("", &slices, keys.iter().map(String::as_str));
+        let obs = crate::judge::budget::BudgetObservation::observe(
+            "",
+            &slices,
+            keys.iter().map(String::as_str),
+        );
         let findings = judge_cardinality(&slices, &obs, 5.0);
         assert_eq!(findings.len(), 1, "{findings:?}");
         let f = &findings[0];

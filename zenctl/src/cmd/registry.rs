@@ -152,9 +152,9 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
         // Stated before the window opens, not after (O5).
         eprintln!(
             "{}",
-            zenkey_fleet::retired::scope_note(
+            zenkey_fleet::judge::retired::scope_note(
                 entries,
-                &zenkey_fleet::cutover::new_prefix(args.base()),
+                &zenkey_fleet::judge::cutover::new_prefix(args.base()),
                 window
             )
         );

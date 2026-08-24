@@ -14,7 +14,7 @@
 use std::io::Write as _;
 
 use anyhow::Result;
-use zenkey_fleet::condition::{Condition, Transition, WatchdogSpec, run_watchdog};
+use zenkey_fleet::judge::condition::{Condition, Transition, WatchdogSpec, run_watchdog};
 
 use crate::Bus;
 

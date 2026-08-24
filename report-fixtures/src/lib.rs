@@ -1161,7 +1161,7 @@ pub fn attachments() -> Vec<zenkey_fleet::OriginAttachment> {
 /// never read as a bug (RFC 08 §6.1), and `NotAsked` rungs that say why they
 /// were not asked (RFC 09 §5.1 O4) — under the `Healthy` verdict (exit 1).
 pub fn why_report() -> zenkey_fleet::WhyReport {
-    use zenkey_fleet::why::{Rung, RungAnswer};
+    use zenkey_fleet::judge::why::{Rung, RungAnswer};
     let rung = |id: &'static str, question: &'static str, answer, evidence: &[&str]| Rung {
         id,
         question,

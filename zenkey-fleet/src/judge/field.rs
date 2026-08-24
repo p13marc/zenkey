@@ -27,10 +27,10 @@
 //!
 //! The path table is **bounded and reports what it dropped** (O6) — never a
 //! silent truncation. The judges are pure functions over the observation,
-//! the house pattern of [`crate::condition`] (#227) and [`crate::budget`]
+//! the house pattern of [`crate::judge::condition`] (#227) and [`crate::judge::budget`]
 //! (#221): testable without a bus. Surfaces: `zenctl field <selector>
 //! [--for S]`, the doctor listen phase (#161) via the appended
-//! [`crate::doctor::CHECK_IDS`], and — **deferred to a later zengui
+//! [`crate::judge::doctor::CHECK_IDS`], and — **deferred to a later zengui
 //! window** — the Inspector field table with per-field sparklines through
 //! the existing `series.rs`/`spark.rs` gap-drawing. This chunk ships the
 //! engine and zenctl halves only.

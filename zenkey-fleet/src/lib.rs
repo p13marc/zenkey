@@ -12,30 +12,10 @@
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 
 pub mod bus;
+pub mod judge;
 pub mod model;
-
-pub mod bench;
-pub mod budget;
-pub mod cutover;
-pub mod ingest;
-pub mod judgement;
-pub mod record;
 pub mod report;
-pub mod retired;
-pub mod why;
-
-#[cfg(feature = "decode")]
-pub mod condition;
-#[cfg(feature = "decode")]
-pub mod doctor;
-#[cfg(feature = "decode")]
-pub mod expect;
-#[cfg(feature = "decode")]
-pub mod field;
-#[cfg(feature = "decode")]
-pub mod generate;
-#[cfg(feature = "decode")]
-pub mod synth;
+pub mod tape;
 // ─── the supported surface ──────────────────────────────────────────────────
 //
 // **The rule: the crate root is the whole supported surface.** Every type and
@@ -63,35 +43,33 @@ pub use bus::body::{
     prepare_request,
 };
 #[cfg(feature = "decode")]
-pub use condition::{
+pub use judge::condition::{
     CondState, CondWindow, Condition, DoctorWatch, Eval, RuleState, Transition, WatchdogSpec,
     WatchdogSummary, run_watchdog,
 };
 #[cfg(feature = "decode")]
-pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
+pub use judge::doctor::{CHECK_IDS, DoctorSpec, run_doctor};
 #[cfg(feature = "decode")]
-pub use expect::{ExpectSpec, QosCheck, run_expect};
+pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
 #[cfg(feature = "decode")]
-pub use field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run_field};
-#[cfg(feature = "decode")]
-pub use generate::{
-    Fault, GenPattern, GenPlanEntry, GenReport, GenSpec, MockProducer, build_plan, run_gen,
-    serve_describe, synthetic_marker,
-};
+pub use judge::field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run_field};
 #[cfg(feature = "decode")]
 pub use model::decode::{
     DecodedSample, Rendering, SchemaDrift, SchemaStore, TotalityGap, decode_sample, schema_drift,
     schema_dump, schemas_for_type, totality_gaps,
 };
 #[cfg(feature = "decode")]
-pub use synth::Synth;
+pub use tape::generate::{
+    Fault, GenPattern, GenPlanEntry, GenReport, GenSpec, MockProducer, build_plan, run_gen,
+    serve_describe, synthetic_marker,
+};
+#[cfg(feature = "decode")]
+pub use tape::synth::Synth;
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]
 pub use zenkey::schema::validate::{NotValidated, Verdict};
 
-pub use bench::{BenchSpec, run_bench};
-pub use budget::{BudgetObservation, data_plane_scopes, join_budget};
 pub use bus::admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,
     storages,
@@ -127,9 +105,13 @@ pub use bus::write::{
     CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
     declare_publication,
 };
-pub use cutover::run_cutover;
-pub use ingest::{IngestRow, SampleRow, StreamLine, parse_row, parse_stream_line};
-pub use judgement::{Judgement, judgement_exit_code};
+pub use judge::budget::{BudgetObservation, data_plane_scopes, join_budget};
+pub use judge::cutover::run_cutover;
+pub use judge::judgement::{Judgement, judgement_exit_code};
+pub use judge::retired::run_retired;
+pub use judge::why::{
+    RUNG_IDS, Rung, RungAnswer, WhyInputs, WhyReport, WhySpec, WhyVerdict, run_why,
+};
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
@@ -139,10 +121,6 @@ pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use model::stats::{KeyStats, LatencyReport, LatencySummary, StampClass, StatsTable};
 pub use model::tree::KeyTreeSnapshot;
-pub use record::{
-    RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplaySpec, ReplayTarget, ZREC_VERSION,
-    ZrecHeader, ZrecItem, ZrecReader, ZrecWriter, record, replay,
-};
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
 /// back. The rest of `report` (rows, cells, verdict enums) stays behind
@@ -151,8 +129,12 @@ pub use record::{
 pub use report::{
     BenchReport, CallReport, CutoverReport, DoctorReport, ExpectReport, FieldReport, RetiredReport,
 };
-pub use retired::run_retired;
-pub use why::{RUNG_IDS, Rung, RungAnswer, WhyInputs, WhyReport, WhySpec, WhyVerdict, run_why};
+pub use tape::bench::{BenchSpec, run_bench};
+pub use tape::ingest::{IngestRow, SampleRow, StreamLine, parse_row, parse_stream_line};
+pub use tape::record::{
+    RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplaySpec, ReplayTarget, ZREC_VERSION,
+    ZrecHeader, ZrecItem, ZrecReader, ZrecWriter, record, replay,
+};
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.
 #[cfg(feature = "blob")]

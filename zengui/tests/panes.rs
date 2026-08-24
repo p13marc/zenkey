@@ -3538,7 +3538,7 @@ fn the_fields_section_states_its_window_and_its_bounds() {
 fn the_why_section_renders_not_asked_and_never_no() {
     use std::sync::Arc;
     use zengui::view::why::{WhyState, section};
-    use zenkey_fleet::why::{RungAnswer, WhyInputs, ladder};
+    use zenkey_fleet::judge::why::{RungAnswer, WhyInputs, ladder};
 
     // Never run: the section states the frugal default's cost.
     let state = WhyState::default();

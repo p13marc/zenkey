@@ -19,12 +19,12 @@
 //! starts counting before anyone listens converts "not asked" into "no".
 //!
 //! Since #227 the three-state judgement is spelled in the closed condition
-//! vocabulary ([`crate::condition`]): the count and rate floors ride
-//! [`crate::condition::judge_shortfall`]
+//! vocabulary ([`crate::judge::condition`]): the count and rate floors ride
+//! [`crate::judge::condition::judge_shortfall`]
 //! (`rate-below`'s rule), the rate ceiling rides
-//! [`crate::condition::judge_excess`]
+//! [`crate::judge::condition::judge_excess`]
 //! (`rate-above`'s), and `--absent` is `silent-for` over the whole window
-//! ([`crate::condition::judge_silence`]) — so
+//! ([`crate::judge::condition::judge_silence`]) — so
 //! `expect` and `zenctl watchdog` cannot drift about what a drop means.
 
 use std::collections::BTreeSet;
@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::condition;
+use crate::judge::condition;
 use crate::model::decode::SchemaStore;
 use crate::model::examples::Examples;
 use crate::model::registry::SliceSet;

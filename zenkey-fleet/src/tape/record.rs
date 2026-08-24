@@ -3,7 +3,7 @@
 //!
 //! A `.zrec` file is newline-delimited JSON in the explorers' one row
 //! dialect — the same shape `echo --format ndjson` emits and
-//! [`crate::ingest::parse_row`] reads back — upgraded with what a pipe does
+//! [`crate::tape::ingest::parse_row`] reads back — upgraded with what a pipe does
 //! not need but a capture does: a versioned header line naming what was
 //! asked, a lossless `"bytes"` payload (a `"value"` is a rendering), a
 //! pacing offset `"t"` on the observer's arrival clock, and drop records
@@ -31,8 +31,8 @@ use zenoh::Session;
 use zenoh::sample::SampleKind;
 
 use crate::bus::monitor::{EventStream, FleetEvent, SampleView, StreamItem};
-use crate::ingest::{IngestRow, SampleRow, parse_row};
 use crate::model::registry::SliceSet;
+use crate::tape::ingest::{IngestRow, SampleRow, parse_row};
 
 /// The current `.zrec` format version, written into every header.
 pub const ZREC_VERSION: u32 = 1;
@@ -163,7 +163,7 @@ impl<W: Write> ZrecWriter<W> {
             row = row.with_payload_bytes(&view.payload.to_bytes());
         }
         if let Some(a) = &view.attachment {
-            row.attachment_b64 = Some(crate::ingest::b64(&a.to_bytes()));
+            row.attachment_b64 = Some(crate::tape::ingest::b64(&a.to_bytes()));
         }
         self.out
             .write_all(row.to_line().as_bytes())
@@ -329,7 +329,7 @@ impl<R: BufRead> ZrecReader<R> {
 
     /// The next item, or `Err` naming the line and the reason — a malformed
     /// row is counted by the caller, never silently skipped
-    /// ([`crate::ingest`]'s rule). `None` ends the file.
+    /// ([`crate::tape::ingest`]'s rule). `None` ends the file.
     #[allow(clippy::should_implement_trait)] // fallible, line-numbered next
     pub fn next(&mut self) -> Option<std::result::Result<ZrecItem, String>> {
         loop {

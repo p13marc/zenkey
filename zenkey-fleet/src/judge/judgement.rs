@@ -22,16 +22,16 @@
 //!   claim, a window shorter than the claim's span, an ask that failed),
 //!   with the reason. Neither "fine" nor "fire" (O6).
 //!
-//! Domain vocabularies — [`crate::condition::CondState`],
+//! Domain vocabularies — [`crate::judge::condition::CondState`],
 //! [`crate::report::ExpectVerdict`], [`crate::report::CutoverVerdict`],
-//! [`crate::why::WhyVerdict`], the `why` ladder's per-rung answer — remain
+//! [`crate::judge::why::WhyVerdict`], the `why` ladder's per-rung answer — remain
 //! surface namings with documented mappings onto this core; each mapping
 //! lives beside its vocabulary. The mapping convention every verdict-level
 //! `to_judgement()` follows: **the judged claim is the finding** — a verdict
 //! that found something maps to `Established`, a clean one to
 //! `NotEstablished`. That convention is what makes the exit projection below
 //! a pure function; a vocabulary whose own polarity is inverted
-//! ([`crate::why::WhyVerdict`]: `Explained` is the *finding* and its CLI
+//! ([`crate::judge::why::WhyVerdict`]: `Explained` is the *finding* and its CLI
 //! historically exits 0) does the flip at its mapping, never downstream.
 //!
 //! ## Serialized form
@@ -95,7 +95,7 @@ impl Judgement {
 /// is the **finding**, so `Established` is the finding exit and
 /// `NotEstablished` the clean one. A vocabulary with inverted surface
 /// polarity handles the flip in its own `to_judgement()` mapping
-/// ([`crate::why::WhyVerdict`] is the documented case), never here — this
+/// ([`crate::judge::why::WhyVerdict`] is the documented case), never here — this
 /// function has exactly one spelling per pole.
 pub fn judgement_exit_code(j: &Judgement) -> i32 {
     match j.conclusive() {

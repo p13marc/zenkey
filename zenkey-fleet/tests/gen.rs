@@ -7,7 +7,9 @@
 
 use std::time::Duration;
 
-use zenkey_fleet::generate::{Fault, GenPattern, GenSpec, build_plan, run_gen, serve_describe};
+use zenkey_fleet::tape::generate::{
+    Fault, GenPattern, GenSpec, build_plan, run_gen, serve_describe,
+};
 
 mod util;
 use util::peer_pair;

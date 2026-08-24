@@ -217,7 +217,7 @@ impl Render for SchemaCheck {
 pub struct GenPlan<'a> {
     pub origin: &'a str,
     pub duration_s: f64,
-    pub entries: &'a [zenkey_fleet::generate::GenPlanEntry],
+    pub entries: &'a [zenkey_fleet::tape::generate::GenPlanEntry],
 }
 
 impl serde::Serialize for GenPlan<'_> {
@@ -311,7 +311,7 @@ impl Render for GenPlan<'_> {
     }
 }
 
-impl Render for zenkey_fleet::generate::GenReport {
+impl Render for zenkey_fleet::tape::generate::GenReport {
     const FAMILY: &'static str = "gen";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {

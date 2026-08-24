@@ -14,7 +14,7 @@
 //! doctor check id is.
 //!
 //! The semantic core is three tiny rules — [`judge_shortfall`],
-//! [`judge_excess`], [`judge_silence`] — shared with [`crate::expect`], so
+//! [`judge_excess`], [`judge_silence`] — shared with [`crate::judge::expect`], so
 //! the watchdog and the CI assertion cannot drift about what a drop means.
 //! Since RFC 13 (v1.24; the material was RFC 09 §5.1 pre-v1.24) the rules
 //! speak the four-pole [`Judgement`] core, and [`CondState`] is this
@@ -33,7 +33,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde::Serialize;
 
-use crate::judgement::Judgement;
+use crate::judge::judgement::Judgement;
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
 use crate::report::DoctorReport;
@@ -174,10 +174,10 @@ impl Condition {
                 selector: sel.to_string(),
             },
             ["doctor", check] => {
-                if !crate::doctor::CHECK_IDS.contains(check) {
+                if !crate::judge::doctor::CHECK_IDS.contains(check) {
                     bail!(
                         "doctor: {check:?} is not a check id — the stable vocabulary is: {}",
-                        crate::doctor::CHECK_IDS.join(", ")
+                        crate::judge::doctor::CHECK_IDS.join(", ")
                     );
                 }
                 Condition::DoctorCheck {
@@ -584,7 +584,7 @@ pub struct DoctorWatch {
 impl DoctorWatch {
     pub fn new() -> DoctorWatch {
         DoctorWatch {
-            checks: crate::doctor::CHECK_IDS
+            checks: crate::judge::doctor::CHECK_IDS
                 .iter()
                 .map(|id| {
                     let condition = Condition::DoctorCheck {
@@ -751,7 +751,7 @@ pub async fn run_watchdog(
                     let synthetic = s
                         .attachment
                         .as_ref()
-                        .is_some_and(|a| crate::doctor::is_synthetic_marker(&a.to_bytes()));
+                        .is_some_and(|a| crate::judge::doctor::is_synthetic_marker(&a.to_bytes()));
                     // Decode once per sample (budgeted per key per tick),
                     // shared by every invalid-payload rule the key matches.
                     let mut verdict: Option<crate::Verdict> = None;
@@ -825,13 +825,13 @@ pub async fn run_watchdog(
         // Evaluate the tick over the measured window, then say only what
         // changed.
         let now = tokio::time::Instant::now();
-        let at = crate::record::rfc3339_now();
+        let at = crate::tape::record::rfc3339_now();
         let doctor_outcome = if wants_doctor {
             Some(
-                crate::doctor::run_doctor(
+                crate::judge::doctor::run_doctor(
                     fleet,
                     slices,
-                    &crate::doctor::DoctorSpec {
+                    &crate::judge::doctor::DoctorSpec {
                         deep: false,
                         sample: None,
                         timeout: spec.timeout,
@@ -1146,7 +1146,7 @@ mod tests {
         let mut watch = DoctorWatch::new();
         let clean = report_with(&[]);
         let baseline = watch.observe(Ok(&clean), "t0");
-        assert_eq!(baseline.len(), crate::doctor::CHECK_IDS.len());
+        assert_eq!(baseline.len(), crate::judge::doctor::CHECK_IDS.len());
         assert!(baseline.iter().all(|t| t.from.is_none()));
         assert!(baseline.iter().all(|t| t.to == CondState::Ok));
 
@@ -1165,7 +1165,7 @@ mod tests {
         let failed = watch.observe(Err("session lost"), "t3");
         assert_eq!(
             failed.len(),
-            crate::doctor::CHECK_IDS.len(),
+            crate::judge::doctor::CHECK_IDS.len(),
             "a failed run is unobservable for every check — never ok"
         );
         assert!(failed.iter().all(|t| t.to == CondState::Unobservable));

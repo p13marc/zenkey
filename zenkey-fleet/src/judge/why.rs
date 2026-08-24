@@ -13,7 +13,7 @@
 //! ## The rungs
 //!
 //! Ten rungs, in the order a fact weakens the ones below it. The id
-//! vocabulary is **stable API** in the [`crate::doctor::CHECK_IDS`] tradition:
+//! vocabulary is **stable API** in the [`crate::judge::doctor::CHECK_IDS`] tradition:
 //! scripts key on ids, the GUI will key deltas on them, additions append and
 //! nothing renames. The full set is pinned in [`RUNG_IDS`].
 //!
@@ -116,7 +116,7 @@ const CAUSE_IDS: [&str; 5] = [
     "sample-freshness",
 ];
 
-/// One rung's answer — the [`Judgement`](crate::judgement::Judgement) core
+/// One rung's answer — the [`Judgement`](crate::judge::judgement::Judgement) core
 /// (RFC 13, v1.24; RFC 09 §5.1 pre-v1.24), carried directly: since v1.24 the
 /// ladder's three shipped states *are* three of the core's four poles, and
 /// this alias is the fold. The serde tags are byte-identical to what #214
@@ -125,14 +125,14 @@ const CAUSE_IDS: [&str; 5] = [
 /// A rung's judgement is over **its own question** (the rung's fact), not
 /// over "is there a finding?" — which of its poles constitutes a finding is
 /// per-rung policy, and [`is_cause`] is where that policy lives. The rungs
-/// currently never answer [`Unobservable`](crate::judgement::Judgement::Unobservable): an observation the
+/// currently never answer [`Unobservable`](crate::judge::judgement::Judgement::Unobservable): an observation the
 /// ladder could not obtain degrades the rung to `NotAsked` and rides
 /// [`WhyReport::impairments`] instead.
 ///
 /// A rung whose input was not fetched says
-/// [`NotAsked`](crate::judgement::Judgement::NotAsked), never
+/// [`NotAsked`](crate::judge::judgement::Judgement::NotAsked), never
 /// `NotEstablished` (RFC 09 §5.1 O4).
-pub type RungAnswer = crate::judgement::Judgement;
+pub type RungAnswer = crate::judge::judgement::Judgement;
 
 /// One rung of the ladder.
 #[derive(Debug, Clone, Serialize)]
@@ -163,13 +163,13 @@ pub enum WhyVerdict {
 }
 
 impl WhyVerdict {
-    /// The [`Judgement`](crate::judgement::Judgement) mapping (RFC 13,
+    /// The [`Judgement`](crate::judge::judgement::Judgement) mapping (RFC 13,
     /// v1.24), and it is **THE inverted one — read this before wiring exit
     /// codes**: `Explained` is *established-finding* (`Established`), because
     /// the thing `why` establishes is a cause — a finding about the fleet —
     /// even though this family's own historical CLI contract exits **0** for
     /// it (the module doc's table). The RFC 13 exit projection
-    /// ([`crate::judgement::judgement_exit_code`]) therefore gives `why`'s
+    /// ([`crate::judge::judgement::judgement_exit_code`]) therefore gives `why`'s
     /// three verdicts 1 / 0 / 2 in this order — the flip between the two
     /// contracts is carried **here, at the mapping**, never special-cased by
     /// a consumer downstream.
@@ -179,8 +179,8 @@ impl WhyVerdict {
     /// | `Explained` | `Established` (finding) | 1 | 0 |
     /// | `Healthy` | `NotEstablished` (clean) | 0 | 1 |
     /// | `Impaired` | `Unobservable` | 2 | 2 |
-    pub fn to_judgement(self) -> crate::judgement::Judgement {
-        use crate::judgement::Judgement;
+    pub fn to_judgement(self) -> crate::judge::judgement::Judgement {
+        use crate::judge::judgement::Judgement;
         match self {
             WhyVerdict::Explained => Judgement::Established,
             WhyVerdict::Healthy => Judgement::NotEstablished {
@@ -199,9 +199,9 @@ impl WhyVerdict {
 /// an established finding is `Explained`, established-clean is `Healthy`,
 /// and both unestablished poles fold to `Impaired` — a ladder nobody asked
 /// is exactly a ladder that cannot claim health.
-impl From<crate::judgement::Judgement> for WhyVerdict {
-    fn from(j: crate::judgement::Judgement) -> WhyVerdict {
-        use crate::judgement::Judgement;
+impl From<crate::judge::judgement::Judgement> for WhyVerdict {
+    fn from(j: crate::judge::judgement::Judgement) -> WhyVerdict {
+        use crate::judge::judgement::Judgement;
         match j {
             Judgement::Established => WhyVerdict::Explained,
             Judgement::NotEstablished { .. } => WhyVerdict::Healthy,
@@ -1024,7 +1024,7 @@ mod tests {
 
     /// The id vocabulary is API: additions append, nothing renames. If this
     /// test fails you are renaming a shipped rung id — don't (the
-    /// [`crate::doctor::CHECK_IDS`] discipline, applied here).
+    /// [`crate::judge::doctor::CHECK_IDS`] discipline, applied here).
     #[test]
     fn rung_ids_are_stable() {
         assert_eq!(

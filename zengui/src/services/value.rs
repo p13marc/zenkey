@@ -120,13 +120,13 @@ pub fn field(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet::field::FieldSpec {
+            let spec = zenkey_fleet::judge::field::FieldSpec {
                 selector: key,
                 window,
-                max_paths: zenkey_fleet::field::DEFAULT_MAX_PATHS,
+                max_paths: zenkey_fleet::judge::field::DEFAULT_MAX_PATHS,
             };
             let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            zenkey_fleet::field::run_field(&fleet, slices.as_deref(), &store, &spec)
+            zenkey_fleet::judge::field::run_field(&fleet, slices.as_deref(), &store, &spec)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
@@ -157,12 +157,12 @@ pub fn why(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet::why::WhySpec {
+            let spec = zenkey_fleet::judge::why::WhySpec {
                 timeout,
                 listen: None,
             };
             let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            zenkey_fleet::why::run_why(&fleet, &key, slices.as_deref(), &spec)
+            zenkey_fleet::judge::why::run_why(&fleet, &key, slices.as_deref(), &spec)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string())

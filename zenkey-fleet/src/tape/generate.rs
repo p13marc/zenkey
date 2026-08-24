@@ -3,7 +3,7 @@
 //! The opposite artifact of the spray demo: spray is deliberately hardcoded
 //! adversarial weirdness; `gen` reads a registry and produces **conforming**
 //! traffic — every declared subject of a producer, schema-synthesized
-//! payloads ([`crate::synth`]), declared QoS, class-conscious rates. It is a
+//! payloads ([`crate::tape::synth`]), declared QoS, class-conscious rates. It is a
 //! mock producer for testing consumers, not a load cannon.
 //!
 //! Everything rides the existing seams: keys assemble from the declared
@@ -23,7 +23,7 @@ use zenkey::schema::{SchemaSet, TypeSchema};
 
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
-use crate::synth::Synth;
+use crate::tape::synth::Synth;
 
 /// The RFC 09 §5.3 marker (v1.19): every synthetic sample's attachment.
 pub fn synthetic_marker(tool: &str, origin: &str, fault: Option<&str>) -> Vec<u8> {
@@ -420,7 +420,7 @@ pub async fn build_plan(
                     let cap_h = subject
                         .rate
                         .as_deref()
-                        .and_then(crate::doctor::rate_cap_per_hour)
+                        .and_then(crate::judge::doctor::rate_cap_per_hour)
                         .unwrap_or(1);
                     let cap_run = ((f64::from(u32::try_from(cap_h.min(3600)).unwrap_or(3600))
                         * spec.duration.as_secs_f64())

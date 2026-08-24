@@ -1,7 +1,7 @@
 //! The deprecation burn-down (issue #226): who still speaks each retired
 //! subject.
 //!
-//! [`crate::cutover`] proves a whole key family went silent; the append-only
+//! [`crate::judge::cutover`] proves a whole key family went silent; the append-only
 //! `[[deprecated]]` ledger (RFC 08 §3) records dozens of *individual*
 //! retirements, and nothing told you which ones are finished. This walks the
 //! ledger and reports four facts per entry: is it still on the wire, does a
@@ -62,7 +62,7 @@ pub fn retired_selector(slice: &RegistrySlice, path: &str) -> String {
 }
 
 /// The per-entry ladder, pure so it can be exercised without a bus — the
-/// same three states as [`crate::cutover::verdict`], per ledger line.
+/// same three states as [`crate::judge::cutover::verdict`], per ledger line.
 ///
 /// Order matters, exactly as there: **any** sign of life on the retired
 /// subject is the failure, whatever else is true — a sample heard on the
@@ -195,7 +195,7 @@ pub async fn run_retired(
         .collect();
 
     // Facts 1 and 4: the listen window, when one was asked for.
-    let new_prefix = crate::cutover::new_prefix(base);
+    let new_prefix = crate::judge::cutover::new_prefix(base);
     let mut old_counts = vec![0u64; ledger.len()];
     let mut repl_counts = vec![0u64; ledger.len()];
     let (mut plane_samples, mut dropped) = (0u64, 0u64);

@@ -2,7 +2,7 @@
 //! bound joined against the observed population, per `{var}` family and per
 //! origin — the GUI half of [`zenkey_fleet::budget`].
 //!
-//! The join itself is the engine's ([`zenkey_fleet::budget::BudgetObservation`]);
+//! The join itself is the engine's ([`zenkey_fleet::judge::budget::BudgetObservation`]);
 //! this module walks the observed key tree into the key list the engine
 //! wants, and turns each judged family into a badge keyed by the family's
 //! **subtree display path** — the literal prefix under one origin — so the
@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use zenkey_fleet::budget::BudgetObservation;
+use zenkey_fleet::judge::budget::BudgetObservation;
 use zenkey_fleet::{KeyTreeSnapshot, SliceSet};
 
 /// One family's badge, at one origin's subtree path.
