@@ -73,6 +73,34 @@ fn lint(file: &str, message: impl Into<String>) -> Error {
     }
 }
 
+/// Read an optional **count** field (`ttl_s`, `cardinality`) — a duration in
+/// seconds or a key population, neither of which has a negative value.
+///
+/// The sign check lives here rather than in the emitter because of what the
+/// crate doc promises: a violating registry file fails the *consumer's* build,
+/// where the TOML was authored. `as_integer()` alone yields an `i64`, which
+/// the emitter interpolated verbatim into an `Option<u64>` accessor — so
+/// `ttl_s = -60` linted clean and then failed as `Some(-60)` in `$OUT_DIR`, in
+/// code the consumer never wrote and cannot fix (issue #313). The message
+/// names the file, the entry's path and the field, so the reader is pointed at
+/// the line responsible.
+fn opt_count(
+    file: &str,
+    entry: &toml::Value,
+    path: &str,
+    field: &str,
+) -> Result<Option<u64>, Error> {
+    match entry.get(field).and_then(|v| v.as_integer()) {
+        None => Ok(None),
+        Some(n) => u64::try_from(n).map(Some).map_err(|_| {
+            lint(
+                file,
+                format!("{path:?}: {field} must not be negative, got {n} (RFC 08 §5)"),
+            )
+        }),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Chunk {
     Literal(String),
@@ -86,9 +114,9 @@ pub(crate) struct SubjectEntry {
     pub class: String,
     pub payload_type: String,
     pub unit: Option<String>,
-    pub cardinality: Option<i64>,
+    pub cardinality: Option<u64>,
     pub qos: String,
-    pub ttl_s: Option<i64>,
+    pub ttl_s: Option<u64>,
     pub rate: Option<String>,
     pub variant: String,
     /// `common = "..."` — the RFC-defined framework state subject this entry
@@ -121,7 +149,7 @@ pub(crate) struct ProcedureEntry {
     /// Key-population bound — RFC 08 §2 requires it on any `{var}`-bearing
     /// procedure path, the same budget rule as `[[subject]]` and `[[media]]`.
     #[allow(dead_code)] // linted here; served verbatim through introspect
-    pub cardinality: Option<i64>,
+    pub cardinality: Option<u64>,
     /// Optional declared payload encoding (RFC 08 §2, v1.5).
     pub encoding: Option<String>,
 }
@@ -134,7 +162,7 @@ pub(crate) struct MediaEntry {
     pub chunks: Vec<Chunk>,
     pub encoding: String,
     pub attachment: String,
-    pub cardinality: Option<i64>,
+    pub cardinality: Option<u64>,
     pub variant: String,
 }
 
@@ -712,7 +740,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 .get("unit")
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
-            let cardinality = entry.get("cardinality").and_then(|v| v.as_integer());
+            let cardinality = opt_count(&fname, entry, spath, "cardinality")?;
             let has_var = chunks.iter().any(|c| !matches!(c, Chunk::Literal(_)));
             if has_var && cardinality.is_none() {
                 return Err(lint(
@@ -720,7 +748,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     format!("{spath:?}: {{var}} pattern needs integer cardinality (RFC 08 §5)"),
                 ));
             }
-            let ttl_s = entry.get("ttl_s").and_then(|v| v.as_integer());
+            let ttl_s = opt_count(&fname, entry, spath, "ttl_s")?;
             if class == "state" && ttl_s.is_none() {
                 return Err(lint(
                     &fname,
@@ -974,7 +1002,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             // `{var}`-bearing procedure paths carry the same key-population
             // budget as subjects and media (RFC 08 §2/§5): the expansions are
             // real keys, and the budget review needs the bound declared.
-            let cardinality = entry.get("cardinality").and_then(|v| v.as_integer());
+            let cardinality = opt_count(&fname, entry, ppath, "cardinality")?;
             let has_var = chunks.iter().any(|c| matches!(c, Chunk::Var(_)));
             if has_var && cardinality.is_none() {
                 return Err(lint(
@@ -1025,7 +1053,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     ));
                 }
                 let has_var = chunks.iter().any(|c| !matches!(c, Chunk::Literal(_)));
-                let cardinality = entry.get("cardinality").and_then(|v| v.as_integer());
+                let cardinality = opt_count(&fname, entry, mpath, "cardinality")?;
                 if has_var && cardinality.is_none() {
                     return Err(lint(
                         &fname,
@@ -1926,6 +1954,72 @@ mod tests {
             "{base}[[procedure]]\npath = \"x/set\"\nkind = \"write\"\nreply = \"Ack\"\nsince = \"1.0\"\ndescription = \"d\"\n"
         ))
         .unwrap();
+    }
+
+    /// Issue #313: a count field has no negative value, and the refusal
+    /// belongs *here*, where the TOML was authored.
+    ///
+    /// `ttl_s = -60` used to lint clean and reach the emitter as an `i64`,
+    /// which interpolated it verbatim into an `Option<u64>` accessor: the
+    /// consumer's build then broke on `Some(-60)` in `$OUT_DIR`, in code they
+    /// did not write, with nothing naming the line responsible — the exact
+    /// opposite of what this crate's doc promises.
+    #[test]
+    fn a_negative_count_is_refused_where_the_toml_was_authored() {
+        let cases = [
+            (
+                "ttl_s",
+                format!(
+                    "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"health\"\nclass = \"state\"\ntype = \"Health\"\nttl_s = -60\nsince = \"1.0\"\ndescription = \"d\"\n"
+                ),
+                "health",
+            ),
+            (
+                "cardinality",
+                format!(
+                    "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"disk/{{mount}}/used\"\nclass = \"telemetry\"\ntype = \"F64\"\ncardinality = -5\nsince = \"1.0\"\ndescription = \"d\"\n"
+                ),
+                "disk/{mount}/used",
+            ),
+            (
+                "cardinality",
+                format!(
+                    "{HEADER}[producer]\nname = \"t\"\n\n[[procedure]]\npath = \"port/{{port}}/drain\"\nkind = \"write\"\nreply = \"Ack\"\ncardinality = -1\nsince = \"1.0\"\ndescription = \"d\"\n"
+                ),
+                "port/{port}/drain",
+            ),
+            (
+                "cardinality",
+                format!(
+                    "{HEADER}[producer]\nname = \"t\"\n\n[[media]]\npath = \"{{cam}}/video/h264/{{tier}}\"\nencoding = \"video/h264\"\nattachment = \"FrameMeta\"\ncardinality = -12\nsince = \"1.0\"\ndescription = \"d\"\n"
+                ),
+                "{cam}/video/h264/{tier}",
+            ),
+        ];
+        for (field, toml, path) in cases {
+            let err = lint_one(&toml).unwrap_err().to_string();
+            // The file, the entry's path, and the field — all three, so the
+            // reader is pointed at a line and not at a generated accessor.
+            assert!(err.contains("t.toml"), "{err}");
+            assert!(err.contains(path), "{err}");
+            assert!(err.contains(field), "{err}");
+            assert!(err.contains("must not be negative"), "{err}");
+        }
+    }
+
+    /// The other half of #313: whatever the lint lets through, no generated
+    /// source can carry a negative literal into a `u64` accessor. A count
+    /// reaches the emitter as a `u64`, so this is now a property of the type
+    /// rather than of the emitter's care.
+    #[test]
+    fn no_generated_source_holds_a_negative_count() {
+        let out = lint_one(&format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"health\"\nclass = \"state\"\ntype = \"Health\"\ncommon = \"health\"\nttl_s = 900\nsince = \"1.0\"\ndescription = \"d\"\n\n[[subject]]\npath = \"disk/{{mount}}/used\"\nclass = \"telemetry\"\ntype = \"F64\"\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n\n[[procedure]]\npath = \"port/{{port}}/drain\"\nkind = \"write\"\nreply = \"Ack\"\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n\n[[media]]\npath = \"{{cam}}/video/h264/{{tier}}\"\nencoding = \"video/h264\"\nattachment = \"FrameMeta\"\ncardinality = 12\nsince = \"1.0\"\ndescription = \"d\"\n"
+        ))
+        .unwrap();
+        assert!(!out.contains("Some(-"), "{out}");
+        assert!(out.contains("=> Some(900),"), "{out}");
+        assert!(out.contains("=> Some(64),"), "{out}");
     }
 
     #[test]
