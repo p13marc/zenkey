@@ -108,8 +108,26 @@ async fn transition_loop(
     let mut watch = zenkey_fleet::DoctorWatch::new();
     let mut out = std::io::stdout();
     let mut done = 0u64;
+    // One listener for the whole loop, held across every iteration (#334).
+    // Constructed per-iteration it was registered only while the `select!`
+    // was parked: a SIGINT arriving during a sweep cleared tokio's `pending`
+    // flag, failed its send with no receiver to send to, and was gone — while
+    // the first `ctrl_c()` had already taken SIGINT's default disposition
+    // away, so the process did not die either.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
     loop {
-        let outcome = zenkey_fleet::run_doctor(&args.fleet(session), locals, spec).await;
+        // The sweep is *inside* the select, not before it: a `doctor` run is
+        // the long part of a cycle, and Ctrl-C during one has to end it.
+        let fleet = args.fleet(session);
+        let outcome = tokio::select! {
+            biased;
+            _ = &mut ctrl_c => {
+                eprintln!("doctor --transitions: interrupted after {done} run(s)");
+                return Ok(());
+            }
+            outcome = zenkey_fleet::run_doctor(&fleet, locals, spec) => outcome,
+        };
         let at = zenkey_fleet::tape::record::rfc3339_now();
         let transitions = match &outcome {
             Ok(report) => watch.observe(Ok(report), &at),
@@ -132,11 +150,12 @@ async fn transition_loop(
             return Ok(());
         }
         tokio::select! {
-            _ = tokio::time::sleep(period) => {}
-            _ = tokio::signal::ctrl_c() => {
+            biased;
+            _ = &mut ctrl_c => {
                 eprintln!("doctor --transitions: interrupted after {done} run(s)");
                 return Ok(());
             }
+            _ = tokio::time::sleep(period) => {}
         }
     }
 }

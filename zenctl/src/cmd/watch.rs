@@ -180,19 +180,35 @@ pub async fn poll_loop<R: Render>(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut prev: Vec<String> = Vec::new();
     let mut tick = 0u64;
+    // One listener, held across every cycle (#334). A `ctrl_c()` built inside
+    // the loop is registered only while the `select!` is parked, so a SIGINT
+    // arriving mid-fetch cleared tokio's `pending` flag, found no receiver to
+    // send to, and was lost — and SIGINT's default disposition was already
+    // gone, so nothing killed the process either.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
     loop {
+        // `biased` so the listener is polled — and therefore *registered* —
+        // before the first tick, which is ready the instant the interval is
+        // created and would otherwise short-circuit the whole first cycle.
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => break,
-            _ = ticker.tick() => {
-                let report = fetch().await?;
-                let footer = format!(
-                    "watching every {:.0}s, Ctrl-C to stop (+ appeared, - disappeared)",
-                    interval.as_secs_f64()
-                );
-                render_cycle(&report, tick, &mut prev, format, color, &footer)?;
-                tick += 1;
-            }
+            biased;
+            _ = &mut ctrl_c => break,
+            _ = ticker.tick() => {}
         }
+        // The fetch is a fleet GET, up to `--timeout` long: it is the body of
+        // a cycle, so Ctrl-C has to cut it short rather than wait it out.
+        let report = tokio::select! {
+            biased;
+            _ = &mut ctrl_c => break,
+            report = fetch() => report?,
+        };
+        let footer = format!(
+            "watching every {:.0}s, Ctrl-C to stop (+ appeared, - disappeared)",
+            interval.as_secs_f64()
+        );
+        render_cycle(&report, tick, &mut prev, format, color, &footer)?;
+        tick += 1;
     }
     Ok(())
 }
@@ -323,6 +339,68 @@ mod tests {
         let (appeared, gone) = marks(&["a  1"], &["a  2"]);
         assert_eq!(appeared, ["a  2"]);
         assert_eq!(gone, ["a  1"]);
+    }
+
+    /// A report with nothing in it — enough to name `poll_loop`'s `R`.
+    #[derive(serde::Serialize)]
+    struct Nothing;
+
+    impl Render for Nothing {
+        const FAMILY: &'static str = "test-nothing";
+
+        fn rows(&self, _out: &mut dyn FnMut(Row)) {}
+
+        fn table(&self, _t: &mut Table) {}
+    }
+
+    /// #334, with a real SIGINT: the interrupt lands *inside* a cycle body,
+    /// which is the window a per-iteration `ctrl_c()` was blind to. Before the
+    /// fix the signal cleared tokio's `pending` flag, found no registered
+    /// receiver to send to, and was gone — and since the first `ctrl_c()` had
+    /// already displaced SIGINT's default disposition, nothing killed the
+    /// process either. The watch ran on forever; this test would hang out its
+    /// timeout and fail.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_sigint_during_a_cycle_ends_the_watch() {
+        // Our own interrupt listener, held for the length of the test. It
+        // registers eagerly (where `ctrl_c()` registers on first poll), so the
+        // raise below can never kill the test binary whatever `poll_loop`
+        // does. It cannot mask the defect either: a listener subscribed after
+        // a signal has already been delivered never sees it, which is the
+        // whole mechanism at issue.
+        let _sigint_is_not_fatal_here =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .expect("an interrupt listener");
+
+        let calls = std::cell::Cell::new(0usize);
+        let fetch = async || {
+            calls.set(calls.get() + 1);
+            assert_eq!(unsafe { libc::raise(libc::SIGINT) }, 0, "raise(SIGINT)");
+            // Still inside the body when the signal is delivered.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(Nothing)
+        };
+
+        let ended = tokio::time::timeout(
+            Duration::from_secs(5),
+            poll_loop(
+                Duration::from_millis(200),
+                Format::Ndjson,
+                crate::render::ColorChoice::Never,
+                fetch,
+            ),
+        )
+        .await;
+
+        ended
+            .expect("Ctrl-C during a cycle body did not end the watch (#334)")
+            .expect("the watch ended with an error");
+        assert_eq!(
+            calls.get(),
+            1,
+            "a cycle ran after the interrupt — the signal was seen late, not during the body"
+        );
     }
 
     #[test]
