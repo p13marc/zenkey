@@ -333,3 +333,48 @@ async fn a_seeded_watch_shows_pre_existing_state() {
         }
     }
 }
+
+/// #342: dropping a monitor aborts its seed tasks too.
+///
+/// `Drop` aborted only `self.tasks`; a seeded watch's task lives in `watches`
+/// and was merely dropped, which detaches. It holds a cloned `Session` and
+/// goes on ingesting until its own seed timeout — one per dropped monitor, in
+/// a GUI that rebuilds its monitor on every re-scope.
+///
+/// The boundary event is the tell: an aborted seed task never reaches the
+/// `WatchSeeded` send, a detached one does. The `EventStream` outlives the
+/// monitor (it holds the core), so it is still listening either way.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropping_a_monitor_aborts_its_seed_tasks() {
+    let (_a, b) = timestamping_pair().await;
+
+    let monitor = zenkey_fleet::Monitor::start(&b, zenkey_fleet::MonitorSpec::default())
+        .await
+        .expect("monitor");
+    let mut events = monitor.events();
+    monitor
+        .watch_seeded(
+            "wdrop/state/**",
+            SeedPolicy {
+                timeout: Duration::from_millis(300),
+                ..SeedPolicy::default()
+            },
+        )
+        .await
+        .expect("seeded watch");
+
+    // Nothing answers the seed GETs, so the task would otherwise run its
+    // timeout out and then announce the boundary.
+    drop(monitor);
+
+    let listen = tokio::time::Instant::now() + Duration::from_secs(2);
+    while let Ok(Some(item)) = tokio::time::timeout_at(listen, events.recv()).await {
+        assert!(
+            !matches!(
+                item,
+                zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::WatchSeeded { .. })
+            ),
+            "the seed task outlived the monitor that owned it"
+        );
+    }
+}

@@ -499,9 +499,15 @@ struct WatchEntry {
     selector: String,
     subscriber: zenoh::pubsub::Subscriber<()>,
     /// The seed task, while a seeded watch's seed phase is still running.
-    /// Aborted on [`Monitor::unwatch`] so a released watch cannot keep
-    /// ingesting seed replies. (A dropped *monitor* lets it run out — it is
-    /// bounded by the seed timeout and feeds a core nobody reads.)
+    ///
+    /// Aborted wherever the watch ends — [`Monitor::unwatch`],
+    /// [`Monitor::shutdown`] and [`Drop`] alike — so a released watch cannot
+    /// keep ingesting seed replies. `Drop` used to be the outlier, on a note
+    /// that predated `shutdown`: letting it run out was called harmless
+    /// because the seed timeout bounds it and it feeds a core nobody reads.
+    /// It is not harmless (#342). The task holds a cloned [`Session`], so a
+    /// frontend that re-scopes rapidly leaves one of these alive per dropped
+    /// monitor, each holding session teardown open for up to `policy.timeout`.
     seed_task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -841,10 +847,24 @@ impl Monitor {
 /// it calls [`Monitor::stop`] once and exits — but a GUI re-scopes its
 /// subscription whenever the user changes what they are watching, dropping and
 /// rebuilding the monitor each time.
+///
+/// **Every** task, which for one release meant every task but the seeded
+/// watches' (#342): those handles live in `watches`, and aborting only
+/// `self.tasks` detached them. Each holds a cloned [`Session`] and goes on
+/// calling `core.ingest`/`core.tick`, so the re-scoping GUI above left one
+/// running per drop, each holding session teardown open for up to the seed
+/// timeout. `unwatch` and `shutdown` had aborted them all along; the async
+/// mutex is `get_mut` here, which needs no lock because `Drop` holds
+/// `&mut self`.
 impl Drop for Monitor {
     fn drop(&mut self) {
         for t in &self.tasks {
             t.abort();
+        }
+        for entry in self.watches.get_mut().values_mut() {
+            if let Some(task) = entry.seed_task.take() {
+                task.abort();
+            }
         }
     }
 }
