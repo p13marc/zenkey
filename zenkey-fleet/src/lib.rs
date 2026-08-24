@@ -19,6 +19,7 @@ pub mod context_store;
 pub mod cutover;
 pub mod diff;
 pub mod discover;
+pub mod examples;
 pub mod facts;
 pub mod ingest;
 pub mod judgement;

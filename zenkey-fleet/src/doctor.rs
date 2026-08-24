@@ -15,6 +15,7 @@ use zenkey::RegistrySlice;
 use zenkey::grammar::with_base;
 use zenoh::Session;
 
+use crate::examples::Examples;
 use crate::query::{Answer, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
@@ -402,6 +403,36 @@ const DECODE_BUDGET: u8 = 2;
 /// How many per-key findings each listen check emits before summarising.
 const FINDING_CAP: usize = 20;
 
+/// The remainder wording every per-key listen check shares.
+const SAME_FINDING: &str = "more key(s) with the same finding";
+
+/// Spill a capped collector into `findings`, followed by the remainder note
+/// when the cap bit.
+///
+/// Filter and judge **into** the collector, never around it (deep-review D4):
+/// the `qos-observed-mismatch` cap used to bound the judged *keys*, so
+/// violators past the first [`FINDING_CAP`] of them vanished and the
+/// remainder note under-counted. [`Examples`] counts what it is offered, so
+/// the note cannot disagree with the population it summarises.
+fn emit_capped(
+    findings: &mut Vec<DoctorFinding>,
+    ex: Examples<DoctorFinding>,
+    check: &str,
+    tail: &str,
+) {
+    let more = ex.more(tail);
+    findings.extend(ex.into_vec());
+    if let Some(evidence) = more {
+        findings.push(finding(
+            DoctorSeverity::Info,
+            check,
+            "fleet",
+            evidence,
+            None,
+        ));
+    }
+}
+
 /// The declared events rate class as an hourly cap (RFC 04 §1.3):
 /// `rare` ≤ 1/h, `low` ≤ 1/min, `burst(n/h)` a declared cap.
 pub(crate) fn rate_cap_per_hour(rate: &str) -> Option<u64> {
@@ -585,43 +616,35 @@ async fn observe_traffic(
 
     let window_s = window.as_secs_f64();
     let mut findings = Vec::new();
-    let capped = |findings: &mut Vec<DoctorFinding>, check: &str, total: usize, shown: usize| {
-        if total > shown {
-            findings.push(finding(
-                DoctorSeverity::Info,
-                check,
-                "fleet",
-                format!("… and {} more key(s) with the same finding", total - shown),
-                None,
-            ));
-        }
-    };
 
-    for (key, (error, n)) in undecodable.iter().take(FINDING_CAP) {
-        findings.push(finding(
-            DoctorSeverity::Error,
-            "payload-undecodable",
-            key.clone(),
-            format!("payload does not decode as its declared type: {error} ({n} sample(s) tried)"),
-            Some("RFC 08 §7"),
-        ));
+    let mut ex = Examples::new(FINDING_CAP);
+    for (key, (error, n)) in &undecodable {
+        ex.push_with(|| {
+            finding(
+                DoctorSeverity::Error,
+                "payload-undecodable",
+                key.clone(),
+                format!(
+                    "payload does not decode as its declared type: {error} ({n} sample(s) tried)"
+                ),
+                Some("RFC 08 §7"),
+            )
+        });
     }
-    capped(
-        &mut findings,
-        "payload-undecodable",
-        undecodable.len(),
-        FINDING_CAP,
-    );
-    for (key, (violations, n)) in invalid.iter().take(FINDING_CAP) {
-        findings.push(finding(
-            DoctorSeverity::Error,
-            "payload-invalid",
-            key.clone(),
-            format!("payload violates the served schema: {violations} ({n} sample(s) tried)"),
-            Some("RFC 08 §7"),
-        ));
+    emit_capped(&mut findings, ex, "payload-undecodable", SAME_FINDING);
+    let mut ex = Examples::new(FINDING_CAP);
+    for (key, (violations, n)) in &invalid {
+        ex.push_with(|| {
+            finding(
+                DoctorSeverity::Error,
+                "payload-invalid",
+                key.clone(),
+                format!("payload violates the served schema: {violations} ({n} sample(s) tried)"),
+                Some("RFC 08 §7"),
+            )
+        });
     }
-    capped(&mut findings, "payload-invalid", invalid.len(), FINDING_CAP);
+    emit_capped(&mut findings, ex, "payload-invalid", SAME_FINDING);
     findings.extend(judge_qos_observed(&qos_bad));
     if !foreign_stampers.is_empty() {
         let mut named: Vec<String> = foreign_stampers
@@ -644,24 +667,22 @@ async fn observe_traffic(
             Some("RFC 09 §5.1 O7"),
         ));
     }
-    for (key, n) in unregistered.iter().take(FINDING_CAP) {
-        findings.push(finding(
-            DoctorSeverity::Warning,
-            "unregistered-traffic",
-            key.clone(),
-            format!(
-                "{n} sample(s) on a subject the producer's slice does not declare — \
-                 for a conforming producer, a subject that is not registered does not exist"
-            ),
-            Some("RFC 08 §2"),
-        ));
+    let mut ex = Examples::new(FINDING_CAP);
+    for (key, n) in &unregistered {
+        ex.push_with(|| {
+            finding(
+                DoctorSeverity::Warning,
+                "unregistered-traffic",
+                key.clone(),
+                format!(
+                    "{n} sample(s) on a subject the producer's slice does not declare — \
+                     for a conforming producer, a subject that is not registered does not exist"
+                ),
+                Some("RFC 08 §2"),
+            )
+        });
     }
-    capped(
-        &mut findings,
-        "unregistered-traffic",
-        unregistered.len(),
-        FINDING_CAP,
-    );
+    emit_capped(&mut findings, ex, "unregistered-traffic", SAME_FINDING);
     // Over-rate only, and only when provable: within any window no longer
     // than an hour, exceeding the hourly cap is conclusive. Absence or
     // under-rate in a bounded window is never a finding (O1/O4).
@@ -761,34 +782,23 @@ fn judge_qos_observed(
     qos_bad: &std::collections::BTreeMap<String, (String, u64, u64)>,
 ) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
-    let violators: Vec<(&String, &(String, u64, u64))> =
-        qos_bad.iter().filter(|(_, (_, bad, _))| *bad > 0).collect();
-    let total_violators = violators.len();
-    for (key, (declared, bad, total)) in violators.into_iter().take(FINDING_CAP) {
-        findings.push(finding(
-            DoctorSeverity::Warning,
-            "qos-observed-mismatch",
-            key.clone(),
-            format!(
-                "{bad} of {total} sample(s) did not ride the declared {declared} — this \
-                 is what actually rode: an interceptor MAY rewrite QoS, so it is a \
-                 deviation, not proof of the publisher"
-            ),
-            Some("RFC 04 §3"),
-        ));
+    let mut ex = Examples::new(FINDING_CAP);
+    for (key, (declared, bad, total)) in qos_bad.iter().filter(|(_, (_, bad, _))| *bad > 0) {
+        ex.push_with(|| {
+            finding(
+                DoctorSeverity::Warning,
+                "qos-observed-mismatch",
+                key.clone(),
+                format!(
+                    "{bad} of {total} sample(s) did not ride the declared {declared} — this \
+                     is what actually rode: an interceptor MAY rewrite QoS, so it is a \
+                     deviation, not proof of the publisher"
+                ),
+                Some("RFC 04 §3"),
+            )
+        });
     }
-    if total_violators > FINDING_CAP {
-        findings.push(finding(
-            DoctorSeverity::Info,
-            "qos-observed-mismatch",
-            "fleet",
-            format!(
-                "… and {} more key(s) with the same finding",
-                total_violators - FINDING_CAP
-            ),
-            None,
-        ));
-    }
+    emit_capped(&mut findings, ex, "qos-observed-mismatch", SAME_FINDING);
     findings
 }
 
@@ -921,7 +931,7 @@ fn judge_cardinality(
     window_s: f64,
 ) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
-    let mut over: Vec<DoctorFinding> = Vec::new();
+    let mut over: Examples<DoctorFinding> = Examples::new(FINDING_CAP);
     for slice in slices.slices() {
         for s in &slice.subjects {
             if !s.path.contains('{') {
@@ -957,46 +967,37 @@ fn judge_cardinality(
                 if keys.len() as i64 <= declared {
                     continue; // under/at declared: not a finding (O4)
                 }
-                let examples: Vec<&str> = keys
-                    .iter()
-                    .take(crate::budget::EXAMPLE_CAP)
-                    .map(String::as_str)
-                    .collect();
+                let examples =
+                    Examples::collect(crate::budget::EXAMPLE_CAP, keys.iter().map(String::as_str));
                 let subject = if origin.starts_with('@') {
                     format!("{origin}/{}", s.path)
                 } else {
                     format!("{origin}/{}/{}", slice.name, s.path)
                 };
-                over.push(finding(
-                    DoctorSeverity::Warning,
-                    "cardinality-over-declared",
-                    subject,
-                    format!(
-                        "{} distinct key(s) observed in {window_s:.0}s exceed the \
+                over.push_with(|| {
+                    finding(
+                        DoctorSeverity::Warning,
+                        "cardinality-over-declared",
+                        subject,
+                        format!(
+                            "{} distinct key(s) observed in {window_s:.0}s exceed the \
                          declared cardinality {declared} — e.g. {}. A bounded window \
                          observes a lower bound: the population is at least this",
-                        keys.len(),
-                        examples.join(", ")
-                    ),
-                    Some("RFC 04 §1.2"),
-                ));
+                            keys.len(),
+                            examples.as_slice().join(", ")
+                        ),
+                        Some("RFC 04 §1.2"),
+                    )
+                });
             }
         }
     }
-    let total = over.len();
-    findings.extend(over.into_iter().take(FINDING_CAP));
-    if total > FINDING_CAP {
-        findings.push(finding(
-            DoctorSeverity::Info,
-            "cardinality-over-declared",
-            "fleet",
-            format!(
-                "… and {} more origin famil(y|ies) over their declared cardinality",
-                total - FINDING_CAP
-            ),
-            None,
-        ));
-    }
+    emit_capped(
+        &mut findings,
+        over,
+        "cardinality-over-declared",
+        "more origin famil(y|ies) over their declared cardinality",
+    );
     findings
 }
 
