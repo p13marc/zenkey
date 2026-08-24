@@ -199,9 +199,11 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
         &store,
         Some(&slices),
         SUBJECT_KEY,
-        None,
-        typed,
-        PrepareMode::Encode,
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: None,
+            body: typed,
+            mode: PrepareMode::Encode,
+        },
     )
     .await
     .expect("prepare");
@@ -299,9 +301,11 @@ async fn the_three_modes_differ_only_in_what_they_say_and_refuse() {
             &store,
             Some(&slices),
             SUBJECT_KEY,
-            None,
-            bad,
-            mode,
+            zenkey_fleet::PrepareSpec {
+                declared_encoding: None,
+                body: bad,
+                mode,
+            },
         )
         .await
     };
@@ -345,9 +349,11 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
         &store,
         Some(&slices()),
         "demo/foreign/key",
-        None,
-        body,
-        PrepareMode::Encode,
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: None,
+            body,
+            mode: PrepareMode::Encode,
+        },
     )
     .await
     .expect("prepare");
@@ -370,9 +376,11 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
         &store,
         None,
         "demo/foreign/key",
-        None,
-        body,
-        PrepareMode::Encode,
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: None,
+            body,
+            mode: PrepareMode::Encode,
+        },
     )
     .await
     .expect("prepare");
@@ -437,9 +445,11 @@ async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
         &store,
         Some(&slices),
         TWIST_KEY,
-        None,
-        typed,
-        PrepareMode::Encode,
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: None,
+            body: typed,
+            mode: PrepareMode::Encode,
+        },
     )
     .await
     .expect("prepare");

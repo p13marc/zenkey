@@ -61,7 +61,8 @@ pub mod generate;
 pub mod synth;
 #[cfg(feature = "decode")]
 pub use body::{
-    BodySource, PrepareMode, PreparedBody, encode_encoding, prepare_publish, prepare_request,
+    BodySource, PrepareMode, PrepareSpec, PreparedBody, encode_encoding, prepare_publish,
+    prepare_request,
 };
 #[cfg(feature = "decode")]
 pub use condition::{
@@ -112,8 +113,8 @@ pub use query::{
     fetch_stored, fetch_value, fleet_get, fleet_registry, state_snapshot,
 };
 pub use record::{
-    RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplayTarget, ZREC_VERSION, ZrecHeader,
-    ZrecItem, ZrecReader, ZrecWriter, record, replay,
+    RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplaySpec, ReplayTarget, ZREC_VERSION,
+    ZrecHeader, ZrecItem, ZrecReader, ZrecWriter, record, replay,
 };
 pub use registry::SliceSet;
 pub use retain::{RetentionBudget, RetentionStats};
@@ -135,7 +136,8 @@ pub use sub::{
 pub use tree::KeyTreeSnapshot;
 pub use why::{RUNG_IDS, Rung, RungAnswer, WhyInputs, WhyReport, WhySpec, WhyVerdict, run_why};
 pub use write::{
-    CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire, declare_publication,
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
+    declare_publication,
 };
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.

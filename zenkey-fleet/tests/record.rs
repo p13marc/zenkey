@@ -110,13 +110,16 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     let mut reader = ZrecReader::new(file.as_slice()).expect("reader");
     let report = replay(
         &mut reader,
-        ReplayTarget::Bus {
-            session: &c,
-            slices: None,
+        zenkey_fleet::ReplaySpec {
+            target: ReplayTarget::Bus {
+                session: &c,
+                slices: None,
+            },
+            // scaled pacing: original gaps are µs-scale anyway
+            speed: 1000.0,
+            i_know: false,
+            default_qos: zenkey::qos::QosProfile::Refreshed,
         },
-        1000.0, // scaled pacing: original gaps are µs-scale anyway
-        false,
-        "refreshed",
         |_| {},
     )
     .await
@@ -221,10 +224,12 @@ async fn a_lossy_capture_says_so_at_both_ends() {
     let mut reader = ZrecReader::new(file.as_slice()).expect("reader");
     let report = replay(
         &mut reader,
-        ReplayTarget::DryRun,
-        1.0,
-        false,
-        "refreshed",
+        zenkey_fleet::ReplaySpec {
+            target: ReplayTarget::DryRun,
+            speed: 1.0,
+            i_know: false,
+            default_qos: zenkey::qos::QosProfile::Refreshed,
+        },
         |_| {},
     )
     .await

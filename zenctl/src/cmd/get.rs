@@ -70,9 +70,11 @@ pub async fn run(
                 &store,
                 slices.as_ref(),
                 key_part,
-                None,
-                &typed,
-                super::publish::mode(raw, false),
+                zenkey_fleet::PrepareSpec {
+                    declared_encoding: None,
+                    body: &typed,
+                    mode: super::publish::mode(raw, false),
+                },
             )
             .await?;
             if let Some(note) = &prepared.note {

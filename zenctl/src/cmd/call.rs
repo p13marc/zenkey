@@ -57,10 +57,12 @@ pub async fn run(
             &store,
             producer,
             request_type,
-            None,
             decl.encoding.as_deref(),
-            typed,
-            super::publish::mode(raw, no_validate),
+            zenkey_fleet::PrepareSpec {
+                declared_encoding: None,
+                body: typed,
+                mode: super::publish::mode(raw, no_validate),
+            },
         )
         .await?;
         if let Some(note) = &prepared.note {
@@ -71,14 +73,16 @@ pub async fn run(
 
     let report = zenkey_fleet::call(
         &args.fleet(&session),
-        &target,
-        producer,
-        procedure,
-        params,
-        payload,
-        attachment,
-        args.timeout(),
-        slices.as_ref(),
+        zenkey_fleet::CallSpec {
+            target: &target,
+            producer,
+            procedure,
+            params,
+            body: payload,
+            attachment,
+            timeout: args.timeout(),
+            slices: slices.as_ref(),
+        },
     )
     .await?;
 

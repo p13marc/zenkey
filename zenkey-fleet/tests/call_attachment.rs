@@ -57,14 +57,16 @@ async fn a_call_carries_attachments_both_ways() {
     let target = zenkey_fleet::CallTarget::parse("h-aaaaaaaaaaaa").expect("target");
     let report = zenkey_fleet::call(
         &zenkey_fleet::Fleet::new(&client, ""),
-        &target,
-        "demo",
-        "echo",
-        &[],
-        None,
-        Some(b"who=me".to_vec()),
-        Duration::from_secs(5),
-        None,
+        zenkey_fleet::CallSpec {
+            target: &target,
+            producer: "demo",
+            procedure: "echo",
+            params: &[],
+            body: None,
+            attachment: Some(b"who=me".to_vec()),
+            timeout: Duration::from_secs(5),
+            slices: None,
+        },
     )
     .await
     .expect("call");
@@ -81,14 +83,16 @@ async fn a_call_carries_attachments_both_ways() {
     // And a call sending none gets none back: absent, never defaulted.
     let report = zenkey_fleet::call(
         &zenkey_fleet::Fleet::new(&client, ""),
-        &target,
-        "demo",
-        "echo",
-        &[],
-        None,
-        None,
-        Duration::from_secs(5),
-        None,
+        zenkey_fleet::CallSpec {
+            target: &target,
+            producer: "demo",
+            procedure: "echo",
+            params: &[],
+            body: None,
+            attachment: None,
+            timeout: Duration::from_secs(5),
+            slices: None,
+        },
     )
     .await
     .expect("call without attachment");

@@ -71,21 +71,23 @@ pub async fn run(target: &str, producer: &str, procedure: &str, args: &Bus) -> R
     // products use (zenkey::selector::rpc_at inside the engine's call).
     let call = zenkey_fleet::call(
         &args.fleet(&session),
-        &zenkey_fleet::CallTarget::Host(host.clone()),
-        producer,
-        procedure,
-        &[],
-        None,
-        None,
-        args.timeout(),
-        // Deliberately `None`, not a degraded fetch: the engine's `call`
-        // consults slices only for the registry-layer fanout guard, and that
-        // guard is gated on `CallTarget::Fleet` (`write.rs`). This target is
-        // always `Host`, so the slices could never be read — and buying them
-        // costs a full introspect fan-in, plus the union and its disagreement
-        // notes under `--registry`, on the one verb whose stated purpose is a
-        // cheap concrete-key probe (#245).
-        None,
+        zenkey_fleet::CallSpec {
+            target: &zenkey_fleet::CallTarget::Host(host.clone()),
+            producer,
+            procedure,
+            params: &[],
+            body: None,
+            attachment: None,
+            timeout: args.timeout(),
+            // Deliberately `None`, not a degraded fetch: the engine's `call`
+            // consults slices only for the registry-layer fanout guard, and
+            // that guard is gated on `CallTarget::Fleet` (`write.rs`). This
+            // target is always `Host`, so the slices could never be read —
+            // and buying them costs a full introspect fan-in, plus the union
+            // and its disagreement notes under `--registry`, on the one verb
+            // whose stated purpose is a cheap concrete-key probe (#245).
+            slices: None,
+        },
     )
     .await?;
 
