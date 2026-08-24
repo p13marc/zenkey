@@ -34,6 +34,11 @@ pub enum Fetch {
         received: u32,
         total: u32,
         bytes: u64,
+        /// Progress events the bounded queue superseded before the pane could
+        /// read them (#344, RFC 13 §3 O6, the *coalesced* kind). Nothing the
+        /// bar shows was lost — every event carries absolutes — but a reader
+        /// who assumed one update per chunk is wrong, and this says so.
+        coalesced: u64,
     },
     /// A `tree/<root>` inspection is running. Its own state, not a zeroed
     /// [`Fetch::InFlight`]: an inspection has no chunk counts to fake and no
@@ -307,6 +312,7 @@ mod tests {
                 received: 1,
                 total: 4,
                 bytes: 65536,
+                coalesced: 0,
             },
             cancel: Some(zenkey_fleet::zblob::CancelToken::new()),
             ..BlobState::default()

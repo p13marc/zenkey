@@ -112,6 +112,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
                 received: 0,
                 total: 0,
                 bytes: 0,
+                coalesced: 0,
             };
 
             let dest = std::path::PathBuf::from(blob.dest_input.trim());
@@ -134,17 +135,22 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
                 },
             })
         }
-        BlobMsg::Progress(p) => {
+        BlobMsg::Progress(p, dropped) => {
             use zenkey_fleet::report::BlobProgress;
             // No base guard needed (#109 audit): progress only mutates
             // while Fetch::InFlight, and a base change resets the pane to
-            // NotAsked via blob.clear() — stale ticks fall through.
+            // NotAsked via blob.clear() — stale ticks fall through. Nor does
+            // it need an ordering guard any more (#344): progress and outcome
+            // ride one stream, and every Progress is yielded before the
+            // FetchDone that ends it.
             if let crate::blob::Fetch::InFlight {
                 received,
                 total,
                 bytes,
+                coalesced,
             } = &mut blob.fetch
             {
+                *coalesced = dropped;
                 match p {
                     BlobProgress::Started { chunk_count, .. } => *total = chunk_count,
                     BlobProgress::Resumed {
