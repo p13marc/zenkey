@@ -172,6 +172,14 @@ fn bench_decode(c: &mut Criterion) {
 fn bench_tree(c: &mut Criterion) {
     for n in [1_000usize, 10_000, 50_000] {
         let stats = table_of(n);
+        // `rows` is what the stats tick holds the ingest lock for, `build` is
+        // rows + the fold that now happens after releasing it (#330). Both are
+        // benched so the ratio between them stays visible: the whole claim is
+        // that the network callback thread waits behind the first number and
+        // not the second.
+        c.bench_function(&format!("tree/rows_{}k", n / 1_000), |b| {
+            b.iter(|| black_box(&stats).rows())
+        });
         c.bench_function(&format!("tree/build_{}k", n / 1_000), |b| {
             b.iter(|| KeyTreeSnapshot::build(black_box(&stats)))
         });

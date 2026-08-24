@@ -7,12 +7,43 @@
 //! zengui redraw).
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Instant;
 
-use crate::model::stats::{KeyStats, StatsTable};
+use crate::model::stats::StatsTable;
 
-/// Fold one key's stats into every node on its path (the node itself included).
-fn accumulate(node: &mut TreeNode, s: &KeyStats) {
+/// One key's contribution to the fold: everything the tree reads out of a
+/// [`KeyStats`](crate::model::stats::KeyStats), and nothing else.
+///
+/// All `Copy` but the key, which is the table's own `Arc<str>` — so copying
+/// the whole table's rows is a walk plus a refcount bump per key, which is
+/// what makes the ingest lock's critical section O(keys) rather than
+/// O(keys × chunks) (#330).
+#[derive(Debug, Clone)]
+pub struct TreeRow {
+    pub key: Arc<str>,
+    pub count: u64,
+    pub bytes: u64,
+    pub rate_hz: f64,
+    pub last_seen: Instant,
+}
+
+/// A whole table's [`TreeRow`]s and its O6 counters, as of one read —
+/// [`StatsTable::rows`](crate::model::stats::StatsTable::rows) produces it
+/// under the lock, [`KeyTreeSnapshot::fold`] consumes it outside.
+#[derive(Debug, Clone, Default)]
+pub struct TreeRows {
+    pub rows: Vec<TreeRow>,
+    /// Distinct keys the table held — [`KeyTreeSnapshot::keys`].
+    pub keys: usize,
+    /// Keys retired to stay within the table's bound.
+    pub evicted: u64,
+    /// Keys retired because their watch was released.
+    pub unwatched: u64,
+}
+
+/// Fold one key's row into every node on its path (the node itself included).
+fn accumulate(node: &mut TreeNode, s: &TreeRow) {
     node.subtree_count += s.count;
     node.subtree_bytes += s.bytes;
     node.subtree_rate_hz += s.rate_hz;
@@ -64,14 +95,31 @@ pub struct KeyTreeSnapshot {
 }
 
 impl KeyTreeSnapshot {
-    /// Build from the stats table (called on the stats tick, off the
-    /// per-sample path).
+    /// Build from the stats table: copy the rows, then fold them.
+    ///
+    /// The convenience form, for callers that hold the table exclusively
+    /// (tests, offline projections). The monitor's tick deliberately spells
+    /// the two halves out — [`StatsTable::rows`] under the ingest lock,
+    /// [`fold`](Self::fold) after releasing it — because only the first half
+    /// may run while a network callback thread is waiting (#330).
     pub fn build(stats: &StatsTable) -> KeyTreeSnapshot {
+        KeyTreeSnapshot::fold(stats.rows())
+    }
+
+    /// Fold copied rows into the snapshot. O(keys × chunks), and never to be
+    /// run under the ingest lock (#330).
+    pub fn fold(rows: TreeRows) -> KeyTreeSnapshot {
+        let TreeRows {
+            rows,
+            keys,
+            evicted,
+            unwatched,
+        } = rows;
         let mut root = TreeNode::default();
-        for (key, s) in stats.iter() {
+        for s in &rows {
             let mut node = &mut root;
             accumulate(node, s);
-            for chunk in key.split('/') {
+            for chunk in s.key.split('/') {
                 // `entry` would need an owned key, so `chunk.to_string()`
                 // would run — and be dropped — on every *hit*, which is
                 // almost every chunk of almost every key. At 50k keys of 6
@@ -95,9 +143,9 @@ impl KeyTreeSnapshot {
         }
         KeyTreeSnapshot {
             root,
-            keys: stats.len(),
-            evicted: stats.evicted(),
-            unwatched: stats.unwatched(),
+            keys,
+            evicted,
+            unwatched,
         }
     }
 

@@ -154,6 +154,15 @@ The per-tick floor is `KeyTreeSnapshot::build`: one `TreeNode` per *new* node,
 and — since the `contains_key`/`get_mut` fix — no `String` at all for a chunk
 that already exists. `tree/build_50k` is the number that says so.
 
+**The per-tick floor is not the per-tick *critical section*** (#330). Cheap or
+not, the fold is O(keys × chunks), and holding the stats mutex across it made
+zenoh's network callback thread wait for the whole rebuild four times a
+second. The tick is now two phases: `StatsTable::rows` under the lock
+(`tree/rows_50k` — one refcount bump per key, which is why the table's keys are
+`Arc<str>`), `KeyTreeSnapshot::fold` on the blocking pool after releasing it.
+The number to keep an eye on is the **ratio**: at 5 000 keys of 8 chunks in a
+debug build, ~0.9 ms of copy against ~48 ms of fold.
+
 ---
 
 ## 5. Deliberately left alone
@@ -166,7 +175,7 @@ Recorded so they are not "fixed" by the next reader:
 | `zenkey-fleet/src/bus/query.rs` — `declare_querier(key.to_string())` | zenoh's builder takes ownership. A borrowed expr does not compile here. |
 | `zenkey-fleet/src/bus/query.rs` — the error-reply arm | `String::from_utf8_lossy(…).to_string()` into an owned `Error{name,message}`. Rare, and the bytes must be owned. |
 | `zenkey-fleet/src/bus/body.rs` — `body.to_vec()` | The write path builds an owned wire body, once per user action. Not per sample. |
-| `SampleView`'s two `String`s | The floor above. `Box<str>`/`Arc<str>` would save a pointer's worth and break an all-public-fields struct. |
+| `SampleView`'s two `String`s | The floor above. `Box<str>`/`Arc<str>` would save a pointer's worth and break an all-public-fields struct. (`StatsTable`'s *keys* did move to `Arc<str>` in #330 — not for the floor, but so the tick's critical section is a refcount bump per key instead of an allocation per key.) |
 | `Flattened::rows` — one `Vec<RowShape>` per **rebuild** | Bounded by `MAX_ROWS` in all three flatten paths since #249, and no longer per *tick*: #177 separated the shape from the numbers, so a steady-state tick retargets in 11.3 ns and a `TreeRow` is a per-frame temporary of ~40. What a cold rebuild still costs is #251's. |
 | `Zengui::merged_cache` — one merged tree retained | #177. Peak is unchanged, since the transient peak was always this figure; what changed is that it is not returned between rebuilds. It buys the expand/collapse/search/pivot path a merge — the larger half of a `reflatten`. |
 
