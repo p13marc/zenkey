@@ -40,6 +40,20 @@ pub struct SliceSet {
     /// with its slice — the two vectors are index-parallel, and `push` is the
     /// only place either grows.
     parsed: Vec<std::collections::BTreeMap<String, ParsedSubjects>>,
+    /// Producer base name → index into the three parallel vectors.
+    ///
+    /// [`get`](Self::get) and [`refine`](Self::refine) run **per sample** on
+    /// the decode path, and both used to scan `slices` by name — a linear
+    /// walk over a fleet's whole producer set, per key, to answer a question
+    /// a map answers.
+    ///
+    /// **First wins**, because that is `find`/`position`'s rule and the
+    /// shadowing it implies is observable: [`from_slices`](Self::from_slices)
+    /// does not go through `push` and can be handed the same name twice, and
+    /// the one that answers is the earlier. `push` replaces in place, so a
+    /// re-pushed producer keeps its index — and its position in
+    /// [`slices`](Self::slices) and [`entries`](Self::entries).
+    by_name: std::collections::BTreeMap<String, usize>,
 }
 
 /// Group one slice's subjects by class, parsing each pattern once. A subject
@@ -102,11 +116,12 @@ impl SliceSet {
         // several versions — the newest reply is as good a pick as any, and
         // `doctor` is where disagreement is *reported*).
         let parsed = parse_subjects(&slice);
-        if let Some(i) = self.slices.iter().position(|s| s.name == slice.name) {
+        if let Some(&i) = self.by_name.get(&slice.name) {
             self.slices[i] = slice;
             self.raw[i] = raw;
             self.parsed[i] = parsed;
         } else {
+            self.by_name.insert(slice.name.clone(), self.slices.len());
             self.slices.push(slice);
             self.raw.push(raw);
             self.parsed.push(parsed);
@@ -125,7 +140,7 @@ impl SliceSet {
     }
 
     pub fn get(&self, name: &str) -> Option<&RegistrySlice> {
-        self.slices.iter().find(|s| s.name == name)
+        self.by_name.get(name).map(|&i| &self.slices[i])
     }
 
     /// The slice declaring a service origin (`@catalog`) — service keys have
@@ -144,7 +159,7 @@ impl SliceSet {
         class: &str,
         tail: &[&str],
     ) -> Option<(&'s zenkey::slice::SubjectDecl, Vec<(String, String)>)> {
-        let i = self.slices.iter().position(|s| s.name == producer)?;
+        let i = *self.by_name.get(producer)?;
         let slice = &self.slices[i];
         // Precedence-ordered via the shared matcher (issue #7): the class's
         // patterns were parsed at construction, so this is a map lookup and a
@@ -163,10 +178,17 @@ impl SliceSet {
     pub fn from_slices(slices: Vec<RegistrySlice>) -> SliceSet {
         let raw = vec![String::new(); slices.len()];
         let parsed = slices.iter().map(parse_subjects).collect();
+        // `or_insert`, not `insert`: first wins, which is what the linear
+        // `find` this replaced did with a duplicated name.
+        let mut by_name = std::collections::BTreeMap::new();
+        for (i, s) in slices.iter().enumerate() {
+            by_name.entry(s.name.clone()).or_insert(i);
+        }
         SliceSet {
             slices,
             raw,
             parsed,
+            by_name,
         }
     }
 
@@ -425,6 +447,57 @@ mod tests {
                 .slices()
                 .is_empty()
         );
+    }
+
+    /// The name index answers exactly what the linear scan answered.
+    ///
+    /// Two rules, both observable, both easy to lose to a map: a re-pushed
+    /// producer replaces **in place** (so `slices()` order is stable and the
+    /// newest slice is the one that refines), and a set built through
+    /// [`SliceSet::from_slices`] — which does not go through `push` — can
+    /// hold the same name twice, where the **first** answers.
+    #[test]
+    fn a_re_pushed_producer_keeps_its_place_and_shadowing_is_first_wins() {
+        let newer = A.replace("version = \"1.0\"", "version = \"9.9\"");
+        let other = A.replace("name = \"alpha\"", "name = \"beta\"");
+
+        let mut set = SliceSet::default();
+        set.push(parse_slice(A).unwrap(), A.to_string());
+        set.push(parse_slice(&other).unwrap(), other.clone());
+        set.push(parse_slice(&newer).unwrap(), newer.clone());
+
+        assert_eq!(set.slices().len(), 2, "a re-push replaces, never appends");
+        assert_eq!(
+            set.slices()[0].name,
+            "alpha",
+            "the replacement keeps the producer's position"
+        );
+        assert_eq!(set.get("alpha").unwrap().version, "9.9", "last push wins");
+        assert_eq!(
+            set.entries().next().unwrap().1,
+            newer,
+            "the raw TOML rides with the slice it was parsed from"
+        );
+        assert!(set.get("gamma").is_none());
+        // …and refinement still resolves through the replaced slice.
+        assert_eq!(
+            set.refine("alpha", "telemetry", &["flow", "special"])
+                .unwrap()
+                .0
+                .type_name,
+            "Special"
+        );
+        assert!(set.refine("gamma", "telemetry", &["flow"]).is_none());
+
+        // The shadowing `from_slices` can produce: first wins, both ways.
+        let shadowed =
+            SliceSet::from_slices(vec![parse_slice(A).unwrap(), parse_slice(&newer).unwrap()]);
+        assert_eq!(
+            shadowed.get("alpha").unwrap().version,
+            "1.0",
+            "the earlier of two same-named slices answers"
+        );
+        assert_eq!(shadowed.slices().len(), 2, "neither is dropped");
     }
 
     /// Union semantics without a bus: dirs fill everything, nothing claimed
