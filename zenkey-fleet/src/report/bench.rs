@@ -29,6 +29,17 @@ pub struct BenchReport {
     /// silence is not a failure and averaging it away would hide it
     /// (RFC 05 §3.1).
     pub silent: usize,
+    /// Calls whose task **panicked**: a third population, apart from both
+    /// `errors` and `silent` (#329).
+    ///
+    /// A panicked call answered nothing and measured nothing, and it is not
+    /// news about the fleet — it is news about this tool. Folding it into
+    /// `errors` would blame the producer for a bug here; folding it into
+    /// `silent` would claim an observation nobody made. Dropping it, which is
+    /// what `let Ok(result) = handle.await else { continue }` did, deletes a
+    /// whole population from a report whose other counters exist precisely so
+    /// that a benchmark cannot average a non-answer away (RFC 13 §3 O6).
+    pub panicked: usize,
     pub elapsed_s: f64,
     pub calls_per_s: f64,
     pub origins: Vec<OriginLatency>,

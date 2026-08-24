@@ -549,6 +549,10 @@ staging  0 origin(s)  0 producer(s)    storage: archive@eeff0011  (storage confi
     );
 }
 
+/// The three non-answer populations stay apart, in both media. The panicked
+/// line and its note are new with #329: a `JoinError` used to skip `completed`,
+/// `errors` *and* `silent`, so a whole population vanished from a report whose
+/// every other counter exists to stop exactly that.
 #[test]
 fn a_bench_report_right_aligns_its_numbers_and_counts_non_answers_apart() {
     assert_data_eq!(
@@ -557,6 +561,7 @@ fn a_bench_report_right_aligns_its_numbers_and_counts_non_answers_apart() {
 → v1/h-3fa9c2d41b7e/@rpc/sysinfo/processes
 98 call(s), concurrency 8, 2.50s — 39.2 calls/s
   2 of 100 calls did not complete
+  1 of those panicked in this tool — measured nothing
 
 origin          replies  min ms  p50 ms  p95 ms  p99 ms  max ms
 h-3fa9c2d41b7e       64    0.80    1.90   12.40   40.10  123.46
@@ -565,6 +570,7 @@ h-bbbbbbbbbbbb       34    1.10    2.20    9.90   11.00   12.50
 "#]]
     );
     assert!(notes(&fx::bench_report()).contains("drew no reply"));
+    assert!(notes(&fx::bench_report()).contains("panicked inside this tool"));
 }
 
 #[test]
