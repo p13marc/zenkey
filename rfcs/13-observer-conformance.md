@@ -422,8 +422,8 @@ The obligations of §3 apply throughout — a capture file is an observer
 whose window happens to be on disk.*
 
 A `.zrec` file is newline-delimited JSON — deliberately the *same row
-dialect* the explorers already emit (`zenctl topic echo --format ndjson`)
-and read back (`zenctl topic pub --from ndjson`), not a second format —
+dialect* the explorers already emit (`zenctl echo --format ndjson`)
+and read back (`zenctl pub --from ndjson`), not a second format —
 upgraded with what a pipe does not need but a capture does. The file
 format is §3 applied to disk: the header names what was asked (O4) and
 states the coverage of a wildcard scope (O5), non-conformant keys are

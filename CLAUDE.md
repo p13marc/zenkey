@@ -91,6 +91,27 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   flag > env `ZENCTL_BASE` > the active named context
   (`zenctl context create …`, `~/.config/zenctl/config.toml`) > **empty**
   (the base-less bus-root deployment, the RFC v1.6 default).
+  **Tree (#264)**, and the depth carries meaning: a **noun** is something
+  declared, alive or persisted and gets verbs under it (`topic list|info`,
+  `node`, `base`, `service`, `interface`, `schema show`, `registry`,
+  `storage`, `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
+  verb** is an act or observation on live traffic and hangs off the root
+  (`get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`, `replay`,
+  `serve`, `gen`, `scout`); a **judgement** is exit-coded (`check
+  expect|cutover|retired|probe|schema`, `doctor`, `why`, `watchdog`).
+  **Flag vocabulary**: `--for` is every passive window (f64 seconds),
+  `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
+  alone), `--watch` is a bare bool with `--every` as the one period,
+  `--count` is a stop bound (`--at-least` asserts, `--calls` sizes a bench,
+  `--times` repeats a publish), `--from` names an input source, `--i-know` is
+  one guard per verb. **Exit contract**, written once in `zenctl/src/exit.rs`
+  and cited by every verb: 0 asked-and-clean, 1 asked-and-a-finding (`why`
+  included — a cause is the finding), 2 no verdict — which covers clap's
+  usage errors, everything else this tool refuses of your input
+  (`exit::Unaskable`), silence under fan-out, and any pre-run failure of a
+  verdict verb (`exit::asked`). Verdicts exit through
+  `zenkey_fleet::judgement_exit_code` over the RFC 13 §1.2 `Judgement`, never
+  a hand-rolled match. `zenctl/CHANGELOG.md` carries the old→new table.
 
 Plus `fixture-tests/` (unpublished): the ZenSight registry snapshot compiled
 through zenkey-build — the codegen regression corpus. **Do not add features

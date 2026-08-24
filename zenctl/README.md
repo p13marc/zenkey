@@ -13,6 +13,14 @@ that tooling: nothing application-specific is compiled in.
 zenctl node list --base acme -c tcp/127.0.0.1:7447
 ```
 
+> **The command tree moved (#264).** `topic echo` → `echo`, `topic pub` →
+> `pub`, `topic hz`/`topic bw` → `rate`, `expect`/`cutover`/`probe`/`registry
+> retired`/`schema check` → `check …`, `blob probe` → `blob locate`; every
+> observation window is `--for <SECS>`; `why` exits 1 on a finding, and a
+> refused input exits 2 everywhere. No aliases, no shims — the old spellings
+> are gone. [`CHANGELOG.md`](CHANGELOG.md) has the full old→new table and the
+> exit-code contract.
+
 `--base` (or `ZENCTL_BASE`) names the deployment base — the first chunk(s) of
 every key on the wire. Applications set it as their session namespace and never
 spell it; `zenctl` runs un-namespaced on purpose (RFC 09 §5), so it has to be
@@ -54,7 +62,7 @@ subject   disk/{mount}/usage_percent
 variables
   mount = root
 payload   TelemetryPoint
-  (`zenctl schema sysinfo --type TelemetryPoint` for the served shape)
+  (`zenctl schema show sysinfo --type TelemetryPoint` for the served shape)
 qos       sampled
 cardinality  ~512 keys expected
 ```
@@ -62,7 +70,7 @@ cardinality  ~512 keys expected
 **Declared is not observed.** A pattern with a trailing rest-variable
 (`{device}/{path...}`) fixes a *shape*, not its members — proxy producers
 register that way by design, because their metric tree belongs to the polled
-device. `topic list` flags those `[open-ended]`; `topic echo` is what
+device. `topic list` flags those `[open-ended]`; `echo` is what
 enumerates them.
 
 ## On-bus commands
@@ -71,27 +79,27 @@ enumerates them.
 zenctl base list -c tcp/127.0.0.1:7447  # discover deployment bases (needs no --base)
 zenctl node list --base acme            # the liveliness roster (--verbose joins introspect)
 zenctl node list --base acme --watch    # …re-rendered per liveliness event (no polling)
-zenctl topic echo --base acme           # subscribe + decode (defaults to <base>/v1/**)
-zenctl topic list --base acme --watch 5 # topic/storage/base list poll+diff; +/- marks
-zenctl topic hz --base acme             # per-key sample rates; topic bw for bytes
+zenctl echo --base acme                 # subscribe + decode (defaults to <base>/v1/**)
+zenctl topic list --base acme --watch --every 5  # topic/storage/base list poll+diff; +/- marks
+zenctl rate --base acme --per-key       # per-key sample rates; --bytes for bandwidth
 zenctl service call --base acme '*' sysinfo processes --param sort=cpu
 zenctl service call --base acme h-3fa9 netring capture/trigger --body @trigger.json
 zenctl get 'acme/v1/*/state/**'         # fan-in GET on any selector, replies attributed
 zenctl get '@/**'                       # …including the zenoh admin space (was: admin get)
-zenctl topic pub k '{"v":1}' --attachment meta   # attachments ship and render (#117)
-zenctl topic retire acme/v1/h-3fa9…/state/sysinfo/health  # RFC 04 §1.2 tombstone, class-guarded
+zenctl pub k '{"v":1}' --attachment meta        # attachments ship and render (#117)
+zenctl retire acme/v1/h-3fa9…/state/sysinfo/health  # RFC 04 §1.2 tombstone, class-guarded
 zenctl scout                            # raw Hellos: zid/whatami/locators (multicast ON here)
 zenctl serve 'demo/mock/**' '{"ok":1}'  # mock queryable; logs every ask (who queries this key?)
 zenctl key intersects 'v1/**' 'v1/h-1/@rpc/p/x'  # keyexpr algebra, no session; cites D2/D4 on a convention-shaped no
-zenctl topic echo --format ndjson > f   # …and back: topic pub --from ndjson < f (one row shape, both directions)
-zenctl record --base acme -o bus.zrec --duration 10  # capture: same row shape + header + pacing + in-file drop ledger
+zenctl echo --format ndjson > f         # …and back: zenctl pub --from ndjson < f (one row shape, both directions)
+zenctl record --base acme -o bus.zrec --for 10  # capture: same row shape + header + pacing + in-file drop ledger
 zenctl replay bus.zrec --dry-run        # ALWAYS preview first — replay is publishing, and re-stamped old data wins LWW (RFC 09 §5.2)
 zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
 zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold
 zenctl storage list --base acme         # declared state subjects vs storage coverage
 zenctl blob list --base acme            # who declares which @blob tier (registry only)
-zenctl blob probe 01jqz3demo0001        # who *holds* it, and at which content root
-zenctl blob fetch 01jqz3demo0001 --from h-3fa9 --root <hex> -o bundle.bin
+zenctl blob locate 01jqz3demo0001       # who *holds* it, and at which content root
+zenctl blob fetch 01jqz3demo0001 --origin h-3fa9 --root <hex> -o bundle.bin
 zenctl doctor --base acme --registry path/to/registry
 zenctl doctor --deep --sample 10 --fail-on error   # bounded deep sweep; exit 1 on errors
 zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>
@@ -131,18 +139,18 @@ envelope leads rather than trails so that a stream cut short — `| head`, a
 closed pipe — still carries what was asked and what the bounds cost, which is
 exactly the claim a truncated stream needs (RFC 09 §5.1 O5/O6).
 
-Streaming verbs (`topic echo`, `serve`, `replay`, `gen`) emit tagged rows with
+Streaming verbs (`echo`, `serve`, `replay`, `gen`) emit tagged rows with
 **no** envelope: their coverage is not known before the first row, and
-`topic echo`'s rows are an *input* format that `topic pub --from ndjson` and
+`echo`'s rows are an *input* format that `zenctl pub --from ndjson` and
 `.zrec` read back (RFC 09 §5.2), so nothing may precede them.
 
 A field that is absent is a question nobody asked; it is never `null`
 (RFC 09 §5.1 O4). In the table, that reads `—`, and an empty cell means the
 question was asked and the answer was nothing.
 
-**`topic pub` and `topic retire` put nothing on stdout, in any format.** Their
+**`pub` and `retire` put nothing on stdout, in any format.** Their
 answer is "it went out", which is not a document — and the empty stdout is what
-lets `topic echo --format ndjson | topic pub --from ndjson` compose. Everything
+lets `zenctl echo --format ndjson | zenctl pub --from ndjson` compose. Everything
 they say goes to stderr.
 
 **`--as` and `--dot` are neither, because they are somebody else's schema.**
@@ -158,17 +166,17 @@ anything.
 consolidation None, every reply attributed by its own key, RFC 05 §3 error
 envelopes rendered as errors, and exit codes scripts can branch on (0 values,
 1 an error reply, 2 silence — which still prints its non-verdict paragraph).
-`topic retire` publishes an authoritative tombstone through a declared
+`retire` publishes an authoritative tombstone through a declared
 publisher: state keys retire freely, anything else is the RFC 04 §1.2 (v1.12)
 operator act and needs `--i-know`; wildcards are refused outright. `scout` is
 the one verb where multicast is on by default — it only listens, and an empty
 result names the boundary it heard.
 
-`topic pub` and `service call` **encode** a JSON body against the producer's
+`pub` and `service call` **encode** a JSON body against the producer's
 served schema (request types come from the slice's procedure declaration),
 and those encoded bytes are what goes on the wire, labelled with the declared
 `Encoding`. Publishing to a subject that declares `application/protobuf`
-therefore puts protobuf on the bus, not the JSON you typed; `topic echo`
+therefore puts protobuf on the bus, not the JSON you typed; `echo`
 decodes it back through the same descriptor set.
 
 A body the schema cannot encode is refused before it touches the bus.
@@ -197,19 +205,19 @@ producer serving no schema validates nothing — silence is not a verdict about
 the type, and the tool says which of the three cases happened rather than
 letting them look alike.
 
-`topic pub` also prints a matching note ("a subscriber currently matches …")
+`pub` also prints a matching note ("a subscriber currently matches …")
 — a routing fact about *this* publisher, never a fleet verdict.
 
 `node list` is a liveliness query on `<base>/v1/*/state/*/alive` — RFC 04 §5's
 "entire fleet-presence protocol, zero payload bytes". The token *key* is the
 record.
 
-`topic echo` walks wire key → subject → payload type → value with nothing
+`echo` walks wire key → subject → payload type → value with nothing
 compiled in: the registry slices bind one payload type per subject (P5), and
 the value renders generically (JSON, CBOR→JSON diagnostic, text, or hex —
 tagged with the declared type name).
 
-`schema <producer>` dumps the served `describe` reply (RFC 08 §7) and
+`schema show <producer>` dumps the served `describe` reply (RFC 08 §7) and
 `interface show <Type> --schema` asks every producer that carries the type, so
 two producers disagreeing about one name shows up as the drift it is. A
 producer serving no `describe` says so — undescribed is not shapeless.
@@ -248,7 +256,7 @@ a live inventory. `--static` emits the old self-contained script.
 ## `bench rpc` — how fast, and *which origin* is slow
 
 ```bash
-zenctl bench rpc '*' sysinfo --count 200 --concurrency 8
+zenctl bench rpc '*' sysinfo --calls 200 --concurrency 8
 ```
 
 Latency is measured **per reply**, not per call: a fan-out GET finishes when
@@ -302,7 +310,7 @@ round trip, without SSH.
 - **Payload schemas are shown, not invented.** RFC 01 §5 keeps payload
   *definitions* with the owning applications, and this tool has no opinion
   about their contents. But since RFC 08 §7, a producer **serves** its shapes
-  on `@rpc/<producer>/describe`, so `zenctl schema <producer>` and
+  on `@rpc/<producer>/describe`, so `zenctl schema show <producer>` and
   `interface show --schema` print served data rather than sending you to
   `curl`. (This bullet used to say the opposite; it predated §7.) A producer
   serving no `describe` degrades honestly — "undescribed" is not "no shape".
