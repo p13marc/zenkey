@@ -46,9 +46,12 @@ async fn a_declared_token_attaches_its_origin() {
 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let attachments = loop {
-        let a = zenkey_fleet::origin_attachments(&asking, "", Duration::from_millis(500))
-            .await
-            .expect("a quiet admin space is a reading, not an error");
+        let a = zenkey_fleet::origin_attachments(
+            &zenkey_fleet::Fleet::new(&asking, ""),
+            Duration::from_millis(500),
+        )
+        .await
+        .expect("a quiet admin space is a reading, not an error");
         if !a.is_empty() {
             break a;
         }

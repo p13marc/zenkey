@@ -71,7 +71,7 @@ pub async fn run(
         }
         report::RateReport {
             selector: selector.clone(),
-            window_s: window,
+            window_s: window as f64,
             rows,
             total_count,
             total_bytes,

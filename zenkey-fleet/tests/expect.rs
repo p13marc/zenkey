@@ -42,7 +42,13 @@ async fn presence_meets_early_and_a_clean_shortfall_is_not_met() {
         let b = b.clone();
         async move {
             let slices = zenkey_fleet::SliceSet::default();
-            run_expect(&b, "", Some(&slices), &store_of(), &spec(KEY, 10.0)).await
+            run_expect(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                Some(&slices),
+                &store_of(),
+                &spec(KEY, 10.0),
+            )
+            .await
         }
     });
 
@@ -66,9 +72,14 @@ async fn presence_meets_early_and_a_clean_shortfall_is_not_met() {
         count: Some(3),
         ..spec(KEY, 1.0)
     };
-    let report = run_expect(&b, "", Some(&slices), &store_of(), &shortfall)
-        .await
-        .expect("run");
+    let report = run_expect(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        Some(&slices),
+        &store_of(),
+        &shortfall,
+    )
+    .await
+    .expect("run");
     assert_eq!(report.verdict, ExpectVerdict::NotMet);
     assert!(
         report.unmet.iter().any(|u| u.contains("3 required")),
@@ -88,9 +99,14 @@ async fn absence_is_scoped_clean_and_conclusively_breakable() {
         absent: true,
         ..spec("v1/*/state/demo/retired", 1.0)
     };
-    let report = run_expect(&b, "", Some(&slices), &store_of(), &quiet)
-        .await
-        .expect("run");
+    let report = run_expect(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        Some(&slices),
+        &store_of(),
+        &quiet,
+    )
+    .await
+    .expect("run");
     assert_eq!(report.verdict, ExpectVerdict::Met);
     assert_eq!(report.samples, 0);
     assert_eq!(report.dropped, 0, "the claim states its observer was clean");
@@ -108,7 +124,13 @@ async fn absence_is_scoped_clean_and_conclusively_breakable() {
         let b = b.clone();
         async move {
             let slices = zenkey_fleet::SliceSet::default();
-            run_expect(&b, "", Some(&slices), &store_of(), &broken).await
+            run_expect(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                Some(&slices),
+                &store_of(),
+                &broken,
+            )
+            .await
         }
     });
     assert!(
@@ -170,7 +192,15 @@ qos = "transition"
         };
         let expect = tokio::spawn({
             let b = b.clone();
-            async move { run_expect(&b, "", Some(&slices), &store_of(), &spec).await }
+            async move {
+                run_expect(
+                    &zenkey_fleet::Fleet::new(&b, ""),
+                    Some(&slices),
+                    &store_of(),
+                    &spec,
+                )
+                .await
+            }
         });
         assert!(
             tokio::time::timeout(Duration::from_secs(5), matching.recv())

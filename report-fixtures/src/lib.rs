@@ -89,7 +89,7 @@ pub fn topic_list() -> TopicList {
 pub fn topic_list_budget() -> TopicList {
     let mut list = topic_list();
     list.budget = Some(BudgetWindow {
-        window_s: 10,
+        window_s: 10.0,
         scopes: vec!["v1/*/telemetry/**".into(), "v1/*/state/**".into()],
         keys: 44,
         evicted: 0,
@@ -796,7 +796,7 @@ pub fn blob_fetch() -> BlobFetchReport {
 pub fn call_report() -> CallReport {
     CallReport {
         key: "v1/*/@rpc/sysinfo/processes".to_string(),
-        timeout_s: 5,
+        timeout_s: 5.0,
         answers: vec![
             CallAnswer {
                 origin: ORIGIN.into(),
@@ -837,7 +837,7 @@ pub fn cutover_report() -> CutoverReport {
     CutoverReport {
         old_root: "acme/legacy".into(),
         new_prefix: "acme/v1/".into(),
-        window_s: 30,
+        window_s: 30.0,
         old_samples: 12,
         old_keys_seen: 2,
         old_examples: vec![
@@ -898,7 +898,7 @@ pub fn retired_report() -> RetiredReport {
     RetiredReport {
         registries: vec!["../zensight/zensight-common/registry".into()],
         entries,
-        window_s: Asked::Asked(30),
+        window_s: Asked::Asked(30.0),
         plane_samples: Asked::Asked(960),
         dropped: Asked::Asked(5),
         introspect_answered: 2,
@@ -969,7 +969,7 @@ pub fn replay_report() -> ReplayReport {
 pub fn rate_report() -> RateReport {
     RateReport {
         selector: "acme/v1/**".into(),
-        window_s: 10,
+        window_s: 10.0,
         total_count: 9_600,
         total_bytes: 528_000,
         keys: 50_000,
@@ -1004,7 +1004,7 @@ pub fn rate_report() -> RateReport {
 pub fn scout_report_empty() -> ScoutReport {
     ScoutReport {
         asked: vec!["router".into(), "peer".into(), "client".into()],
-        timeout_s: 3,
+        timeout_s: 3.0,
         heard: vec![],
     }
 }
@@ -1012,7 +1012,7 @@ pub fn scout_report_empty() -> ScoutReport {
 pub fn scout_report() -> ScoutReport {
     ScoutReport {
         asked: vec!["router".into()],
-        timeout_s: 3,
+        timeout_s: 3.0,
         heard: vec![zenkey_fleet::HelloView {
             zid: "aabbccdd".into(),
             whatami: "router".into(),

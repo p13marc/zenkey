@@ -424,7 +424,7 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
         target: "*".into(),
         outcome: Some(Ok(CallReport {
             key: "v1/*/@rpc/netring/introspect".into(),
-            timeout_s: 5,
+            timeout_s: 5.0,
             answers: vec![CallAnswer {
                 origin: "h-aaaaaaaaaaaa".into(),
                 outcome: zenkey_fleet::report::CallOutcome::Ok {

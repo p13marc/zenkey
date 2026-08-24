@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
-use zenkey_fleet::{DoctorSpec, declare_publication, run_doctor};
+use zenkey_fleet::{DoctorSpec, Fleet, declare_publication, run_doctor};
 
 mod util;
 use util::peer_pair;
@@ -87,9 +87,13 @@ async fn observed_qos_and_unregistered_traffic_become_findings() {
     let t1 = keep_publishing(wrong_qos, b"{}", None);
     let t2 = keep_publishing(unregistered, b"{}", None);
 
-    let report = run_doctor(&b, "", std::slice::from_ref(&local), &spec(2))
-        .await
-        .expect("run_doctor");
+    let report = run_doctor(
+        &Fleet::new(&b, ""),
+        Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
+        &spec(2),
+    )
+    .await
+    .expect("run_doctor");
     t1.abort();
     t2.abort();
 
@@ -161,9 +165,13 @@ async fn over_rate_events_are_findings_and_synthetic_traffic_is_counted() {
         ));
     }
 
-    let report = run_doctor(&b, "", std::slice::from_ref(&local), &spec(2))
-        .await
-        .expect("run_doctor");
+    let report = run_doctor(
+        &Fleet::new(&b, ""),
+        Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
+        &spec(2),
+    )
+    .await
+    .expect("run_doctor");
     for t in tasks {
         t.abort();
     }

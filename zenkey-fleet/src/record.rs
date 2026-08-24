@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
+use zenkey::qos::QosProfile;
 use zenoh::Session;
 use zenoh::sample::SampleKind;
 
@@ -382,6 +383,26 @@ pub enum ReplayTarget<'a> {
     },
 }
 
+/// What one replay is.
+///
+/// `default_qos` is a [`QosProfile`] and not a profile *name*: the closed
+/// enum is RFC 04 §3's vocabulary, and a caller that hands over a string has
+/// only deferred the moment it is checked — this used to surface a bad
+/// `--qos` as a per-row "malformed" event partway through a replay, rather
+/// than as a refusal before anything published. A name recorded *in the
+/// capture* is still a string, because a file can carry anything; that check
+/// stays where it belongs, per row.
+pub struct ReplaySpec<'a> {
+    pub target: ReplayTarget<'a>,
+    /// Pacing scale: 2.0 replays twice as fast as captured.
+    pub speed: f64,
+    /// Replay recorded deletes that fall off the state class — the same
+    /// operator price as `topic retire` (RFC 04 §1.2, v1.12).
+    pub i_know: bool,
+    /// The profile a row that recorded none is published under.
+    pub default_qos: QosProfile,
+}
+
 /// Replay events, surfaced as they happen so a frontend can render them —
 /// the report at the end carries the counts.
 #[derive(Debug, Clone)]
@@ -438,12 +459,15 @@ pub struct ReplayReport {
 /// distinct key and undeclared at the end.
 pub async fn replay<R: BufRead>(
     reader: &mut ZrecReader<R>,
-    target: ReplayTarget<'_>,
-    speed: f64,
-    i_know: bool,
-    default_qos: &str,
+    spec: ReplaySpec<'_>,
     mut on_event: impl FnMut(ReplayEvent<'_>),
 ) -> Result<ReplayReport> {
+    let ReplaySpec {
+        target,
+        speed,
+        i_know,
+        default_qos,
+    } = spec;
     if !(speed.is_finite() && speed > 0.0) {
         bail!("--speed must be a positive number (got {speed})");
     }
@@ -531,14 +555,24 @@ pub async fn replay<R: BufRead>(
                 let publication = match publications.entry(row.key.clone()) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
-                        let qos_name = row.qos.as_deref().unwrap_or(default_qos);
-                        let Some(qos) = zenkey::qos::QosProfile::from_name(qos_name) else {
-                            let reason = format!("unknown QoS profile {qos_name:?}");
-                            on_event(ReplayEvent::Malformed {
-                                reason: reason.clone(),
-                            });
-                            record_err(&mut report, reason, false);
-                            continue;
+                        // A row that recorded a profile name is judged
+                        // against the closed vocabulary — a name the capture
+                        // carries can be anything. A row that recorded none
+                        // falls to the spec's profile, which is already
+                        // typed and so cannot fail here.
+                        let qos = match &row.qos {
+                            None => default_qos,
+                            Some(name) => match zenkey::qos::QosProfile::from_name(name) {
+                                Some(qos) => qos,
+                                None => {
+                                    let reason = format!("unknown QoS profile {name:?}");
+                                    on_event(ReplayEvent::Malformed {
+                                        reason: reason.clone(),
+                                    });
+                                    record_err(&mut report, reason, false);
+                                    continue;
+                                }
+                            },
                         };
                         let publication = crate::write::declare_publication(
                             session,
@@ -710,10 +744,12 @@ mod tests {
         let mut would = Vec::new();
         let report = replay(
             &mut reader,
-            ReplayTarget::DryRun,
-            1.0,
-            false,
-            "refreshed",
+            ReplaySpec {
+                target: ReplayTarget::DryRun,
+                speed: 1.0,
+                i_know: false,
+                default_qos: QosProfile::Refreshed,
+            },
             |ev| {
                 would.push(format!("{ev:?}"));
             },
@@ -740,10 +776,12 @@ mod tests {
         let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
         let report = replay(
             &mut reader,
-            ReplayTarget::DryRun,
-            1.0,
-            false,
-            "refreshed",
+            ReplaySpec {
+                target: ReplayTarget::DryRun,
+                speed: 1.0,
+                i_know: false,
+                default_qos: QosProfile::Refreshed,
+            },
             |_| {},
         )
         .await
@@ -765,10 +803,12 @@ mod tests {
             let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
             let err = replay(
                 &mut reader,
-                ReplayTarget::DryRun,
-                bad,
-                false,
-                "refreshed",
+                ReplaySpec {
+                    target: ReplayTarget::DryRun,
+                    speed: bad,
+                    i_know: false,
+                    default_qos: QosProfile::Refreshed,
+                },
                 |_| {},
             )
             .await

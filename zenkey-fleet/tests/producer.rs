@@ -75,9 +75,13 @@ async fn alive_implies_callable_and_replies_ride_the_concrete_key() {
 
     // Alive was visible, so the call must be answerable *now* — one GET,
     // no settle loop: that is the invariant the ordering exists for.
-    let answers = zenkey_fleet::fleet_get(&b, "", INTROSPECT, None, Duration::from_secs(5))
-        .await
-        .expect("get");
+    let answers = zenkey_fleet::fleet_get(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        INTROSPECT,
+        &zenkey_fleet::GetOpts::new(Duration::from_secs(5)),
+    )
+    .await
+    .expect("get");
     // (The reply set may also carry the transport's own timeout marker at
     // its close — the value answer is the one attributed to the producer.)
     let value: Vec<_> = answers
@@ -97,9 +101,13 @@ async fn alive_implies_callable_and_replies_ride_the_concrete_key() {
     // The refusal: an error reply carrying the reserved name, never a
     // success payload with `ok: false` (RFC 05 §3) — and the caller's
     // chokepoint parses the envelope back out.
-    let answers = zenkey_fleet::fleet_get(&b, "", INTROSPECT, None, Duration::from_secs(5))
-        .await
-        .expect("get");
+    let answers = zenkey_fleet::fleet_get(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        INTROSPECT,
+        &zenkey_fleet::GetOpts::new(Duration::from_secs(5)),
+    )
+    .await
+    .expect("get");
     let gated: Vec<_> = answers
         .iter()
         .filter_map(|a| match &a.answer {

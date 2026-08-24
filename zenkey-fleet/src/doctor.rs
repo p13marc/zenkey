@@ -13,10 +13,9 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use zenkey::RegistrySlice;
 use zenkey::grammar::with_base;
-use zenoh::Session;
 
 use crate::examples::Examples;
-use crate::query::{Answer, RepeatingRegistry, fleet_get, state_snapshot};
+use crate::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// Every check id `run_doctor` can emit — the stable vocabulary, never
@@ -102,26 +101,36 @@ fn rpc_key(base: &str, slice: &RegistrySlice, procedure: &str) -> Result<String>
 
 /// Run every check against the live fleet and report typed findings.
 ///
-/// `locals` are the caller's registry slices (loaded from `--registry` dirs
-/// or GUI settings); empty means the served-vs-declared diff is skipped and
-/// only bus-derived checks run — the caller states that degradation to its
-/// user (O4: "not asked" must not render as "in sync").
+/// `locals` is the caller's registry (loaded from `--registry` dirs or GUI
+/// settings). `None` means none was loaded: the served-vs-declared diff is
+/// skipped and only bus-derived checks run, and the report says so rather
+/// than reading in sync (O4 — "not asked" must not render as "clean").
+///
+/// `Option<&SliceSet>` and not `&[RegistrySlice]`: this is the engine's
+/// standing shape for "a registry, or honestly none" (`facts.rs` states it as
+/// policy), an empty slice could not tell the two apart, and the set arrives
+/// already indexed — doctor used to rebuild one from a clone of every slice
+/// halfway through the run.
 pub async fn run_doctor(
-    session: &Session,
-    base: &str,
-    locals: &[RegistrySlice],
+    fleet: &crate::Fleet<'_>,
+    locals: Option<&crate::registry::SliceSet>,
     spec: &DoctorSpec,
 ) -> Result<DoctorReport> {
-    let roster = crate::roster(session, base, spec.timeout).await?;
+    let (session, base) = (fleet.session(), fleet.base());
+    // A registry that declares nothing answers no question this run asks, so
+    // it takes the same path as none at all — normalised once, here, rather
+    // than at each of the four places that branch on it below.
+    let locals = locals.filter(|set| !set.slices().is_empty());
+    let roster = crate::roster(fleet, spec.timeout).await?;
 
     let mut findings: Vec<DoctorFinding> = Vec::new();
     let mut synced: Vec<String> = Vec::new();
     let mut answered = 0usize;
 
     // --- served-vs-declared diff (RFC 08 §6) --------------------------
-    for local in locals {
+    for local in locals.iter().flat_map(|set| set.slices()) {
         let key = rpc_key(base, local, "introspect")?;
-        let answers = fleet_get(session, base, &key, None, spec.timeout).await?;
+        let answers = fleet_get(fleet, &key, &GetOpts::new(spec.timeout)).await?;
         for answer in &answers {
             let Answer::Value(bytes) = &answer.answer else {
                 continue;
@@ -164,8 +173,8 @@ pub async fn run_doctor(
 
     // One declared registry sweep (#37) serves both fallbacks below —
     // doctor used to fan the identical wildcard GETs twice per run.
-    let sweep = if locals.is_empty() {
-        let repeating = RepeatingRegistry::declare(session, base, spec.timeout).await?;
+    let sweep = if locals.is_none() {
+        let repeating = RepeatingRegistry::declare(fleet, spec.timeout).await?;
         let slices: Vec<RegistrySlice> = repeating
             .fetch()
             .await?
@@ -194,7 +203,7 @@ pub async fn run_doctor(
     let live: usize = roster.values().map(Vec::len).sum();
     findings.extend(judge_introspect_coverage(
         &roster,
-        (!locals.is_empty()).then_some(locals),
+        locals.map(crate::registry::SliceSet::slices),
         answered,
     ));
 
@@ -233,15 +242,20 @@ pub async fn run_doctor(
     // --- schema conformance (RFC 08 §7) ------------------------------
     // Which slices to judge: the locals when given, else what the fleet
     // serves (the sweep above).
-    let schema_slices: Vec<RegistrySlice> = match sweep {
-        Some(slices) => slices,
-        None => locals.to_vec(),
+    let slice_set: std::borrow::Cow<'_, crate::registry::SliceSet> = match sweep {
+        Some(slices) => std::borrow::Cow::Owned(crate::registry::SliceSet::from_slices(slices)),
+        // The caller's set is already indexed; rebuilding it here reparsed
+        // every subject pattern to arrive at the set we were handed.
+        None => match locals {
+            Some(set) => std::borrow::Cow::Borrowed(set),
+            None => std::borrow::Cow::Owned(crate::registry::SliceSet::default()),
+        },
     };
     let mut described: Vec<(String, zenkey::schema::SchemaSet)> = Vec::new();
     let mut undescribed = 0usize;
-    for slice in &schema_slices {
+    for slice in slice_set.slices() {
         let key = rpc_key(base, slice, "describe")?;
-        let answers = fleet_get(session, base, &key, None, spec.timeout).await?;
+        let answers = fleet_get(fleet, &key, &GetOpts::new(spec.timeout)).await?;
         let set = answers.into_iter().find_map(|a| match a.answer {
             Answer::Value(bytes) => {
                 let cow = bytes.to_bytes();
@@ -258,7 +272,6 @@ pub async fn run_doctor(
     }
     // Totality through the one engine implementation (`totality_gaps`) —
     // doctor used to carry a parallel referenced-names path.
-    let slice_set = crate::registry::SliceSet::from_slices(schema_slices.clone());
     for gap in crate::decode::totality_gaps(&described, &slice_set) {
         findings.push(finding(
             DoctorSeverity::Error,
@@ -302,7 +315,7 @@ pub async fn run_doctor(
     if spec.deep {
         let now = std::time::SystemTime::now();
         let mut unstamped = 0usize;
-        for slice in &schema_slices {
+        for slice in slice_set.slices() {
             for subject in &slice.subjects {
                 let (Some(ttl), "state") = (subject.ttl_s, subject.class.as_str()) else {
                     continue;
@@ -379,7 +392,7 @@ pub async fn run_doctor(
                 store.insert(producer, set.clone());
             }
             let (listen_findings, summary) =
-                observe_traffic(session, base, &slice_set, &store, &described, window).await?;
+                observe_traffic(fleet, &slice_set, &store, &described, window).await?;
             findings.extend(listen_findings);
             Some(summary)
         }
@@ -391,7 +404,7 @@ pub async fn run_doctor(
         // `None` when no local registry was given: the served-vs-declared
         // diff never ran, and the report must say so rather than looking
         // like "ran, none in sync" (RFC 09 §5.1 O4, review finding R1).
-        synced: (!locals.is_empty()).then_some(synced).into(),
+        synced: locals.is_some().then_some(synced).into(),
         introspect_answered: answered,
         live_producers: live,
         describe_served: described.len(),
@@ -470,14 +483,15 @@ pub(crate) fn is_synthetic_marker(attachment: &[u8]) -> bool {
 /// ladder, `qos_matches`, `decode_sample` — and aggregate per key so a hot
 /// key is one finding with a count, not a finding per sample.
 async fn observe_traffic(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     slices: &crate::registry::SliceSet,
     store: &crate::decode::SchemaStore,
     described: &[(String, zenkey::schema::SchemaSet)],
     window: Duration,
 ) -> Result<(Vec<DoctorFinding>, crate::report::ObservationSummary)> {
     use std::collections::BTreeMap;
+
+    let (session, base) = (fleet.session(), fleet.base());
 
     // Scope statement (O5): the three data classes for host origins, plus
     // each declared service origin's three — `*` never matches an `@` chunk
@@ -573,10 +587,9 @@ async fn observe_traffic(
                             // the `_` arm below: not asked/not checkable is
                             // never a finding (RFC 09 §5.1 O4).
                             let d = crate::decode::decode_sample(
+                                fleet,
                                 store,
-                                session,
                                 Some(slices),
-                                base,
                                 &s.key,
                                 Some(&s.encoding),
                                 &s.payload.to_bytes(),

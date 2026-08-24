@@ -38,10 +38,13 @@ async fn a_call_carries_attachments_both_ways() {
     // not evidence.
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let answers =
-            zenkey_fleet::fleet_get(&client, "", RPC_KEY, None, Duration::from_millis(500))
-                .await
-                .expect("probe");
+        let answers = zenkey_fleet::fleet_get(
+            &zenkey_fleet::Fleet::new(&client, ""),
+            RPC_KEY,
+            &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
+        )
+        .await
+        .expect("probe");
         if !answers.is_empty() {
             break;
         }
@@ -53,16 +56,17 @@ async fn a_call_carries_attachments_both_ways() {
 
     let target = zenkey_fleet::CallTarget::parse("h-aaaaaaaaaaaa").expect("target");
     let report = zenkey_fleet::call(
-        &client,
-        "",
-        &target,
-        "demo",
-        "echo",
-        &[],
-        None,
-        Some(b"who=me".to_vec()),
-        Duration::from_secs(5),
-        None,
+        &zenkey_fleet::Fleet::new(&client, ""),
+        zenkey_fleet::CallSpec {
+            target: &target,
+            producer: "demo",
+            procedure: "echo",
+            params: &[],
+            body: None,
+            attachment: Some(b"who=me".to_vec()),
+            timeout: Duration::from_secs(5),
+            slices: None,
+        },
     )
     .await
     .expect("call");
@@ -78,16 +82,17 @@ async fn a_call_carries_attachments_both_ways() {
 
     // And a call sending none gets none back: absent, never defaulted.
     let report = zenkey_fleet::call(
-        &client,
-        "",
-        &target,
-        "demo",
-        "echo",
-        &[],
-        None,
-        None,
-        Duration::from_secs(5),
-        None,
+        &zenkey_fleet::Fleet::new(&client, ""),
+        zenkey_fleet::CallSpec {
+            target: &target,
+            producer: "demo",
+            procedure: "echo",
+            params: &[],
+            body: None,
+            attachment: None,
+            timeout: Duration::from_secs(5),
+            slices: None,
+        },
     )
     .await
     .expect("call without attachment");

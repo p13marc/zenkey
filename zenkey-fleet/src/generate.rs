@@ -20,7 +20,6 @@ use zenkey::grammar::with_base;
 use zenkey::pattern::{PatternChunk, SubjectPattern};
 use zenkey::qos::QosProfile;
 use zenkey::schema::{SchemaSet, TypeSchema};
-use zenoh::Session;
 
 use crate::decode::SchemaStore;
 use crate::registry::SliceSet;
@@ -334,13 +333,14 @@ fn synthetic_var(name: &str) -> String {
 /// (when a session is given) > the offline `--schema-set` document > a
 /// placeholder `{}` body with a stated note.
 pub async fn build_plan(
-    session: Option<&Session>,
+    fleet: Option<&crate::Fleet<'_>>,
     store: &SchemaStore,
     slices: &SliceSet,
     base: &str,
     schema_set: Option<&SchemaSet>,
     spec: &GenSpec,
 ) -> Result<Vec<GenPlanEntry>> {
+    let session = fleet.map(crate::Fleet::session);
     let mut plan = Vec::new();
     for slice in slices.slices() {
         if slice.service_origin.is_some() {
@@ -544,13 +544,13 @@ impl Drop for MockProducer {
 /// schema-set document — a consumer under test can fetch shapes from this
 /// mock exactly as it would from the real producer.
 pub async fn serve_describe(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     origin: &str,
     slices: &SliceSet,
     schema_set: Option<&SchemaSet>,
     producer: Option<&str>,
 ) -> Result<MockProducer> {
+    let (session, base) = (fleet.session(), fleet.base());
     // The bring-up discipline (RFC 04 §5 via `crate::producer::BringUp`):
     // every queryable is declared — awaited, on its own concrete key —
     // before this function returns, so a consumer under test that sees the
@@ -605,10 +605,11 @@ pub async fn serve_describe(
 /// ([`build_plan`] is where the store is asked), and the parameter it used
 /// to take was discarded on the first line.
 pub async fn run_gen(
-    session: &Session,
+    fleet: &crate::Fleet<'_>,
     plan: &[GenPlanEntry],
     spec: &GenSpec,
 ) -> Result<GenReport> {
+    let session = fleet.session();
     let synth = Synth::new(spec.seed);
     let deadline = tokio::time::Instant::now() + spec.duration;
     let total_s = spec.duration.as_secs_f64();

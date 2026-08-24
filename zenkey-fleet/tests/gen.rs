@@ -76,7 +76,9 @@ async fn generated_traffic_is_conforming_marked_and_budgeted() {
         .await
         .expect("plan");
     assert_eq!(plan.len(), 2);
-    let report = run_gen(&generator, &plan, &spec(2.0)).await.expect("run");
+    let report = run_gen(&zenkey_fleet::Fleet::new(&generator, ""), &plan, &spec(2.0))
+        .await
+        .expect("run");
     assert!(report.sent > 0, "{report:?}");
     assert_eq!(report.refused, 0, "{report:?}");
 
@@ -129,19 +131,23 @@ async fn the_mock_producer_serves_both_registry_halves() {
     let slices = zenkey_fleet::SliceSet::from_dirs(&[dir.path().to_path_buf()]).expect("from_dirs");
     let set = zenkey::schema::SchemaSet::parse(SET).expect("set");
 
-    let mock = serve_describe(&serving, "", "h-fefefefefefe", &slices, Some(&set), None)
-        .await
-        .expect("serve");
+    let mock = serve_describe(
+        &zenkey_fleet::Fleet::new(&serving, ""),
+        "h-fefefefefefe",
+        &slices,
+        Some(&set),
+        None,
+    )
+    .await
+    .expect("serve");
     assert_eq!(mock.keys, 2, "introspect + describe for the one producer");
 
     let introspect = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let answers = zenkey_fleet::fleet_get(
-                &asking,
-                "",
+                &zenkey_fleet::Fleet::new(&asking, ""),
                 "v1/h-fefefefefefe/@rpc/demo/introspect",
-                None,
-                Duration::from_millis(500),
+                &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
             )
             .await
             .expect("get");
@@ -160,11 +166,9 @@ async fn the_mock_producer_serves_both_registry_halves() {
     assert_eq!(served.name, "demo");
 
     let describe = zenkey_fleet::fleet_get(
-        &asking,
-        "",
+        &zenkey_fleet::Fleet::new(&asking, ""),
         "v1/h-fefefefefefe/@rpc/demo/describe",
-        None,
-        Duration::from_millis(500),
+        &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
     )
     .await
     .expect("get");
@@ -205,7 +209,9 @@ async fn injected_faults_deviate_by_exactly_one_dimension_and_stay_marked() {
         .expect("plan");
     assert_eq!(plan.len(), 7, "one variant per fault kind: {plan:?}");
 
-    let report = run_gen(&generator, &plan, &spec).await.expect("run");
+    let report = run_gen(&zenkey_fleet::Fleet::new(&generator, ""), &plan, &spec)
+        .await
+        .expect("run");
     assert!(report.sent > 0, "{report:?}");
 
     // Bucket observed samples by the fault kind their marker names.

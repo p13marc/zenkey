@@ -52,6 +52,7 @@ pub async fn run(
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
 
     let session = args.session().await?;
+    let fleet = args.fleet(&session);
     // Through the Monitor (issue #48): the same bounded broadcast the GUI
     // uses, so a bus that outruns this terminal surfaces as an explicit
     // dropped count instead of invisible loss (RFC 09 §5.1 O6). This is also
@@ -204,10 +205,9 @@ pub async fn run(
             // --hex: the decode pipeline still names the type, the payload
             // shows as bytes.
             let type_name = zenkey_fleet::decode::decode_sample(
+                &fleet,
                 &store,
-                &session,
                 slices.as_ref(),
-                &base,
                 key,
                 Some(encoding),
                 &bytes,
@@ -226,10 +226,9 @@ pub async fn run(
             // `--no-decode` never asks, so it has no verdict to misreport —
             // `sample::decode` carries that rule now, for both verbs.
             let d = sample::decode(
+                &fleet,
                 &store,
-                &session,
                 slices.as_ref(),
-                &base,
                 key,
                 Some(encoding),
                 &bytes,

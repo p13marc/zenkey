@@ -321,6 +321,30 @@ fn attachment_value(bytes: &[u8]) -> serde_json::Value {
     }
 }
 
+/// One procedure call, as a spec rather than nine positional arguments —
+/// the shape [`crate::BenchSpec`] already uses next door, for the same
+/// call.
+///
+/// `body` and `attachment` are owned because they are consumed: they ride
+/// the GET out and nothing reads them again.
+pub struct CallSpec<'a> {
+    pub target: &'a CallTarget,
+    pub producer: &'a str,
+    /// Slash-separated, as the registry spells it (`capture/trigger`).
+    pub procedure: &'a str,
+    /// Selector parameters, joined with `;` onto the key (RFC 05 §1).
+    pub params: &'a [String],
+    /// The request payload, already through the encode ladder.
+    pub body: Option<Vec<u8>>,
+    /// Verbatim, never schema-encoded — an attachment is outside the
+    /// registry's vocabulary (#117).
+    pub attachment: Option<Vec<u8>>,
+    pub timeout: Duration,
+    /// The loaded registry, for the fan-out guard below. `None` = none
+    /// loaded, and the guard says so rather than judging.
+    pub slices: Option<&'a SliceSet>,
+}
+
 /// Call a procedure and report every attributed answer.
 ///
 /// - The key composes through the typed builders (never `format!`), lifted to
@@ -336,19 +360,17 @@ fn attachment_value(bytes: &[u8]) -> serde_json::Value {
 ///   is the caller's audit trail).
 /// - Exit-code semantics stay on [`CallReport::exit_code`]: an error reply is
 ///   a failure, zero replies stay a distinct non-verdict (RFC 05 §3.1).
-#[allow(clippy::too_many_arguments)]
-pub async fn call(
-    session: &Session,
-    base: &str,
-    target: &CallTarget,
-    producer: &str,
-    procedure: &str,
-    params: &[String],
-    body: Option<Vec<u8>>,
-    attachment: Option<Vec<u8>>,
-    timeout: Duration,
-    slices: Option<&SliceSet>,
-) -> Result<CallReport> {
+pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallReport> {
+    let CallSpec {
+        target,
+        producer,
+        procedure,
+        params,
+        body,
+        attachment,
+        timeout,
+        slices,
+    } = spec;
     if matches!(target, CallTarget::Fleet)
         && let Some(slices) = slices
         && let Some(slice) = slices.get(producer)
@@ -386,19 +408,25 @@ pub async fn call(
         CallTarget::Fleet => zenkey::selector::fleet_rpc(producer, &segments).to_string(),
         CallTarget::Service(origin) => zenkey::selector::service_rpc(origin, &segments).to_string(),
     };
-    let mut key = zenkey::grammar::with_base(base, relative);
+    let mut key = fleet.wire(relative);
     if !params.is_empty() {
         key.push('?');
         key.push_str(&params.join(";"));
     }
 
-    let answers =
-        crate::query::fleet_get_call(session, base, &key, body, attachment, timeout).await?;
+    let answers = crate::query::fleet_get(
+        fleet,
+        &key,
+        &crate::query::GetOpts::new(timeout)
+            .payload(body)
+            .attachment(attachment),
+    )
+    .await?;
     Ok(CallReport {
         key: key.clone(),
         // The wait is part of the claim (R5): a silent call must be readable
         // against how long it listened.
-        timeout_s: timeout.as_secs(),
+        timeout_s: timeout.as_secs_f64(),
         answers: answers
             .iter()
             .map(|a| {
@@ -612,16 +640,17 @@ mod tests {
         let session = crate::session::open(&[], &[], false).await.unwrap();
         let slices = slice_with_proc("write", Some("forbidden"));
         let err = call(
-            &session,
-            "",
-            &CallTarget::Fleet,
-            "netring",
-            "capture/trigger",
-            &[],
-            None,
-            None,
-            Duration::from_millis(100),
-            Some(&slices),
+            &crate::Fleet::new(&session, ""),
+            CallSpec {
+                target: &CallTarget::Fleet,
+                producer: "netring",
+                procedure: "capture/trigger",
+                params: &[],
+                body: None,
+                attachment: None,
+                timeout: Duration::from_millis(100),
+                slices: Some(&slices),
+            },
         )
         .await
         .unwrap_err()
@@ -633,16 +662,17 @@ mod tests {
         // §2 defaults `kind = "write"` to forbidden, and introspect serves
         // the TOML verbatim — the default is this guard's to apply.
         let err = call(
-            &session,
-            "",
-            &CallTarget::Fleet,
-            "netring",
-            "capture/trigger",
-            &[],
-            None,
-            None,
-            Duration::from_millis(100),
-            Some(&slice_with_proc("write", None)),
+            &crate::Fleet::new(&session, ""),
+            CallSpec {
+                target: &CallTarget::Fleet,
+                producer: "netring",
+                procedure: "capture/trigger",
+                params: &[],
+                body: None,
+                attachment: None,
+                timeout: Duration::from_millis(100),
+                slices: Some(&slice_with_proc("write", None)),
+            },
         )
         .await
         .unwrap_err()
@@ -659,16 +689,17 @@ mod tests {
             slice_with_proc("read", None),
         ] {
             let report = call(
-                &session,
-                "",
-                &CallTarget::Fleet,
-                "netring",
-                "capture/trigger",
-                &[],
-                None,
-                None,
-                Duration::from_millis(100),
-                Some(&slices),
+                &crate::Fleet::new(&session, ""),
+                CallSpec {
+                    target: &CallTarget::Fleet,
+                    producer: "netring",
+                    procedure: "capture/trigger",
+                    params: &[],
+                    body: None,
+                    attachment: None,
+                    timeout: Duration::from_millis(100),
+                    slices: Some(&slices),
+                },
             )
             .await
             .unwrap();

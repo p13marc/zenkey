@@ -63,7 +63,7 @@ pub async fn run(
          the window opened (RFC 09 §5.1 O4)"
     );
     let report =
-        match zenkey_fleet::run_expect(&session, args.base(), slices.as_ref(), &store, &spec).await
+        match zenkey_fleet::run_expect(&args.fleet(&session), slices.as_ref(), &store, &spec).await
         {
             Ok(r) => r,
             Err(e) => {

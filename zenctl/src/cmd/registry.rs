@@ -105,7 +105,7 @@ pub async fn diff(args: &Bus) -> Result<()> {
     }
     let local = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
     let session = args.session().await?;
-    let served = zenkey_fleet::SliceSet::from_bus(&session, args.base(), args.timeout()).await?;
+    let served = zenkey_fleet::SliceSet::from_bus(&args.fleet(&session), args.timeout()).await?;
     let report = served.diff(&local);
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
@@ -117,6 +117,8 @@ pub async fn diff(args: &Bus) -> Result<()> {
 /// in `zenkey_fleet::retired`. What is left here is what only a CLI has: the
 /// session, the rendering, and the exit code.
 pub async fn retired(listen: Option<u64>, args: &Bus) -> Result<()> {
+    // Whole seconds off the flag, a `Duration` from here in.
+    let listen = listen.map(std::time::Duration::from_secs);
     // A verdict verb: every pre-run failure below goes through `asked`'s
     // exit 2 — an exit 1 here would read "a retired subject still speaks"
     // about a ledger nobody could walk.
@@ -151,8 +153,7 @@ pub async fn retired(listen: Option<u64>, args: &Bus) -> Result<()> {
     let report = super::asked(
         "registry retired",
         zenkey_fleet::run_retired(
-            &session,
-            args.base(),
+            &args.fleet(&session),
             &local,
             registries,
             listen,

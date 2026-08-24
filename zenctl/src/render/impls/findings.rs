@@ -385,7 +385,7 @@ impl Render for RetiredReport {
     fn scope(&self) -> Option<ObservedScope> {
         Some(ObservedScope {
             asked: self.entries.iter().map(|e| e.selector.clone()).collect(),
-            window_s: self.window_s.get().map(|w| w as f64),
+            window_s: self.window_s.get(),
         })
     }
 }

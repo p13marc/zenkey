@@ -351,7 +351,7 @@ fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
     // keep parsing.
     let silent = CallReport {
         key: "v1/*/@rpc/sysinfo/introspect".into(),
-        timeout_s: 5,
+        timeout_s: 5.0,
         answers: vec![],
     };
     assert_eq!(silent.exit_code(), 2);
@@ -359,7 +359,9 @@ fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
         serde_json::to_value(&silent).unwrap(),
         json!({
             "key": "v1/*/@rpc/sysinfo/introspect",
-            "timeout_s": 5,
+            // `5.0`, not `5`: since #218 every window/timeout in this surface
+            // is `f64` seconds, so an integral one renders with its point.
+            "timeout_s": 5.0,
             "answers": [],
         })
     );
@@ -657,7 +659,8 @@ fn a_retired_entry_omits_every_fact_that_was_never_asked() {
     );
     // The shared fixture exercises the listened case: every fact present.
     let full = serde_json::to_value(fx::retired_report()).unwrap();
-    assert_eq!(full["window_s"], 30);
+    // `30.0`: the seconds unification (#218) — see `timeout_s` above.
+    assert_eq!(full["window_s"], 30.0);
     assert_eq!(full["dropped"], 5, "a listened run carries its drop count");
     assert_eq!(full["entries"][0]["still_declared"], true);
     assert_eq!(full["entries"][2]["verdict"], "unproven");

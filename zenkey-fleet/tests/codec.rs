@@ -165,9 +165,13 @@ async fn connected_store(session: &zenoh::Session) -> SchemaStore {
     let key = zenkey::selector::fleet_rpc(PRODUCER, &["describe"]).to_string();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let answers = zenkey_fleet::fleet_get(session, "", &key, None, Duration::from_secs(1))
-                .await
-                .unwrap_or_default();
+            let answers = zenkey_fleet::fleet_get(
+                &zenkey_fleet::Fleet::new(session, ""),
+                &key,
+                &zenkey_fleet::GetOpts::new(Duration::from_secs(1)),
+            )
+            .await
+            .unwrap_or_default();
             if !answers.is_empty() {
                 return;
             }
@@ -191,14 +195,15 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
     let typed = br#"{"x": 42, "name": "hi"}"#;
 
     let prepared = zenkey_fleet::prepare_publish(
-        &b,
+        &zenkey_fleet::Fleet::new(&b, ""),
         &store,
         Some(&slices),
-        "",
         SUBJECT_KEY,
-        None,
-        typed,
-        PrepareMode::Encode,
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: None,
+            body: typed,
+            mode: PrepareMode::Encode,
+        },
     )
     .await
     .expect("prepare");
@@ -261,10 +266,9 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
 
     // The other direction, through the same store: named fields back out.
     let d = zenkey_fleet::decode::decode_sample(
+        &zenkey_fleet::Fleet::new(&b, ""),
         &store,
-        &b,
         Some(&slices),
-        "",
         SUBJECT_KEY,
         Some(&sample.encoding().to_string()),
         &sample.payload().to_bytes(),
@@ -292,8 +296,18 @@ async fn the_three_modes_differ_only_in_what_they_say_and_refuse() {
     let bad = br#"{"x": "not an integer"}"#;
 
     let prepare = async |mode| {
-        zenkey_fleet::prepare_publish(&b, &store, Some(&slices), "", SUBJECT_KEY, None, bad, mode)
-            .await
+        zenkey_fleet::prepare_publish(
+            &zenkey_fleet::Fleet::new(&b, ""),
+            &store,
+            Some(&slices),
+            SUBJECT_KEY,
+            zenkey_fleet::PrepareSpec {
+                declared_encoding: None,
+                body: bad,
+                mode,
+            },
+        )
+        .await
     };
 
     let err = prepare(PrepareMode::Encode)
@@ -331,14 +345,15 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
     let body = b"some/foreign/payload";
 
     let asked = zenkey_fleet::prepare_publish(
-        &b,
+        &zenkey_fleet::Fleet::new(&b, ""),
         &store,
         Some(&slices()),
-        "",
         "demo/foreign/key",
-        None,
-        body,
-        PrepareMode::Encode,
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: None,
+            body,
+            mode: PrepareMode::Encode,
+        },
     )
     .await
     .expect("prepare");
@@ -357,14 +372,15 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
     // O4: with no registry loaded the tool has not asked, and must not report
     // the answer it never got.
     let unasked = zenkey_fleet::prepare_publish(
-        &b,
+        &zenkey_fleet::Fleet::new(&b, ""),
         &store,
         None,
-        "",
         "demo/foreign/key",
-        None,
-        body,
-        PrepareMode::Encode,
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: None,
+            body,
+            mode: PrepareMode::Encode,
+        },
     )
     .await
     .expect("prepare");
@@ -381,10 +397,9 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
     // looked") — RFC 09 §5.1 O4 applied to the verdict, not just the note.
     use zenkey::schema::validate::NotValidated;
     let asked = zenkey_fleet::decode::decode_sample(
+        &zenkey_fleet::Fleet::new(&b, ""),
         &store,
-        &b,
         Some(&slices()),
-        "",
         "demo/foreign/key",
         None,
         body,
@@ -394,9 +409,15 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
         asked.verdict,
         zenkey_fleet::Verdict::NotValidated(NotValidated::NoSchema)
     );
-    let unasked =
-        zenkey_fleet::decode::decode_sample(&store, &b, None, "", "demo/foreign/key", None, body)
-            .await;
+    let unasked = zenkey_fleet::decode::decode_sample(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        &store,
+        None,
+        "demo/foreign/key",
+        None,
+        body,
+    )
+    .await;
     assert_eq!(
         unasked.verdict,
         zenkey_fleet::Verdict::NotValidated(NotValidated::NoRegistry)
@@ -420,14 +441,15 @@ async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
                      "angular": {"x": 0.0, "y": 0.0, "z": 0.5}}"#;
 
     let prepared = zenkey_fleet::prepare_publish(
-        &b,
+        &zenkey_fleet::Fleet::new(&b, ""),
         &store,
         Some(&slices),
-        "",
         TWIST_KEY,
-        None,
-        typed,
-        PrepareMode::Encode,
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: None,
+            body: typed,
+            mode: PrepareMode::Encode,
+        },
     )
     .await
     .expect("prepare");
@@ -445,10 +467,9 @@ async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
     assert_eq!(&prepared.bytes[..4], &[0x00, 0x01, 0x00, 0x00]);
 
     let d = zenkey_fleet::decode::decode_sample(
+        &zenkey_fleet::Fleet::new(&b, ""),
         &store,
-        &b,
         Some(&slices),
-        "",
         TWIST_KEY,
         Some("application/cdr"),
         &prepared.bytes,

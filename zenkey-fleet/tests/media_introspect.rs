@@ -65,9 +65,13 @@ async fn declared_media_streams_are_discoverable_off_the_bus() {
     // Routability first: silence is not a slice (RFC 05 §3.1).
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let answers = zenkey_fleet::fleet_get(&client, "", &key, None, Duration::from_millis(500))
-            .await
-            .expect("probe");
+        let answers = zenkey_fleet::fleet_get(
+            &zenkey_fleet::Fleet::new(&client, ""),
+            &key,
+            &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
+        )
+        .await
+        .expect("probe");
         if !answers.is_empty() {
             break;
         }
@@ -77,9 +81,14 @@ async fn declared_media_streams_are_discoverable_off_the_bus() {
         );
     }
 
-    let info = zenkey_fleet::node_info(&client, "", ORIGIN, Duration::from_secs(5), false)
-        .await
-        .expect("node_info");
+    let info = zenkey_fleet::node_info(
+        &zenkey_fleet::Fleet::new(&client, ""),
+        ORIGIN,
+        Duration::from_secs(5),
+        false,
+    )
+    .await
+    .expect("node_info");
     let producer = info
         .producers
         .iter()

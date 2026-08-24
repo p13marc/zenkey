@@ -59,7 +59,7 @@ pub async fn topic_list_budget(
         &mut report,
         &obs,
         zenkey_fleet::report::BudgetWindow {
-            window_s: secs,
+            window_s: secs as f64,
             scopes,
             keys,
             evicted,

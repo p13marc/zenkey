@@ -81,7 +81,7 @@ pub async fn run(
                 })
                 .collect()
         },
-        timeout_s: timeout.as_secs(),
+        timeout_s: timeout.as_secs_f64(),
         heard: dedup_by_zid(heard),
     };
     crate::render::emit_with(&mut std::io::stdout(), &report, format, color)
@@ -123,7 +123,7 @@ mod tests {
         use crate::render::Render as _;
         let empty = zenkey_fleet::report::ScoutReport {
             asked: vec!["router".into()],
-            timeout_s: 5,
+            timeout_s: 5.0,
             heard: Vec::new(),
         };
         let notes = empty.notes();

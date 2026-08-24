@@ -51,10 +51,9 @@ pub fn decode(
     Task::perform(
         async move {
             let d = zenkey_fleet::decode::decode_sample(
+                &zenkey_fleet::Fleet::new(&session, &base),
                 &store,
-                &session,
                 slices.as_deref(),
-                &base,
                 &wire_key,
                 Some(&encoding),
                 &bytes.to_bytes(),
@@ -84,13 +83,13 @@ pub fn validate(
 ) -> Task<Message> {
     Task::perform(
         async move {
+            let fleet = zenkey_fleet::Fleet::new(&session, &base);
             let mut out = Vec::with_capacity(batch.len());
             for (key, encoding, bytes) in batch {
                 let d = zenkey_fleet::decode::decode_sample(
+                    &fleet,
                     &store,
-                    &session,
                     slices.as_deref(),
-                    &base,
                     &key,
                     Some(&encoding),
                     &bytes.to_bytes(),
@@ -126,7 +125,8 @@ pub fn field(
                 window,
                 max_paths: zenkey_fleet::field::DEFAULT_MAX_PATHS,
             };
-            zenkey_fleet::field::run_field(&session, &base, slices.as_deref(), &store, &spec)
+            let fleet = zenkey_fleet::Fleet::new(&session, &base);
+            zenkey_fleet::field::run_field(&fleet, slices.as_deref(), &store, &spec)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
@@ -161,7 +161,8 @@ pub fn why(
                 timeout,
                 listen: None,
             };
-            zenkey_fleet::why::run_why(&session, &base, &key, slices.as_deref(), &spec)
+            let fleet = zenkey_fleet::Fleet::new(&session, &base);
+            zenkey_fleet::why::run_why(&fleet, &key, slices.as_deref(), &spec)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string())

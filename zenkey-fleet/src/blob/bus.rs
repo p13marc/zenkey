@@ -9,11 +9,10 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use zenkey::grammar::{self, ContentHash, Origin};
 use zenkey::{RegistrySlice, RemoteOrigin, ServiceOrigin};
-use zenoh::Session;
 use zenoh::qos::Priority;
 
 use super::{BlobTarget, declared_by};
-use crate::query::{Answer, FleetAnswer, fleet_get_at};
+use crate::query::{Answer, FleetAnswer, GetOpts, fleet_get};
 use crate::report::{
     BlobAvailability, BlobFetchReport, BlobHolder, BlobManifest, BlobProbeReport, BlobProgress,
     CallError,
@@ -21,7 +20,7 @@ use crate::report::{
 
 /// The priority every `@blob` GET this crate issues rides at (RFC 07 §2.6).
 ///
-/// One constant, read by both the probe (which sets it on `fleet_get_at`) and
+/// One constant, read by both the probe (which sets it on its [`GetOpts`]) and
 /// the fetch report (which names it) — so what the report says and what the
 /// wire carried cannot drift apart. The fetch itself does not read it: the
 /// reference client already defaults to `DataLow`, and re-setting it here would
@@ -72,17 +71,17 @@ impl Default for BlobFetchSpec {
 /// that still comes back as `not_probed`, with `declared_by` filled from the
 /// slices.
 pub async fn blob_probe(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     target: &BlobTarget,
     slices: &[RegistrySlice],
     timeout: Duration,
 ) -> Result<BlobProbeReport> {
+    let base = fleet.base();
     let tier = target.tier();
     let declared = declared_by(slices, tier);
 
     let Some(id) = target.artifact_id() else {
-        return probe_tier2(session, base, target, declared, slices.len(), timeout).await;
+        return probe_tier2(fleet, target, declared, slices.len(), timeout).await;
     };
 
     // The wide form: `<base>/v1/*/@blob/artifact/<id>/{have,manifest}`. The
@@ -96,9 +95,10 @@ pub async fn blob_probe(
     // Two independent questions to the same fleet, asked concurrently: a
     // probe costs one timeout window, not two. Folding stays sequential and
     // ordered (have, then manifest), so the merge is deterministic.
+    let bulk = GetOpts::new(timeout).priority(FETCH_PRIORITY);
     let (have_answers, manifest_answers) = tokio::join!(
-        fleet_get_at(session, base, &have, None, timeout, FETCH_PRIORITY),
-        fleet_get_at(session, base, &manifest, None, timeout, FETCH_PRIORITY),
+        fleet_get(fleet, &have, &bulk),
+        fleet_get(fleet, &manifest, &bulk),
     );
     let mut holders: Vec<BlobHolder> = Vec::new();
     for (answers, kind) in [
@@ -138,13 +138,13 @@ pub async fn blob_probe(
 /// each holder *has* — a possession verdict, attributed by the reply's own
 /// key exactly as the Tier-1 probe attributes its holders.
 async fn probe_tier2(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     target: &BlobTarget,
     declared: Vec<String>,
     slices_considered: usize,
     timeout: Duration,
 ) -> Result<BlobProbeReport> {
+    let base = fleet.base();
     let tier = target.tier();
     let probe_prefix = grammar::with_base(base, target.probe_prefix().as_str());
     let report = |asked: Vec<String>, not_probed: Option<String>, holders: Vec<BlobHolder>| {
@@ -190,13 +190,12 @@ async fn probe_tier2(
             let have_key = zblob::keys::store_have_key(&probe_prefix, zblob::HashAlgo::Blake3);
             let want = zblob::wire::encode(&zblob::wire::WantList::new(vec![parsed]))
                 .map_err(|e| anyhow!("encoding the want-list: {e}"))?;
-            let answers = fleet_get_at(
-                session,
-                base,
+            let answers = fleet_get(
+                fleet,
                 &have_key,
-                Some(want),
-                timeout,
-                FETCH_PRIORITY,
+                &GetOpts::new(timeout)
+                    .payload(Some(want))
+                    .priority(FETCH_PRIORITY),
             )
             .await?;
             let holders = fold_tier2(base, answers, |bytes| {
@@ -227,8 +226,12 @@ async fn probe_tier2(
                 anyhow!("`{root}` is not a content address the reference client accepts: {e}")
             })?;
             let have_key = zblob::keys::tree_have_key(&probe_prefix, &parsed.to_string());
-            let answers =
-                fleet_get_at(session, base, &have_key, None, timeout, FETCH_PRIORITY).await?;
+            let answers = fleet_get(
+                fleet,
+                &have_key,
+                &GetOpts::new(timeout).priority(FETCH_PRIORITY),
+            )
+            .await?;
             let holders = fold_tier2(base, answers, |bytes| {
                 let probe: zblob::wire::TreeProbe = zblob::wire::decode(bytes)
                     .map_err(|e| format!("undecodable tree probe: {e}"))?;
@@ -464,17 +467,17 @@ fn decode_manifest(bytes: &[u8]) -> Result<BlobManifest, String> {
 /// against the root as it arrives, and a rejected reply never reaches the
 /// destination file.
 pub async fn blob_fetch(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     origin: &str,
     target: &BlobTarget,
     dest: &Path,
     spec: &BlobFetchSpec,
     on_progress: &(dyn Fn(BlobProgress) + Send + Sync),
 ) -> Result<BlobFetchReport> {
+    let (session, base) = (fleet.session(), fleet.base());
     let origin = parse_origin(origin)?;
     let Some(id) = target.artifact_id() else {
-        return fetch_tier2(session, base, &origin, target, dest, spec, on_progress).await;
+        return fetch_tier2(fleet, &origin, target, dest, spec, on_progress).await;
     };
 
     let prefix = grammar::with_base(base, target.prefix_at(&origin).as_str());
@@ -552,14 +555,14 @@ pub async fn blob_fetch(
 /// reply that unframes to anything else is rejected naming the origin, so
 /// trust-on-first-use is unspellable on this path by construction.
 async fn fetch_tier2(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     origin: &Origin,
     target: &BlobTarget,
     dest: &Path,
     spec: &BlobFetchSpec,
     on_progress: &(dyn Fn(BlobProgress) + Send + Sync),
 ) -> Result<BlobFetchReport> {
+    let (session, base) = (fleet.session(), fleet.base());
     let started = std::time::Instant::now();
     match target {
         BlobTarget::Store { algo, hash } => {
@@ -665,12 +668,12 @@ async fn fetch_tier2(
 /// involved**: the stats make inspecting a huge tree cheap, which is the
 /// difference between browsing a snapshot and downloading one.
 pub async fn blob_tree_index(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     origin: &str,
     root: &ContentHash,
     timeout: Duration,
 ) -> Result<crate::report::BlobTreeIndexReport> {
+    let (session, base) = (fleet.session(), fleet.base());
     let started = std::time::Instant::now();
     let origin = parse_origin(origin)?;
     let tree_str = grammar::with_base(

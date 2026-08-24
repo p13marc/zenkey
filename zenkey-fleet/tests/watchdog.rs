@@ -59,7 +59,14 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
             let mut emit = move |t: &Transition| {
                 let _ = tx.send(t.clone());
             };
-            run_watchdog(&b, "", &slices, &store_of(), &spec, &mut emit).await
+            run_watchdog(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                Some(&slices),
+                &store_of(),
+                &spec,
+                &mut emit,
+            )
+            .await
         }
     });
 
@@ -130,9 +137,15 @@ async fn origin_down_fires_on_an_absent_origin_and_only_once() {
     let mut emit = move |t: &Transition| {
         let _ = tx.send(t.clone());
     };
-    let summary = run_watchdog(&b, "", &slices, &store_of(), &spec, &mut emit)
-        .await
-        .expect("run");
+    let summary = run_watchdog(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        Some(&slices),
+        &store_of(),
+        &spec,
+        &mut emit,
+    )
+    .await
+    .expect("run");
     assert_eq!(summary.ticks, 3);
     let transitions: Vec<Transition> = rx.try_iter().collect();
     assert_eq!(transitions.len(), 1, "{transitions:#?}");

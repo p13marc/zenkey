@@ -116,6 +116,16 @@ impl Bus {
         Ok(zenkey::grammar::with_base(self.base(), relative))
     }
 
+    /// This invocation's resolved base, bound to a session — the bundle every
+    /// bus-facing engine call takes (#218).
+    ///
+    /// Borrowed from both: a command opens its session once and this is what
+    /// it hands each engine call, so the base a command ran against is read
+    /// off the `Bus` exactly once.
+    pub(crate) fn fleet<'a>(&'a self, session: &'a zenoh::Session) -> zenkey_fleet::Fleet<'a> {
+        zenkey_fleet::Fleet::new(session, self.base())
+    }
+
     pub(crate) async fn session(&self) -> Result<zenoh::Session> {
         self.session_reporting()
             .await
@@ -192,7 +202,7 @@ impl Bus {
                         return Err(SliceFailure::Unreachable(e));
                     }
                 };
-                let set = zenkey_fleet::SliceSet::from_bus(&session, base, self.timeout())
+                let set = zenkey_fleet::SliceSet::from_bus(&self.fleet(&session), self.timeout())
                     .await
                     .map_err(SliceFailure::Unreachable)?;
                 if set.slices().is_empty() {
@@ -225,7 +235,7 @@ impl Bus {
         // §6.1's decision, delivered by issue #43: --registry and the bus stop
         // being exclusive. Union: served wins per producer, dirs fill the
         // gaps, disagreement is reported — never silently overwritten.
-        let out = zenkey_fleet::SliceSet::from_union(&session, base, &dirs, self.timeout())
+        let out = zenkey_fleet::SliceSet::from_union(&self.fleet(&session), &dirs, self.timeout())
             .await
             // The dirs are half of this, and a directory the user named that
             // will not read is not the bus being quiet.

@@ -107,24 +107,49 @@ pub fn encode_encoding(
     })
 }
 
-/// Encode `body` against `producer`'s served schema for `type_name`, or
+/// What to encode — the operator's half of a prepare, shared by both entry
+/// points below.
+///
+/// The other half is what to encode it *against*, which is exactly what
+/// differs between them: [`prepare_request`] is told the producer and type
+/// outright, [`prepare_publish`] refines them out of a wire key. That split
+/// is why this is one spec and not two: everything in it means the same
+/// thing on both paths.
+#[derive(Debug, Clone, Copy)]
+pub struct PrepareSpec<'a> {
+    /// The wire encoding the caller stated (`--encoding`), when they did.
+    pub declared_encoding: Option<&'a str>,
+    /// The bytes as the operator supplied them, before any encode.
+    pub body: &'a [u8],
+    /// Encode against the served schema, or ship verbatim.
+    pub mode: PrepareMode,
+}
+
+/// Encode `spec.body` against `producer`'s served schema for `type_name`, or
 /// explain why it could not.
 ///
 /// `Ok` with [`BodySource::AsTyped`] when no schema resolves — that is not a
 /// failure, and it is not silence either (RFC 08 §7 is a SHOULD; a producer
 /// that serves no `describe` has said nothing about this type, which is
 /// different from having said "any bytes will do").
-#[allow(clippy::too_many_arguments)]
+///
+/// Base-less, so a bare `&Session` rather than a [`crate::Fleet`]: nothing
+/// here composes a key — the producer is named, and the schema comes through
+/// the store, which carries the base already. [`prepare_publish`] takes a
+/// `Fleet` because it *refines a wire key*, which needs one.
 pub async fn prepare_request(
     session: &Session,
     store: &SchemaStore,
     producer: &str,
     type_name: &str,
-    declared_encoding: Option<&str>,
     registry_encoding: Option<&str>,
-    body: &[u8],
-    mode: PrepareMode,
+    spec: PrepareSpec<'_>,
 ) -> Result<PreparedBody> {
+    let PrepareSpec {
+        declared_encoding,
+        body,
+        mode,
+    } = spec;
     if mode == PrepareMode::Raw {
         return Ok(PreparedBody::raw(
             body.to_vec(),
@@ -199,17 +224,19 @@ pub async fn prepare_request(
 ///
 /// An unregistered key is not an error — it is the ordinary case on a bus this
 /// convention does not govern, and the note says which case happened.
-#[allow(clippy::too_many_arguments)]
 pub async fn prepare_publish(
-    session: &Session,
+    fleet: &crate::Fleet<'_>,
     store: &SchemaStore,
     slices: Option<&SliceSet>,
-    base: &str,
     wire_key: &str,
-    declared_encoding: Option<&str>,
-    body: &[u8],
-    mode: PrepareMode,
+    spec: PrepareSpec<'_>,
 ) -> Result<PreparedBody> {
+    let (session, base) = (fleet.session(), fleet.base());
+    let PrepareSpec {
+        declared_encoding,
+        body,
+        mode,
+    } = spec;
     if mode == PrepareMode::Raw {
         return Ok(PreparedBody::raw(
             body.to_vec(),
@@ -264,10 +291,8 @@ pub async fn prepare_publish(
         store,
         &producer,
         &subject.type_name,
-        declared_encoding,
         subject.encoding.as_deref(),
-        body,
-        mode,
+        spec,
     )
     .await
 }

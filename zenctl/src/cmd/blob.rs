@@ -33,7 +33,7 @@ pub async fn list(producer: Option<&str>, tier: Option<&str>, args: &Bus) -> Res
     // The roster is a separate, cheap sweep — and skipping it is not a defeat:
     // the report distinguishes "nobody asked" from "nobody answered".
     let roster = match args.session().await {
-        Ok(session) => zenkey_fleet::roster(&session, args.base(), args.timeout())
+        Ok(session) => zenkey_fleet::roster(&args.fleet(&session), args.timeout())
             .await
             .ok(),
         Err(_) => None,
@@ -64,7 +64,7 @@ pub async fn probe(target: &str, args: &Bus) -> Result<()> {
     // claim that makes a *silent* probe legible. A fleet with no registry
     // still probes.
     let slices = args.slices().await.unwrap_or_default();
-    let report = blob_probe(&session, args.base(), &target, &slices, args.timeout()).await?;
+    let report = blob_probe(&args.fleet(&session), &target, &slices, args.timeout()).await?;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
@@ -124,7 +124,7 @@ pub async fn fetch(
             );
         }
         let report =
-            zenkey_fleet::blob_tree_index(&session, args.base(), from, tree_root, args.timeout())
+            zenkey_fleet::blob_tree_index(&args.fleet(&session), from, tree_root, args.timeout())
                 .await?;
         return crate::render::emit_with(
             &mut std::io::stdout(),
@@ -182,8 +182,7 @@ pub async fn fetch(
         );
     }
     let report = blob_fetch(
-        &session,
-        args.base(),
+        &args.fleet(&session),
         from,
         &target,
         out,

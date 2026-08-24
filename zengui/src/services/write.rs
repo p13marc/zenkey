@@ -35,16 +35,17 @@ pub fn call(
         async move {
             let target = zenkey_fleet::CallTarget::parse(&target).map_err(|e| e.to_string())?;
             zenkey_fleet::call(
-                &session,
-                &base,
-                &target,
-                &producer,
-                &procedure,
-                &params,
-                body,
-                attachment,
-                timeout,
-                slices.as_deref(),
+                &zenkey_fleet::Fleet::new(&session, &base),
+                zenkey_fleet::CallSpec {
+                    target: &target,
+                    producer: &producer,
+                    procedure: &procedure,
+                    params: &params,
+                    body,
+                    attachment,
+                    timeout,
+                    slices: slices.as_deref(),
+                },
             )
             .await
             .map(Arc::new)
@@ -87,14 +88,15 @@ pub fn publish(p: Publish) -> Task<Message> {
                 repeat,
             } = p;
             let prepared = zenkey_fleet::prepare_publish(
-                &session,
+                &zenkey_fleet::Fleet::new(&session, &base),
                 &store,
                 slices.as_deref(),
-                &base,
                 &key,
-                (!encoding.is_empty()).then_some(encoding.as_str()),
-                &body,
-                mode,
+                zenkey_fleet::PrepareSpec {
+                    declared_encoding: (!encoding.is_empty()).then_some(encoding.as_str()),
+                    body: &body,
+                    mode,
+                },
             )
             .await
             .map_err(|e| e.to_string())?;

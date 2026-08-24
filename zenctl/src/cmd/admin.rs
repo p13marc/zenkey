@@ -28,7 +28,7 @@ pub async fn graph(dot: bool, origins: bool, args: &Bus) -> Result<()> {
     // The origin join is opt-in (#131): it costs one more admin sweep, and
     // the lazy rule holds even for pictures.
     let attachments = if origins {
-        zenkey_fleet::origin_attachments(&session, args.base(), args.timeout()).await?
+        zenkey_fleet::origin_attachments(&args.fleet(&session), args.timeout()).await?
     } else {
         Vec::new()
     };

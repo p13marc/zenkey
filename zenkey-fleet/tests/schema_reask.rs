@@ -73,9 +73,13 @@ async fn wait_routable(session: &zenoh::Session) {
     let key = zenkey::selector::fleet_rpc(PRODUCER, &["describe"]).to_string();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let answers = zenkey_fleet::fleet_get(session, "", &key, None, Duration::from_secs(1))
-                .await
-                .unwrap_or_default();
+            let answers = zenkey_fleet::fleet_get(
+                &zenkey_fleet::Fleet::new(session, ""),
+                &key,
+                &zenkey_fleet::GetOpts::new(Duration::from_secs(1)),
+            )
+            .await
+            .unwrap_or_default();
             if !answers.is_empty() {
                 return;
             }

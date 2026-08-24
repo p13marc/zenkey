@@ -31,7 +31,6 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use anyhow::Result;
-use zenoh::Session;
 
 use crate::condition;
 use crate::decode::SchemaStore;
@@ -104,13 +103,12 @@ impl Default for ExpectSpec {
 /// reason — the assertion was validity, and "unknowable" is not met
 /// (RFC 09 §5.1 O4; #246). It is never a pass or a fail on its own.
 pub async fn run_expect(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     slices: Option<&SliceSet>,
     store: &SchemaStore,
     spec: &ExpectSpec,
 ) -> Result<ExpectReport> {
-    let monitor = Monitor::start(session, MonitorSpec::default()).await?;
+    let monitor = Monitor::start(fleet.session(), MonitorSpec::default()).await?;
     let mut events = monitor.events();
     // Declared before the window opens: not-asked must never read as "no".
     monitor.watch(&spec.selector).await?;
@@ -150,10 +148,9 @@ pub async fn run_expect(
                 }
                 if spec.valid_payload {
                     let d = crate::decode::decode_sample(
+                        fleet,
                         store,
-                        session,
                         slices,
-                        base,
                         &s.key,
                         Some(&s.encoding),
                         &s.payload.to_bytes(),
@@ -177,7 +174,7 @@ pub async fn run_expect(
                     let against = match check {
                         QosCheck::Profile(p) => Some(p),
                         QosCheck::Declared => {
-                            match crate::facts::describe_key(base, &s.key, slices)
+                            match crate::facts::describe_key(fleet.base(), &s.key, slices)
                                 .facts
                                 .registration
                             {

@@ -25,14 +25,14 @@ use std::time::Duration;
 
 use anyhow::Result;
 use zenkey::slice::{DeprecationDecl, RegistrySlice};
-use zenoh::Session;
 
 use crate::report::{CutoverVerdict, RetiredEntry, RetiredReport};
 
 /// The scope sentence the listen phase operates under — rendered by the
 /// caller *before* the window opens (O5): a user watching a long silence
 /// deserves to know what was and was not being watched.
-pub fn scope_note(entries: usize, new_prefix: &str, window: u64) -> String {
+pub fn scope_note(entries: usize, new_prefix: &str, window: Duration) -> String {
+    let window = window.as_secs_f64();
     format!(
         "retired check: {window}s window over {entries} ledger entr(y|ies) — \
          watching the retired families and their replacements, with {new_prefix}** \
@@ -147,17 +147,17 @@ impl Matcher {
 ///   bounded by `timeout`; the admin sweep runs *before* the listen phase so
 ///   this tool's own data-plane subscriber cannot appear among the consumers
 ///   it is counting.
-/// - **The listen window** (facts 1 and 4) runs only when `listen_s` is
+/// - **The listen window** (facts 1 and 4) runs only when `listen` is
 ///   given: no window means every wire field stays `None` — "not asked" must
 ///   never render as "no" (RFC 09 §5.1 O4).
 pub async fn run_retired(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     local: &crate::SliceSet,
     registries: Vec<String>,
-    listen_s: Option<u64>,
+    listen: Option<Duration>,
     timeout: Duration,
 ) -> Result<RetiredReport> {
+    let (session, base) = (fleet.session(), fleet.base());
     // The ledger: every [[deprecated]] entry the local registries declare,
     // in a stable order.
     let mut ledger: Vec<(&RegistrySlice, &DeprecationDecl)> = local
@@ -170,7 +170,7 @@ pub async fn run_retired(
     });
 
     // Fact 2's source: what live builds actually serve (RFC 08 §6).
-    let served = crate::SliceSet::from_bus(session, base, timeout).await?;
+    let served = crate::SliceSet::from_bus(fleet, timeout).await?;
 
     // Fact 3's source. `None` = no admin space answered, which is "not
     // available", never "nothing declared" (O4). Our own session is excluded:
@@ -199,11 +199,11 @@ pub async fn run_retired(
     let mut old_counts = vec![0u64; ledger.len()];
     let mut repl_counts = vec![0u64; ledger.len()];
     let (mut plane_samples, mut dropped) = (0u64, 0u64);
-    if let Some(window) = listen_s {
+    if let Some(window) = listen {
         let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
         let mut events = monitor.events();
         monitor.watch("**").await?;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(window);
+        let deadline = tokio::time::Instant::now() + window;
         loop {
             let item = tokio::select! {
                 item = events.recv() => item,
@@ -253,7 +253,7 @@ pub async fn run_retired(
         .enumerate()
         .map(|(i, (slice, decl))| {
             let selector = retired_selector(slice, &decl.path);
-            let wire_samples = listen_s.map(|_| old_counts[i]);
+            let wire_samples = listen.map(|_| old_counts[i]);
             // Fact 2: the §6.1 check — the ledger says retired, does a served
             // slice still declare the path *active*?
             let still_declared = served
@@ -278,7 +278,7 @@ pub async fn run_retired(
                     })
                     .count()
             });
-            let replacement_samples = match (&decl.replaced_by, listen_s) {
+            let replacement_samples = match (&decl.replaced_by, listen) {
                 (Some(_), Some(_)) => Some(repl_counts[i]),
                 _ => None,
             };
@@ -286,7 +286,7 @@ pub async fn run_retired(
             // declared, the v1 plane otherwise.
             let life = match &decl.replaced_by {
                 Some(_) => replacement_samples,
-                None => listen_s.map(|_| plane_samples),
+                None => listen.map(|_| plane_samples),
             };
             RetiredEntry {
                 producer: slice.name.clone(),
@@ -307,11 +307,11 @@ pub async fn run_retired(
     Ok(RetiredReport {
         registries,
         entries,
-        window_s: listen_s.into(),
-        plane_samples: listen_s.map(|_| plane_samples).into(),
+        window_s: listen.map(|d| d.as_secs_f64()).into(),
+        plane_samples: listen.map(|_| plane_samples).into(),
         // Gated like its sibling wire facts (R6): with no window there was
         // no observer, and "observed cleanly" is a claim nobody made.
-        dropped: listen_s.map(|_| dropped).into(),
+        dropped: listen.map(|_| dropped).into(),
         introspect_answered: served.slices().len(),
         admin_entities: admin.as_ref().map(|e| e.entities.len()),
         verdict,
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn the_scope_note_states_what_it_cannot_see() {
-        let note = scope_note(16, "acme/v1/", 30);
+        let note = scope_note(16, "acme/v1/", Duration::from_secs(30));
         assert!(note.contains("30s window"));
         assert!(
             note.contains("cannot cross"),

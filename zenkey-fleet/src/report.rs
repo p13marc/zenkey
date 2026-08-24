@@ -183,7 +183,7 @@ pub struct BudgetCell {
 /// bounded sweep never established.
 #[derive(Debug, Clone, Serialize)]
 pub struct BudgetWindow {
-    pub window_s: u64,
+    pub window_s: f64,
     /// The selectors actually watched — coverage is a statement, not a vibe.
     pub scopes: Vec<String>,
     /// Distinct keys the bounded observer retained.
@@ -678,7 +678,7 @@ pub struct CallReport {
     /// legible: the renderer's silence note used to name a timeout the
     /// document never stated (RFC 09 §5.1 O5, review finding R5). Additive,
     /// so scripts on the old shape keep parsing.
-    pub timeout_s: u64,
+    pub timeout_s: f64,
     pub answers: Vec<CallAnswer>,
 }
 
@@ -738,7 +738,7 @@ pub struct RateRow {
 #[derive(Debug, Clone, Serialize)]
 pub struct RateReport {
     pub selector: String,
-    pub window_s: u64,
+    pub window_s: f64,
     /// Rows are present only for a `--per-key` run, sorted by count
     /// descending.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -770,7 +770,7 @@ pub struct ScoutReport {
     /// The node kinds asked for; empty means all three.
     pub asked: Vec<String>,
     /// How long the round listened.
-    pub timeout_s: u64,
+    pub timeout_s: f64,
     /// Distinct nodes heard, first sighting winning — a census, not an
     /// arrival log.
     pub heard: Vec<crate::scout::HelloView>,
@@ -1164,7 +1164,7 @@ mod tests {
     fn call_exit_codes() {
         let mut r = CallReport {
             key: "k".into(),
-            timeout_s: 5,
+            timeout_s: 5.0,
             answers: vec![],
         };
         assert_eq!(r.exit_code(), 2, "silence is its own exit code");
@@ -1544,7 +1544,7 @@ pub struct CutoverReport {
     /// not inferred — the version chunk is plain, so key algebra cannot
     /// separate old from new (RFC 09 §6's note).
     pub new_prefix: String,
-    pub window_s: u64,
+    pub window_s: f64,
     /// Samples heard on the old root — every one is a failure fact.
     pub old_samples: u64,
     pub old_keys_seen: usize,
@@ -1625,7 +1625,7 @@ pub struct RetiredReport {
     /// The listen window, when one ran. `NotAsked` = wire facts were not
     /// asked.
     #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
-    pub window_s: Asked<u64>,
+    pub window_s: Asked<f64>,
     /// Samples heard under `<base>/v1/` over the window — the fleet's proof
     /// of life, which is what lets a silent no-replacement entry pass rather
     /// than a dead fleet passing every silence check for free (RFC 05 §3.1).

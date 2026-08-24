@@ -232,7 +232,7 @@ pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::Bus) -> R
         // cycles (#37) instead of re-declaring per poll.
         let session = args.session().await?;
         let repeating =
-            zenkey_fleet::RepeatingRegistry::declare(&session, args.base(), args.timeout()).await?;
+            zenkey_fleet::RepeatingRegistry::declare(&args.fleet(&session), args.timeout()).await?;
         let fetch = async || {
             let slices: Vec<zenkey::RegistrySlice> = repeating
                 .fetch()

@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use zenkey::grammar::with_base;
-use zenoh::Session;
 
 /// The fleet-presence roster: who is up, and what they run.
 ///
@@ -13,8 +12,7 @@ use zenoh::Session;
 /// payload bytes: the token *key* is the record. `@catalog` is asked for by
 /// name because `*` can never match a verbatim service origin (property D4).
 pub async fn roster(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     timeout: Duration,
 ) -> Result<BTreeMap<String, Vec<String>>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -23,19 +21,24 @@ pub async fn roster(
     // The builders are base-relative; this session is deliberately
     // un-namespaced, so it must spell the base itself.
     for expr in [
-        with_base(
-            base,
-            zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet()),
-        ),
-        with_base(base, catalog_alive),
+        fleet.wire(zenkey::selector::all_liveliness(
+            zenkey::selector::Scope::fleet(),
+        )),
+        fleet.wire(catalog_alive),
     ] {
-        let Ok(replies) = session.liveliness().get(&expr).timeout(timeout).await else {
+        let Ok(replies) = fleet
+            .session()
+            .liveliness()
+            .get(&expr)
+            .timeout(timeout)
+            .await
+        else {
             continue;
         };
         while let Ok(reply) = replies.recv_async().await {
             let Ok(sample) = reply.result() else { continue };
             let key = sample.key_expr().as_str();
-            let Some((origin, producer)) = token_identity(base, key) else {
+            let Some((origin, producer)) = token_identity(fleet.base(), key) else {
                 continue;
             };
             out.entry(origin).or_default().push(producer);
@@ -89,19 +92,17 @@ impl RosterWatch {
     /// in the broadcast before this task drains it, so history alone races,
     /// and a GET alone would miss everything after it. Duplicates from a late
     /// history event are absorbed by [`apply_token`]'s idempotence.
-    pub async fn start(session: &Session, base: &str, timeout: Duration) -> Result<RosterWatch> {
+    pub async fn start(fleet: &crate::Fleet<'_>, timeout: Duration) -> Result<RosterWatch> {
         let liveliness = vec![
-            with_base(
-                base,
-                zenkey::selector::all_liveliness(zenkey::selector::Scope::fleet()),
-            ),
-            with_base(
-                base,
-                zenkey::selector::service_alive(&zenkey::ServiceOrigin::catalog()),
-            ),
+            fleet.wire(zenkey::selector::all_liveliness(
+                zenkey::selector::Scope::fleet(),
+            )),
+            fleet.wire(zenkey::selector::service_alive(
+                &zenkey::ServiceOrigin::catalog(),
+            )),
         ];
         let monitor = crate::Monitor::start(
-            session,
+            fleet.session(),
             crate::MonitorSpec {
                 selectors: vec![],
                 liveliness,
@@ -110,12 +111,12 @@ impl RosterWatch {
         )
         .await?;
         let events = monitor.events();
-        let roster = roster(session, base, timeout).await?;
+        let roster = roster(fleet, timeout).await?;
         Ok(RosterWatch {
             monitor,
             events,
             roster,
-            base: base.to_string(),
+            base: fleet.base().to_string(),
         })
     }
 
@@ -394,12 +395,12 @@ impl Node {
 /// Narrower is also *more* honest: the answers can no longer be diluted by a
 /// deduplication across origins that never applied to this one.
 pub async fn node_info(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     origin: &str,
     timeout: Duration,
     with_freshness: bool,
 ) -> Result<NodeInfo> {
+    let (session, base) = (fleet.session(), fleet.base());
     let node = Node::parse(origin)?;
 
     // Liveliness, this origin only. A producer chunk is position 5 for a host;
@@ -428,7 +429,7 @@ pub async fn node_info(
     // still attributed by reply key, so a router that answered for somebody
     // else could not smuggle a slice in.
     let introspect = with_base(base, node.introspect_selector());
-    let answers = crate::query::fleet_get(session, base, &introspect, None, timeout)
+    let answers = crate::query::fleet_get(fleet, &introspect, &crate::query::GetOpts::new(timeout))
         .await
         .unwrap_or_default();
     let served: Vec<zenkey::slice::RegistrySlice> = answers
@@ -566,8 +567,7 @@ pub struct BridgeMatch {
 /// claim about this label either way — but the total documents seen ride
 /// back so the caller can tell "no claims" from "nobody answered".
 pub async fn bridge_resolve(
-    session: &zenoh::Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     producer: &str,
     label: &str,
     timeout: std::time::Duration,
@@ -575,8 +575,9 @@ pub async fn bridge_resolve(
     let relative =
         zenkey::selector::producer_state(zenkey::selector::Scope::fleet(), producer, &["health"])
             .to_string();
-    let key = zenkey::grammar::with_base(base, relative);
-    let answers = crate::query::fleet_get(session, base, &key, None, timeout).await?;
+    let key = fleet.wire(relative);
+    let answers =
+        crate::query::fleet_get(fleet, &key, &crate::query::GetOpts::new(timeout)).await?;
     let mut matches = Vec::new();
     let seen = answers.len();
     for a in &answers {

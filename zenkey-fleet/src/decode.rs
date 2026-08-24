@@ -178,6 +178,11 @@ impl SchemaStore {
     /// not serve describe or does not describe this type — render
     /// structurally (never an error; RFC 08 §7 is a SHOULD for
     /// self-describing encodings).
+    ///
+    /// A bare `&Session` rather than a [`crate::Fleet`]: the store was
+    /// constructed with the base and composes the `Fleet` itself, so a
+    /// caller cannot hand it a *second* base for the two to disagree over.
+    /// Same for [`set_for`](Self::set_for) and everything built on them.
     pub async fn schema_for(
         &self,
         session: &Session,
@@ -297,10 +302,12 @@ impl SchemaStore {
                     &self.base,
                     zenkey::selector::fleet_rpc(producer, &["describe"]),
                 );
+                // The store carries the base already, so it composes the
+                // `Fleet` rather than taking one — two bases in scope is a
+                // chance for them to disagree.
+                let fleet = crate::Fleet::new(session, &self.base);
                 let declared =
-                    match crate::query::declare_repeating(session, &self.base, &key, self.timeout)
-                        .await
-                    {
+                    match crate::query::declare_repeating(&fleet, &key, self.timeout).await {
                         Ok(q) => std::sync::Arc::new(q),
                         // We could not even ask. Nobody said anything about
                         // this producer, so this is the non-verdict case, not
@@ -751,16 +758,23 @@ impl DecodedSample {
 /// masquerade as [`NotValidated::NoSchema`]'s "asked, and no schema is
 /// served/known for this type" (RFC 09 §5.1 O4; #246). Mirrors
 /// [`schema_dump`]'s `Option<&SliceSet>`.
+///
+/// The argument order is *where*, then *what we know*, then *what arrived*:
+/// the fleet the sample came off, the two knowledge sources consulted about
+/// it (the schema store, the registry), then the sample itself — key,
+/// declared encoding, bytes. It used to open `(store, session, slices, base,
+/// …)`, which put the deployment fourth and split it from its session.
 pub async fn decode_sample(
+    fleet: &crate::Fleet<'_>,
     store: &SchemaStore,
-    session: &Session,
     slices: Option<&SliceSet>,
-    base: &str,
     wire_key: &str,
     sample_encoding: Option<&str>,
     bytes: &[u8],
 ) -> DecodedSample {
     use zenkey::grammar::ClassOrPlane;
+
+    let (session, base) = (fleet.session(), fleet.base());
     let Some(slices) = slices else {
         // Not asked is not answered no: with no registry there was never a
         // lookup to fail, so the reason names the missing registry, not the

@@ -24,6 +24,10 @@ pub async fn run(
     qos: &str,
     args: &Bus,
 ) -> Result<()> {
+    // The `--qos` name is checked here, before a byte is read: the engine
+    // takes the closed enum, so an unknown profile is a refusal rather than a
+    // per-row "malformed" event partway through a replay.
+    let default_qos = super::publish::parse_qos(qos)?;
     let source = std::fs::File::open(file).with_context(|| format!("open {file}"))?;
     let mut reader = ZrecReader::new(BufReader::new(source))?;
     let header = reader.header().clone();
@@ -106,10 +110,12 @@ pub async fn run(
     let report = if dry_run {
         zenkey_fleet::replay(
             &mut reader,
-            ReplayTarget::DryRun,
-            speed,
-            i_know,
-            qos,
+            zenkey_fleet::ReplaySpec {
+                target: ReplayTarget::DryRun,
+                speed,
+                i_know,
+                default_qos,
+            },
             &mut on_event,
         )
         .await?
@@ -118,13 +124,15 @@ pub async fn run(
         let slices = args.slices_optional().await?;
         zenkey_fleet::replay(
             &mut reader,
-            ReplayTarget::Bus {
-                session: &session,
-                slices: slices.as_ref(),
+            zenkey_fleet::ReplaySpec {
+                target: ReplayTarget::Bus {
+                    session: &session,
+                    slices: slices.as_ref(),
+                },
+                speed,
+                i_know,
+                default_qos,
             },
-            speed,
-            i_know,
-            qos,
             &mut on_event,
         )
         .await?

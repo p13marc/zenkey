@@ -51,7 +51,7 @@ pub async fn run(args: WhyArgs) -> Result<()> {
     };
     let report = super::asked(
         "why",
-        zenkey_fleet::run_why(&session, bus.base(), &args.key, slices.as_ref(), &spec).await,
+        zenkey_fleet::run_why(&bus.fleet(&session), &args.key, slices.as_ref(), &spec).await,
     );
     crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())?;
 

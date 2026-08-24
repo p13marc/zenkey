@@ -90,9 +90,14 @@ async fn node_info_asks_only_the_named_origin() {
     // Routing propagation is async; retry bounded until the fixture answers.
     let info = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let info = zenkey_fleet::node_info(&b, "", ORIGIN, Duration::from_secs(2), false)
-                .await
-                .expect("node_info");
+            let info = zenkey_fleet::node_info(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                ORIGIN,
+                Duration::from_secs(2),
+                false,
+            )
+            .await
+            .expect("node_info");
             if !info.producers.is_empty() {
                 break info;
             }
@@ -132,9 +137,14 @@ async fn node_info_asks_only_the_named_origin() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_hostname_is_refused_before_any_get() {
     let (_a, b) = peer_pair().await;
-    let err = zenkey_fleet::node_info(&b, "", "toolbx", Duration::from_millis(200), false)
-        .await
-        .unwrap_err()
-        .to_string();
+    let err = zenkey_fleet::node_info(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        "toolbx",
+        Duration::from_millis(200),
+        false,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
     assert!(err.contains("RFC 06 §6"), "{err}");
 }

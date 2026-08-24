@@ -66,14 +66,15 @@ pub async fn run(
             let typed = b.read()?;
             let key_part = selector.split('?').next().unwrap_or(selector);
             let prepared = zenkey_fleet::prepare_publish(
-                &session,
+                &args.fleet(&session),
                 &store,
                 slices.as_ref(),
-                &base,
                 key_part,
-                None,
-                &typed,
-                super::publish::mode(raw, false),
+                zenkey_fleet::PrepareSpec {
+                    declared_encoding: None,
+                    body: &typed,
+                    mode: super::publish::mode(raw, false),
+                },
             )
             .await?;
             if let Some(note) = &prepared.note {
@@ -90,10 +91,15 @@ pub async fn run(
         }
     };
 
-    let answers =
-        zenkey_fleet::fleet_get(&session, &base, selector, payload, args.timeout()).await?;
+    let fleet = args.fleet(&session);
+    let answers = zenkey_fleet::fleet_get(
+        &fleet,
+        selector,
+        &zenkey_fleet::GetOpts::new(args.timeout()).payload(payload),
+    )
+    .await?;
 
-    let secs = args.timeout().as_secs();
+    let secs = args.timeout().as_secs_f64();
     // A fan-in GET *looks* like a stream and is not: it waits for the window,
     // then has every answer in hand. So it is a document, and the one place
     // that decides which format to print it in is `emit` (#198). The decode
@@ -102,7 +108,7 @@ pub async fn run(
     if crate::render::Mode::of(args.format()).machine() {
         let mut rows = Vec::with_capacity(answers.len());
         for a in &answers {
-            rows.push(row(a, &store, &session, slices.as_ref(), &base, raw, no_decode).await);
+            rows.push(row(a, &fleet, &store, slices.as_ref(), raw, no_decode).await);
         }
         let report = crate::render::GetReport {
             selector: selector.to_string(),
@@ -130,10 +136,9 @@ pub async fn run(
                             continue;
                         }
                         let d = sample::decode(
+                            &fleet,
                             &store,
-                            &session,
                             slices.as_ref(),
-                            &base,
                             &a.key,
                             encoding,
                             &bytes,
@@ -212,10 +217,9 @@ pub async fn run(
 /// One reply as a JSON row — the ndjson line and the json array element.
 async fn row(
     a: &FleetAnswer,
+    fleet: &zenkey_fleet::Fleet<'_>,
     store: &zenkey_fleet::decode::SchemaStore,
-    session: &zenoh::Session,
     slices: Option<&zenkey_fleet::SliceSet>,
-    base: &str,
     raw: bool,
     no_decode: bool,
 ) -> serde_json::Value {
@@ -240,10 +244,9 @@ async fn row(
                 return obj;
             }
             let d = sample::decode(
+                fleet,
                 store,
-                session,
                 slices,
-                base,
                 &a.key,
                 a.encoding.as_deref(),
                 &bytes,

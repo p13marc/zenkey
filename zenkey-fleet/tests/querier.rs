@@ -49,9 +49,13 @@ async fn a_complete_queryable_does_not_collapse_the_declared_fleet() {
         .await
         .expect("queryable b");
 
-    let repeating = declare_repeating(&b, "", SELECTOR, Duration::from_secs(5))
-        .await
-        .expect("declare");
+    let repeating = declare_repeating(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        SELECTOR,
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("declare");
     // Routing propagation is async; retry bounded until both peers answer.
     let answers = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -92,9 +96,13 @@ async fn parameters_ride_per_get_not_in_the_declared_key() {
         .await
         .expect("queryable");
 
-    let repeating = declare_repeating(&b, "", SELECTOR, Duration::from_secs(5))
-        .await
-        .expect("declare");
+    let repeating = declare_repeating(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        SELECTOR,
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("declare");
     assert!(
         !repeating.key().contains('?'),
         "the declared keyexpr must never carry parameters"

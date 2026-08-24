@@ -35,7 +35,7 @@ pub fn mode(raw: bool, no_validate: bool) -> PrepareMode {
 }
 
 /// Parse an explicit `--qos` flag; the error names the closed vocabulary.
-fn parse_qos(name: &str) -> Result<zenkey::qos::QosProfile> {
+pub(super) fn parse_qos(name: &str) -> Result<zenkey::qos::QosProfile> {
     zenkey::qos::QosProfile::from_name(name).ok_or_else(|| {
         anyhow::anyhow!(
             "unknown QoS profile {name:?} — sampled|refreshed|transition|alert|frame (RFC 04 §3)"
@@ -121,14 +121,15 @@ pub async fn run(
     };
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let prepared = zenkey_fleet::prepare_publish(
-        &session,
+        &args.fleet(&session),
         &store,
         slices.as_ref(),
-        args.base(),
         key,
-        encoding,
-        &typed,
-        mode(raw, no_validate),
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: encoding,
+            body: &typed,
+            mode: mode(raw, no_validate),
+        },
     )
     .await?;
     if let Some(note) = &prepared.note {

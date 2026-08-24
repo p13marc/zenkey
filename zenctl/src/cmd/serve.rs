@@ -48,14 +48,15 @@ pub async fn run(
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let key_part = keyexpr.split('?').next().unwrap_or(keyexpr);
     let prepared = zenkey_fleet::prepare_publish(
-        &session,
+        &args.fleet(&session),
         &store,
         slices.as_ref(),
-        args.base(),
         key_part,
-        encoding,
-        &typed,
-        super::publish::mode(raw, no_validate),
+        zenkey_fleet::PrepareSpec {
+            declared_encoding: encoding,
+            body: &typed,
+            mode: super::publish::mode(raw, no_validate),
+        },
     )
     .await?;
     if let Some(note) = &prepared.note {

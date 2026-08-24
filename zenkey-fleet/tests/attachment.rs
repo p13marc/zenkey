@@ -100,9 +100,13 @@ async fn a_fleet_answer_carries_the_reply_attachment() {
 
     // Settle: loop the GET until the queryable answers (wait-routable).
     let answers = loop {
-        let answers = zenkey_fleet::fleet_get(&b, "", KEY, None, Duration::from_millis(500))
-            .await
-            .expect("get");
+        let answers = zenkey_fleet::fleet_get(
+            &zenkey_fleet::Fleet::new(&b, ""),
+            KEY,
+            &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
+        )
+        .await
+        .expect("get");
         if !answers.is_empty() {
             break answers;
         }

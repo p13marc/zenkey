@@ -77,7 +77,7 @@ impl Render for ScoutReport {
     fn scope(&self) -> Option<ObservedScope> {
         Some(ObservedScope {
             asked: self.asked.clone(),
-            window_s: Some(self.timeout_s as f64),
+            window_s: Some(self.timeout_s),
         })
     }
 }

@@ -181,6 +181,10 @@ pub fn merge_signals(
 /// space) or a failed selector narrows the evidence, never errors. Zero rows
 /// is *not* proof of an empty mesh (RFC 05 §3.1): the caller renders that
 /// silence honestly.
+///
+/// Base-less by design, so a bare `&Session` rather than a [`crate::Fleet`]:
+/// this is the verb that *finds* bases, and requiring one to run would be
+/// circular.
 pub async fn discover_bases(session: &Session, timeout: Duration) -> Result<Vec<DiscoveredBase>> {
     let mut tokens = Vec::new();
     for sweep in [HOST_ALIVE_SWEEP, CATALOG_ALIVE_SWEEP] {
