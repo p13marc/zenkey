@@ -125,7 +125,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
 
     let session = args.session().await?;
     let slices = args.slice_set().await?;
-    let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
     let set = match schema_set {
         Some(path) => Some(
             zenkey::schema::SchemaSet::parse(&std::fs::read_to_string(path)?).map_err(|e| {

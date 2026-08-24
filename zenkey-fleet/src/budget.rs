@@ -26,8 +26,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use zenkey::grammar::with_base;
 
 use crate::SliceSet;
-use crate::examples::Examples;
-use crate::facts::{KeyFacts, KeyShape, OriginKind};
+use crate::model::examples::Examples;
+use crate::model::facts::{KeyFacts, KeyShape, OriginKind};
 use crate::report::{BudgetCell, BudgetWindow, TopicList};
 
 /// How many example expansions a finding or budget cell carries — enough to

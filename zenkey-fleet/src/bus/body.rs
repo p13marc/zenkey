@@ -23,8 +23,8 @@ use anyhow::{Result, anyhow};
 use zenkey::schema::{SchemaKind, TypeSchema, WireEncoding};
 use zenoh::Session;
 
-use crate::decode::SchemaStore;
-use crate::registry::SliceSet;
+use crate::model::decode::SchemaStore;
+use crate::model::registry::SliceSet;
 
 /// How the bytes on the wire came to be — carried out of [`prepare_publish`]
 /// so a frontend can say it, not guess it.
@@ -77,7 +77,7 @@ impl PreparedBody {
 }
 
 /// The encoding a body should be **encoded into**, which is a different
-/// question from the one [`crate::decode::resolve_encoding`] answers.
+/// question from the one [`crate::model::decode::resolve_encoding`] answers.
 ///
 /// Decoding resolves *sample > registry > sniff* because a received payload
 /// has bytes to sniff. An outgoing body has none that mean anything — the
@@ -245,8 +245,9 @@ pub async fn prepare_publish(
         ));
     }
 
-    let description = crate::facts::describe_key(base, wire_key, slices);
-    let crate::facts::Registration::Registered(subject) = &description.facts.registration else {
+    let description = crate::model::facts::describe_key(base, wire_key, slices);
+    let crate::model::facts::Registration::Registered(subject) = &description.facts.registration
+    else {
         return Ok(PreparedBody {
             bytes: body.to_vec(),
             encoding: declared_encoding.map(str::to_string),
@@ -300,9 +301,9 @@ pub async fn prepare_publish(
 /// The producer a registered description refined through. `SubjectFacts` does
 /// not carry it (a service slice's name is not a key chunk), so it is derived
 /// from the key shape.
-pub fn subject_producer(description: &crate::facts::KeyDescription) -> Option<String> {
+pub fn subject_producer(description: &crate::model::facts::KeyDescription) -> Option<String> {
     match &description.facts.shape {
-        crate::facts::KeyShape::V1(v) => v.producer.clone(),
+        crate::model::facts::KeyShape::V1(v) => v.producer.clone(),
         _ => None,
     }
 }

@@ -22,8 +22,8 @@ use std::collections::BTreeMap;
 
 use zenoh::key_expr::keyexpr;
 
-use crate::registry::SliceSet;
-use crate::tree::{KeyTreeSnapshot, TreeNode};
+use crate::model::registry::SliceSet;
+use crate::model::tree::{KeyTreeSnapshot, TreeNode};
 
 /// One skeleton chunk: concrete, or a declared variable kept symbolic.
 ///
@@ -493,7 +493,7 @@ fn is_covered(prefix: &str, watched: &[&keyexpr]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stats::StatsTable;
+    use crate::model::stats::StatsTable;
     use std::time::Instant;
     use zenkey::slice::{RegistrySlice, SubjectDecl};
 

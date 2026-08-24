@@ -54,7 +54,7 @@ pub async fn run(
     } else {
         args.slices_optional().await?
     };
-    let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
+    let store = zenkey_fleet::model::decode::SchemaStore::new(&base, args.timeout());
     let session = args.session().await?;
 
     // Optional query body, riding the same encode ladder as `pub`:
@@ -218,7 +218,7 @@ pub async fn run(
 async fn row(
     a: &FleetAnswer,
     fleet: &zenkey_fleet::Fleet<'_>,
-    store: &zenkey_fleet::decode::SchemaStore,
+    store: &zenkey_fleet::model::decode::SchemaStore,
     slices: Option<&zenkey_fleet::SliceSet>,
     raw: bool,
     no_decode: bool,
@@ -339,8 +339,8 @@ mod tests {
     ) -> sample::Decoded {
         sample::Decoded {
             type_name: None,
-            rendering: zenkey_fleet::decode::Rendering::Structural(
-                zenkey_fleet::decode::structural(b"1"),
+            rendering: zenkey_fleet::model::decode::Rendering::Structural(
+                zenkey_fleet::model::decode::structural(b"1"),
             ),
             verdict,
             decode_error,

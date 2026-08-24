@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use crate::stats::{KeyStats, StatsTable};
+use crate::model::stats::{KeyStats, StatsTable};
 
 /// Fold one key's stats into every node on its path (the node itself included).
 fn accumulate(node: &mut TreeNode, s: &KeyStats) {

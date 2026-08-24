@@ -76,7 +76,7 @@ impl BudgetBadges {
 /// on. The engine's observation wants wire keys; the tree stores them as
 /// chunk paths, so this is the inverse walk of `KeyTreeSnapshot::build`.
 pub fn observed_keys(tree: &KeyTreeSnapshot) -> Vec<String> {
-    fn walk(prefix: &str, node: &zenkey_fleet::tree::TreeNode, out: &mut Vec<String>) {
+    fn walk(prefix: &str, node: &zenkey_fleet::model::tree::TreeNode, out: &mut Vec<String>) {
         for (chunk, child) in &node.children {
             let path = if prefix.is_empty() {
                 chunk.clone()
@@ -157,7 +157,7 @@ pub fn badges(base: &str, slices: &SliceSet, tree: &KeyTreeSnapshot) -> BudgetBa
 mod tests {
     use super::*;
     use std::time::Instant;
-    use zenkey_fleet::stats::StatsTable;
+    use zenkey_fleet::model::stats::StatsTable;
 
     fn subject(path: &str, class: &str, cardinality: Option<i64>) -> zenkey::slice::SubjectDecl {
         zenkey::slice::SubjectDecl {

@@ -5,7 +5,7 @@
 //! exactly its declared rate, payload validating perfectly, whose
 //! `temperature_c` has not moved in four hours because the sensor died. This
 //! module makes a *field* — a dotted path inside a decoded structural value
-//! ([`crate::decode::structural_value`]) — a first-class observed thing:
+//! ([`crate::model::decode::structural_value`]) — a first-class observed thing:
 //! bounded per-path statistics over a window (presence, type stability,
 //! last-change, change count, numeric min/max/last, small-domain distinct
 //! values) yielding three finding kinds:
@@ -43,9 +43,9 @@ use anyhow::Result;
 use serde_json::Value;
 use zenoh::Session;
 
-use crate::decode::SchemaStore;
-use crate::examples::Examples;
-use crate::registry::SliceSet;
+use crate::model::decode::SchemaStore;
+use crate::model::examples::Examples;
+use crate::model::registry::SliceSet;
 use crate::report::{DoctorFinding, DoctorSeverity, FieldReport, FieldRow};
 
 /// Default bound on the per-path table, across every key the window sees. A
@@ -216,7 +216,7 @@ impl FieldObservation {
     }
 
     /// Feed one sample. `doc` is the structural value when the payload
-    /// carried one ([`crate::decode::structural_value`]); `None` counts the
+    /// carried one ([`crate::model::decode::structural_value`]); `None` counts the
     /// sample as undocumented rather than pretending its fields were absent.
     pub fn observe(&mut self, key: &str, at_s: f64, doc: Option<&Value>) {
         let entry = self.keys.entry(key.to_string()).or_default();
@@ -562,7 +562,7 @@ pub async fn run_field(
     let mut dropped: u64 = 0;
     // Bounded (#107): one projection per distinct key, LRU past the bound,
     // evictions counted into the report (O6).
-    let mut facts = crate::facts::FactsCache::default();
+    let mut facts = crate::model::facts::FactsCache::default();
 
     loop {
         let item = tokio::select! {
@@ -572,7 +572,7 @@ pub async fn run_field(
         match item {
             Some(StreamItem::Event(FleetEvent::Sample(s))) => {
                 samples += 1;
-                let doc = crate::decode::structural_value(&s.payload.to_bytes());
+                let doc = crate::model::decode::structural_value(&s.payload.to_bytes());
                 obs.observe(&s.key, opened.elapsed().as_secs_f64(), doc.as_ref());
                 facts.ensure(base, &s.key, slices);
             }
@@ -633,13 +633,13 @@ pub(crate) async fn field_context(
     session: &Session,
     store: &SchemaStore,
     slices: Option<&SliceSet>,
-    facts: &crate::facts::FactsCache,
+    facts: &crate::model::facts::FactsCache,
 ) -> BTreeMap<String, KeyFieldContext> {
     let mut declared_cache: BTreeMap<(String, String), Option<DeclaredPaths>> = BTreeMap::new();
     let mut ctx = BTreeMap::new();
     for (key, f) in facts.iter() {
         let mut c = KeyFieldContext::default();
-        if let crate::facts::Registration::Registered(sf) = &f.registration {
+        if let crate::model::facts::Registration::Registered(sf) = &f.registration {
             c.ttl_s = sf.ttl_s;
             c.type_name = Some(sf.type_name.clone());
             if let Some(producer) = producer_of(f, slices)
@@ -668,15 +668,15 @@ pub(crate) async fn field_context(
 /// The producer name behind a key's facts — a service origin's slice is found
 /// by the origin it serves (RFC 03 §1.5).
 pub(crate) fn producer_of(
-    facts: &crate::facts::KeyFacts,
+    facts: &crate::model::facts::KeyFacts,
     slices: Option<&SliceSet>,
 ) -> Option<String> {
-    let crate::facts::KeyShape::V1(v) = &facts.shape else {
+    let crate::model::facts::KeyShape::V1(v) = &facts.shape else {
         return None;
     };
     match v.origin_kind {
-        crate::facts::OriginKind::Host => v.producer.clone(),
-        crate::facts::OriginKind::Service => {
+        crate::model::facts::OriginKind::Host => v.producer.clone(),
+        crate::model::facts::OriginKind::Service => {
             slices.and_then(|s| s.by_service_origin(&v.origin).map(|s| s.name.clone()))
         }
     }

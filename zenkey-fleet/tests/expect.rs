@@ -234,6 +234,6 @@ qos = "transition"
     );
 }
 
-fn store_of() -> zenkey_fleet::decode::SchemaStore {
-    zenkey_fleet::decode::SchemaStore::new("", Duration::from_millis(300))
+fn store_of() -> zenkey_fleet::model::decode::SchemaStore {
+    zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(300))
 }

@@ -26,7 +26,7 @@ use anyhow::{Result, anyhow, bail};
 
 use crate::bus::query::{Answer, RepeatingQuery, declare_repeating};
 use crate::bus::write::CallTarget;
-use crate::registry::SliceSet;
+use crate::model::registry::SliceSet;
 use crate::report::{BenchReport, OriginLatency};
 
 /// What to measure.

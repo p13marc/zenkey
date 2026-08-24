@@ -19,7 +19,7 @@
 
 use iced::widget::{Column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet::decode::{DecodedSample, Rendering};
+use zenkey_fleet::model::decode::{DecodedSample, Rendering};
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
 use crate::message::{Message, PaneMsg, SlotId};
@@ -343,7 +343,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
                     col = col.push(
                         row![
                             hex_pane(&abytes, sp),
-                            kit::mono(zenkey_fleet::decode::structural(&abytes))
+                            kit::mono(zenkey_fleet::model::decode::structural(&abytes))
                         ]
                         .spacing(sp.md),
                     );

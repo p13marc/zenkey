@@ -133,7 +133,7 @@ impl TreeState {
                 &empty_skeleton
             }
         };
-        let merged = Arc::new(zenkey_fleet::skeleton::merge(
+        let merged = Arc::new(zenkey_fleet::model::skeleton::merge(
             skeleton,
             &obs.observed,
             &obs.watched,

@@ -89,8 +89,8 @@ fn keep_publishing(
     })
 }
 
-fn store_of() -> zenkey_fleet::decode::SchemaStore {
-    zenkey_fleet::decode::SchemaStore::new("", Duration::from_millis(500))
+fn store_of() -> zenkey_fleet::model::decode::SchemaStore {
+    zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(500))
 }
 
 fn slices_of() -> zenkey_fleet::SliceSet {

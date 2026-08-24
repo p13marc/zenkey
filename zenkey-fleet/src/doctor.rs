@@ -15,7 +15,7 @@ use zenkey::RegistrySlice;
 use zenkey::grammar::with_base;
 
 use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
-use crate::examples::Examples;
+use crate::model::examples::Examples;
 use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// Every check id `run_doctor` can emit — the stable vocabulary, never
@@ -113,7 +113,7 @@ fn rpc_key(base: &str, slice: &RegistrySlice, procedure: &str) -> Result<String>
 /// halfway through the run.
 pub async fn run_doctor(
     fleet: &crate::Fleet<'_>,
-    locals: Option<&crate::registry::SliceSet>,
+    locals: Option<&crate::model::registry::SliceSet>,
     spec: &DoctorSpec,
 ) -> Result<DoctorReport> {
     let (session, base) = (fleet.session(), fleet.base());
@@ -203,7 +203,7 @@ pub async fn run_doctor(
     let live: usize = roster.values().map(Vec::len).sum();
     findings.extend(judge_introspect_coverage(
         &roster,
-        locals.map(crate::registry::SliceSet::slices),
+        locals.map(crate::model::registry::SliceSet::slices),
         answered,
     ));
 
@@ -242,13 +242,15 @@ pub async fn run_doctor(
     // --- schema conformance (RFC 08 §7) ------------------------------
     // Which slices to judge: the locals when given, else what the fleet
     // serves (the sweep above).
-    let slice_set: std::borrow::Cow<'_, crate::registry::SliceSet> = match sweep {
-        Some(slices) => std::borrow::Cow::Owned(crate::registry::SliceSet::from_slices(slices)),
+    let slice_set: std::borrow::Cow<'_, crate::model::registry::SliceSet> = match sweep {
+        Some(slices) => {
+            std::borrow::Cow::Owned(crate::model::registry::SliceSet::from_slices(slices))
+        }
         // The caller's set is already indexed; rebuilding it here reparsed
         // every subject pattern to arrive at the set we were handed.
         None => match locals {
             Some(set) => std::borrow::Cow::Borrowed(set),
-            None => std::borrow::Cow::Owned(crate::registry::SliceSet::default()),
+            None => std::borrow::Cow::Owned(crate::model::registry::SliceSet::default()),
         },
     };
     let mut described: Vec<(String, zenkey::schema::SchemaSet)> = Vec::new();
@@ -272,7 +274,7 @@ pub async fn run_doctor(
     }
     // Totality through the one engine implementation (`totality_gaps`) —
     // doctor used to carry a parallel referenced-names path.
-    for gap in crate::decode::totality_gaps(&described, &slice_set) {
+    for gap in crate::model::decode::totality_gaps(&described, &slice_set) {
         findings.push(finding(
             DoctorSeverity::Error,
             "describe-totality",
@@ -284,7 +286,7 @@ pub async fn run_doctor(
             Some("RFC 08 §7"),
         ));
     }
-    for drift in crate::decode::schema_drift(&described) {
+    for drift in crate::model::decode::schema_drift(&described) {
         let servers: Vec<String> = drift
             .servers
             .iter()
@@ -383,7 +385,7 @@ pub async fn run_doctor(
     // --- listen: judge what actually rides (#161) --------------------
     let observation = match spec.listen {
         Some(window) => {
-            let store = crate::decode::SchemaStore::new(base, spec.timeout);
+            let store = crate::model::decode::SchemaStore::new(base, spec.timeout);
             // The GET phase above already asked every producer for its
             // `describe` document. Hand those to the window's store rather
             // than letting it re-ask the fleet, mid-window, for what this
@@ -484,8 +486,8 @@ pub(crate) fn is_synthetic_marker(attachment: &[u8]) -> bool {
 /// key is one finding with a count, not a finding per sample.
 async fn observe_traffic(
     fleet: &crate::Fleet<'_>,
-    slices: &crate::registry::SliceSet,
-    store: &crate::decode::SchemaStore,
+    slices: &crate::model::registry::SliceSet,
+    store: &crate::model::decode::SchemaStore,
     described: &[(String, zenkey::schema::SchemaSet)],
     window: Duration,
 ) -> Result<(Vec<DoctorFinding>, crate::report::ObservationSummary)> {
@@ -516,7 +518,7 @@ async fn observe_traffic(
     let mut synthetic: u64 = 0;
     // Bounded (#107): one projection per distinct key, LRU past the bound,
     // evictions counted into the observation summary (O6).
-    let mut facts_cache = crate::facts::FactsCache::default();
+    let mut facts_cache = crate::model::facts::FactsCache::default();
     let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
     // Per-key aggregates: key → count (+ what was wrong, first occurrence).
     let mut unregistered: BTreeMap<String, u64> = BTreeMap::new();
@@ -548,15 +550,15 @@ async fn observe_traffic(
                 if let Some(crate::StampProvenance::Foreign { stamper }) = s.stamped_by {
                     *foreign_stampers.entry(stamper.to_string()).or_default() += 1;
                 }
-                let doc = crate::decode::structural_value(&s.payload.to_bytes());
+                let doc = crate::model::decode::structural_value(&s.payload.to_bytes());
                 fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
                 facts_cache.ensure(base, &s.key, Some(slices));
                 let facts = facts_cache.get(&s.key).expect("just ensured this key");
                 match &facts.registration {
-                    crate::facts::Registration::Unregistered => {
+                    crate::model::facts::Registration::Unregistered => {
                         *unregistered.entry(s.key.clone()).or_default() += 1;
                     }
-                    crate::facts::Registration::Registered(sf) => {
+                    crate::model::facts::Registration::Registered(sf) => {
                         if let (Some(profile), Some(declared)) = (sf.declared_qos(), &sf.qos) {
                             let entry = qos_bad
                                 .entry(s.key.clone())
@@ -566,7 +568,7 @@ async fn observe_traffic(
                                 entry.1 += 1;
                             }
                         }
-                        if let (Some(rate), crate::facts::KeyShape::V1(v)) =
+                        if let (Some(rate), crate::model::facts::KeyShape::V1(v)) =
                             (&sf.rate, &facts.shape)
                             && v.class == "events"
                         {
@@ -586,7 +588,7 @@ async fn observe_traffic(
                             // other than `Undecodable` it would fall through
                             // the `_` arm below: not asked/not checkable is
                             // never a finding (RFC 09 §5.1 O4).
-                            let d = crate::decode::decode_sample(
+                            let d = crate::model::decode::decode_sample(
                                 fleet,
                                 store,
                                 Some(slices),
@@ -755,9 +757,9 @@ async fn observe_traffic(
 /// phase's resolved facts and the already-gathered describe sets — pure, so
 /// the join is testable without a bus.
 fn field_context_from(
-    slices: &crate::registry::SliceSet,
+    slices: &crate::model::registry::SliceSet,
     described: &[(String, zenkey::schema::SchemaSet)],
-    facts: &crate::facts::FactsCache,
+    facts: &crate::model::facts::FactsCache,
 ) -> std::collections::BTreeMap<String, crate::field::KeyFieldContext> {
     use std::collections::BTreeMap;
     let mut declared_cache: BTreeMap<(String, String), Option<crate::field::DeclaredPaths>> =
@@ -765,7 +767,7 @@ fn field_context_from(
     let mut ctx = BTreeMap::new();
     for (key, f) in facts.iter() {
         let mut c = crate::field::KeyFieldContext::default();
-        if let crate::facts::Registration::Registered(sf) = &f.registration {
+        if let crate::model::facts::Registration::Registered(sf) = &f.registration {
             c.ttl_s = sf.ttl_s;
             c.type_name = Some(sf.type_name.clone());
             if let Some(producer) = crate::field::producer_of(f, Some(slices))
@@ -946,7 +948,7 @@ fn judge_state_samples(
 ///   one origin over the bound is conclusive and two origins' healthy
 ///   populations are never summed into a fake violation.
 fn judge_cardinality(
-    slices: &crate::registry::SliceSet,
+    slices: &crate::model::registry::SliceSet,
     observed: &crate::budget::BudgetObservation,
     window_s: f64,
 ) -> Vec<DoctorFinding> {
@@ -1079,7 +1081,7 @@ mod tests {
     /// window it rests on.
     #[test]
     fn cardinality_over_declared_fires_with_count_and_examples() {
-        let slices = crate::registry::SliceSet::from_toml_for_tests(BOUNDED);
+        let slices = crate::model::registry::SliceSet::from_toml_for_tests(BOUNDED);
         let keys: Vec<String> = (0..40)
             .map(|i| format!("v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/m{i:02}/used"))
             .collect();
@@ -1106,7 +1108,7 @@ mod tests {
     /// never the population (O4/O6).
     #[test]
     fn cardinality_under_declared_is_not_a_finding() {
-        let slices = crate::registry::SliceSet::from_toml_for_tests(BOUNDED);
+        let slices = crate::model::registry::SliceSet::from_toml_for_tests(BOUNDED);
         let keys = [
             "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/root/used",
             "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/var/used",
@@ -1135,7 +1137,7 @@ mod tests {
             type = "Point"
             cardinality = 2
         "#;
-        let slices = crate::registry::SliceSet::from_toml_for_tests(toml);
+        let slices = crate::model::registry::SliceSet::from_toml_for_tests(toml);
         let keys: Vec<String> = (0..5)
             .map(|i| format!("v1/h-aaaaaaaaaaaa/telemetry/gnmi/sw1/if/eth{i}/rx"))
             .collect();

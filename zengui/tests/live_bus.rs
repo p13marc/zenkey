@@ -209,7 +209,7 @@ async fn the_tree_carries_foreign_traffic() {
         &std::collections::BTreeMap::new(),
         None,
     );
-    let merged = zenkey_fleet::skeleton::merge(&skel, &snapshot, &["**".to_string()]);
+    let merged = zenkey_fleet::model::skeleton::merge(&skel, &snapshot, &["**".to_string()]);
     let flat = tree::flatten(&merged, "", &expanded, 500, std::time::Instant::now());
 
     // `rows` carries the shape; the numbers are joined by `row` (#177), and

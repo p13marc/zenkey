@@ -5,4 +5,4 @@
 //! observer, making it shared policy rather than GUI policy. The re-export
 //! keeps zengui's internal seam name; new code may use either path.
 
-pub use zenkey_fleet::facts::*;
+pub use zenkey_fleet::model::facts::*;

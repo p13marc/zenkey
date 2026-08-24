@@ -22,7 +22,7 @@ use prost_reflect::prost_types::{
     field_descriptor_proto,
 };
 use zenkey::schema::{SchemaSet, TypeSchema};
-use zenkey_fleet::{BodySource, PrepareMode, SliceSet, decode::SchemaStore};
+use zenkey_fleet::{BodySource, PrepareMode, SliceSet, model::decode::SchemaStore};
 
 const ORIGIN: &str = "h-aaaaaaaaaaaa";
 const PRODUCER: &str = "sysinfo";
@@ -265,7 +265,7 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
     );
 
     // The other direction, through the same store: named fields back out.
-    let d = zenkey_fleet::decode::decode_sample(
+    let d = zenkey_fleet::model::decode::decode_sample(
         &zenkey_fleet::Fleet::new(&b, ""),
         &store,
         Some(&slices),
@@ -277,7 +277,7 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
     assert_eq!(d.type_name.as_deref(), Some("Blob"));
     // #159: a successful dynamic decode is (structural) conformance.
     assert_eq!(d.verdict, zenkey_fleet::Verdict::Valid);
-    let zenkey_fleet::decode::Rendering::Typed(decoded) = d.rendering else {
+    let zenkey_fleet::model::decode::Rendering::Typed(decoded) = d.rendering else {
         panic!("a served protobuf schema must decode, not fall back to structure");
     };
     assert_eq!(decoded.value.get("x"), Some(&serde_json::json!(42)));
@@ -396,7 +396,7 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
     // there is no contract"); no registry at all is `NoRegistry` ("nobody
     // looked") — RFC 09 §5.1 O4 applied to the verdict, not just the note.
     use zenkey::schema::validate::NotValidated;
-    let asked = zenkey_fleet::decode::decode_sample(
+    let asked = zenkey_fleet::model::decode::decode_sample(
         &zenkey_fleet::Fleet::new(&b, ""),
         &store,
         Some(&slices()),
@@ -409,7 +409,7 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
         asked.verdict,
         zenkey_fleet::Verdict::NotValidated(NotValidated::NoSchema)
     );
-    let unasked = zenkey_fleet::decode::decode_sample(
+    let unasked = zenkey_fleet::model::decode::decode_sample(
         &zenkey_fleet::Fleet::new(&b, ""),
         &store,
         None,
@@ -424,7 +424,7 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
     );
     assert!(matches!(
         unasked.rendering,
-        zenkey_fleet::decode::Rendering::Structural(_)
+        zenkey_fleet::model::decode::Rendering::Structural(_)
     ));
 }
 
@@ -466,7 +466,7 @@ async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
     assert_eq!(prepared.bytes.len(), 4 + 6 * 8);
     assert_eq!(&prepared.bytes[..4], &[0x00, 0x01, 0x00, 0x00]);
 
-    let d = zenkey_fleet::decode::decode_sample(
+    let d = zenkey_fleet::model::decode::decode_sample(
         &zenkey_fleet::Fleet::new(&b, ""),
         &store,
         Some(&slices),
@@ -477,7 +477,7 @@ async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
     .await;
     assert_eq!(d.type_name.as_deref(), Some("Twist"));
     assert_eq!(d.verdict, zenkey_fleet::Verdict::Valid);
-    let zenkey_fleet::decode::Rendering::Typed(decoded) = d.rendering else {
+    let zenkey_fleet::model::decode::Rendering::Typed(decoded) = d.rendering else {
         panic!("a served cdr schema must decode, not fall back to structure");
     };
     assert_eq!(

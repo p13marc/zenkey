@@ -31,7 +31,7 @@ use std::time::Instant;
 use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
 use zenkey_fleet::KeyTreeSnapshot;
-use zenkey_fleet::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
+use zenkey_fleet::model::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
 use crate::keyfacts::Registration;
 use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
@@ -118,7 +118,7 @@ impl std::fmt::Display for Pivot {
 ///
 /// The claim this whole cache rests on is that a row's **shape does not depend
 /// on any live number**, and it is checkable rather than plausible.
-/// `zenkey_fleet::skeleton::merge_nodes` computes `status` from *set
+/// `zenkey_fleet::model::skeleton::merge_nodes` computes `status` from *set
 /// membership* — does an observed node exist, is it covered by a watch — never
 /// from a magnitude; and the child-name set it walks is the union of the
 /// skeleton's names and the observed ones. Depth, chunk, path, target, role and
@@ -1659,7 +1659,7 @@ pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet::stats::StatsTable;
+    use zenkey_fleet::model::stats::StatsTable;
 
     fn snapshot(keys: &[&str]) -> MergedNode {
         let mut stats = StatsTable::new();
@@ -1675,7 +1675,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             None,
         );
-        zenkey_fleet::skeleton::merge(&skel, &observed, &["**".to_string()])
+        zenkey_fleet::model::skeleton::merge(&skel, &observed, &["**".to_string()])
     }
 
     fn expand(paths: &[&str]) -> BTreeSet<String> {

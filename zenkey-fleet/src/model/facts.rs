@@ -18,8 +18,8 @@
 //!   base (`acme/fleet-a`) and the empty base must give identical facts for the
 //!   same subject.
 
-use crate::registry::SliceSet;
-use crate::stats::BoundedLru;
+use crate::model::bounded::BoundedLru;
+use crate::model::registry::SliceSet;
 use zenkey::grammar::{self, BlobTier, Class, ClassOrPlane, Origin, Plane, StructuralKey};
 
 /// Everything zengui knows about one wire key.
@@ -263,7 +263,7 @@ impl std::fmt::Debug for Entry {
 }
 
 /// A bounded cache of key projections, sized off the same `max_keys` as the
-/// [`StatsTable`](crate::stats::StatsTable) it shadows, counting what the bound
+/// [`StatsTable`](crate::model::stats::StatsTable) it shadows, counting what the bound
 /// costs (RFC 09 §5.1 O6).
 ///
 /// **Why this exists** (issue #107). Projecting a key is not free — a
@@ -291,7 +291,7 @@ impl std::fmt::Debug for Entry {
 /// churn in the views.
 ///
 /// The bound and the batch eviction are `BoundedLru`'s — shared with the
-/// [`StatsTable`](crate::stats::StatsTable) this shadows, which is where the
+/// [`StatsTable`](crate::model::stats::StatsTable) this shadows, which is where the
 /// argument for both was written. The **ledger** stays here: `inserted` /
 /// `evicted` are this cache's own facts, not the table's (O6).
 #[derive(Debug)]
@@ -304,7 +304,7 @@ pub struct FactsCache {
 
 impl Default for FactsCache {
     fn default() -> Self {
-        FactsCache::with_capacity(crate::stats::DEFAULT_MAX_KEYS)
+        FactsCache::with_capacity(crate::model::bounded::DEFAULT_MAX_KEYS)
     }
 }
 

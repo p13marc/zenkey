@@ -20,7 +20,7 @@
 //! | id | question | source |
 //! |---|---|---|
 //! | `scope-reach` | does a `**` explorer scope reach this key? | key algebra (RFC 09 §5.1 O5; RFC 03 §4 D2/D4) |
-//! | `key-parse` | does it parse as a v1 key under the base? | [`crate::facts::describe_key`] (O2) |
+//! | `key-parse` | does it parse as a v1 key under the base? | [`crate::model::facts::describe_key`] (O2) |
 //! | `registry-declared` | does a loaded slice declare the subject? | [`SliceSet`] refinement (RFC 08 §2) |
 //! | `origin-alive` | is the origin on the liveliness roster? | [`crate::bus::roster::roster()`] (RFC 04 §5) |
 //! | `publisher-declared` | did any session declare a matching publisher? | [`crate::declared_entities`] — and see below |
@@ -81,9 +81,9 @@ use zenoh::key_expr::keyexpr;
 
 use crate::bus::admin::{DeclaredEntities, EntityKind, StorageInfo};
 use crate::bus::query::ValueSource;
-use crate::examples::Examples;
-use crate::facts::{KeyShape, OriginKind, Registration, describe_key};
-use crate::registry::SliceSet;
+use crate::model::examples::Examples;
+use crate::model::facts::{KeyShape, OriginKind, Registration, describe_key};
+use crate::model::registry::SliceSet;
 
 /// Every rung id the ladder can emit — the stable vocabulary, never renamed
 /// (see the module doc). Additions append.
@@ -297,7 +297,7 @@ pub struct WhyInputs<'a> {
     /// The key or selector as asked (params tolerated; stripped for algebra).
     pub key: &'a str,
     /// `None` = no registry was loaded (distinguishable from a loaded set
-    /// that covers nothing — the [`crate::facts`] rule).
+    /// that covers nothing — the [`crate::model::facts`] rule).
     pub slices: Option<&'a SliceSet>,
     /// `None` = the liveliness sweep was not made or failed.
     pub roster: Option<&'a BTreeMap<String, Vec<String>>>,

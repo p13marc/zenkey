@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::facts::{KeyDescription, KeyShape, Registration};
+use crate::model::facts::{KeyDescription, KeyShape, Registration};
 
 /// "Was the question even put?" — the RFC 09 §5.1 O4 split (#246 / P1),
 /// made nominal (RFC 13, v1.24).
@@ -723,7 +723,7 @@ pub struct RateRow {
     /// the three populations measure from different clocks and are never
     /// folded into one median.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency: Option<crate::stats::LatencyReport>,
+    pub latency: Option<crate::model::stats::LatencyReport>,
     /// Samples that carried no HLC — the other half of the latency
     /// observation, so it rides the same gate: `NotAsked` = `--latency` was
     /// not asked (R3, matching #238's fix for `latency` itself).
@@ -732,7 +732,7 @@ pub struct RateRow {
 }
 
 /// The `zenctl rate` report (issue #46) — measured counts plus the
-/// O6 bound honesty: a bounded [`StatsTable`](crate::stats::StatsTable) that retired
+/// O6 bound honesty: a bounded [`StatsTable`](crate::model::stats::StatsTable) that retired
 /// keys must say so, or the totals silently claim more coverage than they
 /// have.
 #[derive(Debug, Clone, Serialize)]
@@ -1157,8 +1157,8 @@ pub struct BlobTreeIndexReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facts::describe_key;
-    use crate::registry::SliceSet;
+    use crate::model::facts::describe_key;
+    use crate::model::registry::SliceSet;
 
     #[test]
     fn call_exit_codes() {

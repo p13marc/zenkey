@@ -249,7 +249,7 @@ pub struct CoverageRow {
 /// (issue #14): the family's wire selector vs each storage's key expression,
 /// by key algebra (`includes` ⇒ covered, `intersects` ⇒ partial). Pure.
 pub fn state_coverage(
-    slices: &crate::registry::SliceSet,
+    slices: &crate::model::registry::SliceSet,
     base: &str,
     storages: &[StorageInfo],
 ) -> Vec<CoverageRow> {
@@ -637,7 +637,7 @@ mod tests {
         assert_eq!(merge_storage_rows(vec![config, other]).len(), 2);
     }
 
-    fn slices_with_state() -> crate::registry::SliceSet {
+    fn slices_with_state() -> crate::model::registry::SliceSet {
         let toml = r#"
             [registry]
             version = "1.0"
@@ -660,7 +660,7 @@ mod tests {
             class = "telemetry"
             type = "Point"
         "#;
-        crate::registry::SliceSet::from_toml_for_tests(toml)
+        crate::model::registry::SliceSet::from_toml_for_tests(toml)
     }
 
     fn storage(name: &str, key_expr: &str) -> StorageInfo {

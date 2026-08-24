@@ -13,9 +13,9 @@
 //! each bound cost and MUST NOT fold the kinds into one number. The ring's
 //! costs are therefore counted apart from every existing population — from
 //! broadcast lag ([`crate::MonitorCore::dropped`], "could not keep up"),
-//! from stats-table eviction ([`crate::stats::StatsTable::evicted`], "chose
+//! from stats-table eviction ([`crate::model::stats::StatsTable::evicted`], "chose
 //! to forget under the key bound") and from unwatch retirement
-//! ([`crate::stats::StatsTable::unwatched`], "stopped looking, by request")
+//! ([`crate::model::stats::StatsTable::unwatched`], "stopped looking, by request")
 //! — and the ring itself keeps its own two kinds apart:
 //!
 //! - [`RetentionStats::evicted`] — samples dropped because the **byte**

@@ -33,9 +33,9 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde::Serialize;
 
-use crate::decode::SchemaStore;
 use crate::judgement::Judgement;
-use crate::registry::SliceSet;
+use crate::model::decode::SchemaStore;
+use crate::model::registry::SliceSet;
 use crate::report::DoctorReport;
 
 /// One condition's evaluation state — the watchdog's serde-stable **wire
@@ -640,7 +640,7 @@ pub struct WatchdogSummary {
     pub transitions: u64,
     /// Key projections the bounded facts cache retired to stay within its
     /// bound (RFC 09 §5.1 O6). The watchdog is the run-forever mode, so its
-    /// per-key cache is a [`crate::facts::FactsCache`], not a map that grows
+    /// per-key cache is a [`crate::model::facts::FactsCache`], not a map that grows
     /// one entry per distinct key ever seen — and a bound must count what it
     /// cost. An evicted key re-observed is re-projected identically (the
     /// projection is a pure function of key and slice set), so evictions
@@ -726,7 +726,7 @@ pub async fn run_watchdog(
     // Bounded (#107): the watchdog runs until stopped, so an unbounded
     // per-key map here is a leak on any bus with churning keys. Evictions
     // ride the summary (O6).
-    let mut facts_cache = crate::facts::FactsCache::default();
+    let mut facts_cache = crate::model::facts::FactsCache::default();
     let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
 
     let mut summary = WatchdogSummary {
@@ -777,7 +777,7 @@ pub async fn run_watchdog(
                                         // `NoRegistry` (#246) changes no
                                         // transition — only the reason the
                                         // sample was not validated.
-                                        let d = crate::decode::decode_sample(
+                                        let d = crate::model::decode::decode_sample(
                                             fleet,
                                             store,
                                             slices,
@@ -799,7 +799,7 @@ pub async fn run_watchdog(
                             Condition::QosMismatch { .. } => {
                                 facts_cache.ensure(base, &s.key, slices);
                                 let facts = facts_cache.get(&s.key).expect("just ensured this key");
-                                if let crate::facts::Registration::Registered(sf) =
+                                if let crate::model::facts::Registration::Registered(sf) =
                                     &facts.registration
                                     && let Some(profile) = sf.declared_qos()
                                 {

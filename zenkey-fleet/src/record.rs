@@ -32,7 +32,7 @@ use zenoh::sample::SampleKind;
 
 use crate::bus::monitor::{EventStream, FleetEvent, SampleView, StreamItem};
 use crate::ingest::{IngestRow, SampleRow, parse_row};
-use crate::registry::SliceSet;
+use crate::model::registry::SliceSet;
 
 /// The current `.zrec` format version, written into every header.
 pub const ZREC_VERSION: u32 = 1;

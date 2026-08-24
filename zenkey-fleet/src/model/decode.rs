@@ -19,7 +19,7 @@ use zenkey::schema::validate::{NotValidated, Verdict};
 use zenkey::schema::{SchemaSet, TypeSchema, WireEncoding};
 use zenoh::Session;
 
-use crate::registry::SliceSet;
+use crate::model::registry::SliceSet;
 
 /// Per-producer schema sets, fetched lazily and cached for the process.
 pub struct SchemaStore {
@@ -1080,7 +1080,7 @@ mod tests {
             media: vec![],
             deprecated: vec![],
         };
-        let slices = crate::registry::SliceSet::from_slices(vec![slice]);
+        let slices = crate::model::registry::SliceSet::from_slices(vec![slice]);
 
         // Served describe missing the referenced type: one gap.
         let incomplete = SchemaSet::builder("a")
@@ -1129,7 +1129,7 @@ mod tests {
             media: vec![],
             deprecated: vec![],
         };
-        let slices = crate::registry::SliceSet::from_slices(vec![slice]);
+        let slices = crate::model::registry::SliceSet::from_slices(vec![slice]);
         let served = SchemaSet::builder("a").build();
         assert!(
             totality_gaps(&[("sysinfo".to_string(), served)], &slices).is_empty(),

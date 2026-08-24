@@ -33,9 +33,9 @@ use std::time::Duration;
 use anyhow::Result;
 
 use crate::condition;
-use crate::decode::SchemaStore;
-use crate::examples::Examples;
-use crate::registry::SliceSet;
+use crate::model::decode::SchemaStore;
+use crate::model::examples::Examples;
+use crate::model::registry::SliceSet;
 use crate::report::{ExpectReport, ExpectVerdict};
 use crate::{FleetEvent, Monitor, MonitorSpec, StreamItem, Verdict};
 
@@ -147,7 +147,7 @@ pub async fn run_expect(
                     continue;
                 }
                 if spec.valid_payload {
-                    let d = crate::decode::decode_sample(
+                    let d = crate::model::decode::decode_sample(
                         fleet,
                         store,
                         slices,
@@ -174,11 +174,13 @@ pub async fn run_expect(
                     let against = match check {
                         QosCheck::Profile(p) => Some(p),
                         QosCheck::Declared => {
-                            match crate::facts::describe_key(fleet.base(), &s.key, slices)
+                            match crate::model::facts::describe_key(fleet.base(), &s.key, slices)
                                 .facts
                                 .registration
                             {
-                                crate::facts::Registration::Registered(f) => f.declared_qos(),
+                                crate::model::facts::Registration::Registered(f) => {
+                                    f.declared_qos()
+                                }
                                 _ => None,
                             }
                         }

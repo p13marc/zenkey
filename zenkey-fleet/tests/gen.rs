@@ -62,7 +62,7 @@ async fn generated_traffic_is_conforming_marked_and_budgeted() {
     let slices =
         zenkey_fleet::SliceSet::from_slices(vec![zenkey::parse_slice(SLICES).expect("slice")]);
     let set = zenkey::schema::SchemaSet::parse(SET).expect("set");
-    let store = zenkey_fleet::decode::SchemaStore::new("", Duration::from_millis(200));
+    let store = zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(200));
 
     // Watch before generating: the monitor is up, the generator's declared
     // publishers match it, samples arrive.
@@ -192,7 +192,7 @@ async fn injected_faults_deviate_by_exactly_one_dimension_and_stay_marked() {
     let slices =
         zenkey_fleet::SliceSet::from_slices(vec![zenkey::parse_slice(SLICES).expect("slice")]);
     let set = zenkey::schema::SchemaSet::parse(SET).expect("set");
-    let store = zenkey_fleet::decode::SchemaStore::new("", Duration::from_millis(200));
+    let store = zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(200));
 
     let mut spec = spec(2.0);
     spec.faults = Fault::ALL.to_vec();

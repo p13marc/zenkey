@@ -19,8 +19,8 @@ use util::peer_pair;
 
 const KEY: &str = "v1/h-dddddddddddd/state/demo/health";
 
-fn store_of() -> zenkey_fleet::decode::SchemaStore {
-    zenkey_fleet::decode::SchemaStore::new("", Duration::from_millis(300))
+fn store_of() -> zenkey_fleet::model::decode::SchemaStore {
+    zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(300))
 }
 
 /// The staged fixture: a `silent-for` rule over a key that is quiet, then

@@ -23,7 +23,7 @@ use zenkey::origin::{HostId, ServiceOrigin};
 use zenkey::qos::QosProfile;
 use zenoh::Session;
 
-use crate::registry::SliceSet;
+use crate::model::registry::SliceSet;
 use crate::report::{CallAnswer, CallError, CallOutcome, CallReport};
 
 /// A declared publisher with its QoS profile applied — the only publish path.
@@ -192,8 +192,8 @@ pub fn check_retire(
              (RFC 04 §1.2, v1.12). Not overridable."
         );
     }
-    let facts = crate::facts::describe_key(base, key, slices).facts;
-    use crate::facts::{ClassKind, KeyShape, Registration};
+    let facts = crate::model::facts::describe_key(base, key, slices).facts;
+    use crate::model::facts::{ClassKind, KeyShape, Registration};
     match &facts.shape {
         KeyShape::V1(v) if v.class_kind == ClassKind::State => {
             let (registered, ttl_s) = match &facts.registration {

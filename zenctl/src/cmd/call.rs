@@ -51,7 +51,7 @@ pub async fn run(
         && let Some(decl) = slice.procedures.iter().find(|p| p.path == procedure)
         && let Some(request_type) = &decl.request
     {
-        let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+        let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
         let prepared = zenkey_fleet::prepare_request(
             &session,
             &store,

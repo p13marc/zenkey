@@ -21,9 +21,9 @@ use tokio::sync::broadcast;
 use zenoh::Session;
 use zenoh::sample::SampleKind;
 
-use crate::retain::{Retention, RetentionBudget, RetentionStats};
-use crate::stats::StatsTable;
-use crate::tree::KeyTreeSnapshot;
+use crate::model::retain::{Retention, RetentionBudget, RetentionStats};
+use crate::model::stats::StatsTable;
+use crate::model::tree::KeyTreeSnapshot;
 
 /// The publisher a sample came from, when its session attaches SourceInfo
 /// — the same signal the gap counter reads, surfaced (#120). All `Copy`:
@@ -256,7 +256,7 @@ impl Default for MonitorSpec {
             liveliness: Vec::new(),
             stats_tick: Duration::from_millis(250),
             capacity: 1024,
-            max_keys: crate::stats::DEFAULT_MAX_KEYS,
+            max_keys: crate::model::bounded::DEFAULT_MAX_KEYS,
         }
     }
 }
@@ -277,7 +277,7 @@ pub struct MonitorCore {
 
 impl MonitorCore {
     pub fn new(capacity: usize) -> Arc<MonitorCore> {
-        MonitorCore::bounded(capacity, crate::stats::DEFAULT_MAX_KEYS)
+        MonitorCore::bounded(capacity, crate::model::bounded::DEFAULT_MAX_KEYS)
     }
 
     /// A core whose statistics table is bounded at `max_keys` distinct keys.
@@ -341,9 +341,13 @@ impl MonitorCore {
                     Err(e) => -i64::try_from(e.duration().as_micros()).unwrap_or(i64::MAX),
                 };
                 let class = match view.stamped_by {
-                    Some(StampProvenance::SelfStamped) => crate::stats::StampClass::SelfStamped,
-                    Some(StampProvenance::Foreign { .. }) => crate::stats::StampClass::Foreign,
-                    _ => crate::stats::StampClass::Unattributable,
+                    Some(StampProvenance::SelfStamped) => {
+                        crate::model::stats::StampClass::SelfStamped
+                    }
+                    Some(StampProvenance::Foreign { .. }) => {
+                        crate::model::stats::StampClass::Foreign
+                    }
+                    _ => crate::model::stats::StampClass::Unattributable,
                 };
                 (us, class)
             });
@@ -396,7 +400,7 @@ impl MonitorCore {
     }
 
     /// Keys retired from the table because their watch was released
-    /// (RFC 09 §5.1 O6 — see [`crate::stats::StatsTable::unwatched`]).
+    /// (RFC 09 §5.1 O6 — see [`crate::model::stats::StatsTable::unwatched`]).
     pub fn keys_unwatched(&self) -> u64 {
         self.with_stats(|s| s.unwatched())
     }
@@ -716,7 +720,7 @@ impl Monitor {
     /// Stop observing: undeclares the subscriber (awaited to completion — the
     /// teardown is acknowledged, not racing a drop), then retires statistics
     /// for keys no remaining watch covers. Retired keys are **counted**
-    /// ([`crate::stats::StatsTable::unwatched`]): a shrinking key set must
+    /// ([`crate::model::stats::StatsTable::unwatched`]): a shrinking key set must
     /// never read as a quieting bus (RFC 09 §5.1 O6).
     pub async fn unwatch(&self, id: WatchId) -> Result<()> {
         let mut entry = {
@@ -980,7 +984,7 @@ mod tests {
     async fn the_eviction_populations_are_never_folded() {
         const SAMPLES: usize = 100;
         let core = MonitorCore::bounded(2, 8);
-        core.set_retention_budget(crate::retain::RetentionBudget {
+        core.set_retention_budget(crate::model::retain::RetentionBudget {
             max_bytes: 1100,
             max_age: Duration::from_secs(3600),
         });

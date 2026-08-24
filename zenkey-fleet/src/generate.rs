@@ -21,8 +21,8 @@ use zenkey::pattern::{PatternChunk, SubjectPattern};
 use zenkey::qos::QosProfile;
 use zenkey::schema::{SchemaSet, TypeSchema};
 
-use crate::decode::SchemaStore;
-use crate::registry::SliceSet;
+use crate::model::decode::SchemaStore;
+use crate::model::registry::SliceSet;
 use crate::synth::Synth;
 
 /// The RFC 09 §5.3 marker (v1.19): every synthetic sample's attachment.

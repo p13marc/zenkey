@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::examples::Examples;
+use crate::model::examples::Examples;
 use crate::report::{CutoverReport, CutoverVerdict};
 
 /// How many distinct offending keys each bucket names in the report.

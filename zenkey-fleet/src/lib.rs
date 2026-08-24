@@ -12,30 +12,20 @@
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 
 pub mod bus;
+pub mod model;
 
 pub mod bench;
 pub mod budget;
 pub mod cutover;
-pub mod diff;
-pub mod examples;
-pub mod facts;
 pub mod ingest;
 pub mod judgement;
-pub mod project;
 pub mod record;
-pub mod registry;
 pub mod report;
-pub mod retain;
 pub mod retired;
-pub mod skeleton;
-pub mod stats;
-pub mod tree;
 pub mod why;
 
 #[cfg(feature = "decode")]
 pub mod condition;
-#[cfg(feature = "decode")]
-pub mod decode;
 #[cfg(feature = "decode")]
 pub mod doctor;
 #[cfg(feature = "decode")]
@@ -78,11 +68,6 @@ pub use condition::{
     WatchdogSummary, run_watchdog,
 };
 #[cfg(feature = "decode")]
-pub use decode::{
-    DecodedSample, Rendering, SchemaDrift, SchemaStore, TotalityGap, decode_sample, schema_drift,
-    schema_dump, schemas_for_type, totality_gaps,
-};
-#[cfg(feature = "decode")]
 pub use doctor::{CHECK_IDS, DoctorSpec, run_doctor};
 #[cfg(feature = "decode")]
 pub use expect::{ExpectSpec, QosCheck, run_expect};
@@ -92,6 +77,11 @@ pub use field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run
 pub use generate::{
     Fault, GenPattern, GenPlanEntry, GenReport, GenSpec, MockProducer, build_plan, run_gen,
     serve_describe, synthetic_marker,
+};
+#[cfg(feature = "decode")]
+pub use model::decode::{
+    DecodedSample, Rendering, SchemaDrift, SchemaStore, TotalityGap, decode_sample, schema_drift,
+    schema_dump, schemas_for_type, totality_gaps,
 };
 #[cfg(feature = "decode")]
 pub use synth::Synth;
@@ -138,15 +128,21 @@ pub use bus::write::{
     declare_publication,
 };
 pub use cutover::run_cutover;
-pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
-pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
 pub use ingest::{IngestRow, SampleRow, StreamLine, parse_row, parse_stream_line};
 pub use judgement::{Judgement, judgement_exit_code};
+pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff};
+pub use model::facts::{
+    FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
+};
+pub use model::registry::SliceSet;
+pub use model::retain::{RetentionBudget, RetentionStats};
+pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
+pub use model::stats::{KeyStats, LatencyReport, LatencySummary, StampClass, StatsTable};
+pub use model::tree::KeyTreeSnapshot;
 pub use record::{
     RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplaySpec, ReplayTarget, ZREC_VERSION,
     ZrecHeader, ZrecItem, ZrecReader, ZrecWriter, record, replay,
 };
-pub use registry::SliceSet;
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
 /// back. The rest of `report` (rows, cells, verdict enums) stays behind
@@ -155,11 +151,7 @@ pub use registry::SliceSet;
 pub use report::{
     BenchReport, CallReport, CutoverReport, DoctorReport, ExpectReport, FieldReport, RetiredReport,
 };
-pub use retain::{RetentionBudget, RetentionStats};
 pub use retired::run_retired;
-pub use skeleton::{MergedNode, NodeStatus, Skeleton};
-pub use stats::{KeyStats, LatencyReport, LatencySummary, StampClass, StatsTable};
-pub use tree::KeyTreeSnapshot;
 pub use why::{RUNG_IDS, Rung, RungAnswer, WhyInputs, WhyReport, WhySpec, WhyVerdict, run_why};
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.

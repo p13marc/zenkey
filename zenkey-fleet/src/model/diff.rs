@@ -8,7 +8,7 @@
 //!
 //! Two levels, and which one ran is never hidden:
 //!
-//! - [`diff`] over two structural values ([`crate::decode::structural_value`])
+//! - [`diff`] over two structural values ([`crate::model::decode::structural_value`])
 //!   — named fields, added/removed/changed;
 //! - [`byte_diff`] when either side has no structural form (plain text, a
 //!   protobuf frame, an opaque blob) — the honest fallback, reporting how much

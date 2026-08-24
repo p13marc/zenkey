@@ -39,7 +39,7 @@ pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
 /// itself, never omitted and never dressed as `NoSchema` (#164, #246).
 #[allow(clippy::too_many_arguments)]
 pub fn decode(
-    store: Arc<zenkey_fleet::decode::SchemaStore>,
+    store: Arc<zenkey_fleet::model::decode::SchemaStore>,
     session: zenoh::Session,
     slices: Option<Arc<zenkey_fleet::SliceSet>>,
     base: String,
@@ -50,7 +50,7 @@ pub fn decode(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let d = zenkey_fleet::decode::decode_sample(
+            let d = zenkey_fleet::model::decode::decode_sample(
                 &zenkey_fleet::Fleet::new(&session, &base),
                 &store,
                 slices.as_deref(),
@@ -75,7 +75,7 @@ pub fn decode(
 /// producer's `describe` on a first miss. The render paths only ever *read*
 /// the cache this lands in.
 pub fn validate(
-    store: Arc<zenkey_fleet::decode::SchemaStore>,
+    store: Arc<zenkey_fleet::model::decode::SchemaStore>,
     session: zenoh::Session,
     slices: Option<Arc<zenkey_fleet::SliceSet>>,
     base: String,
@@ -86,7 +86,7 @@ pub fn validate(
             let fleet = zenkey_fleet::Fleet::new(&session, &base);
             let mut out = Vec::with_capacity(batch.len());
             for (key, encoding, bytes) in batch {
-                let d = zenkey_fleet::decode::decode_sample(
+                let d = zenkey_fleet::model::decode::decode_sample(
                     &fleet,
                     &store,
                     slices.as_deref(),
@@ -114,7 +114,7 @@ pub fn field(
     session: zenoh::Session,
     base: String,
     slices: Option<Arc<zenkey_fleet::SliceSet>>,
-    store: Arc<zenkey_fleet::decode::SchemaStore>,
+    store: Arc<zenkey_fleet::model::decode::SchemaStore>,
     key: String,
     window: std::time::Duration,
 ) -> Task<Message> {
@@ -181,7 +181,7 @@ pub fn why(
 /// *is* an answer.
 pub fn request_schema(
     session: zenoh::Session,
-    store: Arc<zenkey_fleet::decode::SchemaStore>,
+    store: Arc<zenkey_fleet::model::decode::SchemaStore>,
     producer: String,
     request: String,
 ) -> Task<Message> {

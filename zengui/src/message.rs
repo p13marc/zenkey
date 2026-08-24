@@ -274,7 +274,7 @@ pub enum SubjectMsg {
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
     /// (key, the whole decoded sample — rendering, verdict and the decode
     /// error behind an `Undecodable`, #164).
-    ValueDecoded(String, Arc<zenkey_fleet::decode::DecodedSample>),
+    ValueDecoded(String, Arc<zenkey_fleet::model::decode::DecodedSample>),
     /// Point the whole workspace at something (#181).
     ///
     /// One message where there were three — `SelectKey`, `SelectPath` and the

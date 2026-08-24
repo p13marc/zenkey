@@ -56,7 +56,7 @@ pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Res
         }
         ExportAs::Jsonschema => {
             let session = args.session().await?;
-            let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+            let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
             // Fetch here, where the session is; shape the document in
             // zenkey-build, where every other registry-in-document-out
             // exporter lives (#208).

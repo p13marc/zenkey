@@ -11,7 +11,7 @@
 //! Neither needs a bus.
 
 use serde_json::json;
-use zenkey_fleet::diff::diff;
+use zenkey_fleet::model::diff::diff;
 use zenkey_fleet::{Change, SliceSet, byte_diff};
 
 #[test]

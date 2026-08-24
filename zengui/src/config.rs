@@ -106,7 +106,7 @@ pub struct Cli {
     pub history_entries: Option<usize>,
 
     /// How many distinct keys to keep statistics for (default
-    /// `zenkey_fleet::stats::DEFAULT_MAX_KEYS`; remembered since #188).
+    /// `zenkey_fleet::model::bounded::DEFAULT_MAX_KEYS`; remembered since #188).
     ///
     /// Least-recently-seen keys are retired past this, and the retirements are
     /// counted and displayed — a long-running observer is bounded, and says so
@@ -215,7 +215,7 @@ impl Cli {
         let max_keys = self
             .max_keys
             .or(prefs.max_keys.filter(|n| *n > 0))
-            .unwrap_or(zenkey_fleet::stats::DEFAULT_MAX_KEYS);
+            .unwrap_or(zenkey_fleet::model::bounded::DEFAULT_MAX_KEYS);
         if echo_lines == 0 {
             anyhow::bail!("--echo-lines must be at least 1");
         }
@@ -393,7 +393,7 @@ mod tests {
         assert!(!s.eager, "lazy is the default (issue #85)");
         assert_eq!(s.echo_lines, 2000);
         assert_eq!(s.history_entries, 200);
-        assert_eq!(s.max_keys, zenkey_fleet::stats::DEFAULT_MAX_KEYS);
+        assert_eq!(s.max_keys, zenkey_fleet::model::bounded::DEFAULT_MAX_KEYS);
     }
 
     /// History retains whole payloads, so its bound is the one most worth
