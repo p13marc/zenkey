@@ -7,6 +7,13 @@
 //! this module stays a thin, honest transport: keys + JSON values, no
 //! hardcoded schema. `routers` extracts the few fields every 1.x layout
 //! carries, and leaves the rest visible in `raw`.
+//!
+//! **Base-less by design.** Everything here but [`origin_attachments`] takes a
+//! bare `&Session`, not a [`crate::Fleet`]: `@/**` is the middleware's own
+//! space and sits outside every deployment namespace, so there is no base for
+//! these calls to run *against* — a `Fleet` would offer one they must ignore.
+//! [`origin_attachments`] is the exception because it joins admin tokens back
+//! onto convention keys, which only parse under a base.
 
 use std::time::Duration;
 
@@ -882,11 +889,11 @@ fn source_zids(sources: &serde_json::Value) -> Vec<String> {
 /// An empty result means the admin space served no tokens (or none parse
 /// under this base) — an observation, not an empty fleet (O4).
 pub async fn origin_attachments(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     timeout: Duration,
 ) -> Result<Vec<OriginAttachment>> {
-    let entries = admin_get(session, "@/*/*/token/**", timeout).await?;
+    let base = fleet.base();
+    let entries = admin_get(fleet.session(), "@/*/*/token/**", timeout).await?;
     let mut out: Vec<OriginAttachment> = Vec::new();
     for e in &entries {
         let Some(decl) = declared_from_admin_entry(&e.key, &e.value) else {

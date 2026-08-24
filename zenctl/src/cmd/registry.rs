@@ -105,7 +105,7 @@ pub async fn diff(args: &Bus) -> Result<()> {
     }
     let local = zenkey_fleet::SliceSet::from_dirs(&dirs)?;
     let session = args.session().await?;
-    let served = zenkey_fleet::SliceSet::from_bus(&session, args.base(), args.timeout()).await?;
+    let served = zenkey_fleet::SliceSet::from_bus(&args.fleet(&session), args.timeout()).await?;
     let report = served.diff(&local);
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
@@ -151,8 +151,7 @@ pub async fn retired(listen: Option<u64>, args: &Bus) -> Result<()> {
     let report = super::asked(
         "registry retired",
         zenkey_fleet::run_retired(
-            &session,
-            args.base(),
+            &args.fleet(&session),
             &local,
             registries,
             listen,

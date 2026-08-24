@@ -25,7 +25,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use zenkey::slice::{DeprecationDecl, RegistrySlice};
-use zenoh::Session;
 
 use crate::report::{CutoverVerdict, RetiredEntry, RetiredReport};
 
@@ -151,13 +150,13 @@ impl Matcher {
 ///   given: no window means every wire field stays `None` — "not asked" must
 ///   never render as "no" (RFC 09 §5.1 O4).
 pub async fn run_retired(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     local: &crate::SliceSet,
     registries: Vec<String>,
     listen_s: Option<u64>,
     timeout: Duration,
 ) -> Result<RetiredReport> {
+    let (session, base) = (fleet.session(), fleet.base());
     // The ledger: every [[deprecated]] entry the local registries declare,
     // in a stable order.
     let mut ledger: Vec<(&RegistrySlice, &DeprecationDecl)> = local
@@ -170,7 +169,7 @@ pub async fn run_retired(
     });
 
     // Fact 2's source: what live builds actually serve (RFC 08 §6).
-    let served = crate::SliceSet::from_bus(session, base, timeout).await?;
+    let served = crate::SliceSet::from_bus(fleet, timeout).await?;
 
     // Fact 3's source. `None` = no admin space answered, which is "not
     // available", never "nothing declared" (O4). Our own session is excluded:

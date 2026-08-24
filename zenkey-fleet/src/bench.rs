@@ -23,7 +23,6 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
-use zenoh::Session;
 
 use crate::query::{Answer, RepeatingQuery, declare_repeating};
 use crate::registry::SliceSet;
@@ -103,8 +102,7 @@ fn percentile(sorted: &[Duration], p: f64) -> f64 {
 
 /// Run the benchmark.
 pub async fn bench_rpc(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     spec: BenchSpec<'_>,
     slices: Option<&SliceSet>,
 ) -> Result<BenchReport> {
@@ -124,12 +122,12 @@ pub async fn bench_rpc(
         CallTarget::Fleet => zenkey::selector::fleet_rpc(spec.producer, &segments).to_string(),
         CallTarget::Service(origin) => zenkey::selector::service_rpc(origin, &segments).to_string(),
     };
-    let key = zenkey::grammar::with_base(base, relative);
+    let key = fleet.wire(relative);
 
     // One declared querier for the whole run (#37): re-declaring per call
     // would measure zenoh's declaration path rather than the fleet's answers.
     let querier = std::sync::Arc::new(
-        declare_repeating(session, base, &key, spec.timeout)
+        declare_repeating(fleet, &key, spec.timeout)
             .await
             .map_err(|e| anyhow!("declare querier {key}: {e}"))?,
     );

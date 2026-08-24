@@ -68,9 +68,13 @@ fn prefix_at(origin: &str) -> String {
 /// claim is made about it.
 async fn wait_routable(session: &zenoh::Session, key: &str) {
     for _ in 0..50 {
-        let answers = zenkey_fleet::fleet_get(session, BASE, key, None, TIMEOUT)
-            .await
-            .expect("settle get");
+        let answers = zenkey_fleet::fleet_get(
+            &zenkey_fleet::Fleet::new(session, BASE),
+            key,
+            &zenkey_fleet::GetOpts::new(TIMEOUT),
+        )
+        .await
+        .expect("settle get");
         if !answers.is_empty() {
             return;
         }
@@ -113,9 +117,14 @@ async fn a_probe_names_every_holder_and_a_fetch_names_one() {
         wait_routable(&asking, &zblob::keys::manifest_key(&prefix_at(origin), ID)).await;
     }
 
-    let report = blob_probe(&asking, BASE, &target(), &[], TIMEOUT)
-        .await
-        .expect("probe");
+    let report = blob_probe(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        &target(),
+        &[],
+        TIMEOUT,
+    )
+    .await
+    .expect("probe");
 
     // Two holders, distinct origins — attributed by each reply's own key, not
     // by the `*` we asked on.
@@ -159,8 +168,7 @@ async fn a_probe_names_every_holder_and_a_fetch_names_one() {
         ..Default::default()
     };
     let fetched = blob_fetch(
-        &asking,
-        BASE,
+        &zenkey_fleet::Fleet::new(&asking, BASE),
         "h-bbbbbbbbbbbb",
         &target(),
         &dest,
@@ -205,9 +213,14 @@ async fn a_disagreeing_root_is_named_not_averaged() {
         "the fixture must disagree"
     );
 
-    let report = blob_probe(&asking, BASE, &target(), &[], TIMEOUT)
-        .await
-        .expect("probe");
+    let report = blob_probe(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        &target(),
+        &[],
+        TIMEOUT,
+    )
+    .await
+    .expect("probe");
     assert_eq!(report.holders.len(), 2);
     assert_eq!(
         report.roots.len(),
@@ -226,8 +239,7 @@ async fn a_disagreeing_root_is_named_not_averaged() {
         ..Default::default()
     };
     let err = blob_fetch(
-        &asking,
-        BASE,
+        &zenkey_fleet::Fleet::new(&asking, BASE),
         "h-cccccccccccc",
         &target(),
         &dest,
@@ -316,9 +328,14 @@ async fn every_blob_get_rides_at_data_low() {
     // not @blob traffic under test. Forget them before the real assertions.
     seen.lock().unwrap().clear();
 
-    let probe = blob_probe(&asking, BASE, &target(), &[], Duration::from_secs(2))
-        .await
-        .expect("probe");
+    let probe = blob_probe(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        &target(),
+        &[],
+        Duration::from_secs(2),
+    )
+    .await
+    .expect("probe");
     assert_eq!(probe.answered, 1, "the recorder answered the manifest GET");
 
     let dir = tempfile::tempdir().unwrap();
@@ -332,8 +349,7 @@ async fn every_blob_get_rides_at_data_low() {
     let _ = tokio::time::timeout(
         Duration::from_secs(30),
         blob_fetch(
-            &asking,
-            BASE,
+            &zenkey_fleet::Fleet::new(&asking, BASE),
             "h-dddddddddddd",
             &target(),
             &dir.path().join("demo.bin"),
@@ -371,9 +387,14 @@ async fn tier_two_is_probed_and_a_foreign_algo_says_why_not() {
     // serves it on this bus, so the verdict is an honest empty holder list —
     // with the asked selector recorded, per O5.
     let target = BlobTarget::parse(&format!("store/blake3/{hash}")).unwrap();
-    let report = blob_probe(&asking, BASE, &target, &[], Duration::from_secs(1))
-        .await
-        .expect("probe");
+    let report = blob_probe(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        &target,
+        &[],
+        Duration::from_secs(1),
+    )
+    .await
+    .expect("probe");
     assert!(
         report.not_probed.is_none(),
         "blake3 must be probed: {report:?}"
@@ -388,9 +409,14 @@ async fn tier_two_is_probed_and_a_foreign_algo_says_why_not() {
     // A foreign algo cannot be asked by this build, and must say so — O4:
     // "not asked" must never be readable as "nobody holds it".
     let target = BlobTarget::parse(&format!("store/sha256/{hash}")).unwrap();
-    let report = blob_probe(&asking, BASE, &target, &[], Duration::from_secs(1))
-        .await
-        .expect("probe");
+    let report = blob_probe(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        &target,
+        &[],
+        Duration::from_secs(1),
+    )
+    .await
+    .expect("probe");
     assert!(report.asked.is_empty(), "nothing was asked");
     assert!(report.holders.is_empty());
     let why = report.not_probed.expect("an unasked probe must say why");

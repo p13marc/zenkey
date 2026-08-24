@@ -33,8 +33,7 @@ pub async fn rpc(
     let count = count.unwrap_or(DEFAULT_COUNT);
 
     let report = zenkey_fleet::bench_rpc(
-        &session,
-        args.base(),
+        &args.fleet(&session),
         zenkey_fleet::BenchSpec {
             target: &target,
             producer,

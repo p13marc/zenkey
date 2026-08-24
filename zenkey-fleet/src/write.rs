@@ -338,8 +338,7 @@ fn attachment_value(bytes: &[u8]) -> serde_json::Value {
 ///   a failure, zero replies stay a distinct non-verdict (RFC 05 §3.1).
 #[allow(clippy::too_many_arguments)]
 pub async fn call(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     target: &CallTarget,
     producer: &str,
     procedure: &str,
@@ -386,15 +385,14 @@ pub async fn call(
         CallTarget::Fleet => zenkey::selector::fleet_rpc(producer, &segments).to_string(),
         CallTarget::Service(origin) => zenkey::selector::service_rpc(origin, &segments).to_string(),
     };
-    let mut key = zenkey::grammar::with_base(base, relative);
+    let mut key = fleet.wire(relative);
     if !params.is_empty() {
         key.push('?');
         key.push_str(&params.join(";"));
     }
 
     let answers = crate::query::fleet_get(
-        session,
-        base,
+        fleet,
         &key,
         &crate::query::GetOpts::new(timeout)
             .payload(body)
@@ -619,8 +617,7 @@ mod tests {
         let session = crate::session::open(&[], &[], false).await.unwrap();
         let slices = slice_with_proc("write", Some("forbidden"));
         let err = call(
-            &session,
-            "",
+            &crate::Fleet::new(&session, ""),
             &CallTarget::Fleet,
             "netring",
             "capture/trigger",
@@ -640,8 +637,7 @@ mod tests {
         // §2 defaults `kind = "write"` to forbidden, and introspect serves
         // the TOML verbatim — the default is this guard's to apply.
         let err = call(
-            &session,
-            "",
+            &crate::Fleet::new(&session, ""),
             &CallTarget::Fleet,
             "netring",
             "capture/trigger",
@@ -666,8 +662,7 @@ mod tests {
             slice_with_proc("read", None),
         ] {
             let report = call(
-                &session,
-                "",
+                &crate::Fleet::new(&session, ""),
                 &CallTarget::Fleet,
                 "netring",
                 "capture/trigger",

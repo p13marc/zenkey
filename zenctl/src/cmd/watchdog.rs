@@ -59,8 +59,9 @@ pub async fn run(rules: &[String], tick: f64, ticks: Option<u64>, args: &Bus) ->
             let _ = out.flush();
         }
     };
+    let fleet = args.fleet(&session);
     let summary = tokio::select! {
-        r = run_watchdog(&session, args.base(), &slices, &store, &spec, &mut emit) => r?,
+        r = run_watchdog(&fleet, &slices, &store, &spec, &mut emit) => r?,
         _ = tokio::signal::ctrl_c() => {
             eprintln!("watchdog: interrupted");
             return Ok(());

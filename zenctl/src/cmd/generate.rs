@@ -150,8 +150,9 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         faults,
     };
 
+    let fleet = args.fleet(&session);
     let plan = zenkey_fleet::generate::build_plan(
-        Some(&session),
+        Some(&fleet),
         &store,
         &slices,
         args.base(),
@@ -193,8 +194,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
     // The RFC 08 halves for the impersonated producers, on request.
     let mock = if serve_describe {
         let m = zenkey_fleet::generate::serve_describe(
-            &session,
-            args.base(),
+            &fleet,
             &origin,
             &slices,
             set.as_ref(),
@@ -211,7 +211,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         None
     };
 
-    let report = zenkey_fleet::generate::run_gen(&session, &plan, &spec).await?;
+    let report = zenkey_fleet::generate::run_gen(&fleet, &plan, &spec).await?;
     drop(mock);
 
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;

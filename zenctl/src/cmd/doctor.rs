@@ -54,7 +54,7 @@ pub async fn run(
         return watch_loop(&session, &locals, &spec, every, runs, args).await;
     }
 
-    let report = zenkey_fleet::run_doctor(&session, args.base(), &locals, &spec).await?;
+    let report = zenkey_fleet::run_doctor(&args.fleet(&session), &locals, &spec).await?;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
 
     let failed = match fail_on {
@@ -93,7 +93,7 @@ async fn watch_loop(
     let mut out = std::io::stdout();
     let mut done = 0u64;
     loop {
-        let outcome = zenkey_fleet::run_doctor(session, args.base(), locals, spec).await;
+        let outcome = zenkey_fleet::run_doctor(&args.fleet(session), locals, spec).await;
         let at = zenkey_fleet::record::rfc3339_now();
         let transitions = match &outcome {
             Ok(report) => watch.observe(Ok(report), &at),

@@ -12,7 +12,6 @@ use std::time::Duration;
 use crate::report::{ProducerDiff, RegistryDiff};
 use anyhow::{Result, anyhow};
 use zenkey::{RegistrySlice, parse_slice};
-use zenoh::Session;
 
 /// One slice's subject patterns, parsed once and grouped by class.
 ///
@@ -102,8 +101,8 @@ impl SliceSet {
 
     /// Discover every live producer's served slice from the bus
     /// ([`crate::query::fleet_registry`]).
-    pub async fn from_bus(session: &Session, base: &str, timeout: Duration) -> Result<SliceSet> {
-        let pairs = crate::query::fleet_registry_raw(session, base, timeout).await?;
+    pub async fn from_bus(fleet: &crate::Fleet<'_>, timeout: Duration) -> Result<SliceSet> {
+        let pairs = crate::query::fleet_registry_raw(fleet, timeout).await?;
         let mut set = SliceSet::default();
         for (slice, raw) in pairs {
             set.push(slice, raw);
@@ -259,14 +258,11 @@ impl SliceSet {
     /// Degrades honestly: an unreachable bus yields a dirs-only union (the
     /// outcome's `from_bus` is empty — the caller can see which case it got).
     pub async fn from_union(
-        session: &zenoh::Session,
-        base: &str,
+        fleet: &crate::Fleet<'_>,
         dirs: &[std::path::PathBuf],
         timeout: std::time::Duration,
     ) -> Result<UnionOutcome> {
-        let bus = SliceSet::from_bus(session, base, timeout)
-            .await
-            .unwrap_or_default();
+        let bus = SliceSet::from_bus(fleet, timeout).await.unwrap_or_default();
         let disk = if dirs.is_empty() {
             SliceSet::default()
         } else {
@@ -507,9 +503,13 @@ mod tests {
         let session = crate::session::open(&[], &[], false).await.unwrap();
         let dir =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
-        let out = SliceSet::from_union(&session, "", &[dir], std::time::Duration::from_millis(200))
-            .await
-            .unwrap();
+        let out = SliceSet::from_union(
+            &crate::Fleet::new(&session, ""),
+            &[dir],
+            std::time::Duration::from_millis(200),
+        )
+        .await
+        .unwrap();
         assert!(out.from_bus.is_empty(), "no bus answered");
         assert!(!out.dirs_only.is_empty(), "dirs supplied the slices");
         assert!(out.disagreements.is_empty());

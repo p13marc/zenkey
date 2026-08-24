@@ -30,7 +30,7 @@ pub async fn run(old_root: &str, window: u64, args: &Bus) -> Result<()> {
 
     let report = super::asked(
         "cutover",
-        zenkey_fleet::run_cutover(&session, &base, old_root, window).await,
+        zenkey_fleet::run_cutover(&args.fleet(&session), old_root, window).await,
     );
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // The one part that cannot move: a library returns a verdict, a command

@@ -928,15 +928,15 @@ pub struct WhySpec {
 /// `slices` is the caller's registry (bus-swept or `--registry` dirs); `None`
 /// means none was loaded, and the declaration rung says so (O4).
 pub async fn run_why(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     key: &str,
     slices: Option<&SliceSet>,
     spec: &WhySpec,
 ) -> Result<WhyReport> {
+    let (session, base) = (fleet.session(), fleet.base());
     let key_part = key.split('?').next().unwrap_or_default();
 
-    let roster = crate::roster(session, base, spec.timeout).await.ok();
+    let roster = crate::roster(fleet, spec.timeout).await.ok();
     let admin_answered = crate::topology(session, spec.timeout)
         .await
         .ok()

@@ -114,6 +114,11 @@ pub fn encode_encoding(
 /// failure, and it is not silence either (RFC 08 §7 is a SHOULD; a producer
 /// that serves no `describe` has said nothing about this type, which is
 /// different from having said "any bytes will do").
+///
+/// Base-less, so a bare `&Session` rather than a [`crate::Fleet`]: nothing
+/// here composes a key — the producer is named, and the schema comes through
+/// the store, which carries the base already. [`prepare_publish`] takes a
+/// `Fleet` because it *refines a wire key*, which needs one.
 #[allow(clippy::too_many_arguments)]
 pub async fn prepare_request(
     session: &Session,
@@ -201,15 +206,15 @@ pub async fn prepare_request(
 /// convention does not govern, and the note says which case happened.
 #[allow(clippy::too_many_arguments)]
 pub async fn prepare_publish(
-    session: &Session,
+    fleet: &crate::Fleet<'_>,
     store: &SchemaStore,
     slices: Option<&SliceSet>,
-    base: &str,
     wire_key: &str,
     declared_encoding: Option<&str>,
     body: &[u8],
     mode: PrepareMode,
 ) -> Result<PreparedBody> {
+    let (session, base) = (fleet.session(), fleet.base());
     if mode == PrepareMode::Raw {
         return Ok(PreparedBody::raw(
             body.to_vec(),

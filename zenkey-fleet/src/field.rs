@@ -542,14 +542,14 @@ pub struct FieldSpec {
 /// type names are then unknown, `field-stuck` and `field-new` are
 /// unjudgeable, and the report says so rather than reading clean (O4; #246).
 pub async fn run_field(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     slices: Option<&SliceSet>,
     store: &SchemaStore,
     spec: &FieldSpec,
 ) -> Result<FieldReport> {
     use crate::{FleetEvent, StreamItem};
 
+    let (session, base) = (fleet.session(), fleet.base());
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
     // Declared before the window opens: not-asked must never read as "no".

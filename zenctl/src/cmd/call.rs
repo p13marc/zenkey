@@ -70,8 +70,7 @@ pub async fn run(
     }
 
     let report = zenkey_fleet::call(
-        &session,
-        args.base(),
+        &args.fleet(&session),
         &target,
         producer,
         procedure,

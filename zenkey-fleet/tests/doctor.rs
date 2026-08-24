@@ -81,9 +81,13 @@ async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
     // token and the introspect answers.
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let report = run_doctor(&b, "", std::slice::from_ref(&local), &spec())
-                .await
-                .expect("run_doctor");
+            let report = run_doctor(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                std::slice::from_ref(&local),
+                &spec(),
+            )
+            .await
+            .expect("run_doctor");
             if report.live_producers >= 1 && report.introspect_answered >= 1 {
                 break report;
             }
@@ -129,7 +133,9 @@ async fn a_mute_live_producer_is_a_coverage_finding() {
 
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let report = run_doctor(&b, "", &[], &spec()).await.expect("run_doctor");
+            let report = run_doctor(&zenkey_fleet::Fleet::new(&b, ""), &[], &spec())
+                .await
+                .expect("run_doctor");
             if report.live_producers >= 1 {
                 break report;
             }

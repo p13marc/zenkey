@@ -38,10 +38,13 @@ async fn a_call_carries_attachments_both_ways() {
     // not evidence.
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let answers =
-            zenkey_fleet::fleet_get(&client, "", RPC_KEY, None, Duration::from_millis(500))
-                .await
-                .expect("probe");
+        let answers = zenkey_fleet::fleet_get(
+            &zenkey_fleet::Fleet::new(&client, ""),
+            RPC_KEY,
+            &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
+        )
+        .await
+        .expect("probe");
         if !answers.is_empty() {
             break;
         }
@@ -53,8 +56,7 @@ async fn a_call_carries_attachments_both_ways() {
 
     let target = zenkey_fleet::CallTarget::parse("h-aaaaaaaaaaaa").expect("target");
     let report = zenkey_fleet::call(
-        &client,
-        "",
+        &zenkey_fleet::Fleet::new(&client, ""),
         &target,
         "demo",
         "echo",
@@ -78,8 +80,7 @@ async fn a_call_carries_attachments_both_ways() {
 
     // And a call sending none gets none back: absent, never defaulted.
     let report = zenkey_fleet::call(
-        &client,
-        "",
+        &zenkey_fleet::Fleet::new(&client, ""),
         &target,
         "demo",
         "echo",

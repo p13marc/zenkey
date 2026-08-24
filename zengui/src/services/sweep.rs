@@ -24,7 +24,7 @@ use crate::view::nodes::NodesMsg;
 pub fn slices(session: zenoh::Session, base: String, timeout: Duration) -> Task<Message> {
     Task::perform(
         async move {
-            SliceSet::from_bus(&session, &base, timeout)
+            SliceSet::from_bus(&zenkey_fleet::Fleet::new(&session, &base), timeout)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
@@ -43,7 +43,7 @@ pub fn slices_union(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            SliceSet::from_union(&session, &base, &dirs, timeout)
+            SliceSet::from_union(&zenkey_fleet::Fleet::new(&session, &base), &dirs, timeout)
                 .await
                 .map(|out| {
                     (
@@ -69,7 +69,8 @@ pub fn skeleton(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let roster = zenkey_fleet::roster(&session, &base, timeout)
+            let fleet = zenkey_fleet::Fleet::new(&session, &base);
+            let roster = zenkey_fleet::roster(&fleet, timeout)
                 .await
                 .unwrap_or_default();
             let admin = zenkey_fleet::declared_entities(&session, timeout)
@@ -92,7 +93,8 @@ pub fn node_info(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let out = zenkey_fleet::node_info(&session, &base, &origin, timeout, true)
+            let fleet = zenkey_fleet::Fleet::new(&session, &base);
+            let out = zenkey_fleet::node_info(&fleet, &origin, timeout, true)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string());
@@ -119,7 +121,7 @@ pub fn doctor(
                 Ok(set) => set.slices().to_vec(),
                 Err(e) => return Err(format!("registry dirs: {e}")),
             };
-            zenkey_fleet::run_doctor(&session, &base, &locals, &spec)
+            zenkey_fleet::run_doctor(&zenkey_fleet::Fleet::new(&session, &base), &locals, &spec)
                 .await
                 .map(|r| crate::doctor::DoctorRun {
                     report: Arc::new(r),
@@ -173,9 +175,12 @@ pub fn admin(
             let topology = zenkey_fleet::topology(&session, timeout)
                 .await
                 .map_err(|e| e.to_string())?;
-            let origins = zenkey_fleet::origin_attachments(&session, &base, timeout)
-                .await
-                .map_err(|e| e.to_string())?;
+            let origins = zenkey_fleet::origin_attachments(
+                &zenkey_fleet::Fleet::new(&session, &base),
+                timeout,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             Ok(Arc::new(crate::admin::AdminSweep {
                 routers,
                 storage: zenkey_fleet::report::StorageList { storages, coverage },
@@ -219,7 +224,8 @@ pub fn blob_probe(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let out = zenkey_fleet::blob_probe(&session, &base, &target, &slices, timeout)
+            let fleet = zenkey_fleet::Fleet::new(&session, &base);
+            let out = zenkey_fleet::blob_probe(&fleet, &target, &slices, timeout)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string());
@@ -241,7 +247,8 @@ pub fn blob_tree(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let out = zenkey_fleet::blob_tree_index(&session, &base, &origin, &root, timeout)
+            let fleet = zenkey_fleet::Fleet::new(&session, &base);
+            let out = zenkey_fleet::blob_tree_index(&fleet, &origin, &root, timeout)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string());
@@ -292,11 +299,11 @@ pub fn blob_fetch(f: BlobFetch) -> Task<Message> {
             let sink = move |p| {
                 let _ = tx.send(p);
             };
-            let out =
-                zenkey_fleet::blob_fetch(&session, &base, &origin, &target, &dest, &spec, &sink)
-                    .await
-                    .map(Arc::new)
-                    .map_err(|e| e.to_string());
+            let fleet = zenkey_fleet::Fleet::new(&session, &base);
+            let out = zenkey_fleet::blob_fetch(&fleet, &origin, &target, &dest, &spec, &sink)
+                .await
+                .map(Arc::new)
+                .map_err(|e| e.to_string());
             (base, out)
         },
         |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::FetchDone(ran, out))),

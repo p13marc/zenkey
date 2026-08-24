@@ -16,14 +16,14 @@ pub async fn info(origin: &str, args: &Bus) -> Result<()> {
         ));
     }
     let session = args.session().await?;
-    let info = zenkey_fleet::node_info(&session, args.base(), origin, args.timeout(), true).await?;
+    let info = zenkey_fleet::node_info(&args.fleet(&session), origin, args.timeout(), true).await?;
 
     crate::render::emit_with(&mut std::io::stdout(), &info, args.format(), args.color())
 }
 
 pub async fn list(verbose: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
-    let roster = bus::roster(&session, args.base(), args.timeout()).await?;
+    let roster = bus::roster(&args.fleet(&session), args.timeout()).await?;
 
     if roster.is_empty() {
         eprintln!(
@@ -65,7 +65,7 @@ pub async fn watch(verbose: bool, args: &Bus) -> Result<()> {
     // seed/coalesce loop lives in the engine (#207) — both explorers were
     // running their own copy of it, and zenctl's had drifted into a second
     // copy of the polling driver's cycle body besides.
-    let mut watch = bus::RosterWatch::start(&session, args.base(), args.timeout()).await?;
+    let mut watch = bus::RosterWatch::start(&args.fleet(&session), args.timeout()).await?;
 
     let mut slices = if verbose {
         args.slices_optional().await?

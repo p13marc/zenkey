@@ -4,11 +4,12 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use zenkey::grammar::with_base;
 use zenkey::{RegistrySlice, parse_slice};
 use zenoh::Session;
 use zenoh::qos::Priority;
 use zenoh::query::{ConsolidationMode, QueryTarget};
+
+use crate::session::Fleet;
 
 /// How a producer answered a procedure call.
 ///
@@ -193,16 +194,11 @@ pub(crate) async fn disciplined_get(
 /// Silence is deliberately *not* interpreted here (RFC 05 §3.1: "no reply" is
 /// not one condition). Callers that need a verdict join this against the
 /// liveliness roster; see `cmd::doctor`.
-pub async fn fleet_get(
-    session: &Session,
-    base: &str,
-    key: &str,
-    opts: &GetOpts,
-) -> Result<Vec<FleetAnswer>> {
-    let replies = disciplined_get(session, key, opts)
+pub async fn fleet_get(fleet: &Fleet<'_>, key: &str, opts: &GetOpts) -> Result<Vec<FleetAnswer>> {
+    let replies = disciplined_get(fleet.session(), key, opts)
         .await
         .with_context(|| format!("query failed: {key}"))?;
-    Ok(collect_answers(base, replies).await)
+    Ok(collect_answers(fleet.base(), replies).await)
 }
 
 /// Drain a reply channel into attributed answers — the shared back half of
@@ -292,12 +288,11 @@ pub struct RepeatingQuery {
 /// The §2.1 discipline is fixed at declaration: target `All`, consolidation
 /// `None`, `timeout` for every subsequent fetch.
 pub async fn declare_repeating(
-    session: &Session,
-    base: &str,
+    fleet: &Fleet<'_>,
     key: &str,
     timeout: Duration,
 ) -> Result<RepeatingQuery> {
-    declare(session, base, key, timeout, false).await
+    declare(fleet, key, timeout, false).await
 }
 
 /// As [`declare_repeating`], additionally accepting replies **outside** the
@@ -305,22 +300,21 @@ pub async fn declare_repeating(
 /// the `@adv` cache rung needs. A separate constructor because this axis is
 /// part of the querier's identity: never reuse one querier across both modes.
 pub async fn declare_repeating_any(
-    session: &Session,
-    base: &str,
+    fleet: &Fleet<'_>,
     key: &str,
     timeout: Duration,
 ) -> Result<RepeatingQuery> {
-    declare(session, base, key, timeout, true).await
+    declare(fleet, key, timeout, true).await
 }
 
 async fn declare(
-    session: &Session,
-    base: &str,
+    fleet: &Fleet<'_>,
     key: &str,
     timeout: Duration,
     accept_any: bool,
 ) -> Result<RepeatingQuery> {
-    let mut builder = session
+    let mut builder = fleet
+        .session()
         .declare_querier(key.to_string())
         .target(QueryTarget::All)
         .consolidation(ConsolidationMode::None)
@@ -334,7 +328,7 @@ async fn declare(
         .with_context(|| format!("declare querier failed: {key}"))?;
     Ok(RepeatingQuery {
         querier,
-        base: base.to_string(),
+        base: fleet.base().to_string(),
     })
 }
 
@@ -454,11 +448,10 @@ fn origin_of(base: &str, key: &str) -> String {
 /// service origins remain reachable only via local registry files
 /// (`doctor --registry` asks each declared `service_origin` by name).
 pub async fn fleet_registry(
-    session: &Session,
-    base: &str,
+    fleet: &Fleet<'_>,
     timeout: Duration,
 ) -> Result<Vec<(String, RegistrySlice)>> {
-    Ok(fleet_registry_raw(session, base, timeout)
+    Ok(fleet_registry_raw(fleet, timeout)
         .await?
         .into_iter()
         .map(|(slice, _)| (slice.name.clone(), slice))
@@ -468,11 +461,10 @@ pub async fn fleet_registry(
 /// As [`fleet_registry`], additionally yielding each reply's raw TOML text
 /// (the artifact the slice cache persists).
 pub async fn fleet_registry_raw(
-    session: &Session,
-    base: &str,
+    fleet: &Fleet<'_>,
     timeout: Duration,
 ) -> Result<Vec<(RegistrySlice, String)>> {
-    let repeating = RepeatingRegistry::declare(session, base, timeout).await?;
+    let repeating = RepeatingRegistry::declare(fleet, timeout).await?;
     let slices = repeating.fetch().await?;
     repeating.undeclare().await?;
     Ok(slices)
@@ -491,17 +483,17 @@ pub struct RepeatingRegistry {
 }
 
 impl RepeatingRegistry {
-    pub async fn declare(session: &Session, base: &str, timeout: Duration) -> Result<Self> {
+    pub async fn declare(fleet: &Fleet<'_>, timeout: Duration) -> Result<Self> {
         // This session is un-namespaced on purpose (RFC 09 §5), so it must
         // spell the base itself — exactly as `service call` composes its key.
-        let wildcard = with_base(base, zenkey::selector::fleet_rpc("*", &["introspect"]));
-        let catalog = with_base(
-            base,
-            zenkey::selector::service_rpc(&zenkey::ServiceOrigin::catalog(), &["introspect"]),
-        );
+        let wildcard = fleet.wire(zenkey::selector::fleet_rpc("*", &["introspect"]));
+        let catalog = fleet.wire(zenkey::selector::service_rpc(
+            &zenkey::ServiceOrigin::catalog(),
+            &["introspect"],
+        ));
         Ok(RepeatingRegistry {
-            wildcard: declare_repeating(session, base, &wildcard, timeout).await?,
-            catalog: declare_repeating(session, base, &catalog, timeout).await?,
+            wildcard: declare_repeating(fleet, &wildcard, timeout).await?,
+            catalog: declare_repeating(fleet, &catalog, timeout).await?,
         })
     }
 

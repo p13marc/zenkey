@@ -121,7 +121,13 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
                 window: Duration::from_secs(4),
                 max_paths: 64,
             };
-            run_field(&b, "", Some(&slices), &store_of(), &spec).await
+            run_field(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                Some(&slices),
+                &store_of(),
+                &spec,
+            )
+            .await
         }
     });
     // The field window's subscriber raises the badge; then publish into it.
@@ -181,9 +187,14 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
         rate_min: Some(1.0),
         ..ExpectSpec::default()
     };
-    let report = run_expect(&b, "", Some(&slices), &store_of(), &expect)
-        .await
-        .expect("run_expect");
+    let report = run_expect(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        Some(&slices),
+        &store_of(),
+        &expect,
+    )
+    .await
+    .expect("run_expect");
     assert_eq!(
         report.verdict,
         ExpectVerdict::Met,
@@ -218,7 +229,13 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
                 window: Duration::from_secs(3),
                 max_paths: 64,
             };
-            run_field(&b, "", Some(&slices), &store_of(), &spec).await
+            run_field(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                Some(&slices),
+                &store_of(),
+                &spec,
+            )
+            .await
         }
     });
     assert!(
@@ -287,8 +304,7 @@ async fn the_doctor_listen_phase_flags_the_frozen_field() {
     );
 
     let report = zenkey_fleet::run_doctor(
-        &b,
-        "",
+        &zenkey_fleet::Fleet::new(&b, ""),
         std::slice::from_ref(&local),
         &zenkey_fleet::DoctorSpec {
             deep: false,

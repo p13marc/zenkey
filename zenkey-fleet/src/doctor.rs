@@ -13,7 +13,6 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use zenkey::RegistrySlice;
 use zenkey::grammar::with_base;
-use zenoh::Session;
 
 use crate::examples::Examples;
 use crate::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
@@ -107,12 +106,12 @@ fn rpc_key(base: &str, slice: &RegistrySlice, procedure: &str) -> Result<String>
 /// only bus-derived checks run — the caller states that degradation to its
 /// user (O4: "not asked" must not render as "in sync").
 pub async fn run_doctor(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     locals: &[RegistrySlice],
     spec: &DoctorSpec,
 ) -> Result<DoctorReport> {
-    let roster = crate::roster(session, base, spec.timeout).await?;
+    let (session, base) = (fleet.session(), fleet.base());
+    let roster = crate::roster(fleet, spec.timeout).await?;
 
     let mut findings: Vec<DoctorFinding> = Vec::new();
     let mut synced: Vec<String> = Vec::new();
@@ -121,7 +120,7 @@ pub async fn run_doctor(
     // --- served-vs-declared diff (RFC 08 §6) --------------------------
     for local in locals {
         let key = rpc_key(base, local, "introspect")?;
-        let answers = fleet_get(session, base, &key, &GetOpts::new(spec.timeout)).await?;
+        let answers = fleet_get(fleet, &key, &GetOpts::new(spec.timeout)).await?;
         for answer in &answers {
             let Answer::Value(bytes) = &answer.answer else {
                 continue;
@@ -165,7 +164,7 @@ pub async fn run_doctor(
     // One declared registry sweep (#37) serves both fallbacks below —
     // doctor used to fan the identical wildcard GETs twice per run.
     let sweep = if locals.is_empty() {
-        let repeating = RepeatingRegistry::declare(session, base, spec.timeout).await?;
+        let repeating = RepeatingRegistry::declare(fleet, spec.timeout).await?;
         let slices: Vec<RegistrySlice> = repeating
             .fetch()
             .await?
@@ -241,7 +240,7 @@ pub async fn run_doctor(
     let mut undescribed = 0usize;
     for slice in &schema_slices {
         let key = rpc_key(base, slice, "describe")?;
-        let answers = fleet_get(session, base, &key, &GetOpts::new(spec.timeout)).await?;
+        let answers = fleet_get(fleet, &key, &GetOpts::new(spec.timeout)).await?;
         let set = answers.into_iter().find_map(|a| match a.answer {
             Answer::Value(bytes) => {
                 let cow = bytes.to_bytes();
@@ -379,7 +378,7 @@ pub async fn run_doctor(
                 store.insert(producer, set.clone());
             }
             let (listen_findings, summary) =
-                observe_traffic(session, base, &slice_set, &store, &described, window).await?;
+                observe_traffic(fleet, &slice_set, &store, &described, window).await?;
             findings.extend(listen_findings);
             Some(summary)
         }
@@ -470,14 +469,15 @@ pub(crate) fn is_synthetic_marker(attachment: &[u8]) -> bool {
 /// ladder, `qos_matches`, `decode_sample` — and aggregate per key so a hot
 /// key is one finding with a count, not a finding per sample.
 async fn observe_traffic(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     slices: &crate::registry::SliceSet,
     store: &crate::decode::SchemaStore,
     described: &[(String, zenkey::schema::SchemaSet)],
     window: Duration,
 ) -> Result<(Vec<DoctorFinding>, crate::report::ObservationSummary)> {
     use std::collections::BTreeMap;
+
+    let (session, base) = (fleet.session(), fleet.base());
 
     // Scope statement (O5): the three data classes for host origins, plus
     // each declared service origin's three — `*` never matches an `@` chunk
@@ -573,10 +573,9 @@ async fn observe_traffic(
                             // the `_` arm below: not asked/not checkable is
                             // never a finding (RFC 09 §5.1 O4).
                             let d = crate::decode::decode_sample(
+                                fleet,
                                 store,
-                                session,
                                 Some(slices),
-                                base,
                                 &s.key,
                                 Some(&s.encoding),
                                 &s.payload.to_bytes(),

@@ -42,9 +42,13 @@ fn tier_prefix(origin: &str, tier: zenkey::grammar::BlobTier) -> String {
 /// indistinguishable and the test rides the scheduler's mood.
 async fn wait_routable(session: &zenoh::Session, key: &str) {
     for _ in 0..50 {
-        let answers = zenkey_fleet::fleet_get(session, BASE, key, None, TIMEOUT)
-            .await
-            .expect("settle get");
+        let answers = zenkey_fleet::fleet_get(
+            &zenkey_fleet::Fleet::new(session, BASE),
+            key,
+            &zenkey_fleet::GetOpts::new(TIMEOUT),
+        )
+        .await
+        .expect("settle get");
         if !answers.is_empty() {
             return;
         }
@@ -116,9 +120,14 @@ async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
 
     // The tree probe: a possession verdict, not a capability claim.
     let target = BlobTarget::parse(&format!("tree/{root_hex}")).unwrap();
-    let report = blob_probe(&asking, BASE, &target, &[], TIMEOUT)
-        .await
-        .expect("tree probe");
+    let report = blob_probe(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        &target,
+        &[],
+        TIMEOUT,
+    )
+    .await
+    .expect("tree probe");
     assert!(report.not_probed.is_none(), "{report:?}");
     assert_eq!(report.holders.len(), 1, "{report:?}");
     let holder = &report.holders[0];
@@ -132,9 +141,14 @@ async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
 
     // The store probe: one bit per asked address, per holder.
     let target = BlobTarget::parse(&format!("store/blake3/{}", chunk.hash)).unwrap();
-    let report = blob_probe(&asking, BASE, &target, &[], TIMEOUT)
-        .await
-        .expect("store probe");
+    let report = blob_probe(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        &target,
+        &[],
+        TIMEOUT,
+    )
+    .await
+    .expect("store probe");
     assert_eq!(report.holders.len(), 1, "{report:?}");
     let avail = report.holders[0].availability.as_ref().unwrap();
     assert!(avail.complete, "the holder holds the asked chunk");
@@ -143,9 +157,14 @@ async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
     // honest zero — "asked, and it does not have it", not silence.
     let absent = zblob::Hash::of(b"content nobody published");
     let target = BlobTarget::parse(&format!("store/blake3/{absent}")).unwrap();
-    let report = blob_probe(&asking, BASE, &target, &[], TIMEOUT)
-        .await
-        .expect("absent-chunk probe");
+    let report = blob_probe(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        &target,
+        &[],
+        TIMEOUT,
+    )
+    .await
+    .expect("absent-chunk probe");
     assert_eq!(report.holders.len(), 1, "{report:?}");
     let avail = report.holders[0].availability.as_ref().unwrap();
     assert!(!avail.complete && avail.have == 0, "{avail:?}");
@@ -155,8 +174,7 @@ async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
     let dest = dir.path().join("chunk.bin");
     let target = BlobTarget::parse(&format!("store/blake3/{}", chunk.hash)).unwrap();
     let fetched = blob_fetch(
-        &asking,
-        BASE,
+        &zenkey_fleet::Fleet::new(&asking, BASE),
         ORIGIN,
         &target,
         &dest,
@@ -180,8 +198,7 @@ async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
     // Overwrite::Refuse semantics, tier-2 edition: an existing destination is
     // refused before a byte is fetched, and saying so is the report's job.
     let err = blob_fetch(
-        &asking,
-        BASE,
+        &zenkey_fleet::Fleet::new(&asking, BASE),
         ORIGIN,
         &target,
         &dest,
@@ -198,9 +215,14 @@ async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
     // The tree summary: validated against the root, no content store, and
     // the numbers are the index's own.
     let root = zenkey::ContentHash::parse(&root_hex).unwrap();
-    let summary = blob_tree_index(&asking, BASE, ORIGIN, &root, TIMEOUT)
-        .await
-        .expect("tree summary");
+    let summary = blob_tree_index(
+        &zenkey_fleet::Fleet::new(&asking, BASE),
+        ORIGIN,
+        &root,
+        TIMEOUT,
+    )
+    .await
+    .expect("tree summary");
     assert_eq!(summary.origin, ORIGIN);
     assert_eq!(
         (
@@ -251,8 +273,7 @@ async fn a_lying_store_holder_is_rejected_by_name() {
     let dest = dir.path().join("chunk.bin");
     let target = BlobTarget::parse(&format!("store/blake3/{honest}")).unwrap();
     let err = blob_fetch(
-        &asking,
-        BASE,
+        &zenkey_fleet::Fleet::new(&asking, BASE),
         ORIGIN,
         &target,
         &dest,

@@ -37,6 +37,6 @@ pub async fn run(selector: &str, window: f64, max_paths: usize, args: &Bus) -> R
          the window opened (RFC 09 §5.1 O4)"
     );
     let report =
-        zenkey_fleet::run_field(&session, args.base(), slices.as_ref(), &store, &spec).await?;
+        zenkey_fleet::run_field(&args.fleet(&session), slices.as_ref(), &store, &spec).await?;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }

@@ -32,7 +32,6 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use serde::Serialize;
-use zenoh::Session;
 
 use crate::decode::SchemaStore;
 use crate::judgement::Judgement;
@@ -654,14 +653,15 @@ const DECODE_BUDGET: u8 = 2;
 /// opens (O4); every selector rule is judged per tick over the measured
 /// window, doctor and roster rules by one ask per tick each.
 pub async fn run_watchdog(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     slices: &SliceSet,
     store: &SchemaStore,
     spec: &WatchdogSpec,
     emit: &mut (dyn FnMut(&Transition) + Send),
 ) -> Result<WatchdogSummary> {
     use crate::{FleetEvent, StreamItem};
+
+    let (session, base) = (fleet.session(), fleet.base());
 
     #[derive(Default, Clone, Copy)]
     struct TickCounters {
@@ -774,10 +774,9 @@ pub async fn run_watchdog(
                                         // so `NoRegistry` (#246) would change
                                         // no transition — only the reason.
                                         let d = crate::decode::decode_sample(
+                                            fleet,
                                             store,
-                                            session,
                                             Some(slices),
-                                            base,
                                             &s.key,
                                             Some(&s.encoding),
                                             &s.payload.to_bytes(),
@@ -826,8 +825,7 @@ pub async fn run_watchdog(
         let doctor_outcome = if wants_doctor {
             Some(
                 crate::doctor::run_doctor(
-                    session,
-                    base,
+                    fleet,
                     &locals,
                     &crate::doctor::DoctorSpec {
                         deep: false,
@@ -844,7 +842,7 @@ pub async fn run_watchdog(
         };
         let roster_outcome = if wants_roster {
             Some(
-                crate::roster(session, base, spec.timeout)
+                crate::roster(fleet, spec.timeout)
                     .await
                     .map_err(|e| e.to_string()),
             )

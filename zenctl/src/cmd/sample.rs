@@ -153,12 +153,10 @@ pub struct Decoded {
 /// `not-validated: no registry loaded…` rather than `no-schema`'s claim
 /// about the type — the two silences stay apart on the wire
 /// (RFC 09 §5.1 O4; #246).
-#[allow(clippy::too_many_arguments)]
 pub async fn decode(
+    fleet: &zenkey_fleet::Fleet<'_>,
     store: &zenkey_fleet::decode::SchemaStore,
-    session: &zenoh::Session,
     slices: Option<&zenkey_fleet::SliceSet>,
-    base: &str,
     key: &str,
     encoding: Option<&str>,
     bytes: &[u8],
@@ -174,8 +172,7 @@ pub async fn decode(
             decode_error: None,
         };
     }
-    let d = zenkey_fleet::decode::decode_sample(store, session, slices, base, key, encoding, bytes)
-        .await;
+    let d = zenkey_fleet::decode::decode_sample(fleet, store, slices, key, encoding, bytes).await;
     Decoded {
         type_name: d.type_name,
         rendering: d.rendering,

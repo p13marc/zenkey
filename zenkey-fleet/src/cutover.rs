@@ -21,7 +21,6 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use zenoh::Session;
 
 use crate::examples::Examples;
 use crate::report::{CutoverReport, CutoverVerdict};
@@ -48,16 +47,15 @@ pub fn new_prefix(base: &str) -> String {
 
 /// Watch the whole bus for `window` seconds and judge the cutover.
 pub async fn run_cutover(
-    session: &Session,
-    base: &str,
+    fleet: &crate::Fleet<'_>,
     old_root: &str,
     window: u64,
 ) -> Result<CutoverReport> {
     let old_expr = zenoh::key_expr::KeyExpr::try_from(old_root.to_string())
         .map_err(|e| anyhow::anyhow!("--old-root {old_root:?} is not a key expression: {e}"))?;
-    let new_prefix = new_prefix(base);
+    let new_prefix = new_prefix(fleet.base());
 
-    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+    let monitor = crate::Monitor::start(fleet.session(), crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
     monitor.watch("**").await?;
 

@@ -1,9 +1,72 @@
-//! Session setup for un-namespaced observers (RFC 09 §5).
+//! Session setup for un-namespaced observers (RFC 09 §5), and the
+//! session-plus-deployment bundle every bus-facing call runs against.
 
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use zenoh::Session;
+
+/// A session **and the deployment it is pointed at** — the two halves every
+/// bus-facing entry point in this crate needs, carried together (#218).
+///
+/// The pair used to be threaded positionally through some twenty-five
+/// functions, and one of them — `decode_sample` — had already broken the
+/// order, taking `(store, session, slices, base, …)`. A bundle is not
+/// sugar here: it makes "which base did this call run against?" a question
+/// with one answer per call site instead of one per parameter list.
+///
+/// ## Borrowed, not owned
+///
+/// Both frontends already hold both halves as owned values, in scope, at the
+/// moment they call. zenctl opens one `zenoh::Session` per command and reads
+/// the base off its `Bus`; zengui moves an owned `Session` and `String` into
+/// each `async move` in `services/`, because an `async move` cannot borrow
+/// `&self`. So a `Fleet` is built at the call, borrowed for its duration and
+/// dropped — an owned bundle would clone the base string at every one of
+/// those sites and buy nothing back (`zenoh::Session` is itself refcounted;
+/// a `&str` is cheaper still).
+///
+/// ## What deliberately does *not* take one
+///
+/// The **admin space is base-less by design**: `@/**` is the middleware's
+/// own introspection and sits outside any deployment namespace (RFC 09 §5),
+/// so [`crate::admin_get`], [`crate::routers`], [`crate::storages`],
+/// [`crate::declared_entities`] and [`crate::topology`] keep a bare
+/// `&Session`. [`crate::discover_bases`] likewise: it exists to *find* bases,
+/// so requiring one would be circular. Handing those a `Fleet` would offer a
+/// base the function is obliged to ignore, which is the kind of parameter
+/// that eventually gets used.
+#[derive(Debug, Clone, Copy)]
+pub struct Fleet<'a> {
+    session: &'a Session,
+    base: &'a str,
+}
+
+impl<'a> Fleet<'a> {
+    /// Point a session at a deployment.
+    ///
+    /// An **empty** base is a deployment — the bus-root one, which is the
+    /// RFC v1.6 default — and never means "no base".
+    pub fn new(session: &'a Session, base: &'a str) -> Self {
+        Fleet { session, base }
+    }
+
+    /// The un-namespaced session (RFC 09 §5) every call goes out on.
+    pub fn session(&self) -> &'a Session {
+        self.session
+    }
+
+    /// The deployment base, as the Zenoh **namespace** these keys live under.
+    pub fn base(&self) -> &'a str {
+        self.base
+    }
+
+    /// Compose a base-relative key (RFC 03: keys start at `v1`) into the full
+    /// wire key this un-namespaced session must actually spell.
+    pub fn wire(&self, relative: impl AsRef<str>) -> String {
+        zenkey::grammar::with_base(self.base, relative)
+    }
+}
 
 /// Open a session for a read-only explorer.
 ///

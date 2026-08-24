@@ -35,8 +35,7 @@ pub fn call(
         async move {
             let target = zenkey_fleet::CallTarget::parse(&target).map_err(|e| e.to_string())?;
             zenkey_fleet::call(
-                &session,
-                &base,
+                &zenkey_fleet::Fleet::new(&session, &base),
                 &target,
                 &producer,
                 &procedure,
@@ -87,10 +86,9 @@ pub fn publish(p: Publish) -> Task<Message> {
                 repeat,
             } = p;
             let prepared = zenkey_fleet::prepare_publish(
-                &session,
+                &zenkey_fleet::Fleet::new(&session, &base),
                 &store,
                 slices.as_deref(),
-                &base,
                 &key,
                 (!encoding.is_empty()).then_some(encoding.as_str()),
                 &body,

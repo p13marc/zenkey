@@ -54,9 +54,13 @@ async fn a_publication_sees_its_own_subscribers_appear_and_leave() {
 async fn a_repeating_query_sees_a_server_appear() {
     let (a, b) = peer_pair().await;
 
-    let repeating = declare_repeating(&b, "", KEY, Duration::from_secs(5))
-        .await
-        .expect("declare");
+    let repeating = declare_repeating(
+        &zenkey_fleet::Fleet::new(&b, ""),
+        KEY,
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("declare");
     let events = repeating.matching_events().await.expect("events");
 
     let _queryable = a
