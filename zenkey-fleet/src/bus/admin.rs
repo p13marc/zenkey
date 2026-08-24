@@ -35,16 +35,38 @@ pub struct AdminEntry {
 
 /// GET an admin selector (default `@/**`). Fans to every node (target All,
 /// consolidation None — several routers may answer).
+///
+/// Bounded at [`crate::DEFAULT_MAX_REPLIES`] (#339): `@/**` against a router
+/// with a large storage is a lot of replies, each holding a payload. To see
+/// what the bound cost — or to raise it — use [`admin_get_within`], which
+/// takes the options the count rides on.
 pub async fn admin_get(
     session: &Session,
     selector: &str,
     timeout: Duration,
 ) -> Result<Vec<AdminEntry>> {
-    let replies = crate::bus::query::disciplined_get(session, selector, &GetOpts::new(timeout))
+    admin_get_within(session, selector, &GetOpts::new(timeout)).await
+}
+
+/// [`admin_get`] under the caller's own options — the reply bound and, after
+/// the call, what it cost ([`GetOpts::elided`], RFC 13 §3 O6).
+pub async fn admin_get_within(
+    session: &Session,
+    selector: &str,
+    opts: &GetOpts,
+) -> Result<Vec<AdminEntry>> {
+    let replies = crate::bus::query::disciplined_get(session, selector, opts)
         .await
         .map_err(|e| anyhow!("admin get {selector}: {e}"))?;
     let mut out = Vec::new();
+    let mut elided = 0u64;
     while let Ok(reply) = replies.recv_async().await {
+        // Past the bound the replies are drained but not kept: the count
+        // stays exact, the memory stays bounded.
+        if out.len() >= opts.reply_bound() {
+            elided += 1;
+            continue;
+        }
         let Ok(sample) = reply.result() else { continue };
         let bytes = sample.payload().to_bytes();
         let value = serde_json::from_slice(&bytes).unwrap_or_else(|_| {
@@ -55,6 +77,7 @@ pub async fn admin_get(
             value,
         });
     }
+    opts.note_elided(elided);
     out.sort_by(|a, b| a.key.cmp(&b.key));
     Ok(out)
 }

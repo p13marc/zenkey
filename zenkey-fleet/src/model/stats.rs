@@ -7,9 +7,11 @@
 //! *new* key is the floor.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::model::bounded::{BoundedLru, DEFAULT_MAX_KEYS};
+use crate::model::tree::{TreeRow, TreeRows};
 use crate::report::{LatencyReport, LatencySummary};
 
 /// How many per-key latency observations the summary window keeps. Bounded
@@ -144,9 +146,15 @@ fn summarise(values: impl Iterator<Item = i64>) -> Option<LatencySummary> {
 /// least-recently-seen first — the keys that stopped publishing are the ones a
 /// live view has least use for — and **counts every eviction**, so a shrinking
 /// key set is never mistaken for a quiet bus (RFC 09 §5.1).
+///
+/// The keys are `Arc<str>` rather than `String` so that
+/// [`rows`](Self::rows) — the copy the ingest lock is held for (#330) — is a
+/// refcount bump per key and not a per-key allocation. Lookups still borrow:
+/// `Arc<str>: Borrow<str>`, so `get(&str)` allocates nothing on the hot hit
+/// path.
 #[derive(Debug)]
 pub struct StatsTable {
-    keys: BoundedLru<String, KeyStats>,
+    keys: BoundedLru<Arc<str>, KeyStats>,
     evicted: u64,
     unwatched: u64,
 }
@@ -219,17 +227,17 @@ impl StatsTable {
             .iter()
             .filter_map(|k| keyexpr::new(k.as_str()).ok())
             .collect();
-        let doomed: Vec<String> = self
+        let doomed: Vec<Arc<str>> = self
             .keys
             .keys()
-            .filter(|key| match keyexpr::new(key.as_str()) {
+            .filter(|key| match keyexpr::new(&***key) {
                 Ok(ke) => gone.intersects(ke) && !kept.iter().any(|k| k.intersects(ke)),
                 Err(_) => false,
             })
             .cloned()
             .collect();
         for key in &doomed {
-            self.keys.remove(key);
+            self.keys.remove(&**key);
         }
         self.unwatched += doomed.len() as u64;
         doomed.len()
@@ -290,7 +298,7 @@ impl StatsTable {
             // the test seam, and eviction must follow the timeline it states.
             self.evicted += self.keys.admit(|s| s.last_seen) as u64;
             self.keys.insert(
-                key.to_string(),
+                Arc::from(key),
                 KeyStats {
                     count: 1,
                     bytes: payload_len as u64,
@@ -318,7 +326,38 @@ impl StatsTable {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, &KeyStats)> {
-        self.keys.iter().map(|(k, v)| (k.as_str(), v))
+        self.keys.iter().map(|(k, v)| (&**k, v))
+    }
+
+    /// The compact rows a [`KeyTreeSnapshot`](crate::KeyTreeSnapshot) is
+    /// folded from, plus the table's own O6 counters (#330).
+    ///
+    /// This is the **whole** of what the tree needs, and it is deliberately a
+    /// copy: [`MonitorCore::tick`](crate::MonitorCore::tick) holds the ingest
+    /// mutex for exactly this call and folds afterwards, so the network
+    /// callback thread waits on an O(keys) walk of `Copy` fields and one
+    /// refcount bump per key — never on the O(keys × chunks) `BTreeMap`
+    /// descent with a `String` allocation per new node that the fold is.
+    /// Before the split, four ticks a second each held the lock for the whole
+    /// rebuild, and `Monitor::watch`'s promise that a slow UI cannot push
+    /// back into the network layer was false for as long as each one took.
+    pub fn rows(&self) -> TreeRows {
+        TreeRows {
+            rows: self
+                .keys
+                .iter()
+                .map(|(key, s)| TreeRow {
+                    key: Arc::clone(key),
+                    count: s.count,
+                    bytes: s.bytes,
+                    rate_hz: s.rate_hz,
+                    last_seen: s.last_seen,
+                })
+                .collect(),
+            keys: self.keys.len(),
+            evicted: self.evicted,
+            unwatched: self.unwatched,
+        }
     }
 
     pub fn len(&self) -> usize {

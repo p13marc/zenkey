@@ -375,11 +375,50 @@ impl MonitorCore {
     }
 
     /// Rebuild the snapshot from the stats and announce it.
+    ///
+    /// **Two phases, and the split is the whole point** (#330). The stats
+    /// mutex is the one [`ingest`](Self::ingest) takes on zenoh's network
+    /// callback thread, so whatever this holds it for, the network layer
+    /// waits for. It therefore holds it for the O(keys) row copy
+    /// ([`StatsTable::rows`]) and folds the tree — O(keys × chunks) of
+    /// `BTreeMap` descents, a `String` per new node, ~300 000 map operations
+    /// at the 50 000-key bound — after releasing it. Four times a second the
+    /// old shape held the lock for the whole rebuild, which made
+    /// [`Monitor::watch`]'s promise that a slow UI cannot exert backpressure
+    /// into the network layer false four times a second.
+    ///
+    /// The fold still runs on the calling thread here. The periodic tick
+    /// takes [`tick_off_runtime`](Self::tick_off_runtime) instead, which puts
+    /// it on the blocking pool where that much CPU belongs.
     pub fn tick(&self) {
-        let snapshot = {
-            let stats = self.stats.lock().expect("stats lock");
-            KeyTreeSnapshot::build(&stats)
-        };
+        let rows = self.stats_rows();
+        self.publish(KeyTreeSnapshot::fold(rows));
+    }
+
+    /// [`tick`](Self::tick) with the fold on the blocking pool (#330): the
+    /// copy is taken here, the CPU is spent on a blocking thread, and the
+    /// runtime's workers stay free for the drains they exist for. Used by the
+    /// stats-tick task; `tick` remains the synchronous form for the paths
+    /// that publish a snapshot as part of another operation (a seed boundary,
+    /// an unwatch).
+    pub async fn tick_off_runtime(&self) {
+        let rows = self.stats_rows();
+        match tokio::task::spawn_blocking(move || KeyTreeSnapshot::fold(rows)).await {
+            Ok(snapshot) => self.publish(snapshot),
+            // A blocking-pool panic must not take the tick task with it: the
+            // snapshot simply does not advance this tick, and says so.
+            Err(e) => tracing::warn!("key-tree fold: {e}"),
+        }
+    }
+
+    /// The rows the fold needs — the entire critical section of a tick.
+    fn stats_rows(&self) -> crate::model::tree::TreeRows {
+        self.stats.lock().expect("stats lock").rows()
+    }
+
+    /// Publish a folded snapshot and announce it. Lock-free: an `ArcSwap`
+    /// store and a bounded send.
+    fn publish(&self, snapshot: KeyTreeSnapshot) {
         self.tree.store(Arc::new(snapshot));
         let _ = self.tx.send(FleetEvent::StatsTick);
     }
@@ -427,11 +466,26 @@ impl MonitorCore {
     /// ingest path, and nothing unwatched is ever ingested. A consumer that
     /// presents this window MUST say so (RFC 09 §5.1 O5 — a retained window
     /// over three watches is not a retained window over the bus).
-    pub fn retained(&self) -> Vec<Arc<SampleView>> {
-        self.retain
+    ///
+    /// **What this read costs the network thread** (#331): the retain mutex
+    /// is [`ingest`](Self::ingest)'s, taken on zenoh's callback thread, so a
+    /// read that walked the window blocked the network layer for as long as
+    /// the window was long — 64 MiB of 256-byte samples is ~260 000 refcount
+    /// atomics, and zengui calls this from `update()`. The ring is chunked
+    /// instead ([`crate::model::retain`]): under the lock this clones the
+    /// sealed chunks' pointers and the open tail — bounded by
+    /// `window / 1024 + 1024`, independent of payload — and the flatten into
+    /// the returned slice happens **after** the guard is dropped. The result
+    /// is an `Arc<[_]>` so passing the window on costs nothing again.
+    pub fn retained(&self) -> Arc<[Arc<SampleView>]> {
+        // Two statements, deliberately: the guard is dropped at the end of
+        // this one, and only then does the O(window) flatten run.
+        let parts = self
+            .retain
             .lock()
             .expect("retain lock")
-            .snapshot(Instant::now())
+            .parts(Instant::now());
+        parts.flatten()
     }
 
     /// The retained window's account of itself: budget in force, what it
@@ -566,7 +620,11 @@ impl Monitor {
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     interval.tick().await;
-                    core.tick();
+                    // Off the runtime (#330): the fold is the heaviest CPU
+                    // this crate schedules periodically, and a worker thread
+                    // spending 300 000 map operations on it is a worker not
+                    // draining anything.
+                    core.tick_off_runtime().await;
                 }
             }));
         }
@@ -1025,6 +1083,127 @@ mod tests {
         assert_eq!(window.len(), 10, "the ring is upstream of the lag");
         assert_eq!(window[0].key, "zs/v1/h-a/telemetry/x/m0");
         assert_eq!(window[9].key, "zs/v1/h-a/telemetry/x/m9");
+    }
+
+    /// #330: the ingest lock is held for the **copy**, not for the build.
+    ///
+    /// The measurement is a ratio rather than a wall-clock budget, because
+    /// what the issue asserts is a complexity claim: the critical section is
+    /// O(keys), the fold O(keys × chunks). Timed on the same table in the
+    /// same build, the copy must therefore come out a small fraction of the
+    /// fold — and it is the copy, and only the copy, that a network callback
+    /// thread waits behind.
+    #[test]
+    fn the_tick_holds_the_ingest_lock_only_for_the_row_copy() {
+        const KEYS: usize = 5_000;
+        let core = MonitorCore::bounded(2, KEYS * 2);
+        let now = Instant::now();
+        core.with_stats_mut(|stats| {
+            for i in 0..KEYS {
+                // Eight chunks: the fold does eight `BTreeMap` descents per
+                // key, the copy does one refcount bump.
+                stats.record(
+                    &format!(
+                        "zs/v1/h-{:04}/telemetry/proc-{i}/group/sub/leaf/m{i}",
+                        i % 97
+                    ),
+                    64,
+                    None,
+                    now,
+                    None,
+                    None,
+                );
+            }
+        });
+
+        // Phase 1 — everything the lock is held for.
+        let t0 = Instant::now();
+        let rows = core.stats_rows();
+        let copy = t0.elapsed();
+        assert_eq!(rows.rows.len(), KEYS);
+
+        // Phase 2 — everything that now happens with the lock released.
+        let t1 = Instant::now();
+        let snapshot = KeyTreeSnapshot::fold(rows);
+        let fold = t1.elapsed();
+        assert_eq!(snapshot.keys, KEYS);
+
+        // Measured at 5 000 keys of 8 chunks (debug): copy ~0.9 ms, fold
+        // ~48 ms — a factor of ~55. The assertion is loose enough to hold on
+        // a loaded CI box and tight enough that folding under the lock again
+        // fails it outright (the two phases would then be one number).
+        assert!(
+            copy * 4 < fold,
+            "the critical section must be a fraction of the fold: copy {copy:?}, fold {fold:?}"
+        );
+    }
+
+    /// The split changes what the lock costs, never what the snapshot says:
+    /// `build` (copy + fold) and the tick agree, key for key.
+    #[test]
+    fn the_split_fold_is_the_same_snapshot() {
+        let core = MonitorCore::new(8);
+        for i in 0..50 {
+            core.ingest(view(&format!("zs/v1/h-a/telemetry/x/m{i}"), 4), None);
+        }
+        core.tick();
+        let ticked = core.tree();
+        let direct = core.with_stats(KeyTreeSnapshot::build);
+        assert_eq!(ticked.keys, direct.keys);
+        assert_eq!(ticked.root.subtree_count, direct.root.subtree_count);
+        assert_eq!(ticked.root.subtree_bytes, direct.root.subtree_bytes);
+        assert_eq!(
+            ticked
+                .node(&["zs", "v1", "h-a", "telemetry", "x"])
+                .unwrap()
+                .subtree_keys,
+            50
+        );
+    }
+
+    /// #331: a retained-window read holds the ingest mutex for the chunk
+    /// pointers and the open tail, and flattens the window afterwards.
+    ///
+    /// The same shape of measurement as the tick's (#330), for the same
+    /// reason: the claim is that the under-lock half no longer scales with
+    /// the window. It is asserted as a ratio against the flatten — the half
+    /// that does scale — so a return to `ring.iter().cloned().collect()`
+    /// under the guard fails it.
+    #[test]
+    fn a_retained_read_holds_the_ingest_lock_for_chunk_pointers_only() {
+        const SAMPLES: usize = 40_000;
+        let core = MonitorCore::new(2);
+        let now = Instant::now();
+        for i in 0..SAMPLES {
+            core.ingest_at(
+                Arc::new(view(&format!("zs/v1/h-a/telemetry/x/m{i}"), 8)),
+                None,
+                now,
+                std::time::SystemTime::now(),
+            );
+        }
+
+        // Phase 1 — everything the network callback thread waits behind.
+        let t0 = Instant::now();
+        let parts = core
+            .retain
+            .lock()
+            .expect("retain lock")
+            .parts(Instant::now());
+        let under_lock = t0.elapsed();
+
+        // Phase 2 — everything that now happens with the guard dropped.
+        let t1 = Instant::now();
+        let window = parts.flatten();
+        let flatten = t1.elapsed();
+
+        assert_eq!(window.len(), SAMPLES, "the whole window, unchanged");
+        assert_eq!(window[0].key, "zs/v1/h-a/telemetry/x/m0");
+        assert!(
+            under_lock * 4 < flatten,
+            "the critical section must not scale with the window: \
+             under lock {under_lock:?}, flatten {flatten:?}"
+        );
     }
 
     /// RFC 09 §5.1 **O6** / v1.18 **R1**: the eviction populations stay

@@ -71,13 +71,21 @@ async fn capture(
         base,
         captured_at: zenkey_fleet::tape::record::rfc3339_now(),
     };
-    let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-    let mut writer = zenkey_fleet::ZrecWriter::new(std::io::BufWriter::new(file), &header)
+    // Off the runtime, both halves (#332): iced drives this task on the same
+    // runtime the monitor's drain runs on, so a blocking write per sample
+    // stalled the drain and the capture recorded its own drops.
+    let file = tokio::fs::File::create(&path)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_std()
+        .await;
+    let sink = zenkey_fleet::ZrecSink::spawn(std::io::BufWriter::new(file), &header)
+        .await
         .map_err(|e| e.to_string())?;
     let mut events = core.events();
     let recording = zenkey_fleet::record(
         &mut events,
-        &mut writer,
+        &sink,
         zenkey_fleet::RecordBounds::default(),
         |_, _| {},
     );
@@ -88,8 +96,7 @@ async fn capture(
         _ = stop => {}
         r = recording => r.map_err(|e| e.to_string())?,
     }
-    let (samples, dropped) = writer.counts();
-    writer.finish().map_err(|e| e.to_string())?;
+    let (samples, dropped) = sink.finish().await.map_err(|e| e.to_string())?;
     Ok((samples, dropped, path))
 }
 

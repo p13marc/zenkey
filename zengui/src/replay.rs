@@ -257,8 +257,13 @@ impl ReplayState {
     /// so. There is no `capture_dropped` here — the ring sits on the ingest
     /// path, upstream of the broadcast's lag; its own costs ride in
     /// `taken` and stay separate numbers (O6).
+    ///
+    /// The window arrives as the engine's shared `Arc<[_]>` snapshot (#331):
+    /// borrowed here, because the rows it is turned into are `Arc` clones
+    /// either way and taking it by value would only pin the whole slice for
+    /// the life of the replay.
     pub fn from_retained(
-        window: Vec<Arc<SampleView>>,
+        window: &[Arc<SampleView>],
         watched: Arc<[String]>,
         taken: RetentionStats,
     ) -> ReplayState {
@@ -269,11 +274,11 @@ impl ReplayState {
         // measurement instead of re-reading a moving "now" per scrub.
         let wall_epoch = std::time::SystemTime::now() - epoch.elapsed();
         let rows: Vec<ReplayRow> = window
-            .into_iter()
+            .iter()
             .map(|view| ReplayRow {
                 t_us: u64::try_from(view.received.saturating_duration_since(epoch).as_micros())
                     .unwrap_or(u64::MAX),
-                view,
+                view: Arc::clone(view),
             })
             .collect();
         let span_us = rows.last().map_or(0, |r| r.t_us);

@@ -9,9 +9,11 @@
 //! pipeline in one call; encoding resolution is **sample > registry > sniff**
 //! and the sniff never goes away.
 
-use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
+
+use crate::model::bounded::BoundedLru;
 
 use anyhow::Result;
 use zenkey::schema::decode::{DecodeError, DecodedPayload, DecoderRegistry};
@@ -22,7 +24,57 @@ use zenoh::Session;
 use crate::model::registry::SliceSet;
 use crate::report::{SchemaDrift, TotalityGap};
 
+/// How many producers one store remembers anything about (#340).
+///
+/// The keys these maps are built from come off the wire —
+/// `parse_full(base, key)` over whatever traffic an explorer happens to
+/// watch — not from a trusted enumeration, so "a fleet's producer set is
+/// small" is an assumption about well-behaved traffic and not a bound. 1024
+/// is far past any fleet the reference application has, and far short of
+/// what a runaway key family could mint in an overnight session.
+pub const DEFAULT_MAX_PRODUCERS: usize = 1_024;
+
+/// What one store's bounds have cost, as of one read (#340, RFC 13 §3 O6).
+///
+/// Three numbers, not one, because they are three different facts and only
+/// the first hides anything: an evicted **set** is a schema the next sample
+/// of that producer must re-ask for; an evicted **querier** is routing state
+/// that gets re-declared; an evicted **gate** is at worst one duplicate GET.
+/// Folding them would report a re-declared querier as lost knowledge.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StoreBounds {
+    /// The producer bound in force.
+    pub max_producers: usize,
+    /// Producers currently answered-for — the length of [`SchemaStore::known`].
+    pub producers: usize,
+    /// Cached `describe` answers dropped under the bound. Non-zero means a
+    /// decode may re-ask for something this store had already learned.
+    pub sets_evicted: u64,
+    /// Declared queriers dropped under the bound.
+    pub queriers_evicted: u64,
+    /// Single-flight gates dropped under the bound.
+    pub gates_evicted: u64,
+}
+
+/// One entry with the recency `BoundedLru` orders by.
+///
+/// A monotone counter rather than a clock, exactly as
+/// [`FactsCache`](crate::model::facts::FactsCache) does it: these entries have
+/// no timestamp of their own, and "least recently *used*" is the property
+/// that matters — a producer being decoded right now must outlive one seen
+/// once an hour ago.
+#[derive(Debug)]
+struct Entry<V> {
+    value: V,
+    seen: u64,
+}
+
 /// Per-producer schema sets, fetched lazily and cached for the process.
+///
+/// **Bounded** (#340). All three maps are keyed by a producer name lifted out
+/// of arbitrary bus traffic, so all three are `BoundedLru` at
+/// [`DEFAULT_MAX_PRODUCERS`], and each keeps its own eviction count —
+/// [`SchemaStore::bounds`], beside [`SchemaStore::known`].
 pub struct SchemaStore {
     base: String,
     timeout: Duration,
@@ -33,28 +85,48 @@ pub struct SchemaStore {
     /// the schema for this one type" was the other half of issue #100's cost,
     /// and the quieter half — a descriptor pool rebuild at least looks
     /// expensive.
-    sets: Mutex<HashMap<String, Cached>>,
+    sets: Mutex<BoundedLru<String, Entry<Cached>>>,
     /// One declared querier per producer's describe key (#37), reused across
-    /// the negative-TTL re-asks. Bounded by fleet producer count; entries
-    /// live for the store's lifetime (no eviction — a fleet's producer set
-    /// is small and a stale querier is only idle routing state).
-    queriers: Mutex<HashMap<String, std::sync::Arc<crate::bus::query::RepeatingQuery>>>,
+    /// the negative-TTL re-asks.
+    queriers: Mutex<BoundedLru<String, Entry<std::sync::Arc<crate::bus::query::RepeatingQuery>>>>,
     /// One in-flight `describe` per producer. A hot bus misses on many
     /// samples of the same producer at once — the first sample's GET is
     /// still on the wire when the second arrives — and the store used to
     /// fan one GET per miss at a producer that had been asked microseconds
     /// earlier. The losers wait on the winner's gate and then read its
     /// answer out of `sets`, so the fleet sees exactly one ask.
-    ///
-    /// Bounded and unevicted for the same reason `queriers` is: an entry is
-    /// a bare async mutex, and a fleet's producer set is small.
-    inflight: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    inflight: Mutex<BoundedLru<String, Entry<std::sync::Arc<tokio::sync::Mutex<()>>>>>,
+    /// The recency clock all three maps order by, and their three ledgers.
+    clock: std::sync::atomic::AtomicU64,
+    sets_evicted: std::sync::atomic::AtomicU64,
+    queriers_evicted: std::sync::atomic::AtomicU64,
+    gates_evicted: std::sync::atomic::AtomicU64,
     /// Behind a lock because registration is a `&self` act: the store is
     /// shared through an `Arc` by every frontend that has one, and a
     /// `&mut self` setter on it is unreachable by construction. Read-locked
     /// per decode, which is the same order of cost as the `sets` lookup that
     /// preceded it.
     decoders: std::sync::RwLock<DecoderRegistry>,
+    /// While set, a **decode** answers from the cache or not at all — see
+    /// [`SchemaStore::seal`] (#337).
+    sealed: std::sync::atomic::AtomicBool,
+}
+
+/// A sealed store, for as long as this guard lives ([`SchemaStore::seal`]).
+///
+/// A guard rather than a pair of calls because every judging window has
+/// `?`-shaped ways out, and a store left sealed by an early return would
+/// answer `NoSchema` for the rest of the process.
+pub struct Sealed<'a> {
+    store: &'a SchemaStore,
+}
+
+impl Drop for Sealed<'_> {
+    fn drop(&mut self) {
+        self.store
+            .sealed
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// How long "asked, and answered with nothing usable" stays authoritative
@@ -133,14 +205,72 @@ enum Fetched {
 
 impl SchemaStore {
     pub fn new(base: impl Into<String>, timeout: Duration) -> Self {
+        SchemaStore::bounded(base, timeout, DEFAULT_MAX_PRODUCERS)
+    }
+
+    /// A store that remembers at most `max_producers` producers (#340).
+    pub fn bounded(base: impl Into<String>, timeout: Duration, max_producers: usize) -> Self {
         SchemaStore {
             base: base.into(),
             timeout,
-            sets: Mutex::new(HashMap::new()),
-            queriers: Mutex::new(HashMap::new()),
-            inflight: Mutex::new(HashMap::new()),
+            sets: Mutex::new(BoundedLru::with_capacity(max_producers)),
+            queriers: Mutex::new(BoundedLru::with_capacity(max_producers)),
+            inflight: Mutex::new(BoundedLru::with_capacity(max_producers)),
             decoders: std::sync::RwLock::new(DecoderRegistry::new()),
+            sealed: std::sync::atomic::AtomicBool::new(false),
+            clock: std::sync::atomic::AtomicU64::new(0),
+            sets_evicted: std::sync::atomic::AtomicU64::new(0),
+            queriers_evicted: std::sync::atomic::AtomicU64::new(0),
+            gates_evicted: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// The next recency stamp. Monotone and shared by all three maps: they
+    /// are three views of the same producer set, and ordering them on one
+    /// clock keeps "least recently used" meaning the same thing in each.
+    fn tick(&self) -> u64 {
+        self.clock.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// What the bounds hold and what they have cost (#340, RFC 13 §3 O6).
+    ///
+    /// Read it beside [`known`](Self::known): that says what the store can
+    /// answer for, this says what it stopped being able to answer for.
+    pub fn bounds(&self) -> StoreBounds {
+        let sets = self.sets.lock().expect("store lock");
+        StoreBounds {
+            max_producers: sets.max_keys(),
+            producers: sets.len(),
+            sets_evicted: self.sets_evicted.load(Ordering::Relaxed),
+            queriers_evicted: self.queriers_evicted.load(Ordering::Relaxed),
+            gates_evicted: self.gates_evicted.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Stop **decodes** from going to the bus until the guard drops (#337).
+    ///
+    /// A judging window's drain loop calls [`decode_sample`] per sample, and
+    /// on a cache miss that used to be a `describe` GET, awaited inside the
+    /// loop, bounded by this store's timeout. Nobody drains the monitor's
+    /// bounded broadcast while it is in flight, so the window loses samples
+    /// to its own decode — and loses them twice over, because the window's
+    /// deadline does not extend to cover the wait. Self-inflicted
+    /// `Dropped(n)` in the one place where the whole product is a verdict
+    /// about a window (RFC 13 §3 O6).
+    ///
+    /// Sealed, a miss is simply a miss: [`set_for`](Self::set_for) answers
+    /// from the cache or returns `None`, which reads through as
+    /// `NotValidated(NoSchema)` — "asked, none served" — and records nothing,
+    /// because a seal is a fact about the observer, not about the producer.
+    ///
+    /// It does **not** stop the store talking to the fleet: [`prewarm`] still
+    /// asks. That is the distinction — a deliberate ask, made where the
+    /// caller has decided it is safe to wait, is fine; an incidental one from
+    /// inside a drain loop is not.
+    pub fn seal(&self) -> Sealed<'_> {
+        self.sealed
+            .store(true, std::sync::atomic::Ordering::Release);
+        Sealed { store: self }
     }
 
     /// Register a custom kind's codec (RFC 08 §7 is open to kinds beyond the
@@ -168,10 +298,30 @@ impl SchemaStore {
     /// Authoritative, not a hint: it overwrites whatever the store held,
     /// including a negative entry still inside its backoff.
     pub fn insert(&self, producer: impl Into<String>, set: SchemaSet) {
-        self.sets
-            .lock()
-            .expect("store lock")
-            .insert(producer.into(), Cached::Served(std::sync::Arc::new(set)));
+        self.remember(producer.into(), Cached::Served(std::sync::Arc::new(set)));
+    }
+
+    /// Put one producer's cache entry in, under the bound, counting what the
+    /// bound refused (#340).
+    fn remember(&self, producer: String, cached: Cached) {
+        let seen = self.tick();
+        let mut sets = self.sets.lock().expect("store lock");
+        // Only a *new* producer needs room made: overwriting one that is
+        // already held does not grow the map, and evicting for it would drop
+        // a stranger's entry to make space that was never needed.
+        if sets.get(producer.as_str()).is_none() {
+            let dropped = sets.admit(|e| e.seen) as u64;
+            if dropped > 0 {
+                self.sets_evicted.fetch_add(dropped, Ordering::Relaxed);
+            }
+        }
+        sets.insert(
+            producer,
+            Entry {
+                value: cached,
+                seen,
+            },
+        );
     }
 
     /// The schema for `type_name` as served by `producer`, fetching
@@ -207,14 +357,30 @@ impl SchemaStore {
         session: &Session,
         producer: &str,
     ) -> Option<std::sync::Arc<SchemaSet>> {
+        let may_ask = !self.sealed.load(std::sync::atomic::Ordering::Acquire);
+        self.set_for_within(session, producer, may_ask).await
+    }
+
+    /// [`set_for`](Self::set_for), stating whether this caller is allowed to
+    /// go to the bus. The seal is a caller-level policy (#337), so the one
+    /// path that is *meant* to ask — [`prewarm`] — passes `true` regardless.
+    async fn set_for_within(
+        &self,
+        session: &Session,
+        producer: &str,
+        may_ask: bool,
+    ) -> Option<std::sync::Arc<SchemaSet>> {
         if let Lookup::Answered(hit) = self.lookup(producer) {
             return hit;
         }
+        if !may_ask {
+            // Sealed: a miss stays a miss, and nothing is recorded — the
+            // store learned nothing about this producer, and a negative entry
+            // would outlive the window that refused to ask.
+            return None;
+        }
         // Singleflight: hold the producer's gate for the duration of the ask.
-        let gate = {
-            let mut inflight = self.inflight.lock().expect("inflight lock");
-            std::sync::Arc::clone(inflight.entry(producer.to_string()).or_default())
-        };
+        let gate = self.gate_for(producer);
         let _held = gate.lock().await;
         // Whoever held the gate before us has already written its answer —
         // served or missing — so ask only if the cache is still undecided.
@@ -239,25 +405,59 @@ impl SchemaStore {
                 attempts: 0,
             }),
         };
-        let mut sets = self.sets.lock().expect("store lock");
         let served = match &entry {
             Cached::Served(set) => Some(std::sync::Arc::clone(set)),
             Cached::Missing(_) => None,
         };
-        sets.insert(producer.to_string(), entry);
+        self.remember(producer.to_string(), entry);
         served
+    }
+
+    /// This producer's single-flight gate, admitted under the bound (#340).
+    ///
+    /// An evicted gate costs at most one duplicate `describe` GET: whoever
+    /// still holds the old `Arc` is still gated by it, and a newcomer simply
+    /// makes a new one. That is why its ledger is separate from the sets' —
+    /// it is not lost knowledge.
+    fn gate_for(&self, producer: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        let seen = self.tick();
+        let mut inflight = self.inflight.lock().expect("inflight lock");
+        if let Some(entry) = inflight.get_mut(producer) {
+            entry.seen = seen;
+            return std::sync::Arc::clone(&entry.value);
+        }
+        let dropped = inflight.admit(|e| e.seen) as u64;
+        if dropped > 0 {
+            self.gates_evicted.fetch_add(dropped, Ordering::Relaxed);
+        }
+        let gate = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+        inflight.insert(
+            producer.to_string(),
+            Entry {
+                value: std::sync::Arc::clone(&gate),
+                seen,
+            },
+        );
+        gate
     }
 
     /// What the cache alone can say about `producer`: a verdict, or how many
     /// consecutive zero-reply asks precede the next one (carried across so
     /// the backoff actually grows).
+    ///
+    /// A hit is a *use*, so it refreshes the entry's recency: the producers
+    /// being decoded right now are the ones the bound must keep (#340).
     fn lookup(&self, producer: &str) -> Lookup {
-        let sets = self.sets.lock().expect("store lock");
-        match sets.get(producer) {
-            Some(Cached::Served(set)) => Lookup::Answered(Some(std::sync::Arc::clone(set))),
-            Some(Cached::Missing(m)) if !m.may_reask() => Lookup::Answered(None),
-            Some(Cached::Missing(m)) => Lookup::Ask(m.attempts),
-            None => Lookup::Ask(0),
+        let seen = self.tick();
+        let mut sets = self.sets.lock().expect("store lock");
+        let Some(entry) = sets.get_mut(producer) else {
+            return Lookup::Ask(0);
+        };
+        entry.seen = seen;
+        match &entry.value {
+            Cached::Served(set) => Lookup::Answered(Some(std::sync::Arc::clone(set))),
+            Cached::Missing(m) if !m.may_reask() => Lookup::Answered(None),
+            Cached::Missing(m) => Lookup::Ask(m.attempts),
         }
     }
 
@@ -285,7 +485,7 @@ impl SchemaStore {
         let sets = self.sets.lock().expect("store lock");
         let mut out: Vec<(String, bool)> = sets
             .iter()
-            .map(|(p, c)| (p.clone(), matches!(c, Cached::Served(_))))
+            .map(|(p, e)| (p.clone(), matches!(e.value, Cached::Served(_))))
             .collect();
         out.sort();
         out
@@ -293,8 +493,12 @@ impl SchemaStore {
 
     async fn fetch(&self, session: &Session, producer: &str) -> Fetched {
         let cached = {
-            let queriers = self.queriers.lock().expect("querier lock");
-            queriers.get(producer).cloned()
+            let seen = self.tick();
+            let mut queriers = self.queriers.lock().expect("querier lock");
+            queriers.get_mut(producer).map(|e| {
+                e.seen = seen;
+                std::sync::Arc::clone(&e.value)
+            })
         };
         let querier = match cached {
             Some(q) => q,
@@ -318,11 +522,29 @@ impl SchemaStore {
                 // A concurrent miss may have declared first; keep whichever
                 // landed (the loser undeclares itself on drop — idle state,
                 // not a leak).
+                let seen = self.tick();
                 let mut queriers = self.queriers.lock().expect("querier lock");
-                queriers
-                    .entry(producer.to_string())
-                    .or_insert(declared)
-                    .clone()
+                if let Some(entry) = queriers.get_mut(producer) {
+                    entry.seen = seen;
+                    std::sync::Arc::clone(&entry.value)
+                } else {
+                    // Room, under the bound (#340). An evicted querier is
+                    // routing state, not knowledge — it is re-declared on the
+                    // next miss, which is why its ledger is its own.
+                    let dropped = queriers.admit(|e| e.seen);
+                    if dropped > 0 {
+                        self.queriers_evicted
+                            .fetch_add(dropped as u64, Ordering::Relaxed);
+                    }
+                    queriers.insert(
+                        producer.to_string(),
+                        Entry {
+                            value: std::sync::Arc::clone(&declared),
+                            seen,
+                        },
+                    );
+                    declared
+                }
             }
         };
         let Ok(answers) = querier.fetch().await else {
@@ -750,6 +972,46 @@ impl DecodedSample {
 /// it (the schema store, the registry), then the sample itself — key,
 /// declared encoding, bytes. It used to open `(store, session, slices, base,
 /// …)`, which put the deployment fourth and split it from its session.
+/// Ask every producer the loaded registry names for its `describe`, before
+/// a judging window opens (#337). Returns how many now have a served set.
+///
+/// **This is exhaustive, not a heuristic.** [`decode_sample`] refines a key
+/// against the slices *first* and only then asks the store, so the only
+/// producers it can ever miss on are the ones the registry names — the set
+/// this walks. After a pre-warm, every decode inside the window is a cache
+/// hit or a cached miss, and neither touches the bus.
+///
+/// Pair it with [`SchemaStore::seal`], which covers what warming cannot: a
+/// producer that answered nothing is cached as a *miss with a backoff*, and
+/// the backoff would expire mid-window and put the GET back inside the drain
+/// loop.
+///
+/// With no registry loaded there is nothing to warm and nothing to miss on —
+/// `decode_sample` returns `NoRegistry` before it reaches the store.
+///
+/// Sequential, like the doctor's own describe sweep: each ask is bounded by
+/// the store's timeout, and the phase is deliberately *before* anything is
+/// watched, so its cost is latency to the window's start rather than samples
+/// lost inside it.
+pub async fn prewarm(
+    fleet: &crate::Fleet<'_>,
+    store: &SchemaStore,
+    slices: Option<&SliceSet>,
+) -> usize {
+    let Some(slices) = slices else { return 0 };
+    let mut served = 0;
+    for slice in slices.slices() {
+        if store
+            .set_for_within(fleet.session(), &slice.name, true)
+            .await
+            .is_some()
+        {
+            served += 1;
+        }
+    }
+    served
+}
+
 pub async fn decode_sample(
     fleet: &crate::Fleet<'_>,
     store: &SchemaStore,
@@ -821,6 +1083,79 @@ pub async fn decode_sample(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #340: the store's maps are bounded, and each bound counts what it
+    /// dropped — the discipline every other accumulating structure in this
+    /// crate already keeps (`StatsTable::evicted`, `Retention::evicted`,
+    /// `FactsCache::evicted`).
+    ///
+    /// The keys come from `parse_full` over arbitrary bus traffic, so "a
+    /// fleet's producer set is small" was never a bound — it was a hope about
+    /// what an explorer happens to be pointed at.
+    #[test]
+    fn the_store_is_bounded_and_says_what_the_bound_cost() {
+        const PRODUCERS: usize = 200;
+        let set = || {
+            SchemaSet::parse(
+                r#"{"schema_version":1,"app":"t",
+                    "types":{"W":{"kind":"cddl","hash":"sha256:00","spec":"x = int"}}}"#,
+            )
+            .expect("fixture parses")
+        };
+        let store = SchemaStore::bounded("", Duration::from_millis(1), 16);
+        for i in 0..PRODUCERS {
+            store.insert(format!("p{i:04}"), set());
+        }
+
+        let bounds = store.bounds();
+        assert_eq!(bounds.max_producers, 16);
+        assert!(bounds.producers <= 16, "the bound bit: {bounds:?}");
+        assert_eq!(
+            bounds.producers as u64 + bounds.sets_evicted,
+            PRODUCERS as u64,
+            "every producer is held or counted: {bounds:?}"
+        );
+        assert_eq!(store.known().len(), bounds.producers, "known() agrees");
+        // The three ledgers are three facts: nothing was declared and nothing
+        // was gated here, so only the sets' bound has a cost to report.
+        assert_eq!(bounds.queriers_evicted, 0);
+        assert_eq!(bounds.gates_evicted, 0);
+    }
+
+    /// Eviction is least-recently-**used**, not least-recently-inserted: the
+    /// producer being decoded right now outlives one seen once (#340).
+    #[test]
+    fn a_producer_still_being_read_survives_the_bound() {
+        let set = || {
+            SchemaSet::parse(
+                r#"{"schema_version":1,"app":"t",
+                    "types":{"W":{"kind":"cddl","hash":"sha256:00","spec":"x = int"}}}"#,
+            )
+            .expect("fixture parses")
+        };
+        let store = SchemaStore::bounded("", Duration::from_millis(1), 8);
+        store.insert("hot", set());
+        for i in 0..7 {
+            store.insert(format!("cold{i}"), set());
+        }
+        // Read `hot` between every further insert — a decode's cache hit.
+        for i in 7..64 {
+            assert!(
+                matches!(store.lookup("hot"), Lookup::Answered(Some(_))),
+                "the hot producer was evicted at insert {i}"
+            );
+            store.insert(format!("cold{i}"), set());
+        }
+        assert!(store.bounds().sets_evicted > 0, "the bound did bite");
+        assert!(
+            store
+                .known()
+                .iter()
+                .any(|(p, served)| p == "hot" && *served),
+            "the producer in use survived: {:?}",
+            store.known()
+        );
+    }
 
     /// RFC 08 §7's totality set for one producer: every type the slice
     /// references — subject types, procedure request/reply, blob references,

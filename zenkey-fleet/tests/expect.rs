@@ -237,3 +237,119 @@ qos = "transition"
 fn store_of() -> zenkey_fleet::model::decode::SchemaStore {
     zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(300))
 }
+
+/// #337: a cold schema store must not cost the window the samples it is
+/// judging.
+///
+/// Nothing on this bus serves `describe`, so the first sample of the
+/// producer used to open a GET that waited the store's whole timeout —
+/// inside the drain loop, with nobody attending the monitor's 1024-slot
+/// broadcast, and with the window's deadline not extending to make up for
+/// it. The window came back both thinner and shorter than it claimed, and
+/// `dropped` blamed the bus.
+///
+/// The traffic is shaped so the answer is a property rather than a race:
+/// bursts of 120 (well inside the broadcast's slots, so no single burst can
+/// overflow it) with 5 ms between them. A drain that is not waiting on the
+/// fleet empties a burst in microseconds; one that is waits ~800 ms and
+/// overflows within a dozen bursts.
+///
+/// What the verdict says is unchanged and still honest: no schema is served,
+/// so every sample is `NotValidated`, and `--valid` is NOT MET. The point is
+/// that it is not met *cleanly* — nothing was lost while deciding it.
+///
+/// Measured on this exact traffic while the fix was written: without the
+/// pre-warm and the seal, 419 of the 1 440 samples were dropped, every one
+/// of them to the observer's own GET.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cold_schema_store_costs_the_window_nothing() {
+    const BURSTS: usize = 12;
+    const PER_BURST: usize = 120;
+    const SAMPLES: u64 = (BURSTS * PER_BURST) as u64;
+
+    let slice = zenkey::parse_slice(
+        r#"
+[registry]
+version = "1.0"
+app = "demo"
+convention = 1
+[producer]
+name = "demo"
+[[subject]]
+path = "health"
+class = "state"
+type = "Health"
+"#,
+    )
+    .expect("fixture slice parses");
+    let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
+
+    let (a, b) = peer_pair().await;
+    // A `describe` queryable that never answers. That — not an absent
+    // queryable — is the stall the issue is about: with nothing declared,
+    // zenoh ends the query at once, while a producer that is merely slow (or
+    // wedged) holds the GET for the store's whole timeout.
+    let stuck: std::sync::Arc<std::sync::Mutex<Vec<zenoh::query::Query>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let _describe = a
+        .declare_queryable("v1/h-cccccccccccc/@rpc/demo/describe")
+        .callback({
+            let stuck = std::sync::Arc::clone(&stuck);
+            move |q| stuck.lock().expect("stuck lock").push(q)
+        })
+        .await
+        .expect("describe queryable");
+
+    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+        .await
+        .expect("declare");
+    let matching = publication.matching_events().await.expect("events");
+
+    let expect = tokio::spawn({
+        let b = b.clone();
+        async move {
+            let spec = ExpectSpec {
+                valid_payload: true,
+                count: Some(SAMPLES),
+                ..spec(KEY, 4.0)
+            };
+            run_expect(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                Some(&slices),
+                // Long on purpose: a `describe` that goes unanswered is
+                // exactly the stall under test.
+                &zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(800)),
+                &spec,
+            )
+            .await
+        }
+    });
+
+    // The window's subscriber raises the badge — after the pre-warm, which
+    // is the whole point: the waiting happens before anything is watched.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(10), matching.recv())
+            .await
+            .expect("matching within 10s")
+            .expect("listener alive")
+    );
+    for _ in 0..BURSTS {
+        for _ in 0..PER_BURST {
+            publication.send(b"{}".to_vec(), None).await.expect("send");
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    let report = expect.await.expect("join").expect("run");
+    assert_eq!(
+        report.dropped, 0,
+        "the observer lost samples to its own schema fetch"
+    );
+    assert_eq!(report.samples, SAMPLES, "the whole burst was observed");
+    assert_eq!(report.verdict, ExpectVerdict::NotMet, "no schema is served");
+    assert!(
+        report.violations[0].contains("validity unknowable"),
+        "{:?}",
+        report.violations
+    );
+}

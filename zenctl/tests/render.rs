@@ -1185,6 +1185,7 @@ fn a_get_with_no_replies_names_the_three_silences() {
     let silent = zenctl::render::GetReport {
         selector: "acme/v1/**/state/**".into(),
         timeout_s: 5.0,
+        elided: 0,
         answers: vec![],
     };
     let n = notes(&silent);
@@ -1399,6 +1400,7 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&zenctl::render::GetReport {
         selector: "acme/v1/**/state/**".into(),
         timeout_s: 5.0,
+        elided: 0,
         answers: vec![],
     });
     assert_eq!(s.asked, ["acme/v1/**/state/**"]);

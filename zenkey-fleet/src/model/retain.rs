@@ -28,6 +28,23 @@
 //! The ring holds `Arc<SampleView>` — retaining a sample is a refcount bump
 //! on zenoh's refcounted buffers, not a copy (`docs/zero-copy.md` §4); the
 //! byte budget accounts the payload bytes those Arcs keep alive.
+//!
+//! ## Why the ring is chunked (#331)
+//!
+//! The ring lives behind [`crate::MonitorCore`]'s retain mutex, which
+//! `ingest` takes on **zenoh's network callback thread**. A read that cloned
+//! the whole `VecDeque` therefore stalled the network layer for one refcount
+//! atomic per retained sample — ~260 000 of them at the default budget — and
+//! zengui called it from `update()`, twice in a row, per retained-window
+//! entry.
+//!
+//! So the ring is a queue of **sealed, immutable chunks** (1024 samples
+//! each) plus one open tail. A read clones the chunk pointers and the tail
+//! (`RetainedParts`) — bounded by `window / CHUNK + CHUNK` pointer clones,
+//! ~1 300 atomics at the same budget, and *nothing* that grows with the
+//! payload — and flattens them into the handed-out `Arc<[_]>` after the lock
+//! is released. Pushes stay O(1) amortised: a chunk is sealed once per
+//! `CHUNK` samples, which is a `drain` into an `Arc<[_]>` and nothing else.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -99,12 +116,57 @@ pub fn sample_cost(view: &SampleView) -> usize {
         + OVERHEAD
 }
 
+/// Samples per sealed chunk — the granularity a read pays for (#331).
+///
+/// 1024 is the trade: a read clones `window / 1024` chunk pointers plus at
+/// most 1024 tail pointers, and a push seals a chunk once per 1024 samples.
+/// Both sides of that stay in the low thousands of atomics at any budget an
+/// explorer is given.
+const CHUNK: usize = 1024;
+
+/// A read of the ring, taken **under** the mutex and flattened outside it
+/// (#331): sealed chunk pointers, how far into the first one the window
+/// starts, and a copy of the open tail. Cloning this is bounded by
+/// `window / CHUNK + CHUNK` pointer clones; nothing in it walks the window.
+pub(crate) struct RetainedParts {
+    sealed: Vec<Arc<[Arc<SampleView>]>>,
+    front: usize,
+    tail: Vec<Arc<SampleView>>,
+    len: usize,
+}
+
+impl RetainedParts {
+    /// The window, oldest first. O(window) — which is why it happens with
+    /// the ingest mutex released.
+    pub(crate) fn flatten(self) -> Arc<[Arc<SampleView>]> {
+        let mut out: Vec<Arc<SampleView>> = Vec::with_capacity(self.len);
+        for (i, chunk) in self.sealed.iter().enumerate() {
+            let from = if i == 0 { self.front } else { 0 };
+            out.extend(chunk[from..].iter().cloned());
+        }
+        out.extend(self.tail);
+        Arc::from(out)
+    }
+}
+
 /// The ring itself. Owned by [`crate::MonitorCore`] behind its own mutex;
 /// everything here is synchronous and allocation-light.
+///
+/// Sealed chunks and an open tail rather than one `VecDeque`, so that a read
+/// is bounded work under that mutex — see the module header (#331).
 #[derive(Debug)]
 pub(crate) struct Retention {
     budget: RetentionBudget,
-    ring: VecDeque<Arc<SampleView>>,
+    /// Sealed chunks, oldest first. Immutable once sealed, which is what
+    /// makes handing one out a pointer clone.
+    sealed: VecDeque<Arc<[Arc<SampleView>]>>,
+    /// Samples already evicted from the front of the oldest sealed chunk.
+    front: usize,
+    /// The chunk being filled. Sealed at [`CHUNK`] samples.
+    tail: VecDeque<Arc<SampleView>>,
+    /// Samples held across both — `sealed` cannot report its own length
+    /// cheaply once `front` is non-zero.
+    len: usize,
     bytes: usize,
     evicted: u64,
     expired: u64,
@@ -114,7 +176,10 @@ impl Retention {
     pub(crate) fn new(budget: RetentionBudget) -> Retention {
         Retention {
             budget,
-            ring: VecDeque::new(),
+            sealed: VecDeque::new(),
+            front: 0,
+            tail: VecDeque::new(),
+            len: 0,
             bytes: 0,
             evicted: 0,
             expired: 0,
@@ -129,9 +194,13 @@ impl Retention {
     /// Retain one sample, then enforce both budgets (oldest out first).
     pub(crate) fn push(&mut self, view: Arc<SampleView>, now: Instant) {
         self.bytes += sample_cost(&view);
-        self.ring.push_back(view);
+        self.tail.push_back(view);
+        self.len += 1;
+        if self.tail.len() >= CHUNK {
+            self.sealed.push_back(self.tail.drain(..).collect());
+        }
         self.expire(now);
-        while self.bytes > self.budget.max_bytes && self.ring.len() > 1 {
+        while self.bytes > self.budget.max_bytes && self.len > 1 {
             self.pop_front();
             self.evicted += 1;
         }
@@ -140,17 +209,45 @@ impl Retention {
         // read as a quiet bus.
     }
 
+    /// The oldest retained sample, wherever it lives.
+    fn oldest(&self) -> Option<&Arc<SampleView>> {
+        match self.sealed.front() {
+            Some(chunk) => chunk.get(self.front),
+            None => self.tail.front(),
+        }
+    }
+
+    /// The newest retained sample, wherever it lives.
+    fn newest(&self) -> Option<&Arc<SampleView>> {
+        match self.tail.back() {
+            Some(view) => Some(view),
+            None => self.sealed.back().and_then(|chunk| chunk.last()),
+        }
+    }
+
     fn pop_front(&mut self) {
-        if let Some(v) = self.ring.pop_front() {
+        let popped = match self.sealed.front() {
+            Some(chunk) => {
+                let view = Arc::clone(&chunk[self.front]);
+                self.front += 1;
+                if self.front >= chunk.len() {
+                    self.sealed.pop_front();
+                    self.front = 0;
+                }
+                Some(view)
+            }
+            None => self.tail.pop_front(),
+        };
+        if let Some(v) = popped {
             self.bytes = self.bytes.saturating_sub(sample_cost(&v));
+            self.len -= 1;
         }
     }
 
     /// Age out everything past the duration budget.
     fn expire(&mut self, now: Instant) {
         while self
-            .ring
-            .front()
+            .oldest()
             .is_some_and(|v| now.saturating_duration_since(v.received) > self.budget.max_age)
         {
             self.pop_front();
@@ -158,16 +255,29 @@ impl Retention {
         }
     }
 
-    /// The window, oldest first — `Arc` clones, not copies.
-    pub(crate) fn snapshot(&mut self, now: Instant) -> Vec<Arc<SampleView>> {
+    /// The window as chunk pointers — bounded work, for the caller to
+    /// flatten once the mutex is released (#331).
+    pub(crate) fn parts(&mut self, now: Instant) -> RetainedParts {
         self.expire(now);
-        self.ring.iter().cloned().collect()
+        RetainedParts {
+            sealed: self.sealed.iter().map(Arc::clone).collect(),
+            front: self.front,
+            tail: self.tail.iter().map(Arc::clone).collect(),
+            len: self.len,
+        }
+    }
+
+    /// The window, oldest first — both halves in one call, for the module's
+    /// own tests and for callers that hold the ring exclusively.
+    #[cfg(test)]
+    pub(crate) fn snapshot(&mut self, now: Instant) -> Arc<[Arc<SampleView>]> {
+        self.parts(now).flatten()
     }
 
     /// The window's account of itself, budgets applied as of `now`.
     pub(crate) fn stats(&mut self, now: Instant) -> RetentionStats {
         self.expire(now);
-        let span = match (self.ring.front(), self.ring.back()) {
+        let span = match (self.oldest(), self.newest()) {
             (Some(oldest), Some(newest)) => {
                 newest.received.saturating_duration_since(oldest.received)
             }
@@ -175,7 +285,7 @@ impl Retention {
         };
         RetentionStats {
             budget: self.budget,
-            retained: self.ring.len(),
+            retained: self.len,
             retained_bytes: self.bytes,
             span,
             evicted: self.evicted,
@@ -274,6 +384,54 @@ mod tests {
             s.retained_bytes > s.budget.max_bytes,
             "over budget, and said so"
         );
+    }
+
+    /// The chunking is invisible from the outside (#331): order, length and
+    /// the span read the same across a sealed boundary as inside one chunk.
+    #[test]
+    fn the_window_reads_the_same_across_chunk_boundaries() {
+        let now = Instant::now();
+        let mut r = Retention::new(RetentionBudget {
+            max_bytes: usize::MAX,
+            max_age: Duration::from_secs(3600),
+        });
+        let total = CHUNK * 2 + 7;
+        for i in 0..total {
+            r.push(view(&format!("k{i:05}"), 8, now), now);
+        }
+        let kept = r.snapshot(now);
+        assert_eq!(kept.len(), total);
+        assert_eq!(kept[0].key, "k00000");
+        assert_eq!(kept[CHUNK].key, format!("k{CHUNK:05}"), "the seam holds");
+        assert_eq!(kept.last().unwrap().key, format!("k{:05}", total - 1));
+        assert_eq!(r.stats(now).retained, total);
+    }
+
+    /// Eviction walks *into* a sealed chunk rather than dropping it whole:
+    /// the byte budget's granularity is one sample, chunked or not.
+    #[test]
+    fn eviction_walks_into_a_sealed_chunk() {
+        let now = Instant::now();
+        let keep = CHUNK + 5;
+        let mut r = Retention::new(RetentionBudget {
+            max_bytes: sample_cost(&view("k00000", 8, now)) * keep,
+            max_age: Duration::from_secs(3600),
+        });
+        let total = CHUNK * 3;
+        for i in 0..total {
+            r.push(view(&format!("k{i:05}"), 8, now), now);
+        }
+        let s = r.stats(now);
+        assert_eq!(s.retained, keep, "the bound bit mid-chunk");
+        assert_eq!(
+            s.retained as u64 + s.evicted,
+            total as u64,
+            "present or counted"
+        );
+        let kept = r.snapshot(now);
+        assert_eq!(kept.len(), keep);
+        assert_eq!(kept[0].key, format!("k{:05}", total - keep));
+        assert_eq!(kept.last().unwrap().key, format!("k{:05}", total - 1));
     }
 
     /// The span states what the window actually holds — which is shorter

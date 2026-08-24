@@ -110,8 +110,8 @@ pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
 pub use judge::field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run_field};
 #[cfg(feature = "decode")]
 pub use model::decode::{
-    DecodedSample, Rendering, SchemaStore, decode_sample, schema_drift, schema_dump,
-    schemas_for_type, totality_gaps,
+    DEFAULT_MAX_PRODUCERS, DecodedSample, Rendering, SchemaStore, Sealed, StoreBounds,
+    decode_sample, prewarm, schema_drift, schema_dump, schemas_for_type, totality_gaps,
 };
 #[cfg(feature = "decode")]
 pub use tape::generate::{
@@ -125,8 +125,8 @@ pub use tape::synth::Synth;
 pub use zenkey::schema::validate::{NotValidated, Verdict};
 
 pub use bus::admin::{
-    AdminEntry, admin_doc_omits_loopback, admin_get, declared_entities, mesh_links,
-    origin_attachments, render_dot, routers, state_coverage, storages, topology,
+    AdminEntry, admin_doc_omits_loopback, admin_get, admin_get_within, declared_entities,
+    mesh_links, origin_attachments, render_dot, routers, state_coverage, storages, topology,
 };
 #[cfg(feature = "blob")]
 pub use bus::blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
@@ -138,9 +138,9 @@ pub use bus::monitor::{
 };
 pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use bus::query::{
-    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts, RepeatingQuery,
-    RepeatingRegistry, StateSample, declare_repeating, declare_repeating_any, fetch_stored,
-    fetch_value, fleet_get, fleet_registry, state_snapshot,
+    Answer, DEFAULT_MAX_REPLIES, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts,
+    RepeatingQuery, RepeatingRegistry, StateSample, declare_repeating, declare_repeating_any,
+    fetch_stored, fetch_value, fleet_get, fleet_registry, state_snapshot,
 };
 pub use bus::roster::{
     BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, node_info, node_rows,
@@ -149,7 +149,9 @@ pub use bus::roster::{
 pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
-pub use bus::session::{Fleet, OpenFailure, open, open_reporting, open_with_config};
+pub use bus::session::{
+    Fleet, OPEN_TIMEOUT, OpenFailure, open, open_reporting, open_reporting_within, open_with_config,
+};
 pub use bus::write::{
     CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
     declare_publication,
@@ -188,7 +190,7 @@ pub use tape::bench::{BenchSpec, run_bench};
 pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
 pub use tape::record::{
     RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, ZREC_VERSION, ZrecItem, ZrecReader,
-    ZrecWriter, record, replay,
+    ZrecSink, ZrecSource, ZrecWriter, record, replay,
 };
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.

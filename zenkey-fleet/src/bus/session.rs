@@ -2,9 +2,28 @@
 //! session-plus-deployment bundle every bus-facing call runs against.
 
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use zenoh::Session;
+
+/// How long [`open_reporting`] gives `zenoh::open` before calling the
+/// attempt a transport failure (#341).
+///
+/// A **connect deadline of its own**, deliberately not the caller's
+/// `--timeout`. That flag is reply-wait — how long a GET listens for answers
+/// on a session that already exists — and a fleet on a fast LAN legitimately
+/// runs it at half a second, which is not a sane bound on a TLS handshake or
+/// a gossip join. Nor is it the caller's `--for`, which bounds an
+/// observation window. Bringing a transport up is its own act with its own
+/// scale, so it gets its own number, and a caller who disagrees says so
+/// through [`open_reporting_within`].
+///
+/// Ten seconds: long enough that no ordinary open trips it, short enough
+/// that a stalled listener surfaces as a *failure* rather than as a connect
+/// flow that never returns — which is the whole point of
+/// [`OpenFailure::Transport`] existing.
+pub const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A session **and the deployment it is pointed at** — the two halves every
 /// bus-facing entry point in this crate needs, carried together (#218).
@@ -130,19 +149,87 @@ impl OpenFailure {
     }
 }
 
-/// [`open_with_config`], but saying which half failed.
+/// [`open_with_config`], but saying which half failed — and bounded
+/// ([`OPEN_TIMEOUT`]).
 pub async fn open_reporting(
     file: Option<&Path>,
     connect: &[String],
     listen: &[String],
     scouting: Option<bool>,
 ) -> Result<Session, OpenFailure> {
-    let config = build_config(file, connect, listen, scouting).map_err(OpenFailure::Config)?;
-    zenoh::open(config)
+    open_reporting_within(file, connect, listen, scouting, OPEN_TIMEOUT).await
+}
+
+/// [`open_reporting`] with the connect deadline named by the caller.
+///
+/// **Neither half blocks the runtime, and neither half is unbounded** (#341).
+/// A named config file is read and JSON5-parsed on the blocking pool — it is
+/// a file read, and one on a stalled mount used to park a runtime worker with
+/// nothing to time it out. `zenoh::open` is then raced against `deadline`:
+/// an endpoint that never settles is a **transport** failure, which is the
+/// verdict [`OpenFailure`] exists to distinguish and the one a connect flow
+/// that simply never returned could never reach (RFC 13 §3: a tool that
+/// cannot obtain an observation says so; it does not wait forever in
+/// silence).
+pub async fn open_reporting_within(
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+    deadline: Duration,
+) -> Result<Session, OpenFailure> {
+    let config = config_off_runtime(file, connect, listen, scouting)
         .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
-        .context("failed to open Zenoh session")
-        .map_err(OpenFailure::Transport)
+        .map_err(OpenFailure::Config)?;
+    // `async move` because zenoh's builder is `IntoFuture`, not `Future`.
+    opened_within(deadline, async move { zenoh::open(config).await }).await
+}
+
+/// Race one open against its deadline and name which half failed.
+///
+/// Split out from [`open_reporting_within`] for exactly one reason: the
+/// deadline arm is otherwise reachable only with a transport that stalls on
+/// demand, and an untested arm is how "OpenFailure exists to distinguish the
+/// two halves" stayed true on paper while nothing ever reached it (#341).
+async fn opened_within<E: std::fmt::Display>(
+    deadline: Duration,
+    open: impl std::future::Future<Output = std::result::Result<Session, E>>,
+) -> Result<Session, OpenFailure> {
+    match tokio::time::timeout(deadline, open).await {
+        Ok(Ok(session)) => Ok(session),
+        Ok(Err(e)) => Err(OpenFailure::Transport(
+            anyhow::anyhow!("{e}").context("failed to open Zenoh session"),
+        )),
+        Err(_) => Err(OpenFailure::Transport(anyhow::anyhow!(
+            "the Zenoh session did not open within {deadline:?} — the config \
+             parsed, so this is the transport: an endpoint that never settles, \
+             a listener that never binds, or a peer that never answers"
+        ))),
+    }
+}
+
+/// Build the config without holding a runtime thread for a file read.
+///
+/// With no file there is no I/O at all — `Config::default()` plus a few
+/// JSON5 inserts is microseconds of pure CPU, and a `spawn_blocking` hop
+/// would cost more than it saves. With one, the read *and* the JSON5 parse
+/// go to the pool together (`bus/blob/transfer.rs` makes the same call for
+/// the same reason).
+async fn config_off_runtime(
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<zenoh::Config> {
+    let Some(path) = file else {
+        return build_config(None, connect, listen, scouting);
+    };
+    let path = path.to_path_buf();
+    let connect = connect.to_vec();
+    let listen = listen.to_vec();
+    tokio::task::spawn_blocking(move || build_config(Some(&path), &connect, &listen, scouting))
+        .await
+        .context("reading the zenoh config")?
 }
 
 /// The explorer config in one place: un-namespaced, explicit endpoints,
@@ -289,6 +376,33 @@ mod tests {
             "false"
         );
         std::fs::remove_file(path).ok();
+    }
+
+    /// #341: an open that never settles is a **transport** verdict naming
+    /// its deadline — not a connect flow that hangs with nothing to time it
+    /// out. The stalled half is a `pending` future because that is precisely
+    /// what a hanging listener looks like from here.
+    #[tokio::test]
+    async fn an_open_that_never_settles_is_a_transport_failure() {
+        let stalled = std::future::pending::<std::result::Result<Session, String>>();
+        match opened_within(Duration::from_millis(10), stalled).await {
+            Err(OpenFailure::Transport(e)) => {
+                let text = format!("{e:#}");
+                assert!(
+                    text.contains("did not open within"),
+                    "the deadline is named, so an operator knows what to raise: {text}"
+                );
+            }
+            Err(OpenFailure::Config(e)) => panic!("a deadline is not a config error: {e:#}"),
+            Ok(_) => panic!("a pending future opened a session"),
+        }
+    }
+
+    /// The deadline is the *connect* one and stated once — never a
+    /// reply-wait borrowed from a caller's `--timeout` (#341).
+    #[test]
+    fn the_connect_deadline_is_its_own_number() {
+        assert_eq!(OPEN_TIMEOUT, Duration::from_secs(10));
     }
 
     /// #122: a file that sets a namespace is refused with the RFC pointer —

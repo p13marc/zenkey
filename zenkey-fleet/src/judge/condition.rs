@@ -630,10 +630,6 @@ pub async fn run_watchdog(
         }
     }
 
-    // Declared before the window opens — not-asked must never read as "no".
-    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
-    let mut events = monitor.events();
-    let monitor = monitor.watching(&watched).await?;
     let wants_doctor = spec
         .rules
         .iter()
@@ -642,6 +638,26 @@ pub async fn run_watchdog(
         .rules
         .iter()
         .any(|r| matches!(r, Condition::OriginDown { .. }));
+    let wants_decode = spec
+        .rules
+        .iter()
+        .any(|r| matches!(r, Condition::InvalidPayload { .. }));
+
+    // Warmed before the first tick and sealed for the run (#337): a decode
+    // inside the drain loop must never become a `describe` GET, because
+    // nothing attends the broadcast while one is in flight and the tick's
+    // verdict is about the window that lost the samples. zenctl hands this
+    // store over cold. Each tick's sweep re-warms whatever is still
+    // unserved — from beside the drain, where waiting costs nothing.
+    if wants_decode {
+        crate::model::decode::prewarm(fleet, store, slices).await;
+    }
+    let _sealed = store.seal();
+
+    // Declared before the window opens — not-asked must never read as "no".
+    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+    let mut events = monitor.events();
+    let monitor = monitor.watching(&watched).await?;
 
     let started = tokio::time::Instant::now();
     let mut counters: Vec<TickCounters> = vec![TickCounters::default(); spec.rules.len()];
@@ -663,10 +679,67 @@ pub async fn run_watchdog(
     let mut closed = false;
     loop {
         let deadline = last_eval + spec.tick;
+        // The tick's bus work runs **beside** the drain, not after it (#338).
+        //
+        // A roster GET, a registry sweep, per-producer describes and state
+        // snapshots take seconds, and every one of them used to happen with
+        // the drain loop stopped — so the broadcast overflowed, and because
+        // `dropped_tick` was reset immediately afterwards, the loss was
+        // billed to the *following* window. In the one tool whose entire
+        // product is a per-window verdict.
+        //
+        // Now the sweep is a future the drain selects on: sampling never
+        // stops, and a sweep that outlives the tick period simply widens this
+        // window — `window_s` is measured from `last_eval`, never assumed —
+        // so the drops land in the tick that incurred them.
+        let sweep = async {
+            let doctor = if wants_doctor {
+                Some(
+                    crate::judge::doctor::run_doctor(
+                        fleet,
+                        slices,
+                        &crate::judge::doctor::DoctorSpec {
+                            deep: false,
+                            sample: None,
+                            timeout: spec.timeout,
+                            listen: None,
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string()),
+                )
+            } else {
+                None
+            };
+            let roster = if wants_roster {
+                Some(
+                    crate::bus::roster::roster(fleet, spec.timeout)
+                        .await
+                        .map_err(|e| e.to_string()),
+                )
+            } else {
+                None
+            };
+            // The schema warming rides here too (#337): still-unserved
+            // producers are re-asked at the store's own backoff, off the
+            // drain loop.
+            if wants_decode {
+                crate::model::decode::prewarm(fleet, store, slices).await;
+            }
+            (doctor, roster)
+        };
+        let mut sweep = std::pin::pin!(sweep);
+        let mut swept = None;
         while !closed {
             let item = tokio::select! {
                 item = events.recv() => item,
-                _ = tokio::time::sleep_until(deadline) => break,
+                // The tick cannot close before its own sweep has landed, and
+                // the drain keeps running until it does.
+                outcome = &mut sweep, if swept.is_none() => {
+                    swept = Some(outcome);
+                    continue;
+                }
+                _ = tokio::time::sleep_until(deadline), if swept.is_some() => break,
             };
             match item {
                 Some(StreamItem::Event(FleetEvent::Sample(s))) => {
@@ -748,36 +821,15 @@ pub async fn run_watchdog(
         }
 
         // Evaluate the tick over the measured window, then say only what
-        // changed.
+        // changed. The sweep has already landed unless the stream closed
+        // under it — in which case there is nothing left to drain, and
+        // awaiting it here costs the tick nothing.
+        let (doctor_outcome, roster_outcome) = match swept {
+            Some(outcome) => outcome,
+            None => sweep.await,
+        };
         let now = tokio::time::Instant::now();
         let at = crate::tape::record::rfc3339_now();
-        let doctor_outcome = if wants_doctor {
-            Some(
-                crate::judge::doctor::run_doctor(
-                    fleet,
-                    slices,
-                    &crate::judge::doctor::DoctorSpec {
-                        deep: false,
-                        sample: None,
-                        timeout: spec.timeout,
-                        listen: None,
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string()),
-            )
-        } else {
-            None
-        };
-        let roster_outcome = if wants_roster {
-            Some(
-                crate::bus::roster::roster(fleet, spec.timeout)
-                    .await
-                    .map_err(|e| e.to_string()),
-            )
-        } else {
-            None
-        };
         for (i, rule) in spec.rules.iter().enumerate() {
             let eval = match rule {
                 Condition::DoctorCheck { .. } => {

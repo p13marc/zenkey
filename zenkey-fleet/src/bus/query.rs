@@ -80,7 +80,24 @@ pub struct GetOpts {
     attachment: Option<Vec<u8>>,
     priority: Priority,
     accept_any: bool,
+    max_replies: usize,
+    /// What the bound cost, filled in by the GET (#339). Shared rather than
+    /// returned — see [`GetOpts::elided`].
+    elided: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
+
+/// How many replies a GET keeps unless the caller says otherwise (#339).
+///
+/// Every fan-out here was unbounded: `collect_answers`, `fetch_timed` and
+/// `admin_get` pushed every reply into a `Vec`, each holding a refcounted
+/// payload, so a `**` sweep against a router with a large storage was
+/// unbounded memory in a tool that bounds everything else it accumulates.
+///
+/// 4096 is chosen against what the fan-out *means*: a fleet GET is one reply
+/// per producer per key, and a fleet with four thousand replying entities on
+/// one selector is past what any of these renderers show anyway. A caller
+/// that genuinely wants more says so, and hears what the last bound cost.
+pub const DEFAULT_MAX_REPLIES: usize = 4096;
 
 impl GetOpts {
     /// A plain GET, bounded by `timeout`.
@@ -95,6 +112,8 @@ impl GetOpts {
             attachment: None,
             priority: Priority::DEFAULT,
             accept_any: false,
+            max_replies: DEFAULT_MAX_REPLIES,
+            elided: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -141,6 +160,58 @@ impl GetOpts {
     /// The bound this GET runs under.
     pub fn timeout(&self) -> Duration {
         self.timeout
+    }
+
+    /// Keep at most `max` replies (#339). Zero is clamped to one: a GET that
+    /// kept nothing would report silence, and silence is never a verdict
+    /// (RFC 05 §3.1).
+    pub fn max_replies(mut self, max: usize) -> Self {
+        self.max_replies = max.max(1);
+        self
+    }
+
+    /// The reply bound in force.
+    pub fn reply_bound(&self) -> usize {
+        self.max_replies
+    }
+
+    /// **What the bound cost**: replies that arrived and were not kept,
+    /// across every GET run under these options (RFC 13 §3 O6 — a bound that
+    /// hides data must say so).
+    ///
+    /// It rides here, on the object that *states* the bound, rather than in
+    /// the return type, for the reason every other bounded structure in this
+    /// crate keeps its own ledger (`StatsTable::evicted`,
+    /// `Retention::evicted`, `BoundedLru::admit`): the thing that owns the
+    /// ceiling owns the count of what the ceiling refused. A caller reads it
+    /// beside the answers it just got:
+    ///
+    /// ```ignore
+    /// let opts = GetOpts::new(timeout);
+    /// let answers = fleet_get(&fleet, key, &opts).await?;
+    /// if opts.elided() > 0 { /* say so — never render this as "all of them" */ }
+    /// ```
+    ///
+    /// The count is exact: past the bound the replies are still drained, they
+    /// are simply not kept. Draining is what makes the number honest; *keeping*
+    /// is what was unbounded.
+    pub fn elided(&self) -> u64 {
+        self.elided.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Forget what earlier GETs under these options cost — for a caller that
+    /// reuses one `GetOpts` and reports per GET rather than per run.
+    pub fn reset_elided(&self) {
+        self.elided.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Add to the ledger — for the drains that live in another module
+    /// ([`crate::admin_get_within`]) and keep their own reply shape.
+    pub(crate) fn note_elided(&self, n: u64) {
+        if n > 0 {
+            self.elided
+                .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
@@ -195,26 +266,42 @@ pub(crate) async fn disciplined_get(
 /// Silence is deliberately *not* interpreted here (RFC 05 §3.1: "no reply" is
 /// not one condition). Callers that need a verdict join this against the
 /// liveliness roster; see `cmd::doctor`.
+/// Bounded at [`GetOpts::reply_bound`], and what the bound cost is on
+/// [`GetOpts::elided`] (#339).
 pub async fn fleet_get(fleet: &Fleet<'_>, key: &str, opts: &GetOpts) -> Result<Vec<FleetAnswer>> {
     let replies = disciplined_get(fleet.session(), key, opts)
         .await
         .with_context(|| format!("query failed: {key}"))?;
-    Ok(collect_answers(fleet.base(), replies).await)
+    let (answers, elided) = collect_answers(fleet.base(), replies, opts.max_replies).await;
+    opts.note_elided(elided);
+    Ok(answers)
 }
 
 /// Drain a reply channel into attributed answers — the shared back half of
 /// [`fleet_get`] and [`RepeatingQuery`]: one implementation of reply-key
 /// attribution and the RFC 05 §3 error envelope, however the query was issued.
+///
+/// Returns what it kept and **how many it did not** (#339). Past `max` the
+/// replies are still drained — the channel is being emptied either way — they
+/// are simply not retained, so the count is exact and the memory is bounded.
+/// The two are different facts: draining is the fan-in finishing, keeping is
+/// what used to be unbounded.
 async fn collect_answers(
     base: &str,
     replies: zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>,
-) -> Vec<FleetAnswer> {
+    max: usize,
+) -> (Vec<FleetAnswer>, u64) {
     let mut out = Vec::new();
+    let mut elided = 0u64;
 
     while let Ok(reply) = replies.recv_async().await {
+        if out.len() >= max {
+            elided += 1;
+            continue;
+        }
         out.push(answer_of(base, reply));
     }
-    out
+    (out, elided)
 }
 
 /// One reply, attributed — the per-reply half of [`collect_answers`], shared
@@ -283,6 +370,10 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
 pub struct RepeatingQuery {
     querier: zenoh::query::Querier<'static>,
     base: String,
+    /// Replies kept per fetch, and what the bound has cost across all of them
+    /// (#339) — the same ledger [`GetOpts`] carries, for the declared path.
+    max_replies: usize,
+    elided: std::sync::atomic::AtomicU64,
 }
 
 /// Declare a repeating query on `key` (a full wire keyexpr, no `?params`).
@@ -331,6 +422,8 @@ async fn declare(
     Ok(RepeatingQuery {
         querier,
         base: fleet.base().to_string(),
+        max_replies: DEFAULT_MAX_REPLIES,
+        elided: std::sync::atomic::AtomicU64::new(0),
     })
 }
 
@@ -364,7 +457,33 @@ impl RepeatingQuery {
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))
             .with_context(|| format!("repeating query failed: {}", self.key()))?;
-        Ok(collect_answers(&self.base, replies).await)
+        let (answers, elided) = collect_answers(&self.base, replies, self.max_replies).await;
+        self.note_elided(elided);
+        Ok(answers)
+    }
+
+    /// Keep at most `max` replies per fetch (#339). Zero is clamped to one.
+    pub fn max_replies(mut self, max: usize) -> Self {
+        self.max_replies = max.max(1);
+        self
+    }
+
+    /// The reply bound in force.
+    pub fn reply_bound(&self) -> usize {
+        self.max_replies
+    }
+
+    /// Replies this querier's bound refused, across every fetch (RFC 13 §3
+    /// O6). See [`GetOpts::elided`] for why the count lives with the bound.
+    pub fn elided(&self) -> u64 {
+        self.elided.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn note_elided(&self, n: u64) {
+        if n > 0 {
+            self.elided
+                .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// As [`fetch`](Self::fetch), stamping each reply with how long after the
@@ -385,10 +504,16 @@ impl RepeatingQuery {
             .map_err(|e| anyhow::anyhow!("{e}"))
             .with_context(|| format!("repeating query failed: {}", self.key()))?;
         let mut out = Vec::new();
+        let mut elided = 0u64;
         while let Ok(reply) = replies.recv_async().await {
             let at = started.elapsed();
+            if out.len() >= self.max_replies {
+                elided += 1;
+                continue;
+            }
             out.push((answer_of(&self.base, reply), at));
         }
+        self.note_elided(elided);
         Ok(out)
     }
 

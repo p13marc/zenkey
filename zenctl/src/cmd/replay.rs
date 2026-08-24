@@ -10,7 +10,7 @@
 use std::io::BufReader;
 
 use anyhow::{Context, Result, bail};
-use zenkey_fleet::{ReplayEvent, ReplayTarget, ZrecReader};
+use zenkey_fleet::{ReplayEvent, ReplayTarget, ZrecSource};
 
 use crate::Bus;
 
@@ -28,8 +28,15 @@ pub async fn run(
     // takes the closed enum, so an unknown profile is a refusal rather than a
     // per-row "malformed" event partway through a replay.
     let default_qos = super::publish::parse_qos(qos)?;
-    let source = std::fs::File::open(file).with_context(|| format!("open {file}"))?;
-    let mut reader = ZrecReader::new(BufReader::new(source))?;
+    // The read runs on the blocking pool (#332): a replay interleaves pacing
+    // sleeps and network puts, and a blocking line read between them stalls
+    // the runtime mid-pacing.
+    let source = tokio::fs::File::open(file)
+        .await
+        .with_context(|| format!("open {file}"))?
+        .into_std()
+        .await;
+    let mut reader = ZrecSource::spawn(BufReader::new(source)).await?;
     let header = reader.header().clone();
 
     // The header names what the capture asked and under which base; the
