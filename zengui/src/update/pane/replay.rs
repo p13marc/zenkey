@@ -264,9 +264,14 @@ pub(crate) fn enter_retained(
     core: &Arc<zenkey_fleet::MonitorCore>,
 ) {
     let taken = core.retention();
+    // Both reads are bounded work under the ingest mutex (#331): `retention`
+    // is a `Copy` struct, `retained` hands back a shared `Arc<[_]>` snapshot
+    // the ring flattened after releasing the lock. Called back to back from
+    // `update()`, they used to stall zenoh's callback thread for a walk of
+    // the whole window.
     let window = core.retained();
     let mut state =
-        crate::replay::ReplayState::from_retained(window, Arc::clone(&obs.watched), taken);
+        crate::replay::ReplayState::from_retained(&window, Arc::clone(&obs.watched), taken);
     // Mode honesty, exactly as opening a file: the panes now show the
     // window — nothing live bleeds through, and the scrollback restarts.
     // Every slot's recorder was of the live world (#257).

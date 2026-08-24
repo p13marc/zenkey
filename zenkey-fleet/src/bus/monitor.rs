@@ -466,11 +466,26 @@ impl MonitorCore {
     /// ingest path, and nothing unwatched is ever ingested. A consumer that
     /// presents this window MUST say so (RFC 09 §5.1 O5 — a retained window
     /// over three watches is not a retained window over the bus).
-    pub fn retained(&self) -> Vec<Arc<SampleView>> {
-        self.retain
+    ///
+    /// **What this read costs the network thread** (#331): the retain mutex
+    /// is [`ingest`](Self::ingest)'s, taken on zenoh's callback thread, so a
+    /// read that walked the window blocked the network layer for as long as
+    /// the window was long — 64 MiB of 256-byte samples is ~260 000 refcount
+    /// atomics, and zengui calls this from `update()`. The ring is chunked
+    /// instead ([`crate::model::retain`]): under the lock this clones the
+    /// sealed chunks' pointers and the open tail — bounded by
+    /// `window / 1024 + 1024`, independent of payload — and the flatten into
+    /// the returned slice happens **after** the guard is dropped. The result
+    /// is an `Arc<[_]>` so passing the window on costs nothing again.
+    pub fn retained(&self) -> Arc<[Arc<SampleView>]> {
+        // Two statements, deliberately: the guard is dropped at the end of
+        // this one, and only then does the O(window) flatten run.
+        let parts = self
+            .retain
             .lock()
             .expect("retain lock")
-            .snapshot(Instant::now())
+            .parts(Instant::now());
+        parts.flatten()
     }
 
     /// The retained window's account of itself: budget in force, what it
@@ -1143,6 +1158,51 @@ mod tests {
                 .unwrap()
                 .subtree_keys,
             50
+        );
+    }
+
+    /// #331: a retained-window read holds the ingest mutex for the chunk
+    /// pointers and the open tail, and flattens the window afterwards.
+    ///
+    /// The same shape of measurement as the tick's (#330), for the same
+    /// reason: the claim is that the under-lock half no longer scales with
+    /// the window. It is asserted as a ratio against the flatten — the half
+    /// that does scale — so a return to `ring.iter().cloned().collect()`
+    /// under the guard fails it.
+    #[test]
+    fn a_retained_read_holds_the_ingest_lock_for_chunk_pointers_only() {
+        const SAMPLES: usize = 40_000;
+        let core = MonitorCore::new(2);
+        let now = Instant::now();
+        for i in 0..SAMPLES {
+            core.ingest_at(
+                Arc::new(view(&format!("zs/v1/h-a/telemetry/x/m{i}"), 8)),
+                None,
+                now,
+                std::time::SystemTime::now(),
+            );
+        }
+
+        // Phase 1 — everything the network callback thread waits behind.
+        let t0 = Instant::now();
+        let parts = core
+            .retain
+            .lock()
+            .expect("retain lock")
+            .parts(Instant::now());
+        let under_lock = t0.elapsed();
+
+        // Phase 2 — everything that now happens with the guard dropped.
+        let t1 = Instant::now();
+        let window = parts.flatten();
+        let flatten = t1.elapsed();
+
+        assert_eq!(window.len(), SAMPLES, "the whole window, unchanged");
+        assert_eq!(window[0].key, "zs/v1/h-a/telemetry/x/m0");
+        assert!(
+            under_lock * 4 < flatten,
+            "the critical section must not scale with the window: \
+             under lock {under_lock:?}, flatten {flatten:?}"
         );
     }
 
