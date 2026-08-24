@@ -301,33 +301,52 @@ pub(crate) fn update(
 }
 
 /// Pick this tick's bounded validation batch (#164): the newest sample per
-/// distinct key, keys the cache wants checked first-come, capped at
+/// distinct key, keys the cache wants checked **first-come**, capped at
 /// [`crate::verdict::VALIDATE_PER_TICK`] — a hot bus costs a fixed slice of
 /// CPU per tick, never a proportional one. Tombstones carry no payload to
 /// validate, and payloads past [`crate::verdict::VALIDATE_LIMIT`] stay
 /// unchecked (which renders as unchecked, not as fine).
-fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Task<Message> {
-    let (Some(session), Some(store)) = (dep.session.clone(), dep.schema_store.clone()) else {
-        return Task::none();
-    };
-    // Newest per key: later samples in the tick supersede earlier ones.
+///
+/// First-come is now what the code does rather than what its comment claimed
+/// (#359). The batch used to be drained out of a `HashMap`, whose iteration
+/// order is the per-process hash seed: on any bus with more than sixteen
+/// unchecked keys in a tick, *which* sixteen got checked varied run to run,
+/// the badges filled in a different order every launch, and no test could pin
+/// any of it. The keys go in the order the bus delivered them, and only the
+/// payload each carries is the newest one the tick holds.
+fn validation_batch(
+    samples: &[Arc<zenkey_fleet::SampleView>],
+    cache: &crate::verdict::VerdictCache,
+) -> Vec<(String, String, zenoh::bytes::ZBytes)> {
+    // Newest per key, in first-arrival key order: `newest` supersedes,
+    // `order` remembers when the key first showed up.
     let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet::SampleView>> =
         std::collections::HashMap::new();
-    for sample in &tick.samples {
+    let mut order: Vec<&str> = Vec::new();
+    for sample in samples {
         if sample.kind == zenoh::sample::SampleKind::Delete
             || sample.payload.len() > crate::verdict::VALIDATE_LIMIT
         {
             continue;
         }
-        newest.insert(sample.key.as_str(), sample);
+        if newest.insert(sample.key.as_str(), sample).is_none() {
+            order.push(sample.key.as_str());
+        }
     }
-    let cache = &work.verdicts.payloads;
-    let batch: Vec<(String, String, zenoh::bytes::ZBytes)> = newest
-        .into_values()
+    order
+        .into_iter()
+        .filter_map(|key| newest.get(key))
         .filter(|s| cache.should_check(&s.key))
         .take(crate::verdict::VALIDATE_PER_TICK)
         .map(|s| (s.key.clone(), s.encoding.clone(), s.payload.clone()))
-        .collect();
+        .collect()
+}
+
+fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Task<Message> {
+    let (Some(session), Some(store)) = (dep.session.clone(), dep.schema_store.clone()) else {
+        return Task::none();
+    };
+    let batch = validation_batch(&tick.samples, &work.verdicts.payloads);
     if batch.is_empty() {
         return Task::none();
     }
@@ -509,6 +528,106 @@ mod tests {
             dep.base_options[0].to_string(),
             "(empty — keys start at v1/)",
             "the empty base is a labelled deployment, never a blank row"
+        );
+    }
+
+    fn sample(key: &str, payload: &[u8]) -> Arc<zenkey_fleet::SampleView> {
+        Arc::new(zenkey_fleet::SampleView {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
+            encoding: "application/json".to_string(),
+            kind: zenoh::sample::SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: std::time::Instant::now(),
+        })
+    }
+
+    /// #359: which keys a tick validates is the bus's delivery order, not a
+    /// hash seed. Picked out of a `HashMap` this was randomised per process —
+    /// the doc's "first-come" was false, the badges filled differently every
+    /// launch, and no test over the selection could exist at all.
+    ///
+    /// Two ticks, pinned key for key: the first takes the first
+    /// `VALIDATE_PER_TICK` keys as delivered, and the second — with those
+    /// recorded — takes exactly the ones that were left, still in order.
+    #[test]
+    fn a_two_tick_sequence_checks_the_keys_the_bus_delivered_first() {
+        use crate::verdict::{VALIDATE_PER_TICK, VerdictCache};
+
+        let per_tick = VALIDATE_PER_TICK;
+        // More keys than one tick's slots, so the cap actually bites.
+        let keys: Vec<String> = (0..per_tick * 2 + 3)
+            .map(|i| format!("v1/h-0123456789ab/state/p/k{i:03}"))
+            .collect();
+        let samples: Vec<_> = keys.iter().map(|k| sample(k, b"{}")).collect();
+
+        let mut cache = VerdictCache::new(4096);
+        let first = validation_batch(&samples, &cache);
+        assert_eq!(
+            first.iter().map(|(k, _, _)| k.as_str()).collect::<Vec<_>>(),
+            keys[..per_tick]
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            "the first tick takes the first {per_tick} keys the bus delivered"
+        );
+
+        for (key, _, _) in &first {
+            cache.record(key, zenkey_fleet::Verdict::Valid);
+        }
+        let second = validation_batch(&samples, &cache);
+        assert_eq!(
+            second
+                .iter()
+                .map(|(k, _, _)| k.as_str())
+                .collect::<Vec<_>>(),
+            keys[per_tick..per_tick * 2]
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            "the second tick takes exactly what the first left, still in order"
+        );
+    }
+
+    /// The other half of the claim: first-come is by key, and the payload is
+    /// the newest that key carried in the tick. A tombstone and an oversized
+    /// payload are not validated, and neither claims the key's slot.
+    #[test]
+    fn a_key_keeps_its_arrival_slot_and_its_newest_payload() {
+        use crate::verdict::{VALIDATE_LIMIT, VerdictCache};
+
+        let mut big = sample("v1/h-0123456789ab/state/p/big", b"x");
+        Arc::get_mut(&mut big).unwrap().payload =
+            zenoh::bytes::ZBytes::from(vec![b'x'; VALIDATE_LIMIT + 1]);
+        let mut gone = sample("v1/h-0123456789ab/state/p/gone", b"{}");
+        Arc::get_mut(&mut gone).unwrap().kind = zenoh::sample::SampleKind::Delete;
+
+        let samples = vec![
+            sample("v1/h-0123456789ab/state/p/a", b"{\"n\":1}"),
+            big,
+            gone,
+            sample("v1/h-0123456789ab/state/p/b", b"{\"n\":2}"),
+            // `a` again, later in the same tick: same slot, newer bytes.
+            sample("v1/h-0123456789ab/state/p/a", b"{\"n\":3}"),
+        ];
+
+        let batch = validation_batch(&samples, &VerdictCache::new(4096));
+        assert_eq!(
+            batch.iter().map(|(k, _, _)| k.as_str()).collect::<Vec<_>>(),
+            ["v1/h-0123456789ab/state/p/a", "v1/h-0123456789ab/state/p/b"],
+            "a tombstone and an oversized payload are skipped, not slotted"
+        );
+        assert_eq!(
+            batch[0].2.to_bytes().as_ref(),
+            b"{\"n\":3}",
+            "the key keeps its arrival slot and the tick's newest payload"
         );
     }
 }

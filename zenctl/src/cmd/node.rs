@@ -97,9 +97,16 @@ pub async fn watch(verbose: bool, args: &Bus) -> Result<()> {
     // (RFC 05 §3.1).
     render(watch.roster(), slices.as_ref(), &mut prev, &mut tick)?;
 
+    // One listener for the whole watch (#334): built per-iteration it was
+    // registered only while the `select!` was parked, so a SIGINT arriving
+    // while a change was being rendered was dropped on the floor — and the
+    // first `ctrl_c()` had already displaced SIGINT's default disposition.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
     loop {
         let change = tokio::select! {
-            _ = tokio::signal::ctrl_c() => break,
+            biased;
+            _ = &mut ctrl_c => break,
             change = watch.next_change() => change,
         };
         let Some(change) = change else { break };

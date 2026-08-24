@@ -17,7 +17,16 @@ use zenkey_fleet::SampleView;
 ///
 /// Attempting a structural decode of a multi-megabyte payload to render a
 /// one-line preview would burn the whole tick budget for a string nobody reads.
-const DECODE_LIMIT: usize = 64 * 1024;
+///
+/// The app's **one** preview-decode bound (#345): the echo line here, the
+/// Inspector's attachment preview (`view::detail`) and the media viewer's
+/// metadata (`view::media`) all stop at it. Every one of them renders a
+/// summary of bytes nobody asked to see in full, every one of them sits on a
+/// path that runs per sample or per frame, and three different limits would
+/// be three different answers to one question. Past it the size is reported
+/// and the decode is skipped — which is stated, never silently empty
+/// (RFC 13 §3 O6).
+pub const DECODE_LIMIT: usize = 64 * 1024;
 
 /// Maximum characters retained per preview.
 const PREVIEW_CHARS: usize = 512;
@@ -63,10 +72,20 @@ pub struct EchoLine {
 }
 
 impl EchoLine {
-    /// Render a sample. Runs off the UI thread — this is the only place a
-    /// payload is touched, and it is deliberately the *sync* `structural`
-    /// decode, never the async schema-aware `decode_sample` (which may hit the
-    /// bus on a schema miss and must never sit on a render path).
+    /// Render a sample: once per sample on the **update** thread, from
+    /// `update::bus::apply_tick`, and never again on a redraw.
+    ///
+    /// The comment here used to claim it ran off the UI thread; it does not,
+    /// and never did (#345). What it actually is, is *bounded and once*: the
+    /// link's per-tick batch cap fixes how many samples reach it, and
+    /// [`DECODE_LIMIT`] fixes how much of each one is decoded, so a tick's
+    /// cost has a ceiling that does not move with the bus. Being once is the
+    /// other half — the pane draws the string this produced, and a redraw
+    /// touches no payload at all.
+    ///
+    /// Deliberately the *sync* `structural` decode, never the async
+    /// schema-aware `decode_sample` (which may hit the bus on a schema miss,
+    /// and belongs in a `Task`).
     pub fn render(seq: u64, view: &SampleView) -> EchoLine {
         let len = view.payload.len();
         let preview = if view.kind == zenoh::sample::SampleKind::Delete {

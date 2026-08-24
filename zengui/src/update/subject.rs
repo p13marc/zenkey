@@ -125,16 +125,18 @@ pub(crate) fn update(
             };
             Task::batch([reveal, decode_task])
         }
-        SubjectMsg::ValueDecoded(key, sample) => {
+        SubjectMsg::ValueDecoded(key, value) => {
             // The verdict cache learns every decode, current subject or not
             // (#164): the check ran and its result is a fact about the key,
             // not about the selection.
-            work.verdicts.payloads.record(&key, sample.verdict.clone());
+            work.verdicts
+                .payloads
+                .record(&key, value.sample.verdict.clone());
             // Stale guard, per slot (#257): the decode lands in every slot
             // still showing its key, and in none that moved on.
             for slot in sub.slots.iter_mut() {
                 if slot.current.key() == Some(key.as_str()) {
-                    slot.decoded = Some(Arc::clone(&sample));
+                    slot.decoded = Some(Arc::clone(&value));
                 }
             }
             Task::none()

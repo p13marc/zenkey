@@ -19,11 +19,12 @@
 
 use iced::widget::{Column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet::model::decode::{DecodedSample, Rendering};
+use zenkey_fleet::model::decode::Rendering;
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::{NumericLeaves, Series};
+use crate::value::DecodedValue;
 use crate::view::kit;
 use crate::view::spark;
 use crate::view::theme::{RegistrationTone, SeriesTone, colors};
@@ -31,6 +32,59 @@ use crate::view::tokens::Spacing;
 
 /// How much payload the hex view shows before truncating (with a note).
 const HEX_VIEW_BYTES: usize = 1024;
+
+/// How many characters of a rendered document this pane draws (#345).
+///
+/// Both bounded sides of a value row now say the same kind of thing: the hex
+/// side stops at [`HEX_VIEW_BYTES`], the rendered side stops here, and each
+/// says how much it left out. Before this the rendered side had no bound at
+/// all — a megabyte of decoded document was re-serialized and re-copied into
+/// a text widget on **every redraw**, next to a hex pane clamped at 1 KiB.
+///
+/// 64 KiB is far past what anyone reads in a pane and far short of what
+/// costs a frame; a payload that wants more than this wants a file, not a
+/// scroll (RFC 13 §3 O6 — the bound is stated where it bites).
+const DOCUMENT_VIEW_CHARS: usize = 64 * 1024;
+
+/// Clamp a rendered document to [`DOCUMENT_VIEW_CHARS`], on a char boundary.
+///
+/// Returns what to draw and how many bytes were left out — zero when it all
+/// fits, which is the common case and renders no note.
+fn clamp_document(s: &str) -> (&str, usize) {
+    if s.len() <= DOCUMENT_VIEW_CHARS {
+        return (s, 0);
+    }
+    let mut end = DOCUMENT_VIEW_CHARS;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&s[..end], s.len() - end)
+}
+
+/// The structural rendering of an attachment, bounded on both axes (#345).
+///
+/// The decode used to run over the *whole* attachment on every redraw, with
+/// no cap, beside a hex pane that deliberately clamps at 1 KiB. Two bounds
+/// now, both stated: nothing over [`crate::echo::DECODE_LIMIT`] is decoded at
+/// all — the same limit the echo line and the media viewer stop at — and what
+/// is decoded is drawn up to [`DOCUMENT_VIEW_CHARS`].
+fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
+    if bytes.len() > crate::echo::DECODE_LIMIT {
+        col = col.push(kit::mono(format!(
+            "<{} bytes — too large to render structurally>",
+            bytes.len()
+        )));
+        return col.into();
+    }
+    let rendered = zenkey_fleet::model::decode::structural(bytes);
+    let (shown, elided) = clamp_document(&rendered);
+    col = col.push(kit::mono(shown.to_string()));
+    if elided > 0 {
+        col = col.push(kit::muted(format!("… {elided} more bytes not shown")));
+    }
+    col.into()
+}
 
 /// Messages the pane emits.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,9 +121,9 @@ pub struct DetailData<'a> {
     pub facts: Option<&'a KeyFacts>,
     pub fetched: Fetched<'a>,
     /// The decode of the fetched value, when it has completed — the whole
-    /// [`DecodedSample`]: rendering, verdict, and the decode error behind an
-    /// `Undecodable` (#164).
-    pub decoded: Option<&'a DecodedSample>,
+    /// [`DecodedValue`]: rendering, verdict, the decode error behind an
+    /// `Undecodable` (#164), and the document rendered once (#345).
+    pub decoded: Option<&'a DecodedValue>,
     /// The plotted series (issue #64). Owned rather than borrowed: they are
     /// derived per frame from the history ring, and a pane cannot borrow a
     /// per-frame local.
@@ -341,11 +395,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
                         abytes.len()
                     )));
                     col = col.push(
-                        row![
-                            hex_pane(&abytes, sp),
-                            kit::mono(zenkey_fleet::model::decode::structural(&abytes))
-                        ]
-                        .spacing(sp.md),
+                        row![hex_pane(&abytes, sp), attachment_pane(&abytes, sp)].spacing(sp.md),
                     );
                 }
             }
@@ -570,7 +620,7 @@ const VIOLATION_ROWS: usize = 8;
 /// not-validated *reason* spelled (`NoRegistry`'s "nobody looked" never wears
 /// `NoSchema`'s "asked, and the type has none" — #246).
 fn decoded_pane<'a>(
-    decoded: Option<&'a DecodedSample>,
+    decoded: Option<&'a DecodedValue>,
     payload_len: usize,
     sp: Spacing,
 ) -> Element<'a, Message> {
@@ -579,7 +629,11 @@ fn decoded_pane<'a>(
         None => {
             col = col.push(kit::muted("decoding…"));
         }
-        Some(sample) => {
+        Some(value) => {
+            let sample = &value.sample;
+            // The document was rendered once, in the decode task (#345); all
+            // this pane decides is how much of it to draw.
+            let (shown, elided) = clamp_document(&value.document);
             match &sample.rendering {
                 Rendering::Typed(d) => {
                     col = col.push(kit::tone_badge(
@@ -589,26 +643,27 @@ fn decoded_pane<'a>(
                             sample.type_name.as_deref().unwrap_or("?")
                         ),
                     ));
-                    col = col.push(kit::mono(
-                        serde_json::to_string_pretty(&d.value).unwrap_or_default(),
-                    ));
+                    col = col.push(kit::mono(shown.to_string()));
                     for note in &d.notes {
                         col = col.push(kit::muted(format!("note: {note}")));
                     }
                 }
-                Rendering::Structural(s) => {
+                Rendering::Structural(_) => {
                     // The honest ladder: typed-but-undecoded vs plain structural.
                     let tag = match &sample.type_name {
                         Some(t) => format!("<{t}?> structural (schema did not decode)"),
                         None => "structural (no schema resolves — RFC 08 §7's fallback)".into(),
                     };
                     col = col.push(kit::muted(tag));
-                    col = col.push(kit::mono(if s.is_empty() {
+                    col = col.push(kit::mono(if shown.is_empty() {
                         format!("<{payload_len} bytes>")
                     } else {
-                        s.clone()
+                        shown.to_string()
                     }));
                 }
+            }
+            if elided > 0 {
+                col = col.push(kit::muted(format!("… {elided} more bytes not shown")));
             }
             // The verdict, glyph and word (#164/#193).
             col = col.push(kit::badge_verdict(
@@ -648,6 +703,38 @@ fn decoded_pane<'a>(
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    /// #345: both sides of a value row are bounded now, and each says what it
+    /// left out. The rendered side had no bound at all — a whole decoded
+    /// document was re-serialized into a text widget on every redraw, next to
+    /// a hex pane deliberately clamped at 1 KiB.
+    #[test]
+    fn a_document_within_the_bound_is_whole_and_one_past_it_says_what_it_hid() {
+        let small = "{\"value\":42.0}";
+        assert_eq!(clamp_document(small), (small, 0), "no note, nothing hidden");
+
+        let big = "x".repeat(DOCUMENT_VIEW_CHARS + 137);
+        let (shown, elided) = clamp_document(&big);
+        assert_eq!(shown.len(), DOCUMENT_VIEW_CHARS);
+        assert_eq!(elided, 137, "the count is the bound's cost, stated (O6)");
+        assert_eq!(
+            shown.len() + elided,
+            big.len(),
+            "nothing is unaccounted for"
+        );
+    }
+
+    /// The clamp lands on a char boundary — a bound that can panic on a
+    /// multi-byte payload is not a bound, it is a crash waiting for traffic.
+    #[test]
+    fn the_clamp_never_splits_a_character() {
+        // A three-byte character straddling the limit whichever way it falls.
+        let s = "é".repeat(DOCUMENT_VIEW_CHARS);
+        let (shown, elided) = clamp_document(&s);
+        assert!(shown.len() <= DOCUMENT_VIEW_CHARS);
+        assert!(s.is_char_boundary(shown.len()));
+        assert_eq!(shown.len() + elided, s.len());
+    }
 
     /// The hand-rolled formatter agrees with `{:06x}`/`{:02x}`, byte for byte,
     /// which is the only thing that makes it an improvement rather than a

@@ -273,8 +273,9 @@ pub enum SubjectMsg {
     ValueFetched(String, Result<Arc<FetchOutcome>, String>),
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
     /// (key, the whole decoded sample — rendering, verdict and the decode
-    /// error behind an `Undecodable`, #164).
-    ValueDecoded(String, Arc<zenkey_fleet::model::decode::DecodedSample>),
+    /// error behind an `Undecodable`, #164 — with the document text rendered
+    /// from it in the same task rather than on every redraw, #345).
+    ValueDecoded(String, Arc<crate::value::DecodedValue>),
     /// Point the whole workspace at something (#181).
     ///
     /// One message where there were three — `SelectKey`, `SelectPath` and the

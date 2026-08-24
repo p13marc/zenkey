@@ -44,7 +44,11 @@ pub enum BlobMsg {
     /// field. It fills the field; it never becomes a path on its own.
     UseSuggestedName,
     Fetch,
-    Progress(zenkey_fleet::report::BlobProgress),
+    /// One progress event, plus how many the bounded queue has coalesced away
+    /// so far (#344, RFC 13 §3 O6): the event carries absolutes, so nothing
+    /// the bar shows was lost — but a reader assuming one update per chunk
+    /// would be wrong, and the count is what says so.
+    Progress(zenkey_fleet::report::BlobProgress, u64),
     FetchDone(
         String,
         Result<std::sync::Arc<zenkey_fleet::report::BlobFetchReport>, String>,
@@ -407,11 +411,23 @@ fn fetch_form(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
             received,
             total,
             bytes,
+            coalesced,
         } => {
             col = col.push(kit::muted(format!(
                 "{received}/{total} chunks verified · {} on disk",
                 kit::human_bytes(*bytes)
             )));
+            // O6, the *coalesced* kind: the bar's own bound, in its own
+            // words. Nothing final is lost — each event carries absolutes and
+            // the report supersedes them all — but "one update per chunk" is
+            // what a reader would otherwise assume, and here it did not hold.
+            if *coalesced > 0 {
+                col = col.push(kit::caption(format!(
+                    "{coalesced} progress updates coalesced — the transfer outran the \
+                     frame rate, so the counts above are the last that fit, not a tick \
+                     per chunk"
+                )));
+            }
         }
         Fetch::Failed(e) => {
             col = col.push(

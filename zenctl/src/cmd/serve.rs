@@ -90,10 +90,18 @@ pub async fn run(
     }
 
     let mut served = 0usize;
+    // One listener for the whole run (#334): a fresh `ctrl_c()` per query was
+    // registered only while the `select!` was parked, so a SIGINT arriving
+    // while a reply was being rendered was lost — and with SIGINT's default
+    // disposition already displaced by the first call, nothing ended the
+    // process either.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
     loop {
         let view = tokio::select! {
+            biased;
+            _ = &mut ctrl_c => None,
             v = responder.next() => v,
-            _ = tokio::signal::ctrl_c() => None,
         };
         let Some(view) = view else { break };
         served += 1;

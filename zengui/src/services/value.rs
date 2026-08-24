@@ -60,8 +60,11 @@ pub fn decode(
             )
             .await;
             // The verdict rides the sample (#159) and lands whole: the
-            // Inspector renders it, and the cache learns it (#164).
-            (fetched_key, Arc::new(d))
+            // Inspector renders it, and the cache learns it (#164). The
+            // document is rendered here too (#345) — once, off the update
+            // thread, rather than re-serialized on every redraw of the pane
+            // that shows it.
+            (fetched_key, Arc::new(crate::value::DecodedValue::new(d)))
         },
         |(k, d)| Message::Subject(SubjectMsg::ValueDecoded(k, d)),
     )

@@ -72,7 +72,7 @@ pub struct InspectorData<'a> {
     /// facts ladder the Detail section renders.
     pub facts: Option<&'a KeyFacts>,
     pub fetched: Fetched<'a>,
-    pub decoded: Option<&'a zenkey_fleet::model::decode::DecodedSample>,
+    pub decoded: Option<&'a crate::value::DecodedValue>,
     pub series: Option<&'a SeriesData>,
     pub history: Option<&'a HistoryRecorder>,
     /// The timeline's scroll offset and viewport height (#183).
