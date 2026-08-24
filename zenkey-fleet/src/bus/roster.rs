@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use crate::report::{Freshness, MediaStreamInfo, NodeInfo, ProducerInfo};
 use anyhow::Result;
 use zenkey::grammar::with_base;
 
@@ -18,6 +19,7 @@ pub async fn roster(
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     let catalog_alive = zenkey::selector::service_alive(&zenkey::ServiceOrigin::catalog());
+
     // The builders are base-relative; this session is deliberately
     // un-namespaced, so it must spell the base itself.
     for expr in [
@@ -244,6 +246,7 @@ pub fn node_rows(
     slices: Option<&crate::SliceSet>,
 ) -> crate::report::NodeList {
     let mut nodes = Vec::new();
+
     for (origin, producers) in roster {
         for producer in producers {
             let joined = slices.and_then(|s| {
@@ -265,65 +268,6 @@ pub fn node_rows(
         nodes,
         slices_joined: slices.is_some(),
     }
-}
-
-/// One producer's story on one node — the enrichment §6.3 promised
-/// (issue #40). Every field is honest about its provenance: absent
-/// introspection is `None`, never a default (RFC 09 §5.1 O4).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ProducerInfo {
-    pub name: String,
-    /// A liveliness token stands (RFC 04 §5 — the only presence signal).
-    pub alive: bool,
-    /// From this origin's served introspect slice, when it answered.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub app: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub registry_version: Option<String>,
-    pub subjects: usize,
-    pub procedures: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub blob_tiers: Vec<String>,
-    /// Declared `@media` streams (RFC 08 §2/§6, v1.16 — the slice finally
-    /// carries what §6 claimed through v1.7): discoverable off the bus, so
-    /// a viewer can enumerate streams without a compiled-in registry.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub media: Vec<MediaStreamInfo>,
-    /// Deprecated subjects this build still serves — RFC 08 §6's headline
-    /// buy ("which hosts still serve a deprecated subject").
-    pub deprecated_served: usize,
-}
-
-/// One declared media stream, as the slice states it (RFC 08 §2).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct MediaStreamInfo {
-    /// The stream pattern after `@media/<producer>/`.
-    pub path: String,
-    /// The declared wire encoding (`image/jpeg`, `video/*`).
-    pub encoding: String,
-}
-
-/// Freshness of one declared state subject on this node (RFC 04 §1.2).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct Freshness {
-    pub producer: String,
-    pub path: String,
-    pub ttl_s: i64,
-    /// Seconds since the newest matching sample's HLC stamp; `None` when no
-    /// sample answered — which is "not seen", not "fresh" (O4).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub age_s: Option<i64>,
-    /// `age > ttl`, or no sample at all for a declared live subject.
-    pub stale: bool,
-}
-
-/// One node, joined: liveliness × introspect × state freshness.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct NodeInfo {
-    pub origin: String,
-    pub producers: Vec<ProducerInfo>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub freshness: Vec<Freshness>,
 }
 
 /// How one origin string spells its two framework keys. A host and a service
@@ -401,9 +345,11 @@ pub async fn node_info(
     with_freshness: bool,
 ) -> Result<NodeInfo> {
     let (session, base) = (fleet.session(), fleet.base());
+
     let node = Node::parse(origin)?;
 
     // Liveliness, this origin only. A producer chunk is position 5 for a host;
+
     // `@catalog`'s token has none — the service *is* the producer.
     let mut alive: Vec<String> = Vec::new();
     let alive_expr = with_base(base, node.alive_selector());

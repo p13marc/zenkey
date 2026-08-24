@@ -25,14 +25,14 @@ use std::io::{BufRead, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use serde::{Deserialize, Serialize};
 use zenkey::qos::QosProfile;
 use zenoh::Session;
 use zenoh::sample::SampleKind;
 
 use crate::bus::monitor::{EventStream, FleetEvent, SampleView, StreamItem};
 use crate::model::registry::SliceSet;
-use crate::tape::ingest::{IngestRow, SampleRow, parse_row};
+use crate::report::{ReplayReport, SampleRow, ZrecHeader};
+use crate::tape::ingest::{IngestRow, parse_row};
 
 /// The current `.zrec` format version, written into every header.
 pub const ZREC_VERSION: u32 = 1;
@@ -64,27 +64,6 @@ fn rfc3339_from_unix(secs: u64) -> String {
     let mo = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if mo <= 2 { y + 1 } else { y };
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
-}
-
-/// The first line of a `.zrec` file: what was asked, under which base, and
-/// when (RFC 09 §5.1 O4 — a capture names its question). The `base` is the
-/// operator's *stated* deployment base at capture time; recorded keys are
-/// full wire keys and are never re-derived from it (O3).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ZrecHeader {
-    /// Format version ([`ZREC_VERSION`]).
-    pub zrec: u32,
-    /// The full wire selectors the capture watched. A wildcard selector
-    /// never crosses an `@`-chunk, so a `**` capture excludes the verbatim
-    /// planes by construction (O5) — the reader states that rather than
-    /// letting the file claim "everything".
-    pub selectors: Vec<String>,
-    /// The deployment base the operator resolved at capture time
-    /// (may be empty: the base-less bus-root deployment).
-    pub base: String,
-    /// Capture start, RFC 3339 wall clock — provenance, not a pacing clock
-    /// (pacing rides each row's `t`).
-    pub captured_at: String,
 }
 
 /// A `.zrec` writer over any byte sink: header first, then rows as they
@@ -223,6 +202,7 @@ pub async fn record<W: Write>(
     mut on_progress: impl FnMut(u64, u64),
 ) -> Result<()> {
     let deadline = bounds.max_duration.map(|d| Instant::now() + d);
+
     loop {
         let (samples, _) = writer.counts();
         if bounds.max_samples.is_some_and(|max| samples >= max) {
@@ -254,23 +234,6 @@ pub async fn record<W: Write>(
         let (samples, dropped) = writer.counts();
         on_progress(samples, dropped);
     }
-}
-
-/// What a capture did — the shared report shape both frontends render.
-#[derive(Debug, Clone, Serialize)]
-pub struct RecordReport {
-    /// The header as written: a capture names its question (O4).
-    pub header: ZrecHeader,
-    /// Where the capture went, when it went to a file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub out: Option<String>,
-    /// Samples written.
-    pub samples: u64,
-    /// Samples the capture missed while behind — stored in the file as
-    /// interleaved drop records *and* totalled here (O6).
-    pub dropped: u64,
-    /// Wall-clock capture length.
-    pub duration_ms: u64,
 }
 
 /// One `.zrec` line after the header.
@@ -422,29 +385,6 @@ pub enum ReplayEvent<'a> {
     /// The capture itself missed this many samples here (O6): the replay
     /// is a partial view of a partial view, and both halves are counted.
     CaptureDropped(u64),
-}
-
-/// What a replay did — the shared report shape both frontends render.
-#[derive(Debug, Clone, Serialize)]
-pub struct ReplayReport {
-    /// The capture header, echoed: a replay names what it replayed.
-    pub header: ZrecHeader,
-    pub dry_run: bool,
-    pub speed: f64,
-    /// Rows published (dry run: rows that would have been).
-    pub published: u64,
-    /// Tombstones sent (dry run: would have been).
-    pub tombstones: u64,
-    /// Rows that could not be parsed — counted, never skipped.
-    pub malformed: u64,
-    /// Delete rows the retire gate refused.
-    pub refused: u64,
-    /// Samples the *capture* missed (summed from the file's drop records):
-    /// this replay is a partial view and says so (O6).
-    pub capture_dropped: u64,
-    /// The first few malformed/refused reasons, for the human render.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub first_errors: Vec<String>,
 }
 
 /// Replay a `.zrec` onto a bus — or list what doing so would publish.

@@ -20,6 +20,7 @@ use zenkey::schema::{SchemaSet, TypeSchema, WireEncoding};
 use zenoh::Session;
 
 use crate::model::registry::SliceSet;
+use crate::report::{SchemaDrift, TotalityGap};
 
 /// Per-producer schema sets, fetched lazily and cached for the process.
 pub struct SchemaStore {
@@ -470,6 +471,7 @@ pub async fn schema_dump(
     full: bool,
 ) -> crate::report::SchemaDump {
     let set = store.set_for(session, producer).await;
+
     let Some(set) = set else {
         return crate::report::SchemaDump {
             producer: producer.to_string(),
@@ -521,29 +523,13 @@ pub async fn schemas_for_type(
     full: bool,
 ) -> Vec<crate::report::SchemaRow> {
     let mut out = Vec::new();
+
     for producer in producers {
         if let Some(schema) = store.schema_for(session, producer, type_name).await {
             out.push(row(producer, type_name, &schema, full));
         }
     }
     out
-}
-
-/// Two producers serving one type name with different hashes — "a `doctor`
-/// finding" by RFC 08 §7's own words (issue #41).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct SchemaDrift {
-    pub type_name: String,
-    /// Every (producer, hash) pair observed for the name.
-    pub servers: Vec<(String, String)>,
-}
-
-/// A type the producer's slice references that its served describe set does
-/// not cover — a violation of RFC 08 §7's totality clause.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct TotalityGap {
-    pub producer: String,
-    pub missing: Vec<String>,
 }
 
 /// Compute drift across a described fleet. Pure — feed it whatever describe
@@ -775,6 +761,7 @@ pub async fn decode_sample(
     use zenkey::grammar::ClassOrPlane;
 
     let (session, base) = (fleet.session(), fleet.base());
+
     let Some(slices) = slices else {
         // Not asked is not answered no: with no registry there was never a
         // lookup to fail, so the reason names the missing registry, not the

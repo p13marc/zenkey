@@ -14,7 +14,7 @@
 //!   and fault patterns, every sample carrying the synthetic marker so that
 //!   nothing downstream can mistake a rehearsal for a fleet.
 //! * [`synth`] — payload bodies for the above, synthesized from a schema.
-//! * [`bench`] — traffic manufactured to be timed, and the timing.
+//! * [`bench`](mod@bench) — traffic manufactured to be timed, and the timing.
 //!
 //! The layer's own honesty rule is the one the file format carries: a
 //! capture taken while behind is a partial view, and it says so **at the

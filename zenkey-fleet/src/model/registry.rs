@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::report::SliceDisagreement;
 use crate::report::{ProducerDiff, RegistryDiff};
 use anyhow::{Result, anyhow};
 use zenkey::{RegistrySlice, parse_slice};
@@ -222,21 +223,6 @@ pub enum SliceSource {
     Bus,
     Dirs,
     Union,
-}
-
-/// One producer where the served slice and the on-disk slice disagree.
-///
-/// A disagreement is **data**, not an error: served wins in the union (the
-/// bus is the runtime truth, RFC 08 §6.1), and the difference is retained for
-/// `doctor` to report instead of being silently overwritten.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct SliceDisagreement {
-    pub producer: String,
-    pub bus_version: String,
-    pub dirs_version: String,
-    /// Whether anything beyond the version string differs (subjects,
-    /// procedures, blob tiers).
-    pub shape_differs: bool,
 }
 
 /// A union load's full outcome.

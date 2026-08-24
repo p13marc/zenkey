@@ -75,15 +75,14 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::Result;
-use serde::Serialize;
 use zenoh::Session;
 use zenoh::key_expr::keyexpr;
 
-use crate::bus::admin::{DeclaredEntities, EntityKind, StorageInfo};
-use crate::bus::query::ValueSource;
 use crate::model::examples::Examples;
 use crate::model::facts::{KeyShape, OriginKind, Registration, describe_key};
 use crate::model::registry::SliceSet;
+use crate::report::{DeclaredEntities, EntityKind, StorageInfo};
+use crate::report::{Rung, RungAnswer, ValueSource, WhyReport, WhyVerdict};
 
 /// Every rung id the ladder can emit — the stable vocabulary, never renamed
 /// (see the module doc). Additions append.
@@ -115,131 +114,6 @@ const CAUSE_IDS: [&str; 5] = [
     "origin-alive",
     "sample-freshness",
 ];
-
-/// One rung's answer — the [`Judgement`](crate::judge::judgement::Judgement) core
-/// (RFC 13, v1.24; RFC 09 §5.1 pre-v1.24), carried directly: since v1.24 the
-/// ladder's three shipped states *are* three of the core's four poles, and
-/// this alias is the fold. The serde tags are byte-identical to what #214
-/// shipped (`established` / `not_established` + `reason` / `not_asked`).
-///
-/// A rung's judgement is over **its own question** (the rung's fact), not
-/// over "is there a finding?" — which of its poles constitutes a finding is
-/// per-rung policy, and [`is_cause`] is where that policy lives. The rungs
-/// currently never answer [`Unobservable`](crate::judge::judgement::Judgement::Unobservable): an observation the
-/// ladder could not obtain degrades the rung to `NotAsked` and rides
-/// [`WhyReport::impairments`] instead.
-///
-/// A rung whose input was not fetched says
-/// [`NotAsked`](crate::judge::judgement::Judgement::NotAsked), never
-/// `NotEstablished` (RFC 09 §5.1 O4).
-pub type RungAnswer = crate::judge::judgement::Judgement;
-
-/// One rung of the ladder.
-#[derive(Debug, Clone, Serialize)]
-pub struct Rung {
-    /// From [`RUNG_IDS`] — stable, script-keyable.
-    pub id: &'static str,
-    /// The question this rung puts, as prose.
-    pub question: &'static str,
-    #[serde(flatten)]
-    pub answer: RungAnswer,
-    /// What the answer rests on, one fact per line.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub evidence: Vec<String>,
-}
-
-/// The report's overall reading — what the CLI exits with (see the module
-/// doc's exit table).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WhyVerdict {
-    /// An explanation of the silence was established (exit 0).
-    Explained,
-    /// No cause, and everything checked looks healthy (exit 1).
-    Healthy,
-    /// No cause, and the observation was impaired: an input this ladder
-    /// wanted could not be obtained, so "healthy" cannot be claimed (exit 2).
-    Impaired,
-}
-
-impl WhyVerdict {
-    /// The [`Judgement`](crate::judge::judgement::Judgement) mapping (RFC 13,
-    /// v1.24), and it is **THE inverted one — read this before wiring exit
-    /// codes**: `Explained` is *established-finding* (`Established`), because
-    /// the thing `why` establishes is a cause — a finding about the fleet —
-    /// even though this family's own historical CLI contract exits **0** for
-    /// it (the module doc's table). The RFC 13 exit projection
-    /// ([`crate::judge::judgement::judgement_exit_code`]) therefore gives `why`'s
-    /// three verdicts 1 / 0 / 2 in this order — the flip between the two
-    /// contracts is carried **here, at the mapping**, never special-cased by
-    /// a consumer downstream.
-    ///
-    /// | verdict | judgement | RFC 13 exit | historical `zenctl why` exit |
-    /// |---|---|---|---|
-    /// | `Explained` | `Established` (finding) | 1 | 0 |
-    /// | `Healthy` | `NotEstablished` (clean) | 0 | 1 |
-    /// | `Impaired` | `Unobservable` | 2 | 2 |
-    pub fn to_judgement(self) -> crate::judge::judgement::Judgement {
-        use crate::judge::judgement::Judgement;
-        match self {
-            WhyVerdict::Explained => Judgement::Established,
-            WhyVerdict::Healthy => Judgement::NotEstablished {
-                reason: "no cause established, and everything checked looks healthy".into(),
-            },
-            WhyVerdict::Impaired => Judgement::Unobservable {
-                reason: "an input the ladder wanted could not be obtained — \"healthy\" \
-                         cannot be claimed over questions it could not ask"
-                    .into(),
-            },
-        }
-    }
-}
-
-/// The inverse of [`WhyVerdict::to_judgement`], same (inverted) polarity:
-/// an established finding is `Explained`, established-clean is `Healthy`,
-/// and both unestablished poles fold to `Impaired` — a ladder nobody asked
-/// is exactly a ladder that cannot claim health.
-impl From<crate::judge::judgement::Judgement> for WhyVerdict {
-    fn from(j: crate::judge::judgement::Judgement) -> WhyVerdict {
-        use crate::judge::judgement::Judgement;
-        match j {
-            Judgement::Established => WhyVerdict::Explained,
-            Judgement::NotEstablished { .. } => WhyVerdict::Healthy,
-            Judgement::NotAsked | Judgement::Unobservable { .. } => WhyVerdict::Impaired,
-        }
-    }
-}
-
-/// The ladder, assembled. One rung per [`RUNG_IDS`] entry, in order, always —
-/// a rung is never omitted, it degrades to `NotAsked`.
-#[derive(Debug, Clone, Serialize)]
-pub struct WhyReport {
-    /// The key (or selector) as asked, verbatim.
-    pub key: String,
-    /// The base the ladder judged under. Empty is the bus-root deployment.
-    pub base: String,
-    pub rungs: Vec<Rung>,
-    pub verdict: WhyVerdict,
-    /// Inputs the ladder wanted and could not obtain — what makes a
-    /// no-cause run [`WhyVerdict::Impaired`] rather than healthy.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub impairments: Vec<String>,
-    /// The listen window that ran, seconds. Absent = not listened — which
-    /// the `wire-heard` rung states rather than hiding (O4).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub listened_s: Option<f64>,
-}
-
-impl WhyReport {
-    /// The rung ids whose answers established a cause — what exit 0 rests on.
-    pub fn causes(&self) -> Vec<&'static str> {
-        self.rungs
-            .iter()
-            .filter(|r| is_cause(r.id, &r.answer))
-            .map(|r| r.id)
-            .collect()
-    }
-}
 
 /// Whether one rung's answer counts as an established explanation.
 ///
@@ -581,7 +455,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             )
         }
         Some(Some(entities)) => {
-            let matches: Vec<&crate::bus::admin::DeclaredEntity> = keyexpr::new(key)
+            let matches: Vec<&crate::report::DeclaredEntity> = keyexpr::new(key)
                 .ok()
                 .map(|ke| {
                     entities
@@ -934,9 +808,11 @@ pub async fn run_why(
     spec: &WhySpec,
 ) -> Result<WhyReport> {
     let (session, base) = (fleet.session(), fleet.base());
+
     let key_part = key.split('?').next().unwrap_or_default();
 
     let roster = crate::bus::roster::roster(fleet, spec.timeout).await.ok();
+
     let admin_answered = crate::topology(session, spec.timeout)
         .await
         .ok()
@@ -1138,7 +1014,7 @@ mod tests {
         // The admin space answered, and it holds no publisher for this key
         // (only an unrelated subscriber) — the lazily-undeclared state.
         let entities = DeclaredEntities {
-            entities: vec![crate::bus::admin::DeclaredEntity {
+            entities: vec![crate::report::DeclaredEntity {
                 kind: EntityKind::Subscriber,
                 keyexpr: "v1/**".into(),
                 node_zid: "z1".into(),

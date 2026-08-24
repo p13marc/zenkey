@@ -44,8 +44,7 @@ pub use bus::body::{
 };
 #[cfg(feature = "decode")]
 pub use judge::condition::{
-    CondState, CondWindow, Condition, DoctorWatch, Eval, RuleState, Transition, WatchdogSpec,
-    WatchdogSummary, run_watchdog,
+    CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, run_watchdog,
 };
 #[cfg(feature = "decode")]
 pub use judge::doctor::{CHECK_IDS, DoctorSpec, run_doctor};
@@ -55,13 +54,12 @@ pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
 pub use judge::field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run_field};
 #[cfg(feature = "decode")]
 pub use model::decode::{
-    DecodedSample, Rendering, SchemaDrift, SchemaStore, TotalityGap, decode_sample, schema_drift,
-    schema_dump, schemas_for_type, totality_gaps,
+    DecodedSample, Rendering, SchemaStore, decode_sample, schema_drift, schema_dump,
+    schemas_for_type, totality_gaps,
 };
 #[cfg(feature = "decode")]
 pub use tape::generate::{
-    Fault, GenPattern, GenPlanEntry, GenReport, GenSpec, MockProducer, build_plan, run_gen,
-    serve_describe, synthetic_marker,
+    GenPattern, GenSpec, MockProducer, build_plan, run_gen, serve_describe, synthetic_marker,
 };
 #[cfg(feature = "decode")]
 pub use tape::synth::Synth;
@@ -71,18 +69,13 @@ pub use tape::synth::Synth;
 pub use zenkey::schema::validate::{NotValidated, Verdict};
 
 pub use bus::admin::{
-    AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,
-    storages,
-};
-pub use bus::admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
-pub use bus::admin::{
-    MeshLink, OriginAttachment, TopologyEdge, TopologyNode, TopologyReport,
-    admin_doc_omits_loopback, mesh_links, origin_attachments, render_dot, topology,
+    AdminEntry, admin_doc_omits_loopback, admin_get, declared_entities, mesh_links,
+    origin_attachments, render_dot, routers, state_coverage, storages, topology,
 };
 #[cfg(feature = "blob")]
 pub use bus::blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
 pub use bus::blob::{BlobTarget, blob_list, declared_by};
-pub use bus::discover::{AliveToken, DiscoveredBase, discover_bases};
+pub use bus::discover::{AliveToken, discover_bases};
 pub use bus::monitor::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
     StampProvenance, StreamItem, WatchId,
@@ -90,15 +83,15 @@ pub use bus::monitor::{
 pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use bus::query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts, RepeatingQuery,
-    RepeatingRegistry, StateSample, ValueSource, declare_repeating, declare_repeating_any,
-    fetch_stored, fetch_value, fleet_get, fleet_registry, state_snapshot,
+    RepeatingRegistry, StateSample, declare_repeating, declare_repeating_any, fetch_stored,
+    fetch_value, fleet_get, fleet_registry, state_snapshot,
 };
 pub use bus::roster::{
-    BridgeMatch, Freshness, NodeInfo, ProducerInfo, RosterChange, RosterWatch, apply_token,
-    bridge_resolve, node_info, node_rows, roster, token_identity,
+    BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, node_info, node_rows,
+    roster, token_identity,
 };
-pub use bus::scout::{HelloView, ScoutStream, scout};
-pub use bus::seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
+pub use bus::scout::{ScoutStream, scout};
+pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{Fleet, OpenFailure, open, open_reporting, open_with_config};
 pub use bus::write::{
@@ -107,11 +100,8 @@ pub use bus::write::{
 };
 pub use judge::budget::{BudgetObservation, data_plane_scopes, join_budget};
 pub use judge::cutover::run_cutover;
-pub use judge::judgement::{Judgement, judgement_exit_code};
 pub use judge::retired::run_retired;
-pub use judge::why::{
-    RUNG_IDS, Rung, RungAnswer, WhyInputs, WhyReport, WhySpec, WhyVerdict, run_why,
-};
+pub use judge::why::{RUNG_IDS, WhyInputs, WhySpec, run_why};
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
@@ -119,7 +109,7 @@ pub use model::facts::{
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
-pub use model::stats::{KeyStats, LatencyReport, LatencySummary, StampClass, StatsTable};
+pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::tree::KeyTreeSnapshot;
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
@@ -127,13 +117,21 @@ pub use model::tree::KeyTreeSnapshot;
 /// `zenkey_fleet::report::*`: it is the rendering vocabulary, and lifting all
 /// of it here would make this block a second copy of that module.
 pub use report::{
-    BenchReport, CallReport, CutoverReport, DoctorReport, ExpectReport, FieldReport, RetiredReport,
+    BenchReport, CallReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities,
+    DeclaredEntity, DiscoveredBase, DoctorReport, EntityKind, ExpectReport, Fault, FieldReport,
+    Freshness, GenPlanEntry, GenReport, HelloView, Judgement, LatencyReport, LatencySummary,
+    MeshLink, NodeInfo, OriginAttachment, ProducerInfo, RecordReport, ReplayReport, RetiredReport,
+    RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SeedCoverage, StorageInfo, TopologyEdge,
+    TopologyNode, TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
+    judgement_exit_code,
 };
+#[cfg(feature = "decode")]
+pub use report::{CondState, Transition, WatchdogSummary};
 pub use tape::bench::{BenchSpec, run_bench};
-pub use tape::ingest::{IngestRow, SampleRow, StreamLine, parse_row, parse_stream_line};
+pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
 pub use tape::record::{
-    RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplaySpec, ReplayTarget, ZREC_VERSION,
-    ZrecHeader, ZrecItem, ZrecReader, ZrecWriter, record, replay,
+    RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, ZREC_VERSION, ZrecItem, ZrecReader,
+    ZrecWriter, record, replay,
 };
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.

@@ -12,9 +12,8 @@ use std::time::Duration;
 
 use zenkey::qos::QosProfile;
 use zenkey_fleet::declare_publication;
-use zenkey_fleet::judge::condition::{
-    CondState, Condition, Transition, WatchdogSpec, run_watchdog,
-};
+use zenkey_fleet::judge::condition::{Condition, WatchdogSpec, run_watchdog};
+use zenkey_fleet::report::{CondState, Transition};
 
 mod util;
 use util::peer_pair;

@@ -10,29 +10,11 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::model::bounded::{BoundedLru, DEFAULT_MAX_KEYS};
+use crate::report::{LatencyReport, LatencySummary};
 
 /// How many per-key latency observations the summary window keeps. Bounded
 /// like everything else an hours-long observer accumulates (O6).
 const LAT_WINDOW: usize = 256;
-
-/// The observed **skewed** latency distribution of one key (#119):
-/// (arrival wall-clock − publisher HLC), µs, over the last `LAT_WINDOW`
-/// (a private bound) stamped samples.
-///
-/// The caveat is part of the measurement: this contains clock skew, and
-/// HLCs are only as good as the fleet's time discipline. Negative values
-/// are the skew *evidence* and are never clamped — render this as
-/// "observed skewed latency", an observation, not a verdict on the
-/// transport (RFC 09 §5.1 applied to a number).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct LatencySummary {
-    pub min_us: i64,
-    pub median_us: i64,
-    pub p95_us: i64,
-    pub max_us: i64,
-    /// Stamped samples in the window.
-    pub samples: usize,
-}
 
 /// Which clock stamped a latency observation — the storage form of
 /// [`crate::bus::monitor::StampProvenance`], without the stamper's identity.
@@ -41,84 +23,6 @@ pub enum StampClass {
     SelfStamped,
     Foreign,
     Unattributable,
-}
-
-/// One key's observed latency, kept apart by **who stamped it** (issue #213).
-///
-/// Three populations, never folded into one median. A publisher-stamped sample
-/// measures publisher → observer; a router-stamped one measures that router →
-/// observer, which is a different quantity on the same axis. Averaging them
-/// produces a number that describes neither, and a fleet where some producers
-/// timestamp and some do not would report it without a word.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
-pub struct LatencyReport {
-    /// Samples the publishing session stamped itself.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub self_stamped: Option<LatencySummary>,
-    /// Samples stamped by another node — commonly a router.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub foreign: Option<LatencySummary>,
-    /// Stamped, but with no `SourceInfo` to compare against: unknown, not
-    /// foreign (RFC 09 §5.1 O4).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unattributable: Option<LatencySummary>,
-    /// The distinct stamping nodes seen on this key, rendered. Empty when
-    /// every sample was self-stamped — there is no third party to name.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub stampers: Vec<String>,
-    /// Stampers beyond the retained bound that were dropped (O6: a bound
-    /// reports what it cost).
-    #[serde(skip_serializing_if = "is_zero", default)]
-    pub stampers_dropped: u64,
-}
-
-fn is_zero(n: &u64) -> bool {
-    *n == 0
-}
-
-impl LatencyReport {
-    /// Whether anything was observed at all.
-    pub fn is_empty(&self) -> bool {
-        self.self_stamped.is_none() && self.foreign.is_none() && self.unattributable.is_none()
-    }
-
-    /// The populations present, each with the label that says what it
-    /// measures. Ordered self → foreign → unattributable.
-    pub fn populations(&self) -> Vec<(&'static str, LatencySummary)> {
-        [
-            ("publisher-stamped", self.self_stamped),
-            ("router-stamped", self.foreign),
-            ("stamper unknown", self.unattributable),
-        ]
-        .into_iter()
-        .filter_map(|(label, s)| s.map(|s| (label, s)))
-        .collect()
-    }
-
-    /// The caveat that has to travel with every rendering of these numbers.
-    ///
-    /// One sentence, in the engine, so the CLI and the GUI cannot drift into
-    /// describing the same measurement differently (RFC 09 §5.1 O7).
-    pub fn caveat(&self) -> String {
-        let clock = match (self.self_stamped.is_some(), self.foreign.is_some()) {
-            (true, false) => "the publisher's own HLC",
-            (false, true) => "an HLC stamped in transit, not the publisher's",
-            (true, true) => "two different clocks, kept apart below",
-            (false, false) => "an HLC whose stamper did not identify itself",
-        };
-        let mut note = format!(
-            "arrival wall-clock − {clock}: observed *skewed* latency — it contains \
-             clock skew, and negative values are the skew evidence, not an error \
-             (RFC 09 §5.1)"
-        );
-        if !self.stampers.is_empty() {
-            note.push_str(&format!("\nstamped by: {}", self.stampers.join(", ")));
-            if self.stampers_dropped > 0 {
-                note.push_str(&format!(" (+{} more not retained)", self.stampers_dropped));
-            }
-        }
-        note
-    }
 }
 
 /// How many distinct stampers one key retains. A key sees its publisher and,
@@ -203,6 +107,7 @@ fn note_stamper(
     stamper: Option<zenoh::time::TimestampId>,
 ) {
     let Some(id) = stamper else { return };
+
     if set.contains(&id) {
         return;
     }

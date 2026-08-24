@@ -4,11 +4,11 @@
 //! [`SampleRow`] is the only writer and [`parse_row`] the only reader, which
 //! is what makes the pipe symmetric. It was not, until #235: the claim lived
 //! in this doc comment while three hand-built writers — `.zrec`
-//! ([`mod@crate::tape::record`]), `zenctl echo --format ndjson`, and zengui's
+//! ([`mod@crate::tape::record`]), `zenctl topic echo --format ndjson`, and zengui's
 //! echo export — each assembled the object with `serde_json::json!` and two
 //! of them disagreed with this reader. `echo` wrote the zenoh *wire axes*
 //! under `"qos"`, where [`parse_row`] resolves a profile *name*, so every
-//! row of `zenctl echo --format ndjson | zenctl pub --from ndjson` was counted
+//! row of `topic echo --format ndjson | topic pub --from ndjson` was counted
 //! malformed; zengui wrote a payload byte *count* under `"bytes"`, which has
 //! meant base64 of the wire payload since RFC 09 §5.2. Both carried a doc
 //! comment asserting conformance. One struct is the repair — a dialect with
@@ -26,121 +26,7 @@
 //! `"value"`: a `value` is a decoded *rendering* and does not round-trip a
 //! binary payload. Same for `"attachment_b64"` over `"attachment"`.
 
-use serde::Serialize;
-
-/// One sample, as the explorers write it (#235).
-///
-/// The write side of this module's dialect: `.zrec` rows (RFC 09 §5.2),
-/// `zenctl echo --format ndjson`, and zengui's echo export are all
-/// this struct, so [`parse_row`] reads back what any of them wrote. Every
-/// optional field is `skip_serializing_if`: a writer that does not hold a
-/// fact omits it rather than nulling it, because a `null` here would claim
-/// a question was asked and answered negatively (RFC 09 §5.1 O4). That is
-/// also what keeps the three writers' rows a *subset* relationship rather
-/// than three shapes — a `.zrec` row carries no `origin`, an echo row
-/// carries no pacing offset, and neither is lying about the other.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-pub struct SampleRow {
-    /// Full wire key, as received — explorers run un-namespaced (RFC 09 §5).
-    pub key: String,
-    /// The convention-parsed origin chunk, when the key parses at all.
-    ///
-    /// Absent means the key did not parse under the observer's base, which
-    /// is a fact about the key and not a claim about the fleet (O1/O3).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub origin: Option<String>,
-    /// The parsed subject tail, joined — absent on the same terms as
-    /// [`SampleRow::origin`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subject: Option<String>,
-    /// Microseconds since the capture epoch: the **observer's arrival
-    /// clock**, and the only thing replay paces by (RFC 09 §5.2). A live
-    /// stream has no epoch to be relative to, so it omits this.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub t: Option<u64>,
-    /// The registry-declared type name, when a decode was asked for and
-    /// resolved one. `--no-decode` never asks, so it omits this rather than
-    /// nulling it (O4).
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub type_name: Option<String>,
-    /// Whether [`SampleRow::value`] is a schema decode rather than a
-    /// structural rendering. Absent when nothing was decoded.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub typed: Option<bool>,
-    /// The sample's declared encoding, verbatim (RFC 08 §7: sample beats
-    /// registry beats sniff).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encoding: Option<String>,
-    /// The sample's HLC, when one rode it. Whose clock it is depends on who
-    /// stamped it (RFC 09 §5.1 O7); this field says only that it exists.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<String>,
-    /// The RFC 04 §3 QoS profile **name**, and only when the wire's actual
-    /// axes match one.
-    ///
-    /// This is the field [`parse_row`] resolves through
-    /// `zenkey::qos::QosProfile::from_name`, so it must never carry
-    /// anything else — axes matching no profile are not approximated, they
-    /// ride [`SampleRow::qos_axes`] instead. Writing the axes here is
-    /// exactly the bug in #235.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qos: Option<String>,
-    /// The wire's actual QoS axes as one token,
-    /// `priority/congestion/reliability[+express]` (#120).
-    ///
-    /// A fact worth carrying and *not* a profile name: a fleet is free to
-    /// publish axes no profile declares, and the declared-vs-observed
-    /// comparison is the point.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qos_axes: Option<String>,
-    /// A tombstone: authoritative retirement, never an empty put
-    /// (RFC 04 §1.2). Always written — every sample is one or the other,
-    /// and that is a fact rather than an unanswered question.
-    pub delete: bool,
-    /// Base64 of the exact wire payload — lossless and round-trippable,
-    /// which is why [`parse_row`] prefers it over [`SampleRow::value`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bytes: Option<String>,
-    /// The payload as a *rendering*: a schema decode when one was asked
-    /// for and succeeded, else the structural degradation. It does not
-    /// round-trip a binary payload, and RFC 09 §5.2 says so.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<serde_json::Value>,
-    /// True payload size, whatever the rendering above shows.
-    ///
-    /// Deliberately not spelled `bytes`: that key has meant the base64
-    /// payload since RFC 09 §5.2, and a byte count under it makes the row
-    /// unreadable rather than merely lossy (#235).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payload_bytes: Option<usize>,
-    /// The publishing entity, `zid:eid#sn`, when `SourceInfo` rode the
-    /// sample. Usually absent: zenoh 1.9 and 1.10 deliver none to a
-    /// subscriber — 1.10 even dropped setting it through the advanced API
-    /// (eclipse-zenoh/zenoh#2563) — RFC 09 §5.1 O7's practical note.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    /// The attachment as a rendering (#117), on the same terms as
-    /// [`SampleRow::value`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attachment: Option<serde_json::Value>,
-    /// Base64 of the exact attachment bytes; wins over the rendering.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attachment_b64: Option<String>,
-    /// True attachment size, whatever the rendering above shows.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attachment_bytes: Option<usize>,
-    /// The RFC 08 §7 validation verdict, present only when the pipeline
-    /// was asked — and then always, so "valid" and "not checked" cannot be
-    /// confused by a shared absence (#159).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verdict: Option<String>,
-    /// The failed constraints, when the verdict is `invalid`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub violations: Option<Vec<String>>,
-    /// Why a decode that was asked for did not happen.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub decode_error: Option<String>,
-}
+use crate::report::SampleRow;
 
 impl SampleRow {
     /// The identity fields every writer shares: the wire key, and what the
@@ -234,6 +120,7 @@ fn b64_bytes(
     field: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     use base64::Engine as _;
+
     match obj.get(field) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::String(s)) => base64::engine::general_purpose::STANDARD

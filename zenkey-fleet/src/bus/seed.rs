@@ -31,6 +31,7 @@ use anyhow::{Result, anyhow};
 use zenoh::Session;
 
 use crate::bus::monitor::SampleView;
+use crate::report::SeedCoverage;
 
 /// Which seed paths to run. Default: both — per-path opt-out exists because
 /// a deployment may *know* it has no storages (or no advanced publishers),
@@ -56,22 +57,6 @@ impl Default for SeedPolicy {
             timeout: Duration::from_secs(3),
         }
     }
-}
-
-/// What each seed path contributed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct SeedCoverage {
-    /// Replies from the `@adv` cache query (`None` = the history path was
-    /// disabled; `Some(0)` = ran and no cache answered — an observation,
-    /// not a verdict).
-    pub history_replies: Option<usize>,
-    /// Replies from the storage GET (same `None`/`Some(0)` reading).
-    pub storage_replies: Option<usize>,
-    /// Samples suppressed by the merge — not newer than what was already
-    /// seen for their key. The honesty counter: a seed that arrived late
-    /// and lost (or duplicated the other path) is counted, never silently
-    /// absorbed.
-    pub superseded: u64,
 }
 
 /// One delivery from a seeded subscription.
@@ -245,6 +230,7 @@ pub(crate) async fn seed_get(
     mut deliver: impl FnMut(SampleView),
 ) -> usize {
     let mut n = 0usize;
+
     // `accept_any`: cache replies arrive on the sample's own key, outside an
     // `@adv`-suffixed selector — without it they are dropped.
     let opts = crate::bus::query::GetOpts::new(timeout).accept_any();
@@ -283,6 +269,7 @@ pub async fn seed_subscribe(
     policy: SeedPolicy,
 ) -> Result<SeededSubscriber> {
     let (tx, rx) = seed_channel(SEED_CAPACITY);
+
     let merge = Arc::new(Merge::new());
 
     // 1) The subscriber, FIRST — anything published from here on is caught.

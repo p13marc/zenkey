@@ -9,7 +9,7 @@
 //! scan, same `len - target` batch, differing only in the recency *type*.
 //!
 //! So the mechanism lives here, once, and the policy stays with each holder:
-//! [`BoundedLru::admit`] returns how many entries it dropped, and the caller
+//! `BoundedLru::admit` returns how many entries it dropped, and the caller
 //! adds that to its own ledger. "Evicted under the bound", "retired because
 //! nothing watches it any more" and "never projected in the first place" are
 //! different facts, and one counter over several of them is exactly what O6
@@ -17,7 +17,7 @@
 //!
 //! Recency is the caller's too: `StatsTable` orders by an injected
 //! `last_seen: Instant`, `FactsCache` by a monotone observation counter, and
-//! [`BoundedLru::admit`] takes whichever as a projection out of the value.
+//! `BoundedLru::admit` takes whichever as a projection out of the value.
 
 use std::collections::HashMap;
 

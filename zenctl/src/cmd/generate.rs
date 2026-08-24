@@ -28,7 +28,8 @@
 
 use crate::cli::Pattern;
 use anyhow::Result;
-use zenkey_fleet::tape::generate::{Fault, GenPattern, GenSpec};
+use zenkey_fleet::report::Fault;
+use zenkey_fleet::tape::generate::{GenPattern, GenSpec};
 
 use crate::Bus;
 

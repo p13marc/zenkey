@@ -10,6 +10,7 @@ use zenoh::qos::Priority;
 use zenoh::query::{ConsolidationMode, QueryTarget};
 
 use crate::bus::session::Fleet;
+use crate::report::ValueSource;
 
 /// How a producer answered a procedure call.
 ///
@@ -209,6 +210,7 @@ async fn collect_answers(
     replies: zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>,
 ) -> Vec<FleetAnswer> {
     let mut out = Vec::new();
+
     while let Ok(reply) = replies.recv_async().await {
         out.push(answer_of(base, reply));
     }
@@ -465,8 +467,11 @@ pub async fn fleet_registry_raw(
     timeout: Duration,
 ) -> Result<Vec<(RegistrySlice, String)>> {
     let repeating = RepeatingRegistry::declare(fleet, timeout).await?;
+
     let slices = repeating.fetch().await?;
+
     repeating.undeclare().await?;
+
     Ok(slices)
 }
 
@@ -568,19 +573,6 @@ pub async fn state_snapshot(
         });
     }
     Ok(out)
-}
-
-/// Which rung of the fetch ladder produced a value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ValueSource {
-    /// A GET on the concrete key answered — a router storage (or any plain
-    /// queryable standing at that key).
-    Storage,
-    /// The publisher's AdvancedPublisher cache answered on `<key>/@adv/**`.
-    Cache,
-    /// A brief bounded subscription caught a live sample.
-    Window,
 }
 
 /// One fetched value with its provenance.

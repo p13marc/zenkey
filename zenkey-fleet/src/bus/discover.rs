@@ -18,20 +18,20 @@
 //! `@catalog` by name. A base populated *only* by other service origins, with
 //! no host producers and no storage config, is not discoverable here.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::Result;
-use serde::Serialize;
 use zenkey::grammar::{self, ClassOrPlane, SUBJECT_ALIVE, VERSION_CHUNK};
 use zenoh::Session;
 
-use crate::bus::admin::StorageInfo;
+use crate::report::{DiscoveredBase, StorageInfo};
 
 /// Host-form sweep: `**` matches zero or more chunks, so every base depth is
 /// covered — including the empty base. A verbatim origin is never matched
 /// (D4), hence the separate catalog sweep.
 const HOST_ALIVE_SWEEP: &str = "**/v1/*/state/*/alive";
+
 /// `@catalog` asked for by name at any base depth, mirroring [`crate::bus::roster`]
 /// (a unit test pins this against the typed `selector::service_alive`).
 const CATALOG_ALIVE_SWEEP: &str = "**/v1/@catalog/state/alive";
@@ -121,19 +121,6 @@ pub fn base_of_storage(storage: &StorageInfo) -> Option<String> {
     None
 }
 
-/// One discovered base and the evidence for it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct DiscoveredBase {
-    /// `""` is the empty base (keys start at `v1/` on the wire).
-    pub base: String,
-    /// Origins holding alive tokens under this base.
-    pub origins: BTreeSet<String>,
-    /// Producer names alive under this base.
-    pub producers: BTreeSet<String>,
-    /// Storages whose config names this base, as `name@zid`.
-    pub storages: Vec<String>,
-}
-
 /// Merge the two signals into sorted, deduped rows (the empty base sorts
 /// first). Pure — [`discover_bases`] is the thin session wrapper.
 pub fn merge_signals(
@@ -141,6 +128,7 @@ pub fn merge_signals(
     storages: &[StorageInfo],
 ) -> Vec<DiscoveredBase> {
     let mut bases: BTreeMap<String, DiscoveredBase> = BTreeMap::new();
+
     fn entry<'m>(
         bases: &'m mut BTreeMap<String, DiscoveredBase>,
         base: &str,

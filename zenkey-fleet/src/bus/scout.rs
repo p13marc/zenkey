@@ -10,22 +10,11 @@
 //! The session-opening default stays off (see `session::open`'s contamination
 //! warning): a scout only listens for Hellos and joins nothing.
 
+use crate::report::HelloView;
 use anyhow::{Context, Result};
 use zenoh::config::WhatAmIMatcher;
 use zenoh::handlers::FifoChannelHandler;
 use zenoh::scouting::Hello;
-
-/// One Hello, owned — zenoh's [`Hello`] is a wrapper we flatten so callers
-/// (a CLI row, a widget) hold plain strings, serialized as they render.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct HelloView {
-    /// The node's Zenoh id, hex-formatted.
-    pub zid: String,
-    /// What the node says it is: `router`, `peer`, or `client`.
-    pub whatami: String,
-    /// The locators the node advertises, verbatim.
-    pub locators: Vec<String>,
-}
 
 impl HelloView {
     fn of(hello: &Hello) -> Self {
@@ -77,6 +66,7 @@ pub async fn scout(
     listen: &[String],
 ) -> Result<ScoutStream> {
     let config = crate::bus::session::explorer_config(connect, listen, true);
+
     let inner = zenoh::scout(what, config)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))

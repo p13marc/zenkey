@@ -18,16 +18,18 @@
 //! * **Silence is never a verdict** (RFC 05 §2.1). A judge that heard
 //!   nothing says what it asked and what did not answer.
 //!
-//! [`judgement`] is where those three become a type: the four-pole core
-//! ([`judgement::Judgement`]) every surface verdict maps onto, and the
-//! 0/1/2 exit projection.
+//! [`crate::report::Judgement`] is where those three become a type: the
+//! four-pole core every surface verdict maps onto, and the 0/1/2 exit
+//! projection beside it. It sits under `report/` rather than here because it
+//! is serde-pinned — `{"answer": "not_asked"}` reaches a script — and the
+//! placement rule on [`crate::report`] admits no exceptions, not even for the
+//! vocabulary the judges are written in.
 //!
 //! What a judge returns is a **report**, and every serialized report shape
 //! lives in [`crate::report`], not here (see that module's placement rule).
 
 pub mod budget;
 pub mod cutover;
-pub mod judgement;
 pub mod retired;
 pub mod why;
 

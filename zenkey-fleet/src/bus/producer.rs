@@ -180,7 +180,7 @@ impl Responder {
 ///
 /// ```no_run
 /// # async fn demo(session: zenoh::Session) -> anyhow::Result<()> {
-/// let mut up = zenkey_fleet::producer::BringUp::new(&session);
+/// let mut up = zenkey_fleet::bus::producer::BringUp::new(&session);
 /// up.serve("v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect").await?;
 /// up.serve("v1/h-3fa9c2d41b7e/@rpc/sysinfo/describe").await?;
 /// // The token is mintable only by consuming the bring-up: every
