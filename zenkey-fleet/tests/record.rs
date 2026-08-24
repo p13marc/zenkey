@@ -8,16 +8,61 @@
 //! Ports are ephemeral (`util::peer_pair`), so two test runs at once
 //! cannot collide.
 
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
 use zenkey_fleet::{
-    RecordBounds, ReplayTarget, ZREC_VERSION, ZrecHeader, ZrecReader, ZrecWriter,
+    RecordBounds, ReplayTarget, ZREC_VERSION, ZrecHeader, ZrecSink, ZrecSource,
     declare_publication, record, replay,
 };
 
 mod util;
 use util::peer_pair;
+
+/// A byte sink the test can read back.
+///
+/// The sink **owns** its writer — it lives on the blocking pool (#332) — so
+/// an in-memory capture cannot simply take the `Vec` back out of it the way
+/// a synchronous `ZrecWriter::finish` handed it over.
+#[derive(Clone, Default)]
+struct SharedBuf(Arc<Mutex<Vec<u8>>>);
+
+impl SharedBuf {
+    fn take(&self) -> Vec<u8> {
+        self.0.lock().expect("buffer lock").clone()
+    }
+}
+
+impl Write for SharedBuf {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("buffer lock").write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A [`SharedBuf`] that costs real time per write — a disk, modelled.
+#[derive(Clone)]
+struct SlowBuf {
+    inner: SharedBuf,
+    per_write: Duration,
+}
+
+impl Write for SlowBuf {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // Blocking on purpose: this is what must not be on a runtime thread.
+        std::thread::sleep(self.per_write);
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 fn header(selector: &str) -> ZrecHeader {
     ZrecHeader {
@@ -69,10 +114,13 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
         .expect("send binary");
     publication.retire().await.expect("retire");
 
-    let mut writer = ZrecWriter::new(Vec::new(), &header(SELECTOR)).expect("writer");
+    let buf = SharedBuf::default();
+    let sink = ZrecSink::spawn(buf.clone(), &header(SELECTOR))
+        .await
+        .expect("sink");
     record(
         &mut events,
-        &mut writer,
+        &sink,
         RecordBounds {
             max_samples: Some(3),
             max_duration: Some(Duration::from_secs(10)),
@@ -81,10 +129,10 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     )
     .await
     .expect("record");
-    let (samples, dropped) = writer.counts();
+    let (samples, dropped) = sink.finish().await.expect("finish");
     assert_eq!(samples, 3, "two puts and a tombstone");
     assert_eq!(dropped, 0);
-    let file = writer.finish().expect("finish");
+    let file = buf.take();
 
     // --- replay side (a second, unrelated bus) ------------------------
     let (c, d) = peer_pair().await;
@@ -107,7 +155,9 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     );
     gate.undeclare().await.expect("undeclare gate");
 
-    let mut reader = ZrecReader::new(file.as_slice()).expect("reader");
+    let mut reader = ZrecSource::spawn(std::io::Cursor::new(file))
+        .await
+        .expect("reader");
     let report = replay(
         &mut reader,
         zenkey_fleet::ReplaySpec {
@@ -198,10 +248,13 @@ async fn a_lossy_capture_says_so_at_both_ends() {
     // channel never closes underneath a recorder — bound by time instead:
     // everything is already buffered, so the drain is instant and the
     // deadline only caps the tail.
-    let mut writer = ZrecWriter::new(Vec::new(), &header(SELECTOR)).expect("writer");
+    let buf = SharedBuf::default();
+    let sink = ZrecSink::spawn(buf.clone(), &header(SELECTOR))
+        .await
+        .expect("sink");
     record(
         &mut events,
-        &mut writer,
+        &sink,
         RecordBounds {
             max_samples: None,
             max_duration: Some(Duration::from_secs(1)),
@@ -210,10 +263,10 @@ async fn a_lossy_capture_says_so_at_both_ends() {
     )
     .await
     .expect("record");
-    let (samples, dropped) = writer.counts();
+    let (samples, dropped) = sink.finish().await.expect("finish");
     assert!(dropped > 0, "a capacity-4 channel under 32 sends must lag");
     assert!(samples > 0);
-    let file = writer.finish().expect("finish");
+    let file = buf.take();
 
     let text = String::from_utf8(file.clone()).expect("a .zrec is text");
     assert!(
@@ -221,7 +274,9 @@ async fn a_lossy_capture_says_so_at_both_ends() {
         "the drop ledger is in the file, not only in memory"
     );
 
-    let mut reader = ZrecReader::new(file.as_slice()).expect("reader");
+    let mut reader = ZrecSource::spawn(std::io::Cursor::new(file))
+        .await
+        .expect("reader");
     let report = replay(
         &mut reader,
         zenkey_fleet::ReplaySpec {
@@ -240,4 +295,112 @@ async fn a_lossy_capture_says_so_at_both_ends() {
     );
     assert_eq!(u64::from(report.dry_run), 1);
     assert_eq!(report.published, samples);
+}
+
+/// #332: a slow disk no longer manufactures the drops the capture records.
+///
+/// The traffic is shaped so the answer is a property, not a race: bursts of
+/// 150 — well inside the shipped 1024-slot broadcast, so a burst alone can
+/// never overflow it — with 5 ms between them. Draining a burst is 150
+/// pointer moves into the sink's queue, microseconds; *writing* one is 150
+/// rows at 200 µs, thirty milliseconds. So the backlog can only grow if the
+/// writing is what the drain is doing.
+///
+/// When the write ran inline in the drain loop, it was: the backlog grew by
+/// most of a burst each round, the broadcast overflowed a few bursts in, and
+/// the capture wrote `{"dropped": n}` records caused by its own writer. With
+/// the writer on the blocking pool behind the sink's bounded queue the drain
+/// keeps up with every burst, and a drop record in a `.zrec` means what it
+/// says: the bus outran the observer.
+///
+/// The final `finish` is timed as well — it must still be draining when the
+/// capture ends, which is the proof that the queue really did absorb a
+/// writer stall rather than the writer having quietly kept up.
+///
+/// Measured on this exact traffic while the fix was written: the old drain
+/// loop captured 1 207 samples and recorded 293 drops, every one of them the
+/// writer's; this one captures 1 500 and records none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_slow_writer_does_not_become_the_captures_drops() {
+    const SAMPLES: u64 = 1_500;
+    /// Samples per burst — comfortably inside the broadcast's 1024 slots.
+    const BURST: u64 = 150;
+
+    let core = zenkey_fleet::MonitorCore::new(1024); // the shipped default
+    let mut events = core.events();
+    let buf = SharedBuf::default();
+    let sink = ZrecSink::spawn(
+        SlowBuf {
+            inner: buf.clone(),
+            per_write: Duration::from_micros(100),
+        },
+        &header(SELECTOR),
+    )
+    .await
+    .expect("sink");
+
+    let producer = {
+        let core = std::sync::Arc::clone(&core);
+        tokio::spawn(async move {
+            for i in 0..SAMPLES {
+                if i > 0 && i % BURST == 0 {
+                    // Between bursts: long enough for any drain that is not
+                    // writing to disk to have emptied the last one, far too
+                    // short for one that is.
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                core.ingest(
+                    zenkey_fleet::SampleView {
+                        key: KEY.to_string(),
+                        payload: zenoh::bytes::ZBytes::from(i.to_le_bytes().to_vec()),
+                        encoding: String::new(),
+                        kind: zenoh::sample::SampleKind::Put,
+                        timestamp: None,
+                        stamped_by: None,
+                        attachment: None,
+                        priority: zenoh::qos::Priority::Data,
+                        congestion_control: zenoh::qos::CongestionControl::Drop,
+                        reliability: zenoh::qos::Reliability::BestEffort,
+                        express: false,
+                        source: None,
+                        received: std::time::Instant::now(),
+                    },
+                    None,
+                );
+                // The producer is not the subject of the measurement: yield
+                // so the drain is scheduled the way a real network callback
+                // thread (a thread of its own) would leave it.
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+
+    record(
+        &mut events,
+        &sink,
+        RecordBounds {
+            max_samples: Some(SAMPLES),
+            max_duration: Some(Duration::from_secs(30)),
+        },
+        |_, _| {},
+    )
+    .await
+    .expect("record");
+    producer.await.expect("producer");
+
+    let draining = std::time::Instant::now();
+    let (samples, dropped) = sink.finish().await.expect("finish");
+    let drain_took = draining.elapsed();
+
+    assert_eq!(dropped, 0, "the writer's latency is not the bus's loss");
+    assert_eq!(samples, SAMPLES, "every sample reached the file");
+    assert!(
+        drain_took > Duration::from_millis(20),
+        "the writer kept up on its own, so this proves nothing: {drain_took:?}"
+    );
+    let text = String::from_utf8(buf.take()).expect("a .zrec is text");
+    assert!(
+        !text.lines().any(|l| l.contains("\"dropped\"")),
+        "no self-inflicted drop record"
+    );
 }

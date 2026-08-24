@@ -188,7 +188,7 @@ pub use tape::bench::{BenchSpec, run_bench};
 pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
 pub use tape::record::{
     RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, ZREC_VERSION, ZrecItem, ZrecReader,
-    ZrecWriter, record, replay,
+    ZrecSink, ZrecSource, ZrecWriter, record, replay,
 };
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.

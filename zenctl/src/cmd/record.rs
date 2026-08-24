@@ -8,7 +8,7 @@
 use std::io::BufWriter;
 
 use anyhow::{Context, Result};
-use zenkey_fleet::{RecordBounds, RecordReport, ZREC_VERSION, ZrecHeader, ZrecWriter};
+use zenkey_fleet::{RecordBounds, RecordReport, ZREC_VERSION, ZrecHeader, ZrecSink};
 
 use crate::Bus;
 use crate::cli::SelectorArgs;
@@ -31,8 +31,15 @@ pub async fn run(
         base: args.base().to_string(),
         captured_at: zenkey_fleet::tape::record::rfc3339_now(),
     };
-    let file = std::fs::File::create(out).with_context(|| format!("create {out}"))?;
-    let mut writer = ZrecWriter::new(BufWriter::new(file), &header)?;
+    // Both halves off the runtime (#332): the create through `tokio::fs`,
+    // and every row after it on the blocking pool behind the sink's queue.
+    // A capture that stalls its own drain records drops it caused itself.
+    let file = tokio::fs::File::create(out)
+        .await
+        .with_context(|| format!("create {out}"))?
+        .into_std()
+        .await;
+    let sink = ZrecSink::spawn(BufWriter::new(file), &header).await?;
 
     let session = args.session().await?;
     let monitor =
@@ -63,7 +70,7 @@ pub async fn run(
     };
     let started = std::time::Instant::now();
     let mut last_line = std::time::Instant::now();
-    let recording = zenkey_fleet::record(&mut events, &mut writer, bounds, |samples, dropped| {
+    let recording = zenkey_fleet::record(&mut events, &sink, bounds, |samples, dropped| {
         // Progress on stderr, throttled — completion and failure are the
         // report's job, not a progress line's.
         if last_line.elapsed() >= std::time::Duration::from_secs(1) {
@@ -76,8 +83,9 @@ pub async fn run(
         _ = tokio::signal::ctrl_c() => {}
     }
 
-    let (samples, dropped) = writer.counts();
-    writer.finish()?;
+    // `finish` drains the queue before it flushes and reports what actually
+    // reached the file — not what the capture handed the queue.
+    let (samples, dropped) = sink.finish().await?;
     let report = RecordReport {
         header,
         out: Some(out.to_string()),

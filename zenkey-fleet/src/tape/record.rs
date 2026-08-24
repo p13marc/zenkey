@@ -11,6 +11,23 @@
 //! file — a capture taken while behind is a partial view and says so at
 //! the position of the loss).
 //!
+//! **Neither direction touches the disk from a runtime thread** (#332).
+//! [`ZrecWriter`] and [`ZrecReader`] are plain synchronous `std::io` — a
+//! capture is line-at-a-time base64 and JSON, which is CPU as well as I/O —
+//! and the async ends of the module, [`ZrecSink`] and [`ZrecSource`], run
+//! them on the blocking pool behind a bounded channel. The alternative,
+//! `AsyncWrite`/`AsyncBufRead` bounds on the two types, was rejected: the
+//! serialization would still run on a runtime worker, and the two callers
+//! that write a `.zrec` **without** a runtime at all — zengui's "save the
+//! retained window", this module's tests — would need a second, synchronous
+//! writer to stay honest. `bus/blob/transfer.rs`'s `tokio::fs` is the model
+//! for byte-shovelling; this is the model for a serialising loop.
+//!
+//! It matters because the thing being recorded is the thing the writer
+//! stalls: a blocking `write_all` per sample on the drain's own task left the
+//! monitor's bounded broadcast unattended, and `zenctl record` faithfully
+//! wrote `{"dropped": n}` records it had caused itself.
+//!
 //! Replay is publishing. Every replayed sample rides a declared publisher
 //! ([`crate::bus::write::declare_publication`], P7 — no ad-hoc puts), gets the
 //! *replaying* session's HLC (re-stamped deliberately: a preserved foreign
@@ -22,6 +39,8 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -175,6 +194,167 @@ impl<W: Write> ZrecWriter<W> {
     }
 }
 
+/// How many lines a [`ZrecSink`] queues ahead of its writer.
+///
+/// Four times the monitor's default broadcast capacity (1024), on purpose:
+/// a burst the *bus* side can hold is a burst the disk side can hold too, so
+/// a momentary write stall spends the queue instead of manufacturing drops
+/// the bus never had. Past that the queue backpressures the drain — which is
+/// where a genuinely-too-slow disk belongs, surfacing as `Dropped(n)` like
+/// any other observer that could not keep up (RFC 13 §3 O6). Bounded, not
+/// unbounded, because a capture promises to stream in bounded memory.
+const SINK_QUEUE: usize = 4096;
+
+/// One line on its way to the disk. Serialization happens on the writer's
+/// thread, so what crosses the channel is the sample itself — a pointer
+/// move, not a copy.
+enum ZrecLine {
+    Sample(Arc<SampleView>),
+    Dropped(u64),
+}
+
+/// What the sink's async half can see of a writer that lives on the
+/// blocking pool.
+#[derive(Debug, Default)]
+struct SinkState {
+    samples: AtomicU64,
+    dropped: AtomicU64,
+    /// The writer's error, kept where the async half can name it: a `send`
+    /// that fails says only "the writer is gone", and the reason is what the
+    /// operator needs.
+    failure: std::sync::Mutex<Option<String>>,
+}
+
+/// A [`ZrecWriter`] running on the blocking pool behind a bounded channel
+/// (#332) — the async end of a capture.
+///
+/// Every byte of `.zrec` I/O, and every base64 and JSON encode that precedes
+/// it, happens on a blocking thread. The runtime side of a capture does
+/// nothing but move `Arc`s into a queue, so the drain stays available to the
+/// monitor's bounded broadcast and the drop records in the file mean what
+/// they say: samples the *bus* outran the observer with, not samples the
+/// observer's own writer stalled it out of.
+pub struct ZrecSink {
+    tx: tokio::sync::mpsc::Sender<ZrecLine>,
+    state: Arc<SinkState>,
+    writer: tokio::task::JoinHandle<Result<(u64, u64)>>,
+}
+
+impl ZrecSink {
+    /// Write `header` and hand back the sink. Awaits the header's own write,
+    /// so a sink that comes back is a file with a valid first line on it —
+    /// the failure an operator must hear about before a capture starts
+    /// "running".
+    ///
+    /// The capture epoch is stamped **here** rather than on the blocking
+    /// thread: every row's `t` is an offset from it, and it must not shift by
+    /// however long the pool took to pick the task up.
+    pub async fn spawn<W: Write + Send + 'static>(out: W, header: &ZrecHeader) -> Result<ZrecSink> {
+        ZrecSink::spawn_at(out, header, Instant::now()).await
+    }
+
+    /// [`ZrecSink::spawn`] with the capture epoch injected — the streaming
+    /// twin of [`ZrecWriter::new_at`], and the seam a test uses to write
+    /// deterministic offsets.
+    pub async fn spawn_at<W: Write + Send + 'static>(
+        out: W,
+        header: &ZrecHeader,
+        epoch: Instant,
+    ) -> Result<ZrecSink> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(SINK_QUEUE);
+        let (ready, opened) = tokio::sync::oneshot::channel();
+        let state = Arc::new(SinkState::default());
+        let header = header.clone();
+        let task_state = Arc::clone(&state);
+        let writer = tokio::task::spawn_blocking(move || {
+            let mut writer = match ZrecWriter::new_at(out, &header, epoch) {
+                Ok(w) => {
+                    let _ = ready.send(None);
+                    w
+                }
+                Err(e) => {
+                    let _ = ready.send(Some(format!("{e:#}")));
+                    return Err(e);
+                }
+            };
+            while let Some(line) = rx.blocking_recv() {
+                let wrote = match line {
+                    ZrecLine::Sample(view) => writer.write_sample(&view),
+                    ZrecLine::Dropped(n) => writer.write_dropped(n),
+                };
+                if let Err(e) = wrote {
+                    *task_state.failure.lock().expect("sink failure lock") = Some(format!("{e:#}"));
+                    return Err(e);
+                }
+            }
+            let counts = writer.counts();
+            writer.finish().map(|_| counts)
+        });
+        match opened.await {
+            Ok(None) => Ok(ZrecSink { tx, state, writer }),
+            Ok(Some(reason)) => Err(anyhow!(reason)),
+            Err(_) => Err(anyhow!("the .zrec writer stopped before it opened")),
+        }
+    }
+
+    /// Queue one sample. Awaits only the queue's capacity — never the disk.
+    pub async fn write_sample(&self, view: Arc<SampleView>) -> Result<()> {
+        self.send(ZrecLine::Sample(view)).await?;
+        self.state.samples.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Queue a drop record at the position the gap happened (O6 on a file).
+    pub async fn write_dropped(&self, n: u64) -> Result<()> {
+        self.send(ZrecLine::Dropped(n)).await?;
+        self.state.dropped.fetch_add(n, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn send(&self, line: ZrecLine) -> Result<()> {
+        if self.tx.send(line).await.is_ok() {
+            return Ok(());
+        }
+        // The writer is gone, which only happens because it failed: report
+        // *its* error rather than the channel's shadow of it.
+        let failure = self
+            .state
+            .failure
+            .lock()
+            .expect("sink failure lock")
+            .clone();
+        Err(anyhow!(
+            failure.unwrap_or_else(|| "the .zrec writer stopped".to_string())
+        ))
+    }
+
+    /// Samples and drops **accepted** so far — the progress line's numbers.
+    ///
+    /// Accepted, not yet written: the queue is what stands between the two,
+    /// and [`finish`](Self::finish) drains it, so the final counts are the
+    /// file's. A progress line that waited for the disk would be reporting
+    /// the disk, not the capture.
+    pub fn counts(&self) -> (u64, u64) {
+        (
+            self.state.samples.load(Ordering::Relaxed),
+            self.state.dropped.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Close the queue, wait for the writer to drain it, flush, and report
+    /// what reached the file: (samples, dropped).
+    ///
+    /// This is where a write error surfaces if the capture did not already
+    /// trip over it. The counts come from the writer rather than the queue,
+    /// so a report built on them is a report about the file.
+    pub async fn finish(self) -> Result<(u64, u64)> {
+        let ZrecSink { tx, state, writer } = self;
+        drop(tx);
+        drop(state);
+        writer.await.context("the .zrec writer panicked")?
+    }
+}
+
 /// Bounds on a capture. Unset bounds mean "until the caller stops the
 /// loop" (Ctrl-C is the caller's `select!`, not this module's business —
 /// [`record()`](record) is cancel-safe between lines).
@@ -186,25 +366,32 @@ pub struct RecordBounds {
     pub max_duration: Option<Duration>,
 }
 
-/// Drain a monitor's event stream into a `.zrec` writer until a bound is
-/// hit or the stream ends. Samples and interleaved drops are recorded;
+/// Drain a monitor's event stream into a `.zrec` [`ZrecSink`] until a bound
+/// is hit or the stream ends. Samples and interleaved drops are recorded;
 /// liveliness and tick events are not part of the format. `on_progress` is
-/// called after every written line with (samples, dropped) — throttle in
+/// called after every queued line with (samples, dropped) — throttle in
 /// the callback, not here.
 ///
+/// **This loop never touches the disk** (#332): it moves `Arc`s into the
+/// sink's bounded queue and goes straight back to the stream, so the
+/// monitor's broadcast stays attended and a `{"dropped": n}` in the file
+/// means the bus outran the observer — not that the observer's own writer
+/// stalled its drain. A disk that is slower than the bus *on average* still
+/// backpressures through the queue and still drops, honestly.
+///
 /// Cancel-safe: dropping the future mid-`recv` loses nothing already
-/// written (each line lands whole); call [`ZrecWriter::finish`] afterwards
-/// to flush.
-pub async fn record<W: Write>(
+/// queued (each line lands whole, in order); call
+/// [`ZrecSink::finish`] afterwards to drain and flush.
+pub async fn record(
     events: &mut EventStream,
-    writer: &mut ZrecWriter<W>,
+    sink: &ZrecSink,
     bounds: RecordBounds,
     mut on_progress: impl FnMut(u64, u64),
 ) -> Result<()> {
     let deadline = bounds.max_duration.map(|d| Instant::now() + d);
 
     loop {
-        let (samples, _) = writer.counts();
+        let (samples, _) = sink.counts();
         if bounds.max_samples.is_some_and(|max| samples >= max) {
             return Ok(());
         }
@@ -223,15 +410,15 @@ pub async fn record<W: Write>(
         };
         match item {
             Some(StreamItem::Event(FleetEvent::Sample(view))) => {
-                writer.write_sample(&view)?;
+                sink.write_sample(view).await?;
             }
             Some(StreamItem::Dropped(n)) => {
-                writer.write_dropped(n)?;
+                sink.write_dropped(n).await?;
             }
             Some(_) => continue,
             None => return Ok(()),
         }
-        let (samples, dropped) = writer.counts();
+        let (samples, dropped) = sink.counts();
         on_progress(samples, dropped);
     }
 }
@@ -329,6 +516,69 @@ impl<R: BufRead> ZrecReader<R> {
                 Err(e) => Err(format!("line {}: {e}", self.line)),
             });
         }
+    }
+}
+
+/// A [`ZrecReader`] running on the blocking pool behind a bounded channel
+/// (#332) — the async end of a replay, and the mirror of [`ZrecSink`].
+///
+/// [`replay`] interleaves `sleep().await`s and network puts with its reads,
+/// so a blocking `BufRead` in that loop stalls the runtime on every line —
+/// on a cold page cache or a network filesystem, for as long as the read
+/// takes, mid-pacing. Here the file is read ahead on a blocking thread and
+/// the loop awaits parsed items; the queue is bounded, so a replay that
+/// pauses for pacing does not read the whole capture into memory.
+pub struct ZrecSource {
+    header: ZrecHeader,
+    rx: tokio::sync::mpsc::Receiver<std::result::Result<ZrecItem, String>>,
+}
+
+impl ZrecSource {
+    /// Parse the header, then read the rest ahead on the blocking pool.
+    ///
+    /// The header is awaited — a file that is not a `.zrec` is a refusal
+    /// before anything is scheduled, exactly as it was when the reader was
+    /// constructed inline.
+    pub async fn spawn<R: BufRead + Send + 'static>(source: R) -> Result<ZrecSource> {
+        let (tx, rx) = tokio::sync::mpsc::channel(SINK_QUEUE);
+        let (ready, opened) = tokio::sync::oneshot::channel();
+        tokio::task::spawn_blocking(move || {
+            let mut reader = match ZrecReader::new(source) {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = ready.send(Err(e));
+                    return;
+                }
+            };
+            if ready.send(Ok(reader.header().clone())).is_err() {
+                return;
+            }
+            // A receiver that went away ends the read: a dropped replay must
+            // not leave a thread reading a file nobody will look at.
+            while let Some(item) = reader.next() {
+                if tx.blocking_send(item).is_err() {
+                    return;
+                }
+            }
+        });
+        match opened.await {
+            Ok(header) => Ok(ZrecSource {
+                header: header?,
+                rx,
+            }),
+            Err(_) => Err(anyhow!("the .zrec reader stopped before it opened")),
+        }
+    }
+
+    pub fn header(&self) -> &ZrecHeader {
+        &self.header
+    }
+
+    /// The next item, or `Err` naming the line and the reason — a malformed
+    /// row is counted by the caller, never silently skipped. `None` ends the
+    /// file.
+    pub async fn next(&mut self) -> Option<std::result::Result<ZrecItem, String>> {
+        self.rx.recv().await
     }
 }
 
@@ -465,8 +715,8 @@ impl Drop for Publications {
 /// distinct key and undeclared on **every** way out — a failed row tears the
 /// set down before it reports, and a cancelled replay hands the remainder to
 /// a drop guard that undeclares them properly (#327).
-pub async fn replay<R: BufRead>(
-    reader: &mut ZrecReader<R>,
+pub async fn replay(
+    reader: &mut ZrecSource,
     spec: ReplaySpec<'_>,
     mut on_event: impl FnMut(ReplayEvent<'_>),
 ) -> Result<ReplayReport> {
@@ -507,7 +757,7 @@ pub async fn replay<R: BufRead>(
     // publishers are undeclared first, and only then does it go back to the
     // caller (#327).
     let mut fatal: Option<anyhow::Error> = None;
-    while let Some(item) = reader.next() {
+    while let Some(item) = reader.next().await {
         let (row, t_us) = match item {
             Ok(ZrecItem::Sample { row, t_us, .. }) => (row, t_us),
             Ok(ZrecItem::Dropped(n)) => {
@@ -652,6 +902,14 @@ mod tests {
         }
     }
 
+    /// A replay source over an in-memory capture. `Cursor<Vec<u8>>` because
+    /// the read happens on the blocking pool and so must own its bytes.
+    async fn source_of(body: &str) -> ZrecSource {
+        ZrecSource::spawn(std::io::Cursor::new(body.as_bytes().to_vec()))
+            .await
+            .expect("a .zrec header")
+    }
+
     /// The header round-trips, and a versioned reader refuses what it
     /// cannot speak rather than guessing.
     #[test]
@@ -770,7 +1028,7 @@ mod tests {
             r#"{"dropped":3}"#,
             r#"{"key":"v1/h-0123456789ab/state/p/health","t":500000,"delete":true}"#,
         );
-        let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
+        let mut reader = source_of(&body).await;
         let mut would = Vec::new();
         let report = replay(
             &mut reader,
@@ -803,7 +1061,7 @@ mod tests {
             serde_json::to_string(&header()).unwrap(),
             r#"{"key":"v1/h-0123456789ab/telemetry/p/temp","t":0,"delete":true}"#,
         );
-        let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
+        let mut reader = source_of(&body).await;
         let report = replay(
             &mut reader,
             ReplaySpec {
@@ -830,7 +1088,7 @@ mod tests {
     async fn speed_must_be_positive() {
         let body = serde_json::to_string(&header()).unwrap() + "\n";
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
+            let mut reader = source_of(&body).await;
             let err = replay(
                 &mut reader,
                 ReplaySpec {
@@ -878,7 +1136,7 @@ mod tests {
             bad.to_line(),
         );
 
-        let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
+        let mut reader = source_of(&body).await;
         let err = replay(
             &mut reader,
             ReplaySpec {
