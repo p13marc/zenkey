@@ -171,3 +171,74 @@ async fn a_producer_that_answers_with_junk_is_asked_at_most_once_per_ttl() {
         "forget() must send the next question to the bus"
     );
 }
+
+/// Singleflight: a hot bus misses on many samples of the same producer at
+/// once — the first sample's GET is still on the wire when the second
+/// arrives. One ask must serve them all, or the store's frugality is a
+/// property of slow buses only.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_misses_for_one_producer_share_one_describe() {
+    let (listen, connect) = peer_pair(7509).await;
+    let (_q, asked) = declare_describe(&listen, schema_set_json()).await;
+    wait_routable(&connect).await;
+
+    let store = SchemaStore::new("", Duration::from_secs(2));
+    let before = asked.load(Ordering::Relaxed);
+
+    // Eight misses in flight together: one wins the gate, the rest wait on
+    // it and read its answer out of the cache.
+    let got = tokio::join!(
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+    );
+    for (i, set) in [got.0, got.1, got.2, got.3, got.4, got.5, got.6, got.7]
+        .into_iter()
+        .enumerate()
+    {
+        assert!(
+            set.is_some_and(|s| s.get("Point").is_some()),
+            "waiter {i} must get the winner's answer"
+        );
+    }
+    assert_eq!(
+        asked.load(Ordering::Relaxed) - before,
+        1,
+        "eight concurrent misses must cost the producer one describe"
+    );
+}
+
+/// The doctor already holds every producer's describe document by the time
+/// its listen window opens. A pre-warmed store must not go back to the bus
+/// for what it was handed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pre_warmed_producer_is_never_asked() {
+    let (listen, connect) = peer_pair(7510).await;
+    let (_q, asked) = declare_describe(&listen, schema_set_json()).await;
+    wait_routable(&connect).await;
+
+    let store = SchemaStore::new("", Duration::from_secs(2));
+    store.insert(
+        PRODUCER,
+        SchemaSet::parse(&schema_set_json()).expect("fixture parses"),
+    );
+    let before = asked.load(Ordering::Relaxed);
+
+    for _ in 0..10 {
+        let set = store.set_for(&connect, PRODUCER).await;
+        assert!(
+            set.is_some_and(|s| s.get("Point").is_some()),
+            "the pre-warmed set answers"
+        );
+    }
+    assert_eq!(
+        asked.load(Ordering::Relaxed) - before,
+        0,
+        "a pre-warmed producer costs the fleet nothing"
+    );
+}

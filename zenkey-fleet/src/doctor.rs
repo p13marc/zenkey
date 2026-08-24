@@ -371,6 +371,13 @@ pub async fn run_doctor(
     let observation = match spec.listen {
         Some(window) => {
             let store = crate::decode::SchemaStore::new(base, spec.timeout);
+            // The GET phase above already asked every producer for its
+            // `describe` document. Hand those to the window's store rather
+            // than letting it re-ask the fleet, mid-window, for what this
+            // run is holding (RFC 08 §7; the store's frugality note).
+            for (producer, set) in &described {
+                store.insert(producer, set.clone());
+            }
             let (listen_findings, summary) =
                 observe_traffic(session, base, &slice_set, &store, &described, window).await?;
             findings.extend(listen_findings);
