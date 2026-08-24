@@ -25,10 +25,20 @@
 //! placement rule on [`crate::report`] admits no exceptions, not even for the
 //! vocabulary the judges are written in.
 //!
+//! [`common`] holds the rest of that vocabulary: the check- and rung-id
+//! registries, the synthetic-traffic marker, the definition of "the new
+//! plane", the scope statement a passive observation watches, and the caps on
+//! how many offenders a report names. It exists because those had lived
+//! wherever they were first needed and the other judges reached across for
+//! them — `doctor` into `field`, `expect` and `condition` into `doctor`,
+//! `retired` into `cutover`. A judge importing another judge is now the
+//! signal it should be: it means one of them is doing the other's work.
+//!
 //! What a judge returns is a **report**, and every serialized report shape
 //! lives in [`crate::report`], not here (see that module's placement rule).
 
 pub mod budget;
+pub mod common;
 pub mod cutover;
 pub mod retired;
 pub mod why;

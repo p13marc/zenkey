@@ -154,7 +154,7 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
             "{}",
             zenkey_fleet::judge::retired::scope_note(
                 entries,
-                &zenkey_fleet::judge::cutover::new_prefix(args.base()),
+                &zenkey_fleet::new_prefix(args.base()),
                 window
             )
         );

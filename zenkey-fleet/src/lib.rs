@@ -47,7 +47,7 @@ pub use judge::condition::{
     CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, run_watchdog,
 };
 #[cfg(feature = "decode")]
-pub use judge::doctor::{CHECK_IDS, DoctorSpec, run_doctor};
+pub use judge::doctor::{DoctorSpec, run_doctor};
 #[cfg(feature = "decode")]
 pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
 #[cfg(feature = "decode")]
@@ -98,10 +98,11 @@ pub use bus::write::{
     CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
     declare_publication,
 };
-pub use judge::budget::{BudgetObservation, data_plane_scopes, join_budget};
+pub use judge::budget::{BudgetObservation, join_budget};
+pub use judge::common::{CHECK_IDS, EXPANSION_CAP, RUNG_IDS, data_plane_scopes, new_prefix};
 pub use judge::cutover::run_cutover;
 pub use judge::retired::run_retired;
-pub use judge::why::{RUNG_IDS, WhyInputs, WhySpec, run_why};
+pub use judge::why::{WhyInputs, WhySpec, run_why};
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,

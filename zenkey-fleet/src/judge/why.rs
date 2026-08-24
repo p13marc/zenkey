@@ -13,7 +13,7 @@
 //! ## The rungs
 //!
 //! Ten rungs, in the order a fact weakens the ones below it. The id
-//! vocabulary is **stable API** in the [`crate::judge::doctor::CHECK_IDS`] tradition:
+//! vocabulary is **stable API** in the [`crate::judge::common::CHECK_IDS`] tradition:
 //! scripts key on ids, the GUI will key deltas on them, additions append and
 //! nothing renames. The full set is pinned in [`RUNG_IDS`].
 //!
@@ -78,26 +78,12 @@ use anyhow::Result;
 use zenoh::Session;
 use zenoh::key_expr::keyexpr;
 
+use crate::judge::common::{EVIDENCE_CAP, RUNG_IDS};
 use crate::model::examples::Examples;
 use crate::model::facts::{KeyShape, OriginKind, Registration, describe_key};
 use crate::model::registry::SliceSet;
 use crate::report::{DeclaredEntities, EntityKind, StorageInfo};
 use crate::report::{Rung, RungAnswer, ValueSource, WhyReport, WhyVerdict};
-
-/// Every rung id the ladder can emit — the stable vocabulary, never renamed
-/// (see the module doc). Additions append.
-pub const RUNG_IDS: [&str; 10] = [
-    "scope-reach",
-    "key-parse",
-    "registry-declared",
-    "origin-alive",
-    "publisher-declared",
-    "storage-coverage",
-    "stored-value",
-    "sample-freshness",
-    "admin-answered",
-    "wire-heard",
-];
 
 /// The rungs whose `NotEstablished` is an *explanation* of silence. The
 /// others state facts that must never read as one: `publisher-declared`
@@ -190,10 +176,6 @@ pub struct WhyInputs<'a> {
     /// `None` = no listen window was requested (the default; O4 says so).
     pub wire: Option<&'a WireWatch>,
 }
-
-/// How many matching declared entities / storages the evidence names before
-/// summarising.
-const EVIDENCE_CAP: usize = 5;
 
 /// Assemble the ladder from what was (and was not) fetched. Pure — every
 /// judgement over bus data is testable without a bus.
@@ -900,7 +882,7 @@ mod tests {
 
     /// The id vocabulary is API: additions append, nothing renames. If this
     /// test fails you are renaming a shipped rung id — don't (the
-    /// [`crate::judge::doctor::CHECK_IDS`] discipline, applied here).
+    /// [`crate::judge::common::CHECK_IDS`] discipline, applied here).
     #[test]
     fn rung_ids_are_stable() {
         assert_eq!(

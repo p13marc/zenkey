@@ -23,36 +23,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use zenkey::grammar::with_base;
-
 use crate::SliceSet;
+use crate::judge::common::EXPANSION_CAP;
 use crate::model::examples::Examples;
 use crate::model::facts::{KeyFacts, KeyShape, OriginKind};
 use crate::report::{BudgetCell, BudgetWindow, TopicList};
-
-/// How many example expansions a finding or budget cell carries — enough to
-/// recognise the family member that exploded, without pasting the population.
-pub const EXAMPLE_CAP: usize = 3;
-
-/// The data-plane scopes a passive observation must watch: the three data
-/// classes for host origins, plus each declared service origin's three —
-/// `**` never crosses an `@` chunk (RFC 03 §4 D2), so the service planes
-/// must be named to be seen. This is the O5 scope statement the doctor's
-/// listen phase and the `--budget` observation share (#161, #221).
-pub fn data_plane_scopes(base: &str, slices: &SliceSet) -> Vec<String> {
-    let mut scopes = Vec::new();
-    for class in ["telemetry", "state", "events"] {
-        scopes.push(with_base(base, format!("v1/*/{class}/**")));
-    }
-    for slice in slices.slices() {
-        if let Some(origin) = &slice.service_origin {
-            for class in ["telemetry", "state", "events"] {
-                scopes.push(with_base(base, format!("v1/{origin}/{class}/**")));
-            }
-        }
-    }
-    scopes
-}
 
 /// Observed expansions of every `{var}` subject family, grouped
 /// per origin — RFC 04 §1's table bounds cardinality *per producer*, so one
@@ -144,7 +119,7 @@ pub fn join_budget(list: &mut TopicList, obs: &BudgetObservation, window: Budget
             .as_ref()
             .and_then(|o| origins.get(o))
             .map(|keys| {
-                let mut ex = Examples::new(EXAMPLE_CAP);
+                let mut ex = Examples::new(EXPANSION_CAP);
                 for key in keys {
                     ex.push_with(|| key.clone());
                 }
@@ -215,26 +190,5 @@ mod tests {
             obs.family("sysinfo", "health").is_none(),
             "literals excluded"
         );
-    }
-
-    #[test]
-    fn scopes_name_the_service_planes_explicitly() {
-        let toml = r#"
-            [registry]
-            version = "1.0"
-            app = "t"
-            convention = 1
-            [service]
-            name = "catalog"
-            origin = "@catalog"
-        "#;
-        let slices = SliceSet::from_toml_for_tests(toml);
-        let scopes = data_plane_scopes("zs", &slices);
-        assert!(scopes.contains(&"zs/v1/*/telemetry/**".to_string()));
-        assert!(
-            scopes.contains(&"zs/v1/@catalog/state/**".to_string()),
-            "`*` never matches `@catalog` (D4), so it must be named: {scopes:?}"
-        );
-        assert_eq!(scopes.len(), 6);
     }
 }

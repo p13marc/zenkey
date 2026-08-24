@@ -27,7 +27,7 @@ pub async fn run(old_root: &str, for_secs: f64, args: &Bus) -> Result<()> {
         "{}",
         zenkey_fleet::judge::cutover::scope_note(
             old_root,
-            &zenkey_fleet::judge::cutover::new_prefix(&base),
+            &zenkey_fleet::new_prefix(&base),
             window
         )
     );

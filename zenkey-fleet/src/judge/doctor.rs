@@ -6,7 +6,7 @@
 //!
 //! Check ids are **stable API**: scripts key on them (`--format json`), the
 //! GUI keys deltas on them. New checks add ids; nothing renames one. The full
-//! set is pinned in [`CHECK_IDS`].
+//! set is pinned in [`CHECK_IDS`](crate::judge::common::CHECK_IDS).
 
 use std::time::Duration;
 
@@ -15,39 +15,9 @@ use zenkey::RegistrySlice;
 use zenkey::grammar::with_base;
 
 use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
+use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
 use crate::model::examples::Examples;
 use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
-
-/// Every check id `run_doctor` can emit — the stable vocabulary, never
-/// renamed (see the module doc).
-pub const CHECK_IDS: [&str; 21] = [
-    "slice-parse",
-    "slice-sync",
-    "introspect-coverage",
-    "admin-unreachable",
-    "router-version-skew",
-    "describe-totality",
-    "schema-drift",
-    "describe-missing",
-    "stale-state",
-    "unstamped-state",
-    "storage-coverage",
-    // The `--for` passive phase (#161) — traffic judged as it rides.
-    "payload-undecodable",
-    "payload-invalid",
-    "qos-observed-mismatch",
-    "unregistered-traffic",
-    "rate-over-declared",
-    "timestamp-stamped-elsewhere",
-    // Key-population budgets (#221): declared `cardinality` vs the observed
-    // expansion count, per origin. `{path...}` families are exempt and say so.
-    "cardinality-over-declared",
-    // Field intelligence (#223): per-dotted-path judgement over the listen
-    // window — the failure modes per-sample validation cannot see.
-    "field-vanished",
-    "field-stuck",
-    "field-new",
-];
 
 /// What a doctor run should cost.
 #[derive(Debug, Clone)]
@@ -117,6 +87,7 @@ pub async fn run_doctor(
     spec: &DoctorSpec,
 ) -> Result<DoctorReport> {
     let (session, base) = (fleet.session(), fleet.base());
+
     // A registry that declares nothing answers no question this run asks, so
     // it takes the same path as none at all — normalised once, here, rather
     // than at each of the four places that branch on it below.
@@ -422,9 +393,6 @@ pub async fn run_doctor(
 /// budget that keeps a hot bus from turning the doctor into a load test.
 const DECODE_BUDGET: u8 = 2;
 
-/// How many per-key findings each listen check emits before summarising.
-const FINDING_CAP: usize = 20;
-
 /// The remainder wording every per-key listen check shares.
 const SAME_FINDING: &str = "more key(s) with the same finding";
 
@@ -443,7 +411,9 @@ fn emit_capped(
     tail: &str,
 ) {
     let more = ex.more(tail);
+
     findings.extend(ex.into_vec());
+
     if let Some(evidence) = more {
         findings.push(finding(
             DoctorSeverity::Info,
@@ -469,17 +439,6 @@ pub(crate) fn rate_cap_per_hour(rate: &str) -> Option<u64> {
     }
 }
 
-/// Does an attachment carry the RFC 09 §5.3 synthetic-traffic marker
-/// (`{"synthetic": true, …}`, #162)? Generated traffic judged as real would
-/// be a self-inflicted finding, so the observation counts it separately —
-/// here and in the watchdog's windows (`condition`, #227).
-pub(crate) fn is_synthetic_marker(attachment: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(attachment)
-        .ok()
-        .and_then(|v| v.get("synthetic").and_then(serde_json::Value::as_bool))
-        .unwrap_or(false)
-}
-
 /// The passive listening phase: watch the data planes for `window`, judge
 /// each sample through the ladders that already exist — the Registration
 /// ladder, `qos_matches`, `decode_sample` — and aggregate per key so a hot
@@ -499,7 +458,7 @@ async fn observe_traffic(
     // each declared service origin's three — `*` never matches an `@` chunk
     // (D4), so the service planes must be named to be seen. Shared with the
     // `topic list --budget` observation (#221).
-    let scopes = crate::judge::budget::data_plane_scopes(base, slices);
+    let scopes = crate::judge::common::data_plane_scopes(base, slices);
 
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
@@ -766,6 +725,7 @@ fn field_context_from(
     facts: &crate::model::facts::FactsCache,
 ) -> std::collections::BTreeMap<String, crate::judge::field::KeyFieldContext> {
     use std::collections::BTreeMap;
+
     let mut declared_cache: BTreeMap<(String, String), Option<crate::judge::field::DeclaredPaths>> =
         BTreeMap::new();
     let mut ctx = BTreeMap::new();
@@ -774,7 +734,7 @@ fn field_context_from(
         if let crate::model::facts::Registration::Registered(sf) = &f.registration {
             c.ttl_s = sf.ttl_s;
             c.type_name = Some(sf.type_name.clone());
-            if let Some(producer) = crate::judge::field::producer_of(f, Some(slices))
+            if let Some(producer) = crate::judge::common::producer_of(f, Some(slices))
                 && !sf.type_name.is_empty()
             {
                 let declared = declared_cache
@@ -808,7 +768,9 @@ fn judge_qos_observed(
     qos_bad: &std::collections::BTreeMap<String, (String, u64, u64)>,
 ) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
+
     let mut ex = Examples::new(FINDING_CAP);
+
     for (key, (declared, bad, total)) in qos_bad.iter().filter(|(_, (_, bad, _))| *bad > 0) {
         ex.push_with(|| {
             finding(
@@ -850,6 +812,7 @@ fn judge_introspect_coverage(
     answered: usize,
 ) -> Option<DoctorFinding> {
     let live: usize = roster.values().map(Vec::len).sum();
+
     let (in_scope, scope) = match locals {
         None => (
             live,
@@ -909,7 +872,9 @@ fn judge_state_samples(
     now: std::time::SystemTime,
 ) -> (Vec<DoctorFinding>, usize) {
     let mut findings = Vec::new();
+
     let mut unstamped = 0usize;
+
     for sample in samples {
         match sample.timestamp {
             Some(ts) => {
@@ -957,7 +922,9 @@ fn judge_cardinality(
     window_s: f64,
 ) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
+
     let mut over: Examples<DoctorFinding> = Examples::new(FINDING_CAP);
+
     for slice in slices.slices() {
         for s in &slice.subjects {
             if !s.path.contains('{') {
@@ -994,7 +961,7 @@ fn judge_cardinality(
                     continue; // under/at declared: not a finding (O4)
                 }
                 let examples = Examples::collect(
-                    crate::judge::budget::EXAMPLE_CAP,
+                    crate::judge::common::EXPANSION_CAP,
                     keys.iter().map(String::as_str),
                 );
                 let subject = if origin.starts_with('@') {
@@ -1032,41 +999,6 @@ fn judge_cardinality(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The id vocabulary is API: additions append, nothing renames. If this
-    /// test fails you are renaming a shipped check id — don't.
-    #[test]
-    fn check_ids_are_stable() {
-        assert_eq!(
-            CHECK_IDS,
-            [
-                "slice-parse",
-                "slice-sync",
-                "introspect-coverage",
-                "admin-unreachable",
-                "router-version-skew",
-                "describe-totality",
-                "schema-drift",
-                "describe-missing",
-                "stale-state",
-                "unstamped-state",
-                "storage-coverage",
-                "payload-undecodable",
-                "payload-invalid",
-                "qos-observed-mismatch",
-                "unregistered-traffic",
-                "rate-over-declared",
-                // #213: appended, as the rule above requires.
-                "timestamp-stamped-elsewhere",
-                // #221: appended likewise.
-                "cardinality-over-declared",
-                // #223: appended likewise — the field-granular checks.
-                "field-vanished",
-                "field-stuck",
-                "field-new",
-            ]
-        );
-    }
 
     const BOUNDED: &str = r#"
         [registry]
@@ -1181,19 +1113,6 @@ mod tests {
         assert_eq!(rate_cap_per_hour("burst(100/h)"), Some(100));
         assert_eq!(rate_cap_per_hour("burst(100)"), None);
         assert_eq!(rate_cap_per_hour("often"), None);
-    }
-
-    /// #162's marker as #161 reads it: a JSON object with `"synthetic": true`.
-    /// Anything else — other attachments, non-JSON bytes — is real traffic.
-    #[test]
-    fn the_synthetic_marker_is_recognised_and_nothing_else_is() {
-        assert!(is_synthetic_marker(
-            br#"{"synthetic":true,"tool":"zenctl gen"}"#
-        ));
-        assert!(!is_synthetic_marker(br#"{"synthetic":false}"#));
-        assert!(!is_synthetic_marker(br#"{"tool":"zenctl gen"}"#));
-        assert!(!is_synthetic_marker(b"meta"));
-        assert!(!is_synthetic_marker(b""));
     }
 
     /// Deep-review D4: the qos-observed-mismatch cap bounds *violators*, not

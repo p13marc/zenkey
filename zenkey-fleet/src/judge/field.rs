@@ -30,7 +30,7 @@
 //! the house pattern of [`crate::judge::condition`] (#227) and [`crate::judge::budget`]
 //! (#221): testable without a bus. Surfaces: `zenctl field <selector>
 //! [--for S]`, the doctor listen phase (#161) via the appended
-//! [`crate::judge::doctor::CHECK_IDS`], and — **deferred to a later zengui
+//! [`crate::judge::common::CHECK_IDS`], and — **deferred to a later zengui
 //! window** — the Inspector field table with per-field sparklines through
 //! the existing `series.rs`/`spark.rs` gap-drawing. This chunk ships the
 //! engine and zenctl halves only.
@@ -43,6 +43,7 @@ use anyhow::Result;
 use serde_json::Value;
 use zenoh::Session;
 
+use crate::judge::common::{FINDING_CAP, producer_of};
 use crate::model::decode::SchemaStore;
 use crate::model::examples::Examples;
 use crate::model::registry::SliceSet;
@@ -73,9 +74,6 @@ pub const VANISHED_MIN_ABSENT: u64 = 3;
 /// A stuck path must have been observed at least this often — "the key kept
 /// publishing" is part of the finding's meaning.
 const STUCK_MIN_SEEN: u64 = 3;
-
-/// Per-check finding cap before summarising, the doctor's own discipline.
-const FINDING_CAP: usize = 20;
 
 /// Dropped-path examples carried by the bound report (O6 names, not just
 /// counts — enough to recognise the document that exploded).
@@ -439,9 +437,13 @@ pub fn judge_fields(
     ctx: &BTreeMap<String, KeyFieldContext>,
 ) -> Vec<DoctorFinding> {
     let empty = KeyFieldContext::default();
+
     let mut vanished = Examples::new(FINDING_CAP);
+
     let mut stuck = Examples::new(FINDING_CAP);
+
     let mut new = Examples::new(FINDING_CAP);
+
     for (key, fields) in obs.iter() {
         let c = ctx.get(key).unwrap_or(&empty);
         for (path, stats) in &fields.paths {
@@ -550,8 +552,11 @@ pub async fn run_field(
     use crate::{FleetEvent, StreamItem};
 
     let (session, base) = (fleet.session(), fleet.base());
+
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+
     let mut events = monitor.events();
+
     // Declared before the window opens: not-asked must never read as "no".
     monitor.watch(&spec.selector).await?;
     let opened = tokio::time::Instant::now();
@@ -636,7 +641,9 @@ pub(crate) async fn field_context(
     facts: &crate::model::facts::FactsCache,
 ) -> BTreeMap<String, KeyFieldContext> {
     let mut declared_cache: BTreeMap<(String, String), Option<DeclaredPaths>> = BTreeMap::new();
+
     let mut ctx = BTreeMap::new();
+
     for (key, f) in facts.iter() {
         let mut c = KeyFieldContext::default();
         if let crate::model::facts::Registration::Registered(sf) = &f.registration {
@@ -663,23 +670,6 @@ pub(crate) async fn field_context(
         ctx.insert(key.to_string(), c);
     }
     ctx
-}
-
-/// The producer name behind a key's facts — a service origin's slice is found
-/// by the origin it serves (RFC 03 §1.5).
-pub(crate) fn producer_of(
-    facts: &crate::model::facts::KeyFacts,
-    slices: Option<&SliceSet>,
-) -> Option<String> {
-    let crate::model::facts::KeyShape::V1(v) = &facts.shape else {
-        return None;
-    };
-    match v.origin_kind {
-        crate::model::facts::OriginKind::Host => v.producer.clone(),
-        crate::model::facts::OriginKind::Service => {
-            slices.and_then(|s| s.by_service_origin(&v.origin).map(|s| s.name.clone()))
-        }
-    }
 }
 
 #[cfg(test)]

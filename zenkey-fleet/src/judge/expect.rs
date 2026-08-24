@@ -32,15 +32,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use crate::judge::common::FINDING_CAP;
 use crate::judge::condition;
 use crate::model::decode::SchemaStore;
 use crate::model::examples::Examples;
 use crate::model::registry::SliceSet;
 use crate::report::{ExpectReport, ExpectVerdict};
 use crate::{FleetEvent, Monitor, MonitorSpec, StreamItem, Verdict};
-
-/// How many violation examples the report names (totals are exact).
-const EXAMPLE_CAP: usize = 20;
 
 /// Which QoS each observed sample must have ridden.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +107,9 @@ pub async fn run_expect(
     spec: &ExpectSpec,
 ) -> Result<ExpectReport> {
     let monitor = Monitor::start(fleet.session(), MonitorSpec::default()).await?;
+
     let mut events = monitor.events();
+
     // Declared before the window opens: not-asked must never read as "no".
     monitor.watch(&spec.selector).await?;
     let opened = tokio::time::Instant::now();
@@ -127,8 +127,8 @@ pub async fn run_expect(
     let mut keys: BTreeSet<String> = BTreeSet::new();
     let mut dropped: u64 = 0;
     // Named examples, exact total: the report shows the first
-    // [`EXAMPLE_CAP`] and says how many there were.
-    let mut violations: Examples<String> = Examples::new(EXAMPLE_CAP);
+    // [`FINDING_CAP`](crate::judge::common::FINDING_CAP) and says how many there were.
+    let mut violations: Examples<String> = Examples::new(FINDING_CAP);
     let mut ended_early = false;
 
     loop {

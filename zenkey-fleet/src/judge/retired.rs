@@ -26,6 +26,7 @@ use std::time::Duration;
 use anyhow::Result;
 use zenkey::slice::{DeprecationDecl, RegistrySlice};
 
+use crate::judge::common::new_prefix;
 use crate::report::{CutoverVerdict, RetiredEntry, RetiredReport};
 
 /// The scope sentence the listen phase operates under — rendered by the
@@ -195,7 +196,7 @@ pub async fn run_retired(
         .collect();
 
     // Facts 1 and 4: the listen window, when one was asked for.
-    let new_prefix = crate::judge::cutover::new_prefix(base);
+    let new_prefix = new_prefix(base);
     let mut old_counts = vec![0u64; ledger.len()];
     let mut repl_counts = vec![0u64; ledger.len()];
     let (mut plane_samples, mut dropped) = (0u64, 0u64);

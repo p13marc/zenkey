@@ -68,7 +68,7 @@ pub enum Condition {
     /// unjudgeable and counted in the evidence, not the state.
     QosMismatch { selector: String },
     /// A doctor run reported at least one finding with this check id
-    /// (the stable [`crate::CHECK_IDS`] vocabulary). A failed doctor run is
+    /// (the stable [`crate::judge::common::CHECK_IDS`] vocabulary). A failed doctor run is
     /// unobservable for every doctor condition — never `ok`.
     DoctorCheck { check: String },
     /// The origin holds no `alive` token on the liveliness roster
@@ -126,10 +126,10 @@ impl Condition {
                 selector: sel.to_string(),
             },
             ["doctor", check] => {
-                if !crate::judge::doctor::CHECK_IDS.contains(check) {
+                if !crate::judge::common::CHECK_IDS.contains(check) {
                     bail!(
                         "doctor: {check:?} is not a check id — the stable vocabulary is: {}",
-                        crate::judge::doctor::CHECK_IDS.join(", ")
+                        crate::judge::common::CHECK_IDS.join(", ")
                     );
                 }
                 Condition::DoctorCheck {
@@ -510,8 +510,8 @@ impl RuleState {
 }
 
 /// Run-over-run delta over a doctor report: one [`RuleState`] per stable
-/// check id ([`crate::CHECK_IDS`]), fed by `doctor --transitions`. The first
-/// run states the baseline (one transition per check id); every later run yields
+/// check id ([`crate::judge::common::CHECK_IDS`]), fed by `doctor --transitions`. The
+/// first run states the baseline (one transition per check id); every later run yields
 /// only genuine changes. A failed run flips every check to `unobservable` —
 /// a doctor that could not run has not said the fleet is healthy.
 #[derive(Debug, Clone)]
@@ -522,7 +522,7 @@ pub struct DoctorWatch {
 impl DoctorWatch {
     pub fn new() -> DoctorWatch {
         DoctorWatch {
-            checks: crate::judge::doctor::CHECK_IDS
+            checks: crate::judge::common::CHECK_IDS
                 .iter()
                 .map(|id| {
                     let condition = Condition::DoctorCheck {
@@ -674,7 +674,7 @@ pub async fn run_watchdog(
                     let synthetic = s
                         .attachment
                         .as_ref()
-                        .is_some_and(|a| crate::judge::doctor::is_synthetic_marker(&a.to_bytes()));
+                        .is_some_and(|a| crate::judge::common::is_synthetic_marker(&a.to_bytes()));
                     // Decode once per sample (budgeted per key per tick),
                     // shared by every invalid-payload rule the key matches.
                     let mut verdict: Option<crate::Verdict> = None;
@@ -1069,7 +1069,7 @@ mod tests {
         let mut watch = DoctorWatch::new();
         let clean = report_with(&[]);
         let baseline = watch.observe(Ok(&clean), "t0");
-        assert_eq!(baseline.len(), crate::judge::doctor::CHECK_IDS.len());
+        assert_eq!(baseline.len(), crate::judge::common::CHECK_IDS.len());
         assert!(baseline.iter().all(|t| t.from.is_none()));
         assert!(baseline.iter().all(|t| t.to == CondState::Ok));
 
@@ -1088,7 +1088,7 @@ mod tests {
         let failed = watch.observe(Err("session lost"), "t3");
         assert_eq!(
             failed.len(),
-            crate::judge::doctor::CHECK_IDS.len(),
+            crate::judge::common::CHECK_IDS.len(),
             "a failed run is unobservable for every check — never ok"
         );
         assert!(failed.iter().all(|t| t.to == CondState::Unobservable));

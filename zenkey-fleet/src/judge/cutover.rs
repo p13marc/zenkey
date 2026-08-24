@@ -23,11 +23,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use crate::judge::common::{FINDING_CAP, new_prefix};
 use crate::model::examples::Examples;
 use crate::report::{CutoverReport, CutoverVerdict};
-
-/// How many distinct offending keys each bucket names in the report.
-const EXAMPLE_CAP: usize = 20;
 
 /// The scope sentence this check operates under — rendered by the caller
 /// before the window opens, because a user watching a 30-second silence
@@ -40,11 +38,6 @@ pub fn scope_note(old_root: &str, new_prefix: &str, window: Duration) -> String 
          `@`-chunks: verbatim planes and the admin space are outside this \
          check by construction (O5)."
     )
-}
-
-/// The stated meaning of "the new plane": keys under `<base>/v1/`.
-pub fn new_prefix(base: &str) -> String {
-    format!("{}/", zenkey::grammar::with_base(base, "v1"))
 }
 
 /// Watch the whole bus for `window` seconds and judge the cutover.
@@ -100,7 +93,7 @@ pub async fn run_cutover(
     // The keys-seen counts beside these are the exact totals, so the buckets
     // name examples and leave the arithmetic to the counter.
     let cap = |m: &BTreeMap<String, u64>| {
-        let mut ex = Examples::new(EXAMPLE_CAP);
+        let mut ex = Examples::new(FINDING_CAP);
         for (k, n) in m {
             ex.push_with(|| format!("{k} ({n})"));
         }
@@ -152,15 +145,6 @@ mod tests {
         // when the new plane is busy.
         assert_eq!(verdict(1, 10_000), CutoverVerdict::OldStillSpeaks);
     }
-
-    #[test]
-    fn the_new_plane_is_a_stated_prefix_not_key_algebra() {
-        assert_eq!(new_prefix("acme"), "acme/v1/");
-        // The base-less deployment (RFC v1.6) is a real one.
-        assert_eq!(new_prefix(""), "v1/");
-        assert_eq!(new_prefix("a/b"), "a/b/v1/");
-    }
-
     #[test]
     fn the_scope_note_states_what_it_cannot_see() {
         let note = scope_note("old/**", "acme/v1/", Duration::from_secs(30));

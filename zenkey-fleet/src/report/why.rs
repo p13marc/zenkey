@@ -31,7 +31,7 @@ pub type RungAnswer = crate::report::Judgement;
 /// One rung of the ladder.
 #[derive(Debug, Clone, Serialize)]
 pub struct Rung {
-    /// From [`RUNG_IDS`](crate::judge::why::RUNG_IDS) — stable, script-keyable.
+    /// From [`RUNG_IDS`](crate::judge::common::RUNG_IDS) — stable, script-keyable.
     pub id: &'static str,
     /// The question this rung puts, as prose.
     pub question: &'static str,
@@ -104,7 +104,7 @@ impl From<crate::report::Judgement> for WhyVerdict {
     }
 }
 
-/// The ladder, assembled. One rung per [`RUNG_IDS`](crate::judge::why::RUNG_IDS) entry, in order, always —
+/// The ladder, assembled. One rung per [`RUNG_IDS`](crate::judge::common::RUNG_IDS) entry, in order, always —
 /// a rung is never omitted, it degrades to `NotAsked`.
 #[derive(Debug, Clone, Serialize)]
 pub struct WhyReport {
