@@ -110,8 +110,8 @@ pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
 pub use judge::field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run_field};
 #[cfg(feature = "decode")]
 pub use model::decode::{
-    DecodedSample, Rendering, SchemaStore, decode_sample, schema_drift, schema_dump,
-    schemas_for_type, totality_gaps,
+    DEFAULT_MAX_PRODUCERS, DecodedSample, Rendering, SchemaStore, Sealed, StoreBounds,
+    decode_sample, prewarm, schema_drift, schema_dump, schemas_for_type, totality_gaps,
 };
 #[cfg(feature = "decode")]
 pub use tape::generate::{
