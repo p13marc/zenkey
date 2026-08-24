@@ -209,7 +209,7 @@ impl Condition {
 
     /// Judge one observation window. `None` for the conditions that are not
     /// window-scoped ([`Condition::DoctorCheck`], [`Condition::OriginDown`]).
-    pub fn judge_window(&self, w: &Window) -> Option<Eval> {
+    pub fn judge_window(&self, w: &CondWindow) -> Option<Eval> {
         let synth = if w.synthetic > 0 {
             format!("; {} synthetic-marked (RFC 09 §5.3)", w.synthetic)
         } else {
@@ -474,8 +474,13 @@ pub fn judge_silence(sample_within: bool, span_observed: bool, drop_free: bool) 
 
 /// What one evaluation window observed on one condition's selector — the
 /// facts, separated from the judgement so the judgement is pure.
+///
+/// `CondWindow` and not `Window`: this type is re-exported at the crate root
+/// beside `BudgetWindow` and `RecordBounds`, and a bare `Window` there reads
+/// as *the* window of an engine that has several. Nothing serializes the
+/// name (the type carries no `Serialize`), so the rename is Rust-side only.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Window {
+pub struct CondWindow {
     /// The span this window judges, seconds.
     pub window_s: f64,
     /// How long the observer has been watching in total — a claim about a
@@ -862,7 +867,7 @@ pub async fn run_watchdog(
                         .expect("an origin rule asked the roster");
                     rule.judge_roster(outcome.as_ref().map_err(String::as_str))
                 }
-                _ => rule.judge_window(&Window {
+                _ => rule.judge_window(&CondWindow {
                     window_s: (now - last_eval).as_secs_f64(),
                     observed_s: (now - started).as_secs_f64(),
                     samples: counters[i].samples,
@@ -1007,18 +1012,18 @@ mod tests {
     #[test]
     fn window_judgement_applies_the_drop_rules() {
         let rule = Condition::parse("rate-above k/** 1").unwrap();
-        let base = Window {
+        let base = CondWindow {
             window_s: 10.0,
             observed_s: 10.0,
-            ..Window::default()
+            ..CondWindow::default()
         };
-        let over = Window {
+        let over = CondWindow {
             samples: 20,
             dropped: 5,
             ..base
         };
         assert_eq!(rule.judge_window(&over).unwrap().state, CondState::Firing);
-        let under_dropped = Window {
+        let under_dropped = CondWindow {
             samples: 2,
             dropped: 5,
             ..base
@@ -1029,21 +1034,21 @@ mod tests {
         );
 
         let rule = Condition::parse("silent-for k/** 30").unwrap();
-        let young = Window {
+        let young = CondWindow {
             window_s: 5.0,
             observed_s: 5.0,
-            ..Window::default()
+            ..CondWindow::default()
         };
         let eval = rule.judge_window(&young).unwrap();
         assert_eq!(eval.state, CondState::Unobservable);
         assert!(eval.evidence.contains("watched only"), "{}", eval.evidence);
-        let silent = Window {
+        let silent = CondWindow {
             window_s: 5.0,
             observed_s: 60.0,
-            ..Window::default()
+            ..CondWindow::default()
         };
         assert_eq!(rule.judge_window(&silent).unwrap().state, CondState::Firing);
-        let recently_dropped = Window {
+        let recently_dropped = CondWindow {
             last_drop_ago_s: Some(10.0),
             ..silent
         };
@@ -1051,7 +1056,7 @@ mod tests {
             rule.judge_window(&recently_dropped).unwrap().state,
             CondState::Unobservable
         );
-        let spoken = Window {
+        let spoken = CondWindow {
             samples: 1,
             last_sample_ago_s: Some(3.0),
             ..silent
@@ -1064,12 +1069,12 @@ mod tests {
     #[test]
     fn synthetic_marked_samples_are_said_out_loud() {
         let rule = Condition::parse("rate-above k/** 0.1").unwrap();
-        let w = Window {
+        let w = CondWindow {
             window_s: 10.0,
             observed_s: 10.0,
             samples: 20,
             synthetic: 3,
-            ..Window::default()
+            ..CondWindow::default()
         };
         let eval = rule.judge_window(&w).unwrap();
         assert!(

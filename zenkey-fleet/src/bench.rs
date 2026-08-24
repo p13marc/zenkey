@@ -101,7 +101,7 @@ fn percentile(sorted: &[Duration], p: f64) -> f64 {
 }
 
 /// Run the benchmark.
-pub async fn bench_rpc(
+pub async fn run_bench(
     fleet: &crate::Fleet<'_>,
     spec: BenchSpec<'_>,
     slices: Option<&SliceSet>,
