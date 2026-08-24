@@ -5,7 +5,7 @@
 //! Pure logic, no widgets — the pane renders standalone in a test.
 //!
 //! **No key expression is spelled here.** Every admin selector lives inside
-//! `zenkey_fleet::admin`; this module holds what came back. That is the right
+//! `zenkey_fleet::bus::admin`; this module holds what came back. That is the right
 //! posture for a plane whose shape is the middleware's rather than this
 //! convention's, and it is why `scope.rs` needs no new entry.
 

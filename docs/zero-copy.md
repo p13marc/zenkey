@@ -25,7 +25,7 @@ that pin each rule are named in the sections below. Run them with
 without copying a byte.
 
 ```rust
-// zenkey-fleet/src/query.rs — the canonical example, whose doc comment
+// zenkey-fleet/src/bus/query.rs — the canonical example, whose doc comment
 // records retiring the old double copy.
 Answer::Value(sample.payload().clone())
 ```
@@ -36,7 +36,7 @@ avoids it out of caution is confusing itself. Bind it to a local and pass
 `&bytes` onward:
 
 ```rust
-// zenkey-fleet/src/decode.rs — hold the Cow, borrow through it.
+// zenkey-fleet/src/model/decode.rs — hold the Cow, borrow through it.
 let cow = bytes.to_bytes();
 if let Ok(text) = std::str::from_utf8(&cow) { … }
 ```
@@ -113,7 +113,7 @@ prefix test says `v1/h-a/**` covers `v1/h-a/@rpc/sysinfo/introspect`, and it
 does not.
 
 ```rust
-// zenkey-fleet/src/admin.rs — state_coverage, borrowed and algebraic:
+// zenkey-fleet/src/bus/admin.rs — state_coverage, borrowed and algebraic:
 // `includes` ⇒ covered, `intersects` ⇒ partial.
 if ke.includes(family) { … }
 if ke.intersects(family) && coverage == Coverage::Uncovered { … }
@@ -163,9 +163,9 @@ Recorded so they are not "fixed" by the next reader:
 | Site | Why it stays |
 |---|---|
 | `zenctl/src/cmd/echo.rs` — `sample.payload.to_bytes()` | **Not a copy.** Returns `Cow::Borrowed` for a contiguous payload. Issue #44 named this as a surviving violation at `zenctl/src/main.rs:917`; that line is clap dispatch, the loop moved in #48, and the construct was never the problem. The two `String` clones beside it were, and they are gone. |
-| `zenkey-fleet/src/query.rs` — `declare_querier(key.to_string())` | zenoh's builder takes ownership. A borrowed expr does not compile here. |
-| `zenkey-fleet/src/query.rs` — the error-reply arm | `String::from_utf8_lossy(…).to_string()` into an owned `Error{name,message}`. Rare, and the bytes must be owned. |
-| `zenkey-fleet/src/body.rs` — `body.to_vec()` | The write path builds an owned wire body, once per user action. Not per sample. |
+| `zenkey-fleet/src/bus/query.rs` — `declare_querier(key.to_string())` | zenoh's builder takes ownership. A borrowed expr does not compile here. |
+| `zenkey-fleet/src/bus/query.rs` — the error-reply arm | `String::from_utf8_lossy(…).to_string()` into an owned `Error{name,message}`. Rare, and the bytes must be owned. |
+| `zenkey-fleet/src/bus/body.rs` — `body.to_vec()` | The write path builds an owned wire body, once per user action. Not per sample. |
 | `SampleView`'s two `String`s | The floor above. `Box<str>`/`Arc<str>` would save a pointer's worth and break an all-public-fields struct. |
 | `Flattened::rows` — one `Vec<RowShape>` per **rebuild** | Bounded by `MAX_ROWS` in all three flatten paths since #249, and no longer per *tick*: #177 separated the shape from the numbers, so a steady-state tick retargets in 11.3 ns and a `TreeRow` is a per-frame temporary of ~40. What a cold rebuild still costs is #251's. |
 | `Zengui::merged_cache` — one merged tree retained | #177. Peak is unchanged, since the transient peak was always this figure; what changed is that it is not returned between rebuilds. It buys the expand/collapse/search/pivot path a merge — the larger half of a `reflatten`. |

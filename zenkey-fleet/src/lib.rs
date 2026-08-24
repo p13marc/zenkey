@@ -1,15 +1,71 @@
 //! Fleet engine for keyspace-v2 tooling (issue #15).
 //!
 //! The shared core of `zenctl` and `zengui`: everything a bus explorer needs
-//! that is not presentation. The RFC 05 §2.1 fan-in discipline lives in
-//! exactly one place ([`bus::query::fleet_get`], moved verbatim from zenctl —
-//! target `All`, consolidation `None`, attribution by the reply's own key);
-//! the liveliness roster, registry-slice sets, and the schema-aware decode
-//! seam build on it.
+//! that is not presentation, in five layers — see **The map** below. The
+//! RFC 05 §2.1 fan-in discipline lives in exactly one place
+//! ([`bus::query::fleet_get`], moved verbatim from zenctl — target `All`,
+//! consolidation `None`, attribution by the reply's own key); the liveliness
+//! roster, registry-slice sets, and the schema-aware decode seam build on it.
 //!
 //! Sessions opened here are deliberately **un-namespaced** (RFC 09 §5): an
 //! explorer sees the wire as it really is, full keys included — that is what
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
+//!
+//! # The map
+//!
+//! Five strata, and the arrow between them only ever points one way. A
+//! sample enters at the top and leaves at the bottom as something a frontend
+//! can draw:
+//!
+//! ```text
+//!   bus/     holds a session      →  observations
+//!   model/   holds values         →  meaning
+//!   judge/   holds meaning        →  verdicts
+//!   report/  the serialized shapes every layer above hands out
+//!   tape/    traffic as a thing: captured, replayed, manufactured, timed
+//! ```
+//!
+//! * **[`bus`]** — everything whose job needs a live session. `session`,
+//!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, `blob`,
+//!   `roster`, `discover`, `producer`, `body`. The RFC 05 §2.1 fan-in
+//!   discipline lives here exactly once, in [`bus::query::fleet_get`] (moved
+//!   verbatim from zenctl — target `All`, consolidation `None`, attribution
+//!   by the reply's own key), and everything in the layer that asks the
+//!   fleet a question goes through it. This layer returns observations and
+//!   never a verdict about one.
+//!
+//! * **[`model`]** — everything that can do its job from values already in
+//!   hand. `facts`, `registry`, `project`, `stats`, `tree`, `skeleton`,
+//!   `diff`, `decode`, `retain`, plus the two mechanisms every long-running
+//!   projection shares (`bounded`, `examples`). Nothing here takes a
+//!   session, and that is load-bearing: it is what lets a frontend replay a
+//!   `.zrec` through the same projections it runs live.
+//!
+//! * **[`judge`]** — everything that takes a position. `doctor`, `expect`,
+//!   `condition`, `field`, `why`, `cutover`, `retired`, `budget`, and
+//!   [`judge::common`] for the vocabulary they share. The honesty rules
+//!   (RFC 13, v1.24) bite hardest here, so the layer states them once.
+//!
+//! * **[`report`]** — every serde-pinned wire shape in the crate, split by
+//!   domain. Its module doc carries the placement rule, which is the answer
+//!   to "where does this struct go?" whenever the struct has a `Serialize`
+//!   on it.
+//!
+//! * **[`tape`]** — traffic as a thing rather than an event. `record`,
+//!   `ingest`, `generate`, `synth`, `bench`. It sits beside the others
+//!   rather than under them because it both reads from the bus and writes
+//!   back to it.
+//!
+//! **Placing a new module.** Ask, in order: does it need a session
+//! (`bus/`), can it answer from values in hand (`model/`), does it say
+//! whether something is *wrong* (`judge/`), does it turn a stream into a
+//! recording or back (`tape/`)? A new serde-pinned struct is not a module
+//! question at all — it goes to [`report`], by the rule stated there.
+//!
+//! What is deliberately **not** here: configuration. Where the operator
+//! keeps their connection contexts is `zenkey-explorer-config`'s job; this
+//! crate has no stratum for `~/.config`, and forcing `dirs` and `toml` on a
+//! library consumer so two binaries could read a TOML file was the tell.
 
 pub mod bus;
 pub mod judge;
@@ -20,17 +76,17 @@ pub mod tape;
 //
 // **The rule: the crate root is the whole supported surface.** Every type and
 // function a frontend is meant to use is re-exported here, and a path through
-// a module (`zenkey_fleet::decode::decode_sample`) is a spelling of the same
-// item, never the only way to reach one. The modules stay `pub` because their
-// docs are where the reasoning lives and because a reader browsing by module
-// should not hit a wall — but nothing supported is *only* there.
+// a module (`zenkey_fleet::model::decode::decode_sample`) is a spelling of the
+// same item, never the only way to reach one. The modules stay `pub` because
+// their docs are where the reasoning lives and because a reader browsing by
+// module should not hit a wall — but nothing supported is *only* there.
 //
 // Why it matters: both frontends had drifted into a mix of the two
-// (`zenkey_fleet::SliceSet` beside `zenkey_fleet::decode::SchemaStore`), and
-// which spelling a call site used said nothing about how supported the item
-// was. With the rule, "is this ours to use?" is answered by looking at this
-// block, and adding a public item without adding it here is the omission that
-// stands out.
+// (`zenkey_fleet::SliceSet` beside `zenkey_fleet::model::decode::SchemaStore`),
+// and which spelling a call site used said nothing about how supported the
+// item was. With the rule, "is this ours to use?" is answered by looking at
+// this block, and adding a public item without adding it here is the omission
+// that stands out.
 //
 // What is deliberately *not* here: `report`'s fifty-odd row and cell types,
 // which are the rendering vocabulary rather than the engine's — a frontend

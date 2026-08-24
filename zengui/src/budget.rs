@@ -1,6 +1,6 @@
 //! Key-population budgets in the tree (#221): the declared `cardinality`
 //! bound joined against the observed population, per `{var}` family and per
-//! origin — the GUI half of [`zenkey_fleet::budget`].
+//! origin — the GUI half of [`zenkey_fleet::judge::budget`].
 //!
 //! The join itself is the engine's ([`zenkey_fleet::judge::budget::BudgetObservation`]);
 //! this module walks the observed key tree into the key list the engine

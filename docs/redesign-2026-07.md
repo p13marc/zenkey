@@ -567,6 +567,12 @@ zenkey-fleet/src/
   record.rs    # [later] .zrec read/write/replay
 ```
 
+> **Since shipped, and since restructured.** The flat list above is the
+> 2026-07 plan and is kept as written. The crate now has five layers —
+> `bus/`, `model/`, `judge/`, `report/`, `tape/` — and `zenkey-fleet/src/lib.rs`'s
+> doc-map is the normative statement of where a module goes. Every file
+> named here still exists, one directory deeper.
+
 Async model: tokio throughout. `Monitor::events()` is a bounded broadcast
 (overflow surfaces as an explicit `Dropped(n)` event — dropped samples are never
 invisible); the tree view redraws on `StatsTick` (default 250 ms) by pulling an

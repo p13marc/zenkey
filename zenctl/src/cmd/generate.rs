@@ -3,7 +3,7 @@
 //! consumer-robustness testing.
 //!
 //! Orchestration only: the plan, the schedule, and the synthesis live in
-//! `zenkey_fleet::generate`/`synth`. This command's job is the etiquette —
+//! `zenkey_fleet::tape::generate`/`synth`. This command's job is the etiquette —
 //! print the full plan before anything is published (the replay dry-run
 //! precedent), refuse a wide run without `--i-know`, and stamp the RFC 09
 //! §5.3 synthetic marker via the engine.

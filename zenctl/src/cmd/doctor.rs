@@ -1,7 +1,7 @@
 //! `doctor` — diff what the fleet *serves* against local registry files, and
 //! check the fleet against the RFC contracts it claims to follow.
 //!
-//! Since #55 the checks live in the engine (`zenkey_fleet::doctor`), where
+//! Since #55 the checks live in the engine (`zenkey_fleet::judge::doctor`), where
 //! the GUI doctor panel calls the exact same [`zenkey_fleet::run_doctor`];
 //! this command is orchestration and rendering: load the local slices,
 //! run, print, and apply the opt-in `--fail-on` exit policy.

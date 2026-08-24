@@ -3,7 +3,7 @@
 //!
 //! Thin by design (#206/#209): the rung ladder, the stable id vocabulary and
 //! the verdict rules are judgement over bus data, so they live in
-//! [`zenkey_fleet::why`] where the other explorer can reach them. What is
+//! [`zenkey_fleet::judge::why`] where the other explorer can reach them. What is
 //! left here is what only a CLI has: the resolved bus, the registry ladder
 //! (`--registry` dirs, or the live sweep, degrading through
 //! `slices_optional` — a registry that could not be loaded turns the

@@ -123,7 +123,7 @@ pub async fn diff(args: &Bus) -> Result<()> {
 ///
 /// Thin for `check cutover`'s reason (#206): the per-entry ladder, the wire
 /// bucketing and the worst-of verdict are judgement over bus traffic and live
-/// in `zenkey_fleet::retired`. What is left here is what only a CLI has: the
+/// in `zenkey_fleet::judge::retired`. What is left here is what only a CLI has: the
 /// session, the rendering, and the exit code.
 pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
     // Seconds off the flag, a `Duration` from here in.

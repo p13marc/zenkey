@@ -169,7 +169,7 @@ impl NodeRoster {
         self.nodes.get(origin)
     }
 
-    /// Origin → live producers, in the shape `zenkey_fleet::roster` returns —
+    /// Origin → live producers, in the shape `zenkey_fleet::bus::roster` returns —
     /// for joins that need "who is actually up".
     ///
     /// `None` while unseeded, and that is the whole point of the method: a

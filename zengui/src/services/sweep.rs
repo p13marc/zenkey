@@ -211,7 +211,7 @@ pub fn admin(
 /// The one entry in this module that costs the bus **nothing** — it joins
 /// data already in hand — but it is O(observed keys × refinement) and runs on
 /// a throttled cadence, so it is a `Task` like the sweeps rather than work on
-/// the update thread. `zenkey_fleet::budget` does the judging; the landing
+/// the update thread. `zenkey_fleet::judge::budget` does the judging; the landing
 /// carries the badge map the tree looks rows up in.
 pub fn budget(
     base: String,

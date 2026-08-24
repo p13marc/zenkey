@@ -1,7 +1,7 @@
 //! `zenctl watchdog` (#227) — transitions, not states.
 //!
 //! The continuous observer over the engine's closed condition vocabulary
-//! (`zenkey_fleet::condition`): every genuine state change is one ndjson
+//! (`zenkey_fleet::judge::condition`): every genuine state change is one ndjson
 //! line on stdout, an unchanged tick prints nothing. A **foreground**
 //! process, explicitly launched, one per invocation, no shared state — the
 //! redesign ledger's "no daemon" decision rejected a hidden discovery-caching
