@@ -184,12 +184,12 @@ A body the schema cannot encode is refused before it touches the bus.
 The three `blob` commands cost three very different things, and the surface
 says which is which. `list` reads registry slices and touches no data plane:
 it answers "who *declares* a tier", which is a capability claim and never
-possession. `probe` fans two tiny GETs (`have`, `manifest`) across origins —
+possession. `locate` fans two tiny GETs (`have`, `manifest`) across origins —
 RFC 07 §2.5's sanctioned form — and reports every holder with its own concrete
 key. `fetch` moves bytes from exactly one of them, at **data-low** priority
 (§2.6), verifying each reply against the content root **before disk** (§2.1).
 
-`--from` is required and takes one concrete origin; `RemoteOrigin::parse`
+`--origin` is required and takes one concrete origin; `RemoteOrigin::parse`
 rejects `*`, so a wildcard-origin bulk fetch has no spelling here. A tier-1
 fetch also requires `--root <hex>` or an explicit `--allow-unpinned`: §2.1 says
 a reference must carry the identity of the bytes it names, and an operator
@@ -197,7 +197,7 @@ typing an id by hand has no reference — so trust-on-first-use is a decision
 made out loud, and the report says which one you made.
 
 Two holders answering one id at two different roots is a **finding**, not a
-tie-break. `probe` prints both and refuses to choose; the root you pin is what
+tie-break. `locate` prints both and refuses to choose; the root you pin is what
 the fetch will accept.
 `--no-validate` drops the refusal (the body ships as typed, with a note);
 `--raw` skips the schema lookup entirely and sends the bytes verbatim. A

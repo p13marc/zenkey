@@ -84,8 +84,8 @@ impl Render for WhyReport {
                 "listened {s:.0}s on the asked key — the run's one data-plane cost"
             ))),
             None => notes.push(Note::next_step(
-                "pass --listen-for <SECS> to add the wire-heard rung — the only \
-                 rung that costs the data plane",
+                "pass --for <SECS> to add the wire-heard rung — the only rung \
+                 that costs the data plane",
             )),
         }
         let causes = self.causes();

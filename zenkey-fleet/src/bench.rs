@@ -110,7 +110,7 @@ pub async fn run_bench(
         check_idempotent(slices, spec.producer, spec.procedure)?;
     }
     if spec.count == 0 {
-        bail!("--count 0 measures nothing");
+        bail!("--calls 0 measures nothing");
     }
 
     let segments: Vec<&str> = spec.procedure.split('/').collect();

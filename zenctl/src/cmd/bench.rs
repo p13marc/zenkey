@@ -12,9 +12,9 @@ use anyhow::{Result, anyhow};
 
 use crate::Bus;
 
-/// A ceiling on `--count`, so a typo is a bounded mistake. Not a policy about
+/// A ceiling on `--calls`, so a typo is a bounded mistake. Not a policy about
 /// how much load a fleet can take — the operator knows that and `--i-know`
-/// does not lift this; `--count` explicitly can.
+/// does not lift this; `--calls` explicitly can.
 const DEFAULT_COUNT: usize = 100;
 
 #[allow(clippy::too_many_arguments)]
