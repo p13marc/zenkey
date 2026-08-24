@@ -412,7 +412,7 @@ impl V1Facts {
     fn from_parsed(parsed: &StructuralKey<'_>) -> V1Facts {
         let (origin, origin_kind) = match &parsed.origin {
             Origin::Host(id) => (id.as_str().to_string(), OriginKind::Host),
-            Origin::Service(s) => (s.clone(), OriginKind::Service),
+            Origin::Service(s) => (s.as_str().to_string(), OriginKind::Service),
         };
         let (class, class_kind) = match parsed.class {
             ClassOrPlane::Class(c) => (c.chunk().to_string(), ClassKind::from_class(c)),

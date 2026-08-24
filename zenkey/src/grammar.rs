@@ -139,30 +139,39 @@ pub fn is_valid_host_origin(chunk: &str) -> bool {
 }
 
 /// The publishing identity in position 3 (RFC 03 §1.3).
+///
+/// **Both arms carry a validated newtype** (issue #311). They did not always:
+/// `Service` held a bare `String`, so `data_key(&Origin::Service("has
+/// spaces".into()), …)` returned `Ok(Key("v1/has spaces/state/health"))` — an
+/// ungrammatical key wearing the one type whose entire claim is "validated,
+/// canonical". [`crate::origin::ServiceOrigin`] already did the checking; it
+/// simply was not the thing the variant held. Now it is, and every builder in
+/// [`crate::grammar`], [`crate::context`] and [`crate::selector`] inherits the
+/// guarantee rather than the hole.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Origin {
     /// `h-<12hex>` — a machine (see [`crate::origin`] for minting).
     Host(crate::origin::HostId),
-    /// A verbatim service origin, e.g. `@catalog`. Producer chunk omitted.
-    Service(String),
+    /// A validated verbatim service origin, e.g. `@catalog` (RFC 06 §5).
+    /// Producer chunk omitted (RFC 03 §1.5).
+    Service(crate::origin::ServiceOrigin),
 }
 
 impl Origin {
     pub fn catalog() -> Self {
-        Origin::Service(SERVICE_CATALOG.to_string())
+        Origin::Service(crate::origin::ServiceOrigin::catalog())
     }
 
+    /// A registered service origin by name (`@desired`, …). Delegates to
+    /// [`crate::origin::ServiceOrigin::new`] — one validation, one spelling.
     pub fn service(name: &str) -> Result<Self, KeyError> {
-        if !is_valid_verbatim_chunk(name) {
-            return Err(KeyError::InvalidVerbatimChunk(name.to_string()));
-        }
-        Ok(Origin::Service(name.to_string()))
+        crate::origin::ServiceOrigin::new(name).map(Origin::Service)
     }
 
     pub fn chunk(&self) -> &str {
         match self {
             Origin::Host(id) => id.as_str(),
-            Origin::Service(s) => s,
+            Origin::Service(s) => s.as_str(),
         }
     }
 
@@ -559,6 +568,25 @@ mod content_addressing {
     }
 }
 
+/// RFC 03 §3: `alive` names a liveliness token and nothing else — it is never
+/// a subject chunk, at any position, in any class.
+///
+/// **The one implementation of the rule** (issue #322). [`data_key`] and every
+/// [`crate::V1Context`] builder call this, so a reserved token fails the same
+/// way wherever a key is spelled. It used to be two rules with two failure
+/// modes: `data_key` returned `Err(ReservedToken)` and `V1Context::state_key`
+/// `assert!`ed on the identical input, which meant the same mistake was a
+/// recoverable error in one layer and a panic in the next.
+///
+/// `what` names the position for the error message, as
+/// [`KeyError::ReservedToken`] carries it.
+pub fn reject_reserved_chunks(subject: &[&str], what: &'static str) -> Result<(), KeyError> {
+    if subject.contains(&SUBJECT_ALIVE) {
+        return Err(KeyError::ReservedToken(SUBJECT_ALIVE.to_string(), what));
+    }
+    Ok(())
+}
+
 fn validate_subject(subject: &[&str]) -> Result<(), KeyError> {
     if subject.is_empty() {
         return Err(KeyError::EmptySubject);
@@ -603,12 +631,7 @@ pub fn data_key(
     // always enforced — `telemetry/foo/alive` reads as presence to every
     // human and selector that greps for the token): keys carrying it come
     // only from the dedicated builders below.
-    if subject.contains(&SUBJECT_ALIVE) {
-        return Err(KeyError::ReservedToken(
-            SUBJECT_ALIVE.to_string(),
-            "data subject chunk",
-        ));
-    }
+    reject_reserved_chunks(subject, "data subject chunk")?;
     let mut key = String::new();
     push_key(&mut key, VERSION_CHUNK);
     push_key(&mut key, origin.chunk());
@@ -839,7 +862,7 @@ pub fn parse(key: &str) -> Result<StructuralKey<'_>, KeyError> {
     let origin = if is_valid_host_origin(origin_chunk) {
         Origin::Host(crate::origin::HostId::parse(origin_chunk).expect("validated"))
     } else if is_valid_verbatim_chunk(origin_chunk) {
-        Origin::Service(origin_chunk.to_string())
+        Origin::Service(crate::origin::ServiceOrigin::new(origin_chunk).expect("validated"))
     } else {
         return Err(KeyError::InvalidHostOrigin(origin_chunk.to_string()));
     };
@@ -1170,6 +1193,51 @@ mod tests {
             .is_err()
         );
         assert!(data_key(&host(), Class::State, None, &["health"]).is_err());
+    }
+
+    /// Issue #311, the guard: **no `Origin` value can put an ungrammatical
+    /// chunk in position 2.** `Host` was always immune (it carries a
+    /// [`HostId`]); `Service` held a bare `String` and was not, so
+    /// `Origin::Service("has spaces".into())` minted
+    /// `Key("v1/has spaces/state/health")` — a `Key` is the type whose whole
+    /// claim is that this cannot happen.
+    ///
+    /// The property is now structural: [`crate::origin::ServiceOrigin`] is the
+    /// only way to spell the variant, so the assertion below is a statement
+    /// about *every* value of the type, not a sample of them.
+    #[test]
+    fn no_origin_can_mint_an_illegal_position_2() {
+        for bad in ["has spaces", "NotVerbatim", "catalog", "@", "@Desired", ""] {
+            assert!(
+                Origin::service(bad).is_err(),
+                "{bad:?} must not become an Origin"
+            );
+            assert!(crate::origin::ServiceOrigin::new(bad).is_err(), "{bad:?}");
+        }
+        // Every constructible service origin is a legal verbatim chunk, and
+        // every constructible host origin a legal `h-<12hex>` one.
+        for origin in [
+            Origin::catalog(),
+            Origin::service("@desired").unwrap(),
+            host(),
+        ] {
+            let key = data_key(
+                &origin,
+                Class::State,
+                origin
+                    .has_producer_chunk()
+                    .then(|| Producer::new("netring").unwrap())
+                    .as_ref(),
+                &["health"],
+            )
+            .unwrap();
+            let position_2 = key.as_str().split('/').nth(1).unwrap();
+            assert_eq!(position_2, origin.chunk());
+            assert!(
+                is_valid_verbatim_chunk(position_2) || is_valid_host_origin(position_2),
+                "position 2 of {key} is ungrammatical"
+            );
+        }
     }
 
     #[test]

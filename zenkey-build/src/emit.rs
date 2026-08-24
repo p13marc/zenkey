@@ -31,7 +31,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         let _ = writeln!(out, "    #[allow(unused_imports)]");
         let _ = writeln!(
             out,
-            "    use {zk}::grammar::{{self, Class, KeyError, Origin, Producer}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key, Selector}};\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin, LocalOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::selector::Scope;"
+            "    use {zk}::grammar::{{self, Class, KeyError, Origin, Producer}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key, Selector}};\n    // Wrapping a builder's own output is not public API (issue #312): the\n    // path is named explicitly so generated code says what it is reaching\n    // past, and `key_from_canonical` refuses a wildcard.\n    #[allow(unused_imports)]\n    use {zk}::__private::{{key_from_canonical, selector_from_canonical}};\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin, LocalOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::selector::Scope;"
         );
         let _ = writeln!(out, "    #[allow(unused_imports)]");
         let _ = writeln!(out, "    use {zk}::qos::QosProfile;");
@@ -97,7 +97,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                         let n = snake(v);
                         if f.service_origin.is_some() && v == "host" {
                             let _ = write!(args, "{n}: &{zk}::origin::HostId, ");
-                            let _ = write!(inits, "{n}: Chunk::from_valid({n}.as_str()), ");
+                            let _ = write!(inits, "{n}: Chunk::from({n}), ");
                         } else {
                             let _ = write!(args, "{n}: impl AsRef<str>, ");
                             let _ = write!(inits, "{n}: Chunk::slug({n}), ");
@@ -477,7 +477,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 let sel = format!("v1/{origin}/{class}/{tail}");
                 let _ = writeln!(
                     out,
-                    "                Self::{} => Selector::from_canonical({sel:?}.to_string()),",
+                    "                Self::{} => selector_from_canonical({sel:?}.to_string()),",
                     s.variant
                 );
             }
@@ -498,7 +498,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 let suffix = format!("/{class}/{}/{tail}", f.name);
                 let _ = writeln!(
                     out,
-                    "                Self::{} => Selector::from_canonical(format!(\"v1/{{}}{suffix}\", scope.chunk())),",
+                    "                Self::{} => selector_from_canonical(format!(\"v1/{{}}{suffix}\", scope.chunk())),",
                     s.variant
                 );
             }
@@ -582,7 +582,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 "        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/{origin}/\");\n        k.push_str(subject.class().chunk());\n        match subject {{"
             );
             emit_subject_arms(&mut out, &f.subjects);
-            let _ = writeln!(out, "        }}\n        Key::from_canonical(k)\n    }}");
+            let _ = writeln!(out, "        }}\n        key_from_canonical(k)\n    }}");
         } else {
             let _ = writeln!(
                 out,
@@ -594,7 +594,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 "\n    fn key_impl(origin: &str, producer: &str, subject: &Subject) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/\");\n        k.push_str(origin);\n        k.push('/');\n        k.push_str(subject.class().chunk());\n        k.push('/');\n        k.push_str(producer);\n        match subject {{"
             );
             emit_subject_arms(&mut out, &f.subjects);
-            let _ = writeln!(out, "        }}\n        Key::from_canonical(k)\n    }}");
+            let _ = writeln!(out, "        }}\n        key_from_canonical(k)\n    }}");
         }
 
         // Procedures.
@@ -777,7 +777,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                     let sel = format!("v1/*/@rpc/{}/{}", f.name, tail.join("/"));
                     let _ = writeln!(
                         out,
-                        "            FleetProcedureId::{} => Selector::from_canonical({sel:?}.to_string()),",
+                        "            FleetProcedureId::{} => selector_from_canonical({sel:?}.to_string()),",
                         p.variant
                     );
                 }
@@ -787,12 +787,12 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             if f.service_origin.is_some() {
                 let _ = writeln!(
                     out,
-                    "    /// Base-relative `@rpc` key for this service's procedure (origin fixed).\n    /// Errs on a `{{var}}`-bearing pattern — use the named per-procedure builder.\n    pub fn rpc_key(p: ProcedureId) -> Result<Key, KeyError> {{\n        if p.chunks().iter().any(|c| c.starts_with('{{')) {{\n            return Err(KeyError::Parse(format!(\"procedure {{}} has variables; use its named builder\", p.path())));\n        }}\n        grammar::rpc_key(&origin(), None, p.chunks())\n    }}\n\n    /// The serve-side selector: every `{{var}}` becomes `*`.\n    pub fn rpc_serve_key(p: ProcedureId) -> Selector {{\n        let mut key = format!(\"{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, origin().chunk(), grammar::PLANE_RPC);\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        Selector::from_canonical(key)\n    }}"
+                    "    /// Base-relative `@rpc` key for this service's procedure (origin fixed).\n    /// Errs on a `{{var}}`-bearing pattern — use the named per-procedure builder.\n    pub fn rpc_key(p: ProcedureId) -> Result<Key, KeyError> {{\n        if p.chunks().iter().any(|c| c.starts_with('{{')) {{\n            return Err(KeyError::Parse(format!(\"procedure {{}} has variables; use its named builder\", p.path())));\n        }}\n        grammar::rpc_key(&origin(), None, p.chunks())\n    }}\n\n    /// The serve-side selector: every `{{var}}` becomes `*`.\n    pub fn rpc_serve_key(p: ProcedureId) -> Selector {{\n        let mut key = format!(\"{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, origin().chunk(), grammar::PLANE_RPC);\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        selector_from_canonical(key)\n    }}"
                 );
             } else {
                 let _ = writeln!(
                     out,
-                    "    /// Base-relative `@rpc` key for this producer's procedure at one host\n    /// (RFC 08 §1.1: the origin is typed and concrete — never a fleet).\n    /// Errs on a `{{var}}`-bearing pattern — use the named per-procedure builder.\n    pub fn rpc_key(o: &impl HostOrigin, p: ProcedureId) -> Result<Key, KeyError> {{\n        if p.chunks().iter().any(|c| c.starts_with('{{')) {{\n            return Err(KeyError::Parse(format!(\"procedure {{}} has variables; use its named builder\", p.path())));\n        }}\n        grammar::rpc_key(&o.to_origin(), Some(&producer()), p.chunks())\n    }}\n\n    /// The serve-side selector (this process's own queryable): every\n    /// `{{var}}` becomes `*`.\n    pub fn rpc_serve_key(o: &LocalOrigin, p: ProcedureId) -> Selector {{\n        let mut key = format!(\"{{}}/{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, o.chunk(), grammar::PLANE_RPC, producer().chunk());\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        Selector::from_canonical(key)\n    }}"
+                    "    /// Base-relative `@rpc` key for this producer's procedure at one host\n    /// (RFC 08 §1.1: the origin is typed and concrete — never a fleet).\n    /// Errs on a `{{var}}`-bearing pattern — use the named per-procedure builder.\n    pub fn rpc_key(o: &impl HostOrigin, p: ProcedureId) -> Result<Key, KeyError> {{\n        if p.chunks().iter().any(|c| c.starts_with('{{')) {{\n            return Err(KeyError::Parse(format!(\"procedure {{}} has variables; use its named builder\", p.path())));\n        }}\n        grammar::rpc_key(&o.to_origin(), Some(&producer()), p.chunks())\n    }}\n\n    /// The serve-side selector (this process's own queryable): every\n    /// `{{var}}` becomes `*`.\n    pub fn rpc_serve_key(o: &LocalOrigin, p: ProcedureId) -> Selector {{\n        let mut key = format!(\"{{}}/{{}}/{{}}/{{}}\", grammar::VERSION_CHUNK, o.chunk(), grammar::PLANE_RPC, producer().chunk());\n        for c in p.chunks() {{\n            key.push('/');\n            key.push_str(if c.starts_with('{{') {{ \"*\" }} else {{ c }});\n        }}\n        selector_from_canonical(key)\n    }}"
                 );
             }
 
@@ -831,13 +831,13 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                     let origin = f.service_origin.as_deref().unwrap();
                     let _ = writeln!(
                         out,
-                        "    /// Call key for `{}` (origin fixed; args slugged, RFC 03 §2).\n    pub fn {fn_base}_key({args}) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/{origin}/@rpc\");\n        {body}\n        Key::from_canonical(k)\n    }}\n",
+                        "    /// Call key for `{}` (origin fixed; args slugged, RFC 03 §2).\n    pub fn {fn_base}_key({args}) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/{origin}/@rpc\");\n        {body}\n        key_from_canonical(k)\n    }}\n",
                         p.path
                     );
                 } else {
                     let _ = writeln!(
                         out,
-                        "    /// Call key for `{}` at one host (typed origin, G5; args slugged).\n    pub fn {fn_base}_key(o: &impl HostOrigin, {args}) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/\");\n        k.push_str(o.chunk());\n        k.push_str(\"/@rpc/{}\");\n        {body}\n        Key::from_canonical(k)\n    }}\n",
+                        "    /// Call key for `{}` at one host (typed origin, G5; args slugged).\n    pub fn {fn_base}_key(o: &impl HostOrigin, {args}) -> Key {{\n        let mut k = String::with_capacity(96);\n        k.push_str(\"v1/\");\n        k.push_str(o.chunk());\n        k.push_str(\"/@rpc/{}\");\n        {body}\n        key_from_canonical(k)\n    }}\n",
                         p.path, f.name
                     );
                 }
@@ -974,7 +974,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                     };
                     let _ = writeln!(out, "            {pat} => {{ {body}}}");
                 }
-                let _ = writeln!(out, "        }}\n        Key::from_canonical(k)\n    }}");
+                let _ = writeln!(out, "        }}\n        key_from_canonical(k)\n    }}");
             };
             let _ = writeln!(
                 out,
@@ -1148,7 +1148,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
     );
     let _ = writeln!(
         out,
-        "/// Refine a base-relative wire key into its registered subject.\npub fn refine_key(key: &str) -> Option<Refined<'_>> {{\n    let parsed = {zk}::grammar::parse(key).ok()?;\n    let {zk}::grammar::ClassOrPlane::Class(class) = parsed.class else {{ return None; }};\n    let name: &str = match (&parsed.producer, &parsed.origin) {{\n        (Some(p), _) => p.name(),\n        (None, {zk}::grammar::Origin::Service(s)) => s.trim_start_matches('@'),\n        _ => return None,\n    }};\n    let subject = parse_subject(name, class, &parsed.subject)?;\n    let producer = subject.producer_name();\n    Some(Refined {{ key: parsed, producer, subject }})\n}}\n"
+        "/// Refine a base-relative wire key into its registered subject.\npub fn refine_key(key: &str) -> Option<Refined<'_>> {{\n    let parsed = {zk}::grammar::parse(key).ok()?;\n    let {zk}::grammar::ClassOrPlane::Class(class) = parsed.class else {{ return None; }};\n    let name: &str = match (&parsed.producer, &parsed.origin) {{\n        (Some(p), _) => p.name(),\n        (None, {zk}::grammar::Origin::Service(s)) => s.as_str().trim_start_matches('@'),\n        _ => return None,\n    }};\n    let subject = parse_subject(name, class, &parsed.subject)?;\n    let producer = subject.producer_name();\n    Some(Refined {{ key: parsed, producer, subject }})\n}}\n"
     );
     let _ = writeln!(
         out,
@@ -1261,7 +1261,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
 
     let _ = writeln!(
         out,
-        "/// The `@blob` tiers this build serves (RFC 07 §2, RFC 08 §2).\n///\n/// App-level rather than per-producer: a blob key carries **no producer\n/// chunk** — the position after `@blob` is a reserved tier token, because\n/// content-addressed data has no owning component.\npub mod blob {{\n    #[allow(unused_imports)]\n    use {zk}::grammar::{{BlobTier, ContentHash, KeyError}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key}};\n    #[allow(unused_imports)]\n    use {zk}::slug::ulid_slug;\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::context::BlobProbePrefix;\n"
+        "/// The `@blob` tiers this build serves (RFC 07 §2, RFC 08 §2).\n///\n/// App-level rather than per-producer: a blob key carries **no producer\n/// chunk** — the position after `@blob` is a reserved tier token, because\n/// content-addressed data has no owning component.\npub mod blob {{\n    #[allow(unused_imports)]\n    use {zk}::grammar::{{BlobTier, ContentHash, KeyError}};\n    #[allow(unused_imports)]\n    use {zk}::key::{{Chunk, Key}};\n    #[allow(unused_imports)]\n    use {zk}::__private::key_from_canonical;\n    #[allow(unused_imports)]\n    use {zk}::slug::ulid_slug;\n    #[allow(unused_imports)]\n    use {zk}::origin::{{ConcreteOrigin, HostOrigin}};\n    #[allow(unused_imports)]\n    use {zk}::context::BlobProbePrefix;\n"
     );
 
     // The tier-prefix helper every builder routes through, so the one place a
@@ -1396,7 +1396,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
 
     let _ = writeln!(
         out,
-        "        /// The concrete tier prefix at one host: `v1/<origin>/@blob/<tier>`.\n        pub fn prefix_at(self, o: &impl HostOrigin) -> Key {{\n            Key::from_canonical(tier_prefix(ConcreteOrigin::chunk(o), self.token()))\n        }}\n"
+        "        /// The concrete tier prefix at one host: `v1/<origin>/@blob/<tier>`.\n        pub fn prefix_at(self, o: &impl HostOrigin) -> Key {{\n            key_from_canonical(tier_prefix(ConcreteOrigin::chunk(o), self.token()))\n        }}\n"
     );
     let _ = writeln!(
         out,
@@ -1411,26 +1411,26 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
             "artifact" => {
                 let _ = writeln!(
                     out,
-                    "    /// Tier-1 artifact prefix at one host: `…/@blob/artifact/<id>`.\n    ///\n    /// `id` is the ULID minted by the RPC that created the artifact\n    /// (RFC 07 §2.2). A ULID-shaped id is **lowercased at key-build time**\n    /// (RFC 03 §2: Crockford base32 decodes case-insensitively, so both\n    /// cases name one chunk — escaping the canonical uppercase form would\n    /// mint a different key no holder answers); anything else is slugged at\n    /// the boundary.\n    pub fn artifact_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        Key::from_canonical(artifact_prefix(o, id))\n    }}\n\n    fn artifact_prefix(o: &impl HostOrigin, id: impl AsRef<str>) -> String {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"artifact\");\n        k.push('/');\n        let id = id.as_ref();\n        match ulid_slug(id) {{\n            Some(lower) => k.push_str(&lower),\n            None => k.push_str(Chunk::slug(id).as_str()),\n        }}\n        k\n    }}\n"
+                    "    /// Tier-1 artifact prefix at one host: `…/@blob/artifact/<id>`.\n    ///\n    /// `id` is the ULID minted by the RPC that created the artifact\n    /// (RFC 07 §2.2). A ULID-shaped id is **lowercased at key-build time**\n    /// (RFC 03 §2: Crockford base32 decodes case-insensitively, so both\n    /// cases name one chunk — escaping the canonical uppercase form would\n    /// mint a different key no holder answers); anything else is slugged at\n    /// the boundary.\n    pub fn artifact_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        key_from_canonical(artifact_prefix(o, id))\n    }}\n\n    fn artifact_prefix(o: &impl HostOrigin, id: impl AsRef<str>) -> String {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"artifact\");\n        k.push('/');\n        let id = id.as_ref();\n        match ulid_slug(id) {{\n            Some(lower) => k.push_str(&lower),\n            None => k.push_str(Chunk::slug(id).as_str()),\n        }}\n        k\n    }}\n"
                 );
                 for ep in &b.endpoints {
                     match ep.as_str() {
                         "slice" => {
                             let _ = writeln!(
                                 out,
-                                "    /// A verified slice of transfer chunk `index` (RFC 07 §2.2).\n    pub fn artifact_slice_key(o: &impl HostOrigin, id: impl AsRef<str>, index: u64) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/slice/\");\n        k.push_str(&index.to_string());\n        Key::from_canonical(k)\n    }}\n"
+                                "    /// A verified slice of transfer chunk `index` (RFC 07 §2.2).\n    pub fn artifact_slice_key(o: &impl HostOrigin, id: impl AsRef<str>, index: u64) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/slice/\");\n        k.push_str(&index.to_string());\n        key_from_canonical(k)\n    }}\n"
                             );
                         }
                         "push" => {
                             let _ = writeln!(
                                 out,
-                                "    /// Upload offer (RFC 07 §2.2).\n    ///\n    /// `push/**` is a write expressed as a query: the receiving origin MUST\n    /// gate it behind an authorization hook and MUST NOT enable it by\n    /// default. Declaring the endpoint states the capability and cannot\n    /// discharge that obligation.\n    pub fn artifact_push_offer_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/push/offer\");\n        Key::from_canonical(k)\n    }}\n\n    /// One uploaded slice (RFC 07 §2.2); same authorization gate as the offer.\n    pub fn artifact_push_slice_key(o: &impl HostOrigin, id: impl AsRef<str>, index: u64) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/push/slice/\");\n        k.push_str(&index.to_string());\n        Key::from_canonical(k)\n    }}\n"
+                                "    /// Upload offer (RFC 07 §2.2).\n    ///\n    /// `push/**` is a write expressed as a query: the receiving origin MUST\n    /// gate it behind an authorization hook and MUST NOT enable it by\n    /// default. Declaring the endpoint states the capability and cannot\n    /// discharge that obligation.\n    pub fn artifact_push_offer_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/push/offer\");\n        key_from_canonical(k)\n    }}\n\n    /// One uploaded slice (RFC 07 §2.2); same authorization gate as the offer.\n    pub fn artifact_push_slice_key(o: &impl HostOrigin, id: impl AsRef<str>, index: u64) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/push/slice/\");\n        k.push_str(&index.to_string());\n        key_from_canonical(k)\n    }}\n"
                             );
                         }
                         "fanout" => {
                             let _ = writeln!(
                                 out,
-                                "    /// One-to-many rollout of the same blob (**experimental** —\n    /// RFC 07 Appendix A, demoted from §2.2 in v1.17).\n    ///\n    /// The one `@blob` endpoint that is a **publication** rather than a\n    /// queryable — N consumers each pulling the same bytes is precisely the\n    /// amplification this plane exists to avoid. Declaring it is legal and\n    /// states an experimental capability no conformant consumer is required\n    /// to speak. Publish at the bulk QoS of §2.6, with blocking congestion\n    /// control, using version-first tagged framing (Appendix A).\n    pub fn artifact_fanout_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/fanout\");\n        Key::from_canonical(k)\n    }}\n"
+                                "    /// One-to-many rollout of the same blob (**experimental** —\n    /// RFC 07 Appendix A, demoted from §2.2 in v1.17).\n    ///\n    /// The one `@blob` endpoint that is a **publication** rather than a\n    /// queryable — N consumers each pulling the same bytes is precisely the\n    /// amplification this plane exists to avoid. Declaring it is legal and\n    /// states an experimental capability no conformant consumer is required\n    /// to speak. Publish at the bulk QoS of §2.6, with blocking congestion\n    /// control, using version-first tagged framing (Appendix A).\n    pub fn artifact_fanout_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/fanout\");\n        key_from_canonical(k)\n    }}\n"
                             );
                         }
                         other => {
@@ -1441,7 +1441,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
                             };
                             let _ = writeln!(
                                 out,
-                                "    /// {doc}\n    pub fn artifact_{other}_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/{other}\");\n        Key::from_canonical(k)\n    }}\n"
+                                "    /// {doc}\n    pub fn artifact_{other}_key(o: &impl HostOrigin, id: impl AsRef<str>) -> Key {{\n        let mut k = artifact_prefix(o, id);\n        k.push_str(\"/{other}\");\n        key_from_canonical(k)\n    }}\n"
                             );
                         }
                     }
@@ -1450,7 +1450,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
             "tree" => {
                 let _ = writeln!(
                     out,
-                    "    /// Tier-2 tree index at one host: `…/@blob/tree/<root>` (RFC 07 §2.3).\n    ///\n    /// `root` is a validated [`ContentHash`], so the caller-chosen snapshot\n    /// name §2.3 revoked (`tree/nightly`) has **no spelling here** — the rule\n    /// is structural rather than something to remember. A mutable snapshot\n    /// *name* is durable state and belongs on `state`, carrying this root.\n    pub fn tree_key(o: &impl HostOrigin, root: &ContentHash) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"tree\");\n        k.push('/');\n        k.push_str(root.as_str());\n        Key::from_canonical(k)\n    }}\n\n    /// The `*`-origin **tree probe** (RFC 07 §2.4/§2.5, v1.17):\n    /// `v1/*/@blob/tree/<root>/have`. Each holder answers has-index plus\n    /// chunks present / total — O(question), never the object — which is\n    /// what legitimises the wildcard origin. Probe, pick a holder, then\n    /// fetch from that origin's concrete [`tree_key`].\n    pub fn tree_have_probe(root: &ContentHash) -> BlobProbePrefix {{\n        BlobProbePrefix::tree_have(root)\n    }}\n"
+                    "    /// Tier-2 tree index at one host: `…/@blob/tree/<root>` (RFC 07 §2.3).\n    ///\n    /// `root` is a validated [`ContentHash`], so the caller-chosen snapshot\n    /// name §2.3 revoked (`tree/nightly`) has **no spelling here** — the rule\n    /// is structural rather than something to remember. A mutable snapshot\n    /// *name* is durable state and belongs on `state`, carrying this root.\n    pub fn tree_key(o: &impl HostOrigin, root: &ContentHash) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"tree\");\n        k.push('/');\n        k.push_str(root.as_str());\n        key_from_canonical(k)\n    }}\n\n    /// The `*`-origin **tree probe** (RFC 07 §2.4/§2.5, v1.17):\n    /// `v1/*/@blob/tree/<root>/have`. Each holder answers has-index plus\n    /// chunks present / total — O(question), never the object — which is\n    /// what legitimises the wildcard origin. Probe, pick a holder, then\n    /// fetch from that origin's concrete [`tree_key`].\n    pub fn tree_have_probe(root: &ContentHash) -> BlobProbePrefix {{\n        BlobProbePrefix::tree_have(root)\n    }}\n"
                 );
             }
             _ => {
@@ -1459,7 +1459,7 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
                     let desc = entry.description.as_deref().unwrap_or("(no description)");
                     let _ = writeln!(
                         out,
-                        "    /// A validated content address in the **`{algo}`** address space\n    /// (RFC 07 §2.4, v1.17): {desc}\n    ///\n    /// Per-algo by design — dedup is per-algorithm, and during a dual-algo\n    /// migration window the two address spaces must not mix. An address of\n    /// another algorithm has **no spelling** under this type, the same move\n    /// that keeps `tree/nightly` unspellable.\n    #[derive(Debug, Clone, PartialEq, Eq, Hash)]\n    pub struct {ty}(ContentHash);\n\n    impl {ty} {{\n        /// Adopt a validated hash as a `{algo}`-space address.\n        pub fn new(hash: ContentHash) -> Self {{\n            Self(hash)\n        }}\n\n        /// Parse a hex digest as a `{algo}`-space address.\n        pub fn parse(s: &str) -> Result<Self, KeyError> {{\n            ContentHash::parse(s).map(Self)\n        }}\n\n        /// The digest as it appears in the key.\n        pub fn as_str(&self) -> &str {{\n            self.0.as_str()\n        }}\n\n        /// The underlying content hash.\n        pub fn hash(&self) -> &ContentHash {{\n            &self.0\n        }}\n    }}\n\n    impl std::fmt::Display for {ty} {{\n        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n            f.write_str(self.as_str())\n        }}\n    }}\n\n    impl std::str::FromStr for {ty} {{\n        type Err = KeyError;\n        fn from_str(s: &str) -> Result<Self, KeyError> {{\n            Self::parse(s)\n        }}\n    }}\n\n    /// Tier-2 chunk at one host: `…/@blob/store/{algo}/<hash>` (RFC 07 §2.4).\n    ///\n    /// The `<algo>` chunk comes from the registry, not from the caller, and\n    /// the address is typed to this algo's address space, so one build cannot\n    /// address the same bytes under two algorithms by accident even while a\n    /// migration runs both (v1.17). `addr` addresses the chunk's *content*;\n    /// the value carried under the key is a self-describing container.\n    pub fn store_key_{algo}(o: &impl HostOrigin, addr: &{ty}) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"store\");\n        k.push_str(\"/{algo}/\");\n        k.push_str(addr.as_str());\n        Key::from_canonical(k)\n    }}\n\n    /// The `*`-origin **store probe** for the `{algo}` address space\n    /// (RFC 07 §2.4/§2.5, v1.17): `v1/*/@blob/store/{algo}/have`. The\n    /// request carries a hash list; each holder answers a bitfield over\n    /// exactly that list — O(question) by construction. Probe, pick a\n    /// holder, then fetch from that origin's concrete keys.\n    pub fn store_have_probe_{algo}() -> BlobProbePrefix {{\n        BlobProbePrefix::store_have({algo:?})\n    }}\n"
+                        "    /// A validated content address in the **`{algo}`** address space\n    /// (RFC 07 §2.4, v1.17): {desc}\n    ///\n    /// Per-algo by design — dedup is per-algorithm, and during a dual-algo\n    /// migration window the two address spaces must not mix. An address of\n    /// another algorithm has **no spelling** under this type, the same move\n    /// that keeps `tree/nightly` unspellable.\n    #[derive(Debug, Clone, PartialEq, Eq, Hash)]\n    pub struct {ty}(ContentHash);\n\n    impl {ty} {{\n        /// Adopt a validated hash as a `{algo}`-space address.\n        pub fn new(hash: ContentHash) -> Self {{\n            Self(hash)\n        }}\n\n        /// Parse a hex digest as a `{algo}`-space address.\n        pub fn parse(s: &str) -> Result<Self, KeyError> {{\n            ContentHash::parse(s).map(Self)\n        }}\n\n        /// The digest as it appears in the key.\n        pub fn as_str(&self) -> &str {{\n            self.0.as_str()\n        }}\n\n        /// The underlying content hash.\n        pub fn hash(&self) -> &ContentHash {{\n            &self.0\n        }}\n    }}\n\n    impl std::fmt::Display for {ty} {{\n        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n            f.write_str(self.as_str())\n        }}\n    }}\n\n    impl std::str::FromStr for {ty} {{\n        type Err = KeyError;\n        fn from_str(s: &str) -> Result<Self, KeyError> {{\n            Self::parse(s)\n        }}\n    }}\n\n    /// Tier-2 chunk at one host: `…/@blob/store/{algo}/<hash>` (RFC 07 §2.4).\n    ///\n    /// The `<algo>` chunk comes from the registry, not from the caller, and\n    /// the address is typed to this algo's address space, so one build cannot\n    /// address the same bytes under two algorithms by accident even while a\n    /// migration runs both (v1.17). `addr` addresses the chunk's *content*;\n    /// the value carried under the key is a self-describing container.\n    pub fn store_key_{algo}(o: &impl HostOrigin, addr: &{ty}) -> Key {{\n        let mut k = tier_prefix(ConcreteOrigin::chunk(o), \"store\");\n        k.push_str(\"/{algo}/\");\n        k.push_str(addr.as_str());\n        key_from_canonical(k)\n    }}\n\n    /// The `*`-origin **store probe** for the `{algo}` address space\n    /// (RFC 07 §2.4/§2.5, v1.17): `v1/*/@blob/store/{algo}/have`. The\n    /// request carries a hash list; each holder answers a bitfield over\n    /// exactly that list — O(question) by construction. Probe, pick a\n    /// holder, then fetch from that origin's concrete keys.\n    pub fn store_have_probe_{algo}() -> BlobProbePrefix {{\n        BlobProbePrefix::store_have({algo:?})\n    }}\n"
                     );
                 }
             }

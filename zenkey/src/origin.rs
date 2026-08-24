@@ -289,7 +289,7 @@ impl ConcreteOrigin for ServiceOrigin {
         &self.0
     }
     fn to_origin(&self) -> crate::grammar::Origin {
-        crate::grammar::Origin::Service(self.0.clone())
+        crate::grammar::Origin::Service(self.clone())
     }
 }
 
@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(chunk_of(&svc), "@catalog");
         assert_eq!(
             svc.to_origin(),
-            crate::grammar::Origin::Service("@catalog".into())
+            crate::grammar::Origin::Service(ServiceOrigin::catalog())
         );
         // Parse-side bridge: a parsed host key yields a RemoteOrigin.
         let parsed = crate::grammar::parse("v1/h-3fa9c2d41b7e/state/tc/health").unwrap();

@@ -772,7 +772,7 @@ pub async fn decode_sample(
         let producer = match (&parsed.producer, &parsed.origin) {
             (Some(p), _) => p.name().to_string(),
             (None, zenkey::grammar::Origin::Service(s)) => {
-                slices.by_service_origin(s)?.name.clone()
+                slices.by_service_origin(s.as_str())?.name.clone()
             }
             _ => return None,
         };
