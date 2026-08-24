@@ -149,7 +149,9 @@ pub use bus::roster::{
 pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
-pub use bus::session::{Fleet, OpenFailure, open, open_reporting, open_with_config};
+pub use bus::session::{
+    Fleet, OPEN_TIMEOUT, OpenFailure, open, open_reporting, open_reporting_within, open_with_config,
+};
 pub use bus::write::{
     CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
     declare_publication,
