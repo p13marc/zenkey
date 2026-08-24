@@ -38,13 +38,13 @@
 //! zengui called it from `update()`, twice in a row, per retained-window
 //! entry.
 //!
-//! So the ring is a queue of **sealed, immutable chunks** ([`CHUNK`] samples
+//! So the ring is a queue of **sealed, immutable chunks** (1024 samples
 //! each) plus one open tail. A read clones the chunk pointers and the tail
-//! ([`RetainedParts`]) — bounded by `window / CHUNK + CHUNK` pointer clones,
+//! (`RetainedParts`) — bounded by `window / CHUNK + CHUNK` pointer clones,
 //! ~1 300 atomics at the same budget, and *nothing* that grows with the
 //! payload — and flattens them into the handed-out `Arc<[_]>` after the lock
 //! is released. Pushes stay O(1) amortised: a chunk is sealed once per
-//! [`CHUNK`] samples, which is a `drain` into an `Arc<[_]>` and nothing else.
+//! `CHUNK` samples, which is a `drain` into an `Arc<[_]>` and nothing else.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
