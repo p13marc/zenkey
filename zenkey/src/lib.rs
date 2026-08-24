@@ -73,6 +73,10 @@ pub use grammar::{
     BlobTier, Class, ClassOrPlane, ContentHash, KeyError, Origin, Plane, Producer, StructuralKey,
     VERSION_CHUNK,
 };
+/// Not public API — the reachable path generated registry code names to wrap
+/// its own builder output (issue #312). Nothing here is covered by semver.
+#[doc(hidden)]
+pub use key::__private;
 pub use key::{Chunk, Key, Selector};
 pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};
 pub use profile::AppProfile;

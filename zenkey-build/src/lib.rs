@@ -1942,6 +1942,36 @@ mod tests {
         lint_one(&ok).unwrap();
     }
 
+    /// Issue #312: wrapping a builder's own output is not public API. The
+    /// constructors are `pub(crate)` in zenkey and reachable only through
+    /// `zenkey::__private`, which generated code names explicitly — so the
+    /// old `Key::from_canonical` / `Selector::from_canonical` /
+    /// `Chunk::from_valid` spellings must not survive anywhere in the
+    /// emitted module. This is the compile-time half of the fix; the
+    /// wildcard refusal itself is pinned in zenkey's `key` tests.
+    #[test]
+    fn generated_code_names_the_private_wrapping_path() {
+        let out = lint_one(&format!(
+            "{HEADER}[service]\nname = \"desired\"\norigin = \"@desired\"\n\n[[subject]]\npath = \"{{host}}/config/x\"\nclass = \"state\"\ntype = \"Doc\"\nttl_s = 60\ncardinality = 100\nsince = \"1.0\"\ndescription = \"d\"\n\n[[procedure]]\npath = \"port/{{port}}/drain\"\nkind = \"write\"\nreply = \"Ack\"\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+        ))
+        .unwrap();
+        assert!(
+            out.contains("use ::zenkey::__private::{key_from_canonical, selector_from_canonical};"),
+            "the generated preamble must name the private path"
+        );
+        for gone in [
+            "Key::from_canonical",
+            "Selector::from_canonical",
+            "Chunk::from_valid",
+        ] {
+            assert!(!out.contains(gone), "generated code still calls {gone}");
+        }
+        // A `{host}` var takes a typed HostId, whose `h-<12hex>` shape is a
+        // legal plain chunk by construction — converted, never slugged and
+        // never waved through by a `debug_assert`.
+        assert!(out.contains("host: Chunk::from(host)"), "{out}");
+    }
+
     #[test]
     fn type_table_lint_activates_on_existence() {
         let dir = std::env::temp_dir().join(format!(

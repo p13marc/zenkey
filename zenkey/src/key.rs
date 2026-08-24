@@ -21,33 +21,94 @@ use zenoh_keyexpr::{OwnedKeyExpr, keyexpr};
 use crate::grammar::KeyError;
 use crate::slug::chunk_slug;
 
-/// A validated, canonical, concrete, base-relative v1 key.
+/// A validated, canonical, **concrete**, base-relative v1 key.
 ///
 /// Obtained from the grammar/context/generated builders — there is no public
 /// constructor from a raw string on purpose (parse wire keys with
 /// [`crate::grammar::parse`] instead; build keys through builders).
+///
+/// "Concrete" is enforced, not merely documented (issue #312). The wrapping
+/// constructor was `#[doc(hidden)] pub`, which hides an item from rustdoc and
+/// from nobody else, and it was shared verbatim with [`Selector`] — so
+/// `Key::from_canonical("v1/*/state/**")` succeeded and the two newtypes were
+/// one type wearing two names. The constructor is now `pub(crate)`, reachable
+/// from outside only through [`crate::__private`] (which generated code names
+/// explicitly), and it *refuses* a wildcard.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Key(OwnedKeyExpr);
 
 /// A validated, base-relative key expression that may contain `*`/`**`.
+///
+/// The one structural difference from [`Key`]: this constructor admits
+/// wildcards and that one does not.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Selector(OwnedKeyExpr);
+
+impl Key {
+    /// Wrap a builder-produced, already-canonical, concrete key string.
+    ///
+    /// `pub(crate)`: builders are the only sound producers of this invariant,
+    /// and outside the crate the sole path is [`crate::__private`]. The
+    /// `expect` is pinned by the canonicality property test below — every
+    /// grammar-legal key is already a canonical zenoh key expression, so this
+    /// never re-canonizes and never fails. The wildcard assertion is the
+    /// *structural* half of the type's claim: a builder that reaches here
+    /// with a `*` has composed a selector, not a key, and says so at the
+    /// point of the mistake rather than on the wire.
+    pub(crate) fn from_canonical(s: String) -> Self {
+        let ke = OwnedKeyExpr::try_from(s).expect("builder output is a canonical keyexpr");
+        assert!(
+            !is_wild(&ke),
+            "a Key is concrete (RFC 08 §1.2): {ke} carries a wildcard — build a Selector"
+        );
+        Key(ke)
+    }
+}
+
+/// Does this key expression carry a wildcard (`*`, `**`, `$*`)?
+///
+/// `keyexpr::is_wild` is gated behind zenoh-keyexpr's `internal` feature and
+/// `#[doc(hidden)]`, so it is not ours to depend on. Its body is this test,
+/// and the equivalence is exact: a canonical key expression admits `*` in no
+/// other role — RFC 03 §2 excludes it from both chunk charsets.
+fn is_wild(ke: &keyexpr) -> bool {
+    ke.as_str().contains('*')
+}
+
+impl Selector {
+    /// Wrap a builder-produced, already-canonical selector string. Wildcards
+    /// are the point here; see [`Key::from_canonical`] for the rest.
+    pub(crate) fn from_canonical(s: String) -> Self {
+        Selector(OwnedKeyExpr::try_from(s).expect("builder output is a canonical keyexpr"))
+    }
+}
+
+/// Not public API, and not a hiding place: the generated registry module
+/// (zenkey-build) is compiled into a *foreign* crate, so it needs a reachable
+/// path to the wrapping constructors. It names this one explicitly, which is
+/// the whole design — a hand-written call site that types `__private` has
+/// stated it is reaching past the contract, where `#[doc(hidden)] pub fn
+/// from_canonical` merely looked like API with the docs turned off (#312).
+///
+/// Nothing here is covered by semver.
+#[doc(hidden)]
+pub mod __private {
+    use super::{Key, Selector};
+
+    /// Wrap a generated builder's concrete key string. Panics on a wildcard.
+    pub fn key_from_canonical(s: String) -> Key {
+        Key::from_canonical(s)
+    }
+
+    /// Wrap a generated builder's selector string.
+    pub fn selector_from_canonical(s: String) -> Selector {
+        Selector::from_canonical(s)
+    }
+}
 
 macro_rules! keyexpr_newtype {
     ($ty:ident) => {
         impl $ty {
-            /// Wrap a builder-produced, already-canonical string.
-            ///
-            /// Not part of the public contract — builders are the only sound
-            /// producers of this invariant. The `expect` is pinned by the
-            /// canonicality property test below: every grammar-legal key is
-            /// already a canonical zenoh key expression, so this never
-            /// re-canonizes and never fails.
-            #[doc(hidden)]
-            pub fn from_canonical(s: String) -> Self {
-                Self(OwnedKeyExpr::try_from(s).expect("builder output is a canonical keyexpr"))
-            }
-
             /// The key as a borrowed [`keyexpr`] (alloc-free `intersects`/
             /// `includes` live there).
             pub fn as_keyexpr(&self) -> &keyexpr {
@@ -156,18 +217,6 @@ impl Chunk {
         }
     }
 
-    /// Wrap a chunk that arrived from the wire and was therefore already
-    /// validated by the grammar. Debug-asserted, not re-validated — the
-    /// generated parse path calls this per bound variable.
-    #[doc(hidden)]
-    pub fn from_valid(value: &str) -> Chunk {
-        debug_assert!(
-            crate::grammar::is_valid_plain_chunk(value),
-            "from_valid on an illegal chunk: {value:?}"
-        );
-        Chunk(value.to_string())
-    }
-
     /// The chunk as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -204,6 +253,19 @@ impl From<&str> for Chunk {
 impl From<String> for Chunk {
     fn from(v: String) -> Chunk {
         Chunk::slug(&v)
+    }
+}
+
+impl From<&crate::origin::HostId> for Chunk {
+    /// A host origin is `h-[0-9a-f]{12}` (RFC 03 §1.3), which is a legal plain
+    /// chunk by construction — the one conversion that is total *and* needs no
+    /// slugging. This replaced `Chunk::from_valid`, which took the caller's
+    /// word for it and re-checked only under `debug_assert`, so a release
+    /// build admitted an illegal chunk (#312). The generated `{host}`
+    /// constructor in a service registry is the caller; the wire-parse path
+    /// uses `Chunk::parse(..).ok()?`, where untrusted input belongs.
+    fn from(id: &crate::origin::HostId) -> Chunk {
+        Chunk(id.as_str().to_string())
     }
 }
 
@@ -280,5 +342,56 @@ mod tests {
         assert!(Chunk::parse("p95_ms").is_ok());
         assert!(Chunk::parse("Not A Chunk").is_err());
         assert!(Chunk::parse("").is_err());
+    }
+
+    /// The `h-<12hex>` shape is a legal plain chunk, so the conversion is
+    /// total and lossless — never the slug's `_xNN_` escape.
+    #[test]
+    fn a_host_id_converts_to_a_chunk_verbatim() {
+        let id = HostId::parse("h-3fa9c2d41b7e").unwrap();
+        let chunk = Chunk::from(&id);
+        assert_eq!(chunk, "h-3fa9c2d41b7e");
+        assert!(crate::grammar::is_valid_plain_chunk(chunk.as_str()));
+    }
+
+    /// Issue #312: a wildcard string cannot become a `Key` by any public
+    /// path. The two the crate exposes are the builders — which run the
+    /// grammar first — and `__private`, which asserts. What Rust cannot
+    /// assert is a *missing* item, so the half that can be asserted is
+    /// pinned here and the reasoning sits beside it.
+    #[test]
+    #[should_panic(expected = "a Key is concrete")]
+    fn a_wildcard_is_not_a_key() {
+        let _ = crate::__private::key_from_canonical("v1/*/state/**".to_string());
+    }
+
+    /// …and the same string *is* a selector. This is the structural
+    /// difference the doc comment claimed while both types shared one
+    /// constructor.
+    #[test]
+    fn the_same_wildcard_is_a_selector() {
+        let sel = crate::__private::selector_from_canonical("v1/*/state/**".to_string());
+        assert_eq!(sel, "v1/*/state/**");
+    }
+
+    /// Every wildcard shape the grammar can produce is refused, not just the
+    /// `*` in position 2: `**`, a wild subject leaf, a `$*` verbatim match.
+    #[test]
+    fn every_wildcard_shape_is_refused() {
+        for wild in [
+            "v1/*/state/netring/health",
+            "v1/h-3fa9c2d41b7e/state/*/health",
+            "v1/h-3fa9c2d41b7e/state/netring/**",
+            "v1/h-3fa9c2d41b7e/**/health",
+        ] {
+            let attempt =
+                std::panic::catch_unwind(|| crate::__private::key_from_canonical(wild.to_string()));
+            assert!(attempt.is_err(), "{wild} must not become a Key");
+            // The selector newtype takes all of them.
+            assert_eq!(
+                crate::__private::selector_from_canonical(wild.to_string()),
+                wild
+            );
+        }
     }
 }
