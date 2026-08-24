@@ -361,8 +361,18 @@ pub struct GetReport {
     /// Seconds waited — the other half of the claim, and what makes a silent
     /// result legible.
     pub timeout_s: f64,
+    /// Replies that arrived and were not read, because the reply bound bit
+    /// (#339, RFC 13 §3 O6). Absent — not `0` — when it did not: an unheld
+    /// fact is absent from the row rather than null, and a bound that never
+    /// bit hid nothing to disclose.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub elided: u64,
     #[serde(skip)]
     pub answers: Vec<serde_json::Value>,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl Render for GetReport {
@@ -373,6 +383,9 @@ impl Render for GetReport {
         e.insert("selector".into(), self.selector.clone().into());
         e.insert("timeout_s".into(), self.timeout_s.into());
         e.insert("answers".into(), self.answers.len().into());
+        if self.elided > 0 {
+            e.insert("elided".into(), self.elided.into());
+        }
         e
     }
 
@@ -389,15 +402,23 @@ impl Render for GetReport {
     fn table(&self, _t: &mut Table) {}
 
     fn notes(&self) -> Vec<Note> {
+        let mut notes = Vec::new();
         if self.answers.is_empty() {
-            return vec![Note::silence(format!(
+            notes.push(Note::silence(format!(
                 "no replies to {} within {}s. Nobody is registered for it, nobody \
                  who is was up, or the timeout was short — and the three are \
                  different",
                 self.selector, self.timeout_s
-            ))];
+            )));
         }
-        Vec::new()
+        if self.elided > 0 {
+            notes.push(Note::coverage(format!(
+                "{} further repl(y|ies) arrived and were not read — the reply \
+                 bound bit, so this is a sample of the answers, not all of them",
+                self.elided
+            )));
+        }
+        notes
     }
 
     fn scope(&self) -> Option<crate::render::ObservedScope> {

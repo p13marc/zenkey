@@ -125,8 +125,8 @@ pub use tape::synth::Synth;
 pub use zenkey::schema::validate::{NotValidated, Verdict};
 
 pub use bus::admin::{
-    AdminEntry, admin_doc_omits_loopback, admin_get, declared_entities, mesh_links,
-    origin_attachments, render_dot, routers, state_coverage, storages, topology,
+    AdminEntry, admin_doc_omits_loopback, admin_get, admin_get_within, declared_entities,
+    mesh_links, origin_attachments, render_dot, routers, state_coverage, storages, topology,
 };
 #[cfg(feature = "blob")]
 pub use bus::blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
@@ -138,9 +138,9 @@ pub use bus::monitor::{
 };
 pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use bus::query::{
-    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts, RepeatingQuery,
-    RepeatingRegistry, StateSample, declare_repeating, declare_repeating_any, fetch_stored,
-    fetch_value, fleet_get, fleet_registry, state_snapshot,
+    Answer, DEFAULT_MAX_REPLIES, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts,
+    RepeatingQuery, RepeatingRegistry, StateSample, declare_repeating, declare_repeating_any,
+    fetch_stored, fetch_value, fleet_get, fleet_registry, state_snapshot,
 };
 pub use bus::roster::{
     BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, node_info, node_rows,

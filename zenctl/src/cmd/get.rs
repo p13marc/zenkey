@@ -92,12 +92,12 @@ pub async fn run(
     };
 
     let fleet = args.fleet(&session);
-    let answers = zenkey_fleet::fleet_get(
-        &fleet,
-        selector,
-        &zenkey_fleet::GetOpts::new(args.timeout()).payload(payload),
-    )
-    .await?;
+    // Named, because the reply bound's *cost* rides on the options that state
+    // it (#339): a GET that read only some of the replies must say so, or the
+    // rendering claims a fan-in it did not have (RFC 13 §3 O6).
+    let opts = zenkey_fleet::GetOpts::new(args.timeout()).payload(payload);
+    let answers = zenkey_fleet::fleet_get(&fleet, selector, &opts).await?;
+    let elided = opts.elided();
 
     let secs = args.timeout().as_secs_f64();
     // A fan-in GET *looks* like a stream and is not: it waits for the window,
@@ -113,6 +113,7 @@ pub async fn run(
         let report = crate::render::GetReport {
             selector: selector.to_string(),
             timeout_s: secs,
+            elided,
             answers: rows,
         };
         crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
@@ -202,6 +203,12 @@ pub async fn run(
                      (RFC 05 §2.1)",
                     if len == 1 { "y" } else { "ies" }
                 ),
+            }
+            if elided > 0 {
+                eprintln!(
+                    "{elided} further repl(y|ies) arrived and were not read — the \
+                     reply bound bit, so the above is a sample of the answers"
+                );
             }
         }
     }
