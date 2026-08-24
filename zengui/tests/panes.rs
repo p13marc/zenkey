@@ -732,14 +732,14 @@ fn the_detail_pane_tags_decode_provenance() {
     // Structural fallback with a declared type: the honest <T?> tag — and
     // the verdict rides the sample now (#164): an undecodable payload under
     // a present schema is `NotValidated(Undecodable)`, worded as itself.
-    let decoded = zenkey_fleet::model::decode::DecodedSample {
+    let decoded = zengui::value::DecodedValue::new(zenkey_fleet::model::decode::DecodedSample {
         type_name: Some("TelemetryPoint".to_string()),
         rendering: Rendering::Structural(r#"{"value":42.0}"#.to_string()),
         verdict: zenkey::schema::validate::Verdict::NotValidated(
             zenkey::schema::validate::NotValidated::Undecodable,
         ),
         decode_error: Some("wrong wire kind".to_string()),
-    };
+    });
     let mut ui = simulator::<Message, _, _>(section(DetailData {
         slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
@@ -3239,12 +3239,13 @@ fn the_decoded_pane_renders_three_verdict_states_and_keeps_the_silences_apart() 
     let render = |verdict: Verdict| {
         // Leaked so the simulator may outlive the block — a test-only cost,
         // bounded by the four calls below.
-        let decoded: &'static DecodedSample = Box::leak(Box::new(DecodedSample {
-            type_name: None,
-            rendering: Rendering::Structural(r#"{"status":"ok"}"#.to_string()),
-            verdict,
-            decode_error: None,
-        }));
+        let decoded: &'static zengui::value::DecodedValue =
+            Box::leak(Box::new(zengui::value::DecodedValue::new(DecodedSample {
+                type_name: None,
+                rendering: Rendering::Structural(r#"{"status":"ok"}"#.to_string()),
+                verdict,
+                decode_error: None,
+            })));
         simulator::<Message, _, _>(section(DetailData {
             slot: zengui::message::SlotId::FOLLOW,
             key,

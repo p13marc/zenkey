@@ -99,8 +99,17 @@ impl Viewing {
             encoding: sample.encoding.clone(),
             len: bytes.len(),
         });
+        // Bounded like every other preview decode (#345,
+        // [`crate::echo::DECODE_LIMIT`]): this runs per *arrival*, so at 30
+        // frames a second an unbounded parse of a megabyte attachment was a
+        // megabyte of `serde_json` thirty times a second. Past the bound the
+        // size is stated and the parse is skipped — RFC 13 §3 O6: a bound
+        // that hides data says what it hid.
         self.meta = sample.attachment.as_ref().map(|a| {
             let b = a.to_bytes();
+            if b.len() > crate::echo::DECODE_LIMIT {
+                return format!("<{} bytes — too large to preview>", b.len());
+            }
             match serde_json::from_slice::<serde_json::Value>(&b) {
                 Ok(v) => v.to_string(),
                 Err(_) => String::from_utf8_lossy(&b).to_string(),
@@ -296,4 +305,52 @@ pub fn section<'a>(
     }
 
     col
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(attachment: Vec<u8>) -> SampleView {
+        SampleView {
+            key: "v1/h-0123456789ab/@media/cam/frame".to_string(),
+            payload: zenoh::bytes::ZBytes::from(vec![0u8; 4]),
+            encoding: "image/jpeg".to_string(),
+            kind: zenoh::sample::SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: Some(zenoh::bytes::ZBytes::from(attachment)),
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: Instant::now(),
+        }
+    }
+
+    /// #345: the metadata parse runs per *arrival*, so at thirty frames a
+    /// second an unbounded one was a megabyte of `serde_json` thirty times a
+    /// second. Past [`crate::echo::DECODE_LIMIT`] the size is stated and the
+    /// parse is skipped — never a silent empty (RFC 13 §3 O6).
+    #[test]
+    fn an_oversized_frame_attachment_is_sized_not_parsed() {
+        let mut v = Viewing::new("v1/h-0123456789ab/@media/cam/frame".to_string());
+        let len = crate::echo::DECODE_LIMIT + 1;
+        v.on_frame(&frame(vec![b'x'; len]));
+        assert_eq!(
+            v.meta.as_deref(),
+            Some(format!("<{len} bytes — too large to preview>").as_str()),
+            "the bound states what it hid"
+        );
+    }
+
+    /// And an ordinary attachment still reads as itself — the bound is not a
+    /// tax on the traffic anyone actually watches.
+    #[test]
+    fn an_ordinary_frame_attachment_is_parsed() {
+        let mut v = Viewing::new("v1/h-0123456789ab/@media/cam/frame".to_string());
+        v.on_frame(&frame(br#"{"seq":7}"#.to_vec()));
+        assert_eq!(v.meta.as_deref(), Some(r#"{"seq":7}"#));
+    }
 }

@@ -45,8 +45,9 @@ sub_state! {
         /// The last on-demand fetch: (key, outcome-or-error).
         pub(crate) fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
         /// The decode of the last fetched value — the whole
-        /// [`zenkey_fleet::model::decode::DecodedSample`], verdict included (#164).
-        pub(crate) decoded: Option<Arc<zenkey_fleet::model::decode::DecodedSample>>,
+        /// [`crate::value::DecodedValue`]: the decode, verdict included
+        /// (#164), plus the document rendered from it once (#345).
+        pub(crate) decoded: Option<Arc<crate::value::DecodedValue>>,
         /// The timeline's scroll position + viewport height, driving its
         /// virtual window (#183).
         ///

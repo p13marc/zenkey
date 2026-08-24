@@ -54,5 +54,6 @@ pub mod services;
 pub mod shortcuts;
 pub(crate) mod state;
 pub(crate) mod update;
+pub mod value;
 pub mod verdict;
 pub mod view;
