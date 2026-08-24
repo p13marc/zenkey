@@ -31,6 +31,10 @@ impl Render for BenchReport {
         // non-answer into a latency figure is how a benchmark lies.
         e.insert("errors".into(), self.errors.into());
         e.insert("silent".into(), self.silent.into());
+        // A third population, apart from both (#329): a panicked call is news
+        // about this tool, not about the fleet, and it belongs in neither of
+        // the other two counters.
+        e.insert("panicked".into(), self.panicked.into());
         e
     }
 
@@ -51,6 +55,12 @@ impl Render for BenchReport {
                 "  {} of {} calls did not complete",
                 self.requested - self.completed,
                 self.requested
+            ));
+        }
+        if self.panicked > 0 {
+            t.line(format!(
+                "  {} of those panicked in this tool — measured nothing",
+                self.panicked
             ));
         }
         if self.origins.is_empty() {
@@ -89,6 +99,15 @@ impl Render for BenchReport {
                  from the latencies above, because averaging a non-answer into a \
                  latency figure is how a benchmark lies",
                 self.errors, self.silent
+            )));
+        }
+        if self.panicked > 0 {
+            notes.push(Note::coverage(format!(
+                "{} call(s) panicked inside this tool and are counted apart from \
+                 both — a panicked call is not an error reply and not attributable \
+                 silence, and folding it into either would report a bug here as a \
+                 fact about the fleet",
+                self.panicked
             )));
         }
         notes

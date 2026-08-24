@@ -545,8 +545,10 @@ pub fn base_list() -> BaseList {
     }
 }
 
-/// Latency per origin, and errors counted apart from it — averaging a
-/// non-answer into a latency figure is how a benchmark lies.
+/// Latency per origin, and three non-answers counted apart from it — averaging
+/// a non-answer into a latency figure is how a benchmark lies. The three are
+/// deliberately distinct: an error reply, a call nobody answered, and a call
+/// that panicked inside the tool (#329).
 pub fn bench_report() -> BenchReport {
     BenchReport {
         key: format!("v1/{ORIGIN}/@rpc/sysinfo/processes"),
@@ -555,6 +557,7 @@ pub fn bench_report() -> BenchReport {
         concurrency: 8,
         errors: 1,
         silent: 1,
+        panicked: 1,
         elapsed_s: 2.5,
         calls_per_s: 39.2,
         origins: vec![

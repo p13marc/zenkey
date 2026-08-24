@@ -462,9 +462,9 @@ async fn observe_traffic(
 
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
-    for scope in &scopes {
-        monitor.watch(scope).await?;
-    }
+    // A scope that fails to declare tears the monitor down on the way out,
+    // rather than leaving a `**` subscriber to `Drop` (#336).
+    let monitor = monitor.watching(&scopes).await?;
     let started = tokio::time::Instant::now();
     let deadline = started + window;
 
@@ -589,7 +589,7 @@ async fn observe_traffic(
         }
     }
     let keys_seen = facts_cache.len();
-    monitor.stop();
+    monitor.shutdown().await?;
 
     // Key-population budgets (#221): the window's distinct keys, grouped
     // into `{var}` families per origin, judged against each family's

@@ -98,12 +98,17 @@ pub async fn run(
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
     loop {
-        let view = tokio::select! {
+        // Only the *receive* rides the select (#333): once a query is in
+        // hand, answering and logging it are not something ctrl-c — or any
+        // deadline a later flag adds here — can interrupt half-way. The
+        // listener is the pinned one (#334) and goes first, biased.
+        let query = tokio::select! {
             biased;
             _ = &mut ctrl_c => None,
-            v = responder.next() => v,
+            q = responder.next() => q,
         };
-        let Some(view) = view else { break };
+        let Some(query) = query else { break };
+        let view = responder.answer(query).await;
         served += 1;
         if ndjson {
             let mut obj = serde_json::json!({

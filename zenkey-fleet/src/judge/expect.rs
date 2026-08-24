@@ -110,8 +110,9 @@ pub async fn run_expect(
 
     let mut events = monitor.events();
 
-    // Declared before the window opens: not-asked must never read as "no".
-    monitor.watch(&spec.selector).await?;
+    // Declared before the window opens: not-asked must never read as "no" —
+    // and a declaration that fails takes the monitor down with it (#336).
+    let monitor = monitor.watching([spec.selector.as_str()]).await?;
     let opened = tokio::time::Instant::now();
     let deadline = opened + spec.within;
 
@@ -207,7 +208,7 @@ pub async fn run_expect(
             None => break,
         }
     }
-    monitor.stop();
+    monitor.shutdown().await?;
 
     let window = if ended_early {
         opened.elapsed()

@@ -90,6 +90,62 @@ fn check_idempotent(slices: Option<&SliceSet>, producer: &str, procedure: &str) 
     }
 }
 
+/// The four populations a benchmark keeps apart, and the one place a joined
+/// call is sorted into them.
+///
+/// Keeping them apart is the whole honesty claim of this report (RFC 13 §3 O6,
+/// RFC 05 §3.1): an error reply is the fleet refusing, silence is the fleet not
+/// answering, and a **panicked** call is this tool falling over — three
+/// different facts that a single "failed" counter would flatten into a lie.
+/// The fold lives here rather than inline so the fourth one can be tested
+/// against a real `JoinError` (#329), which is what the loop above cannot
+/// manufacture.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Tally {
+    completed: usize,
+    errors: usize,
+    silent: usize,
+    panicked: usize,
+}
+
+impl Tally {
+    /// Fold one joined call in, routing its per-reply latencies to their
+    /// origins.
+    fn record(
+        &mut self,
+        joined: std::result::Result<
+            Result<Vec<(crate::bus::query::FleetAnswer, Duration)>>,
+            tokio::task::JoinError,
+        >,
+        per_origin: &mut BTreeMap<String, Vec<Duration>>,
+    ) {
+        // A panicked call reached no ledger at all before #329: the
+        // `let Ok(result) = handle.await else { continue }` that stood here
+        // skipped `completed`, `errors` and `silent` in one line.
+        let Ok(result) = joined else {
+            self.panicked += 1;
+            return;
+        };
+        let Ok(answers) = result else {
+            self.errors += 1;
+            return;
+        };
+        self.completed += 1;
+        if answers.is_empty() {
+            // RFC 05 §3.1: zero replies is its own outcome, counted apart
+            // from an error so a benchmark cannot average silence away.
+            self.silent += 1;
+            return;
+        }
+        for (answer, at) in answers {
+            match answer.answer {
+                Answer::Value(_) => per_origin.entry(answer.origin).or_default().push(at),
+                Answer::Error { .. } => self.errors += 1,
+            }
+        }
+    }
+}
+
 /// Percentile by nearest-rank over a sorted slice. Reported in milliseconds.
 fn percentile(sorted: &[Duration], p: f64) -> f64 {
     if sorted.is_empty() {
@@ -135,9 +191,7 @@ pub async fn run_bench(
     let concurrency = spec.concurrency.max(1).min(spec.count);
     let started = Instant::now();
     let mut per_origin: BTreeMap<String, Vec<Duration>> = BTreeMap::new();
-    let mut errors = 0usize;
-    let mut silent = 0usize;
-    let mut completed = 0usize;
+    let mut tally = Tally::default();
 
     let mut issued = 0usize;
     while issued < spec.count {
@@ -149,29 +203,15 @@ pub async fn run_bench(
         }
         issued += batch;
         for handle in set {
-            let Ok(result) = handle.await else { continue };
-            let answers = match result {
-                Ok(a) => a,
-                Err(_) => {
-                    errors += 1;
-                    continue;
-                }
-            };
-            completed += 1;
-            if answers.is_empty() {
-                // RFC 05 §3.1: zero replies is its own outcome, counted apart
-                // from an error so a benchmark cannot average silence away.
-                silent += 1;
-                continue;
-            }
-            for (answer, at) in answers {
-                match answer.answer {
-                    Answer::Value(_) => per_origin.entry(answer.origin).or_default().push(at),
-                    Answer::Error { .. } => errors += 1,
-                }
-            }
+            tally.record(handle.await, &mut per_origin);
         }
     }
+    let Tally {
+        completed,
+        errors,
+        silent,
+        panicked,
+    } = tally;
     let elapsed = started.elapsed();
     std::sync::Arc::try_unwrap(querier)
         .map_err(|_| anyhow!("bench tasks outlived the run"))?
@@ -201,6 +241,7 @@ pub async fn run_bench(
         concurrency,
         errors,
         silent,
+        panicked,
         elapsed_s: elapsed.as_secs_f64(),
         calls_per_s: if elapsed.as_secs_f64() > 0.0 {
             completed as f64 / elapsed.as_secs_f64()
@@ -280,6 +321,58 @@ mod tests {
         }
         // …and nothing else gets the exemption by resembling them.
         assert!(check_idempotent(None, "anything", "introspect/all").is_err());
+    }
+
+    /// The four populations, each landing in exactly one ledger — and a
+    /// panicked task landing in the fourth rather than in none (#329). The
+    /// `JoinError` is a real one: nothing else produces the value the loop
+    /// used to throw away.
+    #[tokio::test]
+    async fn a_panicked_call_is_its_own_population_and_reaches_a_ledger() {
+        let mut per_origin: BTreeMap<String, Vec<Duration>> = BTreeMap::new();
+        let mut tally = Tally::default();
+
+        let join_error = tokio::spawn(async { panic!("a call fell over") })
+            .await
+            .expect_err("the task panicked");
+        tally.record(Err(join_error), &mut per_origin);
+        assert_eq!(
+            tally,
+            Tally {
+                completed: 0,
+                errors: 0,
+                silent: 0,
+                panicked: 1,
+            },
+            "the panic reaches its own ledger and no other"
+        );
+
+        // The three it must not be confused with.
+        tally.record(Ok(Err(anyhow!("the GET failed"))), &mut per_origin);
+        tally.record(Ok(Ok(vec![])), &mut per_origin);
+        tally.record(
+            Ok(Ok(vec![(
+                crate::bus::query::FleetAnswer {
+                    origin: "h-3fa9c2d41b7e".into(),
+                    key: "v1/h-3fa9c2d41b7e/@rpc/netring/capture/trigger".into(),
+                    encoding: None,
+                    attachment: None,
+                    answer: Answer::Value(zenoh::bytes::ZBytes::from(b"{}".to_vec())),
+                },
+                Duration::from_millis(3),
+            )])),
+            &mut per_origin,
+        );
+        assert_eq!(
+            tally,
+            Tally {
+                completed: 2,
+                errors: 1,
+                silent: 1,
+                panicked: 1,
+            }
+        );
+        assert_eq!(per_origin["h-3fa9c2d41b7e"], vec![Duration::from_millis(3)]);
     }
 
     #[test]

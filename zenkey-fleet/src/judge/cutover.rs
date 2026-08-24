@@ -52,7 +52,9 @@ pub async fn run_cutover(
 
     let monitor = crate::Monitor::start(fleet.session(), crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
-    monitor.watch("**").await?;
+    // `**` is the whole bus: leaving this one to `Drop` on an error path is
+    // the loudest version of the leak (#336).
+    let monitor = monitor.watching(["**"]).await?;
 
     let mut old_keys: BTreeMap<String, u64> = BTreeMap::new();
     let mut leaked: BTreeMap<String, u64> = BTreeMap::new();
@@ -88,7 +90,7 @@ pub async fn run_cutover(
             None => break,
         }
     }
-    monitor.stop();
+    monitor.shutdown().await?;
 
     // The keys-seen counts beside these are the exact totals, so the buckets
     // name examples and leave the arithmetic to the counter.

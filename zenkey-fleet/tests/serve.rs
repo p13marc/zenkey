@@ -28,7 +28,8 @@ async fn a_responder_answers_and_logs_the_ask() {
     .expect("declare responder");
 
     let log = tokio::spawn(async move {
-        let view = responder.next().await.expect("one ask");
+        let query = responder.next().await.expect("one ask");
+        let view = responder.answer(query).await;
         responder.undeclare().await.expect("undeclare");
         view
     });
@@ -91,7 +92,8 @@ async fn a_wildcard_ask_is_answered_on_the_responders_concrete_key() {
     .await
     .expect("declare responder");
     let log = tokio::spawn(async move {
-        let view = responder.next().await.expect("one ask");
+        let query = responder.next().await.expect("one ask");
+        let view = responder.answer(query).await;
         responder.undeclare().await.expect("undeclare");
         view
     });
@@ -115,4 +117,65 @@ async fn a_wildcard_ask_is_answered_on_the_responders_concrete_key() {
     );
     let view = log.await.expect("join");
     assert!(view.selector.contains("v1/*"), "{}", view.selector);
+}
+
+/// #333: receiving and answering are separate awaits, so a window that closes
+/// between them loses neither the reply nor the log line.
+///
+/// The old `next()` had an await at each end — `recv_async` took the query,
+/// `reply` sent it — and a caller dropped in between consumed a query that was
+/// then never answered and never logged: silence the asker cannot attribute
+/// (RFC 05 §3.1) and an ask the responder's own log never records
+/// (RFC 13 §3 O6). Today `ctrl_c` is the only thing racing that loop, which is
+/// benign; the moment a `--for` deadline joins it, this is the shape that
+/// stays honest.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_query_in_hand_outlives_the_window_that_took_it() {
+    let (a, b) = peer_pair().await;
+
+    let responder = zenkey_fleet::declare_responder(
+        &a,
+        KEY,
+        br#"{"mock":true}"#.to_vec(),
+        Some("application/json"),
+        false,
+    )
+    .await
+    .expect("declare responder");
+
+    let log = tokio::spawn(async move {
+        let query = responder.next().await.expect("one ask");
+        // The window expires *here*, with the query already off the channel —
+        // precisely where the combined call used to lose it. Answering is a
+        // second await the caller owns, so the deadline cannot cut it short.
+        let expired = tokio::select! {
+            _ = tokio::time::sleep(Duration::ZERO) => true,
+            _ = std::future::pending::<()>() => false,
+        };
+        assert!(expired, "the window closed while the query was in hand");
+        let view = responder.answer(query).await;
+        responder.undeclare().await.expect("undeclare");
+        view
+    });
+
+    let answers = loop {
+        let answers = zenkey_fleet::fleet_get(
+            &zenkey_fleet::Fleet::new(&b, ""),
+            KEY,
+            &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
+        )
+        .await
+        .expect("get");
+        if !answers.is_empty() {
+            break answers;
+        }
+    };
+    let zenkey_fleet::Answer::Value(v) = &answers[0].answer else {
+        panic!("the reply still went out");
+    };
+    assert_eq!(v.to_bytes().as_ref(), br#"{"mock":true}"#);
+
+    let view = log.await.expect("join");
+    assert_eq!(view.reply_error, None, "the reply left");
+    assert!(view.selector.contains(KEY), "the ask reached the log");
 }

@@ -387,6 +387,72 @@ pub enum ReplayEvent<'a> {
     CaptureDropped(u64),
 }
 
+/// The publishers one [`replay`] has declared, and the promise that every way
+/// out of it undeclares them (#327).
+///
+/// The declarations used to live in a bare `HashMap`, so each of the loop's
+/// `?`s returned with the whole set still declared on the bus — contradicting
+/// this module's own "undeclared at the end" and the crate idiom stated at
+/// [`crate::bus::query::RepeatingQuery::undeclare`]: teardown is explicit and
+/// awaited, never left to `Drop`.
+///
+/// [`close`](Self::close) is that teardown, modelled on
+/// [`crate::Monitor::shutdown`]: **every** publisher is undeclared even when
+/// one fails, and the failures are reported together — a replay half torn down
+/// is worse than one torn down noisily.
+///
+/// `Drop` is the cancellation fallback, and the one path that cannot be
+/// awaited: a dropped `replay` future hands the remaining publishers to a task
+/// that undeclares them properly, rather than leaving zenoh to reclaim them
+/// behind everyone's back. Nothing reaches it on the normal paths — `close`
+/// leaves the set empty.
+#[derive(Default)]
+struct Publications(HashMap<String, crate::bus::write::Publication>);
+
+impl std::ops::Deref for Publications {
+    type Target = HashMap<String, crate::bus::write::Publication>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Publications {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Publications {
+    /// Undeclare every publisher, acknowledged, joining what failed.
+    async fn close(mut self) -> Result<()> {
+        crate::bus::teardown::drain_undeclare(self.0.drain().collect(), |p| {
+            crate::bus::write::Publication::undeclare(p)
+        })
+        .await
+    }
+}
+
+impl Drop for Publications {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        // No runtime means nothing can be awaited at all; zenoh's own
+        // drop-undeclare is then the only teardown there is.
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let declared: Vec<(String, crate::bus::write::Publication)> = self.0.drain().collect();
+        runtime.spawn(async move {
+            for (key, publication) in declared {
+                if let Err(e) = publication.undeclare().await {
+                    tracing::warn!(key = %key, "undeclare after a cancelled replay: {e}");
+                }
+            }
+        });
+    }
+}
+
 /// Replay a `.zrec` onto a bus — or list what doing so would publish.
 ///
 /// Pacing follows each row's `t` divided by `speed` (must be positive);
@@ -396,7 +462,9 @@ pub enum ReplayEvent<'a> {
 /// were captured under it, and classifying them under anything else would
 /// re-derive what O3 says must not be re-derived; `i_know` is the operator
 /// saying the off-state cleanup is meant. Publishers are declared once per
-/// distinct key and undeclared at the end.
+/// distinct key and undeclared on **every** way out — a failed row tears the
+/// set down before it reports, and a cancelled replay hands the remainder to
+/// a drop guard that undeclares them properly (#327).
 pub async fn replay<R: BufRead>(
     reader: &mut ZrecReader<R>,
     spec: ReplaySpec<'_>,
@@ -433,8 +501,12 @@ pub async fn replay<R: BufRead>(
             report.first_errors.push(reason);
         }
     };
-    let mut publications: HashMap<String, crate::bus::write::Publication> = HashMap::new();
+    let mut publications = Publications::default();
     let mut prev_t: Option<u64> = None;
+    // The one fatal error a row can raise, held rather than thrown: the
+    // publishers are undeclared first, and only then does it go back to the
+    // caller (#327).
+    let mut fatal: Option<anyhow::Error> = None;
     while let Some(item) = reader.next() {
         let (row, t_us) = match item {
             Ok(ZrecItem::Sample { row, t_us, .. }) => (row, t_us),
@@ -514,29 +586,47 @@ pub async fn replay<R: BufRead>(
                                 }
                             },
                         };
-                        let publication = crate::bus::write::declare_publication(
+                        let publication = match crate::bus::write::declare_publication(
                             session,
                             &row.key,
                             qos,
                             row.encoding.as_deref(),
                         )
-                        .await?;
+                        .await
+                        {
+                            Ok(p) => p,
+                            Err(e) => {
+                                fatal = Some(e);
+                                break;
+                            }
+                        };
                         e.insert(publication)
                     }
                 };
-                if row.delete {
-                    publication.retire().await?;
-                    report.tombstones += 1;
+                let delete = row.delete;
+                let sent = if delete {
+                    publication.retire().await
                 } else {
-                    publication.send(row.payload, row.attachment).await?;
-                    report.published += 1;
+                    publication.send(row.payload, row.attachment).await
+                };
+                match (sent, delete) {
+                    (Ok(()), true) => report.tombstones += 1,
+                    (Ok(()), false) => report.published += 1,
+                    (Err(e), _) => {
+                        fatal = Some(e);
+                        break;
+                    }
                 }
             }
         }
     }
-    for (_, publication) in publications.drain() {
-        publication.undeclare().await?;
+    // Teardown first, on every path out — the row error is the one reported,
+    // but a failure to undeclare is never skipped for it.
+    let closed = publications.close().await;
+    if let Some(e) = fatal {
+        return Err(e);
     }
+    closed?;
     Ok(report)
 }
 
@@ -756,5 +846,57 @@ mod tests {
             .to_string();
             assert!(err.contains("speed"), "{err}");
         }
+    }
+
+    /// A row the bus refuses is still reported — the teardown that now runs
+    /// first does not swallow it (#327). The undeclared publishers left behind
+    /// by the old `?` were invisible from the outside, which is why the drain
+    /// itself is pinned in `bus::teardown`; what is observable here is that
+    /// the failing row's own error is what comes back.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_row_the_bus_refuses_tears_down_and_still_reports_itself() {
+        let session = crate::bus::session::open(&[], &[], false)
+            .await
+            .expect("a standalone peer");
+        let good = SampleRow {
+            key: "v1/h-aaaaaaaaaaaa/state/demo/health".into(),
+            ..SampleRow::default()
+        }
+        .with_payload_bytes(b"{}");
+        // An empty chunk is not a key expression, so `declare_publication`
+        // refuses it — the fatal row this replay dies on, after one good
+        // publisher is already declared.
+        let bad = SampleRow {
+            key: "v1//nowhere".into(),
+            ..SampleRow::default()
+        }
+        .with_payload_bytes(b"{}");
+        let body = format!(
+            "{}\n{}\n{}\n",
+            serde_json::to_string(&header()).unwrap(),
+            good.to_line(),
+            bad.to_line(),
+        );
+
+        let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
+        let err = replay(
+            &mut reader,
+            ReplaySpec {
+                target: ReplayTarget::Bus {
+                    session: &session,
+                    slices: None,
+                },
+                speed: 1000.0,
+                i_know: false,
+                default_qos: QosProfile::Transition,
+            },
+            |_| {},
+        )
+        .await
+        .expect_err("the bus refused the second row")
+        .to_string();
+        assert!(err.contains("nowhere"), "{err}");
+
+        session.close().await.expect("close the session");
     }
 }

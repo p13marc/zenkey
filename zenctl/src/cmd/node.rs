@@ -124,6 +124,6 @@ pub async fn watch(verbose: bool, args: &Bus) -> Result<()> {
         }
         render(watch.roster(), slices.as_ref(), &mut prev, &mut tick)?;
     }
-    watch.stop().await;
+    watch.stop().await?;
     Ok(())
 }

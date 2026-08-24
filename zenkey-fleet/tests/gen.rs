@@ -297,3 +297,79 @@ async fn injected_faults_deviate_by_exactly_one_dimension_and_stay_marked() {
     assert_eq!(baseline.encoding, "application/json");
     assert!(baseline.qos_matches(zenkey::qos::QosProfile::Transition));
 }
+
+/// One entry's task panicking used to leave every *other* entry publishing
+/// until its own deadline (#326): `run_gen` returned on the `JoinError` while
+/// the surviving `JoinHandle`s were merely dropped, and a dropped handle
+/// detaches. On `--duration 1h` that is an hour of synthetic traffic with no
+/// owner and nothing left to stop it.
+///
+/// The panic is induced through the plan rather than through a test hook: a
+/// `rate_hz` of zero makes the entry's `1.0 / rate_hz` interval non-finite,
+/// which `Duration::from_secs_f64` refuses by panicking. `build_plan` never
+/// produces one — this is the shape of *any* bug in an entry's task.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panicking_entry_takes_every_other_entry_down_with_it() {
+    let (observer, generator) = peer_pair().await;
+
+    let monitor = zenkey_fleet::Monitor::start(&observer, zenkey_fleet::MonitorSpec::default())
+        .await
+        .expect("monitor");
+    let mut events = monitor.events();
+    monitor.watch("v1/**").await.expect("watch");
+
+    let entry = |key: &str, rate_hz: f64| zenkey_fleet::GenPlanEntry {
+        key: key.into(),
+        class: "state".into(),
+        producer: "demo".into(),
+        type_name: "Health".into(),
+        qos: "transition".into(),
+        qos_source: "declared",
+        rate_hz,
+        body_source: "placeholder",
+        encoding: Some("application/json".into()),
+        events_cap: None,
+        note: None,
+        fault: None,
+        fault_delta: None,
+        schema: None,
+        unique_chunk: None,
+    };
+    // The poisoned entry first, so the join order the old code walked reaches
+    // it immediately; the survivor would otherwise publish for a full minute.
+    let plan = vec![
+        entry("v1/h-fefefefefefe/state/demo/poison", 0.0),
+        entry("v1/h-fefefefefefe/state/demo/health", 50.0),
+    ];
+
+    let err = run_gen(
+        &zenkey_fleet::Fleet::new(&generator, ""),
+        &plan,
+        &spec(60.0),
+    )
+    .await
+    .expect_err("the panicked entry is reported, never swallowed");
+    assert!(err.to_string().contains("gen task"), "{err}");
+
+    // Drain everything already in flight, then listen again on a fresh
+    // window: the survivor was publishing at 50 Hz, so anything still
+    // running would be plainly audible here.
+    let settle = tokio::time::Instant::now() + Duration::from_millis(500);
+    while tokio::time::timeout_at(settle, events.recv()).await.is_ok() {}
+
+    let listen = tokio::time::Instant::now() + Duration::from_millis(500);
+    let mut after = 0usize;
+    while let Ok(Some(item)) = tokio::time::timeout_at(listen, events.recv()).await {
+        if let zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) = item
+            && s.key.starts_with("v1/h-fefefefefefe/")
+        {
+            after += 1;
+        }
+    }
+    assert_eq!(
+        after, 0,
+        "the surviving entry went silent when run_gen returned"
+    );
+
+    monitor.shutdown().await.expect("shutdown");
+}

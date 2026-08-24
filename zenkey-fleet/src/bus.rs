@@ -30,6 +30,7 @@ pub mod scout;
 pub mod seed;
 pub mod serve;
 pub mod session;
+pub(crate) mod teardown;
 pub mod write;
 
 #[cfg(feature = "decode")]

@@ -499,9 +499,15 @@ struct WatchEntry {
     selector: String,
     subscriber: zenoh::pubsub::Subscriber<()>,
     /// The seed task, while a seeded watch's seed phase is still running.
-    /// Aborted on [`Monitor::unwatch`] so a released watch cannot keep
-    /// ingesting seed replies. (A dropped *monitor* lets it run out — it is
-    /// bounded by the seed timeout and feeds a core nobody reads.)
+    ///
+    /// Aborted wherever the watch ends — [`Monitor::unwatch`],
+    /// [`Monitor::shutdown`] and [`Drop`] alike — so a released watch cannot
+    /// keep ingesting seed replies. `Drop` used to be the outlier, on a note
+    /// that predated `shutdown`: letting it run out was called harmless
+    /// because the seed timeout bounds it and it feeds a core nobody reads.
+    /// It is not harmless (#342). The task holds a cloned [`Session`], so a
+    /// frontend that re-scopes rapidly leaves one of these alive per dropped
+    /// monitor, each holding session teardown open for up to `policy.timeout`.
     seed_task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -607,6 +613,38 @@ impl Monitor {
         );
         let _ = self.core.tx.send(FleetEvent::WatchChanged);
         Ok(id)
+    }
+
+    /// Declare `selectors` on this monitor, tearing it down — acknowledged —
+    /// if any of them fails.
+    ///
+    /// This is the judge windows' opening move (#336): `start`, take the event
+    /// stream, then declare what the window will observe. In that order,
+    /// deliberately — a sample arriving between the subscriber's declaration
+    /// and the stream's creation would be counted and not delivered, and these
+    /// windows exist to say what they saw. But the `?` on the declaration used
+    /// to return with the monitor's liveliness and tick tasks running and its
+    /// subscribers left to `Drop`: the unacknowledged teardown
+    /// [`shutdown`](Self::shutdown) exists to refuse, on the one path nobody
+    /// thinks about.
+    ///
+    /// Consuming and returning the monitor is what lets the failing path
+    /// `shutdown().await` before it returns. The declaration error is the one
+    /// reported — a teardown failure behind a failed declaration is noise —
+    /// but the teardown itself is never skipped.
+    pub async fn watching<S: AsRef<str>>(
+        self,
+        selectors: impl IntoIterator<Item = S>,
+    ) -> Result<Monitor> {
+        for selector in selectors {
+            if let Err(declare) = self.watch(selector.as_ref()).await {
+                if let Err(teardown) = self.shutdown().await {
+                    tracing::warn!("after a failed watch: {teardown}");
+                }
+                return Err(declare);
+            }
+        }
+        Ok(self)
     }
 
     /// Observe a selector **with a correct seed phase** (issue #92; the
@@ -841,10 +879,24 @@ impl Monitor {
 /// it calls [`Monitor::stop`] once and exits — but a GUI re-scopes its
 /// subscription whenever the user changes what they are watching, dropping and
 /// rebuilding the monitor each time.
+///
+/// **Every** task, which for one release meant every task but the seeded
+/// watches' (#342): those handles live in `watches`, and aborting only
+/// `self.tasks` detached them. Each holds a cloned [`Session`] and goes on
+/// calling `core.ingest`/`core.tick`, so the re-scoping GUI above left one
+/// running per drop, each holding session teardown open for up to the seed
+/// timeout. `unwatch` and `shutdown` had aborted them all along; the async
+/// mutex is `get_mut` here, which needs no lock because `Drop` holds
+/// `&mut self`.
 impl Drop for Monitor {
     fn drop(&mut self) {
         for t in &self.tasks {
             t.abort();
+        }
+        for entry in self.watches.get_mut().values_mut() {
+            if let Some(task) = entry.seed_task.take() {
+                task.abort();
+            }
         }
     }
 }

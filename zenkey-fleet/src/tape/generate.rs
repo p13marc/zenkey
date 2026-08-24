@@ -504,7 +504,14 @@ pub async fn serve_describe(
     for (responder, (body, encoding)) in responders.into_iter().zip(bodies) {
         tasks.push(tokio::spawn(async move {
             while let Some(query) = responder.next().await {
-                let _ = responder.reply(&query, body.clone(), Some(encoding)).await;
+                // Surfaced, not swallowed (#346), for the same reason
+                // `MockResponder` carries `ServedQuery::reply_error`: a mock
+                // whose answers never leave the process must say so, or its
+                // silence reads as service on the asking side (RFC 05 §3.1 —
+                // silence needs attribution, on the answering side too).
+                if let Err(e) = responder.reply(&query, body.clone(), Some(encoding)).await {
+                    tracing::warn!(key = %responder.key(), "mock producer reply failed: {e}");
+                }
             }
         }));
     }
@@ -519,6 +526,15 @@ pub async fn serve_describe(
 /// No [`SchemaStore`]: the plan already carries every schema the run needs
 /// ([`build_plan`] is where the store is asked), and the parameter it used
 /// to take was discarded on the first line.
+///
+/// **Nothing outlives this call** (#326). The entries run in a
+/// [`JoinSet`](tokio::task::JoinSet), which aborts what it still holds when
+/// it is dropped, and the join loop shuts the set down — aborted *and*
+/// awaited — before it returns for any reason. A detached generator is
+/// synthetic traffic with no owner and nothing left to stop it before its own
+/// deadline (RFC 13 §5: the etiquette is the generator's, and a tool that has
+/// stopped reporting must also have stopped publishing). The same holds for
+/// cancelling this future: dropping the `JoinSet` aborts every entry.
 pub async fn run_gen(
     fleet: &crate::Fleet<'_>,
     plan: &[GenPlanEntry],
@@ -532,7 +548,8 @@ pub async fn run_gen(
 
     let total_s = spec.duration.as_secs_f64();
 
-    let mut tasks = Vec::new();
+    let mut tasks: tokio::task::JoinSet<(usize, u64, u64, Vec<String>)> =
+        tokio::task::JoinSet::new();
 
     for (i, entry) in plan.iter().enumerate() {
         let entry = entry.clone();
@@ -544,7 +561,7 @@ pub async fn run_gen(
         let store_encoding = entry.encoding.clone();
         let pattern = spec.pattern;
         let seed = spec.seed;
-        tasks.push(tokio::spawn(async move {
+        tasks.spawn(async move {
             let registry = zenkey::schema::decode::DecoderRegistry::new();
             let started = tokio::time::Instant::now();
             let mut sent = 0u64;
@@ -569,7 +586,7 @@ pub async fn run_gen(
                 {
                     Ok(p) => Some(p),
                     Err(e) => {
-                        return (0, 1, vec![format!("{}: declare: {e}", entry.key)]);
+                        return (i, 0, 1, vec![format!("{}: declare: {e}", entry.key)]);
                     }
                 }
             } else {
@@ -690,15 +707,37 @@ pub async fn run_gen(
             if let Some(p) = publication {
                 let _ = p.undeclare().await;
             }
-            (sent, refused, first_errors)
-        }));
+            (i, sent, refused, first_errors)
+        });
+    }
+
+    // Joined in completion order, aggregated in plan order: the report's
+    // `first_errors` names the plan's first entries to complain, not the
+    // scheduler's.
+    let mut done: Vec<Option<(u64, u64, Vec<String>)>> = vec![None; plan.len()];
+    let mut failed: Option<anyhow::Error> = None;
+    while let Some(joined) = tasks.join_next().await {
+        match joined {
+            Ok((i, s, r, errs)) => done[i] = Some((s, r, errs)),
+            Err(e) => {
+                failed = Some(anyhow!("gen task: {e}"));
+                break;
+            }
+        }
+    }
+    // Whatever is still running is aborted **and waited for** before this
+    // returns — on the happy path the set is already empty, and on a panic
+    // this is what keeps the surviving entries from publishing on into a run
+    // nobody is reporting (#326).
+    tasks.shutdown().await;
+    if let Some(e) = failed {
+        return Err(e);
     }
 
     let mut sent = 0u64;
     let mut refused = 0u64;
     let mut first_errors = Vec::new();
-    for t in tasks {
-        let (s, r, errs) = t.await.map_err(|e| anyhow!("gen task: {e}"))?;
+    for (s, r, errs) in done.into_iter().flatten() {
         sent += s;
         refused += r;
         for e in errs {
