@@ -11,7 +11,7 @@ use anyhow::{Context as _, Result, anyhow, bail};
 pub use zenkey_fleet::context_store::{StoredContext, load, save};
 
 /// The active context, resolved — and a name that resolves to nothing tagged
-/// as **your input** (#264).
+/// as **your input** (#307).
 ///
 /// The engine returns a plain error, because a library has no exit codes to
 /// choose between. zenctl does: a `--context` that is not in the config file

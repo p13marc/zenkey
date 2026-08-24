@@ -56,7 +56,7 @@ pub async fn rpc(
     }
     // An error reply is a finding, and a benchmark that measured nothing but
     // error envelopes used to exit **0** with a latency distribution over
-    // failures (#264). The numbers are still printed — they are what makes
+    // failures (#307). The numbers are still printed — they are what makes
     // the finding legible — and the exit says what they are made of.
     if report.errors > 0 {
         eprintln!(

@@ -1,5 +1,5 @@
 The wire verbs: acts and observations on live traffic, all hanging off the
-root (#264). A noun gets a family because it has several things you can ask
+root (#307). A noun gets a family because it has several things you can ask
 *about* it; an act on the bus does not, and burying `echo` under `topic` said
 it was a property of the registry rather than of the wire.
 
@@ -226,7 +226,7 @@ Options:
           [default: 1]
 
       --every <SECS>
-          Seconds between repeats — the one period flag (#264)
+          Seconds between repeats — the one period flag (#307)
           
           [default: 1]
 
@@ -370,7 +370,7 @@ Options:
 $ zenctl rate --help
 Measure publish rate over a window (ros2-style), or bytes with --bytes.
 
-One verb, because they are one observation: `topic hz` and `topic bw` watched the same window through the same Monitor and differed only in which column the table led with (#264).
+One verb, because they are one observation: `topic hz` and `topic bw` watched the same window through the same Monitor and differed only in which column the table led with (#307).
 
 Usage: zenctl rate [OPTIONS] [SELECTOR]
 
@@ -491,7 +491,7 @@ Options:
           [default: 512]
 
       --fail-on <SEVERITY>
-          Exit 1 when a finding at (or above) this severity exists — `doctor`'s opt-in, on the verb that grew the same findings (#264). Default: always exit 0
+          Exit 1 when a finding at (or above) this severity exists — `doctor`'s opt-in, on the verb that grew the same findings (#307). Default: always exit 0
 
           Possible values:
           - error:   Fail on error-severity findings only
@@ -838,7 +838,7 @@ Options:
           [possible values: steady, jitter, burst, ramp]
 
       --duration <SECS>
-          How long to keep generating, seconds. The one `--duration` in the tool, and it bounds OUTPUT: a passive window is `--for` everywhere (#264)
+          How long to keep generating, seconds. The one `--duration` in the tool, and it bounds OUTPUT: a passive window is `--for` everywhere (#307)
           
           [default: 10]
 
@@ -1165,7 +1165,7 @@ Options:
           One rule (repeatable): `rate-above <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`, `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `doctor <CHECK-ID>`, `origin-down <ORIGIN>`, `dropped`. Selectors are full wire form (this session is un-namespaced, RFC 09 §5); a doctor rule runs the doctor once per tick
 
       --every <SECS>
-          Seconds between evaluations — the one period flag (#264)
+          Seconds between evaluations — the one period flag (#307)
           
           [default: 5]
 
@@ -1234,7 +1234,7 @@ Options:
 be a `match (from, key, body)` in the dispatch handing back an `anyhow`
 message, which meant a mis-shaped invocation exited **1** — the same code a
 publish that actually failed on the bus exits with. Clap refuses it at 2, like
-every other usage error in this tool (#209), and since #264 like every other
+every other usage error in this tool (#209), and since #307 like every other
 refusal of your input (`exit.rs`).
 
 (`--base <BASE>` rides these usage lines because the corpus sets `ZENCTL_BASE`
@@ -1288,7 +1288,7 @@ For more information, try '--help'.
 
 `SelectorArgs` rides every wire watcher — `echo`, `rate`, `record`, `field`,
 `check expect`, `why` — and the positional and the three positions refuse each
-other rather than one silently winning (#264). A flag that is accepted and then
+other rather than one silently winning (#307). A flag that is accepted and then
 overridden is a flag that lied.
 
 ```console

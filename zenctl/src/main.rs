@@ -20,7 +20,7 @@ async fn main() -> std::process::ExitCode {
         // did not happen, the bus said no) unless the chain carries an
         // `exit::Unaskable`, which is this tool refusing your input and
         // therefore a **2**, the same code clap already exits with for every
-        // mis-shaped command line (#264, and `exit.rs` for the whole
+        // mis-shaped command line (#307, and `exit.rs` for the whole
         // contract).
         Err(e) => {
             eprintln!("{}", zenctl::errors::render(&e));

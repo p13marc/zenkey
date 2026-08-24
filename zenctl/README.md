@@ -13,7 +13,7 @@ that tooling: nothing application-specific is compiled in.
 zenctl node list --base acme -c tcp/127.0.0.1:7447
 ```
 
-> **The command tree moved (#264).** `topic echo` → `echo`, `topic pub` →
+> **The command tree moved (#307).** `topic echo` → `echo`, `topic pub` →
 > `pub`, `topic hz`/`topic bw` → `rate`, `expect`/`cutover`/`probe`/`registry
 > retired`/`schema check` → `check …`, `blob probe` → `blob locate`; every
 > observation window is `--for <SECS>`; `why` exits 1 on a finding, and a

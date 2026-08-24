@@ -83,7 +83,7 @@ not checked: give --producer (live describe) or --schema-set FILE — the regist
 
 ```
 
-## `why`'s polarity flipped (#264)
+## `why`'s polarity flipped (#307)
 
 `why` used to exit **0** when it found a cause and **1** when the fleet was
 healthy — which pages you for a healthy fleet and stays quiet when something

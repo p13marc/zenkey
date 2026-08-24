@@ -1,4 +1,4 @@
-`check` is where the exit-coded assertions live (#264) — one family, one
+`check` is where the exit-coded assertions live (#307) — one family, one
 contract, five leaves. They were scattered before: `expect`, `cutover` and
 `probe` at the root, `retired` under `registry`, `check` under `schema`, and
 nothing but habit tying their exit codes together.

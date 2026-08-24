@@ -10,7 +10,7 @@
 //!   `cli/bus.rs`). This is the first step of that, taken now because the
 //!   renderer rewrite has to move every call site anyway.
 //!
-//! ## The shape of the tree (#264)
+//! ## The shape of the tree (#307)
 //!
 //! Three kinds of thing, and the depth says which:
 //!
@@ -30,7 +30,7 @@
 //! `check`. No aliases and no shims: the old spellings are gone, and
 //! `zenctl/CHANGELOG.md` carries the table.
 //!
-//! ## The flag vocabulary (#264)
+//! ## The flag vocabulary (#307)
 //!
 //! One spelling per concept, and every duration is `f64` seconds:
 //!
@@ -129,7 +129,7 @@ pub(crate) struct OutputArgs {
 }
 
 /// Where a wire watcher looks: one typed selector, **or** the three grammar
-/// positions composed server-side (#264).
+/// positions composed server-side (#307).
 ///
 /// Flattened onto every verb that opens a subscription — `echo`, `rate`,
 /// `record`, `field`, `check expect`, `why` — so composition is a property of
@@ -204,7 +204,7 @@ pub(crate) struct GenArgs {
     pub(crate) pattern: Pattern,
     /// How long to keep generating, seconds. The one `--duration` in the
     /// tool, and it bounds OUTPUT: a passive window is `--for` everywhere
-    /// (#264).
+    /// (#307).
     #[arg(long, value_name = "SECS", default_value_t = 10.0)]
     pub(crate) duration: f64,
     /// Synthesis/jitter seed — same seed, same run.
@@ -237,7 +237,7 @@ pub(crate) struct GenArgs {
     pub(crate) dry_run: bool,
     /// Mean the faults: the acknowledging half of --fault's double guard.
     //
-    // One `--i-know` per verb (#264). `gen` has two guards — deliberately
+    // One `--i-know` per verb (#307). `gen` has two guards — deliberately
     // non-conforming traffic, and a fleet-wide impersonation — and one flag
     // discharging both meant acknowledging the wide run also armed the fault
     // injector. The graver guard keeps the name; the other is `--wide`.
@@ -354,12 +354,12 @@ pub(crate) struct PubArgs {
     pub(crate) encoding: Option<String>,
     /// Publish this many times.
     //
-    // `--times`, default 1, not `--repeat` default 0 (#264): a count flag
+    // `--times`, default 1, not `--repeat` default 0 (#307): a count flag
     // whose 0 and 1 both mean "once" has one spelling too many, and the one
     // that reads as "none" is the one people typed.
     #[arg(long, value_name = "N", default_value_t = 1)]
     pub(crate) times: usize,
-    /// Seconds between repeats — the one period flag (#264).
+    /// Seconds between repeats — the one period flag (#307).
     #[arg(long, value_name = "SECS", default_value_t = 1.0)]
     pub(crate) every: f64,
     /// Do not refuse a body the served schema rejects — it ships as typed,
@@ -397,7 +397,7 @@ pub(crate) struct DoctorArgs {
     /// report states the window, its scopes, and what the bounded observer
     /// dropped (O5/O6).
     //
-    // `--for`, the one passive-window spelling (#264). It used to be
+    // `--for`, the one passive-window spelling (#307). It used to be
     // `--listen-for`, which existed only to dodge `-l/--listen`, the endpoint
     // flag on every verb; `--for` collides with nothing and says what it is.
     #[arg(long = "for", value_name = "SECS")]
@@ -412,7 +412,7 @@ pub(crate) struct DoctorArgs {
     /// and a run that fails flips every check to `unobservable`, never
     /// silently to "ok".
     //
-    // `--transitions`, not `--watch` (#264): `--watch` is a bare bool that
+    // `--transitions`, not `--watch` (#307): `--watch` is a bare bool that
     // re-renders a *state* on the list verbs, and this emits a stream of
     // *changes*, which is the opposite kind of output. Folding it into
     // `watchdog --rule 'doctor <check-id>'` was the alternative and does not
@@ -550,7 +550,7 @@ pub(crate) enum Command {
     ///
     /// One verb, because they are one observation: `topic hz` and `topic bw`
     /// watched the same window through the same Monitor and differed only in
-    /// which column the table led with (#264).
+    /// which column the table led with (#307).
     Rate {
         #[command(flatten)]
         selector: SelectorArgs,
@@ -602,7 +602,7 @@ pub(crate) enum Command {
         #[arg(long, value_name = "N", default_value_t = 512)]
         max_paths: usize,
         /// Exit 1 when a finding at (or above) this severity exists —
-        /// `doctor`'s opt-in, on the verb that grew the same findings (#264).
+        /// `doctor`'s opt-in, on the verb that grew the same findings (#307).
         /// Default: always exit 0.
         #[arg(long, value_enum, value_name = "SEVERITY")]
         fail_on: Option<FailOn>,
@@ -793,7 +793,7 @@ pub(crate) enum Command {
         /// RFC 09 §5); a doctor rule runs the doctor once per tick.
         #[arg(long = "rule", value_name = "RULE", required = true)]
         rules: Vec<String>,
-        /// Seconds between evaluations — the one period flag (#264).
+        /// Seconds between evaluations — the one period flag (#307).
         #[arg(long, value_name = "SECS", default_value_t = 5.0)]
         every: f64,
         /// Stop after N evaluations (default: run until interrupted).
@@ -828,7 +828,7 @@ pub(crate) enum Command {
     },
 }
 
-/// The exit-coded assertions (#264). One family, one contract — see
+/// The exit-coded assertions (#307). One family, one contract — see
 /// `crate::exit`.
 #[derive(Subcommand)]
 pub(crate) enum CheckCmd {
@@ -847,7 +847,7 @@ pub(crate) enum CheckCmd {
         for_secs: f64,
         /// Require at least N samples (default 1 unless --absent).
         //
-        // `--at-least`, not `--count` (#264): `--count` is a stop bound
+        // `--at-least`, not `--count` (#307): `--count` is a stop bound
         // everywhere else in the tool, and here it was an assertion — the
         // one flag name that meant the opposite of itself.
         #[arg(long, value_name = "N")]
@@ -1039,7 +1039,7 @@ pub(crate) enum BenchCmd {
         procedure: String,
         /// Calls to issue (default 100).
         //
-        // `--calls`, not `--count` (#264): `--count` is a stop bound on a
+        // `--calls`, not `--count` (#307): `--count` is a stop bound on a
         // stream everywhere else, and this is the size of the experiment.
         #[arg(long, value_name = "N")]
         calls: Option<usize>,
@@ -1200,7 +1200,7 @@ pub(crate) enum BlobCmd {
     ///
     /// There is no `--origin`: fanning out is what finding a holder *is*.
     //
-    // `locate`, not `probe` (#264): the top-level `check probe` FORBIDS
+    // `locate`, not `probe` (#307): the top-level `check probe` FORBIDS
     // fan-out by rule ("a `*`-origin probe cannot catch a broken origin
     // path"), and this verb IS a fan-out. One word cannot mean both.
     Locate {
@@ -1217,7 +1217,7 @@ pub(crate) enum BlobCmd {
         /// The one origin to fetch from (`h-<12hex>` or `@service`) — as
         /// reported by `zenctl blob locate`. A wildcard is not an origin.
         //
-        // `--origin`, not `--from` (#264): `--from` names an input *source*
+        // `--origin`, not `--from` (#307): `--from` names an input *source*
         // in this tool (`pub --from ndjson`, `check schema --from @file`),
         // and an origin is a place on the bus, not a source of bytes to
         // read.

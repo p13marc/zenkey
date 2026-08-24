@@ -1,7 +1,7 @@
 //! `zenctl echo` — subscribe, refine, schema-decode (RFC 08 §7) with honest
 //! structural fallback.
 //!
-//! Top-level since #264: subscribing to live traffic is not something the
+//! Top-level since #307: subscribing to live traffic is not something the
 //! registry declares, so it is not a verb of the `topic` noun. The rename is
 //! the whole change — the stream, the row shape and the `%`-vocabulary are
 //! untouched, which is what keeps `zenctl echo --format ndjson | zenctl pub

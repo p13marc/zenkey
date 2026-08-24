@@ -7,7 +7,7 @@
 //! - `locate` fans two *tiny* GETs across origins (§2.5's sanctioned form);
 //! - `fetch` moves bytes, from exactly one origin, at data-low (§2.6).
 //!
-//! `locate`, not `probe` (#264): the tool's other probe — `check probe` — is
+//! `locate`, not `probe` (#307): the tool's other probe — `check probe` — is
 //! defined by *refusing* to fan out ("a `*`-origin probe cannot catch a broken
 //! origin path", RFC 09 §6), and this one is a fan-out by construction. One
 //! word could not carry both meanings, so the fan-out took a different one.

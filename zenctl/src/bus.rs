@@ -26,7 +26,7 @@
 //! *One user-visible change, twice reversed:* a bad `--context` used to exit
 //! 2 through a `std::process::exit` inside a getter, then 1 through the anyhow
 //! edge (#209's reading: "your input is a 1"), and exits **2** again since
-//! #264 — this time because the whole tool agrees. Clap already exits 2 for
+//! #307 — this time because the whole tool agrees. Clap already exits 2 for
 //! every mis-shaped command line, which fixes the meaning of 2 for user input
 //! whether the rest of the tool likes it or not; the refusals clap cannot
 //! express joined it rather than competing with it. [`crate::exit`] is the
@@ -300,7 +300,7 @@ enum SliceFailure {
 }
 
 impl SliceFailure {
-    /// The two halves also part on their **exit code** (#264): a source the
+    /// The two halves also part on their **exit code** (#307): a source the
     /// user named that did not work is a refused input — exit 2, clap's code
     /// — while a bus that would not answer is an ordinary failure, exit 1.
     /// The fork already existed; this is the one line that spends it.

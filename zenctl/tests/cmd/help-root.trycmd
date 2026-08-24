@@ -1,7 +1,7 @@
 The root: the tree itself, the version, and what a bare invocation does.
 
 Read the command list below as three groups, because that is how it was built
-(#264). **Nouns** — `topic`, `node`, `base`, `service`, `interface`, `schema`,
+(#307). **Nouns** — `topic`, `node`, `base`, `service`, `interface`, `schema`,
 `registry`, `storage`, `blob`, `admin`, `key`, `bench` — are things declared,
 alive or persisted, and get verbs under them. **Wire verbs** — `get`, `echo`,
 `pub`, `retire`, `rate`, `field`, `record`, `replay`, `serve`, `gen`, `scout` —

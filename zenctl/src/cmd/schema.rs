@@ -1,6 +1,6 @@
 //! `zenctl schema show <producer>` and `interface show --schema` (issue #51)
 //! — the served payload shapes, shown. Plus [`check`](check), which answers
-//! under `check schema` (#264) and reads the same served documents.
+//! under `check schema` (#307) and reads the same served documents.
 //!
 //! `schema <producer>` used to be its own spelling: a noun that was also a
 //! verb, with `schema check` hanging off it and a bare `zenctl schema`

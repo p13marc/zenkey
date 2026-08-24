@@ -2,7 +2,7 @@
 means. Two verbs, and both answer from a document — the producers' served
 introspect slices, or local `--registry` TOMLs.
 
-What used to live here and does not any more (#264): `echo`, `pub`, `retire`,
+What used to live here and does not any more (#307): `echo`, `pub`, `retire`,
 `hz` and `bw`. None of them is a thing the registry declares — they are acts
 and observations on live traffic — so they hang off the root now, and `hz`/`bw`
 became the one verb they always were, `rate`. The old spellings are gone; there

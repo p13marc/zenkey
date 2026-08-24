@@ -19,7 +19,7 @@ use zenkey_fleet::condition::{Condition, Transition, WatchdogSpec, run_watchdog}
 use crate::Bus;
 
 pub async fn run(rules: &[String], every: f64, count: Option<u64>, args: &Bus) -> Result<()> {
-    // `--every`/`--count`, not `--tick`/`--ticks` (#264): one period flag and
+    // `--every`/`--count`, not `--tick`/`--ticks` (#307): one period flag and
     // one stop-bound flag across the whole tool.
     let tick = super::positive_secs("--every", every)?;
     let rules: Vec<Condition> = rules

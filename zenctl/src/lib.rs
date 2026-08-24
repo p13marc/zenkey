@@ -18,7 +18,7 @@
 //! command that reports it.
 //!
 //! Two seams carry the shape of the tool rather than the shape of a command:
-//! [`cli`] is the clap tree and the vocabulary it enforces (#264), and
+//! [`cli`] is the clap tree and the vocabulary it enforces (#307), and
 //! [`exit`] is the exit contract every verb cites. Read those two and the
 //! rest is verbs.
 pub(crate) mod bus;

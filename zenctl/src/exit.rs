@@ -1,7 +1,7 @@
 //! **The exit contract.** One doctrine, written here once, cited everywhere.
 //!
 //! `zenctl` is a tool CI branches on, so its exit codes are part of its wire
-//! surface. Before the #264 restructure there were two doctrines pinned side
+//! surface. Before the #307 restructure there were two doctrines pinned side
 //! by side in the corpus — `session-config-error.trycmd` argued *your input is
 //! a 1*, `key-algebra.trycmd` argued *an invalid expression is a 2* — and a
 //! script could not hold both. This module is the single statement of the one

@@ -17,10 +17,10 @@
 //! post-synthesis, so the plan prints exactly what deviates per key, and
 //! every faulted sample's marker carries `fault=<kind>`.
 //!
-//! ## Two guards, two flags (#264)
+//! ## Two guards, two flags (#307)
 //!
 //! There is a *second*, unrelated guard here — a run wider than ten subjects
-//! is a fleet-wide impersonation — and until #264 one `--i-know` discharged
+//! is a fleet-wide impersonation — and until #307 one `--i-know` discharged
 //! both. That is the one thing an acknowledgement flag must never do:
 //! somebody widening a benign run past the threshold typed `--i-know`, and
 //! from then on `--fault` was armed on that command line. `--wide` carries
@@ -120,7 +120,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         .collect::<Result<_>>()?;
     // The one `--duration` in the tool, and it bounds *output* rather than an
     // observation — which is why it kept the word while every window became
-    // `--for` (#264).
+    // `--for` (#307).
     let run_for = super::positive_secs("--duration", duration)?;
 
     let session = args.session().await?;
