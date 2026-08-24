@@ -90,8 +90,13 @@ pub async fn run(
         }
     };
 
-    let answers =
-        zenkey_fleet::fleet_get(&session, &base, selector, payload, args.timeout()).await?;
+    let answers = zenkey_fleet::fleet_get(
+        &session,
+        &base,
+        selector,
+        &zenkey_fleet::GetOpts::new(args.timeout()).payload(payload),
+    )
+    .await?;
 
     let secs = args.timeout().as_secs();
     // A fan-in GET *looks* like a stream and is not: it waits for the window,

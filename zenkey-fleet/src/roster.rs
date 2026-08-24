@@ -428,9 +428,14 @@ pub async fn node_info(
     // still attributed by reply key, so a router that answered for somebody
     // else could not smuggle a slice in.
     let introspect = with_base(base, node.introspect_selector());
-    let answers = crate::query::fleet_get(session, base, &introspect, None, timeout)
-        .await
-        .unwrap_or_default();
+    let answers = crate::query::fleet_get(
+        session,
+        base,
+        &introspect,
+        &crate::query::GetOpts::new(timeout),
+    )
+    .await
+    .unwrap_or_default();
     let served: Vec<zenkey::slice::RegistrySlice> = answers
         .into_iter()
         .filter(|a| a.origin == origin)
@@ -576,7 +581,8 @@ pub async fn bridge_resolve(
         zenkey::selector::producer_state(zenkey::selector::Scope::fleet(), producer, &["health"])
             .to_string();
     let key = zenkey::grammar::with_base(base, relative);
-    let answers = crate::query::fleet_get(session, base, &key, None, timeout).await?;
+    let answers =
+        crate::query::fleet_get(session, base, &key, &crate::query::GetOpts::new(timeout)).await?;
     let mut matches = Vec::new();
     let seen = answers.len();
     for a in &answers {

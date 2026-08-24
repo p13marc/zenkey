@@ -245,16 +245,10 @@ pub(crate) async fn seed_get(
     mut deliver: impl FnMut(SampleView),
 ) -> usize {
     let mut n = 0usize;
-    if let Ok(replies) = session
-        .get(selector)
-        .target(zenoh::query::QueryTarget::All)
-        .consolidation(zenoh::query::ConsolidationMode::None)
-        // Cache replies arrive on the sample's own key, outside an
-        // `@adv`-suffixed selector — without Any they are dropped.
-        .accept_replies(zenoh::query::ReplyKeyExpr::Any)
-        .timeout(timeout)
-        .await
-    {
+    // `accept_any`: cache replies arrive on the sample's own key, outside an
+    // `@adv`-suffixed selector — without it they are dropped.
+    let opts = crate::query::GetOpts::new(timeout).accept_any();
+    if let Ok(replies) = crate::query::disciplined_get(session, selector, &opts).await {
         while let Ok(reply) = replies.recv_async().await {
             let Ok(sample) = reply.result() else { continue };
             n += 1;

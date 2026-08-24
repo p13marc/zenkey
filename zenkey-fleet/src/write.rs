@@ -392,8 +392,15 @@ pub async fn call(
         key.push_str(&params.join(";"));
     }
 
-    let answers =
-        crate::query::fleet_get_call(session, base, &key, body, attachment, timeout).await?;
+    let answers = crate::query::fleet_get(
+        session,
+        base,
+        &key,
+        &crate::query::GetOpts::new(timeout)
+            .payload(body)
+            .attachment(attachment),
+    )
+    .await?;
     Ok(CallReport {
         key: key.clone(),
         // The wait is part of the claim (R5): a silent call must be readable

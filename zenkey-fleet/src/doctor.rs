@@ -16,7 +16,7 @@ use zenkey::grammar::with_base;
 use zenoh::Session;
 
 use crate::examples::Examples;
-use crate::query::{Answer, RepeatingRegistry, fleet_get, state_snapshot};
+use crate::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// Every check id `run_doctor` can emit — the stable vocabulary, never
@@ -121,7 +121,7 @@ pub async fn run_doctor(
     // --- served-vs-declared diff (RFC 08 §6) --------------------------
     for local in locals {
         let key = rpc_key(base, local, "introspect")?;
-        let answers = fleet_get(session, base, &key, None, spec.timeout).await?;
+        let answers = fleet_get(session, base, &key, &GetOpts::new(spec.timeout)).await?;
         for answer in &answers {
             let Answer::Value(bytes) = &answer.answer else {
                 continue;
@@ -241,7 +241,7 @@ pub async fn run_doctor(
     let mut undescribed = 0usize;
     for slice in &schema_slices {
         let key = rpc_key(base, slice, "describe")?;
-        let answers = fleet_get(session, base, &key, None, spec.timeout).await?;
+        let answers = fleet_get(session, base, &key, &GetOpts::new(spec.timeout)).await?;
         let set = answers.into_iter().find_map(|a| match a.answer {
             Answer::Value(bytes) => {
                 let cow = bytes.to_bytes();

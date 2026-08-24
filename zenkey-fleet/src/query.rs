@@ -56,10 +56,97 @@ pub struct FleetAnswer {
     pub answer: Answer,
 }
 
-/// Call a procedure and collect **every** reply, attributed by origin.
+/// What one GET may vary — everything RFC 05 §2.1 does **not** fix.
 ///
-/// The three things RFC 05 §2.1 requires, in the one place they cannot be
-/// forgotten:
+/// The §2.1 triple is not a knob and deliberately has no field here: it is
+/// applied by `disciplined_get` to every GET this crate issues. What a
+/// caller does choose is the timeout, the request body, an attachment riding
+/// beside it (#126), the query's priority (RFC 04 §3, RFC 07 §2.6) and
+/// whether replies from *outside* the selector are accepted.
+///
+/// A spec struct rather than named sibling functions: `fleet_get_at`
+/// (priority) and `fleet_get_call` (attachment) used to be those siblings, and
+/// `_at` had come to mean two things — this axis, and the injected-clock
+/// convention (`ingest_at`, `ZrecWriter::new_at`). The greps the siblings
+/// bought survive as setter greps: "who issues bulk GETs?" is
+/// `grep '\.priority('`, "who sends attachments on queries?" is
+/// `grep '\.attachment('`.
+#[derive(Debug, Clone)]
+pub struct GetOpts {
+    timeout: Duration,
+    payload: Option<Vec<u8>>,
+    attachment: Option<Vec<u8>>,
+    priority: Priority,
+    accept_any: bool,
+}
+
+impl GetOpts {
+    /// A plain GET, bounded by `timeout`.
+    ///
+    /// [`Priority::DEFAULT`] is `Priority::Data` — byte-identical to setting
+    /// no priority at all, which is what every un-annotated GET did before
+    /// this type existed.
+    pub fn new(timeout: Duration) -> Self {
+        GetOpts {
+            timeout,
+            payload: None,
+            attachment: None,
+            priority: Priority::DEFAULT,
+            accept_any: false,
+        }
+    }
+
+    /// The request body, when there is one. `None` is the common case and
+    /// costs nothing to say.
+    pub fn payload(mut self, payload: Option<Vec<u8>>) -> Self {
+        self.payload = payload;
+        self
+    }
+
+    /// A query attachment (#126), verbatim — never schema-encoded. The encode
+    /// ladder is for bodies; an attachment is outside the registry's
+    /// vocabulary (#117), on a query exactly as on a publish.
+    pub fn attachment(mut self, attachment: Option<Vec<u8>>) -> Self {
+        self.attachment = attachment;
+        self
+    }
+
+    /// State the query's priority (RFC 04 §3, RFC 07 §2.6).
+    ///
+    /// Replies inherit the *query's* QoS — a server-side setter is a no-op —
+    /// so a bulk plane's priority can only be decided here. RFC 07 §2.6 makes
+    /// that a caller obligation rather than a suggestion: `@blob` GETs MUST
+    /// ride at [`Priority::DataLow`], or one operator fetching a debug bundle
+    /// starves the telemetry and alerts sharing the link.
+    pub fn priority(mut self, priority: Priority) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    /// Accept replies on keys **outside** the selector
+    /// ([`zenoh::query::ReplyKeyExpr::Any`]) — the querying-subscriber
+    /// pattern.
+    ///
+    /// The `@adv` cache replies with the cached sample on the *sample's* own
+    /// key, outside a `<key>/@adv/**` selector, and zenoh drops such replies
+    /// unless the caller opts in. Harmless on a rung whose replies sit inside
+    /// the selector anyway.
+    pub fn accept_any(mut self) -> Self {
+        self.accept_any = true;
+        self
+    }
+
+    /// The bound this GET runs under.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+}
+
+/// **The** `session.get` of this crate (RFC 05 §2.1) — no other module issues
+/// one, which is what makes the discipline checkable by grep rather than by
+/// review.
+///
+/// Two of the three things §2.1 requires are set here, once:
 ///
 /// 1. **target = All.** The default `BestMatching` short-circuits to a single
 ///    queryable the moment any matching one is declared `complete` — "one
@@ -67,8 +154,41 @@ pub struct FleetAnswer {
 /// 2. **consolidation = None.** Default consolidation keeps one reply *per
 ///    reply key*; belt-and-braces against a producer that wrongly echoes the
 ///    wildcard selector instead of replying on its own concrete key.
-/// 3. **Attribution by the reply's own key**, never by the key we asked on —
-///    that is what makes `*`-origin fan-out legible.
+///
+/// The third — **attribution by the reply's own key**, never by the key we
+/// asked on — belongs to whoever drains the channel, and lives in
+/// `answer_of` for the [`FleetAnswer`] path.
+///
+/// The error is the middleware's own, unwrapped: every caller has a better
+/// sentence to wrap it in than this function does.
+pub(crate) async fn disciplined_get(
+    session: &Session,
+    selector: &str,
+    opts: &GetOpts,
+) -> Result<zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>> {
+    let mut builder = session
+        .get(selector)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .priority(opts.priority)
+        .timeout(opts.timeout);
+    if let Some(body) = opts.payload.clone() {
+        builder = builder.payload(body);
+    }
+    if let Some(att) = opts.attachment.clone() {
+        builder = builder.attachment(att);
+    }
+    if opts.accept_any {
+        builder = builder.accept_replies(zenoh::query::ReplyKeyExpr::Any);
+    }
+    builder.await.map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// Call a procedure and collect **every** reply, attributed by origin.
+///
+/// The RFC 05 §2.1 fan-in, end to end: `disciplined_get` sets target `All`
+/// and consolidation `None`, and `answer_of` attributes each reply by the
+/// reply's *own* key — which is what makes `*`-origin fan-out legible.
 ///
 /// Silence is deliberately *not* interpreted here (RFC 05 §3.1: "no reply" is
 /// not one condition). Callers that need a verdict join this against the
@@ -77,90 +197,10 @@ pub async fn fleet_get(
     session: &Session,
     base: &str,
     key: &str,
-    payload: Option<Vec<u8>>,
-    timeout: Duration,
+    opts: &GetOpts,
 ) -> Result<Vec<FleetAnswer>> {
-    fleet_get_at(session, base, key, payload, timeout, Priority::DEFAULT).await
-}
-
-/// [`fleet_get`] with the query's **priority** stated (RFC 04 §3, RFC 07 §2.6).
-///
-/// Replies inherit the *query's* QoS — a server-side setter is a no-op — so a
-/// bulk plane's priority can only be decided here. RFC 07 §2.6 makes that a
-/// caller obligation rather than a suggestion: `@blob` GETs MUST ride at
-/// [`Priority::DataLow`], or one operator fetching a debug bundle starves the
-/// telemetry and alerts sharing the link.
-///
-/// A sibling rather than a sixth parameter on [`fleet_get`]: every existing
-/// call site would pass the same value and read worse for it, and naming the
-/// bulk case makes "who issues bulk GETs?" a grep — the same argument that
-/// keeps `BlobProbePrefix` a distinct type instead of a `Key`.
-///
-/// [`fleet_get`] delegates here with [`Priority::DEFAULT`], which is
-/// `Priority::Data` — byte-identical to setting nothing, which is what it did
-/// before this function existed.
-pub async fn fleet_get_at(
-    session: &Session,
-    base: &str,
-    key: &str,
-    payload: Option<Vec<u8>>,
-    timeout: Duration,
-    priority: Priority,
-) -> Result<Vec<FleetAnswer>> {
-    fleet_get_inner(session, base, key, payload, None, timeout, priority).await
-}
-
-/// [`fleet_get`] with a query **attachment** riding beside the body (#126) —
-/// the RPC caller's variant, a named sibling for the same reason
-/// [`fleet_get_at`] is one: "who sends attachments on queries?" stays a grep.
-///
-/// The attachment is verbatim, never schema-encoded — the encode ladder is
-/// for bodies; an attachment is outside the registry's vocabulary (#117),
-/// on a query exactly as on a publish.
-pub async fn fleet_get_call(
-    session: &Session,
-    base: &str,
-    key: &str,
-    payload: Option<Vec<u8>>,
-    attachment: Option<Vec<u8>>,
-    timeout: Duration,
-) -> Result<Vec<FleetAnswer>> {
-    fleet_get_inner(
-        session,
-        base,
-        key,
-        payload,
-        attachment,
-        timeout,
-        Priority::DEFAULT,
-    )
-    .await
-}
-
-async fn fleet_get_inner(
-    session: &Session,
-    base: &str,
-    key: &str,
-    payload: Option<Vec<u8>>,
-    attachment: Option<Vec<u8>>,
-    timeout: Duration,
-    priority: Priority,
-) -> Result<Vec<FleetAnswer>> {
-    let mut builder = session
-        .get(key)
-        .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::None)
-        .priority(priority)
-        .timeout(timeout);
-    if let Some(body) = payload {
-        builder = builder.payload(body);
-    }
-    if let Some(att) = attachment {
-        builder = builder.attachment(att);
-    }
-    let replies = builder
+    let replies = disciplined_get(session, key, opts)
         .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
         .with_context(|| format!("query failed: {key}"))?;
     Ok(collect_answers(base, replies).await)
 }
@@ -520,13 +560,8 @@ pub async fn state_snapshot(
     timeout: Duration,
     max: Option<usize>,
 ) -> Result<Vec<StateSample>> {
-    let replies = session
-        .get(selector)
-        .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::None)
-        .timeout(timeout)
+    let replies = disciplined_get(session, selector, &GetOpts::new(timeout))
         .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
         .with_context(|| format!("state snapshot failed: {selector}"))?;
     let mut out = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
@@ -685,33 +720,44 @@ async fn get_latest(
     source: ValueSource,
     timeout: Duration,
 ) -> Result<Option<FetchedValue>> {
-    let replies = session
-        .get(selector)
-        .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::None)
-        // The @adv cache replies with the cached sample on the sample's OWN
-        // key — outside the `<key>/@adv/**` selector — and zenoh drops such
-        // replies unless the caller opts in. This is the querying-subscriber
-        // pattern; harmless for the storage rung, whose replies sit inside
-        // the selector anyway.
-        .accept_replies(zenoh::query::ReplyKeyExpr::Any)
-        .timeout(timeout)
+    // `accept_any`: the @adv cache replies with the cached sample on the
+    // sample's OWN key — outside the `<key>/@adv/**` selector.
+    let replies = disciplined_get(session, selector, &GetOpts::new(timeout).accept_any())
         .await
         .map_err(|e| anyhow::anyhow!("get {selector}: {e}"))?;
-    let mut best: Option<FetchedValue> = None;
+    let mut candidates = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else { continue };
-        let candidate = FetchedValue {
+        candidates.push(FetchedValue {
             key: sample.key_expr().as_str().to_string(),
             payload: sample.payload().clone(),
             encoding: sample.encoding().to_string(),
             timestamp: sample.timestamp().copied(),
             attachment: sample.attachment().cloned(),
             source,
-        };
+        });
+    }
+    Ok(pick_latest(candidates))
+}
+
+/// The winner among several answers on one rung — RFC 04 §1.2's LWW, as a
+/// pure function.
+///
+/// Latest HLC wins; a **stamped** answer beats an unstamped one whatever the
+/// order they arrived in (a storage that does not stamp cannot outrank one
+/// that does, and RFC 04 §4 is why an unstamped deployment is a doctor-grade
+/// observation rather than a tie-break rule here). Ties keep the first
+/// answer, which is the arrival order the channel gave us — arbitrary, but
+/// stated.
+///
+/// Extracted from [`get_latest`] because a rule this quiet is exactly the
+/// kind that stops being true: as a loop over a live reply channel it was
+/// unreachable from a test.
+fn pick_latest(candidates: impl IntoIterator<Item = FetchedValue>) -> Option<FetchedValue> {
+    let mut best: Option<FetchedValue> = None;
+    for candidate in candidates {
         best = Some(match best.take() {
             None => candidate,
-            // Latest HLC wins; stamped beats unstamped (RFC 04 §1.2 LWW).
             Some(cur) => match (cur.timestamp, candidate.timestamp) {
                 (Some(a), Some(b)) if b > a => candidate,
                 (None, Some(_)) => candidate,
@@ -719,5 +765,74 @@ async fn get_latest(
             },
         });
     }
-    Ok(best)
+    best
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stamp(secs: u64) -> zenoh::time::Timestamp {
+        zenoh::time::Timestamp::new(
+            zenoh::time::NTP64::from(Duration::from_secs(secs)),
+            zenoh::time::TimestampId::rand(),
+        )
+    }
+
+    fn value(key: &str, timestamp: Option<zenoh::time::Timestamp>) -> FetchedValue {
+        FetchedValue {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(vec![0u8]),
+            encoding: "application/json".to_string(),
+            timestamp,
+            attachment: None,
+            source: ValueSource::Storage,
+        }
+    }
+
+    #[test]
+    fn the_latest_hlc_wins_whatever_order_the_replies_arrived_in() {
+        let pick = |order: [u64; 3]| {
+            pick_latest(order.map(|s| value(&format!("k/{s}"), Some(stamp(s)))))
+                .expect("three candidates")
+                .key
+        };
+        assert_eq!(pick([1, 2, 3]), "k/3");
+        assert_eq!(pick([3, 2, 1]), "k/3", "arrival order is not the rule");
+        assert_eq!(pick([2, 3, 1]), "k/3");
+    }
+
+    /// RFC 04 §1.2: a storage that does not stamp cannot outrank one that
+    /// does — in either arrival order. That asymmetry is the whole reason
+    /// this is not a `max_by_key` on the timestamp.
+    #[test]
+    fn a_stamped_answer_beats_an_unstamped_one_both_ways_round() {
+        let stamped = || value("stamped", Some(stamp(7)));
+        let bare = || value("bare", None);
+        assert_eq!(pick_latest([bare(), stamped()]).unwrap().key, "stamped");
+        assert_eq!(pick_latest([stamped(), bare()]).unwrap().key, "stamped");
+    }
+
+    #[test]
+    fn nothing_answered_is_nothing_picked_and_a_tie_keeps_the_first() {
+        assert!(
+            pick_latest(Vec::new()).is_none(),
+            "silence is not a value (RFC 05 §3.1)"
+        );
+        let ts = stamp(4);
+        assert_eq!(
+            pick_latest([value("first", Some(ts)), value("second", Some(ts))])
+                .unwrap()
+                .key,
+            "first",
+            "equal stamps keep arrival order — arbitrary, but stated"
+        );
+        assert_eq!(
+            pick_latest([value("first", None), value("second", None)])
+                .unwrap()
+                .key,
+            "first",
+            "two unstamped answers cannot be ordered; the first stands"
+        );
+    }
 }

@@ -13,7 +13,7 @@ use zenoh::Session;
 use zenoh::qos::Priority;
 
 use super::{BlobTarget, declared_by};
-use crate::query::{Answer, FleetAnswer, fleet_get_at};
+use crate::query::{Answer, FleetAnswer, GetOpts, fleet_get};
 use crate::report::{
     BlobAvailability, BlobFetchReport, BlobHolder, BlobManifest, BlobProbeReport, BlobProgress,
     CallError,
@@ -21,7 +21,7 @@ use crate::report::{
 
 /// The priority every `@blob` GET this crate issues rides at (RFC 07 §2.6).
 ///
-/// One constant, read by both the probe (which sets it on `fleet_get_at`) and
+/// One constant, read by both the probe (which sets it on its [`GetOpts`]) and
 /// the fetch report (which names it) — so what the report says and what the
 /// wire carried cannot drift apart. The fetch itself does not read it: the
 /// reference client already defaults to `DataLow`, and re-setting it here would
@@ -96,9 +96,10 @@ pub async fn blob_probe(
     // Two independent questions to the same fleet, asked concurrently: a
     // probe costs one timeout window, not two. Folding stays sequential and
     // ordered (have, then manifest), so the merge is deterministic.
+    let bulk = GetOpts::new(timeout).priority(FETCH_PRIORITY);
     let (have_answers, manifest_answers) = tokio::join!(
-        fleet_get_at(session, base, &have, None, timeout, FETCH_PRIORITY),
-        fleet_get_at(session, base, &manifest, None, timeout, FETCH_PRIORITY),
+        fleet_get(session, base, &have, &bulk),
+        fleet_get(session, base, &manifest, &bulk),
     );
     let mut holders: Vec<BlobHolder> = Vec::new();
     for (answers, kind) in [
@@ -190,13 +191,13 @@ async fn probe_tier2(
             let have_key = zblob::keys::store_have_key(&probe_prefix, zblob::HashAlgo::Blake3);
             let want = zblob::wire::encode(&zblob::wire::WantList::new(vec![parsed]))
                 .map_err(|e| anyhow!("encoding the want-list: {e}"))?;
-            let answers = fleet_get_at(
+            let answers = fleet_get(
                 session,
                 base,
                 &have_key,
-                Some(want),
-                timeout,
-                FETCH_PRIORITY,
+                &GetOpts::new(timeout)
+                    .payload(Some(want))
+                    .priority(FETCH_PRIORITY),
             )
             .await?;
             let holders = fold_tier2(base, answers, |bytes| {
@@ -227,8 +228,13 @@ async fn probe_tier2(
                 anyhow!("`{root}` is not a content address the reference client accepts: {e}")
             })?;
             let have_key = zblob::keys::tree_have_key(&probe_prefix, &parsed.to_string());
-            let answers =
-                fleet_get_at(session, base, &have_key, None, timeout, FETCH_PRIORITY).await?;
+            let answers = fleet_get(
+                session,
+                base,
+                &have_key,
+                &GetOpts::new(timeout).priority(FETCH_PRIORITY),
+            )
+            .await?;
             let holders = fold_tier2(base, answers, |bytes| {
                 let probe: zblob::wire::TreeProbe = zblob::wire::decode(bytes)
                     .map_err(|e| format!("undecodable tree probe: {e}"))?;

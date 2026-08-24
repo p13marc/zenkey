@@ -107,9 +107,9 @@ pub use ingest::{IngestRow, SampleRow, StreamLine, parse_row, parse_stream_line}
 pub use judgement::{Judgement, judgement_exit_code};
 pub use producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use query::{
-    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, RepeatingQuery, RepeatingRegistry,
-    StateSample, ValueSource, declare_repeating, declare_repeating_any, fetch_stored, fetch_value,
-    fleet_get, fleet_get_at, fleet_get_call, fleet_registry, state_snapshot,
+    Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts, RepeatingQuery,
+    RepeatingRegistry, StateSample, ValueSource, declare_repeating, declare_repeating_any,
+    fetch_stored, fetch_value, fleet_get, fleet_registry, state_snapshot,
 };
 pub use record::{
     RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplayTarget, ZREC_VERSION, ZrecHeader,
