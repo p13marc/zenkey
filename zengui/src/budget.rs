@@ -1,8 +1,8 @@
 //! Key-population budgets in the tree (#221): the declared `cardinality`
 //! bound joined against the observed population, per `{var}` family and per
-//! origin — the GUI half of [`zenkey_fleet::budget`].
+//! origin — the GUI half of [`zenkey_fleet::judge::budget`].
 //!
-//! The join itself is the engine's ([`zenkey_fleet::budget::BudgetObservation`]);
+//! The join itself is the engine's ([`zenkey_fleet::judge::budget::BudgetObservation`]);
 //! this module walks the observed key tree into the key list the engine
 //! wants, and turns each judged family into a badge keyed by the family's
 //! **subtree display path** — the literal prefix under one origin — so the
@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use zenkey_fleet::budget::BudgetObservation;
+use zenkey_fleet::judge::budget::BudgetObservation;
 use zenkey_fleet::{KeyTreeSnapshot, SliceSet};
 
 /// One family's badge, at one origin's subtree path.
@@ -76,7 +76,7 @@ impl BudgetBadges {
 /// on. The engine's observation wants wire keys; the tree stores them as
 /// chunk paths, so this is the inverse walk of `KeyTreeSnapshot::build`.
 pub fn observed_keys(tree: &KeyTreeSnapshot) -> Vec<String> {
-    fn walk(prefix: &str, node: &zenkey_fleet::tree::TreeNode, out: &mut Vec<String>) {
+    fn walk(prefix: &str, node: &zenkey_fleet::model::tree::TreeNode, out: &mut Vec<String>) {
         for (chunk, child) in &node.children {
             let path = if prefix.is_empty() {
                 chunk.clone()
@@ -157,7 +157,7 @@ pub fn badges(base: &str, slices: &SliceSet, tree: &KeyTreeSnapshot) -> BudgetBa
 mod tests {
     use super::*;
     use std::time::Instant;
-    use zenkey_fleet::stats::StatsTable;
+    use zenkey_fleet::model::stats::StatsTable;
 
     fn subject(path: &str, class: &str, cardinality: Option<i64>) -> zenkey::slice::SubjectDecl {
         zenkey::slice::SubjectDecl {

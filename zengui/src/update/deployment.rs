@@ -202,7 +202,7 @@ fn repoint(
     work: &mut Workspace,
 ) -> Task<Message> {
     forget(dep, obs, tree, work);
-    dep.schema_store = Some(Arc::new(zenkey_fleet::decode::SchemaStore::new(
+    dep.schema_store = Some(Arc::new(zenkey_fleet::model::decode::SchemaStore::new(
         dep.base(),
         dep.timeout(),
     )));
@@ -251,7 +251,7 @@ pub(crate) fn forget(
 /// Layer a stored context over the live settings — the same precedence
 /// `Cli::settings_with` applies, minus the flags, because a context picked
 /// in-app *is* the explicit choice.
-fn apply_context(dep: &mut Deployment, stored: zenkey_fleet::StoredContext) {
+fn apply_context(dep: &mut Deployment, stored: zenkey_explorer_config::StoredContext) {
     dep.settings.base = stored.base.unwrap_or_default();
     dep.settings.connect = stored.connect;
     dep.settings.listen = stored.listen;

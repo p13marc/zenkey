@@ -29,7 +29,7 @@ pub async fn run(
         zrec: ZREC_VERSION,
         selectors: vec![selector.clone()],
         base: args.base().to_string(),
-        captured_at: zenkey_fleet::record::rfc3339_now(),
+        captured_at: zenkey_fleet::tape::record::rfc3339_now(),
     };
     let file = std::fs::File::create(out).with_context(|| format!("create {out}"))?;
     let mut writer = ZrecWriter::new(BufWriter::new(file), &header)?;

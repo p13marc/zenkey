@@ -118,7 +118,7 @@ ci:
     cargo fmt --all --check
     # The gutter gate (#195): a dropped `\` in a multi-line string prints the
     # source indentation to the user. Cheap, and it runs before the compiler.
-    python3 scripts/check-prose.py zenctl/src zenkey-fleet/src zengui/src zenkey/src
+    python3 scripts/check-prose.py zenctl/src zenkey-fleet/src zengui/src zenkey/src zenkey-explorer-config/src
     # One report, three renderings, and exactly one place that decides which
     # (#198).
     ./scripts/check-render-seam.sh

@@ -30,7 +30,7 @@ use std::time::Instant;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use zenkey_fleet::stats::StatsTable;
+use zenkey_fleet::model::stats::StatsTable;
 use zenkey_fleet::{KeyFacts, KeyTreeSnapshot, SliceSet};
 
 /// The canonical fixture origin, shared with `zenkey/benches/keys.rs`, the
@@ -138,7 +138,7 @@ fn bench_stats(c: &mut Criterion) {
 }
 
 fn bench_decode(c: &mut Criterion) {
-    use zenkey_fleet::decode::{structural, structural_value};
+    use zenkey_fleet::model::decode::{structural, structural_value};
 
     let json = br#"{"value":42.0,"unit":"percent","inodes":1188}"#;
     let mut cbor = Vec::new();
@@ -193,7 +193,7 @@ fn bench_skeleton(c: &mut Criterion) {
     let watched = vec!["v1/**".to_string()];
     c.bench_function("skeleton/merge_10k", |b| {
         b.iter(|| {
-            zenkey_fleet::skeleton::merge(
+            zenkey_fleet::model::skeleton::merge(
                 black_box(&skel),
                 black_box(&observed),
                 black_box(&watched),

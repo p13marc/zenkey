@@ -106,7 +106,7 @@ pub struct Cli {
     pub history_entries: Option<usize>,
 
     /// How many distinct keys to keep statistics for (default
-    /// `zenkey_fleet::stats::DEFAULT_MAX_KEYS`; remembered since #188).
+    /// `zenkey_fleet::model::bounded::DEFAULT_MAX_KEYS`; remembered since #188).
     ///
     /// Least-recently-seen keys are retired past this, and the retirements are
     /// counted and displayed — a long-running observer is bounded, and says so
@@ -143,14 +143,14 @@ impl Cli {
     /// what the window remembered (issue #189).
     pub fn settings(self, prefs: &crate::prefs::Prefs) -> anyhow::Result<Settings> {
         let named = self.context.clone().or_else(|| prefs.context.clone());
-        let context = match zenkey_fleet::context_store::active(named.as_deref()) {
+        let context = match zenkey_explorer_config::active(named.as_deref()) {
             Ok(c) => c,
             // A name the user *typed* and that is missing is an error. A
             // remembered one that has since been deleted is a stale
             // preference, and refusing to start over it would be the worst
             // kind of persistence.
             Err(e) if self.context.is_some() => return Err(e),
-            Err(_) => zenkey_fleet::context_store::active(None)?,
+            Err(_) => zenkey_explorer_config::active(None)?,
         };
         self.settings_with(context, prefs)
     }
@@ -160,7 +160,7 @@ impl Cli {
     /// config file.
     pub fn settings_with(
         self,
-        context: Option<zenkey_fleet::StoredContext>,
+        context: Option<zenkey_explorer_config::StoredContext>,
         prefs: &crate::prefs::Prefs,
     ) -> anyhow::Result<Settings> {
         let context = context.unwrap_or_default();
@@ -215,7 +215,7 @@ impl Cli {
         let max_keys = self
             .max_keys
             .or(prefs.max_keys.filter(|n| *n > 0))
-            .unwrap_or(zenkey_fleet::stats::DEFAULT_MAX_KEYS);
+            .unwrap_or(zenkey_fleet::model::bounded::DEFAULT_MAX_KEYS);
         if echo_lines == 0 {
             anyhow::bail!("--echo-lines must be at least 1");
         }
@@ -393,7 +393,7 @@ mod tests {
         assert!(!s.eager, "lazy is the default (issue #85)");
         assert_eq!(s.echo_lines, 2000);
         assert_eq!(s.history_entries, 200);
-        assert_eq!(s.max_keys, zenkey_fleet::stats::DEFAULT_MAX_KEYS);
+        assert_eq!(s.max_keys, zenkey_fleet::model::bounded::DEFAULT_MAX_KEYS);
     }
 
     /// History retains whole payloads, so its bound is the one most worth
@@ -479,7 +479,7 @@ mod tests {
     /// Context supplies defaults; flags override (issue #35).
     #[test]
     fn context_supplies_defaults_and_flags_override() {
-        let ctx = zenkey_fleet::StoredContext {
+        let ctx = zenkey_explorer_config::StoredContext {
             base: Some("zensight".into()),
             connect: vec!["tcp/10.0.0.1:7447".into()],
             listen: vec![],

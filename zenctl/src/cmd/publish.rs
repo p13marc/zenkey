@@ -94,7 +94,7 @@ fn declared_qos(
         .facts
         .registration
     {
-        zenkey_fleet::facts::Registration::Registered(s) => {
+        zenkey_fleet::model::facts::Registration::Registered(s) => {
             s.declared_qos().map(|q| (q, s.path.clone()))
         }
         _ => None,
@@ -159,7 +159,7 @@ pub async fn run(
     } else {
         args.slices_optional().await?
     };
-    let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
     let prepared = zenkey_fleet::prepare_publish(
         &args.fleet(&session),
         &store,

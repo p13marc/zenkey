@@ -2,7 +2,7 @@
 //! non-verdict, itemised.
 //!
 //! "Silence is never a verdict" (RFC 05 §3.1) is correct and it is also
-//! where the user is abandoned; the why ladder ([`zenkey_fleet::why`]) turns
+//! where the user is abandoned; the why ladder ([`zenkey_fleet::judge::why`]) turns
 //! the refusal into rungs over facts the engine already holds. This section
 //! renders the same ladder `zenctl why` prints — same rung ids, same three
 //! answers — and its one law is O4's: a rung whose input was not fetched
@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use iced::widget::{Column, row};
-use zenkey_fleet::why::{RungAnswer, WhyReport, WhyVerdict};
+use zenkey_fleet::report::{RungAnswer, WhyReport, WhyVerdict};
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::view::kit;

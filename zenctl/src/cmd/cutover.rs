@@ -2,7 +2,7 @@
 //!
 //! Thin by design (issue #206). The sample-bucketing rule, the old-wins-ties
 //! tie-break and the three-state verdict ladder are judgement over bus
-//! traffic, so they live in `zenkey_fleet::cutover` where the other explorer
+//! traffic, so they live in `zenkey_fleet::judge::cutover` where the other explorer
 //! can reach them. What is left here is what only a CLI has: the session, the
 //! rendering, and the exit — through [`crate::exit::verdict`], the one place
 //! 0/1/2 is spelled.
@@ -25,9 +25,9 @@ pub async fn run(old_root: &str, for_secs: f64, args: &Bus) -> Result<()> {
     // silence deserves to know what was being watched (O5).
     eprintln!(
         "{}",
-        zenkey_fleet::cutover::scope_note(
+        zenkey_fleet::judge::cutover::scope_note(
             old_root,
-            &zenkey_fleet::cutover::new_prefix(&base),
+            &zenkey_fleet::new_prefix(&base),
             window
         )
     );

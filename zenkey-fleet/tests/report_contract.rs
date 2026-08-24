@@ -154,7 +154,7 @@ fn no_topic_info_field_is_dead_the_constructor_reaches_them_all() {
     "#;
     let slices =
         zenkey_fleet::SliceSet::from_slices(vec![zenkey::parse_slice(toml).expect("slice parses")]);
-    let described = zenkey_fleet::facts::describe_key(
+    let described = zenkey_fleet::model::facts::describe_key(
         "",
         &format!("v1/{}/telemetry/sysinfo/disk/var-log/used", fx::ORIGIN),
         Some(&slices),

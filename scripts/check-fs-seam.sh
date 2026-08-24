@@ -10,11 +10,11 @@
 # The rule is mechanical, so this is the gate: nothing under `zengui/src/update`
 # — nor in `app.rs`, the shell that routes into it — names `std::fs`, opens or
 # creates a `File`, reads or writes the shared context store, or persists the
-# preferences. `context_store::config_path()` stays legal: it computes a path
-# and touches nothing.
+# preferences. `zenkey_explorer_config::config_path()` stays legal: it computes
+# a path and touches nothing.
 set -euo pipefail
 
-hits=$(grep -rnE 'std::fs|File::(open|create)|context_store::(load|save|upsert)|Prefs::save|prefs\.save|save_to\(|ReplayState::load' \
+hits=$(grep -rnE 'std::fs|File::(open|create)|zenkey_explorer_config::(load|save|upsert)|Prefs::save|prefs\.save|save_to\(|ReplayState::load' \
     zengui/src/update zengui/src/app.rs || true)
 if [ -n "$hits" ]; then
     echo "fs seam: the update thread reaches for the filesystem (#255):"

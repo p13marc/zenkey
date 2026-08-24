@@ -111,7 +111,7 @@ pub fn qos_choices() -> &'static [QosChoice] {
 /// The declared profile behind a classified key, when there is one (#158).
 /// Drives the picker default until the user takes the picker over.
 pub fn declared_qos(facts: Option<&KeyFacts>) -> Option<QosProfile> {
-    use zenkey_fleet::facts::Registration;
+    use zenkey_fleet::model::facts::Registration;
     match facts.map(|f| &f.registration) {
         Some(Registration::Registered(s)) => s.declared_qos(),
         _ => None,
@@ -386,7 +386,7 @@ pub enum SendMsg {
 /// state key, where retirement is the class's own semantics. Display logic
 /// only: the engine's `check_retire` is the judge at submit.
 pub fn retire_needs_i_know(facts: Option<&KeyFacts>) -> bool {
-    use zenkey_fleet::facts::{ClassKind, KeyShape};
+    use zenkey_fleet::model::facts::{ClassKind, KeyShape};
     match facts.map(|f| &f.shape) {
         Some(KeyShape::V1(v)) => v.class_kind != ClassKind::State,
         _ => true,

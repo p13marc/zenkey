@@ -134,11 +134,11 @@ fn bench_hex(c: &mut Criterion) {
 /// The nodes pane's watched-freshness join.
 ///
 /// Quadratic in (producers × watch selectors) by construction, which is why
-/// the per-pair key-expression work mattered: `zenkey_fleet::skeleton::merge`
+/// the per-pair key-expression work mattered: `zenkey_fleet::model::skeleton::merge`
 /// was fixed to validate borrowed `&keyexpr` once per tick, and this site was
 /// missed.
 fn bench_roster(c: &mut Criterion) {
-    let mut stats = zenkey_fleet::stats::StatsTable::new();
+    let mut stats = zenkey_fleet::model::stats::StatsTable::new();
     let now = Instant::now();
     for i in 0..40_000 {
         stats.record(
@@ -242,7 +242,7 @@ fn bench_tree(c: &mut Criterion) {
     /// when no registry has answered — which is the common case on a foreign
     /// bus, and the one `app.rs` rebuilds from scratch on every call.
     fn inputs(n: usize) -> (zenkey_fleet::Skeleton, zenkey_fleet::KeyTreeSnapshot) {
-        let mut stats = zenkey_fleet::stats::StatsTable::new();
+        let mut stats = zenkey_fleet::model::stats::StatsTable::new();
         let now = Instant::now();
         for k in keys(n) {
             stats.record(&k, 64, None, now, None, None);
@@ -276,7 +276,7 @@ fn bench_tree(c: &mut Criterion) {
 
     let watched = ["**".to_string()];
     let (skel, observed) = inputs(TREE_KEYS);
-    let merged = zenkey_fleet::skeleton::merge(&skel, &observed, &watched);
+    let merged = zenkey_fleet::model::skeleton::merge(&skel, &observed, &watched);
     let expanded = expand_all(TREE_KEYS);
     let now = Instant::now();
 
@@ -288,7 +288,7 @@ fn bench_tree(c: &mut Criterion) {
     // it flattens anything, on every one of its nine call sites.
     group.bench_function("merge_50k", |b| {
         b.iter(|| {
-            black_box(zenkey_fleet::skeleton::merge(
+            black_box(zenkey_fleet::model::skeleton::merge(
                 black_box(&skel),
                 black_box(&observed),
                 black_box(&watched),
@@ -349,7 +349,7 @@ fn bench_tree(c: &mut Criterion) {
     // `shape_reused`/`shape_rebuilt` unit tests are what stand in for #177's
     // "allocation is O(1)" acceptance, which is not a thing a bench can say.
     let (small_skel, small_observed) = inputs(1_000);
-    let small_merged = zenkey_fleet::skeleton::merge(&small_skel, &small_observed, &watched);
+    let small_merged = zenkey_fleet::model::skeleton::merge(&small_skel, &small_observed, &watched);
     let small_expanded = expand_all(1_000);
     let small_snapshot = Arc::new(small_observed);
     let big_snapshot = Arc::new(observed);

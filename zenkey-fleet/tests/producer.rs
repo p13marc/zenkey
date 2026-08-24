@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use zenkey_fleet::producer::{BringUp, ReservedError};
+use zenkey_fleet::bus::producer::{BringUp, ReservedError};
 
 mod util;
 use util::peer_pair;

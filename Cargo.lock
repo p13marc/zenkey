@@ -8068,6 +8068,7 @@ dependencies = [
  "trycmd",
  "zenkey",
  "zenkey-build",
+ "zenkey-explorer-config",
  "zenkey-fleet",
  "zenkey-report-fixtures",
  "zenoh",
@@ -8091,6 +8092,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zenkey",
+ "zenkey-explorer-config",
  "zenkey-fleet",
  "zenoh",
 ]
@@ -8128,6 +8130,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenkey-explorer-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "serde",
+ "toml 1.1.4+spec-1.1.0",
+]
+
+[[package]]
 name = "zenkey-fixture-tests"
 version = "0.6.0"
 dependencies = [
@@ -8146,13 +8158,11 @@ dependencies = [
  "base64 0.23.1",
  "ciborium",
  "criterion",
- "dirs",
  "prost-reflect",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
- "toml 1.1.4+spec-1.1.0",
  "tracing",
  "zblob",
  "zenkey",

@@ -19,14 +19,14 @@ use zengui::keyfacts::KeyFacts;
 use zengui::message::Message;
 use zengui::view::tokens::Spacing;
 use zengui::view::tree::{self, FactsIndex};
-use zenkey_fleet::stats::StatsTable;
+use zenkey_fleet::model::stats::StatsTable;
 use zenkey_fleet::{KeyTreeSnapshot, SliceSet};
 
 const REGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
 const UNREGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/no/such/thing";
 const FOREIGN: &str = "demo/example/foo";
 
-fn snapshot(keys: &[&str]) -> zenkey_fleet::skeleton::MergedNode {
+fn snapshot(keys: &[&str]) -> zenkey_fleet::model::skeleton::MergedNode {
     let mut stats = StatsTable::new();
     let now = Instant::now();
     for k in keys {
@@ -35,7 +35,7 @@ fn snapshot(keys: &[&str]) -> zenkey_fleet::skeleton::MergedNode {
     let observed = KeyTreeSnapshot::build(&stats);
     // Pane tests watch everything: rows read Observed, as the bootstrap did.
     let skel = zenkey_fleet::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
-    zenkey_fleet::skeleton::merge(&skel, &observed, &["**".to_string()])
+    zenkey_fleet::model::skeleton::merge(&skel, &observed, &["**".to_string()])
 }
 
 /// The comfortable grid — panes render the same claims at either density
@@ -711,7 +711,7 @@ fn the_send_pane_offers_both_modes_over_one_form() {
 fn the_detail_pane_tags_decode_provenance() {
     use std::sync::Arc;
     use zengui::view::detail::{DetailData, Fetched, section};
-    use zenkey_fleet::decode::Rendering;
+    use zenkey_fleet::model::decode::Rendering;
     use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
 
     let slices = slices();
@@ -732,7 +732,7 @@ fn the_detail_pane_tags_decode_provenance() {
     // Structural fallback with a declared type: the honest <T?> tag — and
     // the verdict rides the sample now (#164): an undecodable payload under
     // a present schema is `NotValidated(Undecodable)`, worded as itself.
-    let decoded = zenkey_fleet::decode::DecodedSample {
+    let decoded = zenkey_fleet::model::decode::DecodedSample {
         type_name: Some("TelemetryPoint".to_string()),
         rendering: Rendering::Structural(r#"{"value":42.0}"#.to_string()),
         verdict: zenkey::schema::validate::Verdict::NotValidated(
@@ -850,7 +850,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
     use zengui::view::inspector::{InspectorData, pane};
     use zengui::view::media::MediaState;
     use zengui::view::nodes::DetailState;
-    use zenkey_fleet::facts::KeyFacts;
+    use zenkey_fleet::model::facts::KeyFacts;
 
     let slices = slices();
     let blob = BlobState::default();
@@ -3223,7 +3223,7 @@ fn the_decoded_pane_renders_three_verdict_states_and_keeps_the_silences_apart() 
     use std::sync::Arc;
     use zengui::view::detail::{DetailData, Fetched, section};
     use zenkey::schema::validate::{NotValidated, Verdict};
-    use zenkey_fleet::decode::{DecodedSample, Rendering};
+    use zenkey_fleet::model::decode::{DecodedSample, Rendering};
     use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
 
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
@@ -3357,7 +3357,7 @@ fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
 #[test]
 fn the_tree_badges_the_budget_join() {
     use zengui::budget;
-    use zenkey_fleet::stats::StatsTable;
+    use zenkey_fleet::model::stats::StatsTable;
 
     // A registry that declares a tight budget (2) on the disk family and a
     // rest-variable family beside it.
@@ -3538,7 +3538,8 @@ fn the_fields_section_states_its_window_and_its_bounds() {
 fn the_why_section_renders_not_asked_and_never_no() {
     use std::sync::Arc;
     use zengui::view::why::{WhyState, section};
-    use zenkey_fleet::why::{RungAnswer, WhyInputs, ladder};
+    use zenkey_fleet::judge::why::{WhyInputs, ladder};
+    use zenkey_fleet::report::RungAnswer;
 
     // Never run: the section states the frugal default's cost.
     let state = WhyState::default();

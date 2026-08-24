@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use zenkey_fleet::SliceSet;
-use zenkey_fleet::facts::{KeyFacts, Registration};
+use zenkey_fleet::model::facts::{KeyFacts, Registration};
 
 fn slices() -> SliceSet {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");

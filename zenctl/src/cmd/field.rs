@@ -37,7 +37,7 @@ pub async fn run(
     // into the engine so the report says stuck/new were unjudgeable rather
     // than reading clean (RFC 09 §5.1 O4; #246).
     let slices = args.slices_optional().await?;
-    let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
     let spec = zenkey_fleet::FieldSpec {
         selector: selector.clone(),
         window,

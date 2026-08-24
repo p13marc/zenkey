@@ -28,7 +28,7 @@ async fn a_declared_token_attaches_its_origin() {
     )
     .await
     .expect("serving session");
-    let asking = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
+    let asking = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asking session");
 

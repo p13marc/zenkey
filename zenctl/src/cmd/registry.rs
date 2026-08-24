@@ -56,7 +56,7 @@ pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Res
         }
         ExportAs::Jsonschema => {
             let session = args.session().await?;
-            let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+            let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
             // Fetch here, where the session is; shape the document in
             // zenkey-build, where every other registry-in-document-out
             // exporter lives (#208).
@@ -123,7 +123,7 @@ pub async fn diff(args: &Bus) -> Result<()> {
 ///
 /// Thin for `check cutover`'s reason (#206): the per-entry ladder, the wire
 /// bucketing and the worst-of verdict are judgement over bus traffic and live
-/// in `zenkey_fleet::retired`. What is left here is what only a CLI has: the
+/// in `zenkey_fleet::judge::retired`. What is left here is what only a CLI has: the
 /// session, the rendering, and the exit code.
 pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
     // Seconds off the flag, a `Duration` from here in.
@@ -152,9 +152,9 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
         // Stated before the window opens, not after (O5).
         eprintln!(
             "{}",
-            zenkey_fleet::retired::scope_note(
+            zenkey_fleet::judge::retired::scope_note(
                 entries,
-                &zenkey_fleet::cutover::new_prefix(args.base()),
+                &zenkey_fleet::new_prefix(args.base()),
                 window
             )
         );

@@ -13,7 +13,7 @@
 use std::time::{Duration, Instant};
 
 use zenkey_fleet::KeyTreeSnapshot;
-use zenkey_fleet::stats::StatsTable;
+use zenkey_fleet::model::stats::StatsTable;
 
 fn table(keys: &[(&str, usize)]) -> StatsTable {
     let mut t = StatsTable::new();

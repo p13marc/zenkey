@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use zenkey::schema::{SchemaSet, TypeSchema};
-use zenkey_fleet::decode::SchemaStore;
+use zenkey_fleet::model::decode::SchemaStore;
 
 const ORIGIN: &str = "h-bbbbbbbbbbbb";
 const PRODUCER: &str = "sysinfo";

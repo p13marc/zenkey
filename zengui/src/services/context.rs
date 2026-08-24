@@ -2,7 +2,7 @@
 //!
 //! Every function here is a disk touch that used to run inside `update` —
 //! which is the thread iced renders from, so each was a frame the window did
-//! not paint. The store itself stays [`zenkey_fleet::context_store`]: one
+//! not paint. The store itself stays [`zenkey_explorer_config`]: one
 //! file, two explorers (#35), and a context created in `zenctl` shows up here
 //! without a restart (#67) precisely *because* these re-read it every time.
 //!
@@ -26,7 +26,7 @@ fn done(m: ContextMsg) -> Message {
 pub fn refresh() -> Task<Message> {
     Task::perform(
         async {
-            zenkey_fleet::context_store::load()
+            zenkey_explorer_config::load()
                 .map(|c| (c.contexts.keys().cloned().collect(), c.current))
                 .map_err(|e| e.to_string())
         },
@@ -38,7 +38,7 @@ pub fn refresh() -> Task<Message> {
 pub fn load(name: String) -> Task<Message> {
     Task::perform(
         async move {
-            let config = zenkey_fleet::context_store::load().map_err(|e| e.to_string())?;
+            let config = zenkey_explorer_config::load().map_err(|e| e.to_string())?;
             let stored = config
                 .contexts
                 .get(&name)
@@ -59,14 +59,14 @@ pub fn select(name: String) -> Task<Message> {
     Task::perform(
         async move {
             let result = (|| {
-                let mut config = zenkey_fleet::context_store::load().map_err(|e| e.to_string())?;
+                let mut config = zenkey_explorer_config::load().map_err(|e| e.to_string())?;
                 let stored = config
                     .contexts
                     .get(&name)
                     .cloned()
                     .ok_or_else(|| format!("{name} is no longer in the config"))?;
                 config.current = Some(name.clone());
-                let pointer = zenkey_fleet::context_store::save(&config)
+                let pointer = zenkey_explorer_config::save(&config)
                     .err()
                     .map(|e| e.to_string());
                 Ok((Box::new(stored), pointer))
@@ -88,16 +88,16 @@ pub fn save(snapshot: ContextForm, select: bool) -> Task<Message> {
     Task::perform(
         async move {
             let result = (|| {
-                let mut config = zenkey_fleet::context_store::load().map_err(|e| e.to_string())?;
+                let mut config = zenkey_explorer_config::load().map_err(|e| e.to_string())?;
                 let mut applied = Ok(());
-                zenkey_fleet::context_store::upsert(&mut config, &name, |c| {
+                zenkey_explorer_config::upsert(&mut config, &name, |c| {
                     applied = snapshot.apply_to(c);
                 });
                 applied?;
                 if select {
                     config.current = Some(name.clone());
                 }
-                zenkey_fleet::context_store::save(&config).map_err(|e| e.to_string())?;
+                zenkey_explorer_config::save(&config).map_err(|e| e.to_string())?;
                 Ok(config.contexts.keys().cloned().collect())
             })();
             (name, result)

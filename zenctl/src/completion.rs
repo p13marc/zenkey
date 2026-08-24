@@ -128,8 +128,8 @@ fn context_in(args: impl IntoIterator<Item = String>) -> Option<String> {
 /// Deliberately infallible: completion has no error channel that a user would
 /// want to read mid-keystroke.
 fn cached() -> SliceSet {
-    let name = zenkey_fleet::active_name(context_on_line().as_deref());
-    SliceSet::read_cache(&zenkey_fleet::cache_dir(name.as_deref()))
+    let name = zenkey_explorer_config::active_name(context_on_line().as_deref());
+    SliceSet::read_cache(&zenkey_explorer_config::cache_dir(name.as_deref()))
 }
 
 fn candidates(values: impl IntoIterator<Item = String>) -> Vec<CompletionCandidate> {
@@ -216,7 +216,7 @@ pub fn blob_tiers() -> Vec<CompletionCandidate> {
 
 /// Named contexts from the config file.
 pub fn contexts() -> Vec<CompletionCandidate> {
-    let Ok(config) = zenkey_fleet::context_store::load() else {
+    let Ok(config) = zenkey_explorer_config::load() else {
         return Vec::new();
     };
     candidates(config.contexts.keys().cloned())

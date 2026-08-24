@@ -29,7 +29,9 @@ pub async fn dispatch(cmd: crate::cli::CacheCmd) -> Result<()> {
 
 /// Where this invocation's cache lives.
 fn dir(args: &Bus) -> std::path::PathBuf {
-    zenkey_fleet::cache_dir(zenkey_fleet::active_name(args.context_name()).as_deref())
+    zenkey_explorer_config::cache_dir(
+        zenkey_explorer_config::active_name(args.context_name()).as_deref(),
+    )
 }
 
 pub fn show(args: &Bus) -> Result<()> {

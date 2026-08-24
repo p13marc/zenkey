@@ -29,6 +29,29 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   chokepoint, moved verbatim from zenctl), `SliceSet`, the RFC 08 §7
   schema-decode pipeline (`SchemaStore`/`decode_sample`), `Monitor` with
   bounded broadcast + `Dropped(n)` honesty and ArcSwap key-tree snapshots.
+  **Five layers**, and `lib.rs`'s doc-map is the normative statement of
+  them: `bus/` (everything holding a session → observations), `model/`
+  (values in hand → meaning; nothing here takes a session, which is what
+  lets a `.zrec` replay through the same projections as live traffic),
+  `judge/` (meaning → verdicts, plus `judge/common.rs` for the vocabulary
+  the judges share), `report/` (every serde-pinned wire shape), `tape/`
+  (`record`/`ingest`/`generate`/`synth`/`bench`). Placing a module is one
+  ordered question — session? values in hand? says something is *wrong*?
+  turns a stream into a recording? — and placing a **type** is not a module
+  question at all: **every serde-pinned wire shape lives under `report/`,
+  split by domain, with its pinned-shape test beside it; a type the wire
+  never sees stays in the module that computes it.** That rule has no
+  exceptions (the judgement core is under `report/` because
+  `{"answer": "not_asked"}` reaches a script). `report/`'s domain files are
+  private and re-exported flat, so `zenkey_fleet::report::Thing` stays the
+  one path and the split can be re-cut without a call site moving.
+- `zenkey-explorer-config/` — the **shared explorer config crate**
+  (Apache-2.0, **not published**): named connection contexts, the path
+  policy (`~/.config/zenkey-explorer/config.toml`, legacy zenctl read
+  fallback, `ZENKEY_EXPLORER_CONFIG_DIR`), and the completion cache dir. One
+  file, two explorers (issue #35). It is a sibling of the frontends, not a
+  layer of the engine: it touches no bus, and living in `zenkey-fleet`
+  forced `dirs` and `toml` onto every library consumer.
 - `zengui/` — the **graphical bus explorer** (Apache-2.0, **not published**;
   Forgejo release binaries, like zenctl). The GUI sibling of zenctl over the
   same engine, in Iced 0.14. **Key-agnostic core, RFC as overlay**: it is a
@@ -183,7 +206,7 @@ Registry slices come from the live bus (`zenkey_fleet::fleet_registry`, RFC 08 �
 `--registry <dir>` (offline TOMLs) — every renderer takes `&[RegistrySlice]`
 and is source-agnostic. Payloads render generically (JSON / CBOR→JSON
 diagnostic / text / hex, tagged with the slice-declared type). Bus discipline
-(RFC 05, `zenkey-fleet/src/query.rs`): every fleet GET goes through
+(RFC 05, `zenkey-fleet/src/bus/query.rs`): every fleet GET goes through
 `zenkey_fleet::fleet_get`
 (target `All`, consolidation `None`, attribution by reply key). Silence is
 never a verdict. Scouting is opt-in.

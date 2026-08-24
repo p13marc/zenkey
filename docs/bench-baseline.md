@@ -107,7 +107,7 @@ more than 2× across repeated runs of *identical code* on this workstation
 gate. The unmarked rows agreed within noise across every run.
 
 At `monitor/ingest`, 100k msg/s costs a few percent of one core — which is the
-claim `zenkey-fleet/src/tree.rs` makes and `tests/ledger.rs` now soaks.
+claim `zenkey-fleet/src/model/tree.rs` makes and `tests/ledger.rs` now soaks.
 
 ### What the #44 fixes moved
 

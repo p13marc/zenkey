@@ -39,7 +39,7 @@ pub fn start(
                 zrec: zenkey_fleet::ZREC_VERSION,
                 selectors,
                 base,
-                captured_at: zenkey_fleet::record::rfc3339_now(),
+                captured_at: zenkey_fleet::tape::record::rfc3339_now(),
             };
             let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
             let mut writer = zenkey_fleet::ZrecWriter::new(std::io::BufWriter::new(file), &header)
@@ -100,7 +100,7 @@ pub(crate) fn write_window(
         zrec: zenkey_fleet::ZREC_VERSION,
         selectors,
         base,
-        captured_at: zenkey_fleet::record::rfc3339_now(),
+        captured_at: zenkey_fleet::tape::record::rfc3339_now(),
     };
     let mut writer =
         zenkey_fleet::ZrecWriter::new_at(out, &header, epoch).map_err(|e| e.to_string())?;

@@ -115,7 +115,7 @@ impl NodeRoster {
         // pair, and *borrowed*: `keyexpr::new(&str)` validates without
         // allocating, where `KeyExpr::new(String)` builds an `OwnedKeyExpr`
         // — an `Arc<str>` copy — per selector per producer per tick.
-        // `zenkey_fleet::skeleton::merge` was deliberately fixed this way
+        // `zenkey_fleet::model::skeleton::merge` was deliberately fixed this way
         // (`docs/zero-copy.md`) and this site was missed (#178).
         let watched: Vec<&keyexpr> = watched
             .iter()
@@ -169,7 +169,7 @@ impl NodeRoster {
         self.nodes.get(origin)
     }
 
-    /// Origin → live producers, in the shape `zenkey_fleet::roster` returns —
+    /// Origin → live producers, in the shape `zenkey_fleet::bus::roster` returns —
     /// for joins that need "who is actually up".
     ///
     /// `None` while unseeded, and that is the whole point of the method: a

@@ -1,11 +1,52 @@
 # zenkey-fleet
 
 The fleet engine for [keyspace-v2](https://github.com/p13marc/zenkey) Zenoh
-tooling — the shared core of the `zenctl` and `zengui` explorers:
+tooling — the shared core of the `zenctl` and `zengui` explorers, in five
+layers:
+
+```text
+  bus/     holds a session      →  observations
+  model/   holds values         →  meaning
+  judge/   holds meaning        →  verdicts
+  report/  the serialized shapes every layer above hands out
+  tape/    traffic as a thing: captured, replayed, manufactured, timed
+```
+
+Placing a module is one question in order: does it need a session (`bus/`),
+can it answer from values already in hand (`model/`), does it say whether
+something is *wrong* (`judge/`), does it turn a stream into a recording or
+back (`tape/`)? A new serde-pinned struct is not a module question at all —
+it goes to `report/`, by the rule that module's docs state.
+
+## `bus/` — everything holding a session
 
 - **`query`** — the RFC 05 §2.1 fan-in discipline (`fleet_get`: target `All`,
   consolidation `None`, attribution by the reply's own key), in exactly one
   place. Answers carry zenoh's refcounted `ZBytes` — no per-reply copies.
+- **`write`** — the only two ways an explorer writes: `Publication` (a
+  declared publisher with the closed QoS enum applied — `send`, and since
+  #115 `retire`, the RFC 04 §1.2 tombstone; there is deliberately no
+  bare-put and no bare-delete helper) and `call`, the disciplined RPC.
+  `check_retire` is the class guard: state keys pass, everything else
+  prices the operator act (`--i-know`), wildcards refuse outright.
+- **`monitor`** — `Monitor`: subscription multiplexing + liveliness watching
+  (with `history(true)` — the roster arrives on join) into a bounded
+  broadcast of events. Overflow surfaces as an explicit `Dropped(n)`;
+  render loops pull the immutable `KeyTreeSnapshot` on the stats tick,
+  so a hot bus cannot melt a UI.
+- **`body`** *(feature `decode`)* — the encode direction: `prepare_publish` /
+  `prepare_request` turn a typed body into the bytes that actually ship,
+  encoded against the served schema and labelled with the declared
+  `Encoding`. Encode resolution is declared > registry > the schema kind's
+  native encoding (never a sniff of the operator's text). A body that could
+  not be encoded is reported as such — `BodySource` distinguishes encoded,
+  as-typed, and raw, so no caller can ship an unencoded payload silently.
+- **`roster` / `admin`** — the liveliness roster and raw `@/**` admin-space
+  access. Plus `session`, `serve`, `scout`, `seed`, `blob`, `discover`,
+  `producer`.
+
+## `model/` — meaning, without a session
+
 - **`registry`** — `SliceSet`: registry slices from the live bus
   (`introspect` fan-in) or local `registry/*.toml` dirs, one type either
   way, with precedence-correct subject refinement (shared `zenkey::pattern`
@@ -16,28 +57,41 @@ tooling — the shared core of the `zenctl` and `zengui` explorers:
   structural fallback; encoding resolution is sample > registry > sniff.
   `decode-protobuf` adds dynamic protobuf via the served FileDescriptorSet,
   `decode-cdr` adds XCDR1 (DDS / ROS 2) against a served `cdr` field list.
-- **`body`** *(feature `decode`)* — the other direction: `prepare_publish` /
-  `prepare_request` turn a typed body into the bytes that actually ship,
-  encoded against the served schema and labelled with the declared
-  `Encoding`. Encode resolution is declared > registry > the schema kind's
-  native encoding (never a sniff of the operator's text). A body that could
-  not be encoded is reported as such — `BodySource` distinguishes encoded,
-  as-typed, and raw, so no caller can ship an unencoded payload silently.
-- **`write`** — the only two ways an explorer writes: `Publication` (a
-  declared publisher with the closed QoS enum applied — `send`, and since
-  #115 `retire`, the RFC 04 §1.2 tombstone; there is deliberately no
-  bare-put and no bare-delete helper) and `call`, the disciplined RPC.
-  `check_retire` is the class guard: state keys pass, everything else
-  prices the operator act (`--i-know`), wildcards refuse outright.
-- **`sub`** — `Monitor`: subscription multiplexing + liveliness watching
-  (with `history(true)` — the roster arrives on join) into a bounded
-  broadcast of events. Overflow surfaces as an explicit `Dropped(n)`;
-  render loops pull the immutable `KeyTreeSnapshot` on the stats tick,
-  so a hot bus cannot melt a UI.
 - **`stats` / `tree`** — per-key rate/byte counters (EWMA, SourceInfo gap
   counting) and the chunk-grouped snapshot they build.
-- **`roster` / `admin`** — the liveliness roster and raw `@/**` admin-space
-  access.
+- **`bounded` / `retain` / `examples`** — the three mechanisms every
+  long-running projection shares: the O6 ceiling with its eviction ledger,
+  the retention budget, and "up to N examples, and the count of what they
+  stand for". Plus `facts`, `project`, `skeleton`, `diff`.
+
+## `judge/` — verdicts
+
+`doctor`, `expect`, `condition`, `field`, `why`, `cutover`, `retired`,
+`budget`, and `common` — the vocabulary they share: the stable check- and
+rung-id registries, the RFC 09 §5.3 synthetic marker, the definition of "the
+new plane", the passive-observation scopes, and the caps on how many
+offenders a report names.
+
+## `report/` — every serialized contract
+
+One rule, stated in full at the top of the module: **every serde-pinned wire
+shape lives here, split by domain, with its pinned-shape test beside it; a
+type the wire never sees stays in the module that computes it.** The domain
+files are private and re-exported flat, so every shape is spelled
+`zenkey_fleet::report::Thing` and the split can be re-cut without a call site
+moving.
+
+## `tape/` — traffic as a thing
+
+`record` (`.zrec` capture and replay, normative for the format), `ingest`
+(the row dialect it is made of), `generate` and `synth` (traffic that never
+happened, marked as such), `bench`.
+
+---
 
 Sessions opened here are deliberately **un-namespaced** (RFC 09 §5): an
 explorer sees the wire as it really is. Do not "fix" that.
+
+Explorer *configuration* — named connection contexts, `~/.config`, the
+completion cache — is not here; it lives in `zenkey-explorer-config`, so a
+library consumer of this crate does not pay for `dirs` and `toml`.

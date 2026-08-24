@@ -1,7 +1,7 @@
 //! `zenctl watchdog` (#227) — transitions, not states.
 //!
 //! The continuous observer over the engine's closed condition vocabulary
-//! (`zenkey_fleet::condition`): every genuine state change is one ndjson
+//! (`zenkey_fleet::judge::condition`): every genuine state change is one ndjson
 //! line on stdout, an unchanged tick prints nothing. A **foreground**
 //! process, explicitly launched, one per invocation, no shared state — the
 //! redesign ledger's "no daemon" decision rejected a hidden discovery-caching
@@ -14,7 +14,8 @@
 use std::io::Write as _;
 
 use anyhow::Result;
-use zenkey_fleet::condition::{Condition, Transition, WatchdogSpec, run_watchdog};
+use zenkey_fleet::judge::condition::{Condition, WatchdogSpec, run_watchdog};
+use zenkey_fleet::report::Transition;
 
 use crate::Bus;
 
@@ -32,7 +33,7 @@ pub async fn run(rules: &[String], every: f64, count: Option<u64>, args: &Bus) -
     // registry; with none loaded they observe and say what they could not
     // judge (O4), and doctor rules run their own asks.
     let slices = args.slices_optional().await?;
-    let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
     let spec = WatchdogSpec {
         rules,
         tick,

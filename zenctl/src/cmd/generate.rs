@@ -3,7 +3,7 @@
 //! consumer-robustness testing.
 //!
 //! Orchestration only: the plan, the schedule, and the synthesis live in
-//! `zenkey_fleet::generate`/`synth`. This command's job is the etiquette —
+//! `zenkey_fleet::tape::generate`/`synth`. This command's job is the etiquette —
 //! print the full plan before anything is published (the replay dry-run
 //! precedent), refuse a wide run without `--i-know`, and stamp the RFC 09
 //! §5.3 synthetic marker via the engine.
@@ -28,7 +28,8 @@
 
 use crate::cli::Pattern;
 use anyhow::Result;
-use zenkey_fleet::generate::{Fault, GenPattern, GenSpec};
+use zenkey_fleet::report::Fault;
+use zenkey_fleet::tape::generate::{GenPattern, GenSpec};
 
 use crate::Bus;
 
@@ -125,7 +126,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
 
     let session = args.session().await?;
     let slices = args.slice_set().await?;
-    let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
     let set = match schema_set {
         Some(path) => Some(
             zenkey::schema::SchemaSet::parse(&std::fs::read_to_string(path)?).map_err(|e| {
@@ -169,7 +170,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
     };
 
     let fleet = args.fleet(&session);
-    let plan = zenkey_fleet::generate::build_plan(
+    let plan = zenkey_fleet::tape::generate::build_plan(
         Some(&fleet),
         &store,
         &slices,
@@ -211,7 +212,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
 
     // The RFC 08 halves for the impersonated producers, on request.
     let mock = if serve_describe {
-        let m = zenkey_fleet::generate::serve_describe(
+        let m = zenkey_fleet::tape::generate::serve_describe(
             &fleet,
             &origin,
             &slices,
@@ -229,7 +230,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         None
     };
 
-    let report = zenkey_fleet::generate::run_gen(&fleet, &plan, &spec).await?;
+    let report = zenkey_fleet::tape::generate::run_gen(&fleet, &plan, &spec).await?;
     drop(mock);
 
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;

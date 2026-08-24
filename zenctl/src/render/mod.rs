@@ -35,7 +35,7 @@
 //! report's coverage is known before the first row; a stream's is not — its
 //! coverage statement is the `seed_complete` line, which arrives when it
 //! becomes true. And `echo --format ndjson` is an *input* format:
-//! `zenkey_fleet::ingest::parse_row` reads it back for `pub --from
+//! `zenkey_fleet::tape::ingest::parse_row` reads it back for `pub --from
 //! ndjson` and `.zrec` (RFC 09 §5.2), and it counts a line it cannot parse as
 //! *malformed*. Extra fields on a row are ignored; a prepended envelope line
 //! would break the round trip (#235).

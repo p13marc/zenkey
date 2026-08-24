@@ -24,14 +24,14 @@
 //! it would have read the developer's real config.
 //!
 //! Nothing here opens a file, a session, or a process. The engine legislated
-//! this for its own half already — `zenkey_fleet::context_store` opens with
+//! this for its own half already — `zenkey_explorer_config` opens with
 //! "Everything here is pure and fallible … zenctl turns the `Err` into its own
 //! exit code at its own edge" — and this is zenctl keeping that bargain.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use zenkey_fleet::context_store::StoredContext;
+use zenkey_explorer_config::StoredContext;
 
 /// The default reply/watch window, in seconds, when neither flag nor context
 /// names one.

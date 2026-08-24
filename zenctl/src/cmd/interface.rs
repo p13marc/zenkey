@@ -27,7 +27,7 @@ pub async fn show(type_name: &str, schema: bool, full: bool, args: &Bus) -> Resu
         // already says who, so this is never a fleet fan-out.
         let producers = super::schema::carriers_of(&slices, type_name);
         let session = args.session().await?;
-        let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
+        let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
         // `Asked` even when nothing answered: asked-and-unserved is a
         // different fact from never-asked (O4, R4).
         report.schemas = zenkey_fleet::report::Asked::Asked(

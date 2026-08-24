@@ -35,7 +35,7 @@ async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
     )
     .await
     .expect("serving session");
-    let asking = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
+    let asking = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asking session");
     // The listen address as a locator spells it, for the link evidence below.
@@ -119,10 +119,10 @@ async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_admin_less_mesh_is_a_reading_not_a_mesh() {
     let endpoint = endpoint();
-    let _listen = zenkey_fleet::session::open(&[], std::slice::from_ref(&endpoint), false)
+    let _listen = zenkey_fleet::bus::session::open(&[], std::slice::from_ref(&endpoint), false)
         .await
         .expect("listener");
-    let asking = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
+    let asking = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asker");
     let report = zenkey_fleet::topology(&asking, Duration::from_millis(400))

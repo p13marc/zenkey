@@ -12,7 +12,7 @@
 
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::stats::{StampClass, StatsTable};
+use zenkey_fleet::model::stats::{StampClass, StatsTable};
 
 #[test]
 fn a_bounded_table_reports_what_it_retired() {
