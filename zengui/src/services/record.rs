@@ -3,15 +3,27 @@
 //!
 //! Here rather than in [`super::sweep`] because none of it is a query or a
 //! bus write: the capture is a long-lived tap on the monitor that ends when
-//! the app says so — the `Notify` is the only way to stop it, and a recording
-//! that could only be ended by closing the window would lose its trailer —
-//! and the load is that tap read back.
+//! the app says so — the stop signal is the only way to end it, and a
+//! recording that could only be ended by closing the window would lose its
+//! trailer — and the load is that tap read back.
+//!
+//! ## The stop signal is a `oneshot`, not a `Notify` (#335)
+//!
+//! A `Notify` stores no permit for `notify_waiters`, and this task does real
+//! work before it can wait on anything: iced has to poll it at all, then
+//! `monitor.watched()` awaits. Toggling Record off in that window fired into
+//! nothing, the toggle had already taken the handle out of the state, and the
+//! capture then held an `EventStream` and an open file for the rest of the
+//! process's life with nothing left to stop it with. A `oneshot` **stores**
+//! its value: fired before the receiver is ever polled, it is still there when
+//! the receiver is polled. Dropping the handle ends the capture too — a
+//! sender that goes away resolves the receiver — so no path leaks the task.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use iced::Task;
-use zenkey_fleet::{Monitor, SampleView};
+use zenkey_fleet::{Monitor, MonitorCore, SampleView};
 
 use crate::message::{Message, WorkspaceMsg};
 use crate::view::replay::ReplayMsg;
@@ -25,7 +37,7 @@ pub fn start(
     monitor: Arc<Monitor>,
     path: String,
     base: String,
-    stop: Arc<tokio::sync::Notify>,
+    stop: tokio::sync::oneshot::Receiver<()>,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -35,32 +47,50 @@ pub fn start(
                 .into_iter()
                 .map(|(_, s)| s)
                 .collect();
-            let header = zenkey_fleet::ZrecHeader {
-                zrec: zenkey_fleet::ZREC_VERSION,
-                selectors,
-                base,
-                captured_at: zenkey_fleet::tape::record::rfc3339_now(),
-            };
-            let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-            let mut writer = zenkey_fleet::ZrecWriter::new(std::io::BufWriter::new(file), &header)
-                .map_err(|e| e.to_string())?;
-            let mut events = monitor.events();
-            let recording = zenkey_fleet::record(
-                &mut events,
-                &mut writer,
-                zenkey_fleet::RecordBounds::default(),
-                |_, _| {},
-            );
-            tokio::select! {
-                r = recording => r.map_err(|e| e.to_string())?,
-                _ = stop.notified() => {}
-            }
-            let (samples, dropped) = writer.counts();
-            writer.finish().map_err(|e| e.to_string())?;
-            Ok((samples, dropped, path))
+            capture(monitor.core(), selectors, path, base, stop).await
         },
         |r| Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::RecordFinished(r))),
     )
+}
+
+/// The capture proper: open the file, tap the core, write until `stop`.
+///
+/// Split from [`start`] on the one seam that matters for the defect — it takes
+/// a [`MonitorCore`], which is constructible without a session, so the
+/// stop-during-setup window is testable offline.
+async fn capture(
+    core: &Arc<MonitorCore>,
+    selectors: Vec<String>,
+    path: String,
+    base: String,
+    stop: tokio::sync::oneshot::Receiver<()>,
+) -> Result<(u64, u64, String), String> {
+    let header = zenkey_fleet::ZrecHeader {
+        zrec: zenkey_fleet::ZREC_VERSION,
+        selectors,
+        base,
+        captured_at: zenkey_fleet::tape::record::rfc3339_now(),
+    };
+    let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    let mut writer = zenkey_fleet::ZrecWriter::new(std::io::BufWriter::new(file), &header)
+        .map_err(|e| e.to_string())?;
+    let mut events = core.events();
+    let recording = zenkey_fleet::record(
+        &mut events,
+        &mut writer,
+        zenkey_fleet::RecordBounds::default(),
+        |_, _| {},
+    );
+    tokio::select! {
+        // Biased on the stop: a capture told to end does not get one more
+        // sample in first, however much traffic is queued behind it.
+        biased;
+        _ = stop => {}
+        r = recording => r.map_err(|e| e.to_string())?,
+    }
+    let (samples, dropped) = writer.counts();
+    writer.finish().map_err(|e| e.to_string())?;
+    Ok((samples, dropped, path))
 }
 
 /// Load a `.zrec` for replay, off the update thread (#255): the parse is
@@ -139,6 +169,80 @@ pub fn save_window(
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// #335: the stop lands *inside* the setup window — before the capture is
+    /// polled at all, which is the widest form of it (iced has to schedule the
+    /// task, and `monitor.watched()` awaits before this is reached). The old
+    /// `Notify::notify_waiters` stored nothing, so with no waiter registered
+    /// the toggle was a no-op: the capture ran for the process lifetime
+    /// holding an `EventStream` and an open file, and the handler had already
+    /// dropped the only handle. A `oneshot` keeps the value, so the capture
+    /// finds it the first time it looks.
+    #[tokio::test]
+    async fn a_stop_fired_before_the_capture_is_polled_still_ends_it() {
+        let dir = std::env::temp_dir().join(format!("zengui-record-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stop-window.zrec");
+
+        let core = zenkey_fleet::MonitorCore::new(64);
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        // Toggle off before the capture future exists, let alone runs.
+        stop.send(()).unwrap();
+
+        let done = tokio::time::timeout(
+            Duration::from_secs(5),
+            capture(
+                &core,
+                vec!["v1/**".to_string()],
+                path.display().to_string(),
+                String::new(),
+                stopped,
+            ),
+        )
+        .await
+        .expect("the capture ignored a stop fired during its setup window (#335)")
+        .expect("the capture failed");
+
+        assert_eq!(done.0, 0, "nothing was published, so nothing was captured");
+        // Stopped, not orphaned: the trailer is on disk, so the file is a
+        // finished recording rather than a handle nobody holds.
+        let state = crate::replay::ReplayState::load(
+            &done.2,
+            std::io::BufReader::new(std::fs::File::open(&path).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(state.rows.len(), 0);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The other half of "cannot be lost": the toggle handler takes the handle
+    /// out of the state, so a handle dropped without being fired — a closed
+    /// window, a panicking update — must end the capture too.
+    #[tokio::test]
+    async fn a_dropped_handle_ends_the_capture_as_well() {
+        let dir = std::env::temp_dir().join(format!("zengui-record-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dropped-handle.zrec");
+
+        let core = zenkey_fleet::MonitorCore::new(64);
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        drop(stop);
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            capture(
+                &core,
+                Vec::new(),
+                path.display().to_string(),
+                String::new(),
+                stopped,
+            ),
+        )
+        .await
+        .expect("a dropped stop handle left the capture running (#335)")
+        .expect("the capture failed");
+        let _ = std::fs::remove_file(&path);
+    }
 
     /// The save path round-trips (#217): a window written through
     /// `write_window` loads back with the same rows at the same offsets —

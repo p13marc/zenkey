@@ -165,7 +165,9 @@ pub(crate) fn update(
         }
         ReplayMsg::RecordToggled => {
             if let Some(handle) = work.replay.recording.take() {
-                handle.stop.notify_waiters();
+                // `send` cannot be lost even if the capture task has not been
+                // polled once yet (#335); `Err` only means it already ended.
+                let _ = handle.stop.send(());
                 return Task::none();
             }
             if work.replay.replay.is_some() {
@@ -178,18 +180,18 @@ pub(crate) fn update(
             let Some(monitor) = obs.monitor.clone() else {
                 return Task::none();
             };
-            let stop = Arc::new(tokio::sync::Notify::new());
+            let (stop, stopped) = tokio::sync::oneshot::channel();
             let path = format!(
                 "zengui-{}.zrec",
                 zenkey_fleet::tape::record::rfc3339_now().replace(':', "-")
             );
             let base = dep.base().to_string();
             work.replay.recording = Some(RecordingHandle {
-                stop: Arc::clone(&stop),
+                stop,
                 path: path.clone(),
             });
             work.replay.recorded = None;
-            services::record::start(monitor, path, base, stop)
+            services::record::start(monitor, path, base, stopped)
         }
         ReplayMsg::RecordFinished(result) => {
             work.replay.recording = None;

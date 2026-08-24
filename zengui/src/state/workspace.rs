@@ -331,11 +331,17 @@ pub(crate) struct ActivityDock {
     pub(crate) tab: ActivityTab,
 }
 
-/// A running capture (#74, started from the location bar): dropping the
-/// notify without firing it would leak the task, so `stop` is fired on
-/// toggle-off and on exit.
+/// A running capture (#74, started from the location bar).
+///
+/// `stop` is a `oneshot` rather than a `Notify` (#335): a notification with
+/// no waiter registered is dropped on the floor, and the capture task cannot
+/// wait on anything until iced has polled it and its setup has run — so a
+/// fast toggle-off fired into nothing and orphaned the recorder, with the
+/// handle already taken out of the state. A `oneshot` stores its value, and
+/// a *dropped* sender resolves the receiver too, so neither firing it nor
+/// losing the handle can leave the task running.
 pub(crate) struct RecordingHandle {
-    pub(crate) stop: Arc<tokio::sync::Notify>,
+    pub(crate) stop: tokio::sync::oneshot::Sender<()>,
     pub(crate) path: String,
 }
 
