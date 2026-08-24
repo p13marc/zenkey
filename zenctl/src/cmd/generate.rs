@@ -16,6 +16,15 @@
 //! pointed at. Each fault perturbs one dimension of a synthesized sample
 //! post-synthesis, so the plan prints exactly what deviates per key, and
 //! every faulted sample's marker carries `fault=<kind>`.
+//!
+//! ## Two guards, two flags (#264)
+//!
+//! There is a *second*, unrelated guard here — a run wider than ten subjects
+//! is a fleet-wide impersonation — and until #264 one `--i-know` discharged
+//! both. That is the one thing an acknowledgement flag must never do:
+//! somebody widening a benign run past the threshold typed `--i-know`, and
+//! from then on `--fault` was armed on that command line. `--wide` carries
+//! the width guard now; `--i-know` means the faults and nothing else.
 
 use crate::cli::Pattern;
 use anyhow::Result;
@@ -64,6 +73,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         serve_describe,
         dry_run,
         i_know,
+        wide,
         bus: _,
     } = cli;
     let (producer, subject, origin) = (producer.as_deref(), subject.as_deref(), origin.as_deref());
@@ -71,25 +81,32 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
     // Fault injection is double-guarded (#163): it produces deliberately
     // near-valid traffic, so it may only ever run knowingly, and only against
     // a bus the operator named — never the ambient context default.
+    // A kind outside the closed vocabulary is a refused input, so it exits 2
+    // like every other one (`crate::exit`) — it used to be a 1, which on this
+    // verb reads "some samples were refused on the wire".
     let faults: Vec<Fault> = fault
         .iter()
-        .map(|s| Fault::parse(s))
+        .map(|s| Fault::parse(s).map_err(|e| crate::exit::unaskable!("{e}")))
         .collect::<Result<_>>()?;
+    // Both guards refuse the *command line*, before anything is generated —
+    // so both exit 2, beside the unknown-kind refusal above (`crate::exit`).
+    // An act's 1 means "the act ran and something came back a finding", and
+    // neither of these ran.
     if !faults.is_empty() {
         if !i_know {
-            anyhow::bail!(
+            return Err(crate::exit::unaskable!(
                 "--fault injects deliberately non-conforming traffic — that is \
                  consumer-robustness testing on a bus you own, not a default. \
                  Pass --i-know to mean it."
-            );
+            ));
         }
         if !explicit_target {
-            anyhow::bail!(
+            return Err(crate::exit::unaskable!(
                 "--fault refuses the ambient target: type the bus on this command \
                  line with --base or an endpoint (--connect/--listen/--zenoh-config). \
                  An exported ZENCTL_BASE or a named context is whatever bus the \
                  shell was pointed at, and faults must never land there by default."
-            );
+            ));
         }
     }
 
@@ -98,12 +115,13 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         .map(|kv| {
             kv.split_once('=')
                 .map(|(k, v)| (k.to_string(), v.to_string()))
-                .ok_or_else(|| anyhow::anyhow!("--var takes k=v, got {kv:?}"))
+                .ok_or_else(|| crate::exit::unaskable!("--var takes k=v, got {kv:?}"))
         })
         .collect::<Result<_>>()?;
-    if duration <= 0.0 {
-        anyhow::bail!("--duration must be a positive number of seconds");
-    }
+    // The one `--duration` in the tool, and it bounds *output* rather than an
+    // observation — which is why it kept the word while every window became
+    // `--for` (#264).
+    let run_for = super::positive_secs("--duration", duration)?;
 
     let session = args.session().await?;
     let slices = args.slice_set().await?;
@@ -144,7 +162,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         vars,
         rate_hz: rate,
         pattern: pattern.into(),
-        duration: std::time::Duration::from_secs_f64(duration),
+        duration: run_for,
         seed,
         tool: "zenctl gen".into(),
         faults,
@@ -183,12 +201,12 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         eprintln!("--dry-run: nothing published");
         return Ok(());
     }
-    if plan.len() > WIDE_ENTRIES && !i_know {
-        anyhow::bail!(
+    if plan.len() > WIDE_ENTRIES && !wide {
+        return Err(crate::exit::unaskable!(
             "{} subjects is a fleet-wide impersonation — narrow with --producer/--subject, \
-             or pass --i-know",
+             or pass --wide",
             plan.len()
-        );
+        ));
     }
 
     // The RFC 08 halves for the impersonated producers, on request.
@@ -215,8 +233,9 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
     drop(mock);
 
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
+    // An act's finding (`crate::exit`): samples the bus would not take.
     if report.refused > 0 {
-        std::process::exit(1);
+        std::process::exit(crate::exit::FINDING);
     }
     Ok(())
 }

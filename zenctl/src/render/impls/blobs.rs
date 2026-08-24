@@ -91,7 +91,7 @@ impl Render for BlobList {
         }
         vec![Note::coverage(format!(
             "{} of {} slice(s) declare a tier. A declaration is a capability, never \
-             possession — `zenctl blob probe <id>` asks who actually holds one",
+             possession — `zenctl blob locate <id>` asks who actually holds one",
             self.slices_considered - self.slices_without_blob,
             self.slices_considered
         ))]

@@ -8,7 +8,19 @@
 
 use anyhow::{Context as _, Result, anyhow, bail};
 
-pub use zenkey_fleet::context_store::{StoredContext, active, load, save};
+pub use zenkey_fleet::context_store::{StoredContext, load, save};
+
+/// The active context, resolved — and a name that resolves to nothing tagged
+/// as **your input** (#264).
+///
+/// The engine returns a plain error, because a library has no exit codes to
+/// choose between. zenctl does: a `--context` that is not in the config file
+/// is a refused input, and this tool exits 2 for those, the same code clap
+/// exits with for a mis-shaped command line (`crate::exit`). It used to be a
+/// 1 on the listings and a 2 on the verdict verbs — one mistake, two codes.
+pub fn active(name: Option<&str>) -> Result<Option<StoredContext>> {
+    zenkey_fleet::context_store::active(name).map_err(|e| crate::exit::unaskable!("{e}"))
+}
 
 /// `zenctl context <verb>` — the six verbs, dispatched.
 ///

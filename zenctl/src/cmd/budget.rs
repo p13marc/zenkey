@@ -9,17 +9,16 @@
 //! (O6), and observed-under-declared is never rendered as a pass (O4 — a
 //! bounded window proves a lower bound, never the population).
 
-use std::time::Duration;
-
 use anyhow::Result;
 
 use crate::Bus;
 
 pub async fn topic_list_budget(
     filter: &super::watch::TopicFilter,
-    secs: u64,
+    secs: f64,
     args: &Bus,
 ) -> Result<()> {
+    let window = super::positive_secs("--for", secs)?;
     let slices = args.slice_set().await?;
     let mut report = filter.apply(&slices)?;
 
@@ -37,7 +36,7 @@ pub async fn topic_list_budget(
     )
     .await?;
     eprintln!("observing the key population for {secs}s…");
-    tokio::time::sleep(Duration::from_secs(secs)).await;
+    tokio::time::sleep(window).await;
     let (keys, evicted, observed_keys) = monitor.core().with_stats(|stats| {
         (
             stats.len(),
@@ -59,7 +58,7 @@ pub async fn topic_list_budget(
         &mut report,
         &obs,
         zenkey_fleet::report::BudgetWindow {
-            window_s: secs as f64,
+            window_s: secs,
             scopes,
             keys,
             evicted,

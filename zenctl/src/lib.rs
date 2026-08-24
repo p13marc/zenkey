@@ -16,10 +16,16 @@
 //!
 //! The gap between the two is drift, and `doctor` (bus + `--registry`) is the
 //! command that reports it.
+//!
+//! Two seams carry the shape of the tool rather than the shape of a command:
+//! [`cli`] is the clap tree and the vocabulary it enforces (#264), and
+//! [`exit`] is the exit contract every verb cites. Read those two and the
+//! rest is verbs.
 pub(crate) mod bus;
 pub mod cli;
 pub(crate) mod degrade;
 pub mod errors;
+pub mod exit;
 pub mod input;
 pub mod render;
 pub mod report;
@@ -36,7 +42,7 @@ use anyhow::Result;
 /// past every way resolution can fail (#209).
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
-    AdminCmd, BaseCmd, BenchCmd, BlobCmd, Cli, Command, InterfaceCmd, KeyCmd, NodeCmd, PubSource,
+    AdminCmd, BaseCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, InterfaceCmd, KeyCmd, NodeCmd,
     RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
 };
 
@@ -90,13 +96,16 @@ pub async fn run() -> Result<()> {
 
     let (cli, gen_target_typed) = parse();
     match cli.command {
+        // ── Nouns ────────────────────────────────────────────────────────
         Command::Topic(TopicCmd::List {
             producer,
             class,
             r#type,
             deprecated,
             watch,
+            every,
             budget,
+            for_secs,
             bus,
         }) => {
             let bus = Bus::resolve(&bus)?;
@@ -106,11 +115,11 @@ pub async fn run() -> Result<()> {
                 type_name: r#type,
                 deprecated,
             };
-            if let Some(secs) = watch {
-                return cmd::watch::topic_list(secs, &filter, &bus).await;
+            if watch {
+                return cmd::watch::topic_list(every, &filter, &bus).await;
             }
-            if let Some(secs) = budget {
-                return cmd::budget::topic_list_budget(&filter, secs, &bus).await;
+            if budget {
+                return cmd::budget::topic_list_budget(&filter, for_secs, &bus).await;
             }
             let report = filter.apply(&bus.slice_set().await?)?;
             crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
@@ -119,138 +128,6 @@ pub async fn run() -> Result<()> {
             let bus = Bus::resolve(&bus)?;
             let report = bus.slice_set().await?.topic_info(bus.base(), &key);
             crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
-        }
-        Command::Topic(TopicCmd::Echo {
-            selector,
-            origin,
-            class,
-            producer,
-            fmt,
-            raw,
-            hex,
-            rate,
-            no_decode,
-            count,
-            seed,
-            bus,
-        }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::echo::run(
-                selector.as_deref(),
-                origin.as_deref(),
-                class.as_deref(),
-                producer.as_deref(),
-                fmt.as_deref(),
-                raw,
-                hex,
-                rate,
-                no_decode,
-                count,
-                seed,
-                &bus,
-            )
-            .await
-        }
-        Command::Topic(TopicCmd::Pub {
-            key,
-            body,
-            from,
-            i_know,
-            qos,
-            encoding,
-            repeat,
-            interval,
-            no_validate,
-            raw,
-            attachment,
-            bus,
-        }) => {
-            let bus = Bus::resolve(&bus)?;
-            // The `ArgGroup` on the variant has already refused every other
-            // combination: exactly one of --from/<KEY>, and <KEY> requires
-            // <BODY>. What is left is the two real shapes (#209).
-            match (from, key, body) {
-                (Some(PubSource::Ndjson), _, _) => {
-                    cmd::publish::run_from_ndjson(qos.as_deref(), interval, i_know, &bus).await
-                }
-                (None, Some(key), Some(body)) => {
-                    cmd::publish::run(
-                        &key,
-                        &body,
-                        qos.as_deref(),
-                        encoding.as_deref(),
-                        repeat,
-                        interval,
-                        no_validate,
-                        raw,
-                        attachment.as_ref(),
-                        &bus,
-                    )
-                    .await
-                }
-                (None, _, _) => unreachable!(
-                    "the `source` ArgGroup requires --from or <KEY>, and <KEY> requires <BODY>"
-                ),
-            }
-        }
-        Command::Topic(TopicCmd::Retire {
-            key,
-            qos,
-            i_know,
-            bus,
-        }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::publish::retire(&key, &qos, i_know, &bus).await
-        }
-        Command::Topic(TopicCmd::Hz {
-            selector,
-            origin,
-            class,
-            producer,
-            window,
-            per_key,
-            loss,
-            latency,
-            bus,
-        }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::rate::run(
-                selector.as_deref(),
-                origin.as_deref(),
-                class.as_deref(),
-                producer.as_deref(),
-                window,
-                per_key || latency,
-                loss,
-                latency,
-                false,
-                &bus,
-            )
-            .await
-        }
-        Command::Topic(TopicCmd::Bw {
-            selector,
-            origin,
-            class,
-            producer,
-            window,
-            per_key,
-            bus,
-        }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::rate::run(
-                selector.as_deref(),
-                origin.as_deref(),
-                class.as_deref(),
-                producer.as_deref(),
-                window,
-                per_key,
-                false,
-                false,
-                true,
-                &bus,
-            )
-            .await
         }
         Command::Node(NodeCmd::Info { origin, bus }) => {
             let bus = Bus::resolve(&bus)?;
@@ -267,83 +144,12 @@ pub async fn run() -> Result<()> {
             }
             cmd::node::list(verbose, &bus).await
         }
-        Command::Base(BaseCmd::List { watch, bus }) => {
+        Command::Base(BaseCmd::List { watch, every, bus }) => {
             let bus = Bus::resolve(&bus)?;
-            if let Some(secs) = watch {
-                return cmd::watch::base_list(secs, &bus).await;
+            if watch {
+                return cmd::watch::base_list(every, &bus).await;
             }
             cmd::base::list(&bus).await
-        }
-        Command::Storage(StorageCmd::List { watch, bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            if let Some(secs) = watch {
-                return cmd::watch::storage_list(secs, &bus).await;
-            }
-            cmd::storage::list(&bus).await
-        }
-        Command::Blob(BlobCmd::List {
-            producer,
-            tier,
-            bus,
-        }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::blob::list(producer.as_deref(), tier.as_deref(), &bus).await
-        }
-        Command::Blob(BlobCmd::Probe { target, bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::blob::probe(&target, &bus).await
-        }
-        Command::Blob(BlobCmd::Fetch {
-            target,
-            from,
-            out,
-            root,
-            allow_unpinned,
-            overwrite,
-            quiet,
-            bus,
-        }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::blob::fetch(
-                &target,
-                &from,
-                out.as_deref(),
-                root.as_deref(),
-                allow_unpinned,
-                overwrite,
-                quiet,
-                &bus,
-            )
-            .await
-        }
-        Command::Admin(AdminCmd::Routers { bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::admin::routers(&bus).await
-        }
-        Command::Admin(AdminCmd::Graph { dot, origins, bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::admin::graph(dot, origins, &bus).await
-        }
-        Command::Get {
-            selector,
-            body,
-            raw,
-            hex,
-            fmt,
-            no_decode,
-            bus,
-        } => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::get::run(
-                &selector,
-                body.as_ref(),
-                raw,
-                hex,
-                fmt.as_deref(),
-                no_decode,
-                &bus,
-            )
-            .await
         }
         Command::Service(ServiceCmd::List { producer, bus }) => {
             let bus = Bus::resolve(&bus)?;
@@ -400,48 +206,15 @@ pub async fn run() -> Result<()> {
             let bus = Bus::resolve(&bus)?;
             cmd::interface::show(&type_name, schema, full, &bus).await
         }
-        Command::Schema {
-            cmd:
-                Some(SchemaCmd::Check {
-                    type_name,
-                    from,
-                    producer,
-                    schema_set,
-                    encoding,
-                    bus,
-                }),
-            ..
-        } => {
-            // A verdict verb: a failure before the question is asked is the
-            // reserved exit 2, never 1 (`cmd::asked`'s rule).
-            let bus = cmd::asked("schema check", Bus::resolve(&bus));
-            cmd::schema::check(
-                &type_name,
-                &from,
-                producer.as_deref(),
-                schema_set.as_deref(),
-                encoding.as_deref(),
-                &bus,
-            )
-            .await
-        }
-        Command::Schema {
-            cmd: None,
-            producer: Some(producer),
+        Command::Schema(SchemaCmd::Show {
+            producer,
             type_name,
             full,
             bus,
-        } => {
+        }) => {
             let bus = Bus::resolve(&bus)?;
-            cmd::schema::dump(&producer, type_name.as_deref(), full, &bus).await
+            cmd::schema::show(&producer, type_name.as_deref(), full, &bus).await
         }
-        Command::Schema {
-            cmd: None,
-            producer: None,
-            ..
-        } => Err(anyhow::anyhow!(
-            "schema needs a <PRODUCER> to dump, or the `check` subcommand"
-        )),
         Command::Registry(RegistryCmd::Export {
             target,
             producer,
@@ -454,23 +227,74 @@ pub async fn run() -> Result<()> {
             let bus = Bus::resolve(&bus)?;
             cmd::registry::diff(&bus).await
         }
-        Command::Registry(RegistryCmd::Retired { listen, bus }) => {
-            // A verdict verb: a failure before the question is asked is the
-            // reserved exit 2, never 1 (`cmd::asked`'s rule).
-            let bus = cmd::asked("registry retired", Bus::resolve(&bus));
-            cmd::registry::retired(listen, &bus).await
-        }
         Command::Registry(RegistryCmd::Lint { dir, ledger, out }) => {
             cmd::registry::lint(&dir, ledger.as_ref(), out)
         }
         Command::Registry(RegistryCmd::Lock { dir, force, out }) => {
             cmd::registry::lock(&dir, force, out)
         }
+        Command::Storage(StorageCmd::List { watch, every, bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            if watch {
+                return cmd::watch::storage_list(every, &bus).await;
+            }
+            cmd::storage::list(&bus).await
+        }
+        Command::Blob(BlobCmd::List {
+            producer,
+            tier,
+            bus,
+        }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::blob::list(producer.as_deref(), tier.as_deref(), &bus).await
+        }
+        Command::Blob(BlobCmd::Locate { target, bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::blob::locate(&target, &bus).await
+        }
+        Command::Blob(BlobCmd::Fetch {
+            target,
+            origin,
+            out,
+            root,
+            allow_unpinned,
+            overwrite,
+            quiet,
+            bus,
+        }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::blob::fetch(
+                &target,
+                &origin,
+                out.as_deref(),
+                root.as_deref(),
+                allow_unpinned,
+                overwrite,
+                quiet,
+                &bus,
+            )
+            .await
+        }
+        Command::Admin(AdminCmd::Routers { bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::admin::routers(&bus).await
+        }
+        Command::Admin(AdminCmd::Graph { dot, origins, bus }) => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::admin::graph(dot, origins, &bus).await
+        }
+        Command::Key(KeyCmd::Includes { a, b, out }) => {
+            cmd::key::relate("includes", &a, &b, out.format, out.color)
+        }
+        Command::Key(KeyCmd::Intersects { a, b, out }) => {
+            cmd::key::relate("intersects", &a, &b, out.format, out.color)
+        }
+        Command::Key(KeyCmd::Canon { expr, out }) => cmd::key::canon(&expr, out.format, out.color),
         Command::Bench(BenchCmd::Rpc {
             origin,
             producer,
             procedure,
-            count,
+            calls,
             concurrency,
             i_know,
             bus,
@@ -481,28 +305,99 @@ pub async fn run() -> Result<()> {
                 &origin,
                 &producer,
                 &procedure,
-                count,
+                calls,
                 concurrency,
                 i_know,
                 &bus,
             )
             .await
         }
-        Command::Cache(cmd) => cmd::cache::dispatch(cmd).await,
-        Command::Context(cmd) => context::dispatch(cmd),
-        Command::Completions { shell, static_only } => completion::emit(shell, static_only),
-        Command::Doctor {
-            deep,
-            sample,
-            listen,
-            fail_on,
-            watch,
-            every,
-            runs,
+
+        // ── Wire verbs ───────────────────────────────────────────────────
+        Command::Get {
+            selector,
+            body,
+            raw,
+            hex,
+            fmt,
+            no_decode,
             bus,
         } => {
             let bus = Bus::resolve(&bus)?;
-            cmd::doctor::run(deep, sample, listen, fail_on, watch, every, runs, &bus).await
+            cmd::get::run(
+                &selector,
+                body.as_ref(),
+                raw,
+                hex,
+                fmt.as_deref(),
+                no_decode,
+                &bus,
+            )
+            .await
+        }
+        Command::Echo(args) => cmd::echo::run(args).await,
+        Command::Pub(args) => cmd::publish::dispatch(args).await,
+        Command::Retire {
+            key,
+            qos,
+            i_know,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::publish::retire(&key, &qos, i_know, &bus).await
+        }
+        Command::Rate {
+            selector,
+            for_secs,
+            bytes,
+            per_key,
+            loss,
+            latency,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::rate::run(
+                &selector,
+                for_secs,
+                per_key || latency,
+                loss,
+                latency,
+                bytes,
+                &bus,
+            )
+            .await
+        }
+        Command::Field {
+            selector,
+            for_secs,
+            max_paths,
+            fail_on,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::field::run(&selector, for_secs, max_paths, fail_on, &bus).await
+        }
+        Command::Record {
+            selector,
+            out,
+            for_secs,
+            count,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::record::run(&selector, &out, for_secs, count, &bus).await
+        }
+        Command::Replay {
+            file,
+            speed,
+            dry_run,
+            force_base,
+            i_know,
+            qos,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::replay::run(&file, speed, dry_run, force_base, i_know, &qos, &bus).await
         }
         Command::Serve {
             keyexpr,
@@ -527,113 +422,7 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
-        Command::Key(KeyCmd::Includes { a, b, out }) => {
-            cmd::key::relate("includes", &a, &b, out.format, out.color)
-        }
-        Command::Key(KeyCmd::Intersects { a, b, out }) => {
-            cmd::key::relate("intersects", &a, &b, out.format, out.color)
-        }
-        Command::Key(KeyCmd::Canon { expr, out }) => cmd::key::canon(&expr, out.format, out.color),
-        Command::Cutover {
-            old_root,
-            window,
-            bus,
-        } => {
-            // A verdict verb: a failure before the question is asked is the
-            // reserved exit 2, never 1 (`cmd::asked`'s rule).
-            let bus = cmd::asked("cutover", Bus::resolve(&bus));
-            cmd::cutover::run(&old_root, window, &bus).await
-        }
         Command::Gen(args) => cmd::generate::run(args, gen_target_typed).await,
-        Command::Expect {
-            selector,
-            within,
-            count,
-            rate_min,
-            rate_max,
-            valid_payload,
-            qos,
-            absent,
-            bus,
-        } => {
-            // A verdict verb: a failure before the question is asked is the
-            // reserved exit 2, never 1 (`cmd::asked`'s rule).
-            let bus = cmd::asked("expect", Bus::resolve(&bus));
-            cmd::expect::run(
-                &selector,
-                within,
-                count,
-                rate_min,
-                rate_max,
-                valid_payload,
-                qos.as_deref(),
-                absent,
-                &bus,
-            )
-            .await
-        }
-        Command::Watchdog {
-            rules,
-            tick,
-            ticks,
-            bus,
-        } => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::watchdog::run(&rules, tick, ticks, &bus).await
-        }
-        Command::Field {
-            selector,
-            window,
-            max_paths,
-            bus,
-        } => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::field::run(&selector, window, max_paths, &bus).await
-        }
-        Command::Probe {
-            target,
-            producer,
-            procedure,
-            bus,
-        } => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::probe::run(&target, &producer, &procedure, &bus).await
-        }
-        Command::Record {
-            selector,
-            origin,
-            class,
-            producer,
-            out,
-            duration,
-            count,
-            bus,
-        } => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::record::run(
-                selector.as_deref(),
-                origin.as_deref(),
-                class.as_deref(),
-                producer.as_deref(),
-                &out,
-                duration,
-                count,
-                &bus,
-            )
-            .await
-        }
-        Command::Replay {
-            file,
-            speed,
-            dry_run,
-            force_base,
-            i_know,
-            qos,
-            bus,
-        } => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::replay::run(&file, speed, dry_run, force_base, i_know, &qos, &bus).await
-        }
         Command::Scout {
             what,
             timeout,
@@ -658,6 +447,90 @@ pub async fn run() -> Result<()> {
             let timeout = resolve::timeout(timeout, stored);
             cmd::scout::run(&what, timeout, &connect, &listen, out.format, out.color).await
         }
+
+        // ── Judgement ────────────────────────────────────────────────────
+        Command::Check(CheckCmd::Expect {
+            selector,
+            for_secs,
+            at_least,
+            rate_min,
+            rate_max,
+            valid_payload,
+            qos,
+            absent,
+            bus,
+        }) => {
+            // A verdict verb: a failure before the question is asked is the
+            // reserved exit 2, never 1 (`exit::asked`'s rule).
+            let bus = exit::asked("check expect", Bus::resolve(&bus));
+            cmd::expect::run(
+                &selector,
+                for_secs,
+                at_least,
+                rate_min,
+                rate_max,
+                valid_payload,
+                qos.as_deref(),
+                absent,
+                &bus,
+            )
+            .await
+        }
+        Command::Check(CheckCmd::Cutover {
+            old_root,
+            for_secs,
+            bus,
+        }) => {
+            let bus = exit::asked("check cutover", Bus::resolve(&bus));
+            cmd::cutover::run(&old_root, for_secs, &bus).await
+        }
+        Command::Check(CheckCmd::Retired { for_secs, bus }) => {
+            let bus = exit::asked("check retired", Bus::resolve(&bus));
+            cmd::registry::retired(for_secs, &bus).await
+        }
+        Command::Check(CheckCmd::Probe {
+            target,
+            producer,
+            procedure,
+            bus,
+        }) => {
+            let bus = exit::asked("check probe", Bus::resolve(&bus));
+            cmd::probe::run(&target, &producer, &procedure, &bus).await
+        }
+        Command::Check(CheckCmd::Schema {
+            type_name,
+            from,
+            producer,
+            schema_set,
+            encoding,
+            bus,
+        }) => {
+            let bus = exit::asked("check schema", Bus::resolve(&bus));
+            cmd::schema::check(
+                &type_name,
+                &from,
+                producer.as_deref(),
+                schema_set.as_deref(),
+                encoding.as_deref(),
+                &bus,
+            )
+            .await
+        }
+        Command::Doctor(args) => cmd::doctor::run(args).await,
         Command::Why(args) => cmd::why::run(args).await,
+        Command::Watchdog {
+            rules,
+            every,
+            count,
+            bus,
+        } => {
+            let bus = Bus::resolve(&bus)?;
+            cmd::watchdog::run(&rules, every, count, &bus).await
+        }
+
+        // ── Meta ─────────────────────────────────────────────────────────
+        Command::Context(cmd) => context::dispatch(cmd),
+        Command::Cache(cmd) => cmd::cache::dispatch(cmd).await,
+        Command::Completions { shell, static_only } => completion::emit(shell, static_only),
     }
 }

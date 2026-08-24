@@ -1,17 +1,23 @@
-//! `blob list / probe / fetch` — the `@blob` plane (RFC 07 §2, issue #58).
+//! `blob list / locate / fetch` — the `@blob` plane (RFC 07 §2, issue #58).
 //!
 //! Three commands with three different costs, and the CLI makes the difference
 //! visible rather than hiding it behind one verb:
 //!
 //! - `list` reads registry slices and touches no data plane at all;
-//! - `probe` fans two *tiny* GETs across origins (§2.5's sanctioned form);
+//! - `locate` fans two *tiny* GETs across origins (§2.5's sanctioned form);
 //! - `fetch` moves bytes, from exactly one origin, at data-low (§2.6).
 //!
+//! `locate`, not `probe` (#264): the tool's other probe — `check probe` — is
+//! defined by *refusing* to fan out ("a `*`-origin probe cannot catch a broken
+//! origin path", RFC 09 §6), and this one is a fan-out by construction. One
+//! word could not carry both meanings, so the fan-out took a different one.
+//!
 //! The shape of the plane is enforced by types, not by checks here: the wide
-//! form is a `BlobProbePrefix` that does not convert into a key, and `--from`
-//! goes through `RemoteOrigin::parse`, which rejects `*`. So "wildcard bulk
-//! fetch is unspellable through the CLI" is a property of the grammar crate
-//! that this module inherits, rather than a validation it could forget.
+//! form is a `BlobProbePrefix` that does not convert into a key, and
+//! `--origin` goes through `RemoteOrigin::parse`, which rejects `*`. So
+//! "wildcard bulk fetch is unspellable through the CLI" is a property of the
+//! grammar crate that this module inherits, rather than a validation it could
+//! forget.
 
 use std::path::{Path, PathBuf};
 
@@ -56,8 +62,8 @@ pub async fn list(producer: Option<&str>, tier: Option<&str>, args: &Bus) -> Res
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
-/// `blob probe <target>` — who holds it, and at which root.
-pub async fn probe(target: &str, args: &Bus) -> Result<()> {
+/// `blob locate <target>` — who holds it, and at which root.
+pub async fn locate(target: &str, args: &Bus) -> Result<()> {
     let target = BlobTarget::parse(target)?;
     let session = args.session().await?;
     // Slices are best-effort here: they only fill `declared_by`, the capability
@@ -68,7 +74,7 @@ pub async fn probe(target: &str, args: &Bus) -> Result<()> {
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
-/// `blob fetch <target> --from <origin> -o <path>` — one origin, verified.
+/// `blob fetch <target> --origin <origin> -o <path>` — one origin, verified.
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch(
     target: &str,
@@ -88,32 +94,38 @@ pub async fn fetch(
     // needs no content store, no destination file, and no pinning flags. A
     // flag that would do nothing is refused rather than swallowed: an ignored
     // `-o` is a script reading a file that was never written.
+    //
+    // All four refusals below are mis-shaped command lines, so they exit 2
+    // (`crate::exit`) — the same code clap gives an inert flag it can express
+    // as a conflict, which these are not because they depend on the target.
     if let BlobTarget::Tree { root: tree_root } = &target {
         if let Some(out) = out {
-            bail!(
+            return Err(crate::exit::unaskable!(
                 "`{}` is inspected, not downloaded: the validated index summary writes no \
                  file, so `-o {}` would be silently ignored — drop it (materializing a tree \
                  is the reference client's `download_tree`, which needs a content store this \
                  explorer deliberately does not keep)",
                 target.spelling(),
                 out.display()
-            );
+            ));
         }
         if overwrite {
-            bail!(
+            return Err(crate::exit::unaskable!(
                 "`--overwrite` does nothing for `{}`: a tree inspection writes no file",
                 target.spelling()
-            );
+            ));
         }
         if let Some(hex) = root {
             let pin = zenkey::ContentHash::parse(hex).map_err(|e| {
-                anyhow::anyhow!("--root {hex}: {e} (RFC 07 §2.1 — the anchor is the content root)")
+                crate::exit::unaskable!(
+                    "--root {hex}: {e} (RFC 07 §2.1 — the anchor is the content root)"
+                )
             })?;
             if &pin != tree_root {
-                bail!(
+                return Err(crate::exit::unaskable!(
                     "--root {pin} contradicts the target root {tree_root}: a tree is pinned \
                      by its own key (RFC 07 §2.3) — drop the flag, or fetch the root you mean"
-                );
+                ));
             }
         }
         let session = args.session().await?;
@@ -145,13 +157,15 @@ pub async fn fetch(
     // then says which it was. Tier 2 needs neither flag: the key is the root.
     let pinned = match (root, matches!(target, BlobTarget::Artifact { .. })) {
         (Some(hex), _) => Some(zenkey::ContentHash::parse(hex).map_err(|e| {
-            anyhow::anyhow!("--root {hex}: {e} (RFC 07 §2.1 — the anchor is the content root)")
+            crate::exit::unaskable!(
+                "--root {hex}: {e} (RFC 07 §2.1 — the anchor is the content root)"
+            )
         })?),
         (None, true) if !allow_unpinned => bail!(
             "refusing a trust-on-first-use fetch: pass --root <hex> (the content root the \
              reference carried), or --allow-unpinned to accept whatever this origin serves. \
              RFC 07 §2.1 requires a reference to carry the identity of the bytes it names; \
-             `zenctl blob probe {}` reports the roots on offer.",
+             `zenctl blob locate {}` reports the roots on offer.",
             target.spelling()
         ),
         (None, _) => None,

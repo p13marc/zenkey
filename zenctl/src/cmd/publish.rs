@@ -1,14 +1,17 @@
-//! `topic pub` — publish through the write facade (issue #47): a declared
-//! publisher, never an ad-hoc put (P7); and since #97, a body that actually
-//! ships in the encoding the subject declares.
+//! `zenctl pub` / `zenctl retire` — publish through the write facade
+//! (issue #47): a declared publisher, never an ad-hoc put (P7); and since
+//! #97, a body that actually ships in the encoding the subject declares.
+//!
+//! Top-level since #264 — publishing is an act on the wire, not a verb of
+//! the `topic` noun, which is what the registry declares.
 //!
 //! ## An empty stdout is the contract (#242)
 //!
 //! Every sentence this module prints goes to **stderr**, and every one of the
 //! sixteen is deliberate. `pub` and `retire` have no document to emit: their
 //! answer is "it went out", and inventing a wire shape for that would be a
-//! shape with no reader. What the empty stdout buys is composition — `topic
-//! echo --format ndjson | topic pub --from ndjson` is the same row shape in
+//! shape with no reader. What the empty stdout buys is composition — `zenctl
+//! echo --format ndjson | zenctl pub --from ndjson` is the same row shape in
 //! both directions (#235, RFC 09 §5.2), and a report on pub's stdout would put
 //! something in the pipe that the next stage did not ask for.
 //!
@@ -35,12 +38,49 @@ pub fn mode(raw: bool, no_validate: bool) -> PrepareMode {
 }
 
 /// Parse an explicit `--qos` flag; the error names the closed vocabulary.
+///
+/// An [`Unaskable`](crate::exit::Unaskable) since #264: a profile name
+/// outside RFC 04 §3's five is this tool refusing your input, so it exits 2
+/// like every other refused input — not 1, which on a write means "the
+/// publish failed".
 pub(super) fn parse_qos(name: &str) -> Result<zenkey::qos::QosProfile> {
     zenkey::qos::QosProfile::from_name(name).ok_or_else(|| {
-        anyhow::anyhow!(
+        crate::exit::unaskable!(
             "unknown QoS profile {name:?} — sampled|refreshed|transition|alert|frame (RFC 04 §3)"
         )
     })
+}
+
+/// `zenctl pub`'s two shapes, told apart once (#209).
+///
+/// The `ArgGroup` on `PubArgs` has already refused every other combination:
+/// exactly one of `--from`/`<KEY>`, and `<KEY>` requires `<BODY>`. What is
+/// left is the two real shapes.
+pub async fn dispatch(cli: crate::cli::PubArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    match (cli.from, cli.key, cli.body) {
+        (Some(crate::cli::PubSource::Ndjson), _, _) => {
+            run_from_ndjson(cli.qos.as_deref(), cli.every, cli.i_know, &bus).await
+        }
+        (None, Some(key), Some(body)) => {
+            run(
+                &key,
+                &body,
+                cli.qos.as_deref(),
+                cli.encoding.as_deref(),
+                cli.times,
+                cli.every,
+                cli.no_validate,
+                cli.raw,
+                cli.attachment.as_ref(),
+                &bus,
+            )
+            .await
+        }
+        (None, _, _) => unreachable!(
+            "the `source` ArgGroup requires --from or <KEY>, and <KEY> requires <BODY>"
+        ),
+    }
 }
 
 /// The subject's declared profile, when the key refines to one (#158).
@@ -92,8 +132,8 @@ pub async fn run(
     body: &Source,
     qos: Option<&str>,
     encoding: Option<&str>,
-    repeat: usize,
-    interval: f64,
+    times: usize,
+    every: f64,
     no_validate: bool,
     raw: bool,
     attachment: Option<&Source>,
@@ -149,7 +189,9 @@ pub async fn run(
     if let Some(note) = matching_note(&publication, key).await {
         eprintln!("{}", note.to_line());
     }
-    let times = repeat.max(1);
+    // `--times` is a count, so 0 means zero and 1 means once (#264). The old
+    // `--repeat` made 0 and 1 the same number, which is one spelling too many
+    // — and the one people typed for "none" was the one that published.
     for n in 0..times {
         publication
             .send(prepared.bytes.clone(), attachment.clone())
@@ -160,7 +202,7 @@ pub async fn run(
             n + 1
         );
         if n + 1 < times {
-            tokio::time::sleep(Duration::from_secs_f64(interval.max(0.0))).await;
+            tokio::time::sleep(Duration::from_secs_f64(every.max(0.0))).await;
         }
     }
     publication.undeclare().await?;
@@ -193,7 +235,7 @@ async fn matching_note(
     }
 }
 
-/// `topic retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
+/// `zenctl retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
 pub async fn retire(key: &str, qos: &str, i_know: bool, args: &Bus) -> Result<()> {
     let qos = parse_qos(qos)?;
     // Slices enrich the guard rather than deciding it — a state key still
@@ -232,22 +274,22 @@ pub async fn retire(key: &str, qos: &str, i_know: bool, args: &Bus) -> Result<()
     Ok(())
 }
 
-/// Where `topic pub` reads from, besides its arguments.
-/// `topic pub --from ndjson` (#125): the pipe made symmetric. Reads the
-/// exact row shape `topic echo --format ndjson` emits, publishes each row
+/// Where `zenctl pub` reads from, besides its arguments.
+/// `zenctl pub --from ndjson` (#125): the pipe made symmetric. Reads the
+/// exact row shape `zenctl echo --format ndjson` emits, publishes each row
 /// through a declared publisher — one per distinct key, reusing the write
 /// facade, never ad-hoc puts — and counts what it could not publish
 /// instead of silently skipping it.
 pub async fn run_from_ndjson(
     default_qos: Option<&str>,
-    interval: f64,
+    every: f64,
     i_know: bool,
     args: &Bus,
 ) -> Result<()> {
     use std::io::BufRead as _;
 
     // An explicit --qos fails fast; otherwise each key falls back to its
-    // declared profile, then sampled — the same ladder as `topic pub` (#158).
+    // declared profile, then sampled — the same ladder as `zenctl pub` (#158).
     let explicit_qos = default_qos.map(parse_qos).transpose()?;
     let session = args.session().await?;
     let slices = args.slices_optional().await?;
@@ -338,8 +380,8 @@ pub async fn run_from_ndjson(
             publication.send(row.payload, row.attachment).await?;
             published += 1;
         }
-        if interval > 0.0 {
-            tokio::time::sleep(Duration::from_secs_f64(interval)).await;
+        if every > 0.0 {
+            tokio::time::sleep(Duration::from_secs_f64(every)).await;
         }
     }
 

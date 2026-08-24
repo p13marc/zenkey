@@ -18,10 +18,10 @@ use zenkey_fleet::condition::{Condition, Transition, WatchdogSpec, run_watchdog}
 
 use crate::Bus;
 
-pub async fn run(rules: &[String], tick: f64, ticks: Option<u64>, args: &Bus) -> Result<()> {
-    if tick <= 0.0 {
-        anyhow::bail!("--tick must be a positive number of seconds");
-    }
+pub async fn run(rules: &[String], every: f64, count: Option<u64>, args: &Bus) -> Result<()> {
+    // `--every`/`--count`, not `--tick`/`--ticks` (#264): one period flag and
+    // one stop-bound flag across the whole tool.
+    let tick = super::positive_secs("--every", every)?;
     let rules: Vec<Condition> = rules
         .iter()
         .map(|r| Condition::parse(r))
@@ -35,13 +35,13 @@ pub async fn run(rules: &[String], tick: f64, ticks: Option<u64>, args: &Bus) ->
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let spec = WatchdogSpec {
         rules,
-        tick: std::time::Duration::from_secs_f64(tick),
-        ticks,
+        tick,
+        ticks: count,
         timeout: args.timeout(),
     };
 
     eprintln!(
-        "watchdog: {} rule(s), tick {tick}s — one ndjson line per genuine state \
+        "watchdog: {} rule(s), every {every}s — one ndjson line per genuine state \
          change, none per unchanged tick; three states, ok/firing/unobservable \
          (RFC 09 §5.1 O4/O6)",
         spec.rules.len()

@@ -1,5 +1,11 @@
-//! `topic echo` v2 — subscribe, refine, schema-decode (RFC 08 §7) with
-//! honest structural fallback.
+//! `zenctl echo` — subscribe, refine, schema-decode (RFC 08 §7) with honest
+//! structural fallback.
+//!
+//! Top-level since #264: subscribing to live traffic is not something the
+//! registry declares, so it is not a verb of the `topic` noun. The rename is
+//! the whole change — the stream, the row shape and the `%`-vocabulary are
+//! untouched, which is what keeps `zenctl echo --format ndjson | zenctl pub
+//! --from ndjson` composing.
 
 use anyhow::Result;
 
@@ -8,30 +14,34 @@ use super::sample::{
     type_tag,
 };
 use crate::Bus;
+use crate::cli::EchoArgs;
 
-/// `topic echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
+/// `zenctl echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
 /// GET-then-subscribe (it drops everything published in the gap).
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    selector: Option<&str>,
-    origin: Option<&str>,
-    class: Option<&str>,
-    producer: Option<&str>,
-    fmt: Option<&str>,
-    raw: bool,
-    hex_payload: bool,
-    rate: bool,
-    no_decode: bool,
-    count: usize,
-    seed: bool,
-    args: &Bus,
-) -> Result<()> {
-    let selector = match selector {
-        // Typed selectors pass the raw seam (`$*` refusal, RFC 03 §2);
-        // composed ones cannot spell it.
-        Some(s) => super::raw_selector(s)?.to_string(),
-        None => super::compose_selector(args, origin, class, producer)?,
-    };
+pub async fn run(cli: EchoArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let EchoArgs {
+        selector: sel,
+        fmt,
+        raw,
+        hex: hex_payload,
+        rate,
+        no_decode,
+        count,
+        seed,
+        bus: _,
+    } = &cli;
+    let (fmt, raw, hex_payload, rate, no_decode, count, seed) = (
+        fmt.as_deref(),
+        *raw,
+        *hex_payload,
+        *rate,
+        *no_decode,
+        *count,
+        *seed,
+    );
+    let selector = super::selector_of(sel, args)?;
     let base = args.base().to_string();
 
     // Slices first (a single introspect fan-in), then subscribe: the slice
