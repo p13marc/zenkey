@@ -157,3 +157,113 @@ async fn origin_down_fires_on_an_absent_origin_and_only_once() {
         transitions[0].evidence
     );
 }
+
+/// #338: the sweep no longer gates the sampling it is judging.
+///
+/// An `origin-down` rule makes every tick ask the roster, and a roster sweep
+/// on this fixture takes the better part of a second. That sweep used to run
+/// *after* the drain loop broke, so for its whole duration nobody attended
+/// the monitor's 1024-slot broadcast — and `dropped_tick` was reset
+/// immediately afterwards, so the samples lost to it were billed to the
+/// *following* window. In the one tool whose entire product is a per-window
+/// verdict.
+///
+/// The bus here carries ~5 000 samples a second, so a sweep-shaped gap of
+/// even a quarter-second overflows the broadcast several times over. With
+/// the sweep running beside the drain, the `dropped` rule stays `ok` for the
+/// whole run: one baseline line, no firing.
+///
+/// Measured while the fix was written: with the sweep after the drain, the
+/// rule changed state three times in three ticks — every one of those drops
+/// the observer's own, and every one billed to the window after the one
+/// that lost them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sweep_does_not_stop_the_sampling_it_judges() {
+    let (a, b) = peer_pair().await;
+    // An  queryable that never answers, so the doctor sweep
+    // really costs its timeout — a fleet that answers nothing at all ends
+    // the query at once and would gate nothing.
+    let stuck: std::sync::Arc<std::sync::Mutex<Vec<zenoh::query::Query>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let _introspect = a
+        .declare_queryable("v1/h-dddddddddddd/@rpc/demo/introspect")
+        .callback({
+            let stuck = std::sync::Arc::clone(&stuck);
+            move |q| stuck.lock().expect("stuck lock").push(q)
+        })
+        .await
+        .expect("introspect queryable");
+
+    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+        .await
+        .expect("declare");
+    let matching = publication.matching_events().await.expect("events");
+
+    let (tx, rx) = std::sync::mpsc::channel::<Transition>();
+    let watchdog = tokio::spawn({
+        let b = b.clone();
+        async move {
+            let slices = zenkey_fleet::SliceSet::default();
+            let spec = WatchdogSpec {
+                rules: vec![
+                    Condition::parse("dropped").expect("rule"),
+                    // The watch: without a selector-bearing rule the
+                    // watchdog subscribes to nothing and there is no drain
+                    // to gate.
+                    Condition::parse(&format!("qos-mismatch {KEY}")).expect("rule"),
+                    // The sweep: a whole doctor run per tick.
+                    Condition::parse("doctor slice-sync").expect("rule"),
+                ],
+                tick: Duration::from_millis(300),
+                ticks: Some(3),
+                timeout: Duration::from_millis(500),
+            };
+            let mut emit = move |t: &Transition| {
+                let _ = tx.send(t.clone());
+            };
+            run_watchdog(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                Some(&slices),
+                &store_of(),
+                &spec,
+                &mut emit,
+            )
+            .await
+        }
+    });
+
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+            .await
+            .expect("matching within 5s")
+            .expect("listener alive")
+    );
+    let flood = tokio::spawn(async move {
+        loop {
+            for _ in 0..100 {
+                if publication.send(b"{}".to_vec(), None).await.is_err() {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
+
+    let summary = watchdog.await.expect("join").expect("run");
+    flood.abort();
+    assert_eq!(summary.ticks, 3);
+
+    let transitions: Vec<Transition> = rx.try_iter().collect();
+    let dropped: Vec<&Transition> = transitions.iter().filter(|t| t.rule == "dropped").collect();
+    assert_eq!(
+        dropped.len(),
+        1,
+        "the drop rule changed state, so the sweep cost the window samples: {transitions:#?}"
+    );
+    assert_eq!(
+        dropped[0].to,
+        CondState::Ok,
+        "baseline clean, and it stayed clean: {}",
+        dropped[0].evidence
+    );
+}
