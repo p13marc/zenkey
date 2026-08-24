@@ -73,7 +73,7 @@ fn a_topic_lists_ndjson_leads_with_the_envelope_then_tags_every_row() {
     assert_data_eq!(
         ndjson(&fx::topic_list()),
         str![[r#"
-{"notes":[{"text":"2 are open-ended ({var...}): the registry fixes their shape, not their members. Use `zenctl topic echo` to see what a live fleet actually publishes"}],"report":"topic-list"}
+{"notes":[{"text":"2 are open-ended ({var...}): the registry fixes their shape, not their members. Use `zenctl echo` to see what a live fleet actually publishes"}],"report":"topic-list"}
 {"class":"telemetry","open_ended":false,"path":"disk/{mount}/used","producer":"sysinfo","registry_version":"1.0","row":"subject","type_name":"TelemetryPoint"}
 {"class":"state","open_ended":false,"path":"health","producer":"sysinfo","registry_version":"1.0","row":"subject","type_name":"HealthSnapshot"}
 {"class":"telemetry","open_ended":true,"path":"by_unit/{unit}/messages_total","producer":"logs","registry_version":"2.0","row":"subject","type_name":"TelemetryPoint"}
@@ -106,7 +106,7 @@ logs  (registry 2.0)
         notes(&fx::topic_list_budget()),
         str![[r#"
 4 registered subject(s).
-2 are open-ended ({var...}): the registry fixes their shape, not their members. Use `zenctl topic echo` to see what a live fleet actually publishes
+2 are open-ended ({var...}): the registry fixes their shape, not their members. Use `zenctl echo` to see what a live fleet actually publishes
 budget: observed for 10s over 2 scope(s), 44 distinct key(s) retained; counts are lower bounds on the population, so under the declared cardinality is not a verdict — only over is (RFC 04 §1.2), and {var...} families are exempt: rest-variable (RFC 08 §6.1)
 
 "#]]

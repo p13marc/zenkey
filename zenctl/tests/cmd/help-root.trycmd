@@ -1,10 +1,21 @@
 The root: the tree itself, the version, and what a bare invocation does.
 
+Read the command list below as three groups, because that is how it was built
+(#264). **Nouns** — `topic`, `node`, `base`, `service`, `interface`, `schema`,
+`registry`, `storage`, `blob`, `admin`, `key`, `bench` — are things declared,
+alive or persisted, and get verbs under them. **Wire verbs** — `get`, `echo`,
+`pub`, `retire`, `rate`, `field`, `record`, `replay`, `serve`, `gen`, `scout` —
+are acts and observations on live traffic, and hang off the root, because an
+act is not a property of a noun. **Judgement** — `check`, `doctor`, `why`,
+`watchdog` — is exit-coded, under the one contract in `zenctl/src/exit.rs`.
+Then `context`, `cache` and `completions`, which are about the tool.
+
 A bare `zenctl` exits **2**, and so does `zenctl key includes` with too few
 arguments — clap's usage error. `zenctl key includes 'v1/**a' 'v1/a'` also
-exits 2, for a completely different reason: the expression does not parse.
-Both live in this corpus so the overload is visible rather than discovered;
-see `key-algebra.trycmd` for the second kind.
+exits 2, and that is now the *same* claim rather than a collision: 2 means the
+question could not be asked, and neither of those asked one. See
+`key-algebra.trycmd` for the pair, and `session-config-error.trycmd` for the
+doctrine that lost.
 
 ```console
 $ zenctl --help
@@ -13,34 +24,36 @@ Explore a keyspace-v2 Zenoh bus (RFC 08 §6)
 Usage: zenctl <COMMAND>
 
 Commands:
-  topic        Subjects: what data exists, and what it means
-  get          GET any selector with the fleet discipline (RFC 05 §2.1)
-  key          Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed)
+  topic        Subjects: what the registry declares, and what it means
   node         Producers: who is alive on the bus
   base         Deployment bases discovered from the wire (needs no --base)
   service      Procedures on the `@rpc` plane
   interface    Payload types declared by the registry slices
-  schema       Dump a producer's served payload schemas (`@rpc/<producer>/describe`), or check a payload against one (`schema check`, #159)
-  registry     The registry as a document: export it, diff it, lint it, burn it down
-  bench        Measure the fleet
-  admin        Zenoh admin space (`@/**`) — the middleware's own introspection
+  schema       Payload schemas as producers serve them (RFC 08 §7)
+  registry     The registry as a document: export it, diff it, lint it, lock it
   storage      Storages: what the mesh persists, joined against declared state
   blob         The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2)
-  serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
-  cutover      Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic
-  gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
-  expect       Await an expectation on the bus, exit-coded for CI (#160)
-  watchdog     Watch conditions on the bus and emit TRANSITIONS as ndjson (#227)
+  admin        Zenoh admin space (`@/**`) — the middleware's own introspection
+  key          Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed)
+  bench        Measure the fleet
+  get          GET any selector with the fleet discipline (RFC 05 §2.1)
+  echo         Subscribe and print decoded samples (on-bus)
+  pub          Publish to a key (issue #47) — a declared publisher, never an ad-hoc put (P7)
+  retire       Retire a key with a tombstone — an authoritative delete (RFC 04 §1.2), riding a declared publisher like `pub` (P7)
+  rate         Measure publish rate over a window (ros2-style), or bytes with --bytes
   field        Field intelligence over a window (#223): per-dotted-path statistics — presence, type stability, change count, numeric range, small-domain values — plus the three findings per-sample validation cannot see
-  probe        Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe
   record       Capture a selector's traffic to a .zrec file (RFC 09 §5.2)
   replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
+  serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
+  gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
   scout        Listen for raw scouting Hellos: zid, whatami, locators
+  check        Exit-coded assertions, all on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the question could not be asked or proven)
+  doctor       Check the fleet against the contracts it claims (RFC 08 §6): drift, freshness, QoS, coverage
+  why          Why is this key silent — the non-verdict, itemised (#214)
+  watchdog     Watch conditions on the bus and emit TRANSITIONS as ndjson (#227)
   context      Manage named connection contexts (config file)
   cache        Inspect or clear the slice cache that feeds shell completion
   completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
-  doctor       Check the fleet against the contracts it claims (RFC 08 §6): drift, freshness, QoS, coverage
-  why          Why is this key silent — the non-verdict, itemised (#214)
   help         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -63,34 +76,36 @@ Explore a keyspace-v2 Zenoh bus (RFC 08 §6)
 Usage: zenctl <COMMAND>
 
 Commands:
-  topic        Subjects: what data exists, and what it means
-  get          GET any selector with the fleet discipline (RFC 05 §2.1)
-  key          Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed)
+  topic        Subjects: what the registry declares, and what it means
   node         Producers: who is alive on the bus
   base         Deployment bases discovered from the wire (needs no --base)
   service      Procedures on the `@rpc` plane
   interface    Payload types declared by the registry slices
-  schema       Dump a producer's served payload schemas (`@rpc/<producer>/describe`), or check a payload against one (`schema check`, #159)
-  registry     The registry as a document: export it, diff it, lint it, burn it down
-  bench        Measure the fleet
-  admin        Zenoh admin space (`@/**`) — the middleware's own introspection
+  schema       Payload schemas as producers serve them (RFC 08 §7)
+  registry     The registry as a document: export it, diff it, lint it, lock it
   storage      Storages: what the mesh persists, joined against declared state
   blob         The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2)
-  serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
-  cutover      Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic
-  gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
-  expect       Await an expectation on the bus, exit-coded for CI (#160)
-  watchdog     Watch conditions on the bus and emit TRANSITIONS as ndjson (#227)
+  admin        Zenoh admin space (`@/**`) — the middleware's own introspection
+  key          Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed)
+  bench        Measure the fleet
+  get          GET any selector with the fleet discipline (RFC 05 §2.1)
+  echo         Subscribe and print decoded samples (on-bus)
+  pub          Publish to a key (issue #47) — a declared publisher, never an ad-hoc put (P7)
+  retire       Retire a key with a tombstone — an authoritative delete (RFC 04 §1.2), riding a declared publisher like `pub` (P7)
+  rate         Measure publish rate over a window (ros2-style), or bytes with --bytes
   field        Field intelligence over a window (#223): per-dotted-path statistics — presence, type stability, change count, numeric range, small-domain values — plus the three findings per-sample validation cannot see
-  probe        Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe
   record       Capture a selector's traffic to a .zrec file (RFC 09 §5.2)
   replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
+  serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
+  gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
   scout        Listen for raw scouting Hellos: zid, whatami, locators
+  check        Exit-coded assertions, all on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the question could not be asked or proven)
+  doctor       Check the fleet against the contracts it claims (RFC 08 §6): drift, freshness, QoS, coverage
+  why          Why is this key silent — the non-verdict, itemised (#214)
+  watchdog     Watch conditions on the bus and emit TRANSITIONS as ndjson (#227)
   context      Manage named connection contexts (config file)
   cache        Inspect or clear the slice cache that feeds shell completion
   completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
-  doctor       Check the fleet against the contracts it claims (RFC 08 §6): drift, freshness, QoS, coverage
-  why          Why is this key silent — the non-verdict, itemised (#214)
   help         Print this message or the help of the given subcommand(s)
 
 Options:

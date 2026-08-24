@@ -2,11 +2,14 @@
 session is opened — which is what lets them be offline cases.
 
 An unknown fault kind is refused by name, the vocabulary spelled out (spray's
-decline precedent, applied to a flag).
+decline precedent, applied to a flag). It exits **2** since #264: a kind
+outside a closed vocabulary is this tool refusing your input, and on `gen` a 1
+means "some samples were refused on the wire", which is a fact about a run
+that happened.
 
 ```console
 $ zenctl gen --fault scramble
-? 1
+? 2
 Error: unknown fault kind "scramble" — known kinds: truncate, wrong-type, extra-field, unregistered-key, wrong-qos, missing-encoding, unstamped
 
 ```
@@ -16,7 +19,7 @@ may only run knowingly. No `--i-know`, no faults.
 
 ```console
 $ zenctl gen --fault truncate
-? 1
+? 2
 Error: --fault injects deliberately non-conforming traffic — that is consumer-robustness testing on a bus you own, not a default. Pass --i-know to mean it.
 
 ```
@@ -31,7 +34,18 @@ this invocation sailed past the guard on the strength of an exported variable.
 
 ```console
 $ zenctl gen --fault truncate --i-know
-? 1
+? 2
 Error: --fault refuses the ambient target: type the bus on this command line with --base or an endpoint (--connect/--listen/--zenoh-config). An exported ZENCTL_BASE or a named context is whatever bus the shell was pointed at, and faults must never land there by default.
 
 ```
+
+## One `--i-know` per verb, and `gen` had two guards on one flag
+
+There is a second, unrelated guard here: a run wider than ten subjects is a
+fleet-wide impersonation. Until #264 the same `--i-know` discharged both — so
+somebody widening a perfectly benign run past the threshold typed `--i-know`,
+and from that moment `--fault` was armed on the same command line. An
+acknowledgement flag must acknowledge exactly one thing. `--wide` carries the
+width guard now, and the graver guard kept the name. That half needs a plan,
+and a plan needs a registry, so it is not an offline case — `gen --help` in
+`help-wire.trycmd` is where both flags are pinned.

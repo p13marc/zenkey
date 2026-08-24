@@ -106,7 +106,7 @@ fn the_ndjson_line_count_is_one_envelope_plus_the_rows() {
 }
 
 /// The envelope leads so that a truncated stream still carries the coverage
-/// claim. `zenctl topic hz --format ndjson | head -5` used to lose the O6
+/// claim. `zenctl rate --format ndjson | head -5` used to lose the O6
 /// eviction count, which is exactly the number a shortened stream needs.
 #[test]
 fn the_first_line_carries_the_coverage_even_if_the_rest_is_cut() {

@@ -48,8 +48,8 @@ Options:
           
           OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
 
-      --timeout <TIMEOUT>
-          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
 
       --zenoh-config <FILE>
           Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
@@ -88,7 +88,7 @@ Options:
           Join each producer against its served introspect slice (app + registry version)
 
       --watch
-          Re-render on liveliness events (no polling — the bus pushes the roster). Reflects a producer stopping within one event
+          Re-render on liveliness events (no polling — the bus pushes the roster, so there is no `--every` here). Reflects a producer stopping within one event
 
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.
@@ -114,8 +114,8 @@ Options:
           
           OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
 
-      --timeout <TIMEOUT>
-          Seconds to wait for replies / to watch the bus (default 5; a context may override the default)
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
 
       --zenoh-config <FILE>
           Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)

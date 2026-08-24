@@ -1,15 +1,20 @@
 Two mis-shapes on the streaming surface, both refused at clap's exit 2 rather
 than silently reinterpreted.
 
-**`--format json` on a stream.** `json` promises one document; `topic echo`,
-`serve`, `watchdog` and `doctor --watch` emit rows as they happen and have no
-single document to emit — bounded runs included (`echo --count 3` is three
-rows, not a document). Answering ndjson to a typed request for json was a
-silent lie; an *exported* `ZENCTL_FORMAT=json` stays a preference and falls
+**`--format json` on a stream.** `json` promises one document; `echo`,
+`serve`, `watchdog` and `doctor --transitions` emit rows as they happen and
+have no single document to emit — bounded runs included (`echo --count 3` is
+three rows, not a document). Answering ndjson to a typed request for json was
+a silent lie; an *exported* `ZENCTL_FORMAT=json` stays a preference and falls
 back to rows, on `refuse_foreign_format`'s terms.
 
+(`doctor --transitions` was `doctor --watch` until #264. `--watch` is a bare
+bool that re-renders a *state* on a list verb; this emits a stream of
+*changes*, which is the opposite kind of output, and one word could not mean
+both.)
+
 ```console
-$ zenctl topic echo --format json
+$ zenctl echo --format json
 ? 2
 error: `--format json` promises one document, and a stream has no single document to emit — use `--format ndjson` (one object per line).
 
@@ -33,7 +38,7 @@ Usage: zenctl <COMMAND>
 
 For more information, try '--help'.
 
-$ zenctl doctor --watch --format json
+$ zenctl doctor --transitions --format json
 ? 2
 error: `--format json` promises one document, and a stream has no single document to emit — use `--format ndjson` (one object per line).
 
@@ -43,17 +48,17 @@ For more information, try '--help'.
 
 ```
 
-**`topic pub --i-know` on the positional-key shape.** The flag prices delete
+**`pub --i-know` on the positional-key shape.** The flag prices delete
 rows in a `--from ndjson` pipe; beside a positional key there is nothing it can
 acknowledge, and an accepted-but-inert flag is a mis-shape — the same exit-2
 pattern as the verb's own `<--from|KEY>` group.
 
 ```console
-$ zenctl topic pub v1/x body --i-know
+$ zenctl pub v1/x body --i-know
 ? 2
 error: the argument '[KEY]' cannot be used with '--i-know'
 
-Usage: zenctl topic pub --base <BASE> <--from <FROM>|KEY> <BODY>
+Usage: zenctl pub --base <BASE> <--from <FROM>|KEY> <BODY>
 
 For more information, try '--help'.
 
