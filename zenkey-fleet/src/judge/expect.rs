@@ -106,6 +106,21 @@ pub async fn run_expect(
     store: &SchemaStore,
     spec: &ExpectSpec,
 ) -> Result<ExpectReport> {
+    // Warm the schemas *before* anything is watched, and seal the store for
+    // the window (#337). A `--valid` window decodes per sample, and a cold
+    // store turned the first sample of each producer into a `describe` GET
+    // awaited inside the drain loop — nobody attending the bounded broadcast
+    // for the duration, so the window lost samples to its own decode and did
+    // not extend its deadline to make up for them. zenctl hands this store
+    // over cold, which is why the warming lives here and not at the call
+    // site.
+    let _sealed = if spec.valid_payload {
+        crate::model::decode::prewarm(fleet, store, slices).await;
+        Some(store.seal())
+    } else {
+        None
+    };
+
     let monitor = Monitor::start(fleet.session(), MonitorSpec::default()).await?;
 
     let mut events = monitor.events();

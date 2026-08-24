@@ -364,6 +364,13 @@ pub async fn run_doctor(
             for (producer, set) in &described {
                 store.insert(producer, set.clone());
             }
+            // And sealed for the window (#337): the GET phase asked every
+            // producer the registry names, so a miss inside the window is a
+            // producer that served nothing — already counted as
+            // `describe_missing`. Left unsealed, that miss is a `describe`
+            // GET awaited inside the drain loop, re-asked every time its
+            // backoff expires, with nobody attending the broadcast.
+            let _sealed = store.seal();
             let (listen_findings, summary) =
                 observe_traffic(fleet, &slice_set, &store, &described, window).await?;
             findings.extend(listen_findings);

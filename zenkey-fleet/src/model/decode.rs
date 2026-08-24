@@ -55,6 +55,26 @@ pub struct SchemaStore {
     /// per decode, which is the same order of cost as the `sets` lookup that
     /// preceded it.
     decoders: std::sync::RwLock<DecoderRegistry>,
+    /// While set, a **decode** answers from the cache or not at all — see
+    /// [`SchemaStore::seal`] (#337).
+    sealed: std::sync::atomic::AtomicBool,
+}
+
+/// A sealed store, for as long as this guard lives ([`SchemaStore::seal`]).
+///
+/// A guard rather than a pair of calls because every judging window has
+/// `?`-shaped ways out, and a store left sealed by an early return would
+/// answer `NoSchema` for the rest of the process.
+pub struct Sealed<'a> {
+    store: &'a SchemaStore,
+}
+
+impl Drop for Sealed<'_> {
+    fn drop(&mut self) {
+        self.store
+            .sealed
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// How long "asked, and answered with nothing usable" stays authoritative
@@ -140,7 +160,34 @@ impl SchemaStore {
             queriers: Mutex::new(HashMap::new()),
             inflight: Mutex::new(HashMap::new()),
             decoders: std::sync::RwLock::new(DecoderRegistry::new()),
+            sealed: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Stop **decodes** from going to the bus until the guard drops (#337).
+    ///
+    /// A judging window's drain loop calls [`decode_sample`] per sample, and
+    /// on a cache miss that used to be a `describe` GET, awaited inside the
+    /// loop, bounded by this store's timeout. Nobody drains the monitor's
+    /// bounded broadcast while it is in flight, so the window loses samples
+    /// to its own decode — and loses them twice over, because the window's
+    /// deadline does not extend to cover the wait. Self-inflicted
+    /// `Dropped(n)` in the one place where the whole product is a verdict
+    /// about a window (RFC 13 §3 O6).
+    ///
+    /// Sealed, a miss is simply a miss: [`set_for`](Self::set_for) answers
+    /// from the cache or returns `None`, which reads through as
+    /// `NotValidated(NoSchema)` — "asked, none served" — and records nothing,
+    /// because a seal is a fact about the observer, not about the producer.
+    ///
+    /// It does **not** stop the store talking to the fleet: [`prewarm`] still
+    /// asks. That is the distinction — a deliberate ask, made where the
+    /// caller has decided it is safe to wait, is fine; an incidental one from
+    /// inside a drain loop is not.
+    pub fn seal(&self) -> Sealed<'_> {
+        self.sealed
+            .store(true, std::sync::atomic::Ordering::Release);
+        Sealed { store: self }
     }
 
     /// Register a custom kind's codec (RFC 08 §7 is open to kinds beyond the
@@ -207,8 +254,27 @@ impl SchemaStore {
         session: &Session,
         producer: &str,
     ) -> Option<std::sync::Arc<SchemaSet>> {
+        let may_ask = !self.sealed.load(std::sync::atomic::Ordering::Acquire);
+        self.set_for_within(session, producer, may_ask).await
+    }
+
+    /// [`set_for`](Self::set_for), stating whether this caller is allowed to
+    /// go to the bus. The seal is a caller-level policy (#337), so the one
+    /// path that is *meant* to ask — [`prewarm`] — passes `true` regardless.
+    async fn set_for_within(
+        &self,
+        session: &Session,
+        producer: &str,
+        may_ask: bool,
+    ) -> Option<std::sync::Arc<SchemaSet>> {
         if let Lookup::Answered(hit) = self.lookup(producer) {
             return hit;
+        }
+        if !may_ask {
+            // Sealed: a miss stays a miss, and nothing is recorded — the
+            // store learned nothing about this producer, and a negative entry
+            // would outlive the window that refused to ask.
+            return None;
         }
         // Singleflight: hold the producer's gate for the duration of the ask.
         let gate = {
@@ -750,6 +816,46 @@ impl DecodedSample {
 /// it (the schema store, the registry), then the sample itself — key,
 /// declared encoding, bytes. It used to open `(store, session, slices, base,
 /// …)`, which put the deployment fourth and split it from its session.
+/// Ask every producer the loaded registry names for its `describe`, before
+/// a judging window opens (#337). Returns how many now have a served set.
+///
+/// **This is exhaustive, not a heuristic.** [`decode_sample`] refines a key
+/// against the slices *first* and only then asks the store, so the only
+/// producers it can ever miss on are the ones the registry names — the set
+/// this walks. After a pre-warm, every decode inside the window is a cache
+/// hit or a cached miss, and neither touches the bus.
+///
+/// Pair it with [`SchemaStore::seal`], which covers what warming cannot: a
+/// producer that answered nothing is cached as a *miss with a backoff*, and
+/// the backoff would expire mid-window and put the GET back inside the drain
+/// loop.
+///
+/// With no registry loaded there is nothing to warm and nothing to miss on —
+/// `decode_sample` returns `NoRegistry` before it reaches the store.
+///
+/// Sequential, like the doctor's own describe sweep: each ask is bounded by
+/// the store's timeout, and the phase is deliberately *before* anything is
+/// watched, so its cost is latency to the window's start rather than samples
+/// lost inside it.
+pub async fn prewarm(
+    fleet: &crate::Fleet<'_>,
+    store: &SchemaStore,
+    slices: Option<&SliceSet>,
+) -> usize {
+    let Some(slices) = slices else { return 0 };
+    let mut served = 0;
+    for slice in slices.slices() {
+        if store
+            .set_for_within(fleet.session(), &slice.name, true)
+            .await
+            .is_some()
+        {
+            served += 1;
+        }
+    }
+    served
+}
+
 pub async fn decode_sample(
     fleet: &crate::Fleet<'_>,
     store: &SchemaStore,

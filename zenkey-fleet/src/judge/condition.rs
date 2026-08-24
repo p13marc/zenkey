@@ -630,10 +630,6 @@ pub async fn run_watchdog(
         }
     }
 
-    // Declared before the window opens — not-asked must never read as "no".
-    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
-    let mut events = monitor.events();
-    let monitor = monitor.watching(&watched).await?;
     let wants_doctor = spec
         .rules
         .iter()
@@ -642,6 +638,26 @@ pub async fn run_watchdog(
         .rules
         .iter()
         .any(|r| matches!(r, Condition::OriginDown { .. }));
+    let wants_decode = spec
+        .rules
+        .iter()
+        .any(|r| matches!(r, Condition::InvalidPayload { .. }));
+
+    // Warmed before the first tick and sealed for the run (#337): a decode
+    // inside the drain loop must never become a `describe` GET, because
+    // nothing attends the broadcast while one is in flight and the tick's
+    // verdict is about the window that lost the samples. zenctl hands this
+    // store over cold. Each tick's sweep re-warms whatever is still
+    // unserved — from beside the drain, where waiting costs nothing.
+    if wants_decode {
+        crate::model::decode::prewarm(fleet, store, slices).await;
+    }
+    let _sealed = store.seal();
+
+    // Declared before the window opens — not-asked must never read as "no".
+    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+    let mut events = monitor.events();
+    let monitor = monitor.watching(&watched).await?;
 
     let started = tokio::time::Instant::now();
     let mut counters: Vec<TickCounters> = vec![TickCounters::default(); spec.rules.len()];
@@ -778,6 +794,11 @@ pub async fn run_watchdog(
         } else {
             None
         };
+        // Re-warm what the next tick will decode (#337): still-unserved
+        // producers, at the store's own backoff, outside the drain loop.
+        if wants_decode {
+            crate::model::decode::prewarm(fleet, store, slices).await;
+        }
         for (i, rule) in spec.rules.iter().enumerate() {
             let eval = match rule {
                 Condition::DoctorCheck { .. } => {
