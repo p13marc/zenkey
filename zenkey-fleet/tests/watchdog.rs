@@ -61,7 +61,7 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
             };
             run_watchdog(
                 &zenkey_fleet::Fleet::new(&b, ""),
-                &slices,
+                Some(&slices),
                 &store_of(),
                 &spec,
                 &mut emit,
@@ -139,7 +139,7 @@ async fn origin_down_fires_on_an_absent_origin_and_only_once() {
     };
     let summary = run_watchdog(
         &zenkey_fleet::Fleet::new(&b, ""),
-        &slices,
+        Some(&slices),
         &store_of(),
         &spec,
         &mut emit,

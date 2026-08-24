@@ -117,17 +117,27 @@ pub fn doctor(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let locals = match SliceSet::from_dirs(&dirs) {
-                Ok(set) => set.slices().to_vec(),
-                Err(e) => return Err(format!("registry dirs: {e}")),
+            // `None` when no dirs were given: "no registry loaded" is a
+            // different claim from "a registry that declares nothing", and
+            // only the engine's `Option` can say which happened.
+            let locals = match dirs.is_empty() {
+                true => None,
+                false => match SliceSet::from_dirs(&dirs) {
+                    Ok(set) => Some(set),
+                    Err(e) => return Err(format!("registry dirs: {e}")),
+                },
             };
-            zenkey_fleet::run_doctor(&zenkey_fleet::Fleet::new(&session, &base), &locals, &spec)
-                .await
-                .map(|r| crate::doctor::DoctorRun {
-                    report: Arc::new(r),
-                    base,
-                })
-                .map_err(|e| e.to_string())
+            zenkey_fleet::run_doctor(
+                &zenkey_fleet::Fleet::new(&session, &base),
+                locals.as_ref(),
+                &spec,
+            )
+            .await
+            .map(|r| crate::doctor::DoctorRun {
+                report: Arc::new(r),
+                base,
+            })
+            .map_err(|e| e.to_string())
         },
         |out| Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(out))),
     )

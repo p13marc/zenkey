@@ -31,7 +31,7 @@ pub async fn run(rules: &[String], tick: f64, ticks: Option<u64>, args: &Bus) ->
     // Slices enrich: `qos-mismatch` and `invalid-payload` judge against the
     // registry; with none loaded they observe and say what they could not
     // judge (O4), and doctor rules run their own asks.
-    let slices = args.slices_optional().await?.unwrap_or_default();
+    let slices = args.slices_optional().await?;
     let store = zenkey_fleet::decode::SchemaStore::new(args.base(), args.timeout());
     let spec = WatchdogSpec {
         rules,
@@ -61,7 +61,7 @@ pub async fn run(rules: &[String], tick: f64, ticks: Option<u64>, args: &Bus) ->
     };
     let fleet = args.fleet(&session);
     let summary = tokio::select! {
-        r = run_watchdog(&fleet, &slices, &store, &spec, &mut emit) => r?,
+        r = run_watchdog(&fleet, slices.as_ref(), &store, &spec, &mut emit) => r?,
         _ = tokio::signal::ctrl_c() => {
             eprintln!("watchdog: interrupted");
             return Ok(());

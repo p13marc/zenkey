@@ -83,7 +83,7 @@ async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
         loop {
             let report = run_doctor(
                 &zenkey_fleet::Fleet::new(&b, ""),
-                std::slice::from_ref(&local),
+                Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
                 &spec(),
             )
             .await
@@ -133,7 +133,7 @@ async fn a_mute_live_producer_is_a_coverage_finding() {
 
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let report = run_doctor(&zenkey_fleet::Fleet::new(&b, ""), &[], &spec())
+            let report = run_doctor(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
                 .await
                 .expect("run_doctor");
             if report.live_producers >= 1 {

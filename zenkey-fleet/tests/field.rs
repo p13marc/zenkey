@@ -305,7 +305,7 @@ async fn the_doctor_listen_phase_flags_the_frozen_field() {
 
     let report = zenkey_fleet::run_doctor(
         &zenkey_fleet::Fleet::new(&b, ""),
-        std::slice::from_ref(&local),
+        Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
         &zenkey_fleet::DoctorSpec {
             deep: false,
             sample: None,

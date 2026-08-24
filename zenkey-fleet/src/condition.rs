@@ -654,7 +654,7 @@ const DECODE_BUDGET: u8 = 2;
 /// window, doctor and roster rules by one ask per tick each.
 pub async fn run_watchdog(
     fleet: &crate::Fleet<'_>,
-    slices: &SliceSet,
+    slices: Option<&SliceSet>,
     store: &SchemaStore,
     spec: &WatchdogSpec,
     emit: &mut (dyn FnMut(&Transition) + Send),
@@ -712,7 +712,6 @@ pub async fn run_watchdog(
         .rules
         .iter()
         .any(|r| matches!(r, Condition::OriginDown { .. }));
-    let locals: Vec<zenkey::RegistrySlice> = slices.slices().to_vec();
 
     let started = tokio::time::Instant::now();
     let mut counters: Vec<TickCounters> = vec![TickCounters::default(); spec.rules.len()];
@@ -767,16 +766,16 @@ pub async fn run_watchdog(
                                     let budget = decode_budget.entry(s.key.clone()).or_default();
                                     if *budget < DECODE_BUDGET {
                                         *budget += 1;
-                                        // `Some`: the watchdog runs over the
-                                        // slice set its caller resolved; an
-                                        // `invalid-payload` rule counts every
-                                        // not-`Valid` verdict the same way,
-                                        // so `NoRegistry` (#246) would change
-                                        // no transition — only the reason.
+                                        // An `invalid-payload` rule counts
+                                        // every not-`Valid` verdict the same
+                                        // way, so with no registry loaded
+                                        // `NoRegistry` (#246) changes no
+                                        // transition — only the reason the
+                                        // sample was not validated.
                                         let d = crate::decode::decode_sample(
                                             fleet,
                                             store,
-                                            Some(slices),
+                                            slices,
                                             &s.key,
                                             Some(&s.encoding),
                                             &s.payload.to_bytes(),
@@ -793,7 +792,7 @@ pub async fn run_watchdog(
                                 }
                             }
                             Condition::QosMismatch { .. } => {
-                                facts_cache.ensure(base, &s.key, Some(slices));
+                                facts_cache.ensure(base, &s.key, slices);
                                 let facts = facts_cache.get(&s.key).expect("just ensured this key");
                                 if let crate::facts::Registration::Registered(sf) =
                                     &facts.registration
@@ -826,7 +825,7 @@ pub async fn run_watchdog(
             Some(
                 crate::doctor::run_doctor(
                     fleet,
-                    &locals,
+                    slices,
                     &crate::doctor::DoctorSpec {
                         deep: false,
                         sample: None,

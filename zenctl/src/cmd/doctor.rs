@@ -42,7 +42,12 @@ pub async fn run(
     // No `--registry` warning here: the degradation rides the report itself —
     // `DoctorReport.synced: None` plus the O4 coverage note in its renderer —
     // so every format carries it, not just a tty's stderr (review finding R1).
-    let locals = zenkey_fleet::SliceSet::from_dirs(&dirs)?.slices().to_vec();
+    // `None` when no dirs were given: the engine distinguishes "no registry
+    // loaded" from "a registry that declares nothing", and an empty set said
+    // the second about the first.
+    let locals = (!dirs.is_empty())
+        .then(|| zenkey_fleet::SliceSet::from_dirs(&dirs))
+        .transpose()?;
 
     let spec = DoctorSpec {
         deep,
@@ -51,10 +56,10 @@ pub async fn run(
         listen: listen.map(std::time::Duration::from_secs_f64),
     };
     if watch {
-        return watch_loop(&session, &locals, &spec, every, runs, args).await;
+        return watch_loop(&session, locals.as_ref(), &spec, every, runs, args).await;
     }
 
-    let report = zenkey_fleet::run_doctor(&args.fleet(&session), &locals, &spec).await?;
+    let report = zenkey_fleet::run_doctor(&args.fleet(&session), locals.as_ref(), &spec).await?;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
 
     let failed = match fail_on {
@@ -75,7 +80,7 @@ pub async fn run(
 /// honest across a fleet that comes and goes.
 async fn watch_loop(
     session: &zenoh::Session,
-    locals: &[zenkey::RegistrySlice],
+    locals: Option<&zenkey_fleet::SliceSet>,
     spec: &DoctorSpec,
     every: f64,
     runs: Option<u64>,
