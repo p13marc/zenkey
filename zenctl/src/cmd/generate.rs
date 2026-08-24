@@ -211,7 +211,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         None
     };
 
-    let report = zenkey_fleet::generate::run_gen(&session, &store, &plan, &spec).await?;
+    let report = zenkey_fleet::generate::run_gen(&session, &plan, &spec).await?;
     drop(mock);
 
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;

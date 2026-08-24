@@ -76,9 +76,7 @@ async fn generated_traffic_is_conforming_marked_and_budgeted() {
         .await
         .expect("plan");
     assert_eq!(plan.len(), 2);
-    let report = run_gen(&generator, &store, &plan, &spec(2.0))
-        .await
-        .expect("run");
+    let report = run_gen(&generator, &plan, &spec(2.0)).await.expect("run");
     assert!(report.sent > 0, "{report:?}");
     assert_eq!(report.refused, 0, "{report:?}");
 
@@ -207,9 +205,7 @@ async fn injected_faults_deviate_by_exactly_one_dimension_and_stay_marked() {
         .expect("plan");
     assert_eq!(plan.len(), 7, "one variant per fault kind: {plan:?}");
 
-    let report = run_gen(&generator, &store, &plan, &spec)
-        .await
-        .expect("run");
+    let report = run_gen(&generator, &plan, &spec).await.expect("run");
     assert!(report.sent > 0, "{report:?}");
 
     // Bucket observed samples by the fault kind their marker names.

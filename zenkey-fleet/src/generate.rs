@@ -597,15 +597,18 @@ pub async fn serve_describe(
 }
 
 /// Run the plan: every entry publishes on its own schedule until the
-/// duration elapses. Bodies synthesize per tick and encode through the
-/// store's validating ladder; a refused body is counted and reported.
+/// duration elapses. Bodies synthesize per tick and encode through a
+/// per-task [`DecoderRegistry`](zenkey::schema::decode::DecoderRegistry);
+/// a refused body is counted and reported.
+///
+/// No [`SchemaStore`]: the plan already carries every schema the run needs
+/// ([`build_plan`] is where the store is asked), and the parameter it used
+/// to take was discarded on the first line.
 pub async fn run_gen(
     session: &Session,
-    store: &SchemaStore,
     plan: &[GenPlanEntry],
     spec: &GenSpec,
 ) -> Result<GenReport> {
-    let _ = store; // encode rides a per-task registry; the store fetched schemas at plan time
     let synth = Synth::new(spec.seed);
     let deadline = tokio::time::Instant::now() + spec.duration;
     let total_s = spec.duration.as_secs_f64();
