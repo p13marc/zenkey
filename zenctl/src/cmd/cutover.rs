@@ -11,6 +11,9 @@ use anyhow::Result;
 use crate::Bus;
 
 pub async fn run(old_root: &str, window: u64, args: &Bus) -> Result<()> {
+    // The flag is whole seconds; the engine takes a `Duration`, which is what
+    // a window *is* — the conversion belongs at this edge and nowhere deeper.
+    let window = std::time::Duration::from_secs(window);
     // A verdict verb: a session that will not open is `asked`'s exit 2 — an
     // exit 1 here would read "the old family still speaks" about a bus
     // nobody listened to.

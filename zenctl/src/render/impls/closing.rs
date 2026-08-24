@@ -174,7 +174,7 @@ impl Render for CutoverReport {
     fn scope(&self) -> Option<ObservedScope> {
         Some(ObservedScope {
             asked: vec![self.old_root.clone(), format!("{}**", self.new_prefix)],
-            window_s: Some(self.window_s as f64),
+            window_s: Some(self.window_s),
         })
     }
 

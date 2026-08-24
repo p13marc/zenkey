@@ -19,6 +19,7 @@
 //! code.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use anyhow::Result;
 
@@ -31,7 +32,8 @@ const EXAMPLE_CAP: usize = 20;
 /// The scope sentence this check operates under — rendered by the caller
 /// before the window opens, because a user watching a 30-second silence
 /// deserves to know what was and was not being watched (O5).
-pub fn scope_note(old_root: &str, new_prefix: &str, window: u64) -> String {
+pub fn scope_note(old_root: &str, new_prefix: &str, window: Duration) -> String {
+    let window = window.as_secs_f64();
     format!(
         "cutover check: {window}s window — asserting {old_root} silent while \
          {new_prefix}** carries traffic (RFC 09 §6). `**` cannot cross \
@@ -49,7 +51,7 @@ pub fn new_prefix(base: &str) -> String {
 pub async fn run_cutover(
     fleet: &crate::Fleet<'_>,
     old_root: &str,
-    window: u64,
+    window: Duration,
 ) -> Result<CutoverReport> {
     let old_expr = zenoh::key_expr::KeyExpr::try_from(old_root.to_string())
         .map_err(|e| anyhow::anyhow!("--old-root {old_root:?} is not a key expression: {e}"))?;
@@ -63,7 +65,7 @@ pub async fn run_cutover(
     let mut leaked: BTreeMap<String, u64> = BTreeMap::new();
     let (mut old_samples, mut new_samples, mut leak_samples, mut dropped) =
         (0u64, 0u64, 0u64, 0u64);
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(window);
+    let deadline = tokio::time::Instant::now() + window;
     loop {
         let item = tokio::select! {
             item = events.recv() => item,
@@ -107,7 +109,7 @@ pub async fn run_cutover(
     Ok(CutoverReport {
         old_root: old_root.to_string(),
         new_prefix,
-        window_s: window,
+        window_s: window.as_secs_f64(),
         old_samples,
         old_keys_seen: old_keys.len(),
         old_examples: cap(&old_keys),
@@ -161,7 +163,7 @@ mod tests {
 
     #[test]
     fn the_scope_note_states_what_it_cannot_see() {
-        let note = scope_note("old/**", "acme/v1/", 30);
+        let note = scope_note("old/**", "acme/v1/", Duration::from_secs(30));
         assert!(note.contains("30s window"));
         assert!(
             note.contains("cannot cross"),

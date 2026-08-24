@@ -403,7 +403,7 @@ pub async fn call(
         key: key.clone(),
         // The wait is part of the claim (R5): a silent call must be readable
         // against how long it listened.
-        timeout_s: timeout.as_secs(),
+        timeout_s: timeout.as_secs_f64(),
         answers: answers
             .iter()
             .map(|a| {

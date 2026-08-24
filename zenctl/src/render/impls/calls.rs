@@ -105,7 +105,7 @@ impl Render for CallReport {
     fn scope(&self) -> Option<ObservedScope> {
         Some(ObservedScope {
             asked: vec![self.key.clone()],
-            window_s: Some(self.timeout_s as f64),
+            window_s: Some(self.timeout_s),
         })
     }
 }

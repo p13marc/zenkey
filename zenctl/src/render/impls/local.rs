@@ -360,7 +360,7 @@ pub struct GetReport {
     pub selector: String,
     /// Seconds waited — the other half of the claim, and what makes a silent
     /// result legible.
-    pub timeout_s: u64,
+    pub timeout_s: f64,
     #[serde(skip)]
     pub answers: Vec<serde_json::Value>,
 }
@@ -403,7 +403,7 @@ impl Render for GetReport {
     fn scope(&self) -> Option<crate::render::ObservedScope> {
         Some(crate::render::ObservedScope {
             asked: vec![self.selector.clone()],
-            window_s: Some(self.timeout_s as f64),
+            window_s: Some(self.timeout_s),
         })
     }
 }

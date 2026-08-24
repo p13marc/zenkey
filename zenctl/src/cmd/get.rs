@@ -97,7 +97,7 @@ pub async fn run(
     )
     .await?;
 
-    let secs = args.timeout().as_secs();
+    let secs = args.timeout().as_secs_f64();
     // A fan-in GET *looks* like a stream and is not: it waits for the window,
     // then has every answer in hand. So it is a document, and the one place
     // that decides which format to print it in is `emit` (#198). The decode

@@ -117,6 +117,8 @@ pub async fn diff(args: &Bus) -> Result<()> {
 /// in `zenkey_fleet::retired`. What is left here is what only a CLI has: the
 /// session, the rendering, and the exit code.
 pub async fn retired(listen: Option<u64>, args: &Bus) -> Result<()> {
+    // Whole seconds off the flag, a `Duration` from here in.
+    let listen = listen.map(std::time::Duration::from_secs);
     // A verdict verb: every pre-run failure below goes through `asked`'s
     // exit 2 — an exit 1 here would read "a retired subject still speaks"
     // about a ledger nobody could walk.

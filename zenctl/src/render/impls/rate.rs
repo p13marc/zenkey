@@ -58,7 +58,7 @@ impl Render for RateView<'_> {
     }
 
     fn table(&self, t: &mut Table) {
-        let secs = self.report.window_s as f64;
+        let secs = self.report.window_s;
         let mut g = Grid::unheaded(2).right(0);
         for row in &self.report.rows {
             if self.bandwidth {
@@ -155,7 +155,7 @@ impl Render for RateView<'_> {
     fn scope(&self) -> Option<ObservedScope> {
         Some(ObservedScope {
             asked: vec![self.report.selector.clone()],
-            window_s: Some(self.report.window_s as f64),
+            window_s: Some(self.report.window_s),
         })
     }
 }

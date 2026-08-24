@@ -120,7 +120,10 @@ budget: observed for 10s over 2 scope(s), 44 distinct key(s) retained; counts ar
 fn a_budgeted_topic_list_ndjson_carries_the_window_in_the_envelope() {
     let out = ndjson(&fx::topic_list_budget());
     let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
-    assert_eq!(envelope["budget"]["window_s"], 10);
+    // `10.0`, not `10`: every window/timeout field in the report set is
+    // `f64` seconds since #218, so serde_json renders an integral one with
+    // its point. The number is the same; the type is now one type.
+    assert_eq!(envelope["budget"]["window_s"], 10.0);
     assert_eq!(envelope["budget"]["scopes"][0], "v1/*/telemetry/**");
     assert_eq!(envelope["budget"]["evicted"], 0);
     let over: serde_json::Value = serde_json::from_str(out.lines().nth(1).unwrap()).unwrap();
@@ -762,7 +765,8 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
     assert!(n.contains("within 5s"), "{n}");
     let envelope: serde_json::Value =
         serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
-    assert_eq!(envelope["timeout_s"], 5);
+    // `5.0`: the seconds unification (#218) — see the budget window above.
+    assert_eq!(envelope["timeout_s"], 5.0);
     let silent_probe = zenkey_fleet::report::ProbeReport {
         call: silent,
         ..fx::probe_report()
@@ -770,7 +774,9 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
     assert!(notes(&silent_probe).contains("within 5s"));
     let envelope: serde_json::Value =
         serde_json::from_str(ndjson(&silent_probe).lines().next().unwrap()).unwrap();
-    assert_eq!(envelope["timeout_s"], 5);
+    // `5.0`: the seconds unification (#218) — a probe wraps a `CallReport`,
+    // so it moved with it, which is the point of rendering them identically.
+    assert_eq!(envelope["timeout_s"], 5.0);
 }
 
 #[test]
@@ -1171,7 +1177,7 @@ fn a_cache_report_names_its_directory_in_both_formats() {
 fn a_get_with_no_replies_names_the_three_silences() {
     let silent = zenctl::render::GetReport {
         selector: "acme/v1/**/state/**".into(),
-        timeout_s: 5,
+        timeout_s: 5.0,
         answers: vec![],
     };
     let n = notes(&silent);
@@ -1180,7 +1186,8 @@ fn a_get_with_no_replies_names_the_three_silences() {
     let doc: serde_json::Value =
         serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
     assert_eq!(doc["selector"], "acme/v1/**/state/**");
-    assert_eq!(doc["timeout_s"], 5);
+    // `5.0`: the seconds unification (#218) — see the budget window above.
+    assert_eq!(doc["timeout_s"], 5.0);
 }
 
 /// Synthetic traffic is still publishing, so the plan is a dry run made
@@ -1384,7 +1391,7 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, Some(5.0), "the probe's observation IS the call");
     let s = scoped(&zenctl::render::GetReport {
         selector: "acme/v1/**/state/**".into(),
-        timeout_s: 5,
+        timeout_s: 5.0,
         answers: vec![],
     });
     assert_eq!(s.asked, ["acme/v1/**/state/**"]);
