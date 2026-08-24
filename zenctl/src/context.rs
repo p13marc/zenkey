@@ -1,14 +1,14 @@
 //! Named connection contexts — zenctl's verbs over the shared store.
 //!
 //! The store itself (format, paths, `load`/`save`/`active`) moved to
-//! `zenkey_fleet::context_store` (issue #35) so zengui resolves the same
+//! `zenkey_explorer_config` (issue #35) so zengui resolves the same
 //! contexts. Reads fall back to the legacy `~/.config/zenctl/` location;
 //! writes go to the neutral `~/.config/zenkey-explorer/` — see the store's
 //! module docs for the migration policy.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 
-pub use zenkey_fleet::context_store::{StoredContext, load, save};
+pub use zenkey_explorer_config::{StoredContext, load, save};
 
 /// The active context, resolved — and a name that resolves to nothing tagged
 /// as **your input** (#307).
@@ -19,7 +19,7 @@ pub use zenkey_fleet::context_store::{StoredContext, load, save};
 /// exits with for a mis-shaped command line (`crate::exit`). It used to be a
 /// 1 on the listings and a 2 on the verdict verbs — one mistake, two codes.
 pub fn active(name: Option<&str>) -> Result<Option<StoredContext>> {
-    zenkey_fleet::context_store::active(name).map_err(|e| crate::exit::unaskable!("{e}"))
+    zenkey_explorer_config::active(name).map_err(|e| crate::exit::unaskable!("{e}"))
 }
 
 /// `zenctl context <verb>` — the six verbs, dispatched.
@@ -81,7 +81,7 @@ pub fn edit(out: crate::cli::OutputArgs) -> Result<()> {
     // Ensure the file exists so a first-run edit opens something real.
     let config = load()?;
     save(&config)?;
-    let path = zenkey_fleet::context_store::config_path();
+    let path = zenkey_explorer_config::config_path();
     let status = std::process::Command::new(&editor)
         .arg(&path)
         .status()
@@ -116,7 +116,7 @@ pub fn create(
 ) -> Result<()> {
     let mut config = load()?;
     let existed = config.contexts.contains_key(name);
-    zenkey_fleet::context_store::upsert(&mut config, name, |c| {
+    zenkey_explorer_config::upsert(&mut config, name, |c| {
         if flags.base.is_some() {
             c.base = flags.base;
         }
@@ -156,13 +156,9 @@ pub fn create(
 }
 
 /// The config file as `context list` reports it.
-fn list_report(
-    config: &zenkey_fleet::context_store::ConfigFile,
-) -> Result<crate::render::ContextList> {
+fn list_report(config: &zenkey_explorer_config::ConfigFile) -> Result<crate::render::ContextList> {
     Ok(crate::render::ContextList {
-        path: zenkey_fleet::context_store::config_path()
-            .display()
-            .to_string(),
+        path: zenkey_explorer_config::config_path().display().to_string(),
         contexts: config
             .contexts
             .iter()

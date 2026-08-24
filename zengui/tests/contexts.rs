@@ -13,7 +13,7 @@
 //! it.
 
 use zengui::view::contexts::ContextForm;
-use zenkey_fleet::StoredContext;
+use zenkey_explorer_config::StoredContext;
 
 /// A context written the way `zenctl context create` writes one is a context
 /// this pane lists, loads and can write back — the acceptance criterion, at
@@ -30,7 +30,7 @@ fn contexts_round_trip_between_the_two_explorers() {
 
     // Write two contexts exactly as zenctl does — a based one and a bus-root
     // one, because those take different paths through the base resolution.
-    let mut config = zenkey_fleet::context_store::load().expect("an absent config is empty");
+    let mut config = zenkey_explorer_config::load().expect("an absent config is empty");
     config.contexts.insert(
         "lab".into(),
         StoredContext {
@@ -56,10 +56,10 @@ fn contexts_round_trip_between_the_two_explorers() {
         },
     );
     config.current = Some("lab".into());
-    zenkey_fleet::context_store::save(&config).expect("save");
+    zenkey_explorer_config::save(&config).expect("save");
 
     // The GUI side reads them back, field for field.
-    let reloaded = zenkey_fleet::context_store::load().expect("reload");
+    let reloaded = zenkey_explorer_config::load().expect("reload");
     assert_eq!(reloaded.current.as_deref(), Some("lab"));
     let names: Vec<&String> = reloaded.contexts.keys().collect();
     assert_eq!(names, ["lab", "root"], "the picker's option list");
@@ -89,13 +89,13 @@ fn contexts_round_trip_between_the_two_explorers() {
     // The structural guard, for the *next* field added to the store: an edit
     // merges over what is there rather than replacing it. Simulated by a form
     // that has not loaded the field at all.
-    let mut cfg = zenkey_fleet::context_store::load().expect("reload");
+    let mut cfg = zenkey_explorer_config::load().expect("reload");
     let bare = ContextForm {
         name: "lab".into(),
         connect: "tcp/127.0.0.1:7450".into(),
         ..ContextForm::default()
     };
-    zenkey_fleet::context_store::upsert(&mut cfg, "lab", |c| {
+    zenkey_explorer_config::upsert(&mut cfg, "lab", |c| {
         // A form that renders only endpoints writes only endpoints.
         c.connect = zengui::view::contexts::endpoints(&bare.connect);
     });

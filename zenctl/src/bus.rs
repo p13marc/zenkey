@@ -12,7 +12,7 @@
 //! and both halves were the same mistake in different clothes — the cache
 //! because nothing in the type system said one resolution, the `exit` because
 //! a getter that can fail has nowhere to put the failure. The engine had
-//! already written the rule down: `zenkey_fleet::context_store` opens with
+//! already written the rule down: `zenkey_explorer_config` opens with
 //! *"Everything here is pure and fallible. No process-global caches, no
 //! `exit()` … zenctl turns the `Err` into its own exit code at its own edge."*
 //! zengui built its half (`zengui/src/config.rs`) against exactly this
@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use zenkey::RegistrySlice;
-use zenkey_fleet::context_store::StoredContext;
+use zenkey_explorer_config::StoredContext;
 
 use crate::cli::{BusArgs, OutputArgs};
 use crate::resolve;
@@ -274,8 +274,9 @@ impl Bus {
         // (`completion::cached`) and `zenctl cache` both resolve the name the
         // same way, and three spellings of one rule is how they drifted
         // (#197).
-        let dir =
-            zenkey_fleet::cache_dir(zenkey_fleet::active_name(self.context_name()).as_deref());
+        let dir = zenkey_explorer_config::cache_dir(
+            zenkey_explorer_config::active_name(self.context_name()).as_deref(),
+        );
         // Nothing is logged on failure: this runs on every command, and a
         // warning about a cache the user did not ask for would be noise on
         // the output they did.

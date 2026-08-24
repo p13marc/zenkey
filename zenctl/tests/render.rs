@@ -1482,7 +1482,7 @@ fn a_context_show_puts_the_settings_flat_on_the_envelope() {
     let show = zenctl::render::ContextShow {
         name: "lab".into(),
         current: true,
-        context: zenkey_fleet::context_store::StoredContext {
+        context: zenkey_explorer_config::StoredContext {
             base: Some("zensight".into()),
             connect: vec!["tcp/127.0.0.1:7447".into()],
             timeout: Some(30),

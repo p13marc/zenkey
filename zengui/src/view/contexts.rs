@@ -23,7 +23,7 @@
 
 use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet::StoredContext;
+use zenkey_explorer_config::StoredContext;
 
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;

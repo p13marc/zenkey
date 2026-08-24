@@ -150,7 +150,7 @@ pub enum DeploymentMsg {
     /// context is unnamed.
     ContextApplied {
         name: Option<String>,
-        stored: Box<zenkey_fleet::StoredContext>,
+        stored: Box<zenkey_explorer_config::StoredContext>,
     },
     ScopeSelected(ScopePreset),
     /// A validated Settings-overlay apply (#188): re-bound the rings live,

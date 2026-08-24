@@ -1,0 +1,19 @@
+[package]
+name = "zenkey-explorer-config"
+description = "The named-connection-context store shared by the keyspace-v2 explorers (zenctl and zengui): one config file, two frontends"
+license = "Apache-2.0"
+version = "0.1.0"
+rust-version = "1.97"
+edition.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Not published: the two consumers are the unpublished explorer binaries, and
+# an explorer's config-file layout is not a contract a library user should be
+# able to depend on from crates.io.
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }

@@ -496,7 +496,7 @@ impl Prefs {
     /// Where the file lives: beside the shared context config, so one
     /// directory holds everything an explorer remembers.
     pub fn path() -> PathBuf {
-        let config = zenkey_fleet::context_store::config_path();
+        let config = zenkey_explorer_config::config_path();
         config
             .parent()
             .map(|d| d.join("zengui.toml"))

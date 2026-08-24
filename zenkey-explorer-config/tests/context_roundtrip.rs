@@ -3,9 +3,7 @@
 //! store. Runs in its own test binary so the env-var override cannot race
 //! other tests.
 
-use zenkey_fleet::context_store::{
-    ConfigFile, StoredContext, active, config_path, load, save, upsert,
-};
+use zenkey_explorer_config::{ConfigFile, StoredContext, active, config_path, load, save, upsert};
 
 #[test]
 fn create_select_resolve_round_trip() {

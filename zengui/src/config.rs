@@ -143,14 +143,14 @@ impl Cli {
     /// what the window remembered (issue #189).
     pub fn settings(self, prefs: &crate::prefs::Prefs) -> anyhow::Result<Settings> {
         let named = self.context.clone().or_else(|| prefs.context.clone());
-        let context = match zenkey_fleet::context_store::active(named.as_deref()) {
+        let context = match zenkey_explorer_config::active(named.as_deref()) {
             Ok(c) => c,
             // A name the user *typed* and that is missing is an error. A
             // remembered one that has since been deleted is a stale
             // preference, and refusing to start over it would be the worst
             // kind of persistence.
             Err(e) if self.context.is_some() => return Err(e),
-            Err(_) => zenkey_fleet::context_store::active(None)?,
+            Err(_) => zenkey_explorer_config::active(None)?,
         };
         self.settings_with(context, prefs)
     }
@@ -160,7 +160,7 @@ impl Cli {
     /// config file.
     pub fn settings_with(
         self,
-        context: Option<zenkey_fleet::StoredContext>,
+        context: Option<zenkey_explorer_config::StoredContext>,
         prefs: &crate::prefs::Prefs,
     ) -> anyhow::Result<Settings> {
         let context = context.unwrap_or_default();
@@ -479,7 +479,7 @@ mod tests {
     /// Context supplies defaults; flags override (issue #35).
     #[test]
     fn context_supplies_defaults_and_flags_override() {
-        let ctx = zenkey_fleet::StoredContext {
+        let ctx = zenkey_explorer_config::StoredContext {
             base: Some("zensight".into()),
             connect: vec!["tcp/10.0.0.1:7447".into()],
             listen: vec![],

@@ -496,7 +496,7 @@ pub struct ContextShow {
     pub name: String,
     pub current: bool,
     #[serde(flatten)]
-    pub context: zenkey_fleet::context_store::StoredContext,
+    pub context: zenkey_explorer_config::StoredContext,
 }
 
 impl Render for ContextShow {

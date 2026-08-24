@@ -25,6 +25,7 @@ zenkey = { workspace = true }
 # disagree about which payloads they can read, nor about which planes they
 # can reach.
 zenkey-fleet = { workspace = true, features = ["blob", "decode-protobuf", "decode-cdr", "validate-json"] }
+zenkey-explorer-config = { workspace = true }
 
 zenoh = { workspace = true }
 iced = { workspace = true }

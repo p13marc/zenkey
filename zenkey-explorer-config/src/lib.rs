@@ -1,8 +1,18 @@
 //! Named connection contexts — the store shared by every explorer (issue #35).
 //!
-//! Born in zenctl (the nats-CLI model, issue #12) and moved into the engine so
-//! zenctl and zengui resolve the same named contexts from the same file. One
-//! fleet, two explorers, one config.
+//! Born in zenctl (the nats-CLI model, issue #12), then moved into the engine
+//! so zenctl and zengui resolve the same named contexts from the same file.
+//! One fleet, two explorers, one config.
+//!
+//! **Why it is a crate of its own and not part of `zenkey-fleet`.** Nothing
+//! here touches the bus: no `Session`, no key, no RFC 05 fan-in. It is
+//! explorer *configuration* — `~/.config`, environment fallbacks, a cache
+//! directory — and living in the engine forced `dirs` and `toml` onto every
+//! library consumer of `zenkey-fleet` so that two binaries could read a TOML
+//! file. The layering rule the engine's `lib.rs` states (bus → model → judge
+//! → report → tape) has no stratum for "where the user keeps their
+//! settings", which is the tell: this is a sibling of the explorers, not a
+//! layer of the engine.
 //!
 //! ```toml
 //! current = "lab"

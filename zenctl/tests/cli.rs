@@ -47,7 +47,7 @@
 //! shell rather than of the code:
 //!
 //! * `ZENKEY_EXPLORER_CONFIG_DIR` overrides both the config file and the slice
-//!   cache (`context_store.rs`). Unset, a developer with an active context
+//!   cache (`zenkey-explorer-config`). Unset, a developer with an active context
 //!   gets different output than CI.
 //! * `--format` carries `env = "ZENCTL_FORMAT"`, and a *set* value makes clap
 //!   render the flag as **required** in every usage line — `Usage: zenctl key

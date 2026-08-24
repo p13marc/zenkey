@@ -131,7 +131,7 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
                 form.active = Some(name.clone());
                 form.status = Some(Ok(format!(
                     "saved {name} to {}",
-                    zenkey_fleet::context_store::config_path().display()
+                    zenkey_explorer_config::config_path().display()
                 )));
                 if !select {
                     return Task::none();
