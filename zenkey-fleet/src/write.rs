@@ -2,7 +2,7 @@
 //! bus — a declared publication, and a disciplined RPC call.
 //!
 //! Reading stayed the engine's whole job until now; both frontends need the
-//! same two write paths (`zenctl topic pub` / `service call`, the zengui
+//! same two write paths (`zenctl pub` / `service call`, the zengui
 //! publish/call pane), and the discipline they must share is exactly the kind
 //! that fails silently when duplicated:
 //!

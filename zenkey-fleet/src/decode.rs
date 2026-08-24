@@ -195,7 +195,7 @@ impl SchemaStore {
     }
 
     /// The producer's **whole** served set, on the same fetch-and-cache path
-    /// as [`schema_for`](Self::schema_for) (issue #51: `zenctl schema
+    /// as [`schema_for`](Self::schema_for) (issue #51: `zenctl schema show
     /// <producer>` dumps the inventory, and asking type-by-type would be a
     /// different question than the one `describe` answers).
     ///

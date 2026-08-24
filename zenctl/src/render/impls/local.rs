@@ -283,7 +283,7 @@ impl Render for GenPlan<'_> {
                 self.duration_s
             )),
             // The marker is not decoration: someone else's `doctor
-            // --listen-for` has to be able to tell this traffic from real.
+            // --for` has to be able to tell this traffic from real.
             Note::coverage("every sample carries the marker {\"synthetic\":true}")
                 .cite("RFC 09 §5.3"),
         ];

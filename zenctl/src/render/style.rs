@@ -27,7 +27,7 @@
 //!
 //! Deliberately **not** `anstream::AutoStream`: its `RawStream` bound cannot
 //! wrap `emit`'s generic `impl Write`, and a wrap-and-strip design would also
-//! rewrite *payload bytes* that legitimately contain escapes — `topic echo` on
+//! rewrite *payload bytes* that legitimately contain escapes — `echo` on
 //! a key whose value is a terminal capture, say. Styles are emitted or they
 //! are not; nothing is ever stripped from data.
 

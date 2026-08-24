@@ -14,7 +14,7 @@
 //! > A degradation is **announced, once per invocation**, on stderr.
 //!
 //! `topic list` is determined by slices — with none, it has nothing to list,
-//! and an empty table would be a lie about the deployment. `topic pub` is
+//! and an empty table would be a lie about the deployment. `pub` is
 //! enriched by them: they supply the declared QoS profile and the schema
 //! encoding, and without them it publishes as-typed and says so. The first
 //! must fail; the second must not.
@@ -30,7 +30,7 @@
 //! ## Not-asked is not answered-no
 //!
 //! The announcement exists because an absent registry is invisible in the
-//! output otherwise. `topic pub` without slices prints `qos: sampled (default
+//! output otherwise. `pub` without slices prints `qos: sampled (default
 //! — no declared profile for this key)`, which reads as *"the registry does
 //! not declare one"* when the truth is *"no registry was consulted"*. That is
 //! RFC 09 §5.1 O4 exactly, and it is why the note is on stderr rather than in

@@ -121,7 +121,7 @@ pub async fn diff(args: &Bus) -> Result<()> {
 /// It lives here, beside the registry it reads, and answers under `check`
 /// because it is an exit-coded assertion (#264): one contract, one family.
 ///
-/// Thin for `cutover`'s reason (#206): the per-entry ladder, the wire
+/// Thin for `check cutover`'s reason (#206): the per-entry ladder, the wire
 /// bucketing and the worst-of verdict are judgement over bus traffic and live
 /// in `zenkey_fleet::retired`. What is left here is what only a CLI has: the
 /// session, the rendering, and the exit code.

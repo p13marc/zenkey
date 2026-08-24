@@ -4,7 +4,7 @@
 //! attributed by its own key (RFC 05 §2.1), error envelopes rendered as
 //! errors (RFC 05 §3) — through `zenkey_fleet::fleet_get`, never the
 //! JSON-lossy admin browse. Payloads ride the same rendering ladder as
-//! `topic echo`: served-schema decode → structural → text → hex.
+//! `echo`: served-schema decode → structural → text → hex.
 
 use anyhow::Result;
 
@@ -57,7 +57,7 @@ pub async fn run(
     let store = zenkey_fleet::decode::SchemaStore::new(&base, args.timeout());
     let session = args.session().await?;
 
-    // Optional query body, riding the same encode ladder as `topic pub`:
+    // Optional query body, riding the same encode ladder as `pub`:
     // when the selector's key part refines to a registered subject the
     // served schema encodes it; otherwise it ships as typed, with the note.
     let payload = match body {
@@ -279,7 +279,7 @@ fn value_row(a: &FleetAnswer, d: &sample::Decoded) -> serde_json::Value {
     // #159's rule, applied to this verb too (#246): present only when the
     // pipeline was asked (`--no-decode` never asks) — and then always, so
     // "valid" and "not checked" cannot be confused by their shared absence
-    // (RFC 09 §5.1 O4). The same terms as `topic echo`'s ndjson row — one
+    // (RFC 09 §5.1 O4). The same terms as `echo`'s ndjson row — one
     // decode ladder, two verbs, both honest about it.
     if let Some(verdict) = &d.verdict {
         obj["verdict"] = match verdict {
@@ -380,7 +380,7 @@ mod tests {
     /// "the registry was consulted and names no schema for this"; a run with
     /// no registry loaded never looked, and its rows must say that instead of
     /// making a claim about the types (RFC 09 §5.1 O4). Same terms as
-    /// `topic echo`'s ndjson row — one decode ladder, two verbs.
+    /// `echo`'s ndjson row — one decode ladder, two verbs.
     #[test]
     fn the_two_not_validated_silences_stay_apart_on_the_wire() {
         use zenkey::schema::validate::NotValidated;

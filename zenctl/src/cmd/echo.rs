@@ -109,7 +109,7 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
                 dropped_total += n;
                 if ndjson {
                     // Tagged (`"row":"dropped"`) so the pipe's other end —
-                    // `topic pub --from ndjson`, via `parse_stream_line` —
+                    // `pub --from ndjson`, via `parse_stream_line` —
                     // skips it as stream metadata instead of counting a
                     // malformed row. A bare `{"dropped":n}` poisoned the
                     // round trip the row dialect exists for (#235).

@@ -701,7 +701,7 @@ impl CallReport {
     }
 }
 
-/// One key's measured traffic over a `topic hz`/`topic bw` window.
+/// One key's measured traffic over a `zenctl rate` window.
 #[derive(Debug, Clone, Serialize)]
 pub struct RateRow {
     pub key: String,
@@ -731,7 +731,7 @@ pub struct RateRow {
     pub unstamped: Asked<u64>,
 }
 
-/// The `topic hz` / `topic bw` report (issue #46) — measured counts plus the
+/// The `zenctl rate` report (issue #46) — measured counts plus the
 /// O6 bound honesty: a bounded [`StatsTable`](crate::stats::StatsTable) that retired
 /// keys must say so, or the totals silently claim more coverage than they
 /// have.
@@ -851,13 +851,13 @@ pub struct DoctorReport {
     pub router_version: Option<String>,
     /// Whether the `--deep` freshness/storage checks ran.
     pub deep: bool,
-    /// The passive listening phase (`--listen-for`, #161) — absent when it did
+    /// The passive listening phase (`--for`, #161) — absent when it did
     /// not run, so pre-#161 JSON consumers see an unchanged document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observation: Option<ObservationSummary>,
 }
 
-/// What `doctor --listen-for` observed (#161) — the scope statement that keeps
+/// What `doctor --for` observed (#161) — the scope statement that keeps
 /// its findings honest (O5: `**` never crosses an `@`-chunk, so this section
 /// names exactly which selectors were watched), and the drop count that
 /// taints them (O6).
@@ -908,7 +908,7 @@ impl DoctorReport {
 // These are deliberately **not** feature-gated, and deliberately carry no
 // `zblob` type. `zenkey-fleet`'s blob *transport* is optional (the `blob`
 // feature); its blob *output shape* is not, because a report is a contract:
-// `zenctl blob probe --format json` must serialize the same document whether
+// `zenctl blob locate --format json` must serialize the same document whether
 // or not the binary was built with the transport, and a frontend must be able
 // to render a probe it deserialized from somewhere else entirely.
 
@@ -1278,7 +1278,7 @@ mod tests {
                 "router_version": "1.9.0",
                 "deep": false,
             }),
-            "without --listen-for the document is byte-identical to pre-#161"
+            "without --for the document is byte-identical to pre-#161"
         );
         // R1 (report-honesty batch): `synced` is three-state. Absent = the
         // served-vs-declared diff never ran (no registry, O4); `[]` = it ran
@@ -1431,7 +1431,7 @@ mod tests {
         );
     }
 
-    /// Same contract as the doctor pin: `zenctl expect --format json` is
+    /// Same contract as the doctor pin: `zenctl check expect --format json` is
     /// consumed by CI scripts, so the shape changes only deliberately (#160).
     #[test]
     fn expect_report_json_shape_is_pinned() {
@@ -1536,7 +1536,7 @@ impl From<crate::judgement::Judgement> for CutoverVerdict {
     }
 }
 
-/// The `zenctl cutover` report (issue #59; RFC 09 §6 half one).
+/// The `zenctl check cutover` report (issue #59; RFC 09 §6 half one).
 #[derive(Debug, Clone, Serialize)]
 pub struct CutoverReport {
     pub old_root: String,
@@ -1610,7 +1610,7 @@ pub struct RetiredEntry {
     pub verdict: CutoverVerdict,
 }
 
-/// The `zenctl registry retired` report (issue #226): the deprecation
+/// The `zenctl check retired` report (issue #226): the deprecation
 /// burn-down. The append-only ledger records dozens of individual
 /// retirements; this says which ones are actually *finished* — a migration
 /// without a burn-down list is a belief.
@@ -1651,9 +1651,9 @@ pub struct RetiredReport {
     pub verdict: CutoverVerdict,
 }
 
-/// The `zenctl expect` verdict (#160). Three states, exit-coded 0/1/2: a CI
-/// assertion that cannot tell "condition not met" from "I could not observe
-/// properly" violates O4/O6 exactly where nobody reads logs carefully.
+/// The `zenctl check expect` verdict (#160). Three states, exit-coded 0/1/2:
+/// a CI assertion that cannot tell "condition not met" from "I could not
+/// observe properly" violates O4/O6 exactly where nobody reads logs carefully.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpectVerdict {
@@ -1706,7 +1706,7 @@ impl From<crate::judgement::Judgement> for ExpectVerdict {
     }
 }
 
-/// The `zenctl expect` report (#160) — the window, what rode through it,
+/// The `zenctl check expect` report (#160) — the window, what rode through it,
 /// and the judgement with its reasons spelled out.
 #[derive(Debug, Clone, Serialize)]
 pub struct ExpectReport {
@@ -1805,7 +1805,7 @@ pub struct FieldReport {
     pub findings: Vec<DoctorFinding>,
 }
 
-/// The `zenctl probe` report (issue #59; RFC 09 §6 half two): how the
+/// The `zenctl check probe` report (issue #59; RFC 09 §6 half two): how the
 /// identity resolved, and what the origin-scoped concrete-key call said.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProbeReport {

@@ -1,8 +1,8 @@
 //! Where zenctl reads a body from (#210).
 //!
-//! Seven arguments name bytes — `topic pub`'s payload and attachment, `get`'s
-//! body, `service call`'s body and attachment, `serve`'s reply, `schema
-//! check`'s payload — and each one accepted the same three spellings: `-` for
+//! Seven arguments name bytes — `pub`'s payload and attachment, `get`'s
+//! body, `service call`'s body and attachment, `serve`'s reply, `check
+//! schema`'s payload — and each one accepted the same three spellings: `-` for
 //! stdin, `@path` for a file, anything else for itself.
 //!
 //! They were seven copies. Four were byte-identical; three had dropped the `-`

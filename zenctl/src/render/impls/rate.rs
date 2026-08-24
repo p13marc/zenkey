@@ -1,5 +1,5 @@
-//! `topic hz` / `topic bw` — the family with view flags, and the reason two
-//! of the three were never view flags at all.
+//! `rate` — the family with view flags, and the reason two of the three were
+//! never view flags at all.
 //!
 //! `output::rate` took `bandwidth`, `loss` and `latency`. Under the trait a
 //! report renders itself and takes no options, so each had to be accounted

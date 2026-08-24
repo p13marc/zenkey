@@ -28,14 +28,14 @@
 //! coverage claim — what was asked (O5), and why nothing was (O4). A trailing
 //! envelope is lost in exactly the case where honesty matters most: today
 //! `zenctl rate --format ndjson | head -5` silently drops "we retired 900
-//! keys to stay within the bound". `blob probe` already argued for a leading
+//! keys to stay within the bound". `blob locate` already argued for a leading
 //! envelope, in a comment; it was right, it just was not the rule.
 //!
 //! **A stream gets no envelope**, and that is principled twice over. A
 //! report's coverage is known before the first row; a stream's is not — its
 //! coverage statement is the `seed_complete` line, which arrives when it
-//! becomes true. And `topic echo --format ndjson` is an *input* format:
-//! `zenkey_fleet::ingest::parse_row` reads it back for `topic pub --from
+//! becomes true. And `echo --format ndjson` is an *input* format:
+//! `zenkey_fleet::ingest::parse_row` reads it back for `pub --from
 //! ndjson` and `.zrec` (RFC 09 §5.2), and it counts a line it cannot parse as
 //! *malformed*. Extra fields on a row are ignored; a prepended envelope line
 //! would break the round trip (#235).
@@ -323,9 +323,9 @@ pub trait Render: Serialize {
     /// There is deliberately nothing to fall through to: an impl that wants
     /// to emit the whole document as one line has to say so by emitting no
     /// rows, which is a reviewable act rather than an omission. Four families
-    /// legitimately do (`record`, `replay`, `cutover`, `expect`) — they have
-    /// no rows — and the test floor keeps an explicit list of them, so adding
-    /// a fifth is a diff.
+    /// legitimately do (`record`, `replay`, `check cutover`, `check expect`) —
+    /// they have no rows — and the test floor keeps an explicit list of them,
+    /// so adding a fifth is a diff.
     fn rows(&self, out: &mut dyn FnMut(Row));
 
     /// The human rendering. Total: no early returns, no `Format`.

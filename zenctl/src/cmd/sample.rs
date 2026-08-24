@@ -1,4 +1,4 @@
-//! Sample rendering shared by the streaming (`topic echo`) and fan-in
+//! Sample rendering shared by the streaming (`echo`) and fan-in
 //! (`get`) verbs (#114): the `--fmt` % vocabulary, the hex form, and the
 //! type tag. One vocabulary, wherever a payload is printed.
 
@@ -126,7 +126,7 @@ pub fn format_sample(
 
 /// One sample, decoded — or deliberately not.
 ///
-/// A named-field struct rather than a tuple because `get` and `topic echo`
+/// A named-field struct rather than a tuple because `get` and `echo`
 /// wanted different widths of the same thing and each grew its own: a 2-tuple
 /// here, a 4-tuple there, both spelling the identical ladder (#210). A caller
 /// that wants two of the four now says which two, instead of the return type
@@ -190,7 +190,7 @@ pub struct Value {
     pub notes: Vec<String>,
 }
 
-/// The rendering as printable text. One spelling for `get` and `topic echo`,
+/// The rendering as printable text. One spelling for `get` and `echo`,
 /// which had two identical ones (#210).
 pub fn value_of(rendering: &zenkey_fleet::decode::Rendering) -> Value {
     match rendering {
@@ -412,7 +412,7 @@ mod tests {
     }
 
     /// Both halves of the rendering fork, and the fact that only one of them
-    /// carries notes. `get` and `topic echo` spelled this match separately and
+    /// carries notes. `get` and `echo` spelled this match separately and
     /// identically; only the *other* helper beside it had drifted (#210),
     /// which is the argument for moving both rather than the one that broke.
     #[test]

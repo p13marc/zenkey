@@ -1,5 +1,5 @@
 //! The four families that end something and report what happened: `record`,
-//! `replay`, `cutover`, `expect`.
+//! `replay`, `check cutover`, `check expect`.
 //!
 //! They are the legitimate row-less impls. A capture is not a list of samples
 //! — it is a file, and a count of what went into it; a verdict is not a list

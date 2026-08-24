@@ -1,7 +1,7 @@
 //! The publish→decode round trip through the non-self-describing codecs
 //! (issues #97, #98), against real zenoh.
 //!
-//! This is the test the old design could not have passed: `topic pub` encoded
+//! This is the test the old design could not have passed: `zenctl pub` encoded
 //! the body against the served schema purely to *validate* it and then put the
 //! operator's JSON text on the wire, so a subject declaring
 //! `application/protobuf` was describable, refinable, decodable — and

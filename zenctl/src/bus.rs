@@ -159,7 +159,7 @@ impl Bus {
     /// and [`SliceFailure`] is what keeps them apart. A fleet that will not
     /// answer is a degradation; a source **the user named** — `--registry
     /// /typo`, a `--zenoh-config` that does not parse — is their error, and
-    /// swallowing it would turn `topic echo --registry /typo` from a refusal
+    /// swallowing it would turn `echo --registry /typo` from a refusal
     /// into a silent structural echo.
     pub(crate) async fn slices_optional(&self) -> Result<Option<zenkey_fleet::SliceSet>> {
         match self.load_slices().await {

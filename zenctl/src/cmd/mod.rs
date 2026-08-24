@@ -7,9 +7,9 @@
 //! put through the `render` seam.
 //!
 //! Two verbs put **nothing** on stdout, and that is the contract rather than
-//! an omission: `topic pub` and `topic retire` answer "it went out", which is
+//! an omission: `pub` and `retire` answer "it went out", which is
 //! not a document. All of their prose is stderr, which is what lets
-//! `topic echo --format ndjson | topic pub --from ndjson` compose in either
+//! `echo --format ndjson | pub --from ndjson` compose in either
 //! direction without a wire shape being invented for a verb that has no
 //! answer to give (#242). Their `--format` still chooses how the *notes* are
 //! spelled, and `--format json` on them is an empty stdout by design.

@@ -63,7 +63,7 @@ async fn a_tombstone_reaches_the_subscriber_as_delete() {
 
 /// The Monitor path reports the tombstone as `SampleView.kind == Delete` —
 /// what the explorers render as retirement (they must be able to *see* what
-/// `topic retire` just produced).
+/// `zenctl retire` just produced).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_monitor_reports_kind_delete() {
     let (a, b) = peer_pair().await;

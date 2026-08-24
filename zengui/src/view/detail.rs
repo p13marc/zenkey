@@ -277,7 +277,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
             )));
         }
         col = col.push(kit::mono(format!("{unstamped} unstamped")));
-        // The caveat comes from the engine, so this pane and `zenctl hz
+        // The caveat comes from the engine, so this pane and `zenctl rate
         // --latency` cannot describe the same measurement differently.
         col = col.push(kit::muted(lat.caveat()));
     }
