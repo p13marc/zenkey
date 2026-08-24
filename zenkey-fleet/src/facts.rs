@@ -290,7 +290,7 @@ impl std::fmt::Debug for Entry {
 /// without touching the ordering, so no interior mutability and no signature
 /// churn in the views.
 ///
-/// The bound and the batch eviction are [`BoundedLru`]'s — shared with the
+/// The bound and the batch eviction are `BoundedLru`'s — shared with the
 /// [`StatsTable`](crate::stats::StatsTable) this shadows, which is where the
 /// argument for both was written. The **ledger** stays here: `inserted` /
 /// `evicted` are this cache's own facts, not the table's (O6).
