@@ -88,18 +88,38 @@ pub async fn declare_responder(
 }
 
 impl MockResponder {
-    /// Answer the next query and return its view, or `None` once the
-    /// queryable is gone. The reply is addressed to the responder's **own
-    /// declared key** when that key is concrete (RFC 05 §2.1: attribution
-    /// and consolidation both read the reply key, so echoing a wildcard
-    /// selector back — the G-05b violation this used to commit — collapses
-    /// a mocked fleet to one surviving reply). A responder declared on a
-    /// wildcard has no own concrete key; it falls back to the query's key,
-    /// which is concrete exactly when the asker named a real key. An error
-    /// on the reply path rides the view ([`ServedQuery::reply_error`]) at
-    /// the caller's log, not silently.
-    pub async fn next(&self) -> Option<ServedQuery> {
-        let query = self.queryable.recv_async().await.ok()?;
+    /// The next query, or `None` once the queryable is gone.
+    ///
+    /// **One await, and it consumes nothing it does not hand back** (#333).
+    /// Receiving and answering used to be a single `next()` with an await at
+    /// each end: a caller that raced it against anything — the moment a `--for`
+    /// deadline or a count timeout joins the `select!` that today holds only
+    /// `ctrl_c` — could be dropped between the two, and the query was then
+    /// taken off the channel, never answered, and never logged. Invisible on
+    /// both sides: the asker sees silence it cannot attribute (RFC 05 §3.1),
+    /// and the responder's log — half the point of this type — never records
+    /// the ask at all (RFC 13 §3 O6).
+    ///
+    /// The split is [`crate::bus::producer::Responder`]'s, right next door.
+    /// Hand what this returns to [`answer`](Self::answer): a query in the
+    /// caller's hand can still be answered after a cancelled poll, and one
+    /// never received was never taken.
+    pub async fn next(&self) -> Option<zenoh::query::Query> {
+        self.queryable.recv_async().await.ok()
+    }
+
+    /// Answer one query and return its view.
+    ///
+    /// The reply is addressed to the responder's **own declared key** when
+    /// that key is concrete (RFC 05 §2.1: attribution and consolidation both
+    /// read the reply key, so echoing a wildcard selector back — the G-05b
+    /// violation this used to commit — collapses a mocked fleet to one
+    /// surviving reply). A responder declared on a wildcard has no own
+    /// concrete key; it falls back to the query's key, which is concrete
+    /// exactly when the asker named a real key. An error on the reply path
+    /// rides the view ([`ServedQuery::reply_error`]) at the caller's log, not
+    /// silently.
+    pub async fn answer(&self, query: zenoh::query::Query) -> ServedQuery {
         let mut view = ServedQuery {
             selector: query.selector().to_string(),
             parameters: query.parameters().to_string(),
@@ -121,7 +141,7 @@ impl MockResponder {
         // The view still surfaces on failure so the log records the ask —
         // but a reply that never left carries its reason with it (D7).
         view.reply_error = reply.await.err().map(|e| e.to_string());
-        Some(view)
+        view
     }
 
     /// Undeclare, acknowledged — like the write facade's publications.
