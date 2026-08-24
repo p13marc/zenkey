@@ -5,7 +5,7 @@
 use super::asked::Asked;
 use serde::Serialize;
 
-/// One key's measured traffic over a `topic hz`/`topic bw` window.
+/// One key's measured traffic over a `rate` window.
 #[derive(Debug, Clone, Serialize)]
 pub struct RateRow {
     pub key: String,
@@ -35,7 +35,7 @@ pub struct RateRow {
     pub unstamped: Asked<u64>,
 }
 
-/// The `topic hz` / `topic bw` report (issue #46) — measured counts plus the
+/// The `rate` report (issue #46) — measured counts plus the
 /// O6 bound honesty: a bounded [`StatsTable`](crate::model::stats::StatsTable) that retired
 /// keys must say so, or the totals silently claim more coverage than they
 /// have.

@@ -438,6 +438,237 @@ pub fn render_dot(report: &TopologyReport, attachments: &[OriginAttachment]) -> 
     out
 }
 
+/// Collect every zid string under the zenoh 1.9 `Sources` shape
+/// (`{ routers: [...], peers: [...], clients: [...] }`) — tolerant of the
+/// layout varying by version: unknown shapes yield nothing, never an error.
+fn source_zids(sources: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for kind in ["routers", "peers", "clients"] {
+        if let Some(list) = sources.get(kind).and_then(|v| v.as_array()) {
+            out.extend(list.iter().filter_map(|z| z.as_str().map(str::to_string)));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Join the admin space's declared liveliness tokens against the keyspace:
+/// which origin hangs off which session (#131).
+///
+/// One `@/*/*/token/**` sweep; each token whose keyexpr parses under `base`
+/// as an `alive` leaf yields an attachment. The session zid is taken from
+/// the token's `sources` **only when they name exactly one** — several
+/// candidates or none degrade to reporter-only, stated rather than guessed.
+/// An empty result means the admin space served no tokens (or none parse
+/// under this base) — an observation, not an empty fleet (O4).
+pub async fn origin_attachments(
+    fleet: &crate::Fleet<'_>,
+    timeout: Duration,
+) -> Result<Vec<OriginAttachment>> {
+    let base = fleet.base();
+
+    let entries = admin_get(fleet.session(), "@/*/*/token/**", timeout).await?;
+
+    let mut out: Vec<OriginAttachment> = Vec::new();
+
+    for e in &entries {
+        let Some(decl) = declared_from_admin_entry(&e.key, &e.value) else {
+            continue;
+        };
+        if decl.kind != EntityKind::Token {
+            continue;
+        }
+        let Some(parsed) = zenkey::grammar::parse_full(base, &decl.keyexpr) else {
+            continue;
+        };
+        // The framework liveliness shape: an `alive` leaf on the state
+        // class (RFC 04 §5). Anything else declared as a token is not an
+        // origin claim and is left alone.
+        if parsed.subject.last().copied() != Some("alive") {
+            continue;
+        }
+        let origin = parsed.origin.chunk().to_string();
+        let zids = source_zids(&decl.sources);
+        let session_zid = match zids.as_slice() {
+            [only] => Some(only.clone()),
+            _ => None,
+        };
+        let attachment = OriginAttachment {
+            origin,
+            session_zid,
+            reporter_zid: decl.node_zid.clone(),
+            token_key: decl.keyexpr.clone(),
+        };
+        // One origin can hold several sessions (one per producer process);
+        // dedup only exact repeats.
+        if !out.iter().any(|a| {
+            a.origin == attachment.origin
+                && a.session_zid == attachment.session_zid
+                && a.reporter_zid == attachment.reporter_zid
+        }) {
+            out.push(attachment);
+        }
+    }
+    Ok(out)
+}
+
+/// Whether a node's admin root doc filters loopback endpoints out of its
+/// `locators` — true from zenoh 1.10.0 (eclipse-zenoh/zenoh#2671, the
+/// loopback scouting fix: the root doc switched to
+/// `get_locators_noloopback()`). Judged from the leading `major.minor`
+/// of the version string the doc itself declares; a version that does
+/// not parse answers `false` — "cannot say", never a claim (O4).
+///
+/// One definition, used by both renderers, so the two tools explain an
+/// empty locator column with one voice (#155).
+pub fn admin_doc_omits_loopback(version: &str) -> bool {
+    let nums: Vec<u64> = version
+        .trim_start_matches(|c: char| !c.is_ascii_digit())
+        .split(|c: char| !c.is_ascii_digit())
+        .take(2)
+        .map_while(|p| p.parse().ok())
+        .collect();
+    matches!(nums.as_slice(), [maj, min] if (*maj, *min) >= (1, 10))
+}
+
+/// Join the admin root docs (`@/<zid>/<whatami>`) into a topology: every
+/// answering node with its locators and version, every session it reports
+/// as an edge, and every zid that is *only* mentioned as a
+/// heard-of-not-queryable node.
+///
+/// Where a root doc declares no locators — since zenoh 1.10.0 that is the
+/// normal answer for a loopback-only node (eclipse-zenoh/zenoh#2671
+/// filters loopback endpoints from the root doc) — the join corroborates
+/// from session links instead: the node-side endpoint of each reported
+/// link lands in [`TopologyNode::locators_via_links`], kept apart from
+/// `locators` because it is link evidence, not a listen-endpoint claim.
+/// Nothing is invented: a node no link names stays honestly empty.
+pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyReport> {
+    const ASKED: &str = "@/*/*";
+    let entries = admin_get(session, ASKED, timeout).await?;
+    let mut nodes: Vec<TopologyNode> = Vec::new();
+    let mut edges: Vec<TopologyEdge> = Vec::new();
+    for e in &entries {
+        // Root docs only: @/<zid>/<whatami>. Anything deeper is a
+        // different handler and not a node document.
+        let mut chunks = e.key.split('/');
+        let (Some("@"), Some(zid), Some(whatami), None) =
+            (chunks.next(), chunks.next(), chunks.next(), chunks.next())
+        else {
+            continue;
+        };
+        let doc = &e.value;
+        nodes.push(TopologyNode {
+            zid: doc
+                .get("zid")
+                .and_then(|v| v.as_str())
+                .unwrap_or(zid)
+                .to_string(),
+            whatami: whatami.to_string(),
+            version: doc
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            locators: doc
+                .get("locators")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|l| l.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            locators_via_links: Vec::new(),
+            answered: true,
+        });
+        for s in doc
+            .get("sessions")
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or_default()
+        {
+            let Some(peer) = s.get("peer").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            edges.push(TopologyEdge {
+                reporter: zid.to_string(),
+                peer: peer.to_string(),
+                whatami: s
+                    .get("whatami")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                region: s.get("region").and_then(|v| v.as_str()).map(str::to_string),
+                links: s
+                    .get("links")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|l| {
+                                Some(format!(
+                                    "{} -> {}",
+                                    l.get("src")?.as_str()?,
+                                    l.get("dst")?.as_str()?
+                                ))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            });
+        }
+    }
+    let answered = nodes.len();
+    // Heard-of nodes: mentioned as a session peer, but no root doc answered
+    // for them (admin space off, or out of reach). Shown, never omitted.
+    for e in &edges {
+        if !nodes.iter().any(|n| n.zid == e.peer) {
+            nodes.push(TopologyNode {
+                zid: e.peer.clone(),
+                whatami: e.whatami.clone(),
+                version: None,
+                locators: Vec::new(),
+                locators_via_links: Vec::new(),
+                answered: false,
+            });
+        }
+    }
+    nodes.sort_by(|a, b| a.zid.cmp(&b.zid));
+    nodes.dedup_by(|a, b| a.zid == b.zid);
+    // Corroborate where the root doc declared nothing (see the fn doc):
+    // for each link `src -> dst`, `src` is an address on the reporter's
+    // side and `dst` one on the peer's. That is what a link *used*, no
+    // more — kept out of `locators` and labelled by the renderers.
+    for n in nodes.iter_mut().filter(|n| n.locators.is_empty()) {
+        for e in &edges {
+            let reporter_side = if e.reporter == n.zid {
+                true
+            } else if e.peer == n.zid {
+                false
+            } else {
+                continue;
+            };
+            for l in &e.links {
+                let mut parts = l.splitn(2, " -> ");
+                let (Some(src), Some(dst)) = (parts.next(), parts.next()) else {
+                    continue;
+                };
+                let end = if reporter_side { src } else { dst };
+                if !n.locators_via_links.iter().any(|x| x == end) {
+                    n.locators_via_links.push(end.to_string());
+                }
+            }
+        }
+    }
+    Ok(TopologyReport {
+        nodes,
+        edges,
+        asked: ASKED.to_string(),
+        answered,
+        self_zid: session.zid().to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,235 +964,4 @@ mod tests {
             "{dot}"
         );
     }
-}
-
-/// Collect every zid string under the zenoh 1.9 `Sources` shape
-/// (`{ routers: [...], peers: [...], clients: [...] }`) — tolerant of the
-/// layout varying by version: unknown shapes yield nothing, never an error.
-fn source_zids(sources: &serde_json::Value) -> Vec<String> {
-    let mut out = Vec::new();
-    for kind in ["routers", "peers", "clients"] {
-        if let Some(list) = sources.get(kind).and_then(|v| v.as_array()) {
-            out.extend(list.iter().filter_map(|z| z.as_str().map(str::to_string)));
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-/// Join the admin space's declared liveliness tokens against the keyspace:
-/// which origin hangs off which session (#131).
-///
-/// One `@/*/*/token/**` sweep; each token whose keyexpr parses under `base`
-/// as an `alive` leaf yields an attachment. The session zid is taken from
-/// the token's `sources` **only when they name exactly one** — several
-/// candidates or none degrade to reporter-only, stated rather than guessed.
-/// An empty result means the admin space served no tokens (or none parse
-/// under this base) — an observation, not an empty fleet (O4).
-pub async fn origin_attachments(
-    fleet: &crate::Fleet<'_>,
-    timeout: Duration,
-) -> Result<Vec<OriginAttachment>> {
-    let base = fleet.base();
-
-    let entries = admin_get(fleet.session(), "@/*/*/token/**", timeout).await?;
-
-    let mut out: Vec<OriginAttachment> = Vec::new();
-
-    for e in &entries {
-        let Some(decl) = declared_from_admin_entry(&e.key, &e.value) else {
-            continue;
-        };
-        if decl.kind != EntityKind::Token {
-            continue;
-        }
-        let Some(parsed) = zenkey::grammar::parse_full(base, &decl.keyexpr) else {
-            continue;
-        };
-        // The framework liveliness shape: an `alive` leaf on the state
-        // class (RFC 04 §5). Anything else declared as a token is not an
-        // origin claim and is left alone.
-        if parsed.subject.last().copied() != Some("alive") {
-            continue;
-        }
-        let origin = parsed.origin.chunk().to_string();
-        let zids = source_zids(&decl.sources);
-        let session_zid = match zids.as_slice() {
-            [only] => Some(only.clone()),
-            _ => None,
-        };
-        let attachment = OriginAttachment {
-            origin,
-            session_zid,
-            reporter_zid: decl.node_zid.clone(),
-            token_key: decl.keyexpr.clone(),
-        };
-        // One origin can hold several sessions (one per producer process);
-        // dedup only exact repeats.
-        if !out.iter().any(|a| {
-            a.origin == attachment.origin
-                && a.session_zid == attachment.session_zid
-                && a.reporter_zid == attachment.reporter_zid
-        }) {
-            out.push(attachment);
-        }
-    }
-    Ok(out)
-}
-
-/// Whether a node's admin root doc filters loopback endpoints out of its
-/// `locators` — true from zenoh 1.10.0 (eclipse-zenoh/zenoh#2671, the
-/// loopback scouting fix: the root doc switched to
-/// `get_locators_noloopback()`). Judged from the leading `major.minor`
-/// of the version string the doc itself declares; a version that does
-/// not parse answers `false` — "cannot say", never a claim (O4).
-///
-/// One definition, used by both renderers, so the two tools explain an
-/// empty locator column with one voice (#155).
-pub fn admin_doc_omits_loopback(version: &str) -> bool {
-    let nums: Vec<u64> = version
-        .trim_start_matches(|c: char| !c.is_ascii_digit())
-        .split(|c: char| !c.is_ascii_digit())
-        .take(2)
-        .map_while(|p| p.parse().ok())
-        .collect();
-    matches!(nums.as_slice(), [maj, min] if (*maj, *min) >= (1, 10))
-}
-
-/// Join the admin root docs (`@/<zid>/<whatami>`) into a topology: every
-/// answering node with its locators and version, every session it reports
-/// as an edge, and every zid that is *only* mentioned as a
-/// heard-of-not-queryable node.
-///
-/// Where a root doc declares no locators — since zenoh 1.10.0 that is the
-/// normal answer for a loopback-only node (eclipse-zenoh/zenoh#2671
-/// filters loopback endpoints from the root doc) — the join corroborates
-/// from session links instead: the node-side endpoint of each reported
-/// link lands in [`TopologyNode::locators_via_links`], kept apart from
-/// `locators` because it is link evidence, not a listen-endpoint claim.
-/// Nothing is invented: a node no link names stays honestly empty.
-pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyReport> {
-    const ASKED: &str = "@/*/*";
-    let entries = admin_get(session, ASKED, timeout).await?;
-    let mut nodes: Vec<TopologyNode> = Vec::new();
-    let mut edges: Vec<TopologyEdge> = Vec::new();
-    for e in &entries {
-        // Root docs only: @/<zid>/<whatami>. Anything deeper is a
-        // different handler and not a node document.
-        let mut chunks = e.key.split('/');
-        let (Some("@"), Some(zid), Some(whatami), None) =
-            (chunks.next(), chunks.next(), chunks.next(), chunks.next())
-        else {
-            continue;
-        };
-        let doc = &e.value;
-        nodes.push(TopologyNode {
-            zid: doc
-                .get("zid")
-                .and_then(|v| v.as_str())
-                .unwrap_or(zid)
-                .to_string(),
-            whatami: whatami.to_string(),
-            version: doc
-                .get("version")
-                .and_then(|v| v.as_str())
-                .map(str::to_string),
-            locators: doc
-                .get("locators")
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|l| l.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default(),
-            locators_via_links: Vec::new(),
-            answered: true,
-        });
-        for s in doc
-            .get("sessions")
-            .and_then(|v| v.as_array())
-            .map(|a| a.as_slice())
-            .unwrap_or_default()
-        {
-            let Some(peer) = s.get("peer").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            edges.push(TopologyEdge {
-                reporter: zid.to_string(),
-                peer: peer.to_string(),
-                whatami: s
-                    .get("whatami")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string(),
-                region: s.get("region").and_then(|v| v.as_str()).map(str::to_string),
-                links: s
-                    .get("links")
-                    .and_then(|v| v.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|l| {
-                                Some(format!(
-                                    "{} -> {}",
-                                    l.get("src")?.as_str()?,
-                                    l.get("dst")?.as_str()?
-                                ))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            });
-        }
-    }
-    let answered = nodes.len();
-    // Heard-of nodes: mentioned as a session peer, but no root doc answered
-    // for them (admin space off, or out of reach). Shown, never omitted.
-    for e in &edges {
-        if !nodes.iter().any(|n| n.zid == e.peer) {
-            nodes.push(TopologyNode {
-                zid: e.peer.clone(),
-                whatami: e.whatami.clone(),
-                version: None,
-                locators: Vec::new(),
-                locators_via_links: Vec::new(),
-                answered: false,
-            });
-        }
-    }
-    nodes.sort_by(|a, b| a.zid.cmp(&b.zid));
-    nodes.dedup_by(|a, b| a.zid == b.zid);
-    // Corroborate where the root doc declared nothing (see the fn doc):
-    // for each link `src -> dst`, `src` is an address on the reporter's
-    // side and `dst` one on the peer's. That is what a link *used*, no
-    // more — kept out of `locators` and labelled by the renderers.
-    for n in nodes.iter_mut().filter(|n| n.locators.is_empty()) {
-        for e in &edges {
-            let reporter_side = if e.reporter == n.zid {
-                true
-            } else if e.peer == n.zid {
-                false
-            } else {
-                continue;
-            };
-            for l in &e.links {
-                let mut parts = l.splitn(2, " -> ");
-                let (Some(src), Some(dst)) = (parts.next(), parts.next()) else {
-                    continue;
-                };
-                let end = if reporter_side { src } else { dst };
-                if !n.locators_via_links.iter().any(|x| x == end) {
-                    n.locators_via_links.push(end.to_string());
-                }
-            }
-        }
-    }
-    Ok(TopologyReport {
-        nodes,
-        edges,
-        asked: ASKED.to_string(),
-        answered,
-        self_zid: session.zid().to_string(),
-    })
 }

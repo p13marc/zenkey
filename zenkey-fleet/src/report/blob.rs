@@ -3,7 +3,7 @@
 //! Deliberately **not** feature-gated, and deliberately carrying no `zblob`
 //! type. `zenkey-fleet`'s blob *transport* is optional (the `blob` feature);
 //! its blob *output shape* is not, because a report is a contract:
-//! `zenctl blob probe --format json` must serialize the same document
+//! `zenctl blob locate --format json` must serialize the same document
 //! whether or not the binary was built with the transport, and a frontend
 //! must be able to render a probe it deserialized from somewhere else
 //! entirely.
@@ -17,7 +17,7 @@ use serde::Serialize;
 // These are deliberately **not** feature-gated, and deliberately carry no
 // `zblob` type. `zenkey-fleet`'s blob *transport* is optional (the `blob`
 // feature); its blob *output shape* is not, because a report is a contract:
-// `zenctl blob probe --format json` must serialize the same document whether
+// `zenctl blob locate --format json` must serialize the same document whether
 // or not the binary was built with the transport, and a frontend must be able
 // to render a probe it deserialized from somewhere else entirely.
 

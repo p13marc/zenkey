@@ -50,7 +50,7 @@ pub struct RetiredEntry {
     pub verdict: CutoverVerdict,
 }
 
-/// The `zenctl registry retired` report (issue #226): the deprecation
+/// The `zenctl check retired` report (issue #226): the deprecation
 /// burn-down. The append-only ledger records dozens of individual
 /// retirements; this says which ones are actually *finished* — a migration
 /// without a burn-down list is a belief.

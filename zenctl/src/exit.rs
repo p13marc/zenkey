@@ -56,7 +56,7 @@
 //! not be proven" has no meaning for an act — either it went out or it did
 //! not — so their failures are 1, and only an input **they** refuse is a 2.
 
-use zenkey_fleet::judgement::{Judgement, judgement_exit_code};
+use zenkey_fleet::{Judgement, judgement_exit_code};
 
 /// Asked, clean.
 pub const CLEAN: i32 = 0;

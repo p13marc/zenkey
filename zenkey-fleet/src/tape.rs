@@ -8,7 +8,7 @@
 //! * [`record`] — `.zrec` capture and replay. Normative for the format
 //!   (RFC 09 §5.2 documents the etiquette).
 //! * [`ingest`] — the row dialect a capture is made of, read back: the same
-//!   shape `topic echo --format ndjson` emits, so a pipe and a file are one
+//!   shape `echo --format ndjson` emits, so a pipe and a file are one
 //!   format with one parser.
 //! * [`generate`] — traffic that never happened, on purpose: mock producers
 //!   and fault patterns, every sample carrying the synthetic marker so that

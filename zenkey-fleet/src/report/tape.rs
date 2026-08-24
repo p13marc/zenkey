@@ -72,7 +72,7 @@ pub struct ReplayReport {
 /// One sample, as the explorers write it (#235).
 ///
 /// The write side of this module's dialect: `.zrec` rows (RFC 09 §5.2),
-/// `zenctl topic echo --format ndjson`, and zengui's echo export are all
+/// `zenctl echo --format ndjson`, and zengui's echo export are all
 /// this struct, so [`parse_row`](crate::tape::ingest::parse_row) reads back what any of them wrote. Every
 /// optional field is `skip_serializing_if`: a writer that does not hold a
 /// fact omits it rather than nulling it, because a `null` here would claim

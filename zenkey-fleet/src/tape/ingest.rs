@@ -4,11 +4,11 @@
 //! [`SampleRow`] is the only writer and [`parse_row`] the only reader, which
 //! is what makes the pipe symmetric. It was not, until #235: the claim lived
 //! in this doc comment while three hand-built writers — `.zrec`
-//! ([`mod@crate::tape::record`]), `zenctl topic echo --format ndjson`, and zengui's
+//! ([`mod@crate::tape::record`]), `zenctl echo --format ndjson`, and zengui's
 //! echo export — each assembled the object with `serde_json::json!` and two
 //! of them disagreed with this reader. `echo` wrote the zenoh *wire axes*
 //! under `"qos"`, where [`parse_row`] resolves a profile *name*, so every
-//! row of `topic echo --format ndjson | topic pub --from ndjson` was counted
+//! row of `echo --format ndjson | pub --from ndjson` was counted
 //! malformed; zengui wrote a payload byte *count* under `"bytes"`, which has
 //! meant base64 of the wire payload since RFC 09 §5.2. Both carried a doc
 //! comment asserting conformance. One struct is the repair — a dialect with
