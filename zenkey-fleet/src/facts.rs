@@ -19,6 +19,7 @@
 //!   same subject.
 
 use crate::registry::SliceSet;
+use crate::stats::BoundedLru;
 use zenkey::grammar::{self, BlobTier, Class, ClassOrPlane, Origin, Plane, StructuralKey};
 
 /// Everything zengui knows about one wire key.
@@ -247,11 +248,6 @@ impl KeyFacts {
     }
 }
 
-/// Fraction of the cache dropped when the bound is hit — the amortisation
-/// argument is [`crate::stats`]'s, verbatim: evicting one entry per insert
-/// would make every projection past the bound a full scan.
-const EVICT_FRACTION: usize = 16;
-
 struct Entry {
     facts: KeyFacts,
     /// Monotone observation counter, not an `Instant`: recency here means
@@ -293,10 +289,14 @@ impl std::fmt::Debug for Entry {
 /// [`get`](Self::get) a pure read: a `&self` render path can look keys up
 /// without touching the ordering, so no interior mutability and no signature
 /// churn in the views.
+///
+/// The bound and the batch eviction are `BoundedLru`'s — shared with the
+/// [`StatsTable`](crate::stats::StatsTable) this shadows, which is where the
+/// argument for both was written. The **ledger** stays here: `inserted` /
+/// `evicted` are this cache's own facts, not the table's (O6).
 #[derive(Debug)]
 pub struct FactsCache {
-    entries: std::collections::HashMap<String, Entry>,
-    max_keys: usize,
+    entries: BoundedLru<String, Entry>,
     inserted: u64,
     evicted: u64,
     seq: u64,
@@ -314,8 +314,7 @@ impl FactsCache {
     /// it shadows, and one number makes that one sentence.
     pub fn with_capacity(max_keys: usize) -> FactsCache {
         FactsCache {
-            entries: std::collections::HashMap::new(),
-            max_keys: max_keys.max(1),
+            entries: BoundedLru::with_capacity(max_keys),
             inserted: 0,
             evicted: 0,
             seq: 0,
@@ -332,9 +331,7 @@ impl FactsCache {
             entry.seen = seq;
             return;
         }
-        if self.entries.len() >= self.max_keys {
-            self.evict();
-        }
+        self.evicted += self.entries.admit(|e| e.seen) as u64;
         let mut facts = KeyFacts::project(base, key);
         if let Some(slices) = slices {
             facts.resolve(slices);
@@ -370,7 +367,7 @@ impl FactsCache {
     }
 
     pub fn max_keys(&self) -> usize {
-        self.max_keys
+        self.entries.max_keys()
     }
 
     /// Projections retired to stay within the bound.
@@ -408,21 +405,6 @@ impl FactsCache {
         self.inserted = 0;
         self.evicted = 0;
         self.seq = 0;
-    }
-
-    /// Drop the least-recently-observed entries until there is room.
-    fn evict(&mut self) {
-        let target = self.max_keys - (self.max_keys / EVICT_FRACTION).max(1);
-        let mut seen: Vec<(u64, String)> = self
-            .entries
-            .iter()
-            .map(|(k, e)| (e.seen, k.clone()))
-            .collect();
-        seen.sort_unstable_by_key(|(seen, _)| *seen);
-        for (_, key) in seen.into_iter().take(self.entries.len() - target) {
-            self.entries.remove(&key);
-            self.evicted += 1;
-        }
     }
 }
 

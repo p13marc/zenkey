@@ -11,15 +11,14 @@
 //! The fixture dogfoods #122: `adminspace.enabled` defaults to false and
 //! `session::open` never turns it on, so the serving peer is opened through
 //! the config passthrough with a file that enables it — exactly how an
-//! operator would. Ports 7522-7523 (disjoint from every other test binary).
+//! operator would.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
-fn admin_config() -> std::path::PathBuf {
-    let path = std::env::temp_dir().join("zenkey-fleet-topology-admin.json5");
-    std::fs::write(&path, r#"{ adminspace: { enabled: true } }"#).unwrap();
-    path
-}
+mod util;
+use util::{admin_config, endpoint};
 
 /// A mesh where one peer serves its admin space: the join names the server
 /// as answered, the other peer as an edge — and as a heard-of node, since
@@ -27,17 +26,20 @@ fn admin_config() -> std::path::PathBuf {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
     let file = admin_config();
+    let endpoint = endpoint();
     let serving = zenkey_fleet::open_with_config(
         Some(&file),
         &[],
-        &["tcp/127.0.0.1:7522".to_string()],
+        std::slice::from_ref(&endpoint),
         Some(false),
     )
     .await
     .expect("serving session");
-    let asking = zenkey_fleet::session::open(&["tcp/127.0.0.1:7522".to_string()], &[], false)
+    let asking = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asking session");
+    // The listen address as a locator spells it, for the link evidence below.
+    let listen_addr = endpoint.trim_start_matches("tcp/").to_string();
 
     // Settle: loop until the admin space answers (wait-routable).
     let report = loop {
@@ -75,7 +77,10 @@ async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
     // endpoint of the reported link is the listen address — labelled link
     // evidence, kept out of `locators`, never an invented listen claim.
     assert!(
-        server.locators_via_links.iter().any(|l| l.contains("7522")),
+        server
+            .locators_via_links
+            .iter()
+            .any(|l| l.contains(&listen_addr)),
         "the listen endpoint rides out as link evidence: {:?}",
         server.locators_via_links
     );
@@ -113,10 +118,11 @@ async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
 /// reachability, never an error and never an invented mesh.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_admin_less_mesh_is_a_reading_not_a_mesh() {
-    let _listen = zenkey_fleet::session::open(&[], &["tcp/127.0.0.1:7523".to_string()], false)
+    let endpoint = endpoint();
+    let _listen = zenkey_fleet::session::open(&[], std::slice::from_ref(&endpoint), false)
         .await
         .expect("listener");
-    let asking = zenkey_fleet::session::open(&["tcp/127.0.0.1:7523".to_string()], &[], false)
+    let asking = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asker");
     let report = zenkey_fleet::topology(&asking, Duration::from_millis(400))

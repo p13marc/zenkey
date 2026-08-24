@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use zenkey::grammar::with_base;
 
 use crate::SliceSet;
+use crate::examples::Examples;
 use crate::facts::{KeyFacts, KeyShape, OriginKind};
 use crate::report::{BudgetCell, BudgetWindow, TopicList};
 
@@ -142,7 +143,13 @@ pub fn join_budget(list: &mut TopicList, obs: &BudgetObservation, window: Budget
         let examples = worst_origin
             .as_ref()
             .and_then(|o| origins.get(o))
-            .map(|keys| keys.iter().take(EXAMPLE_CAP).cloned().collect())
+            .map(|keys| {
+                let mut ex = Examples::new(EXAMPLE_CAP);
+                for key in keys {
+                    ex.push_with(|| key.clone());
+                }
+                ex.into_vec()
+            })
             .unwrap_or_default();
         let exempt = row
             .path

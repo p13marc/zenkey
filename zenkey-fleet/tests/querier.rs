@@ -5,22 +5,16 @@
 //! attribution by each reply's own key.
 //!
 //! Self-contained like `lazy.rs`: two in-process peers, explicit endpoints,
-//! no scouting, no external router. Ports 7481-7483 (disjoint from every
-//! other test binary).
+//! no scouting, no external router.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
 use zenkey_fleet::{Answer, declare_repeating};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const HOST_A: &str = "v1/h-aaaaaaaaaaaa/@rpc/sysinfo/introspect";
 const HOST_B: &str = "v1/h-bbbbbbbbbbbb/@rpc/sysinfo/introspect";
@@ -31,7 +25,7 @@ const SELECTOR: &str = "v1/*/@rpc/sysinfo/introspect";
 /// must still hear both, each attributed by its own reply key.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_complete_queryable_does_not_collapse_the_declared_fleet() {
-    let (a, b) = peer_pair(7481).await;
+    let (a, b) = peer_pair().await;
 
     let _qa = a
         .declare_queryable(HOST_A)
@@ -84,7 +78,7 @@ async fn a_complete_queryable_does_not_collapse_the_declared_fleet() {
 /// each `fetch_with` delivers its own parameters to the queryable.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn parameters_ride_per_get_not_in_the_declared_key() {
-    let (a, b) = peer_pair(7482).await;
+    let (a, b) = peer_pair().await;
 
     let _q = a
         .declare_queryable(HOST_A)

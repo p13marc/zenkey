@@ -9,21 +9,15 @@
 //! assertion that no `*`-origin selector appears.
 //!
 //! Self-contained like `querier.rs`: two in-process peers, explicit endpoints,
-//! no scouting, no external router. Ports 7501-7502 (disjoint from every other
-//! test binary).
+//! no scouting, no external router.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const ORIGIN: &str = "h-aaaaaaaaaaaa";
 const OTHER: &str = "h-bbbbbbbbbbbb";
@@ -89,7 +83,7 @@ async fn declare_introspect(
 /// origin's producer is never even reached.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn node_info_asks_only_the_named_origin() {
-    let (a, b) = peer_pair(7501).await;
+    let (a, b) = peer_pair().await;
     let asked: Asked = Arc::default();
     let _queryables = declare_introspect(&a, &asked).await;
 
@@ -137,7 +131,7 @@ async fn node_info_asks_only_the_named_origin() {
 /// loudly here rather than being string-glued into a selector.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_hostname_is_refused_before_any_get() {
-    let (_a, b) = peer_pair(7502).await;
+    let (_a, b) = peer_pair().await;
     let err = zenkey_fleet::node_info(&b, "", "toolbx", Duration::from_millis(200), false)
         .await
         .unwrap_err()

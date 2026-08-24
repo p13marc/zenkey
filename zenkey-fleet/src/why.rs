@@ -80,6 +80,7 @@ use zenoh::Session;
 use zenoh::key_expr::keyexpr;
 
 use crate::admin::{DeclaredEntities, EntityKind, StorageInfo};
+use crate::examples::Examples;
 use crate::facts::{KeyShape, OriginKind, Registration, describe_key};
 use crate::query::ValueSource;
 use crate::registry::SliceSet;
@@ -611,15 +612,13 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
                 };
                 (RungAnswer::NotEstablished { reason }, vec![])
             } else {
-                let mut evidence: Vec<String> = matches
-                    .iter()
-                    .take(EVIDENCE_CAP)
-                    .map(|e| format!("publisher {} declared by session {}", e.keyexpr, e.node_zid))
-                    .collect();
-                if matches.len() > EVIDENCE_CAP {
-                    evidence.push(format!("… and {} more", matches.len() - EVIDENCE_CAP));
+                let mut evidence = Examples::new(EVIDENCE_CAP);
+                for e in &matches {
+                    evidence.push_with(|| {
+                        format!("publisher {} declared by session {}", e.keyexpr, e.node_zid)
+                    });
                 }
-                (RungAnswer::Established, evidence)
+                (RungAnswer::Established, evidence.into_lines("more"))
             }
         }
     };
@@ -670,10 +669,9 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
                     )],
                 )
             } else {
-                let evidence = judged
-                    .iter()
-                    .take(EVIDENCE_CAP)
-                    .map(|(name, full)| {
+                let mut evidence = Examples::new(EVIDENCE_CAP);
+                for (name, full) in &judged {
+                    evidence.push_with(|| {
                         format!(
                             "storage {name} {}",
                             if *full {
@@ -682,9 +680,9 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
                                 "overlaps it partially"
                             }
                         )
-                    })
-                    .collect();
-                (RungAnswer::Established, evidence)
+                    });
+                }
+                (RungAnswer::Established, evidence.into_vec())
             }
         }
     };

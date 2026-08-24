@@ -1,18 +1,12 @@
 //! The mock responder (#121): a declared queryable that answers with static
-//! bytes and surfaces every ask. Ports 7520-7521 (disjoint from every other
-//! test binary).
+//! bytes and surfaces every ask.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const KEY: &str = "v1/h-ffffffffffff/@rpc/mock/answer";
 
@@ -21,7 +15,7 @@ const KEY: &str = "v1/h-ffffffffffff/@rpc/mock/answer";
 /// parameters and query body included.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_responder_answers_and_logs_the_ask() {
-    let (a, b) = peer_pair(7520).await;
+    let (a, b) = peer_pair().await;
 
     let responder = zenkey_fleet::declare_responder(
         &a,
@@ -87,7 +81,7 @@ async fn a_responder_answers_and_logs_the_ask() {
 /// across a mocked fleet (RFC 05 §2.1).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_wildcard_ask_is_answered_on_the_responders_concrete_key() {
-    let (a, b) = peer_pair(7521).await;
+    let (a, b) = peer_pair().await;
 
     let responder = zenkey_fleet::declare_responder(
         &a,

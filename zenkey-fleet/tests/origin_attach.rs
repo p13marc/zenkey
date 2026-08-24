@@ -3,15 +3,13 @@
 //! evidence only, never a guess.
 //!
 //! Same adminspace-config fixture as topology.rs (#122's passthrough).
-//! Ports 7528-7529 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
-fn admin_config() -> std::path::PathBuf {
-    let path = std::env::temp_dir().join("zenkey-fleet-origin-attach-admin.json5");
-    std::fs::write(&path, r#"{ adminspace: { enabled: true } }"#).unwrap();
-    path
-}
+mod util;
+use util::{admin_config, endpoint};
 
 const TOKEN: &str = "v1/h-cccccccccccc/state/demo/alive";
 
@@ -21,15 +19,16 @@ const TOKEN: &str = "v1/h-cccccccccccc/state/demo/alive";
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_declared_token_attaches_its_origin() {
     let file = admin_config();
+    let endpoint = endpoint();
     let serving = zenkey_fleet::open_with_config(
         Some(&file),
         &[],
-        &["tcp/127.0.0.1:7528".to_string()],
+        std::slice::from_ref(&endpoint),
         Some(false),
     )
     .await
     .expect("serving session");
-    let asking = zenkey_fleet::session::open(&["tcp/127.0.0.1:7528".to_string()], &[], false)
+    let asking = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asking session");
 

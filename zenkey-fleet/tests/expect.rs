@@ -3,7 +3,8 @@
 //! Event-driven settles: the publisher's matching badge proves the expect
 //! window's subscriber is routable before anything is sent — a fixture that
 //! publishes into the void tests the void.
-//! Ports 7532-7533 and 7535-7536 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
@@ -11,15 +12,8 @@ use zenkey::qos::QosProfile;
 use zenkey_fleet::report::ExpectVerdict;
 use zenkey_fleet::{ExpectSpec, QosCheck, declare_publication, run_expect};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const KEY: &str = "v1/h-cccccccccccc/state/demo/health";
 
@@ -36,7 +30,7 @@ fn spec(selector: &str, within_s: f64) -> ExpectSpec {
 /// exits CI most needs to trust.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn presence_meets_early_and_a_clean_shortfall_is_not_met() {
-    let (a, b) = peer_pair(7532).await;
+    let (a, b) = peer_pair().await;
     let slices = zenkey_fleet::SliceSet::default();
 
     let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
@@ -87,7 +81,7 @@ async fn presence_meets_early_and_a_clean_shortfall_is_not_met() {
 /// conclusive NOT MET, not a shrug.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn absence_is_scoped_clean_and_conclusively_breakable() {
-    let (a, b) = peer_pair(7533).await;
+    let (a, b) = peer_pair().await;
     let slices = zenkey_fleet::SliceSet::default();
 
     let quiet = ExpectSpec {
@@ -164,8 +158,8 @@ qos = "transition"
     // yet propagated, and send into the gap before its own window subscribed.
     // Under load that lost the sample ~22% of the time, and the test then
     // failed on an empty violation list rather than on the QoS it checks.
-    let run_with = |port: u16, qos_profile: QosProfile, slices: zenkey_fleet::SliceSet| async move {
-        let (a, b) = peer_pair(port).await;
+    let run_with = |qos_profile: QosProfile, slices: zenkey_fleet::SliceSet| async move {
+        let (a, b) = peer_pair().await;
         let publication = declare_publication(&a, KEY, qos_profile, None)
             .await
             .expect("declare");
@@ -188,10 +182,10 @@ qos = "transition"
         expect.await.expect("join").expect("run")
     };
 
-    let report = run_with(7535, QosProfile::Transition, slices.clone()).await;
+    let report = run_with(QosProfile::Transition, slices.clone()).await;
     assert_eq!(report.verdict, ExpectVerdict::Met, "{:?}", report.unmet);
 
-    let report = run_with(7536, QosProfile::Sampled, slices).await;
+    let report = run_with(QosProfile::Sampled, slices).await;
     assert_eq!(report.verdict, ExpectVerdict::NotMet);
     // Named, not indexed: an empty list here means the window saw no samples
     // at all — a presence failure, not the QoS failure under test — and

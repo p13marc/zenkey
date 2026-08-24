@@ -6,14 +6,8 @@ use std::time::Duration;
 use zenkey_fleet::{SeedItem, SeedPolicy, seed_subscribe};
 use zenoh_ext::AdvancedPublisherBuilderExt;
 
-async fn timestamping_listener(port: u16) -> zenoh::Session {
-    let mut cfg = zenoh::Config::default();
-    cfg.insert_json5("scouting/multicast/enabled", "false").ok();
-    cfg.insert_json5("timestamping/enabled", "true").ok();
-    cfg.insert_json5("listen/endpoints", &format!("[\"tcp/127.0.0.1:{port}\"]"))
-        .ok();
-    zenoh::open(cfg).await.expect("publisher session")
-}
+mod util;
+use util::timestamping_pair;
 
 /// Drain a seeded subscriber until the boundary; returns (payloads, coverage).
 async fn drain_seed(
@@ -43,10 +37,7 @@ async fn drain_seed(
 /// Live samples keep flowing after the boundary.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_seed_lands_before_the_boundary() {
-    let a = timestamping_listener(7471).await;
-    let b = zenkey_fleet::session::open(&["tcp/127.0.0.1:7471".to_string()], &[], false)
-        .await
-        .expect("consumer session");
+    let (a, b) = timestamping_pair().await;
 
     let publisher = a
         .declare_publisher("seedtest/state/health")
@@ -95,10 +86,7 @@ async fn history_seed_lands_before_the_boundary() {
 /// state first, stale echo second.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stale_storage_seed_cannot_regress_a_key() {
-    let a = timestamping_listener(7472).await;
-    let b = zenkey_fleet::session::open(&["tcp/127.0.0.1:7472".to_string()], &[], false)
-        .await
-        .expect("consumer session");
+    let (a, b) = timestamping_pair().await;
 
     // The publisher's cache holds the CURRENT value, stamped now.
     let publisher = a
@@ -155,10 +143,7 @@ async fn a_stale_storage_seed_cannot_regress_a_key() {
 /// transition GET-then-subscribe silently drops.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_transition_in_the_seed_window_lands_exactly_once() {
-    let a = timestamping_listener(7473).await;
-    let b = zenkey_fleet::session::open(&["tcp/127.0.0.1:7473".to_string()], &[], false)
-        .await
-        .expect("consumer session");
+    let (a, b) = timestamping_pair().await;
     let publisher = a
         .declare_publisher("gaptest/state/flag")
         .await
@@ -279,10 +264,7 @@ async fn a_transition_in_the_seed_window_lands_exactly_once() {
 /// the boundary as a typed event carrying this watch's id and coverage.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_seeded_watch_shows_pre_existing_state() {
-    let a = timestamping_listener(7474).await;
-    let b = zenkey_fleet::session::open(&["tcp/127.0.0.1:7474".to_string()], &[], false)
-        .await
-        .expect("consumer session");
+    let (a, b) = timestamping_pair().await;
     let publisher = a
         .declare_publisher("wseed/state/health")
         .cache(zenoh_ext::CacheConfig::default().max_samples(1))

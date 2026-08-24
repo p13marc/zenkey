@@ -5,7 +5,8 @@
 //! Event-driven settle as in `tests/expect.rs`: the publisher's matching
 //! badge proves the watchdog's subscriber is routable before the clock that
 //! the assertions depend on starts mattering.
-//! Ports 7541-7542 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
@@ -13,15 +14,8 @@ use zenkey::qos::QosProfile;
 use zenkey_fleet::condition::{CondState, Condition, Transition, WatchdogSpec, run_watchdog};
 use zenkey_fleet::declare_publication;
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const KEY: &str = "v1/h-dddddddddddd/state/demo/health";
 
@@ -41,7 +35,7 @@ fn store_of() -> zenkey_fleet::decode::SchemaStore {
 /// 5. `dropped`: baseline → `ok`, exactly once — six ticks, one line.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() {
-    let (a, b) = peer_pair(7541).await;
+    let (a, b) = peer_pair().await;
 
     let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
         .await
@@ -123,7 +117,7 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
 /// baseline `firing` — and stays one line across the run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn origin_down_fires_on_an_absent_origin_and_only_once() {
-    let (_a, b) = peer_pair(7542).await;
+    let (_a, b) = peer_pair().await;
     let slices = zenkey_fleet::SliceSet::default();
 
     let (tx, rx) = std::sync::mpsc::channel::<Transition>();

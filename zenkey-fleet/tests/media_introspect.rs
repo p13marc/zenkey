@@ -3,19 +3,13 @@
 //! `--registry`, no compiled-in knowledge — which is what unblocks a media
 //! viewer that can enumerate streams before subscribing to one.
 //!
-//! Port 7527 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const ORIGIN: &str = "h-aaaaaaaaaaaa";
 
@@ -52,7 +46,7 @@ since = "1.3"
 /// any other consumer (the zengui detail pane, `topic list`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn declared_media_streams_are_discoverable_off_the_bus() {
-    let (server, client) = peer_pair(7527).await;
+    let (server, client) = peer_pair().await;
 
     let key = format!("v1/{ORIGIN}/@rpc/parallax/introspect");
     let queryable = server

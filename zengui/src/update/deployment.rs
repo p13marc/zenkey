@@ -272,14 +272,24 @@ fn apply_context(dep: &mut Deployment, stored: zenkey_fleet::StoredContext) {
 /// coordinate with it.
 fn reopen_session(dep: &mut Deployment, obs: &mut Observation) -> Task<Message> {
     obs.link = LinkState::Connecting;
-    obs.monitor = None;
+    // The old pump goes down *acknowledged* — the next monitor declares over
+    // the same keys, and a dropped handle only aborts the tasks while its
+    // subscribers undeclare in the background.
+    let teardown = obs
+        .monitor
+        .take()
+        .map(services::watch::shutdown)
+        .unwrap_or_else(Task::none);
     dep.session = None;
-    services::link::reopen(
-        dep.settings.zenoh_config.clone(),
-        dep.settings.connect.clone(),
-        dep.settings.listen.clone(),
-        dep.settings.scouting,
-    )
+    Task::batch([
+        teardown,
+        services::link::reopen(
+            dep.settings.zenoh_config.clone(),
+            dep.settings.connect.clone(),
+            dep.settings.listen.clone(),
+            dep.settings.scouting,
+        ),
+    ])
 }
 
 pub(crate) fn watch_scope(dep: &Deployment, obs: &Observation) -> Task<Message> {

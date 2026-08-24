@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use zenoh::Session;
 
+use crate::examples::Examples;
 use crate::report::{CutoverReport, CutoverVerdict};
 
 /// How many distinct offending keys each bucket names in the report.
@@ -96,11 +97,14 @@ pub async fn run_cutover(
     }
     monitor.stop();
 
+    // The keys-seen counts beside these are the exact totals, so the buckets
+    // name examples and leave the arithmetic to the counter.
     let cap = |m: &BTreeMap<String, u64>| {
-        m.iter()
-            .take(EXAMPLE_CAP)
-            .map(|(k, n)| format!("{k} ({n})"))
-            .collect::<Vec<_>>()
+        let mut ex = Examples::new(EXAMPLE_CAP);
+        for (k, n) in m {
+            ex.push_with(|| format!("{k} ({n})"));
+        }
+        ex.into_vec()
     };
     Ok(CutoverReport {
         old_root: old_root.to_string(),

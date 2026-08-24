@@ -241,20 +241,26 @@ async fn the_tree_carries_foreign_traffic() {
 /// Suspect-on-retraction (#61), self-contained (NOT ignored): a second
 /// in-process peer declares a conforming liveliness token; undeclaring it
 /// must flip the roster to suspect on the very next NodeDown event — no ttl
-/// aging, no polling — and redeclaring recovers it. Port 7476.
+/// aging, no polling — and redeclaring recovers it. The port is ephemeral, so
+/// two test runs at once cannot collide.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
     use std::time::Instant;
     use zenkey_fleet::{FleetEvent, StreamItem};
 
-    let producer_side =
-        zenkey_fleet::session::open(&[], &["tcp/127.0.0.1:7476".to_string()], false)
-            .await
-            .expect("producer session");
-    let observer_side =
-        zenkey_fleet::session::open(&["tcp/127.0.0.1:7476".to_string()], &[], false)
-            .await
-            .expect("observer session");
+    // A port the OS has just said is free, released the instant its number is
+    // known: a hard-coded one collides with a second `cargo test` run.
+    let endpoint = {
+        let held = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+        let port = held.local_addr().expect("local addr").port();
+        format!("tcp/127.0.0.1:{port}")
+    };
+    let producer_side = zenkey_fleet::session::open(&[], std::slice::from_ref(&endpoint), false)
+        .await
+        .expect("producer session");
+    let observer_side = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
+        .await
+        .expect("observer session");
 
     let monitor = Monitor::start(
         &observer_side,

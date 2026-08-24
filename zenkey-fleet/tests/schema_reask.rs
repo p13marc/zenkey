@@ -13,7 +13,9 @@
 //! store. These tests pin both halves of the fix.
 //!
 //! Self-contained: two in-process peers, explicit endpoints, no scouting, no
-//! external router. Ports 7507-7508 (disjoint from every other test binary).
+//! external router.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -25,15 +27,8 @@ use zenkey_fleet::decode::SchemaStore;
 const ORIGIN: &str = "h-bbbbbbbbbbbb";
 const PRODUCER: &str = "sysinfo";
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 fn schema_set_json() -> String {
     SchemaSet::builder("t")
@@ -100,7 +95,7 @@ async fn wait_routable(session: &zenoh::Session) {
 /// not have been met by waiting — only by throwing the store away.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_store_that_asked_too_early_recovers_without_waiting_out_the_ttl() {
-    let (listen, connect) = peer_pair(7507).await;
+    let (listen, connect) = peer_pair().await;
     let store = SchemaStore::new("", Duration::from_secs(2));
 
     // Ask before anyone serves: zero replies, and not a verdict.
@@ -142,7 +137,7 @@ async fn a_store_that_asked_too_early_recovers_without_waiting_out_the_ttl() {
 /// once per TTL, however many samples arrive.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_producer_that_answers_with_junk_is_asked_at_most_once_per_ttl() {
-    let (listen, connect) = peer_pair(7508).await;
+    let (listen, connect) = peer_pair().await;
     let (_q, asked) = declare_describe(&listen, "this is not a SchemaSet".to_string()).await;
     wait_routable(&connect).await;
 
@@ -169,5 +164,76 @@ async fn a_producer_that_answers_with_junk_is_asked_at_most_once_per_ttl() {
         asked.load(Ordering::Relaxed) - before,
         2,
         "forget() must send the next question to the bus"
+    );
+}
+
+/// Singleflight: a hot bus misses on many samples of the same producer at
+/// once — the first sample's GET is still on the wire when the second
+/// arrives. One ask must serve them all, or the store's frugality is a
+/// property of slow buses only.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_misses_for_one_producer_share_one_describe() {
+    let (listen, connect) = peer_pair().await;
+    let (_q, asked) = declare_describe(&listen, schema_set_json()).await;
+    wait_routable(&connect).await;
+
+    let store = SchemaStore::new("", Duration::from_secs(2));
+    let before = asked.load(Ordering::Relaxed);
+
+    // Eight misses in flight together: one wins the gate, the rest wait on
+    // it and read its answer out of the cache.
+    let got = tokio::join!(
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+        store.set_for(&connect, PRODUCER),
+    );
+    for (i, set) in [got.0, got.1, got.2, got.3, got.4, got.5, got.6, got.7]
+        .into_iter()
+        .enumerate()
+    {
+        assert!(
+            set.is_some_and(|s| s.get("Point").is_some()),
+            "waiter {i} must get the winner's answer"
+        );
+    }
+    assert_eq!(
+        asked.load(Ordering::Relaxed) - before,
+        1,
+        "eight concurrent misses must cost the producer one describe"
+    );
+}
+
+/// The doctor already holds every producer's describe document by the time
+/// its listen window opens. A pre-warmed store must not go back to the bus
+/// for what it was handed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pre_warmed_producer_is_never_asked() {
+    let (listen, connect) = peer_pair().await;
+    let (_q, asked) = declare_describe(&listen, schema_set_json()).await;
+    wait_routable(&connect).await;
+
+    let store = SchemaStore::new("", Duration::from_secs(2));
+    store.insert(
+        PRODUCER,
+        SchemaSet::parse(&schema_set_json()).expect("fixture parses"),
+    );
+    let before = asked.load(Ordering::Relaxed);
+
+    for _ in 0..10 {
+        let set = store.set_for(&connect, PRODUCER).await;
+        assert!(
+            set.is_some_and(|s| s.get("Point").is_some()),
+            "the pre-warmed set answers"
+        );
+    }
+    assert_eq!(
+        asked.load(Ordering::Relaxed) - before,
+        0,
+        "a pre-warmed producer costs the fleet nothing"
     );
 }

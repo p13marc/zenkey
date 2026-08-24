@@ -10,8 +10,9 @@
 //! assertions are about **the bytes that actually arrive**.
 //!
 //! Self-contained like `querier.rs`: two in-process peers, explicit endpoints,
-//! no scouting, no external router. Ports 7503-7506 (disjoint from every other
-//! test binary).
+//! no scouting, no external router.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
@@ -28,15 +29,8 @@ const PRODUCER: &str = "sysinfo";
 const SUBJECT_KEY: &str = "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/blob";
 const TWIST_KEY: &str = "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/twist";
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 /// `package t; message Blob { int32 x = 1; string name = 2; }`, built through
 /// prost-types rather than hand-encoded descriptor bytes — the fixture should
@@ -190,7 +184,7 @@ async fn connected_store(session: &zenoh::Session) -> SchemaStore {
 /// bytes — not the JSON the operator typed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
-    let (a, b) = peer_pair(7503).await;
+    let (a, b) = peer_pair().await;
     let _producer = declare_producer(&a).await;
     let store = connected_store(&b).await;
     let slices = slices();
@@ -290,7 +284,7 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
 /// a note / never look. None of them ships silently.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_three_modes_differ_only_in_what_they_say_and_refuse() {
-    let (a, b) = peer_pair(7504).await;
+    let (a, b) = peer_pair().await;
     let _producer = declare_producer(&a).await;
     let store = connected_store(&b).await;
     let slices = slices();
@@ -332,7 +326,7 @@ async fn the_three_modes_differ_only_in_what_they_say_and_refuse() {
 /// and "not asked" (no slices) reads differently from "asked, unregistered".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
-    let (_a, b) = peer_pair(7505).await;
+    let (_a, b) = peer_pair().await;
     let store = SchemaStore::new("", Duration::from_millis(200));
     let body = b"some/foreign/payload";
 
@@ -418,7 +412,7 @@ async fn an_unregistered_key_publishes_as_typed_and_says_which_case_it_is() {
 /// registering a kind is all it took, which is the claim the amendment makes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cdr_subject_ships_cdr_bytes_and_round_trips() {
-    let (a, b) = peer_pair(7506).await;
+    let (a, b) = peer_pair().await;
     let _producer = declare_producer(&a).await;
     let store = connected_store(&b).await;
     let slices = slices();

@@ -44,6 +44,7 @@ use serde_json::Value;
 use zenoh::Session;
 
 use crate::decode::SchemaStore;
+use crate::examples::Examples;
 use crate::registry::SliceSet;
 use crate::report::{DoctorFinding, DoctorSeverity, FieldReport, FieldRow};
 
@@ -98,8 +99,9 @@ pub struct FieldObservation {
     max_paths: usize,
     keys: BTreeMap<String, KeyFields>,
     paths: usize,
-    dropped_paths: u64,
-    dropped_examples: Vec<String>,
+    /// Refused path observations: the count *and* the names, in one
+    /// collector, so they cannot drift apart (O6).
+    dropped: Examples<String>,
 }
 
 /// One key's document samples and the paths inside them.
@@ -209,8 +211,7 @@ impl FieldObservation {
             max_paths: max_paths.max(1),
             keys: BTreeMap::new(),
             paths: 0,
-            dropped_paths: 0,
-            dropped_examples: Vec::new(),
+            dropped: Examples::new(DROPPED_EXAMPLE_CAP),
         }
     }
 
@@ -237,12 +238,7 @@ impl FieldObservation {
                     self.paths += 1;
                 }
                 // The bound: refused, counted, exemplified — never silent.
-                None => {
-                    self.dropped_paths += 1;
-                    if self.dropped_examples.len() < DROPPED_EXAMPLE_CAP {
-                        self.dropped_examples.push(format!("{key} · {path}"));
-                    }
-                }
+                None => self.dropped.push_with(|| format!("{key} · {path}")),
             }
         }
     }
@@ -267,14 +263,14 @@ impl FieldObservation {
 
     /// Path observations refused to stay within the bound (RFC 09 §5.1 O6).
     pub fn dropped_paths(&self) -> u64 {
-        self.dropped_paths
+        self.dropped.total() as u64
     }
 
     /// Up to a handful of `key · path` names among the refused (the cap is
     /// `DROPPED_EXAMPLE_CAP` — enough to recognise the document that
     /// exploded, without pasting the population).
     pub fn dropped_examples(&self) -> &[String] {
-        &self.dropped_examples
+        self.dropped.as_slice()
     }
 
     /// Samples that carried no structural document, across every key.
@@ -443,14 +439,14 @@ pub fn judge_fields(
     ctx: &BTreeMap<String, KeyFieldContext>,
 ) -> Vec<DoctorFinding> {
     let empty = KeyFieldContext::default();
-    let mut vanished = Vec::new();
-    let mut stuck = Vec::new();
-    let mut new = Vec::new();
+    let mut vanished = Examples::new(FINDING_CAP);
+    let mut stuck = Examples::new(FINDING_CAP);
+    let mut new = Examples::new(FINDING_CAP);
     for (key, fields) in obs.iter() {
         let c = ctx.get(key).unwrap_or(&empty);
         for (path, stats) in &fields.paths {
             if judge_vanished(stats, fields.documents) {
-                vanished.push(DoctorFinding {
+                vanished.push_with(|| DoctorFinding {
                     severity: DoctorSeverity::Warning,
                     check: "field-vanished".into(),
                     subject: format!("{key} · {path}"),
@@ -467,7 +463,7 @@ pub fn judge_fields(
             }
             if judge_stuck(stats, c.ttl_s) {
                 let ttl = c.ttl_s.unwrap_or(0);
-                stuck.push(DoctorFinding {
+                stuck.push_with(|| DoctorFinding {
                     severity: DoctorSeverity::Warning,
                     check: "field-stuck".into(),
                     subject: format!("{key} · {path}"),
@@ -487,7 +483,7 @@ pub fn judge_fields(
                 });
             }
             if judge_new(path, c.declared.as_ref()) {
-                new.push(DoctorFinding {
+                new.push_with(|| DoctorFinding {
                     severity: DoctorSeverity::Warning,
                     check: "field-new".into(),
                     subject: format!("{key} · {path}"),
@@ -507,22 +503,19 @@ pub fn judge_fields(
         }
     }
     let mut findings = Vec::new();
-    for (check, mut hits) in [
+    for (check, hits) in [
         ("field-vanished", vanished),
         ("field-stuck", stuck),
         ("field-new", new),
     ] {
-        let total = hits.len();
-        findings.extend(hits.drain(..).take(FINDING_CAP));
-        if total > FINDING_CAP {
+        let more = hits.more("more path(s) with the same finding");
+        findings.extend(hits.into_vec());
+        if let Some(evidence) = more {
             findings.push(DoctorFinding {
                 severity: DoctorSeverity::Info,
                 check: check.into(),
                 subject: "fleet".into(),
-                evidence: format!(
-                    "… and {} more path(s) with the same finding",
-                    total - FINDING_CAP
-                ),
+                evidence,
                 citation: None,
             });
         }

@@ -35,6 +35,7 @@ use zenoh::Session;
 
 use crate::condition;
 use crate::decode::SchemaStore;
+use crate::examples::Examples;
 use crate::registry::SliceSet;
 use crate::report::{ExpectReport, ExpectVerdict};
 use crate::{FleetEvent, Monitor, MonitorSpec, StreamItem, Verdict};
@@ -127,16 +128,10 @@ pub async fn run_expect(
     let mut samples: u64 = 0;
     let mut keys: BTreeSet<String> = BTreeSet::new();
     let mut dropped: u64 = 0;
-    let mut violations: Vec<String> = Vec::new();
-    let mut violations_total: u64 = 0;
+    // Named examples, exact total: the report shows the first
+    // [`EXAMPLE_CAP`] and says how many there were.
+    let mut violations: Examples<String> = Examples::new(EXAMPLE_CAP);
     let mut ended_early = false;
-
-    let violate = |list: &mut Vec<String>, total: &mut u64, line: String| {
-        *total += 1;
-        if list.len() < EXAMPLE_CAP {
-            list.push(line);
-        }
-    };
 
     loop {
         let item = tokio::select! {
@@ -148,11 +143,7 @@ pub async fn run_expect(
                 samples += 1;
                 keys.insert(s.key.clone());
                 if spec.absent {
-                    violate(
-                        &mut violations,
-                        &mut violations_total,
-                        format!("{}: a sample where none may be", s.key),
-                    );
+                    violations.push(format!("{}: a sample where none may be", s.key));
                     // Conclusive — but keep draining so the report counts
                     // the full extent of the failure within the window.
                     continue;
@@ -170,20 +161,16 @@ pub async fn run_expect(
                     .await;
                     match d.verdict {
                         Verdict::Valid => {}
-                        Verdict::Invalid(errors) => violate(
-                            &mut violations,
-                            &mut violations_total,
-                            format!("{}: invalid — {}", s.key, errors.join("; ")),
-                        ),
+                        Verdict::Invalid(errors) => {
+                            violations.push(format!("{}: invalid — {}", s.key, errors.join("; ")))
+                        }
                         // Every not-validated reason — `NoRegistry`
                         // included — rides the same arm: the user asserted
                         // validity, and "unknowable" is not met. The reason
                         // string keeps the two silences apart (#246).
-                        Verdict::NotValidated(reason) => violate(
-                            &mut violations,
-                            &mut violations_total,
-                            format!("{}: validity unknowable — {reason}", s.key),
-                        ),
+                        Verdict::NotValidated(reason) => {
+                            violations.push(format!("{}: validity unknowable — {reason}", s.key))
+                        }
                     }
                 }
                 if let Some(check) = spec.qos {
@@ -201,21 +188,17 @@ pub async fn run_expect(
                     };
                     match against {
                         Some(p) if s.qos_matches(p) => {}
-                        Some(p) => violate(
-                            &mut violations,
-                            &mut violations_total,
-                            format!("{}: did not ride {} on the wire", s.key, p.name()),
-                        ),
-                        None => violate(
-                            &mut violations,
-                            &mut violations_total,
-                            format!("{}: no declared profile to ride", s.key),
-                        ),
+                        Some(p) => violations.push(format!(
+                            "{}: did not ride {} on the wire",
+                            s.key,
+                            p.name()
+                        )),
+                        None => violations.push(format!("{}: no declared profile to ride", s.key)),
                     }
                 }
                 // Early success: the count is in, nothing else can invalidate
                 // it (rate bounds need the full window), nothing has.
-                if no_rate_bounds && violations_total == 0 && samples >= need && need > 0 {
+                if no_rate_bounds && violations.total() == 0 && samples >= need && need > 0 {
                     ended_early = true;
                     break;
                 }
@@ -242,6 +225,7 @@ pub async fn run_expect(
     // ride `judge_shortfall`, whose drops make them unobservable instead.
     let mut unmet: Vec<String> = Vec::new();
     let mut positive = false;
+    let violations_total = violations.total() as u64;
     if violations_total > 0 {
         positive = true;
         unmet.push(if spec.absent {
@@ -314,7 +298,7 @@ pub async fn run_expect(
         keys_seen: keys.len(),
         dropped,
         rate_hz,
-        violations,
+        violations: violations.into_vec(),
         violations_total,
         unmet,
         verdict,

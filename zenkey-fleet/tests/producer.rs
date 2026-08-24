@@ -1,20 +1,15 @@
 //! Producer bring-up (RFC 04 §5) over a real pair of sessions: queryables
 //! before `alive`, replies on the concrete key, reserved-error refusals on
-//! `reply_err`. Ports 7550-7551 (disjoint from every other test binary).
+//! `reply_err`.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
 use zenkey_fleet::producer::{BringUp, ReservedError};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const INTROSPECT: &str = "v1/h-abcdefabcdef/@rpc/mockp/introspect";
 const ALIVE: &str = "v1/h-abcdefabcdef/state/mockp/alive";
@@ -26,7 +21,7 @@ const ALIVE: &str = "v1/h-abcdefabcdef/state/mockp/alive";
 /// reserved name (RFC 05 §3, RFC 08 §6.1).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alive_implies_callable_and_replies_ride_the_concrete_key() {
-    let (a, b) = peer_pair(7550).await;
+    let (a, b) = peer_pair().await;
 
     // A wildcard queryable is not a producer posture: refused up front.
     let mut up = BringUp::new(&a);

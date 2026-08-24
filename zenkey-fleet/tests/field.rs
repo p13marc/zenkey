@@ -6,7 +6,8 @@
 //! The fixture publishers send continuously through each window, so no
 //! settle is needed beyond the publisher's matching badge (a fixture that
 //! publishes into the void tests the void).
-//! Ports 7545-7547 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
@@ -15,15 +16,8 @@ use zenkey::schema::{SchemaSet, TypeSchema};
 use zenkey_fleet::report::ExpectVerdict;
 use zenkey_fleet::{ExpectSpec, FieldSpec, declare_publication, run_expect, run_field};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const ORIGIN: &str = "h-adadadadadad";
 const KEY: &str = "v1/h-adadadadadad/state/demo/health";
@@ -109,7 +103,7 @@ fn slices_of() -> zenkey_fleet::SliceSet {
 /// rate floor: exactly the failure mode every per-sample check renders green.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
-    let (a, b) = peer_pair(7545).await;
+    let (a, b) = peer_pair().await;
     let slices = slices_of();
     let _describe = serve_describe(&a).await;
 
@@ -206,7 +200,7 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
 /// `field-new`, schema drift at field granularity.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn vanished_and_undeclared_paths_become_their_findings() {
-    let (a, b) = peer_pair(7546).await;
+    let (a, b) = peer_pair().await;
     let slices = slices_of();
     let _describe = serve_describe(&a).await;
 
@@ -281,7 +275,7 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
 /// what makes `zenctl watchdog --rule 'doctor field-stuck'` a thing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_doctor_listen_phase_flags_the_frozen_field() {
-    let (a, b) = peer_pair(7547).await;
+    let (a, b) = peer_pair().await;
     let local = zenkey::parse_slice(SLICE).expect("fixture slice");
 
     let publication = declare_publication(&a, KEY, QosProfile::Transition, None)

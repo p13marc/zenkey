@@ -773,8 +773,57 @@ impl Monitor {
 
     /// Stop watching. Equivalent to dropping the monitor — kept as an explicit
     /// verb for call sites that want to say so.
+    ///
+    /// The teardown is the [`Drop`] one: tasks aborted, subscribers left to
+    /// undeclare in the background. Where the *acknowledgement* matters —
+    /// tearing one monitor down to declare another over the same keys — use
+    /// [`shutdown`](Self::shutdown) instead.
     pub fn stop(self) {
         drop(self);
+    }
+
+    /// Stop watching, **acknowledged**: every watch undeclares and is waited
+    /// for before this returns.
+    ///
+    /// [`unwatch`](Self::unwatch) awaits `undeclare` on purpose — "the
+    /// teardown is acknowledged, not racing a drop" — but the whole-monitor
+    /// path had no such verb: [`Drop`] can only abort the tasks and let the
+    /// subscribers undeclare on their own, in the background, which is the
+    /// race that doc disavows. A frontend that re-scopes by rebuilding its
+    /// monitor was therefore declaring the new subscribers while the old ones
+    /// were still tearing down.
+    ///
+    /// Every watch is drained even if one fails to undeclare — a monitor half
+    /// torn down is worse than one torn down noisily — and the failures are
+    /// reported together. `Drop` still runs afterwards, aborting the
+    /// liveliness and tick tasks, and remains the fallback for every path
+    /// that does not come through here.
+    ///
+    /// Statistics are **not** retired the way `unwatch` retires them: that
+    /// counter answers "the key set shrank because you stopped looking"
+    /// (RFC 09 §5.1 O6) for a monitor that goes on running. This one is the
+    /// end of the observation; the core goes with it unless a caller kept an
+    /// `Arc`, and a re-scope's next monitor starts from a fresh one.
+    pub async fn shutdown(self) -> Result<()> {
+        let drained: Vec<WatchEntry> = {
+            let mut watches = self.watches.lock().await;
+            watches.drain().map(|(_, entry)| entry).collect()
+        };
+        let mut failed = Vec::new();
+        for mut entry in drained {
+            if let Some(task) = entry.seed_task.take() {
+                task.abort();
+            }
+            if let Err(e) = entry.subscriber.undeclare().await {
+                failed.push(format!("{}: {e}", entry.selector));
+            }
+        }
+        drop(self);
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!("undeclare {}", failed.join("; ")))
+        }
     }
 }
 

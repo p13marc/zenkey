@@ -38,7 +38,22 @@ pub struct SchemaStore {
     /// live for the store's lifetime (no eviction — a fleet's producer set
     /// is small and a stale querier is only idle routing state).
     queriers: Mutex<HashMap<String, std::sync::Arc<crate::query::RepeatingQuery>>>,
-    decoders: DecoderRegistry,
+    /// One in-flight `describe` per producer. A hot bus misses on many
+    /// samples of the same producer at once — the first sample's GET is
+    /// still on the wire when the second arrives — and the store used to
+    /// fan one GET per miss at a producer that had been asked microseconds
+    /// earlier. The losers wait on the winner's gate and then read its
+    /// answer out of `sets`, so the fleet sees exactly one ask.
+    ///
+    /// Bounded and unevicted for the same reason `queriers` is: an entry is
+    /// a bare async mutex, and a fleet's producer set is small.
+    inflight: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    /// Behind a lock because registration is a `&self` act: the store is
+    /// shared through an `Arc` by every frontend that has one, and a
+    /// `&mut self` setter on it is unreachable by construction. Read-locked
+    /// per decode, which is the same order of cost as the `sets` lookup that
+    /// preceded it.
+    decoders: std::sync::RwLock<DecoderRegistry>,
 }
 
 /// How long "asked, and answered with nothing usable" stays authoritative
@@ -98,6 +113,16 @@ enum Cached {
     Missing(Missing),
 }
 
+/// What the cached state answers on its own, before any GET.
+enum Lookup {
+    /// The cache is authoritative: the served set, or `None` for a miss
+    /// still inside its backoff.
+    Answered(Option<std::sync::Arc<SchemaSet>>),
+    /// Nothing authoritative — ask, carrying this many consecutive
+    /// zero-reply asks into the backoff.
+    Ask(u32),
+}
+
 /// What one `describe` GET produced — the distinction issue #101 exists for.
 enum Fetched {
     Served(SchemaSet),
@@ -112,13 +137,40 @@ impl SchemaStore {
             timeout,
             sets: Mutex::new(HashMap::new()),
             queriers: Mutex::new(HashMap::new()),
-            decoders: DecoderRegistry::new(),
+            inflight: Mutex::new(HashMap::new()),
+            decoders: std::sync::RwLock::new(DecoderRegistry::new()),
         }
     }
 
-    /// The decoder table (register custom kinds through this).
-    pub fn decoders_mut(&mut self) -> &mut DecoderRegistry {
-        &mut self.decoders
+    /// Register a custom kind's codec (RFC 08 §7 is open to kinds beyond the
+    /// built-ins; later registrations win on conflict).
+    ///
+    /// Takes `&self`, unlike the `decoders_mut` it replaces: every frontend
+    /// shares one store through an `Arc`, so a `&mut self` setter could only
+    /// be called before the store was shared — which is to say, not by the
+    /// code that has the store.
+    pub fn register_decoder(&self, decoder: Box<dyn zenkey::schema::decode::PayloadDecoder>) {
+        self.decoders
+            .write()
+            .expect("decoder lock")
+            .register(decoder);
+    }
+
+    /// Pre-warm one producer's served set with a `describe` reply the caller
+    /// already holds (RFC 08 §7).
+    ///
+    /// The doctor fetches every producer's describe document in its GET
+    /// phase and then opens a listen window; without this the window's store
+    /// starts empty and re-asks the fleet, mid-window, for documents the
+    /// same run already has — load this tool put on the fleet for nothing.
+    ///
+    /// Authoritative, not a hint: it overwrites whatever the store held,
+    /// including a negative entry still inside its backoff.
+    pub fn insert(&self, producer: impl Into<String>, set: SchemaSet) {
+        self.sets
+            .lock()
+            .expect("store lock")
+            .insert(producer.into(), Cached::Served(std::sync::Arc::new(set)));
     }
 
     /// The schema for `type_name` as served by `producer`, fetching
@@ -149,16 +201,22 @@ impl SchemaStore {
         session: &Session,
         producer: &str,
     ) -> Option<std::sync::Arc<SchemaSet>> {
-        // How many consecutive zero-reply asks precede this one — carried
-        // across so the backoff actually grows.
-        let attempts = {
-            let sets = self.sets.lock().expect("store lock");
-            match sets.get(producer) {
-                Some(Cached::Served(set)) => return Some(std::sync::Arc::clone(set)),
-                Some(Cached::Missing(m)) if !m.may_reask() => return None,
-                Some(Cached::Missing(m)) => m.attempts,
-                None => 0,
-            }
+        if let Lookup::Answered(hit) = self.lookup(producer) {
+            return hit;
+        }
+        // Singleflight: hold the producer's gate for the duration of the ask.
+        let gate = {
+            let mut inflight = self.inflight.lock().expect("inflight lock");
+            std::sync::Arc::clone(inflight.entry(producer.to_string()).or_default())
+        };
+        let _held = gate.lock().await;
+        // Whoever held the gate before us has already written its answer —
+        // served or missing — so ask only if the cache is still undecided.
+        // This is the whole point of the gate: the waiters pay a lock, not a
+        // GET.
+        let attempts = match self.lookup(producer) {
+            Lookup::Answered(hit) => return hit,
+            Lookup::Ask(attempts) => attempts,
         };
         let entry = match self.fetch(session, producer).await {
             Fetched::Served(set) => Cached::Served(std::sync::Arc::new(set)),
@@ -182,6 +240,19 @@ impl SchemaStore {
         };
         sets.insert(producer.to_string(), entry);
         served
+    }
+
+    /// What the cache alone can say about `producer`: a verdict, or how many
+    /// consecutive zero-reply asks precede the next one (carried across so
+    /// the backoff actually grows).
+    fn lookup(&self, producer: &str) -> Lookup {
+        let sets = self.sets.lock().expect("store lock");
+        match sets.get(producer) {
+            Some(Cached::Served(set)) => Lookup::Answered(Some(std::sync::Arc::clone(set))),
+            Some(Cached::Missing(m)) if !m.may_reask() => Lookup::Answered(None),
+            Some(Cached::Missing(m)) => Lookup::Ask(m.attempts),
+            None => Lookup::Ask(0),
+        }
     }
 
     /// Forget what we learned about one producer, so the next question goes
@@ -276,7 +347,10 @@ impl SchemaStore {
         encoding: &WireEncoding,
         bytes: &[u8],
     ) -> Result<DecodedPayload, DecodeError> {
-        self.decoders.decode(schema, encoding, bytes)
+        self.decoders
+            .read()
+            .expect("decoder lock")
+            .decode(schema, encoding, bytes)
     }
 
     /// The other direction (issue #97): a JSON value framed for the wire.
@@ -288,7 +362,10 @@ impl SchemaStore {
         value: &serde_json::Value,
         target: &WireEncoding,
     ) -> Result<Vec<u8>, DecodeError> {
-        self.decoders.encode(schema, value, target)
+        self.decoders
+            .read()
+            .expect("decoder lock")
+            .encode(schema, value, target)
     }
 }
 

@@ -4,7 +4,9 @@
 //!
 //! Event-driven like `matching.rs`: the publication's matching badge proves
 //! the subscriber is routable before anything is published, so no sleep races
-//! the fixture. Ports 7515-7516 (disjoint from every other test binary).
+//! the fixture.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
@@ -12,15 +14,8 @@ use zenkey::qos::QosProfile;
 use zenkey_fleet::declare_publication;
 use zenoh::sample::SampleKind;
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const KEY: &str = "v1/h-dddddddddddd/state/demo/health";
 
@@ -28,7 +23,7 @@ const KEY: &str = "v1/h-dddddddddddd/state/demo/health";
 /// after an ordinary put on the same declared publisher.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_tombstone_reaches_the_subscriber_as_delete() {
-    let (a, b) = peer_pair(7515).await;
+    let (a, b) = peer_pair().await;
 
     let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
         .await
@@ -71,7 +66,7 @@ async fn a_tombstone_reaches_the_subscriber_as_delete() {
 /// `topic retire` just produced).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_monitor_reports_kind_delete() {
-    let (a, b) = peer_pair(7516).await;
+    let (a, b) = peer_pair().await;
 
     let monitor = zenkey_fleet::Monitor::start(&b, zenkey_fleet::MonitorSpec::default())
         .await
