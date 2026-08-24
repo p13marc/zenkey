@@ -23,11 +23,15 @@
 //! `--context` is refused before a command prints anything, instead of at
 //! whichever of a hundred accessor calls happened to come first.
 //!
-//! *One user-visible change:* a bad `--context` exits **1**, not 2. Nothing
-//! pinned the 2, and 1 is the consistent answer — in this tool exit 2 means
-//! *not proven* (`expect`, `cutover`, `schema check`), while a name that is
-//! not in your config file is your input, which is what
-//! `session-config-error.trycmd` already pins as 1.
+//! *One user-visible change, twice reversed:* a bad `--context` used to exit
+//! 2 through a `std::process::exit` inside a getter, then 1 through the anyhow
+//! edge (#209's reading: "your input is a 1"), and exits **2** again since
+//! #264 — this time because the whole tool agrees. Clap already exits 2 for
+//! every mis-shaped command line, which fixes the meaning of 2 for user input
+//! whether the rest of the tool likes it or not; the refusals clap cannot
+//! express joined it rather than competing with it. [`crate::exit`] is the
+//! one statement of that, and `crate::context::active` is where this
+//! particular refusal is tagged.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -127,9 +131,7 @@ impl Bus {
     }
 
     pub(crate) async fn session(&self) -> Result<zenoh::Session> {
-        self.session_reporting()
-            .await
-            .map_err(zenkey_fleet::OpenFailure::into_error)
+        self.session_reporting().await.map_err(open_error)
     }
 
     /// The same, saying which half failed — so a caller holding `--registry`
@@ -298,10 +300,30 @@ enum SliceFailure {
 }
 
 impl SliceFailure {
+    /// The two halves also part on their **exit code** (#264): a source the
+    /// user named that did not work is a refused input — exit 2, clap's code
+    /// — while a bus that would not answer is an ordinary failure, exit 1.
+    /// The fork already existed; this is the one line that spends it.
     fn into_error(self) -> anyhow::Error {
         match self {
-            SliceFailure::Named(e) | SliceFailure::Unreachable(e) => e,
+            SliceFailure::Named(e) => crate::exit::unaskable!("{e:#}"),
+            SliceFailure::Unreachable(e) => e,
         }
+    }
+}
+
+/// An [`OpenFailure`](zenkey_fleet::OpenFailure), as an error with an exit
+/// code attached.
+///
+/// The same fork as [`SliceFailure`], on the session side (#196): a
+/// `--zenoh-config` this tool refuses — one that sets a session namespace,
+/// say, which an explorer must not have (RFC 09 §5) — is *your file*, so it
+/// is a refused input and exits 2. A transport that would not come up is the
+/// world being unavailable, and keeps its 1.
+fn open_error(f: zenkey_fleet::OpenFailure) -> anyhow::Error {
+    match f {
+        zenkey_fleet::OpenFailure::Config(e) => crate::exit::unaskable!("{e:#}"),
+        other => other.into_error(),
     }
 }
 

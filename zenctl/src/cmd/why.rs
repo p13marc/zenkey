@@ -8,14 +8,26 @@
 //! (`--registry` dirs, or the live sweep, degrading through
 //! `slices_optional` — a registry that could not be loaded turns the
 //! declaration rung `NotAsked`, never `No`), the rendering, and the exit
-//! code:
+//! code.
 //!
-//! * **0** — an explanation was established;
-//! * **1** — none was, and everything checked looks healthy ("declared,
-//!   alive, never published" lands here: lazy publisher declaration is not a
-//!   bug, RFC 08 §6.1);
+//! ## The exit codes flipped (#264)
+//!
+//! They used to read 0 = explained, 1 = healthy, 2 = impaired — which paged
+//! you for a **healthy** fleet and stayed quiet when a cause was found. Under
+//! the one contract in [`crate::exit`], 1 is the *finding*, and a cause is
+//! exactly that:
+//!
+//! * **0** — no cause was established and everything checked looks healthy
+//!   ("declared, alive, never published" lands here: lazy publisher
+//!   declaration is not a bug, RFC 08 §6.1);
+//! * **1** — an explanation was established — the finding;
 //! * **2** — the observation was impaired: an input the ladder wanted could
-//!   not be obtained, so "healthy" cannot be claimed (RFC 09 §5.1 O4).
+//!   not be obtained, so neither answer can be claimed (RFC 09 §5.1 O4).
+//!
+//! Nothing here spells that: [`zenkey_fleet::WhyVerdict::to_judgement`]
+//! carries the inversion (RFC 13's convention — the judged claim is the
+//! finding) and [`crate::exit::verdict`] projects it. The flip is a property
+//! of the mapping, not of this file.
 
 use anyhow::Result;
 
@@ -24,42 +36,42 @@ use crate::cli::WhyArgs;
 
 pub async fn run(args: WhyArgs) -> Result<()> {
     // A verdict verb: every pre-run failure is `asked`'s exit 2, never 1 —
-    // exit 1 here means "no cause found and everything looks healthy", which
-    // a bus that would not open has no standing to claim. A `$*` key is the
-    // same kind of failure: a question that cannot be asked (RFC 03 §2).
-    super::asked("why", super::raw_selector(&args.key));
-    let bus = super::asked("why", Bus::resolve(&args.bus));
+    // exit 1 here means "a cause was found", which a bus that would not open
+    // has no standing to claim. A `$*` selector is the same kind of failure:
+    // a question that cannot be asked (RFC 03 §2).
+    let bus = crate::exit::asked("why", Bus::resolve(&args.bus));
+    let selector = crate::exit::asked("why", super::selector_of(&args.selector, &bus));
     // The registry through the one degradation door (#210): unavailable is
     // `None` — announced once, and rendered as "not asked" by the rung.
-    let slices = super::asked("why", bus.slices_optional().await);
-    let session = super::asked("why", bus.session().await);
+    let slices = crate::exit::asked("why", bus.slices_optional().await);
+    let session = crate::exit::asked("why", bus.session().await);
 
     // Stated before the window opens, not after (O5): a user watching a
     // silence deserves to know what is being watched, and that the window is
     // the only data-plane cost of this run.
-    if let Some(secs) = args.listen {
-        eprintln!(
-            "why: listening {secs}s on {} — the one rung that costs the data \
-             plane; everything else was control-plane sweeps (RFC 09 §5.1).",
-            args.key
-        );
-    }
+    let listen = match args.for_secs {
+        Some(secs) => {
+            let d = crate::exit::asked("why", super::positive_secs("--for", secs));
+            eprintln!(
+                "why: listening {secs}s on {selector} — the one rung that costs the \
+                 data plane; everything else was control-plane sweeps (RFC 09 §5.1)."
+            );
+            Some(d)
+        }
+        None => None,
+    };
 
     let spec = zenkey_fleet::WhySpec {
         timeout: bus.timeout(),
-        listen: args.listen.map(std::time::Duration::from_secs_f64),
+        listen,
     };
-    let report = super::asked(
+    let report = crate::exit::asked(
         "why",
-        zenkey_fleet::run_why(&bus.fleet(&session), &args.key, slices.as_ref(), &spec).await,
+        zenkey_fleet::run_why(&bus.fleet(&session), &selector, slices.as_ref(), &spec).await,
     );
     crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())?;
 
-    // A library returns a verdict, a command exits with it (the `cutover`
-    // discipline): 0 = explained, 1 = no cause and healthy, 2 = impaired.
-    match report.verdict {
-        zenkey_fleet::WhyVerdict::Explained => Ok(()),
-        zenkey_fleet::WhyVerdict::Healthy => std::process::exit(1),
-        zenkey_fleet::WhyVerdict::Impaired => std::process::exit(2),
-    }
+    // A library returns a verdict, a command exits with it — through the
+    // engine's own projection, never a hand-rolled `match` (`crate::exit`).
+    crate::exit::verdict(&report.verdict.to_judgement())
 }

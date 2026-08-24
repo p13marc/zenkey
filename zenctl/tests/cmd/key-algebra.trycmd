@@ -55,12 +55,20 @@ v1/**/a
 
 ```
 
-**Exit 2 is overloaded, and here are both meanings side by side.** The first is
-this command's own verdict — the expression does not parse, and the message is
-zenoh's with its build-machine source location trimmed off (#240). The second
-never reaches the command at all: clap rejected the usage. A script branching on
-the code cannot tell them apart, and pinning them together is how that stays
-known rather than being rediscovered.
+**Exit 2 carries one meaning, and here are two of its shapes side by side.**
+The first is this command's own: the expression does not parse, and the
+message is zenoh's with its build-machine source location trimmed off (#240).
+The second never reaches the command at all: clap rejected the usage. A script
+branching on the code cannot tell them apart — and since #264 it does not need
+to, because they are the same claim. **2 = no verdict: the question could not
+be asked**, which is what an unparseable expression and a mis-shaped command
+line both are.
+
+This file used to be half of a contradiction: it argued *invalid expression =
+2* while `session-config-error.trycmd` argued *your input = 1*, and no script
+could hold both readings. `zenctl/src/exit.rs` is the one statement now, and
+it settled on this half — because clap owns 2 for user input and cannot be
+argued with, so everything else joined it.
 
 ```console
 $ zenctl key includes --format table 'v1/**a' 'v1/a'

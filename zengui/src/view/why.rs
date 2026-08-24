@@ -12,7 +12,7 @@
 //! Cost posture: the frugal default, always. One button, one control-plane
 //! run (liveliness + admin sweeps + one bounded GET); no subscriber is ever
 //! declared from here, so `wire-heard` reads "not asked" and says so. The
-//! opt-in listen window stays a `zenctl why --listen` affair.
+//! opt-in listen window stays a `zenctl why --for` affair.
 
 use std::sync::Arc;
 

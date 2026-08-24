@@ -22,7 +22,7 @@ pub async fn rpc(
     origin: &str,
     producer: &str,
     procedure: &str,
-    count: Option<usize>,
+    calls: Option<usize>,
     concurrency: usize,
     i_know: bool,
     args: &Bus,
@@ -30,7 +30,7 @@ pub async fn rpc(
     let target = zenkey_fleet::CallTarget::parse(origin)?;
     let slices = args.slices_optional().await?;
     let session = args.session().await?;
-    let count = count.unwrap_or(DEFAULT_COUNT);
+    let count = calls.unwrap_or(DEFAULT_COUNT);
 
     let report = zenkey_fleet::run_bench(
         &args.fleet(&session),
@@ -49,9 +49,22 @@ pub async fn rpc(
     .map_err(|e| anyhow!("{e}"))?;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // A benchmark that reached nobody is not a benchmark. Exit 2 matches
-    // `service call`'s "zero replies" code — silence keeps its own meaning.
+    // `service call`'s "zero replies" code — silence keeps its own meaning
+    // (`crate::exit`).
     if report.origins.is_empty() {
-        std::process::exit(2);
+        std::process::exit(crate::exit::NO_VERDICT);
+    }
+    // An error reply is a finding, and a benchmark that measured nothing but
+    // error envelopes used to exit **0** with a latency distribution over
+    // failures (#264). The numbers are still printed — they are what makes
+    // the finding legible — and the exit says what they are made of.
+    if report.errors > 0 {
+        eprintln!(
+            "bench: {} of {} completed call(s) came back as an error envelope \
+             (RFC 05 §3) — the latencies above are timings of failures",
+            report.errors, report.completed
+        );
+        std::process::exit(crate::exit::FINDING);
     }
     Ok(())
 }

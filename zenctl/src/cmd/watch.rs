@@ -30,19 +30,20 @@ use std::io::IsTerminal;
 use std::io::Write as _;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::render::Format;
 use crate::render::{Render, Row, Table};
 
 /// `--watch` accepts table (redraw) and ndjson (stream); a single growing
-/// JSON document would misrepresent a stream, so `--format json` is refused.
+/// JSON document would misrepresent a stream, so `--format json` is refused
+/// — a refused input, so exit 2 (`crate::exit`).
 pub fn validate_format(format: Format) -> Result<()> {
     if matches!(format, Format::Json) {
-        bail!(
+        return Err(crate::exit::unaskable!(
             "--watch cannot stream --format json (one document cannot grow); \
              use --format ndjson: one snapshot per line"
-        );
+        ));
     }
     Ok(())
 }
@@ -196,10 +197,15 @@ pub async fn poll_loop<R: Render>(
     Ok(())
 }
 
-/// `--watch SECS` → a validated interval.
+/// `--watch --every SECS` → a validated interval.
+///
+/// The refusal is a refused input, so it exits 2 (`crate::exit`) — a redraw
+/// period of 10ms is a typo, and the tool says so the way clap would.
 pub fn interval_of(secs: f64) -> Result<Duration> {
     if !secs.is_finite() || secs < 0.2 {
-        bail!("--watch interval must be at least 0.2s (got {secs})");
+        return Err(crate::exit::unaskable!(
+            "--every must be at least 0.2s on a watch (got {secs})"
+        ));
     }
     Ok(Duration::from_secs_f64(secs))
 }

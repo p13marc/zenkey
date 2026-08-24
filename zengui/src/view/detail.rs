@@ -91,7 +91,7 @@ pub struct DetailData<'a> {
 }
 
 /// Microseconds humanised with the sign kept — a negative latency is the
-/// skew evidence (#119), same spelling as `zenctl topic hz --latency`.
+/// skew evidence (#119), same spelling as `zenctl rate --latency`.
 pub fn human_us(us: i64) -> String {
     let sign = if us < 0 { "-" } else { "" };
     let abs = us.unsigned_abs();
@@ -105,7 +105,7 @@ pub fn human_us(us: i64) -> String {
 }
 
 /// The wire's QoS axes as one stable lowercase token — the same spelling
-/// `zenctl topic echo --fmt %q` prints, so the two frontends agree.
+/// `zenctl echo --fmt %q` prints, so the two frontends agree.
 pub fn qos_token(entry: &crate::history::HistoryEntry) -> String {
     use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
     let p = match entry.priority {

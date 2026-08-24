@@ -44,7 +44,7 @@ Options:
       --scouting
           Enable multicast scouting for this context
 
-      --timeout <TIMEOUT>
+      --timeout <SECS>
           Default reply timeout in seconds
 
       --zenoh-config <FILE>

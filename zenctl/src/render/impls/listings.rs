@@ -87,7 +87,7 @@ impl Render for TopicList {
             let is = if open_ended == 1 { "is" } else { "are" };
             notes.push(Note::coverage(format!(
                 "{open_ended} {is} open-ended ({{var...}}): the registry fixes their \
-                 shape, not their members. Use `zenctl topic echo` to see what a live \
+                 shape, not their members. Use `zenctl echo` to see what a live \
                  fleet actually publishes"
             )));
         }

@@ -1,5 +1,5 @@
 //! The Send pane (#184): publish and call, one form — the GUI face of the
-//! write facade (`zenctl topic pub` / `zenctl service call`).
+//! write facade (`zenctl pub` / `zenctl service call`).
 //!
 //! Publish (517 lines) and Call (369) carried the same target key, body
 //! editor, schema validation, QoS vocabulary and result region, and differed
@@ -212,7 +212,7 @@ pub struct SendForm {
     /// schema kind decide" (the engine's ladder).
     pub encoding: String,
     /// Send the bytes verbatim — the explicit escape hatch, mirroring
-    /// `zenctl topic pub --raw`.
+    /// `zenctl pub --raw`.
     pub raw: bool,
     /// Keep publishing on an interval once armed.
     pub repeat: bool,

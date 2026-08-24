@@ -46,34 +46,11 @@ pub mod watch;
 pub mod watchdog;
 pub mod why;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 
 use crate::Bus;
-
-/// The verdict verbs' pre-run guard. `cutover`, `expect`, `why`, `registry
-/// retired` and `schema check` give their 0 and 1 exits *meanings* — met /
-/// not met, silent / still speaking, valid / invalid — and reserve 2 for a
-/// question that could not be asked. A `?` on their setup path exits 1
-/// through main's anyhow edge, which **claims the verdict**: `cutover`
-/// against a bus that would not open used to exit 1 = "the old family still
-/// speaks", actively misleading CI. So every pre-run failure — resolution,
-/// session, registry, the observation itself — goes through here instead:
-/// the error rendered in the one shape (`errors::render`), then the reserved
-/// exit. Acts and listings keep their 1: their exit codes carry no verdict
-/// to protect.
-pub(crate) fn asked<T>(verb: &str, result: Result<T>) -> T {
-    match result {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{}", crate::errors::render(&e));
-            eprintln!(
-                "{verb}: the question could not be asked — exit 2, the reserved \
-                 non-verdict (1 here would claim a verdict this run never reached)"
-            );
-            std::process::exit(2);
-        }
-    }
-}
+use crate::cli::SelectorArgs;
+use crate::exit::unaskable;
 
 /// The raw-selector seam: every selector (or key) a user types, rather than
 /// composes through positions, passes here before anything reaches the
@@ -82,13 +59,38 @@ pub(crate) fn asked<T>(verb: &str, result: Result<T>) -> T {
 /// if a chunk needs `$*`, the key is wrong and wants splitting). zengui's
 /// scope seam refuses it with this wording; the CLI must not be the frontend
 /// that lets it through.
+///
+/// An [`Unaskable`](crate::exit::Unaskable), because it is this tool refusing
+/// what you typed: exit 2, the same code clap uses, on every verb (#264). It
+/// used to be a 1 on the listings and a 2 on the verdict verbs, which is one
+/// mistake with two exit codes.
 pub fn raw_selector(sel: &str) -> Result<&str> {
     if sel.contains("$*") {
-        return Err(anyhow!(
+        return Err(unaskable!(
             "`$*` must not be used in selectors (RFC 03 §2): {sel:?}"
         ));
     }
     Ok(sel)
+}
+
+/// Where a wire watcher looks: the typed selector, or the composed positions,
+/// or the base's whole `v1` subtree (#264).
+///
+/// The one resolution of [`SelectorArgs`], so that `echo`, `rate`, `record`,
+/// `field`, `check expect` and `why` cannot disagree about what "no selector"
+/// means. Clap has already refused the both-at-once shape.
+pub fn selector_of(sel: &SelectorArgs, args: &Bus) -> Result<String> {
+    match sel.selector.as_deref() {
+        // Typed selectors pass the raw seam (`$*` refusal, RFC 03 §2);
+        // composed ones cannot spell it.
+        Some(s) => Ok(raw_selector(s)?.to_string()),
+        None => compose_selector(
+            args,
+            sel.origin.as_deref(),
+            sel.class.as_deref(),
+            sel.producer.as_deref(),
+        ),
+    }
 }
 
 /// Compose a server-side selector from origin/class/producer positions
@@ -103,7 +105,9 @@ pub fn compose_selector(
     if let Some(c) = class
         && !["telemetry", "state", "events"].contains(&c)
     {
-        return Err(anyhow!(
+        // A closed vocabulary the user missed: exit 2, `--qos`'s neighbour
+        // (`crate::exit`).
+        return Err(unaskable!(
             "unknown class {c:?} — the classes are telemetry, state, events (RFC 04 §1)"
         ));
     }
@@ -115,6 +119,20 @@ pub fn compose_selector(
         None => format!("v1/{origin}/{class}/**"),
     };
     args.wire(rel)
+}
+
+/// A positive number of seconds, or the refusal — the one spelling of the
+/// check every `--for`/`--every` shares (#264).
+///
+/// Clap cannot express "greater than zero" on an `f64`, so this is the
+/// nearest edge that can, and it answers the way clap would: exit 2.
+pub fn positive_secs(flag: &str, secs: f64) -> Result<std::time::Duration> {
+    if !secs.is_finite() || secs <= 0.0 {
+        return Err(unaskable!(
+            "{flag} must be a positive number of seconds, got {secs}"
+        ));
+    }
+    Ok(std::time::Duration::from_secs_f64(secs))
 }
 
 #[cfg(test)]

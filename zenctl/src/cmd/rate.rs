@@ -1,33 +1,29 @@
-//! `topic hz` / `topic bw` — watch a window, report rates (ros2-style),
-//! through the typed [`RateReport`](crate::report::RateReport) so `--format
-//! json` applies (issue #46) and the O6 eviction count is printed, never
-//! swallowed.
-
-use std::time::Duration;
+//! `zenctl rate` — watch a window, report rates (ros2-style), through the
+//! typed [`RateReport`](crate::report::RateReport) so `--format json` applies
+//! (issue #46) and the O6 eviction count is printed, never swallowed.
+//!
+//! One verb since #264. `topic hz` and `topic bw` were two spellings of one
+//! observation: the same Monitor, the same window, the same eviction ledger,
+//! differing only in which number the table led with. `--bytes` is that
+//! choice, and it is a rendering flag, which is what it always was.
 
 use anyhow::Result;
 
+use crate::cli::SelectorArgs;
 use crate::{Bus, report};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    selector: Option<&str>,
-    origin: Option<&str>,
-    class: Option<&str>,
-    producer: Option<&str>,
-    window: u64,
+    sel: &SelectorArgs,
+    for_secs: f64,
     per_key: bool,
     loss: bool,
     latency: bool,
     bandwidth: bool,
     args: &Bus,
 ) -> Result<()> {
-    let selector = match selector {
-        // Typed selectors pass the raw seam (`$*` refusal, RFC 03 §2);
-        // composed ones cannot spell it.
-        Some(s) => super::raw_selector(s)?.to_string(),
-        None => super::compose_selector(args, origin, class, producer)?,
-    };
+    let selector = super::selector_of(sel, args)?;
+    let window = super::positive_secs("--for", for_secs)?;
     let session = args.session().await?;
     let monitor = zenkey_fleet::Monitor::start(
         &session,
@@ -38,8 +34,8 @@ pub async fn run(
     )
     .await?;
 
-    eprintln!("measuring {selector} for {window}s…");
-    tokio::time::sleep(Duration::from_secs(window)).await;
+    eprintln!("measuring {selector} for {for_secs}s…");
+    tokio::time::sleep(window).await;
 
     let rep = monitor.core().with_stats(|stats| {
         let (total_count, total_bytes, _) = stats.totals();
@@ -71,7 +67,7 @@ pub async fn run(
         }
         report::RateReport {
             selector: selector.clone(),
-            window_s: window as f64,
+            window_s: for_secs,
             rows,
             total_count,
             total_bytes,

@@ -1,43 +1,46 @@
 The verdict verbs' pre-run discipline: exit 2 is "the question could not be
 asked", and a failure **before** the question — a session that will not open, a
 context that resolves to nothing, a ledger with no registry to walk — must land
-there, never on 1. Their 1 is a *verdict*: `cutover`'s 1 says "the old family
-still speaks", and reaching it through main's anyhow edge on a dead router told
-CI exactly that about a bus nobody listened to.
+there, never on 1. Their 1 is a *verdict*: `check cutover`'s 1 says "the old
+family still speaks", and reaching it through main's anyhow edge on a dead
+router told CI exactly that about a bus nobody listened to.
+
+`exit::asked` is the seam, and `zenctl/src/exit.rs` §"Where each code comes
+from" is the whole doctrine in one place.
 
 The fixture is the same dead client-mode bus as `session-transport-fallback`:
 `connect.timeout_ms: 0`, `exit_on_failure: true`, so the failure is immediate
 and without retry.
 
 ```console
-$ zenctl cutover --old-root 'old/**' --zenoh-config tests/cmd/fixtures/dead-bus.json5
+$ zenctl check cutover --old-root 'old/**' --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: failed to open Zenoh session
 
 Caused by:
     Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
-cutover: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+check cutover: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
-`expect` reserves the same 2 ("session failure" is in its help text), and now
-its session open honours it too — not just the observation window.
+`check expect` reserves the same 2 ("session failure" is in its help text),
+and its session open honours it too — not just the observation window.
 
 ```console
-$ zenctl expect 'v1/**' --within 1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+$ zenctl check expect 'v1/**' --for 1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: failed to open Zenoh session
 
 Caused by:
     Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
-expect: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+check expect: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
-A context that names nothing is a **1** on a listing (`session-config-error`
-pins that) — a listing's 1 carries no verdict. On a verdict verb the same
-mistake must be a 2, because `why`'s 1 is the claim "no cause found and
-everything checked looks healthy".
+A context that names nothing is a 2 everywhere now (`session-config-error`
+pins the listing half), and here it is a 2 for a second, older reason as well:
+`why`'s 1 is the claim "a cause was established", and a config file that does
+not contain the name you gave establishes nothing.
 
 ```console
 $ zenctl why 'v1/h-3fa9c2d41b7e/state/sysinfo/health' --context no-such-context
@@ -47,23 +50,23 @@ why: the question could not be asked — exit 2, the reserved non-verdict (1 her
 
 ```
 
-`registry retired` walks a ledger; no `--registry` means there is no ledger to
+`check retired` walks a ledger; no `--registry` means there is no ledger to
 walk — unproven, not "still speaks" and not a pass.
 
 ```console
-$ zenctl registry retired
+$ zenctl check retired
 ? 2
-Error: registry retired walks the [[deprecated]] ledger of local registry files — pass --registry <dir> (or set one on the active context)
-registry retired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+Error: check retired walks the [[deprecated]] ledger of local registry files — pass --registry <dir> (or set one on the active context)
+check retired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
-`schema check --producer` already had the vocabulary (`not checked:`) and now
+`check schema --producer` already had the vocabulary (`not checked:`) and
 routes its session failure through it — a dead bus is silence about the type,
 not a claim about the payload.
 
 ```console
-$ zenctl schema check --type Health --from '{}' --producer sysinfo --zenoh-config tests/cmd/fixtures/dead-bus.json5
+$ zenctl check schema --type Health --from '{}' --producer sysinfo --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 not checked: no session, so sysinfo's served describe is out of reach: failed to open Zenoh session: Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
 
@@ -74,8 +77,18 @@ happened, which used to come back through `?` as exit 1, this verb's "does not
 conform".
 
 ```console
-$ zenctl schema check --type Health --from '{}'
+$ zenctl check schema --type Health --from '{}'
 ? 2
 not checked: give --producer (live describe) or --schema-set FILE — the registry TOMLs carry type names, not shapes (RFC 08 §7)
 
 ```
+
+## `why`'s polarity flipped (#264)
+
+`why` used to exit **0** when it found a cause and **1** when the fleet was
+healthy — which pages you for a healthy fleet and stays quiet when something
+is wrong. Under the one contract, 1 is the *finding*, and a cause is exactly
+that. Nothing in `cmd/why.rs` spells the flip: `WhyVerdict::to_judgement`
+carries it (RFC 13's convention — the judged claim is the finding) and
+`zenkey_fleet::judgement_exit_code` projects it, so the two frontends cannot
+drift apart on what a `why` verdict means.

@@ -15,10 +15,14 @@
 //! Only verbs that answer **without a bus**, because anything else is a flake
 //! wearing a test's name. That is more than it sounds: `--help` for every leaf
 //! verb (which alone would have caught #195's runs of spaces), the key-expression
-//! algebra, `registry lint`, `schema check --schema-set`, and both halves of
+//! algebra, `registry lint`, `check schema --schema-set`, and both halves of
 //! #196's open-failure fork. Verbs that must reach a producer to say anything
 //! are `--help`-only; their *rendering* is pinned by the render snapshots
 //! instead, which exercise the same code with no process and no network.
+//!
+//! The files are grouped the way the tree is (#264): `help-<noun>` per noun
+//! family, `help-wire` for the verbs that hang off the root, `help-check` for
+//! the exit-coded assertions, and the behaviour cases beside them.
 //!
 //! #201 also asks for a *mechanical* floor — every leaf verb named by at least
 //! one case, checked rather than remembered. `the_corpus_names_every_leaf_verb`
@@ -26,12 +30,16 @@
 //! grew a library target: it walks the real clap tree rather than a list
 //! somebody has to remember to update.
 //!
-//! ## Exit 2 is overloaded, and the corpus says so out loud
+//! ## Exit 2 has one meaning, and the corpus is where that was settled
 //!
 //! `zenctl key includes 'bad[' x` exits 2 because the expression is invalid
-//! (`cmd/key.rs:29`); `zenctl key includes` exits 2 because clap rejected the
-//! usage. Both are pinned, side by side, so the collision is visible in the
-//! corpus rather than discovered by someone branching on the code.
+//! (`cmd/key.rs`); `zenctl key includes` exits 2 because clap rejected the
+//! usage. Those used to be pinned side by side as a *collision*. They are the
+//! same claim now — **2 = no verdict, the question could not be asked** — and
+//! the corpus is what made the disagreement visible: two files argued opposite
+//! doctrines (`key-algebra` for "your input is a 2",
+//! `session-config-error` for "your input is a 1") until #264 wrote the
+//! contract down once in `zenctl/src/exit.rs` and moved every refusal onto it.
 //!
 //! ## Hermeticity
 //!
@@ -98,7 +106,7 @@ fn the_corpus_refuses_an_environment_it_does_not_control() {
         "ZENCTL_ZENOH_CONFIG",
         // Not merely a different default: a set value makes clap print
         // `Usage: zenctl key includes --format <FORMAT> <A> <B>` — the flag
-        // rendered as *required* — in all 65 help texts.
+        // rendered as *required* — in every help text.
         "ZENCTL_FORMAT",
     ] {
         assert!(

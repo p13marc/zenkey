@@ -120,7 +120,7 @@ pub fn publish(p: Publish) -> Task<Message> {
             // listens".
             let matching = publication.matching_status().await.ok();
             // A one-shot undeclares here, acknowledged, exactly as
-            // `zenctl topic pub` does; only a repeating publish hands the
+            // `zenctl pub` does; only a repeating publish hands the
             // declaration back to be held.
             let publication = if repeat {
                 Some(Arc::new(publication))
@@ -169,7 +169,7 @@ pub fn undeclare(publication: Publication) -> Task<Message> {
 }
 
 /// Retire a key: an authoritative delete (RFC 04 §1.2), on the reliable
-/// profile, like `zenctl topic retire`. The engine has already judged whether
+/// profile, like `zenctl retire`. The engine has already judged whether
 /// this key may be retired; this is the write.
 pub fn retire(session: zenoh::Session, key: String) -> Task<Message> {
     Task::perform(

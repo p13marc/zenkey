@@ -1,5 +1,11 @@
-//! `zenctl schema <producer>` and `interface show --schema` (issue #51) —
-//! the served payload shapes, shown.
+//! `zenctl schema show <producer>` and `interface show --schema` (issue #51)
+//! — the served payload shapes, shown. Plus [`check`](check), which answers
+//! under `check schema` (#264) and reads the same served documents.
+//!
+//! `schema <producer>` used to be its own spelling: a noun that was also a
+//! verb, with `schema check` hanging off it and a bare `zenctl schema`
+//! exiting **1** through an `anyhow` message where every other missing
+//! argument in this tool exits 2. `show` is the verb it always was.
 //!
 //! zenctl's README used to *decline* to show schemas ("maps the type
 //! vocabulary rather than pretending to reproduce the shapes"). That stance
@@ -20,8 +26,8 @@ use anyhow::Result;
 use crate::Bus;
 use crate::input::Source;
 
-/// `zenctl schema <producer> [--type X] [--full]`.
-pub async fn dump(producer: &str, type_filter: Option<&str>, full: bool, args: &Bus) -> Result<()> {
+/// `zenctl schema show <producer> [--type X] [--full]`.
+pub async fn show(producer: &str, type_filter: Option<&str>, full: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     // Slices enrich the dump — the *types* come from the producer's served
     // `describe` (`zenkey_fleet::decode::schema_dump`); slices only compute
@@ -43,11 +49,11 @@ pub async fn dump(producer: &str, type_filter: Option<&str>, full: bool, args: &
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
-/// `zenctl schema check` (#159): one payload against one schema, exit-coded
+/// `zenctl check schema` (#159): one payload against one schema, exit-coded
 /// for CI. 0 = valid; 1 = the payload does not conform (schema violations,
 /// or bytes that do not decode as the kind at all); 2 = could not check
 /// (no schema found, unknown kind) — "could not check" must never exit like
-/// either verdict, for the same reason `cutover` reserves its 2.
+/// either verdict, for the same reason `check cutover` reserves its 2.
 ///
 /// This checks; it never publishes and never encodes.
 pub async fn check(
@@ -152,16 +158,19 @@ pub async fn check(
     };
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     if verdict != "valid" {
-        std::process::exit(1);
+        // The finding (`crate::exit`): the payload was checked and does not
+        // conform.
+        std::process::exit(crate::exit::FINDING);
     }
     Ok(())
 }
 
 /// Exit 2: the check never happened — reserved so CI can tell "nonconformant"
-/// from "unobservable", the same split `cutover` and `probe` guard.
+/// from "unobservable", the same split `check cutover` and `check probe`
+/// guard (`crate::exit`).
 fn not_checked(reason: &str) -> ! {
     eprintln!("not checked: {reason}");
-    std::process::exit(2);
+    std::process::exit(crate::exit::NO_VERDICT);
 }
 
 /// The producers that carry a type name, from the loaded slices — who to ask

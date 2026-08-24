@@ -27,7 +27,7 @@
 //! consumer piping to `head`, or a pipe that closes early, still gets the
 //! coverage claim — what was asked (O5), and why nothing was (O4). A trailing
 //! envelope is lost in exactly the case where honesty matters most: today
-//! `zenctl topic hz --format ndjson | head -5` silently drops "we retired 900
+//! `zenctl rate --format ndjson | head -5` silently drops "we retired 900
 //! keys to stay within the bound". `blob probe` already argued for a leading
 //! envelope, in a comment; it was right, it just was not the rule.
 //!

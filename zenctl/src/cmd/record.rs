@@ -11,23 +11,19 @@ use anyhow::{Context, Result};
 use zenkey_fleet::{RecordBounds, RecordReport, ZREC_VERSION, ZrecHeader, ZrecWriter};
 
 use crate::Bus;
+use crate::cli::SelectorArgs;
 
-#[allow(clippy::too_many_arguments)] // clap surface, mirrored from echo
 pub async fn run(
-    selector: Option<&str>,
-    origin: Option<&str>,
-    class: Option<&str>,
-    producer: Option<&str>,
+    sel: &SelectorArgs,
     out: &str,
-    duration: Option<u64>,
+    for_secs: Option<f64>,
     count: u64,
     args: &Bus,
 ) -> Result<()> {
-    let selector = match selector {
-        // Typed selectors pass the raw seam (`$*` refusal, RFC 03 §2);
-        // composed ones cannot spell it.
-        Some(s) => super::raw_selector(s)?.to_string(),
-        None => super::compose_selector(args, origin, class, producer)?,
+    let selector = super::selector_of(sel, args)?;
+    let duration = match for_secs {
+        Some(secs) => Some(super::positive_secs("--for", secs)?),
+        None => None,
     };
     let header = ZrecHeader {
         zrec: ZREC_VERSION,
@@ -48,7 +44,7 @@ pub async fn run(
     // cannot contain up front, not after someone replays it (O5).
     eprintln!(
         "recording {selector} to {out}{} (ctrl-c to stop){}",
-        match (duration, count) {
+        match (for_secs, count) {
             (Some(d), 0) => format!(" for {d}s"),
             (None, n) if n > 0 => format!(" for {n} sample(s)"),
             (Some(d), n) => format!(" for {d}s or {n} sample(s)"),
@@ -63,7 +59,7 @@ pub async fn run(
 
     let bounds = RecordBounds {
         max_samples: (count > 0).then_some(count),
-        max_duration: duration.map(std::time::Duration::from_secs),
+        max_duration: duration,
     };
     let started = std::time::Instant::now();
     let mut last_line = std::time::Instant::now();

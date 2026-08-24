@@ -1,4 +1,5 @@
-The `OpenFailure::Config` half of #196: your error, not the bus's.
+The `OpenFailure::Config` half of #196: your error, not the bus's — and since
+#264, your error's exit code.
 
 A zenoh config file that sets a session namespace is refused **by name** —
 an explorer runs un-namespaced so it sees the wire as it really is, foreign
@@ -8,30 +9,39 @@ which is why it can be a test.
 
 ```console
 $ zenctl topic list --zenoh-config tests/cmd/fixtures/namespaced.json5
-? 1
+? 2
 Error: tests/cmd/fixtures/namespaced.json5 sets a session namespace ("zensight") — an explorer runs un-namespaced so it sees the wire as it really is (RFC 09 §5); remove the namespace from the file, or use --base to name the deployment
 
 ```
 
-The sibling failure, and it now exits the same way. A `--context` that names
-nothing is your input too — the file is right there and the name is not in it —
-so it is a **1**, not the 2 it used to be (#209).
+The sibling failure, and it exits the same way. A `--context` that names
+nothing is your input too — the file is right there and the name is not in it.
 
-That the 2 was wrong is a claim about this tool's vocabulary rather than a
-preference: exit 2 here means *not proven* — `expect`, `cutover` and
-`schema check` all reserve it for a question that could not be asked. A
-misspelled context name is not an unanswerable question — **on a listing**,
-whose 1 carries no verdict. On the verdict verbs themselves the same mistake
-must land on the reserved 2, because their 1 *is* a verdict; that half lives
-in `verdict-not-asked.trycmd`.
+## One doctrine, and this file used to argue the other one
+
+This case pinned **1** and argued for it: exit 2 means *not proven*, so a
+misspelled name — plainly your input — must be a 1. `key-algebra.trycmd`
+pinned **2** two directories over and argued the opposite: an expression that
+does not parse is your input, and it exits 2. A script branching on the code
+could satisfy neither reading, because they were not one contract.
+
+`zenctl/src/exit.rs` settles it, and it settles it the other way. Clap exits 2
+for every mis-shaped command line, and clap is immovable — so the meaning of 2
+for user input is already fixed, whatever the rest of the tool would prefer.
+The refusals clap cannot express (a context name that is not in the file, a
+QoS profile outside RFC 04 §3's five, a class outside RFC 04 §1's three, a
+`$*` selector, a `--fault` kind, a window of zero seconds) joined it rather
+than competing with it. `2` now reads *no verdict — the question could not be
+asked*, which covers both "you did not ask it properly" and "it could not be
+proven"; `1` is reserved for a real finding.
 
 It is also refused **before** the command starts, which is the other half of
-what changed: resolution used to happen at whichever accessor was reached
+what #209 changed: resolution used to happen at whichever accessor was reached
 first, so a bad name could surface after output had already been printed.
 
 ```console
 $ zenctl topic list --context no-such-context
-? 1
+? 2
 Error: context "no-such-context" not found in [..]config.toml — `zenctl context list`
 
 ```
