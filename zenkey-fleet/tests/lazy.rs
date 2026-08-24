@@ -132,6 +132,62 @@ async fn shutdown_undeclares_every_watch() {
     );
 }
 
+/// `watching` is how a window declares what it observes, and a declaration
+/// that fails takes the monitor with it (#336).
+///
+/// Seven judge windows opened a monitor, took its event stream, then declared
+/// their watches with a `?` — three of them on `**`. Any failure there
+/// returned with the monitor's liveliness and tick tasks running and its
+/// subscribers left to `Drop`: the unacknowledged teardown `shutdown` exists
+/// to refuse, on the one path nobody exercises. The error the caller wanted is
+/// still the error it gets; what changed is what is left behind.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_watch_takes_down_the_ones_that_came_up() {
+    let (a, b) = peer_pair().await;
+
+    let publisher = a
+        .declare_publisher("demo/half/key")
+        .await
+        .expect("declare publisher");
+    let matching = publisher
+        .matching_listener()
+        .await
+        .expect("matching listener");
+
+    let monitor = Monitor::start(&b, MonitorSpec::default())
+        .await
+        .expect("lazy monitor");
+    // The stream is taken before anything is declared — the ordering these
+    // windows need, and the reason the watches cannot simply move into the
+    // spec.
+    let _events = monitor.events();
+
+    // The window's first selector comes up …
+    let monitor = monitor
+        .watching(["demo/half/**"])
+        .await
+        .expect("the first selector declares");
+    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+        .await
+        .expect("matching event within 5s")
+        .expect("listener alive");
+    assert!(ev.matching(), "a real subscriber is up");
+
+    // … and the one that fails takes it down on the way out, rather than
+    // handing the caller an error and a live subscriber.
+    let err = monitor
+        .watching(["demo//empty-chunk"])
+        .await
+        .expect_err("an empty chunk is not a key expression")
+        .to_string();
+    assert!(err.contains("subscribe"), "{err}");
+    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+        .await
+        .expect("unmatching event within 5s")
+        .expect("listener alive");
+    assert!(!ev.matching(), "a failed window leaves nothing declared");
+}
+
 /// The fetch ladder reports its source: a queryable at the concrete key is
 /// `storage`; a live publisher only is `window`; nothing is an attributed
 /// `none`.

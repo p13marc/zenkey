@@ -615,6 +615,38 @@ impl Monitor {
         Ok(id)
     }
 
+    /// Declare `selectors` on this monitor, tearing it down — acknowledged —
+    /// if any of them fails.
+    ///
+    /// This is the judge windows' opening move (#336): `start`, take the event
+    /// stream, then declare what the window will observe. In that order,
+    /// deliberately — a sample arriving between the subscriber's declaration
+    /// and the stream's creation would be counted and not delivered, and these
+    /// windows exist to say what they saw. But the `?` on the declaration used
+    /// to return with the monitor's liveliness and tick tasks running and its
+    /// subscribers left to `Drop`: the unacknowledged teardown
+    /// [`shutdown`](Self::shutdown) exists to refuse, on the one path nobody
+    /// thinks about.
+    ///
+    /// Consuming and returning the monitor is what lets the failing path
+    /// `shutdown().await` before it returns. The declaration error is the one
+    /// reported — a teardown failure behind a failed declaration is noise —
+    /// but the teardown itself is never skipped.
+    pub async fn watching<S: AsRef<str>>(
+        self,
+        selectors: impl IntoIterator<Item = S>,
+    ) -> Result<Monitor> {
+        for selector in selectors {
+            if let Err(declare) = self.watch(selector.as_ref()).await {
+                if let Err(teardown) = self.shutdown().await {
+                    tracing::warn!("after a failed watch: {teardown}");
+                }
+                return Err(declare);
+            }
+        }
+        Ok(self)
+    }
+
     /// Observe a selector **with a correct seed phase** (issue #92; the
     /// RFC 04 §3.2 discipline of [`crate::seed_subscribe`], run through this
     /// monitor's bounded broadcast):

@@ -159,13 +159,19 @@ impl RosterWatch {
         .await
     }
 
-    /// Release the subscriptions.
+    /// Release the subscriptions, **acknowledged**.
     ///
     /// On every exit path, which the zenctl original managed only on Ctrl-C:
     /// its channel-closed arm returned before reaching `monitor.stop()`, so a
     /// closed stream leaked the liveliness subscribers (#207).
-    pub async fn stop(self) {
-        self.monitor.stop();
+    ///
+    /// And awaited, which it only looked like (#336): this was an `async fn`
+    /// that awaited nothing, calling the `Drop` teardown and leaving the
+    /// liveliness subscribers to undeclare in the background. It now goes
+    /// through [`crate::Monitor::shutdown`], so the caller that waits for this
+    /// gets what waiting was for.
+    pub async fn stop(self) -> Result<()> {
+        self.monitor.shutdown().await
     }
 }
 

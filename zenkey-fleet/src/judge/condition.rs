@@ -607,19 +607,8 @@ pub async fn run_watchdog(
         .map(|c| RuleState::new(c.to_string()))
         .collect();
 
-    // Declared before the window opens — not-asked must never read as "no".
-    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
-    let mut events = monitor.events();
-    let mut watched: Vec<&str> = Vec::new();
-    for rule in &spec.rules {
-        if let Some(sel) = rule.selector()
-            && !watched.contains(&sel)
-        {
-            monitor.watch(sel).await?;
-            watched.push(sel);
-        }
-    }
-    // Per-rule selector, compiled once for sample attribution.
+    // Per-rule selector, compiled once for sample attribution — and compiled
+    // *before* the monitor exists, so its `?` has nothing to tear down (#336).
     let keyexprs: Vec<Option<zenoh::key_expr::KeyExpr<'static>>> = spec
         .rules
         .iter()
@@ -632,6 +621,19 @@ pub async fn run_watchdog(
                 .transpose()
         })
         .collect::<Result<_>>()?;
+    let mut watched: Vec<String> = Vec::new();
+    for rule in &spec.rules {
+        if let Some(sel) = rule.selector()
+            && !watched.iter().any(|s| s == sel)
+        {
+            watched.push(sel.to_string());
+        }
+    }
+
+    // Declared before the window opens — not-asked must never read as "no".
+    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+    let mut events = monitor.events();
+    let monitor = monitor.watching(&watched).await?;
     let wants_doctor = spec
         .rules
         .iter()
@@ -819,7 +821,7 @@ pub async fn run_watchdog(
         }
         last_eval = now;
     }
-    monitor.stop();
+    monitor.shutdown().await?;
     summary.facts_evicted = facts_cache.evicted();
     Ok(summary)
 }

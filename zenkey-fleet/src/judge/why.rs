@@ -853,7 +853,7 @@ pub async fn run_why(
 async fn listen_window(session: &Session, key: &str, window: Duration) -> Result<WireWatch> {
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
-    monitor.watch(key).await?;
+    let monitor = monitor.watching([key]).await?;
     let deadline = tokio::time::Instant::now() + window;
     let (mut samples, mut dropped) = (0u64, 0u64);
     loop {
@@ -868,7 +868,7 @@ async fn listen_window(session: &Session, key: &str, window: Duration) -> Result
             None => break,
         }
     }
-    monitor.stop();
+    monitor.shutdown().await?;
     Ok(WireWatch {
         window_s: window.as_secs_f64(),
         samples,

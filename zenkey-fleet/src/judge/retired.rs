@@ -203,7 +203,8 @@ pub async fn run_retired(
     if let Some(window) = listen {
         let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
         let mut events = monitor.events();
-        monitor.watch("**").await?;
+        // `**`, and undeclared on every exit including a `?` (#336).
+        let monitor = monitor.watching(["**"]).await?;
         let deadline = tokio::time::Instant::now() + window;
         loop {
             let item = tokio::select! {
@@ -246,7 +247,7 @@ pub async fn run_retired(
                 None => break,
             }
         }
-        monitor.stop();
+        monitor.shutdown().await?;
     }
 
     let entries: Vec<RetiredEntry> = ledger
