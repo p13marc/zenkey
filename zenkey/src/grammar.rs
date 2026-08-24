@@ -568,6 +568,25 @@ mod content_addressing {
     }
 }
 
+/// RFC 03 §3: `alive` names a liveliness token and nothing else — it is never
+/// a subject chunk, at any position, in any class.
+///
+/// **The one implementation of the rule** (issue #322). [`data_key`] and every
+/// [`crate::V1Context`] builder call this, so a reserved token fails the same
+/// way wherever a key is spelled. It used to be two rules with two failure
+/// modes: `data_key` returned `Err(ReservedToken)` and `V1Context::state_key`
+/// `assert!`ed on the identical input, which meant the same mistake was a
+/// recoverable error in one layer and a panic in the next.
+///
+/// `what` names the position for the error message, as
+/// [`KeyError::ReservedToken`] carries it.
+pub fn reject_reserved_chunks(subject: &[&str], what: &'static str) -> Result<(), KeyError> {
+    if subject.contains(&SUBJECT_ALIVE) {
+        return Err(KeyError::ReservedToken(SUBJECT_ALIVE.to_string(), what));
+    }
+    Ok(())
+}
+
 fn validate_subject(subject: &[&str]) -> Result<(), KeyError> {
     if subject.is_empty() {
         return Err(KeyError::EmptySubject);
@@ -612,12 +631,7 @@ pub fn data_key(
     // always enforced — `telemetry/foo/alive` reads as presence to every
     // human and selector that greps for the token): keys carrying it come
     // only from the dedicated builders below.
-    if subject.contains(&SUBJECT_ALIVE) {
-        return Err(KeyError::ReservedToken(
-            SUBJECT_ALIVE.to_string(),
-            "data subject chunk",
-        ));
-    }
+    reject_reserved_chunks(subject, "data subject chunk")?;
     let mut key = String::new();
     push_key(&mut key, VERSION_CHUNK);
     push_key(&mut key, origin.chunk());

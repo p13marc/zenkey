@@ -12,7 +12,9 @@
 //! vocabulary for it, and that is the point — a base you cannot spell is a
 //! base you cannot spell *wrong*.
 
-use crate::grammar::{self, Origin, Producer};
+use std::num::NonZeroU32;
+
+use crate::grammar::{self, KeyError, Origin, Producer};
 use crate::key::Key;
 use crate::profile::AppProfile;
 use crate::slug::chunk_slug;
@@ -29,30 +31,49 @@ pub struct V1Context {
 
 impl V1Context {
     /// Build the context for one producer on this host: origin = the host id
-    /// minted through `profile`, producer = `name` (slugged to a valid chunk
-    /// when necessary; a degenerate name falls back to `sensor`).
-    pub fn for_producer(profile: &'static AppProfile, name: &str) -> Self {
+    /// minted through `profile`, producer = `name`, which MUST be a legal
+    /// producer chunk (RFC 03 §1.5).
+    ///
+    /// **Errs rather than renaming** (issue #322). This used to slug a bad
+    /// name and, failing that, fall back to `Producer::new("sensor")` — so a
+    /// misconfigured producer published its *entire keyspace under a different
+    /// identity*, with no `Err`, no panic and no log, and every misconfigured
+    /// producer in the fleet collided on the same fallback name. In a crate
+    /// whose thesis is that a non-conforming key should have no spelling, that
+    /// was the one place a wrong key was spelled for you.
+    ///
+    /// A name that genuinely is foreign data has a boundary to cross:
+    /// `Producer::new(Chunk::slug(name).as_str())`. Making the caller write
+    /// that is the point — slugging an *identity* is a decision, not a
+    /// fallback.
+    pub fn for_producer(profile: &'static AppProfile, name: &str) -> Result<Self, KeyError> {
         Self::with_origin(Origin::Host(profile.host_id().clone()), name)
     }
 
     /// As [`for_producer`](Self::for_producer) with an explicit origin — for
     /// tests, and for consumers that mint their identity differently.
-    pub fn with_origin(origin: Origin, name: &str) -> Self {
-        let producer = Producer::new(name).unwrap_or_else(|_| {
-            let slug = chunk_slug(name);
-            Producer::parse_chunk(&slug)
-                .or_else(|_| Producer::new("sensor"))
-                .expect("fallback producer name is valid")
-        });
+    pub fn with_origin(origin: Origin, name: &str) -> Result<Self, KeyError> {
+        Ok(Self::with_producer(origin, Producer::new(name)?))
+    }
+
+    /// As [`with_origin`](Self::with_origin) with an already-validated
+    /// [`Producer`] — the infallible form, and the one that carries an
+    /// instance built by [`Producer::with_instance`].
+    pub fn with_producer(origin: Origin, producer: Producer) -> Self {
         Self { origin, producer }
     }
 
     /// As [`for_producer`](Self::for_producer) with an explicit producer
     /// instance (RFC 03 §1.5).
-    pub fn with_instance(mut self, instance: u32) -> Self {
-        if let Ok(p) = Producer::with_instance(self.producer.name(), instance) {
-            self.producer = p;
-        }
+    ///
+    /// Takes a [`NonZeroU32`] because instance numbers start at 1 — the first
+    /// instance uses the bare name. It used to take a `u32` and *swallow*
+    /// `Producer::with_instance`'s rejection of 0, so `.with_instance(0)` was
+    /// a no-op that read like a configuration (issue #322). Zero now has no
+    /// spelling at all.
+    pub fn with_instance(mut self, instance: NonZeroU32) -> Self {
+        self.producer = Producer::with_instance(self.producer.name(), instance.get())
+            .expect("the name is already validated and a NonZeroU32 is never zero");
         self
     }
 
@@ -80,17 +101,14 @@ impl V1Context {
     /// A `state/<producer>/<subject...>` key. Subject chunks are slugged
     /// where not already legal.
     ///
-    /// # Panics
-    /// On a `state` subject containing the reserved `alive` leaf (RFC 03 §3)
-    /// — liveliness keys come from [`Self::alive_key`], never here.
-    pub fn state_key(&self, subject: &[&str]) -> Key {
-        for c in subject {
-            assert!(
-                *c != grammar::SUBJECT_ALIVE,
-                "`alive` is a reserved liveliness leaf (RFC 03 §3); use alive_key()"
-            );
-        }
-        self.build_key(grammar::CLASS_STATE, subject)
+    /// Errs on the reserved `alive` token (RFC 03 §3) with the same
+    /// [`KeyError::ReservedToken`] [`grammar::data_key`] returns for the
+    /// identical input — one rule, one failure mode. It used to `assert!`,
+    /// so the same mistake was a recoverable error one layer down and a panic
+    /// here (issue #322). Liveliness keys come from [`Self::alive_key`].
+    pub fn state_key(&self, subject: &[&str]) -> Result<Key, KeyError> {
+        grammar::reject_reserved_chunks(subject, "data subject chunk")?;
+        Ok(self.build_key(grammar::CLASS_STATE, subject))
     }
 
     /// Single-pass slug-and-assemble (v1.5 perf: one buffer, no intermediate
@@ -122,24 +140,30 @@ impl V1Context {
         Key::from_canonical(key)
     }
 
+    // The framework subjects below are literal constants, so the reserved
+    // token cannot occur and they stay infallible — `build_key` is the same
+    // assembly `state_key` runs after its check.
+
     pub fn health_key(&self) -> Key {
-        self.state_key(&["health"])
+        self.build_key(grammar::CLASS_STATE, &["health"])
     }
 
     pub fn errors_key(&self) -> Key {
-        self.state_key(&["errors"])
+        self.build_key(grammar::CLASS_STATE, &["errors"])
     }
 
     /// The registration document (RFC: `state/<producer>/sensor`).
     pub fn sensor_info_key(&self) -> Key {
-        self.state_key(&["sensor"])
+        self.build_key(grammar::CLASS_STATE, &["sensor"])
     }
 
     pub fn evidence_self_key(&self) -> Key {
-        self.state_key(&["evidence", "self"])
+        self.build_key(grammar::CLASS_STATE, &["evidence", "self"])
     }
 
-    pub fn evidence_device_key(&self, device: &str) -> Key {
+    /// `device` is a foreign value, so this carries [`Self::state_key`]'s
+    /// contract: slugged where not already legal, refused where reserved.
+    pub fn evidence_device_key(&self, device: &str) -> Result<Key, KeyError> {
         self.state_key(&["evidence", "device", device])
     }
 
@@ -156,22 +180,33 @@ impl V1Context {
     }
 
     /// An `@rpc/<producer>/<procedure...>` key (RFC 05).
-    pub fn rpc_key(&self, procedure: &[&str]) -> Key {
+    ///
+    /// Returns the error [`grammar::rpc_key`] returns; it used to `.expect()`
+    /// on it, which made an illegal procedure chunk a panic here and a
+    /// recoverable `Err` one layer down (issue #322).
+    pub fn rpc_key(&self, procedure: &[&str]) -> Result<Key, KeyError> {
+        grammar::reject_reserved_chunks(procedure, "procedure chunk")?;
         grammar::rpc_key(&self.origin, Some(&self.producer), procedure)
-            .expect("registry procedure chunks are valid")
     }
 
     /// Media plane video key (RFC 07 §1): the last chunk is a viewer-chosen
     /// **tier** (`low`/`medium`/`high`), not a codec profile — the viewer
     /// subscribes to it exactly (keyspace v1.3).
-    pub fn media_video_key(&self, stream: &str, codec: &str, tier: &str) -> Key {
-        self.build_key(grammar::PLANE_MEDIA, &[stream, "video", codec, tier])
+    pub fn media_video_key(&self, stream: &str, codec: &str, tier: &str) -> Result<Key, KeyError> {
+        self.media_key(&[stream, "video", codec, tier])
     }
 
     /// A general `@media/<producer>/<stream...>` key (RFC 07 §1). Chunks are
     /// slugged where not already legal.
-    pub fn media_key(&self, stream: &[&str]) -> Key {
-        self.build_key(grammar::PLANE_MEDIA, stream)
+    ///
+    /// The reserved token is refused here too (RFC 03 §3 reserves `alive` at
+    /// any position of a media pattern, not only a data subject): slugging
+    /// leaves `alive` untouched — it is already a legal chunk — so without
+    /// the check this builder was the one that minted a presence-shaped media
+    /// key in silence (issue #322).
+    pub fn media_key(&self, stream: &[&str]) -> Result<Key, KeyError> {
+        grammar::reject_reserved_chunks(stream, "media stream chunk")?;
+        Ok(self.build_key(grammar::PLANE_MEDIA, stream))
     }
 
     /// The `@blob` tier prefix (RFC 07 §2): `v1/<origin>/@blob/<tier>` —
@@ -283,6 +318,7 @@ mod tests {
             Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap()),
             "sysinfo",
         )
+        .unwrap()
     }
 
     #[test]
@@ -306,11 +342,11 @@ mod tests {
             c.device_alive_key("router01")
         );
         assert_eq!(
-            c.rpc_key(&["introspect"]),
+            c.rpc_key(&["introspect"]).unwrap(),
             "v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect"
         );
         assert_eq!(
-            c.media_video_key("cam0", "h264", "high"),
+            c.media_video_key("cam0", "h264", "high").unwrap(),
             "v1/h-3fa9c2d41b7e/@media/sysinfo/cam0/video/h264/high"
         );
     }
@@ -325,8 +361,8 @@ mod tests {
             c.telemetry_prefix(),
             c.health_key(),
             c.alive_key(),
-            c.rpc_key(&["introspect"]),
-            c.media_key(&["cam0", "preview", "jpeg"]),
+            c.rpc_key(&["introspect"]).unwrap(),
+            c.media_key(&["cam0", "preview", "jpeg"]).unwrap(),
             c.blob_prefix(grammar::BlobTier::Store),
         ] {
             assert!(
@@ -406,9 +442,69 @@ mod tests {
     #[test]
     fn for_producer_uses_profile_origin() {
         static PROFILE: AppProfile = AppProfile::new("zenkey-ctx-test", "ctx-test-salt");
-        let a = V1Context::for_producer(&PROFILE, "sysinfo");
-        let b = V1Context::for_producer(&PROFILE, "netlink");
+        let a = V1Context::for_producer(&PROFILE, "sysinfo").unwrap();
+        let b = V1Context::for_producer(&PROFILE, "netlink").unwrap();
         assert_eq!(a.origin(), b.origin());
         assert!(a.health_key().starts_with("v1/h-"));
+    }
+
+    /// Issue #322: a context refuses a producer name it cannot honour rather
+    /// than publishing the whole keyspace under a different identity. The
+    /// fallback that used to run — slug, then `Producer::new("sensor")` — had
+    /// no `Err`, no panic and no log, and collided every misconfigured
+    /// producer in the fleet onto one name.
+    #[test]
+    fn a_bad_producer_name_errs_instead_of_renaming() {
+        static PROFILE: AppProfile = AppProfile::new("zenkey-ctx-test", "ctx-test-salt");
+        for bad in ["has spaces", "Sysinfo", "ipv6-2", "-lead", "", "store"] {
+            assert!(
+                V1Context::for_producer(&PROFILE, bad).is_err(),
+                "{bad:?} must not become a producer identity"
+            );
+        }
+        // Slugging an identity stays available — as a decision the caller
+        // writes down, which is the whole difference.
+        let slugged = V1Context::with_origin(
+            Origin::Host(HostId::parse("h-3fa9c2d41b7e").unwrap()),
+            crate::key::Chunk::slug("has spaces").as_str(),
+        )
+        .unwrap();
+        assert_eq!(slugged.producer().name(), "has_x20_spaces");
+    }
+
+    /// …and instance 0 has no spelling. It used to be silently ignored, so
+    /// `.with_instance(0)` read as a configuration and was a no-op.
+    #[test]
+    fn instance_numbers_start_at_one() {
+        let c = ctx().with_instance(NonZeroU32::new(2).unwrap());
+        assert_eq!(c.producer().chunk(), "sysinfo-2");
+        assert_eq!(c.health_key(), "v1/h-3fa9c2d41b7e/state/sysinfo-2/health");
+        assert!(NonZeroU32::new(0).is_none());
+    }
+
+    /// Issue #322: one reserved-token rule, one failure mode. `state_key`
+    /// used to `assert!` where `grammar::data_key` returned an `Err` for the
+    /// identical input, and the plane builders checked nothing at all.
+    #[test]
+    fn the_reserved_token_fails_the_same_way_everywhere() {
+        let c = ctx();
+        let reserved = |e: KeyError| matches!(e, KeyError::ReservedToken(t, _) if t == "alive");
+        assert!(reserved(c.state_key(&["alive"]).unwrap_err()));
+        assert!(reserved(c.state_key(&["foo", "alive"]).unwrap_err()));
+        assert!(reserved(c.evidence_device_key("alive").unwrap_err()));
+        assert!(reserved(c.rpc_key(&["alive"]).unwrap_err()));
+        assert!(reserved(c.media_key(&["cam0", "alive"]).unwrap_err()));
+        // The same input, the same error, one layer down.
+        assert!(reserved(
+            grammar::data_key(
+                c.origin(),
+                grammar::Class::State,
+                Some(c.producer()),
+                &["alive"]
+            )
+            .unwrap_err()
+        ));
+        // Liveliness keys are still spellable — through their own builders.
+        assert_eq!(c.alive_key(), "v1/h-3fa9c2d41b7e/state/sysinfo/alive");
     }
 }
