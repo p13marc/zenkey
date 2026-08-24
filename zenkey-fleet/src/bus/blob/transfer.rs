@@ -722,7 +722,7 @@ fn parse_origin(origin: &str) -> Result<Origin> {
         let _ = service;
         let svc = ServiceOrigin::new(origin)
             .map_err(|e| anyhow!("`{origin}` is not a service origin: {e}"))?;
-        return Ok(Origin::Service(svc.as_str().to_string()));
+        return Ok(Origin::Service(svc));
     }
     let host = RemoteOrigin::parse(origin).map_err(|e| {
         anyhow!(

@@ -1148,7 +1148,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
     );
     let _ = writeln!(
         out,
-        "/// Refine a base-relative wire key into its registered subject.\npub fn refine_key(key: &str) -> Option<Refined<'_>> {{\n    let parsed = {zk}::grammar::parse(key).ok()?;\n    let {zk}::grammar::ClassOrPlane::Class(class) = parsed.class else {{ return None; }};\n    let name: &str = match (&parsed.producer, &parsed.origin) {{\n        (Some(p), _) => p.name(),\n        (None, {zk}::grammar::Origin::Service(s)) => s.trim_start_matches('@'),\n        _ => return None,\n    }};\n    let subject = parse_subject(name, class, &parsed.subject)?;\n    let producer = subject.producer_name();\n    Some(Refined {{ key: parsed, producer, subject }})\n}}\n"
+        "/// Refine a base-relative wire key into its registered subject.\npub fn refine_key(key: &str) -> Option<Refined<'_>> {{\n    let parsed = {zk}::grammar::parse(key).ok()?;\n    let {zk}::grammar::ClassOrPlane::Class(class) = parsed.class else {{ return None; }};\n    let name: &str = match (&parsed.producer, &parsed.origin) {{\n        (Some(p), _) => p.name(),\n        (None, {zk}::grammar::Origin::Service(s)) => s.as_str().trim_start_matches('@'),\n        _ => return None,\n    }};\n    let subject = parse_subject(name, class, &parsed.subject)?;\n    let producer = subject.producer_name();\n    Some(Refined {{ key: parsed, producer, subject }})\n}}\n"
     );
     let _ = writeln!(
         out,
