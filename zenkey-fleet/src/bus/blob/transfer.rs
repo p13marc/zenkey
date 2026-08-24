@@ -12,7 +12,7 @@ use zenkey::{RegistrySlice, RemoteOrigin, ServiceOrigin};
 use zenoh::qos::Priority;
 
 use super::{BlobTarget, declared_by};
-use crate::query::{Answer, FleetAnswer, GetOpts, fleet_get};
+use crate::bus::query::{Answer, FleetAnswer, GetOpts, fleet_get};
 use crate::report::{
     BlobAvailability, BlobFetchReport, BlobHolder, BlobManifest, BlobProbeReport, BlobProgress,
     CallError,

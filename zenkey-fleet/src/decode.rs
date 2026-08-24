@@ -4,7 +4,7 @@
 //!
 //! [`SchemaStore`] caches each producer's served `describe` reply (RFC 08
 //! §7) and fetches on first miss through a declared
-//! [`crate::query::RepeatingQuery`] (the RFC 05 §2.1 discipline, kept warm
+//! [`crate::bus::query::RepeatingQuery`] (the RFC 05 §2.1 discipline, kept warm
 //! across the negative-TTL re-asks — #37). [`decode_sample`] is the whole
 //! pipeline in one call; encoding resolution is **sample > registry > sniff**
 //! and the sniff never goes away.
@@ -37,7 +37,7 @@ pub struct SchemaStore {
     /// the negative-TTL re-asks. Bounded by fleet producer count; entries
     /// live for the store's lifetime (no eviction — a fleet's producer set
     /// is small and a stale querier is only idle routing state).
-    queriers: Mutex<HashMap<String, std::sync::Arc<crate::query::RepeatingQuery>>>,
+    queriers: Mutex<HashMap<String, std::sync::Arc<crate::bus::query::RepeatingQuery>>>,
     /// One in-flight `describe` per producer. A hot bus misses on many
     /// samples of the same producer at once — the first sample's GET is
     /// still on the wire when the second arrives — and the store used to
@@ -307,7 +307,7 @@ impl SchemaStore {
                 // chance for them to disagree.
                 let fleet = crate::Fleet::new(session, &self.base);
                 let declared =
-                    match crate::query::declare_repeating(&fleet, &key, self.timeout).await {
+                    match crate::bus::query::declare_repeating(&fleet, &key, self.timeout).await {
                         Ok(q) => std::sync::Arc::new(q),
                         // We could not even ask. Nobody said anything about
                         // this producer, so this is the non-verdict case, not
@@ -333,7 +333,7 @@ impl SchemaStore {
         // Any well-formed reply will do; hashes make same-name drift a
         // doctor finding, not a decode concern.
         for a in answers {
-            if let crate::query::Answer::Value(bytes) = a.answer {
+            if let crate::bus::query::Answer::Value(bytes) = a.answer {
                 let cow = bytes.to_bytes();
                 if let Ok(text) = std::str::from_utf8(&cow)
                     && let Ok(set) = SchemaSet::parse(text)

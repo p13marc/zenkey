@@ -100,9 +100,9 @@ impl SliceSet {
     }
 
     /// Discover every live producer's served slice from the bus
-    /// ([`crate::query::fleet_registry`]).
+    /// ([`crate::bus::query::fleet_registry`]).
     pub async fn from_bus(fleet: &crate::Fleet<'_>, timeout: Duration) -> Result<SliceSet> {
-        let pairs = crate::query::fleet_registry_raw(fleet, timeout).await?;
+        let pairs = crate::bus::query::fleet_registry_raw(fleet, timeout).await?;
         let mut set = SliceSet::default();
         for (slice, raw) in pairs {
             set.push(slice, raw);
@@ -500,7 +500,7 @@ mod tests {
     /// from the bus, no invented disagreements.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn union_degrades_to_dirs_when_the_bus_is_silent() {
-        let session = crate::session::open(&[], &[], false).await.unwrap();
+        let session = crate::bus::session::open(&[], &[], false).await.unwrap();
         let dir =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
         let out = SliceSet::from_union(

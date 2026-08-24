@@ -4,7 +4,7 @@
 //!
 //! The conformance review found these uniformly unenforced, with the
 //! in-repo dev tools modeling the violations; this module is the
-//! enforcement seam, and [`crate::serve`]/[`crate::generate`] now ride it
+//! enforcement seam, and [`crate::bus::serve`]/[`crate::generate`] now ride it
 //! or its rules. It lives beside — not inside — `serve.rs`, deliberately:
 //! `serve` is the *explorer's* mock (answer anything, wildcards welcome),
 //! while this is the *producer's* posture (concrete keys, ordered

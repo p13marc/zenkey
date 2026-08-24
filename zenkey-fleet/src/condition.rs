@@ -846,7 +846,7 @@ pub async fn run_watchdog(
         };
         let roster_outcome = if wants_roster {
             Some(
-                crate::roster(fleet, spec.timeout)
+                crate::bus::roster::roster(fleet, spec.timeout)
                     .await
                     .map_err(|e| e.to_string()),
             )

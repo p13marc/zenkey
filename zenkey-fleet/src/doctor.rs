@@ -14,8 +14,8 @@ use anyhow::{Result, anyhow};
 use zenkey::RegistrySlice;
 use zenkey::grammar::with_base;
 
+use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::examples::Examples;
-use crate::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// Every check id `run_doctor` can emit — the stable vocabulary, never
@@ -121,7 +121,7 @@ pub async fn run_doctor(
     // it takes the same path as none at all — normalised once, here, rather
     // than at each of the four places that branch on it below.
     let locals = locals.filter(|set| !set.slices().is_empty());
-    let roster = crate::roster(fleet, spec.timeout).await?;
+    let roster = crate::bus::roster::roster(fleet, spec.timeout).await?;
 
     let mut findings: Vec<DoctorFinding> = Vec::new();
     let mut synced: Vec<String> = Vec::new();

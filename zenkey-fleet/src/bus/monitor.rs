@@ -217,7 +217,7 @@ pub enum FleetEvent {
     /// panes flip to "live" here, never on a guess.
     WatchSeeded {
         id: WatchId,
-        coverage: crate::seed::SeedCoverage,
+        coverage: crate::bus::seed::SeedCoverage,
     },
 }
 
@@ -624,9 +624,9 @@ impl Monitor {
     pub async fn watch_seeded(
         &self,
         selector: &str,
-        policy: crate::seed::SeedPolicy,
+        policy: crate::bus::seed::SeedPolicy,
     ) -> Result<WatchId> {
-        use crate::seed::{Merge, SeedCoverage, cache_selector, seed_get, view_of};
+        use crate::bus::seed::{Merge, SeedCoverage, cache_selector, seed_get, view_of};
 
         // The merge gate: `Some` while seeding (both live callback and seed
         // replies pass `admit`), swapped to `None` at the boundary.

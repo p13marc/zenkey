@@ -773,7 +773,7 @@ pub struct ScoutReport {
     pub timeout_s: f64,
     /// Distinct nodes heard, first sighting winning — a census, not an
     /// arrival log.
-    pub heard: Vec<crate::scout::HelloView>,
+    pub heard: Vec<crate::bus::scout::HelloView>,
 }
 
 /// The routers the admin space answered for (#236).
@@ -785,7 +785,7 @@ pub struct ScoutReport {
 pub struct RouterList {
     /// The admin selector put to the bus.
     pub asked: String,
-    pub routers: Vec<crate::admin::RouterInfo>,
+    pub routers: Vec<crate::bus::admin::RouterInfo>,
 }
 
 /// How bad a doctor finding is.

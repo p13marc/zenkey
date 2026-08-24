@@ -76,7 +76,7 @@ pub async fn scout(
     connect: &[String],
     listen: &[String],
 ) -> Result<ScoutStream> {
-    let config = crate::session::explorer_config(connect, listen, true);
+    let config = crate::bus::session::explorer_config(connect, listen, true);
     let inner = zenoh::scout(what, config)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))

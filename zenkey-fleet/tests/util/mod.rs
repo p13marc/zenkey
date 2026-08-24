@@ -36,10 +36,10 @@ pub fn endpoint() -> String {
 /// No scouting, no external router — the fixture nearly every suite opens.
 pub async fn peer_pair() -> (zenoh::Session, zenoh::Session) {
     let endpoint = endpoint();
-    let listen = zenkey_fleet::session::open(&[], std::slice::from_ref(&endpoint), false)
+    let listen = zenkey_fleet::bus::session::open(&[], std::slice::from_ref(&endpoint), false)
         .await
         .expect("listener session");
-    let connect = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
+    let connect = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("connector session");
     (listen, connect)
@@ -56,7 +56,7 @@ pub async fn timestamping_pair() -> (zenoh::Session, zenoh::Session) {
     cfg.insert_json5("listen/endpoints", &format!("[\"{endpoint}\"]"))
         .ok();
     let listen = zenoh::open(cfg).await.expect("timestamping session");
-    let connect = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
+    let connect = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("connector session");
     (listen, connect)

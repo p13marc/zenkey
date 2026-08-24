@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use zenoh::Session;
 
-use crate::query::GetOpts;
+use crate::bus::query::GetOpts;
 
 /// One admin-space entry.
 #[derive(Debug, Clone)]
@@ -36,7 +36,7 @@ pub async fn admin_get(
     selector: &str,
     timeout: Duration,
 ) -> Result<Vec<AdminEntry>> {
-    let replies = crate::query::disciplined_get(session, selector, &GetOpts::new(timeout))
+    let replies = crate::bus::query::disciplined_get(session, selector, &GetOpts::new(timeout))
         .await
         .map_err(|e| anyhow!("admin get {selector}: {e}"))?;
     let mut out = Vec::new();

@@ -2,7 +2,7 @@
 //!
 //! The shared core of `zenctl` and `zengui`: everything a bus explorer needs
 //! that is not presentation. The RFC 05 §2.1 fan-in discipline lives in
-//! exactly one place ([`query::fleet_get`], moved verbatim from zenctl —
+//! exactly one place ([`bus::query::fleet_get`], moved verbatim from zenctl —
 //! target `All`, consolidation `None`, attribution by the reply's own key);
 //! the liveliness roster, registry-slice sets, and the schema-aware decode
 //! seam build on it.
@@ -11,39 +11,27 @@
 //! explorer sees the wire as it really is, full keys included — that is what
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 
-pub mod admin;
+pub mod bus;
+
 pub mod bench;
-pub mod blob;
 pub mod budget;
 pub mod cutover;
 pub mod diff;
-pub mod discover;
 pub mod examples;
 pub mod facts;
 pub mod ingest;
 pub mod judgement;
-pub mod producer;
 pub mod project;
-pub mod query;
 pub mod record;
 pub mod registry;
 pub mod report;
 pub mod retain;
 pub mod retired;
-pub mod roster;
-pub mod scout;
-pub mod seed;
-pub mod serve;
-pub mod session;
 pub mod skeleton;
 pub mod stats;
-pub mod sub;
 pub mod tree;
 pub mod why;
-pub mod write;
 
-#[cfg(feature = "decode")]
-pub mod body;
 #[cfg(feature = "decode")]
 pub mod condition;
 #[cfg(feature = "decode")]
@@ -80,7 +68,7 @@ pub mod synth;
 // verbs below actually **return** are lifted to the root.
 
 #[cfg(feature = "decode")]
-pub use body::{
+pub use bus::body::{
     BodySource, PrepareMode, PrepareSpec, PreparedBody, encode_encoding, prepare_publish,
     prepare_request,
 };
@@ -112,32 +100,48 @@ pub use synth::Synth;
 #[cfg(feature = "decode")]
 pub use zenkey::schema::validate::{NotValidated, Verdict};
 
-pub use admin::{
+pub use bench::{BenchSpec, run_bench};
+pub use budget::{BudgetObservation, data_plane_scopes, join_budget};
+pub use bus::admin::{
     AdminEntry, Coverage, CoverageRow, RouterInfo, StorageInfo, admin_get, routers, state_coverage,
     storages,
 };
-pub use admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
-pub use admin::{
+pub use bus::admin::{DeclaredEntities, DeclaredEntity, EntityKind, declared_entities};
+pub use bus::admin::{
     MeshLink, OriginAttachment, TopologyEdge, TopologyNode, TopologyReport,
     admin_doc_omits_loopback, mesh_links, origin_attachments, render_dot, topology,
 };
-pub use bench::{BenchSpec, run_bench};
 #[cfg(feature = "blob")]
-pub use blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
-pub use blob::{BlobTarget, blob_list, declared_by};
-pub use budget::{BudgetObservation, data_plane_scopes, join_budget};
-pub use cutover::run_cutover;
-pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
-pub use discover::{AliveToken, DiscoveredBase, discover_bases};
-pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
-pub use ingest::{IngestRow, SampleRow, StreamLine, parse_row, parse_stream_line};
-pub use judgement::{Judgement, judgement_exit_code};
-pub use producer::{BringUp, LiveProducer, ReservedError, Responder};
-pub use query::{
+pub use bus::blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
+pub use bus::blob::{BlobTarget, blob_list, declared_by};
+pub use bus::discover::{AliveToken, DiscoveredBase, discover_bases};
+pub use bus::monitor::{
+    EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
+    StampProvenance, StreamItem, WatchId,
+};
+pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
+pub use bus::query::{
     Answer, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts, RepeatingQuery,
     RepeatingRegistry, StateSample, ValueSource, declare_repeating, declare_repeating_any,
     fetch_stored, fetch_value, fleet_get, fleet_registry, state_snapshot,
 };
+pub use bus::roster::{
+    BridgeMatch, Freshness, NodeInfo, ProducerInfo, RosterChange, RosterWatch, apply_token,
+    bridge_resolve, node_info, node_rows, roster, token_identity,
+};
+pub use bus::scout::{HelloView, ScoutStream, scout};
+pub use bus::seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
+pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
+pub use bus::session::{Fleet, OpenFailure, open, open_reporting, open_with_config};
+pub use bus::write::{
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
+    declare_publication,
+};
+pub use cutover::run_cutover;
+pub use diff::{ByteDiff, Change, ValueDiff, byte_diff};
+pub use facts::{FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key};
+pub use ingest::{IngestRow, SampleRow, StreamLine, parse_row, parse_stream_line};
+pub use judgement::{Judgement, judgement_exit_code};
 pub use record::{
     RecordBounds, RecordReport, ReplayEvent, ReplayReport, ReplaySpec, ReplayTarget, ZREC_VERSION,
     ZrecHeader, ZrecItem, ZrecReader, ZrecWriter, record, replay,
@@ -153,26 +157,10 @@ pub use report::{
 };
 pub use retain::{RetentionBudget, RetentionStats};
 pub use retired::run_retired;
-pub use roster::{
-    BridgeMatch, Freshness, NodeInfo, ProducerInfo, RosterChange, RosterWatch, apply_token,
-    bridge_resolve, node_info, node_rows, roster, token_identity,
-};
-pub use scout::{HelloView, ScoutStream, scout};
-pub use seed::{SeedCoverage, SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
-pub use serve::{MockResponder, ServedQuery, declare_responder};
-pub use session::{Fleet, OpenFailure, open, open_reporting, open_with_config};
 pub use skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use stats::{KeyStats, LatencyReport, LatencySummary, StampClass, StatsTable};
-pub use sub::{
-    EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
-    StampProvenance, StreamItem, WatchId,
-};
 pub use tree::KeyTreeSnapshot;
 pub use why::{RUNG_IDS, Rung, RungAnswer, WhyInputs, WhyReport, WhySpec, WhyVerdict, run_why};
-pub use write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
-    declare_publication,
-};
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.
 #[cfg(feature = "blob")]

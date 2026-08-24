@@ -33,7 +33,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::sub::SampleView;
+use crate::bus::monitor::SampleView;
 
 /// The two bounds on the retained window, both always in force.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

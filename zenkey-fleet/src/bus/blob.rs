@@ -206,7 +206,7 @@ fn content_hash(text: &str, tier: &str) -> Result<ContentHash> {
 /// claims it serves that tier's endpoints, never that it holds any particular
 /// blob. Possession is a probe's answer, and only a probe's.
 ///
-/// `roster` is the liveliness map as [`crate::roster()`] returns it (origin →
+/// `roster` is the liveliness map as [`crate::bus::roster::roster()`] returns it (origin →
 /// producers), inverted here to fill `origins`. Pass `None` when it was not
 /// asked — an offline `--registry` read has learned nothing about who is up,
 /// and `origins: None` is how that stays distinguishable from "declared, but
@@ -278,9 +278,9 @@ pub fn declared_by(slices: &[RegistrySlice], tier: BlobTier) -> Vec<String> {
 }
 
 #[cfg(feature = "blob")]
-mod bus;
+mod transfer;
 #[cfg(feature = "blob")]
-pub use bus::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
+pub use transfer::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
 
 #[cfg(test)]
 mod tests {

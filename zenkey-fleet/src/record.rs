@@ -12,11 +12,11 @@
 //! the position of the loss).
 //!
 //! Replay is publishing. Every replayed sample rides a declared publisher
-//! ([`crate::write::declare_publication`], P7 — no ad-hoc puts), gets the
+//! ([`crate::bus::write::declare_publication`], P7 — no ad-hoc puts), gets the
 //! *replaying* session's HLC (re-stamped deliberately: a preserved foreign
 //! HLC silently loses every RFC 04 §3.2 reconciliation), and a recorded
 //! delete passes the same class-conscious retire gate as a live one
-//! ([`crate::write::check_retire`], RFC 04 §1.2 v1.12). The etiquette the
+//! ([`crate::bus::write::check_retire`], RFC 04 §1.2 v1.12). The etiquette the
 //! CLI enforces on top — dry-run first, header-base refusal without an
 //! explicit override — is RFC 09 §5.2's.
 
@@ -30,9 +30,9 @@ use zenkey::qos::QosProfile;
 use zenoh::Session;
 use zenoh::sample::SampleKind;
 
+use crate::bus::monitor::{EventStream, FleetEvent, SampleView, StreamItem};
 use crate::ingest::{IngestRow, SampleRow, parse_row};
 use crate::registry::SliceSet;
-use crate::sub::{EventStream, FleetEvent, SampleView, StreamItem};
 
 /// The current `.zrec` format version, written into every header.
 pub const ZREC_VERSION: u32 = 1;
@@ -452,7 +452,7 @@ pub struct ReplayReport {
 /// Pacing follows each row's `t` divided by `speed` (must be positive);
 /// a dry run lists instantly, because a preview that takes the capture's
 /// duration is a preview nobody runs. Delete rows pass
-/// [`crate::write::check_retire`] under the **header's** base — the keys
+/// [`crate::bus::write::check_retire`] under the **header's** base — the keys
 /// were captured under it, and classifying them under anything else would
 /// re-derive what O3 says must not be re-derived; `i_know` is the operator
 /// saying the off-state cleanup is meant. Publishers are declared once per
@@ -493,7 +493,7 @@ pub async fn replay<R: BufRead>(
             report.first_errors.push(reason);
         }
     };
-    let mut publications: HashMap<String, crate::write::Publication> = HashMap::new();
+    let mut publications: HashMap<String, crate::bus::write::Publication> = HashMap::new();
     let mut prev_t: Option<u64> = None;
     while let Some(item) = reader.next() {
         let (row, t_us) = match item {
@@ -516,7 +516,7 @@ pub async fn replay<R: BufRead>(
             ReplayTarget::DryRun => None,
         };
         if row.delete
-            && let Err(e) = crate::write::check_retire(&base, &row.key, slices, i_know)
+            && let Err(e) = crate::bus::write::check_retire(&base, &row.key, slices, i_know)
         {
             let reason = e.to_string();
             on_event(ReplayEvent::Refused {
@@ -574,7 +574,7 @@ pub async fn replay<R: BufRead>(
                                 }
                             },
                         };
-                        let publication = crate::write::declare_publication(
+                        let publication = crate::bus::write::declare_publication(
                             session,
                             &row.key,
                             qos,
@@ -653,7 +653,7 @@ mod tests {
     #[test]
     fn an_injected_epoch_preserves_a_window_written_after_the_fact() {
         let epoch = Instant::now();
-        let view = |t_ms: u64| crate::sub::SampleView {
+        let view = |t_ms: u64| crate::bus::monitor::SampleView {
             key: "v1/h-0123456789ab/state/p/a".into(),
             payload: zenoh::bytes::ZBytes::from(vec![1u8]),
             encoding: String::new(),

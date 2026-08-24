@@ -414,10 +414,10 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
         key.push_str(&params.join(";"));
     }
 
-    let answers = crate::query::fleet_get(
+    let answers = crate::bus::query::fleet_get(
         fleet,
         &key,
-        &crate::query::GetOpts::new(timeout)
+        &crate::bus::query::GetOpts::new(timeout)
             .payload(body)
             .attachment(attachment),
     )
@@ -441,7 +441,7 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
                     None => (None, None),
                 };
                 let outcome = match &a.answer {
-                    crate::query::Answer::Value(bytes) => {
+                    crate::bus::query::Answer::Value(bytes) => {
                         let bytes = bytes.to_bytes();
                         match serde_json::from_slice::<serde_json::Value>(&bytes) {
                             Ok(v) => CallOutcome::Ok {
@@ -454,10 +454,12 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
                             },
                         }
                     }
-                    crate::query::Answer::Error { name, message } => CallOutcome::Err(CallError {
-                        name: name.clone(),
-                        message: message.clone(),
-                    }),
+                    crate::bus::query::Answer::Error { name, message } => {
+                        CallOutcome::Err(CallError {
+                            name: name.clone(),
+                            message: message.clone(),
+                        })
+                    }
                 };
                 CallAnswer {
                     origin: a.origin.clone(),
@@ -637,7 +639,7 @@ mod tests {
     /// declared forbidden-fanout write never leaves the process.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fleet_calls_to_forbidden_fanout_are_refused() {
-        let session = crate::session::open(&[], &[], false).await.unwrap();
+        let session = crate::bus::session::open(&[], &[], false).await.unwrap();
         let slices = slice_with_proc("write", Some("forbidden"));
         let err = call(
             &crate::Fleet::new(&session, ""),

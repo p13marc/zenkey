@@ -33,7 +33,7 @@ pub struct LatencySummary {
 }
 
 /// Which clock stamped a latency observation — the storage form of
-/// [`crate::sub::StampProvenance`], without the stamper's identity.
+/// [`crate::bus::monitor::StampProvenance`], without the stamper's identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StampClass {
     SelfStamped,

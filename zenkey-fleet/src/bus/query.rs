@@ -9,7 +9,7 @@ use zenoh::Session;
 use zenoh::qos::Priority;
 use zenoh::query::{ConsolidationMode, QueryTarget};
 
-use crate::session::Fleet;
+use crate::bus::session::Fleet;
 
 /// How a producer answered a procedure call.
 ///
@@ -275,7 +275,7 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
 ///   keyexpr — a `?params` suffix in `key` is a bug here);
 /// - genuinely one-shot, or an ad-hoc key → [`fleet_get`].
 ///
-/// Liveliness sweeps ([`crate::roster()`]) are a different API
+/// Liveliness sweeps ([`crate::bus::roster::roster()`]) are a different API
 /// (`session.liveliness().get()`) with no querier equivalent and stay
 /// undeclared.
 pub struct RepeatingQuery {
@@ -413,8 +413,8 @@ impl RepeatingQuery {
 
     /// Event-driven matching changes for this querier — same honesty bounds
     /// as [`matching_status`](Self::matching_status).
-    pub async fn matching_events(&self) -> Result<crate::write::MatchingEvents> {
-        crate::write::MatchingEvents::for_querier(&self.querier).await
+    pub async fn matching_events(&self) -> Result<crate::bus::write::MatchingEvents> {
+        crate::bus::write::MatchingEvents::for_querier(&self.querier).await
     }
 }
 
@@ -444,7 +444,7 @@ fn origin_of(base: &str, key: &str) -> String {
 /// A verbatim service origin is unmatchable by the `*` of a fleet selector
 /// (grammar property D4), so the wildcard sweep cannot enumerate services.
 /// The well-known `@catalog` identity service (RFC 06 §5) is therefore asked
-/// by name, exactly as [`crate::roster()`] does for its alive token; other
+/// by name, exactly as [`crate::bus::roster::roster()`] does for its alive token; other
 /// service origins remain reachable only via local registry files
 /// (`doctor --registry` asks each declared `service_origin` by name).
 pub async fn fleet_registry(

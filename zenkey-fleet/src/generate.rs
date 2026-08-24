@@ -471,8 +471,11 @@ pub async fn build_plan(
                     None => format!("synthetic values for {{{vars}}} (override with --var)"),
                 });
             }
-            let encoding =
-                crate::body::encode_encoding(None, subject.encoding.as_deref(), schema.as_ref());
+            let encoding = crate::bus::body::encode_encoding(
+                None,
+                subject.encoding.as_deref(),
+                schema.as_ref(),
+            );
 
             let valid = GenPlanEntry {
                 key,
@@ -521,7 +524,7 @@ pub async fn build_plan(
 }
 
 /// The serving halves of a mock producer, alive while held: each declared
-/// responder is *driven* by its own task (a [`crate::producer::Responder`]
+/// responder is *driven* by its own task (a [`crate::bus::producer::Responder`]
 /// is pull-based — a responder nobody drives answers nobody). Dropping this
 /// aborts the drivers, which undeclares their queryables.
 #[derive(Debug)]
@@ -551,14 +554,14 @@ pub async fn serve_describe(
     producer: Option<&str>,
 ) -> Result<MockProducer> {
     let (session, base) = (fleet.session(), fleet.base());
-    // The bring-up discipline (RFC 04 §5 via `crate::producer::BringUp`):
+    // The bring-up discipline (RFC 04 §5 via `crate::bus::producer::BringUp`):
     // every queryable is declared — awaited, on its own concrete key —
     // before this function returns, so a consumer under test that sees the
     // mock exists can already call it, and RFC 08 §6.1's bounded grace has
     // no spawn race to tolerate. The mock deliberately never declares
     // `alive` (`without_alive`): a tool answering for a producer must not
     // also claim its presence (RFC 13 §5).
-    let mut up = crate::producer::BringUp::new(session);
+    let mut up = crate::bus::producer::BringUp::new(session);
     let mut bodies: Vec<(Vec<u8>, &'static str)> = Vec::new();
     for (slice, raw) in slices.entries() {
         if slice.service_origin.is_some() {
@@ -640,7 +643,7 @@ pub async fn run_gen(
             // A long-lived publication for repeated keys; events declare
             // per send on their unique key.
             let publication = if entry.unique_chunk.is_none() {
-                match crate::write::declare_publication(
+                match crate::bus::write::declare_publication(
                     &session,
                     &entry.key,
                     QosProfile::from_name(&entry.qos).unwrap_or(QosProfile::Sampled),
@@ -713,7 +716,7 @@ pub async fn run_gen(
                     None => {
                         // Events: a fresh write-once key per send.
                         let key = unique_key(&entry, seed, sent);
-                        match crate::write::declare_publication(
+                        match crate::bus::write::declare_publication(
                             &session,
                             &key,
                             QosProfile::from_name(&entry.qos).unwrap_or(QosProfile::Sampled),

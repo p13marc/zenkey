@@ -7,7 +7,7 @@
 //! *slowest* origin answers, so attributing the call's duration to every
 //! responder would report the fastest node's latency as the worst one's. The
 //! measurement therefore rides
-//! [`RepeatingQuery::fetch_timed`](crate::query::RepeatingQuery::fetch_timed),
+//! [`RepeatingQuery::fetch_timed`](crate::bus::query::RepeatingQuery::fetch_timed),
 //! which stamps each reply where it is drained — inside the RFC 05 §2.1
 //! chokepoint, not around it.
 //!
@@ -24,10 +24,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::query::{Answer, RepeatingQuery, declare_repeating};
+use crate::bus::query::{Answer, RepeatingQuery, declare_repeating};
+use crate::bus::write::CallTarget;
 use crate::registry::SliceSet;
 use crate::report::{BenchReport, OriginLatency};
-use crate::write::CallTarget;
 
 /// What to measure.
 pub struct BenchSpec<'a> {

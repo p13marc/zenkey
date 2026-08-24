@@ -29,7 +29,7 @@ fn endpoint() -> String {
 const SETTLE: Duration = Duration::from_secs(3);
 
 async fn watch(selectors: Vec<String>) -> (zenkey_fleet::KeyTreeSnapshot, Vec<String>) {
-    let session = zenkey_fleet::session::open(&[endpoint()], &[], false)
+    let session = zenkey_fleet::bus::session::open(&[endpoint()], &[], false)
         .await
         .expect("open session");
     let monitor = Monitor::start(
@@ -167,7 +167,7 @@ async fn the_overlay_classifies_real_traffic_correctly() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs a live bus; see the module docs"]
 async fn a_bounded_observer_reports_what_it_retired() {
-    let session = zenkey_fleet::session::open(&[endpoint()], &[], false)
+    let session = zenkey_fleet::bus::session::open(&[endpoint()], &[], false)
         .await
         .expect("open session");
     let monitor = Monitor::start(
@@ -255,12 +255,14 @@ async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
         let port = held.local_addr().expect("local addr").port();
         format!("tcp/127.0.0.1:{port}")
     };
-    let producer_side = zenkey_fleet::session::open(&[], std::slice::from_ref(&endpoint), false)
-        .await
-        .expect("producer session");
-    let observer_side = zenkey_fleet::session::open(std::slice::from_ref(&endpoint), &[], false)
-        .await
-        .expect("observer session");
+    let producer_side =
+        zenkey_fleet::bus::session::open(&[], std::slice::from_ref(&endpoint), false)
+            .await
+            .expect("producer session");
+    let observer_side =
+        zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
+            .await
+            .expect("observer session");
 
     let monitor = Monitor::start(
         &observer_side,
@@ -348,7 +350,7 @@ async fn history_records_a_real_tombstone_and_a_plottable_series() {
     use zengui::series::value_series;
     use zenkey_fleet::{FleetEvent, StreamItem};
 
-    let session = zenkey_fleet::session::open(&[endpoint()], &[], false)
+    let session = zenkey_fleet::bus::session::open(&[endpoint()], &[], false)
         .await
         .expect("open session");
     let monitor = Monitor::start(

@@ -176,7 +176,7 @@ pub async fn run_retired(
     // available", never "nothing declared" (O4). Our own session is excluded:
     // an explorer counting itself as an unmigrated consumer would be a
     // self-inflicted finding.
-    let admin = crate::admin::declared_entities(session, timeout).await?;
+    let admin = crate::bus::admin::declared_entities(session, timeout).await?;
     let own_zid = session.zid().to_string();
 
     let matchers: Vec<Matcher> = ledger

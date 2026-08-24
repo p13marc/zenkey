@@ -429,14 +429,18 @@ pub async fn node_info(
     // still attributed by reply key, so a router that answered for somebody
     // else could not smuggle a slice in.
     let introspect = with_base(base, node.introspect_selector());
-    let answers = crate::query::fleet_get(fleet, &introspect, &crate::query::GetOpts::new(timeout))
-        .await
-        .unwrap_or_default();
+    let answers = crate::bus::query::fleet_get(
+        fleet,
+        &introspect,
+        &crate::bus::query::GetOpts::new(timeout),
+    )
+    .await
+    .unwrap_or_default();
     let served: Vec<zenkey::slice::RegistrySlice> = answers
         .into_iter()
         .filter(|a| a.origin == origin)
         .filter_map(|a| {
-            let crate::query::Answer::Value(bytes) = a.answer else {
+            let crate::bus::query::Answer::Value(bytes) = a.answer else {
                 return None;
             };
             let toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
@@ -490,7 +494,7 @@ pub async fn node_info(
     if with_freshness && !mine.is_empty() {
         // One origin-scoped state sweep; join against declared ttl_s.
         let selector = with_base(base, node.state_selector());
-        let samples = crate::query::state_snapshot(session, &selector, timeout, None)
+        let samples = crate::bus::query::state_snapshot(session, &selector, timeout, None)
             .await
             .unwrap_or_default();
         let now = std::time::SystemTime::now();
@@ -577,11 +581,12 @@ pub async fn bridge_resolve(
             .to_string();
     let key = fleet.wire(relative);
     let answers =
-        crate::query::fleet_get(fleet, &key, &crate::query::GetOpts::new(timeout)).await?;
+        crate::bus::query::fleet_get(fleet, &key, &crate::bus::query::GetOpts::new(timeout))
+            .await?;
     let mut matches = Vec::new();
     let seen = answers.len();
     for a in &answers {
-        let crate::query::Answer::Value(bytes) = &a.answer else {
+        let crate::bus::query::Answer::Value(bytes) = &a.answer else {
             continue;
         };
         let Ok(doc) = serde_json::from_slice::<serde_json::Value>(&bytes.to_bytes()) else {

@@ -22,10 +22,10 @@
 //! | `scope-reach` | does a `**` explorer scope reach this key? | key algebra (RFC 09 §5.1 O5; RFC 03 §4 D2/D4) |
 //! | `key-parse` | does it parse as a v1 key under the base? | [`crate::facts::describe_key`] (O2) |
 //! | `registry-declared` | does a loaded slice declare the subject? | [`SliceSet`] refinement (RFC 08 §2) |
-//! | `origin-alive` | is the origin on the liveliness roster? | [`crate::roster()`] (RFC 04 §5) |
+//! | `origin-alive` | is the origin on the liveliness roster? | [`crate::bus::roster::roster()`] (RFC 04 §5) |
 //! | `publisher-declared` | did any session declare a matching publisher? | [`crate::declared_entities`] — and see below |
 //! | `storage-coverage` | is a storage configured to capture it? | [`crate::storages`] (RFC 09 §2) |
-//! | `stored-value` | does a stored value answer a bounded GET? | [`crate::query::fetch_stored`] (RFC 04 §3.2) |
+//! | `stored-value` | does a stored value answer a bounded GET? | [`crate::bus::query::fetch_stored`] (RFC 04 §3.2) |
 //! | `sample-freshness` | is the last known sample within its declared ttl? | declared `ttl_s` × the fetched stamp (RFC 04 §1.2) |
 //! | `admin-answered` | is the admin space answering at all? | [`crate::topology`]`.answered` |
 //! | `wire-heard` | did the key speak during a listen window? | a bounded [`crate::Monitor`] window, opt-in |
@@ -79,10 +79,10 @@ use serde::Serialize;
 use zenoh::Session;
 use zenoh::key_expr::keyexpr;
 
-use crate::admin::{DeclaredEntities, EntityKind, StorageInfo};
+use crate::bus::admin::{DeclaredEntities, EntityKind, StorageInfo};
+use crate::bus::query::ValueSource;
 use crate::examples::Examples;
 use crate::facts::{KeyShape, OriginKind, Registration, describe_key};
-use crate::query::ValueSource;
 use crate::registry::SliceSet;
 
 /// Every rung id the ladder can emit — the stable vocabulary, never renamed
@@ -581,7 +581,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             )
         }
         Some(Some(entities)) => {
-            let matches: Vec<&crate::admin::DeclaredEntity> = keyexpr::new(key)
+            let matches: Vec<&crate::bus::admin::DeclaredEntity> = keyexpr::new(key)
                 .ok()
                 .map(|ke| {
                     entities
@@ -921,7 +921,7 @@ pub struct WhySpec {
 /// liveliness sweep, the admin sweeps ([`crate::topology`],
 /// [`crate::declared_entities`], [`crate::storages`] — the last only when an
 /// admin space answered, so an empty vec cannot masquerade as "no storages
-/// configured"), and one bounded [`crate::query::fetch_stored`] on the asked
+/// configured"), and one bounded [`crate::bus::query::fetch_stored`] on the asked
 /// key. Every ingredient that fails to arrive degrades its rung to
 /// `NotAsked` and is recorded as an impairment — never as a `No`.
 ///
@@ -936,7 +936,7 @@ pub async fn run_why(
     let (session, base) = (fleet.session(), fleet.base());
     let key_part = key.split('?').next().unwrap_or_default();
 
-    let roster = crate::roster(fleet, spec.timeout).await.ok();
+    let roster = crate::bus::roster::roster(fleet, spec.timeout).await.ok();
     let admin_answered = crate::topology(session, spec.timeout)
         .await
         .ok()
@@ -949,7 +949,7 @@ pub async fn run_why(
         _ => None,
     };
 
-    let stored = match crate::query::fetch_stored(session, key_part, spec.timeout).await {
+    let stored = match crate::bus::query::fetch_stored(session, key_part, spec.timeout).await {
         Ok(Some(v)) => {
             let age_s = v.timestamp.and_then(|t| {
                 std::time::SystemTime::now()
@@ -1138,7 +1138,7 @@ mod tests {
         // The admin space answered, and it holds no publisher for this key
         // (only an unrelated subscriber) — the lazily-undeclared state.
         let entities = DeclaredEntities {
-            entities: vec![crate::admin::DeclaredEntity {
+            entities: vec![crate::bus::admin::DeclaredEntity {
                 kind: EntityKind::Subscriber,
                 keyexpr: "v1/**".into(),
                 node_zid: "z1".into(),

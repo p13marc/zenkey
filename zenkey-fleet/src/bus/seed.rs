@@ -30,7 +30,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use zenoh::Session;
 
-use crate::sub::SampleView;
+use crate::bus::monitor::SampleView;
 
 /// Which seed paths to run. Default: both — per-path opt-out exists because
 /// a deployment may *know* it has no storages (or no advanced publishers),
@@ -247,8 +247,8 @@ pub(crate) async fn seed_get(
     let mut n = 0usize;
     // `accept_any`: cache replies arrive on the sample's own key, outside an
     // `@adv`-suffixed selector — without it they are dropped.
-    let opts = crate::query::GetOpts::new(timeout).accept_any();
-    if let Ok(replies) = crate::query::disciplined_get(session, selector, &opts).await {
+    let opts = crate::bus::query::GetOpts::new(timeout).accept_any();
+    if let Ok(replies) = crate::bus::query::disciplined_get(session, selector, &opts).await {
         while let Ok(reply) = replies.recv_async().await {
             let Ok(sample) = reply.result() else { continue };
             n += 1;

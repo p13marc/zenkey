@@ -26,13 +26,13 @@ use serde::Serialize;
 use zenkey::grammar::{self, ClassOrPlane, SUBJECT_ALIVE, VERSION_CHUNK};
 use zenoh::Session;
 
-use crate::admin::StorageInfo;
+use crate::bus::admin::StorageInfo;
 
 /// Host-form sweep: `**` matches zero or more chunks, so every base depth is
 /// covered — including the empty base. A verbatim origin is never matched
 /// (D4), hence the separate catalog sweep.
 const HOST_ALIVE_SWEEP: &str = "**/v1/*/state/*/alive";
-/// `@catalog` asked for by name at any base depth, mirroring [`crate::roster`]
+/// `@catalog` asked for by name at any base depth, mirroring [`crate::bus::roster`]
 /// (a unit test pins this against the typed `selector::service_alive`).
 const CATALOG_ALIVE_SWEEP: &str = "**/v1/@catalog/state/alive";
 
@@ -198,7 +198,7 @@ pub async fn discover_bases(session: &Session, timeout: Duration) -> Result<Vec<
             }
         }
     }
-    let storages = crate::admin::storages(session, timeout)
+    let storages = crate::bus::admin::storages(session, timeout)
         .await
         .unwrap_or_default();
     Ok(merge_signals(tokens, &storages))
