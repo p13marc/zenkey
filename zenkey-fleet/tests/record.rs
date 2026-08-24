@@ -5,7 +5,8 @@
 //! replay report.
 //!
 //! Event-driven: the matching badge proves routability before publishing.
-//! Ports 7524-7525 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
@@ -15,15 +16,8 @@ use zenkey_fleet::{
     declare_publication, record, replay,
 };
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 fn header(selector: &str) -> ZrecHeader {
     ZrecHeader {
@@ -43,7 +37,7 @@ const SELECTOR: &str = "v1/h-aaaaaaaaaaaa/state/demo/**";
 /// attachment.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_capture_replays_onto_a_second_bus_intact() {
-    let (a, b) = peer_pair(7524).await;
+    let (a, b) = peer_pair().await;
 
     // --- capture side ------------------------------------------------
     let monitor = zenkey_fleet::Monitor::start(&b, zenkey_fleet::MonitorSpec::default())
@@ -93,7 +87,7 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     let file = writer.finish().expect("finish");
 
     // --- replay side (a second, unrelated bus) ------------------------
-    let (c, d) = peer_pair(7525).await;
+    let (c, d) = peer_pair().await;
     let replay_monitor = zenkey_fleet::Monitor::start(&d, zenkey_fleet::MonitorSpec::default())
         .await
         .expect("replay monitor");

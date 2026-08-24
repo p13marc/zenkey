@@ -11,8 +11,9 @@
 //!    the caller's own report of itself.
 //!
 //! Self-contained like `querier.rs`: in-process peers, explicit endpoints, no
-//! scouting, no external router. Ports 7509-7512 (disjoint from every other
-//! test binary).
+//! scouting, no external router.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 //!
 //! Needs the `blob` feature. `cargo test --workspace` unifies it in through
 //! zenctl/zengui; `cargo test -p zenkey-fleet --features blob` runs it alone.
@@ -32,15 +33,8 @@ const ID: &str = "01jqz3demo0001";
 const BASE: &str = "";
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 /// Deterministic bytes, so a byte-identical assertion means something.
 fn payload(len: usize, seed: u64) -> Vec<u8> {
@@ -111,7 +105,7 @@ async fn serve(
 /// attribution-by-reply-key underneath it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_probe_names_every_holder_and_a_fetch_names_one() {
-    let (serving, asking) = peer_pair(7509).await;
+    let (serving, asking) = peer_pair().await;
     let data = payload(200_000, 7);
     let (a, manifest) = serve(&serving, "h-aaaaaaaaaaaa", data.clone()).await;
     let (b, _) = serve(&serving, "h-bbbbbbbbbbbb", data.clone()).await;
@@ -198,7 +192,7 @@ async fn a_probe_names_every_holder_and_a_fetch_names_one() {
 /// fetch from the wrong one must name it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_disagreeing_root_is_named_not_averaged() {
-    let (serving, asking) = peer_pair(7510).await;
+    let (serving, asking) = peer_pair().await;
     let honest = payload(120_000, 11);
     let rogue = payload(120_000, 12);
     let (a, manifest) = serve(&serving, "h-aaaaaaaaaaaa", honest.clone()).await;
@@ -262,7 +256,7 @@ async fn a_disagreeing_root_is_named_not_averaged() {
 /// reads the priority off the wire — the only place the claim is checkable.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_blob_get_rides_at_data_low() {
-    let (serving, asking) = peer_pair(7511).await;
+    let (serving, asking) = peer_pair().await;
     let seen: Arc<Mutex<Vec<Priority>>> = Arc::new(Mutex::new(Vec::new()));
 
     // A manifest for a blob nobody serves: enough for the client to move on to
@@ -370,7 +364,7 @@ async fn every_blob_get_rides_at_data_low() {
 /// must still say so rather than report zero holders.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tier_two_is_probed_and_a_foreign_algo_says_why_not() {
-    let (_serving, asking) = peer_pair(7512).await;
+    let (_serving, asking) = peer_pair().await;
     let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     // blake3 is speakable: the probe asks the §2.4 have endpoint. Nobody

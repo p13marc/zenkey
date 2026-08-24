@@ -25,25 +25,14 @@ use std::time::Duration;
 
 use zenkey_fleet::{FleetEvent, Monitor, MonitorSpec, StampProvenance, StreamItem};
 
-/// A session that stamps what it publishes, as a fleet with
-/// `timestamping.enabled` does.
-async fn timestamping_listener(port: u16) -> zenoh::Session {
-    let mut cfg = zenoh::Config::default();
-    cfg.insert_json5("scouting/multicast/enabled", "false").ok();
-    cfg.insert_json5("timestamping/enabled", "true").ok();
-    cfg.insert_json5("listen/endpoints", &format!("[\"tcp/127.0.0.1:{port}\"]"))
-        .ok();
-    zenoh::open(cfg).await.expect("publisher session")
-}
+mod util;
+use util::timestamping_pair;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stamp_we_cannot_attribute_is_unknown_and_still_names_its_stamper() {
     let key = "v1/h-3fa9c2d41b7e/state/stamp/probe";
-    let publisher = timestamping_listener(7483).await;
+    let (publisher, observer) = timestamping_pair().await;
     let publisher_zid = publisher.zid();
-    let observer = zenkey_fleet::open(&["tcp/127.0.0.1:7483".to_string()], &[], false)
-        .await
-        .expect("observer session");
 
     let monitor = Monitor::start(&observer, MonitorSpec::default())
         .await

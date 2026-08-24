@@ -1,20 +1,15 @@
 //! The doctor engine (#55) against a real bus: findings come out typed, with
 //! their stable check ids and RFC citations — the same structs both
-//! frontends render. Ports 7491-7492.
+//! frontends render.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
 use zenkey_fleet::{DoctorSpec, run_doctor};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const SERVED_SLICE: &str = r#"
 [registry]
@@ -60,7 +55,7 @@ fn spec() -> DoctorSpec {
 /// summary counts what was actually asked.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
-    let (a, b) = peer_pair(7491).await;
+    let (a, b) = peer_pair().await;
 
     let _token = a
         .liveliness()
@@ -124,7 +119,7 @@ async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
 /// boot-race excuse.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_mute_live_producer_is_a_coverage_finding() {
-    let (a, b) = peer_pair(7492).await;
+    let (a, b) = peer_pair().await;
 
     let _token = a
         .liveliness()

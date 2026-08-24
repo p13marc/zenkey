@@ -4,22 +4,17 @@
 //! reaches beyond the entity this process declared.
 //!
 //! Event-driven like `lazy.rs`: the listener observes the transition, no
-//! status poll races the declaration. Ports 7485-7486.
+//! status poll races the declaration.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
 use zenkey_fleet::{declare_publication, declare_repeating};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const KEY: &str = "v1/h-cccccccccccc/state/demo/health";
 
@@ -27,7 +22,7 @@ const KEY: &str = "v1/h-cccccccccccc/state/demo/health";
 /// and flips back when it undeclares.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_publication_sees_its_own_subscribers_appear_and_leave() {
-    let (a, b) = peer_pair(7485).await;
+    let (a, b) = peer_pair().await;
 
     let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
         .await
@@ -57,7 +52,7 @@ async fn a_publication_sees_its_own_subscribers_appear_and_leave() {
 /// keyexpr it asks on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_repeating_query_sees_a_server_appear() {
-    let (a, b) = peer_pair(7486).await;
+    let (a, b) = peer_pair().await;
 
     let repeating = declare_repeating(&b, "", KEY, Duration::from_secs(5))
         .await

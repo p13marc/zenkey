@@ -11,7 +11,9 @@
 //!    validates against the root the caller asked for.
 //!
 //! Self-contained like `blob.rs`: in-process peers, explicit endpoints, no
-//! scouting. Ports 7530-7531 (disjoint from every other test binary).
+//! scouting.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 #![cfg(feature = "blob")]
 
@@ -25,15 +27,8 @@ const BASE: &str = "";
 const ORIGIN: &str = "h-aaaaaaaaaaaa";
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 fn tier_prefix(origin: &str, tier: zenkey::grammar::BlobTier) -> String {
     let origin = zenkey::grammar::Origin::Host(zenkey::HostId::parse(origin).unwrap());
@@ -76,7 +71,7 @@ fn make_tree(dir: &std::path::Path) -> Vec<u8> {
 /// verifies against the address, and the tree summary needs no store.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
-    let (serving, asking) = peer_pair(7530).await;
+    let (serving, asking) = peer_pair().await;
     let src = tempfile::tempdir().unwrap();
     make_tree(src.path());
 
@@ -225,7 +220,7 @@ async fn tier_two_probes_are_possession_verdicts_and_fetches_verify() {
 /// unattributed verification failure is unactionable (RFC 07 §2.1).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_lying_store_holder_is_rejected_by_name() {
-    let (serving, asking) = peer_pair(7531).await;
+    let (serving, asking) = peer_pair().await;
     let honest = zblob::Hash::of(b"the content the address names");
     let store_prefix = tier_prefix(ORIGIN, zenkey::grammar::BlobTier::Store);
     let key = zblob::keys::store_key(&store_prefix, zblob::HashAlgo::Blake3, &honest);

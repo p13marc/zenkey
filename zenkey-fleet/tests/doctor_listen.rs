@@ -4,22 +4,16 @@
 //!
 //! The fixture publishers send continuously through the window, so no settle
 //! is needed: the listen monitor subscribes, the next send arrives.
-//! Ports 7535-7536 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
 use zenkey_fleet::{DoctorSpec, declare_publication, run_doctor};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 fn spec(listen_s: u64) -> DoctorSpec {
     DoctorSpec {
@@ -69,7 +63,7 @@ qos = "transition"
 /// each become their finding — aggregated per key, phrased per the RFC.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn observed_qos_and_unregistered_traffic_become_findings() {
-    let (a, b) = peer_pair(7535).await;
+    let (a, b) = peer_pair().await;
     let local = zenkey::parse_slice(SLICE).expect("slice");
 
     // Declared transition, riding sampled: the mismatch under test.
@@ -145,7 +139,7 @@ rate = "rare"
 /// observation says how much of what it judged was generated (#162).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn over_rate_events_are_findings_and_synthetic_traffic_is_counted() {
-    let (a, b) = peer_pair(7536).await;
+    let (a, b) = peer_pair().await;
     let local = zenkey::parse_slice(EVENTS_SLICE).expect("slice");
 
     let marker = br#"{"synthetic":true,"tool":"test"}"#.to_vec();

@@ -13,27 +13,22 @@
 //! against, and the one where a panic or an `Err` would be worst.
 //!
 //! Self-contained: in-process peers, explicit endpoints, no scouting, no
-//! router. Ports 7513-7514 (disjoint from every other test binary).
+//! router.
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(2);
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 /// Every admin call degrades to a *reading*, never to an error — which is what
 /// lets an explorer render "peer-only mesh" instead of a failure dialog.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_admin_less_mesh_answers_empty_never_an_error() {
-    let (_serving, asking) = peer_pair(7513).await;
+    let (_serving, asking) = peer_pair().await;
 
     let routers = zenkey_fleet::routers(&asking, TIMEOUT)
         .await
@@ -74,7 +69,7 @@ async fn an_admin_less_mesh_answers_empty_never_an_error() {
 /// is a *fact about coverage*, distinct from the panel's "not judged" state.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn coverage_with_no_storages_judges_rather_than_abstains() {
-    let (_serving, asking) = peer_pair(7514).await;
+    let (_serving, asking) = peer_pair().await;
     let storages = zenkey_fleet::storages(&asking, TIMEOUT).await.unwrap();
 
     let slice = zenkey::parse_slice(

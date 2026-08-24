@@ -4,22 +4,16 @@
 //! the wire carried none (absence is a fact too, never a default).
 //!
 //! Event-driven: the matching badge proves routability before publishing.
-//! Ports 7517-7519 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
 use zenkey_fleet::declare_publication;
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const KEY: &str = "v1/h-eeeeeeeeeeee/state/demo/health";
 
@@ -27,7 +21,7 @@ const KEY: &str = "v1/h-eeeeeeeeeeee/state/demo/health";
 /// without one delivers `None`, not an empty buffer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_watched_sample_carries_its_attachment() {
-    let (a, b) = peer_pair(7517).await;
+    let (a, b) = peer_pair().await;
 
     let monitor = zenkey_fleet::Monitor::start(&b, zenkey_fleet::MonitorSpec::default())
         .await
@@ -87,7 +81,7 @@ async fn a_watched_sample_carries_its_attachment() {
 /// none yields `None`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_fleet_answer_carries_the_reply_attachment() {
-    let (a, b) = peer_pair(7518).await;
+    let (a, b) = peer_pair().await;
 
     let _queryable = a
         .declare_queryable(KEY)
@@ -121,7 +115,7 @@ async fn a_fleet_answer_carries_the_reply_attachment() {
 /// zengui detail pane renders.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_fetched_value_carries_the_attachment() {
-    let (a, b) = peer_pair(7519).await;
+    let (a, b) = peer_pair().await;
 
     let publication = declare_publication(&a, KEY, QosProfile::Sampled, None)
         .await

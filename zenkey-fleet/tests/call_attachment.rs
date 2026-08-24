@@ -2,19 +2,13 @@
 //! carries one back, and the projection into `CallAnswer` keeps it —
 //! present only when the wire carried one, absent otherwise (O4).
 //!
-//! Port 7526 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const RPC_KEY: &str = "v1/h-aaaaaaaaaaaa/@rpc/demo/echo";
 
@@ -23,7 +17,7 @@ const RPC_KEY: &str = "v1/h-aaaaaaaaaaaa/@rpc/demo/echo";
 /// the reply path carried it back into the report.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_call_carries_attachments_both_ways() {
-    let (server, client) = peer_pair(7526).await;
+    let (server, client) = peer_pair().await;
 
     let queryable = server
         .declare_queryable(RPC_KEY)

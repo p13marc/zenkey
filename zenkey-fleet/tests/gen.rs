@@ -2,21 +2,15 @@
 //! budgeted events, and the served RFC 08 halves. Fault injection (#163):
 //! each kind's delta from valid, observed on the wire, and the fault marker
 //! riding every faulted sample.
-//! Ports 7537-7539 (disjoint from every other test binary).
+//! Ports are ephemeral (`util::peer_pair`), so two test runs at once
+//! cannot collide.
 
 use std::time::Duration;
 
 use zenkey_fleet::generate::{Fault, GenPattern, GenSpec, build_plan, run_gen, serve_describe};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 const SLICES: &str = r#"
 [registry]
@@ -64,7 +58,7 @@ fn spec(duration_s: f64) -> GenSpec {
 /// write-once keys.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn generated_traffic_is_conforming_marked_and_budgeted() {
-    let (observer, generator) = peer_pair(7537).await;
+    let (observer, generator) = peer_pair().await;
     let slices =
         zenkey_fleet::SliceSet::from_slices(vec![zenkey::parse_slice(SLICES).expect("slice")]);
     let set = zenkey::schema::SchemaSet::parse(SET).expect("set");
@@ -131,7 +125,7 @@ async fn generated_traffic_is_conforming_marked_and_budgeted() {
 /// — introspect with the verbatim slice TOML, describe with the SchemaSet.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_mock_producer_serves_both_registry_halves() {
-    let (serving, asking) = peer_pair(7538).await;
+    let (serving, asking) = peer_pair().await;
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("demo.toml"), SLICES).expect("write slice");
     let slices = zenkey_fleet::SliceSet::from_dirs(&[dir.path().to_path_buf()]).expect("from_dirs");
@@ -192,7 +186,7 @@ async fn the_mock_producer_serves_both_registry_halves() {
 /// one dimension away from a known-valid baseline.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn injected_faults_deviate_by_exactly_one_dimension_and_stay_marked() {
-    let (observer, generator) = peer_pair(7539).await;
+    let (observer, generator) = peer_pair().await;
     let slices =
         zenkey_fleet::SliceSet::from_slices(vec![zenkey::parse_slice(SLICES).expect("slice")]);
     let set = zenkey::schema::SchemaSet::parse(SET).expect("set");

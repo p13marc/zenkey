@@ -11,21 +11,14 @@ use std::time::Duration;
 
 use zenkey_fleet::{FetchOutcome, Monitor, MonitorSpec, ValueSource};
 
-async fn peer_pair(port: u16) -> (zenoh::Session, zenoh::Session) {
-    let listen = zenkey_fleet::session::open(&[], &[format!("tcp/127.0.0.1:{port}")], false)
-        .await
-        .expect("listener session");
-    let connect = zenkey_fleet::session::open(&[format!("tcp/127.0.0.1:{port}")], &[], false)
-        .await
-        .expect("connector session");
-    (listen, connect)
-}
+mod util;
+use util::peer_pair;
 
 /// Zero data-plane subscriptions before the first watch; watch delivers;
 /// unwatch provably undeclares (the publisher's matching status flips back).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn watch_and_unwatch_are_visible_at_the_routing_layer() {
-    let (a, b) = peer_pair(7461).await;
+    let (a, b) = peer_pair().await;
 
     let publisher = a
         .declare_publisher("demo/lazy/key")
@@ -98,7 +91,7 @@ async fn watch_and_unwatch_are_visible_at_the_routing_layer() {
 /// time.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_undeclares_every_watch() {
-    let (a, b) = peer_pair(7464).await;
+    let (a, b) = peer_pair().await;
 
     let publisher = a
         .declare_publisher("demo/down/key")
@@ -144,7 +137,7 @@ async fn shutdown_undeclares_every_watch() {
 /// `none`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fetch_value_reports_its_source() {
-    let (a, b) = peer_pair(7462).await;
+    let (a, b) = peer_pair().await;
 
     // Rung 1: a queryable standing at the concrete key (storage-shaped).
     let _queryable = a
@@ -214,17 +207,9 @@ async fn fetch_value_reaches_the_advanced_cache() {
     use zenoh_ext::AdvancedPublisherBuilderExt;
 
     // An AdvancedPublisher requires session timestamping (its sequencing is
-    // timestamp-based) — the publisher side gets a bespoke config here; the
+    // timestamp-based), so the publisher side is the stamping listener; the
     // fetching side stays the plain explorer session.
-    let mut cfg = zenoh::Config::default();
-    cfg.insert_json5("scouting/multicast/enabled", "false").ok();
-    cfg.insert_json5("timestamping/enabled", "true").ok();
-    cfg.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:7463\"]")
-        .ok();
-    let a = zenoh::open(cfg).await.expect("timestamping session");
-    let b = zenkey_fleet::session::open(&["tcp/127.0.0.1:7463".to_string()], &[], false)
-        .await
-        .expect("connector session");
+    let (a, b) = util::timestamping_pair().await;
     let publisher = a
         .declare_publisher("demo/fetch/cached")
         .cache(zenoh_ext::CacheConfig::default().max_samples(1))
