@@ -42,6 +42,34 @@ pub fn start_monitor(
     )
 }
 
+/// End the pump with its teardown **acknowledged** — every watch undeclared
+/// and waited for, rather than left to a dropped handle.
+///
+/// Reopening the session builds a new monitor over the same keys, and the old
+/// one's subscribers were undeclaring in the background while the new one's
+/// were declaring. [`Monitor::shutdown`] consumes the monitor and zengui holds
+/// it through an `Arc` (every watch service takes one), so this can only make
+/// the acknowledged teardown when this handle is the last — which it normally
+/// is, the other clones living inside watch tasks that have already finished.
+/// When it is not, dropping the clone falls back to `Drop`'s abort, which is
+/// exactly what happened before and no worse.
+pub fn shutdown(monitor: Arc<Monitor>) -> Task<Message> {
+    Task::future(async move {
+        match Arc::try_unwrap(monitor) {
+            Ok(monitor) => {
+                if let Err(e) = monitor.shutdown().await {
+                    tracing::warn!("monitor shutdown: {e}");
+                }
+            }
+            Err(shared) => {
+                tracing::debug!("monitor still shared on teardown; falling back to drop");
+                drop(shared);
+            }
+        }
+    })
+    .discard()
+}
+
 /// Watch one subtree, seeding it first (issue #92).
 ///
 /// The seed is what makes an observation honest on arrival: current state comes

@@ -89,6 +89,56 @@ async fn watch_and_unwatch_are_visible_at_the_routing_layer() {
     );
 }
 
+/// `shutdown` is `unwatch` for the whole monitor: **every** watch undeclares
+/// and is waited for.
+///
+/// Dropping the monitor only aborts its tasks and lets the subscribers
+/// undeclare in the background — the race `unwatch`'s doc disavows, and the
+/// one a frontend that re-scopes by rebuilding its monitor was running every
+/// time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_undeclares_every_watch() {
+    let (a, b) = peer_pair(7464).await;
+
+    let publisher = a
+        .declare_publisher("demo/down/key")
+        .await
+        .expect("declare publisher");
+    let matching = publisher
+        .matching_listener()
+        .await
+        .expect("matching listener");
+
+    let monitor = Monitor::start(
+        &b,
+        MonitorSpec {
+            selectors: vec![],
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("lazy monitor");
+    // Two watches, both covering the publisher: the badge falls only when
+    // the last of them is gone, so this proves the drain, not one undeclare.
+    monitor.watch("demo/down/**").await.expect("watch");
+    monitor.watch("demo/**").await.expect("second watch");
+    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+        .await
+        .expect("matching event within 5s")
+        .expect("listener alive");
+    assert!(ev.matching(), "the watches declared real subscribers");
+
+    monitor.shutdown().await.expect("acknowledged teardown");
+    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+        .await
+        .expect("unmatching event within 5s")
+        .expect("listener alive");
+    assert!(
+        !ev.matching(),
+        "shutdown must undeclare every watch, provably"
+    );
+}
+
 /// The fetch ladder reports its source: a queryable at the concrete key is
 /// `storage`; a live publisher only is `window`; nothing is an attributed
 /// `none`.
