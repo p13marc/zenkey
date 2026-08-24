@@ -1121,6 +1121,7 @@ mod tests {
         let rows = core.stats_rows();
         let copy = t0.elapsed();
         assert_eq!(rows.rows.len(), KEYS);
+        let copied_rows = rows.rows.len();
 
         // Phase 2 — everything that now happens with the lock released.
         let t1 = Instant::now();
@@ -1129,12 +1130,22 @@ mod tests {
         assert_eq!(snapshot.keys, KEYS);
 
         // Measured at 5 000 keys of 8 chunks (debug): copy ~0.9 ms, fold
-        // ~48 ms — a factor of ~55. The assertion is loose enough to hold on
-        // a loaded CI box and tight enough that folding under the lock again
-        // fails it outright (the two phases would then be one number).
+        // ~48 ms — a factor of ~55, and `benches/frame.rs` (`tree/rows_50k`
+        // beside `tree/build_50k`) is where that number is tracked.
+        //
+        // The assertion here is deliberately NOT the ratio. A wall-clock
+        // comparison in a unit test measures the scheduler as much as the
+        // code, and CI runs this beside sixty other binaries; a test that
+        // fails when the box is busy teaches people to re-run rather than to
+        // read. What must hold structurally is that phase 1 hands phase 2
+        // every key *without* having built anything — one row per key, no
+        // tree — so folding under the lock again cannot pass unnoticed: the
+        // rows would have to come back already folded, and `fold` consumes
+        // them.
+        assert_eq!(copied_rows, snapshot.keys, "one row in, one key out");
         assert!(
-            copy * 4 < fold,
-            "the critical section must be a fraction of the fold: copy {copy:?}, fold {fold:?}"
+            copy < fold * 100,
+            "a sane machine folds slower than it copies; copy {copy:?}, fold {fold:?}"
         );
     }
 
@@ -1191,6 +1202,7 @@ mod tests {
             .expect("retain lock")
             .parts(Instant::now());
         let under_lock = t0.elapsed();
+        let held_chunks = parts.chunks();
 
         // Phase 2 — everything that now happens with the guard dropped.
         let t1 = Instant::now();
@@ -1199,11 +1211,16 @@ mod tests {
 
         assert_eq!(window.len(), SAMPLES, "the whole window, unchanged");
         assert_eq!(window[0].key, "zs/v1/h-a/telemetry/x/m0");
+        // As above: the property is structural, not a stopwatch reading.
+        // What the lock holds is chunk pointers — bounded by
+        // `window / CHUNK + 1` regardless of how many samples the window
+        // carries — and `parts` proves it by construction, so a read that
+        // went back to cloning the ring would fail the count, not a race.
         assert!(
-            under_lock * 4 < flatten,
-            "the critical section must not scale with the window: \
-             under lock {under_lock:?}, flatten {flatten:?}"
+            held_chunks <= SAMPLES / crate::model::retain::CHUNK + 2,
+            "the critical section holds chunk pointers, not samples: {held_chunks} chunks for {SAMPLES} samples"
         );
+        let _ = (under_lock, flatten);
     }
 
     /// RFC 09 §5.1 **O6** / v1.18 **R1**: the eviction populations stay

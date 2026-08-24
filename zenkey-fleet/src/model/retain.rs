@@ -122,7 +122,7 @@ pub fn sample_cost(view: &SampleView) -> usize {
 /// most 1024 tail pointers, and a push seals a chunk once per 1024 samples.
 /// Both sides of that stay in the low thousands of atomics at any budget an
 /// explorer is given.
-const CHUNK: usize = 1024;
+pub(crate) const CHUNK: usize = 1024;
 
 /// A read of the ring, taken **under** the mutex and flattened outside it
 /// (#331): sealed chunk pointers, how far into the first one the window
@@ -136,6 +136,15 @@ pub(crate) struct RetainedParts {
 }
 
 impl RetainedParts {
+    /// How many sealed chunk pointers this read holds, plus one for the
+    /// tail — the whole cost paid under the ingest mutex, and the number a
+    /// test can assert instead of a stopwatch (#331). Test-only: the
+    /// production path never needs to count what it is about to flatten.
+    #[cfg(test)]
+    pub(crate) fn chunks(&self) -> usize {
+        self.sealed.len() + 1
+    }
+
     /// The window, oldest first. O(window) — which is why it happens with
     /// the ingest mutex released.
     pub(crate) fn flatten(self) -> Arc<[Arc<SampleView>]> {
