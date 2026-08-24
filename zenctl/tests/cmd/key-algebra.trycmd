@@ -59,7 +59,7 @@ v1/**/a
 The first is this command's own: the expression does not parse, and the
 message is zenoh's with its build-machine source location trimmed off (#240).
 The second never reaches the command at all: clap rejected the usage. A script
-branching on the code cannot tell them apart — and since #264 it does not need
+branching on the code cannot tell them apart — and since #307 it does not need
 to, because they are the same claim. **2 = no verdict: the question could not
 be asked**, which is what an unparseable expression and a mis-shaped command
 line both are.

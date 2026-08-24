@@ -7,9 +7,9 @@
 //! put through the `render` seam.
 //!
 //! Two verbs put **nothing** on stdout, and that is the contract rather than
-//! an omission: `topic pub` and `topic retire` answer "it went out", which is
+//! an omission: `pub` and `retire` answer "it went out", which is
 //! not a document. All of their prose is stderr, which is what lets
-//! `topic echo --format ndjson | topic pub --from ndjson` compose in either
+//! `echo --format ndjson | pub --from ndjson` compose in either
 //! direction without a wire shape being invented for a verb that has no
 //! answer to give (#242). Their `--format` still chooses how the *notes* are
 //! spelled, and `--format json` on them is an empty stdout by design.
@@ -61,7 +61,7 @@ use crate::exit::unaskable;
 /// that lets it through.
 ///
 /// An [`Unaskable`](crate::exit::Unaskable), because it is this tool refusing
-/// what you typed: exit 2, the same code clap uses, on every verb (#264). It
+/// what you typed: exit 2, the same code clap uses, on every verb (#307). It
 /// used to be a 1 on the listings and a 2 on the verdict verbs, which is one
 /// mistake with two exit codes.
 pub fn raw_selector(sel: &str) -> Result<&str> {
@@ -74,7 +74,7 @@ pub fn raw_selector(sel: &str) -> Result<&str> {
 }
 
 /// Where a wire watcher looks: the typed selector, or the composed positions,
-/// or the base's whole `v1` subtree (#264).
+/// or the base's whole `v1` subtree (#307).
 ///
 /// The one resolution of [`SelectorArgs`], so that `echo`, `rate`, `record`,
 /// `field`, `check expect` and `why` cannot disagree about what "no selector"
@@ -122,7 +122,7 @@ pub fn compose_selector(
 }
 
 /// A positive number of seconds, or the refusal — the one spelling of the
-/// check every `--for`/`--every` shares (#264).
+/// check every `--for`/`--every` shares (#307).
 ///
 /// Clap cannot express "greater than zero" on an `f64`, so this is the
 /// nearest edge that can, and it answers the way clap would: exit 2.

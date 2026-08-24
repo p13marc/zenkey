@@ -14,7 +14,7 @@
 //! `unobservable`, which is the third state doing its job: a doctor that
 //! could not run has not said the fleet is healthy.
 //!
-//! It was spelled `--watch` until #264, and that was the wrong word twice
+//! It was spelled `--watch` until #307, and that was the wrong word twice
 //! over: `--watch` elsewhere in this tool is a bare bool that re-renders a
 //! *state* on a list verb, and this emits a stream of *changes*. Folding it
 //! into `watchdog --rule 'doctor <check-id>'` was the alternative and does

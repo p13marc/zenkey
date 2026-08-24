@@ -1,7 +1,7 @@
 //! `zenctl serve` — a mock queryable for the dev loop (#121).
 //!
 //! Deliberately no reply scripting: static bytes, prepared once through the
-//! same encode ladder as `topic pub`. The incoming-query log is half the
+//! same encode ladder as `pub`. The incoming-query log is half the
 //! feature — it doubles as a "who is querying this key" probe.
 
 use anyhow::Result;

@@ -1,10 +1,10 @@
-//! `service call` and `probe`: one answer rendering, used twice.
+//! `service call` and `check probe`: one answer rendering, used twice.
 //!
 //! `output::call` took the answer rendering as a closure, and both call sites
 //! wrote their own. They drifted: `service call`'s appended the reply
-//! attachment — a wire fact, shown where the reply is (#126) — and `probe`'s
-//! did not, so the same reply displayed differently depending on which verb
-//! you reached for (#237).
+//! attachment — a wire fact, shown where the reply is (#126) — and `check
+//! probe`'s did not, so the same reply displayed differently depending on
+//! which verb you reached for (#237).
 //!
 //! The closure was never a design point. It is a pure function of a
 //! `CallAnswer`, so it is one here, and `ProbeReport` composes `CallReport`'s
@@ -35,7 +35,8 @@ pub fn answer_text(a: &CallAnswer) -> String {
         CallOutcome::Err(e) => format!("✗ {} — {}", e.name, e.message),
     };
     // Present only when the wire carried one — absent, never
-    // null-when-unknown (#117, #126). This clause is the one `probe` lost.
+    // null-when-unknown (#117, #126). This clause is the one `check probe`
+    // lost.
     if let (Some(att), Some(n)) = (&a.attachment, a.attachment_bytes) {
         out.push_str(&format!("\n  attachment ({n} B): {att}"));
     }
@@ -124,7 +125,7 @@ impl Render for ProbeReport {
         e
     }
 
-    /// Delegated, and that is the fix for a second `probe` defect: the old
+    /// Delegated, and that is the fix for a second `check probe` defect: the old
     /// ndjson emitted the whole report as one compact line, so the answers
     /// were buried inside a nested object rather than being rows a consumer
     /// could iterate.

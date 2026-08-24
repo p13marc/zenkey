@@ -1,7 +1,7 @@
 //! Schema-driven payload synthesis (#162) — the datagen half of `zenctl gen`.
 //!
 //! Synthesis produces a **JSON value** for every schema kind; the kind's own
-//! encoder (`DecoderRegistry::encode`, the same seam `topic pub` writes
+//! encoder (`DecoderRegistry::encode`, the same seam `zenctl pub` writes
 //! through) turns it into wire bytes. That keeps this module codec-free: it
 //! never frames bytes, it only answers "what instance would this schema
 //! accept?".

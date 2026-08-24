@@ -4,7 +4,7 @@
 //! renders the report.
 //!
 //! Findings are output, not verdicts — exit 0, the `doctor` discipline. What
-//! changed in #264 is the *opt-in*: `doctor` had `--fail-on` and this verb
+//! changed in #307 is the *opt-in*: `doctor` had `--fail-on` and this verb
 //! did not, so the one place these findings could gate CI was
 //! `watchdog --rule 'doctor field-stuck'`. The asymmetry was the bug, never
 //! the default; the default is still 0.

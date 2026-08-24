@@ -91,7 +91,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   flag > env `ZENCTL_BASE` > the active named context
   (`zenctl context create …`, `~/.config/zenctl/config.toml`) > **empty**
   (the base-less bus-root deployment, the RFC v1.6 default).
-  **Tree (#264)**, and the depth carries meaning: a **noun** is something
+  **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`topic list|info`,
   `node`, `base`, `service`, `interface`, `schema show`, `registry`,
   `storage`, `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire

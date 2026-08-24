@@ -1,7 +1,7 @@
 The RFC 07 bulk plane: who *declares* a tier, who *holds* an object, and
 fetching one with verification before disk.
 
-`probe` became `locate` in #264, and `fetch --from` became `fetch --origin`.
+`probe` became `locate` in #307, and `fetch --from` became `fetch --origin`.
 Both renames are about one word meaning one thing: the tool's other probe —
 `check probe` — is defined by refusing to fan out, while this one *is* a
 fan-out; and `--from` names an input source everywhere else in the tool

@@ -598,7 +598,7 @@ mod protobuf_compiled_tests {
     }
 
     /// Issue #100: the descriptor pool is built once per schema, not once per
-    /// sample. Before this, `topic echo` on a protobuf subject paid a
+    /// sample. Before this, `zenctl echo` on a protobuf subject paid a
     /// base64-decode plus a full pool parse for every message on the wire.
     #[test]
     fn the_descriptor_pool_is_built_once_across_many_samples() {

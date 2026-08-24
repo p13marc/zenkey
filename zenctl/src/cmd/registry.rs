@@ -1,6 +1,6 @@
 //! `zenctl registry export|diff|lint|lock` (issue #50) — the registry as a
 //! document, as a comparison, and as a checkable artifact. Plus
-//! [`retired`](retired), which answers under `check` (#264) but reads the
+//! [`retired`](retired), which answers under `check` (#307) but reads the
 //! same ledger and so lives with it.
 //!
 //! The four sit together because they answer the questions an operator has
@@ -119,9 +119,9 @@ pub async fn diff(args: &Bus) -> Result<()> {
 /// `zenctl check retired` (issue #226) — the deprecation burn-down.
 ///
 /// It lives here, beside the registry it reads, and answers under `check`
-/// because it is an exit-coded assertion (#264): one contract, one family.
+/// because it is an exit-coded assertion (#307): one contract, one family.
 ///
-/// Thin for `cutover`'s reason (#206): the per-entry ladder, the wire
+/// Thin for `check cutover`'s reason (#206): the per-entry ladder, the wire
 /// bucketing and the worst-of verdict are judgement over bus traffic and live
 /// in `zenkey_fleet::retired`. What is left here is what only a CLI has: the
 /// session, the rendering, and the exit code.

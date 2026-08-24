@@ -1,4 +1,4 @@
-`schema` is a noun now, with one verb under it (#264).
+`schema` is a noun now, with one verb under it (#307).
 
 It used to be a hybrid: `zenctl schema <producer>` dumped, `zenctl schema
 check` validated, and a bare `zenctl schema` exited **1** through an `anyhow`

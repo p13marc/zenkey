@@ -287,7 +287,7 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
     );
 }
 
-/// The doctor half: `--listen-for` runs the same judges, so the frozen field
+/// The doctor half: `--for` runs the same judges, so the frozen field
 /// is a `field-stuck` finding under the stable check-id vocabulary — which is
 /// what makes `zenctl watchdog --rule 'doctor field-stuck'` a thing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

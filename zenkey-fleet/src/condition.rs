@@ -1,7 +1,7 @@
 //! Conditions and the watchdog (#227) — transitions, not states.
 //!
 //! Three shipped features each hard-coded their own predicate over the
-//! observation surface: `expect` (one window), `doctor --listen-for` (five
+//! observation surface: `expect` (one window), `doctor --for` (five
 //! checks), `cutover` (silence). This module is the one **closed vocabulary**
 //! they were each a spelling of: [`Condition`], evaluated to three states,
 //! never two (RFC 09 §5.1 O4/O6) — `ok` / `firing` / **`unobservable`**. The
@@ -572,8 +572,8 @@ impl RuleState {
 }
 
 /// Run-over-run delta over a doctor report: one [`RuleState`] per stable
-/// check id ([`crate::CHECK_IDS`]), fed by `doctor --watch`. The first run
-/// states the baseline (one transition per check id); every later run yields
+/// check id ([`crate::CHECK_IDS`]), fed by `doctor --transitions`. The first
+/// run states the baseline (one transition per check id); every later run yields
 /// only genuine changes. A failed run flips every check to `unobservable` —
 /// a doctor that could not run has not said the fleet is healthy.
 #[derive(Debug, Clone)]
@@ -1137,7 +1137,7 @@ mod tests {
         assert_eq!(json["to"], "firing");
     }
 
-    /// `doctor --watch`'s delta: the first run is a full baseline (every
+    /// `doctor --transitions`'s delta: the first run is a full baseline (every
     /// stable check id, once), an identical second run says nothing, a new
     /// finding transitions exactly its check — and a failed run flips every
     /// check to unobservable, never ok.

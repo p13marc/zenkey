@@ -325,8 +325,7 @@ impl Render for RetiredReport {
             _ => notes.push(
                 Note::coverage(
                     "no listen window ran — wire facts read \"not listened\", never \
-                     \"absent\"; pass --listen-for <SECS> to observe the retired \
-                     families",
+                     \"absent\"; pass --for <SECS> to observe the retired families",
                 )
                 .cite("RFC 09 §5.1 O4"),
             ),

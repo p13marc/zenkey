@@ -29,7 +29,7 @@
 //! silent truncation. The judges are pure functions over the observation,
 //! the house pattern of [`crate::condition`] (#227) and [`crate::budget`]
 //! (#221): testable without a bus. Surfaces: `zenctl field <selector>
-//! [--window S]`, the doctor listen phase (#161) via the appended
+//! [--for S]`, the doctor listen phase (#161) via the appended
 //! [`crate::doctor::CHECK_IDS`], and — **deferred to a later zengui
 //! window** — the Inspector field table with per-field sparklines through
 //! the existing `series.rs`/`spark.rs` gap-drawing. This chunk ships the

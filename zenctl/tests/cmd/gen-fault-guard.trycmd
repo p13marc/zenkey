@@ -2,7 +2,7 @@
 session is opened — which is what lets them be offline cases.
 
 An unknown fault kind is refused by name, the vocabulary spelled out (spray's
-decline precedent, applied to a flag). It exits **2** since #264: a kind
+decline precedent, applied to a flag). It exits **2** since #307: a kind
 outside a closed vocabulary is this tool refusing your input, and on `gen` a 1
 means "some samples were refused on the wire", which is a fact about a run
 that happened.
@@ -42,7 +42,7 @@ Error: --fault refuses the ambient target: type the bus on this command line wit
 ## One `--i-know` per verb, and `gen` had two guards on one flag
 
 There is a second, unrelated guard here: a run wider than ten subjects is a
-fleet-wide impersonation. Until #264 the same `--i-know` discharged both — so
+fleet-wide impersonation. Until #307 the same `--i-know` discharged both — so
 somebody widening a perfectly benign run past the threshold typed `--i-know`,
 and from that moment `--fault` was armed on the same command line. An
 acknowledgement flag must acknowledge exactly one thing. `--wide` carries the

@@ -20,7 +20,7 @@
 //! are `--help`-only; their *rendering* is pinned by the render snapshots
 //! instead, which exercise the same code with no process and no network.
 //!
-//! The files are grouped the way the tree is (#264): `help-<noun>` per noun
+//! The files are grouped the way the tree is (#307): `help-<noun>` per noun
 //! family, `help-wire` for the verbs that hang off the root, `help-check` for
 //! the exit-coded assertions, and the behaviour cases beside them.
 //!
@@ -38,7 +38,7 @@
 //! same claim now — **2 = no verdict, the question could not be asked** — and
 //! the corpus is what made the disagreement visible: two files argued opposite
 //! doctrines (`key-algebra` for "your input is a 2",
-//! `session-config-error` for "your input is a 1") until #264 wrote the
+//! `session-config-error` for "your input is a 1") until #307 wrote the
 //! contract down once in `zenctl/src/exit.rs` and moved every refusal onto it.
 //!
 //! ## Hermeticity

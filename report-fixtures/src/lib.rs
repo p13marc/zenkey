@@ -792,7 +792,7 @@ pub fn blob_fetch() -> BlobFetchReport {
 }
 
 /// One origin that answered, one that returned an RFC 05 §3 error envelope,
-/// and a reply carrying an attachment — the clause `probe` used to drop.
+/// and a reply carrying an attachment — the clause `check probe` used to drop.
 pub fn call_report() -> CallReport {
     CallReport {
         key: "v1/*/@rpc/sysinfo/processes".to_string(),
@@ -821,7 +821,7 @@ pub fn call_report() -> CallReport {
 }
 
 /// The same call, reached through a bridge — the resolution provenance is
-/// what `probe` adds over `service call` (RFC 06 §6.2).
+/// what `check probe` adds over `service call` (RFC 06 §6.2).
 pub fn probe_report() -> ProbeReport {
     ProbeReport {
         input: "web-07".into(),
@@ -1247,8 +1247,8 @@ pub fn why_report() -> zenkey_fleet::WhyReport {
                 "did the key speak during a listen window?",
                 RungAnswer::NotAsked,
                 &["not listened — the data plane costs one deliberate action \
-                     (RFC 09 §5.1, v1.18 frugality); pass --listen-for <SECS> to \
-                     watch the wire"],
+                     (RFC 09 §5.1, v1.18 frugality); pass --for <SECS> to watch \
+                     the wire"],
             ),
         ],
         verdict: zenkey_fleet::WhyVerdict::Healthy,

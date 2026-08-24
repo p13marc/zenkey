@@ -1,4 +1,4 @@
-//! `zenctl probe` (issue #59): the RFC 09 §6 acceptance, half two — a
+//! `zenctl check probe` (issue #59): the RFC 09 §6 acceptance, half two — a
 //! **consumer-shaped, concrete-key** probe.
 //!
 //! > A probe MUST build its keys the way the product builds them.

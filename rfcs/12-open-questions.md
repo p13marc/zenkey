@@ -342,7 +342,7 @@ to what this section imagined, learned the honest way:
   entities an explorer declares itself: a *publication* ("a subscriber
   currently matches this publication") and a *repeating query* ("a
   queryable currently serves what we ask"). The CLI prints the note line
-  on `topic pub`; the GUI badges its publish surface.
+  on `pub`; the GUI badges its publish surface.
 - **What adoption taught.** zenoh 1.9's matching listeners exist on
   publishers and queriers **only** — the "per-publisher/per-querier"
   wording above was exactly right, and the further half this repo had

@@ -2,7 +2,7 @@
 "needs no session at all — that is the whole point" (`cmd/schema.rs`). It is
 also the clearest place in the tool where the 0/1/2 contract carries three
 *different* facts rather than degrees of one, which is why it now sits under
-`check` with the other four (#264).
+`check` with the other four (#307).
 
 **0 — it conforms.**
 

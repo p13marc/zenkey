@@ -1,4 +1,4 @@
-//! `doctor --listen-for` (#161) against a real bus: the passive phase turns
+//! `doctor --for` (#161) against a real bus: the passive phase turns
 //! observed traffic into typed findings, and the observation section states
 //! window/scope/drops (O5/O6).
 //!

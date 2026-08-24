@@ -279,7 +279,7 @@ pub enum StoredLookup {
     },
 }
 
-/// One bounded listen window's outcome (`--listen-for`).
+/// One bounded listen window's outcome (`--for`).
 #[derive(Debug, Clone, Copy)]
 pub struct WireWatch {
     pub window_s: f64,
@@ -819,8 +819,8 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             RungAnswer::NotAsked,
             vec![
                 "not listened — the data plane costs one deliberate action \
-                 (RFC 09 §5.1, v1.18 frugality); pass --listen-for <SECS> to watch \
-                 the wire"
+                 (RFC 09 §5.1, v1.18 frugality); pass --for <SECS> to watch the \
+                 wire"
                     .into(),
             ],
         ),

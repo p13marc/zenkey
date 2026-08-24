@@ -10,7 +10,7 @@
 //! declaration rung `NotAsked`, never `No`), the rendering, and the exit
 //! code.
 //!
-//! ## The exit codes flipped (#264)
+//! ## The exit codes flipped (#307)
 //!
 //! They used to read 0 = explained, 1 = healthy, 2 = impaired — which paged
 //! you for a **healthy** fleet and stayed quiet when a cause was found. Under

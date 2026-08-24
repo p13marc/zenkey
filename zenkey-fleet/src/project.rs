@@ -27,7 +27,7 @@ impl SliceSet {
     /// (`{path...}`) stands for a whole family whose real members only exist on the
     /// wire: proxy producers register `{device}/{path...}` by design, because
     /// their metric tree belongs to the polled device, not to us. For those, this
-    /// command can only tell you the shape. `zenctl topic echo` is what tells you
+    /// command can only tell you the shape. `zenctl echo` is what tells you
     /// the members.
     pub fn topic_list(
         &self,

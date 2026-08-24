@@ -1,5 +1,5 @@
 The `OpenFailure::Config` half of #196: your error, not the bus's — and since
-#264, your error's exit code.
+#307, your error's exit code.
 
 A zenoh config file that sets a session namespace is refused **by name** —
 an explorer runs un-namespaced so it sees the wire as it really is, foreign

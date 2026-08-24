@@ -25,7 +25,7 @@ pub async fn run(
 
     let typed = body.map(Source::read).transpose()?;
     // The attachment rides the query verbatim — never schema-encoded, same
-    // rule as `topic pub --attachment` (#117, now on the call side: #126).
+    // rule as `pub --attachment` (#117, now on the call side: #126).
     let attachment = attachment.map(Source::read).transpose()?;
 
     // The fanout guard needs slices; loading them costs one introspect
@@ -39,7 +39,7 @@ pub async fn run(
 
     let session = args.session().await?;
 
-    // The request body rides the same encode ladder as `topic pub` (#97, over
+    // The request body rides the same encode ladder as `pub` (#97, over
     // #57's validation): when the slice declares a request type and the
     // producer serves its schema, the **encoded** payload is what goes on the
     // GET, and an unencodable body is refused before the GET leaves. No

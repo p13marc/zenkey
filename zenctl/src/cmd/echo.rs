@@ -1,7 +1,7 @@
 //! `zenctl echo` — subscribe, refine, schema-decode (RFC 08 §7) with honest
 //! structural fallback.
 //!
-//! Top-level since #264: subscribing to live traffic is not something the
+//! Top-level since #307: subscribing to live traffic is not something the
 //! registry declares, so it is not a verb of the `topic` noun. The rename is
 //! the whole change — the stream, the row shape and the `%`-vocabulary are
 //! untouched, which is what keeps `zenctl echo --format ndjson | zenctl pub
@@ -109,7 +109,7 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
                 dropped_total += n;
                 if ndjson {
                     // Tagged (`"row":"dropped"`) so the pipe's other end —
-                    // `topic pub --from ndjson`, via `parse_stream_line` —
+                    // `pub --from ndjson`, via `parse_stream_line` —
                     // skips it as stream metadata instead of counting a
                     // malformed row. A bare `{"dropped":n}` poisoned the
                     // round trip the row dialect exists for (#235).

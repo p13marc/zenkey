@@ -12,9 +12,9 @@ use anyhow::{Result, anyhow};
 
 use crate::Bus;
 
-/// A ceiling on `--count`, so a typo is a bounded mistake. Not a policy about
+/// A ceiling on `--calls`, so a typo is a bounded mistake. Not a policy about
 /// how much load a fleet can take — the operator knows that and `--i-know`
-/// does not lift this; `--count` explicitly can.
+/// does not lift this; `--calls` explicitly can.
 const DEFAULT_COUNT: usize = 100;
 
 #[allow(clippy::too_many_arguments)]
@@ -56,7 +56,7 @@ pub async fn rpc(
     }
     // An error reply is a finding, and a benchmark that measured nothing but
     // error envelopes used to exit **0** with a latency distribution over
-    // failures (#264). The numbers are still printed — they are what makes
+    // failures (#307). The numbers are still printed — they are what makes
     // the finding legible — and the exit says what they are made of.
     if report.errors > 0 {
         eprintln!(

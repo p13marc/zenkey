@@ -2,7 +2,7 @@
 //! (issue #47): a declared publisher, never an ad-hoc put (P7); and since
 //! #97, a body that actually ships in the encoding the subject declares.
 //!
-//! Top-level since #264 — publishing is an act on the wire, not a verb of
+//! Top-level since #307 — publishing is an act on the wire, not a verb of
 //! the `topic` noun, which is what the registry declares.
 //!
 //! ## An empty stdout is the contract (#242)
@@ -39,7 +39,7 @@ pub fn mode(raw: bool, no_validate: bool) -> PrepareMode {
 
 /// Parse an explicit `--qos` flag; the error names the closed vocabulary.
 ///
-/// An [`Unaskable`](crate::exit::Unaskable) since #264: a profile name
+/// An [`Unaskable`](crate::exit::Unaskable) since #307: a profile name
 /// outside RFC 04 §3's five is this tool refusing your input, so it exits 2
 /// like every other refused input — not 1, which on a write means "the
 /// publish failed".
@@ -189,7 +189,7 @@ pub async fn run(
     if let Some(note) = matching_note(&publication, key).await {
         eprintln!("{}", note.to_line());
     }
-    // `--times` is a count, so 0 means zero and 1 means once (#264). The old
+    // `--times` is a count, so 0 means zero and 1 means once (#307). The old
     // `--repeat` made 0 and 1 the same number, which is one spelling too many
     // — and the one people typed for "none" was the one that published.
     for n in 0..times {

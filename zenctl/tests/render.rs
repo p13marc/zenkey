@@ -333,7 +333,7 @@ fn a_why_ladder_draws_one_rung_per_line_with_its_three_states() {
 ✓  admin-answered      is the admin space answering at all?
       1 admin root document(s) answered @/*/*
 ?  wire-heard          did the key speak during a listen window?
-      not listened — the data plane costs one deliberate action (RFC 09 §5.1, v1.18 frugality); pass --listen-for <SECS> to watch the wire
+      not listened — the data plane costs one deliberate action (RFC 09 §5.1, v1.18 frugality); pass --for <SECS> to watch the wire
 NO CAUSE ESTABLISHED
 
 "#]]
@@ -348,7 +348,7 @@ fn a_why_ladders_notes_state_the_non_verdict_and_the_exit() {
     let stderr = notes(&fx::why_report());
     assert!(stderr.contains("silence is never a verdict"), "{stderr}");
     assert!(stderr.contains("exit 1"), "{stderr}");
-    assert!(stderr.contains("--listen-for"), "{stderr}");
+    assert!(stderr.contains("--for"), "{stderr}");
 }
 
 /// The `why` ndjson: the envelope leads with the verdict and the cause ids
@@ -730,8 +730,8 @@ bundle.bin
     assert!(notes(&fx::blob_fetch()).contains("failed verification before disk"));
 }
 
-/// One reply, one error envelope, and the attachment clause `probe` used to
-/// drop (#237).
+/// One reply, one error envelope, and the attachment clause `check probe` used
+/// to drop (#237).
 #[test]
 fn a_call_and_a_probe_render_a_reply_identically() {
     let call = table(&fx::call_report());
@@ -799,7 +799,8 @@ FAIL
 
 /// The burn-down (#226): each ledger entry carries its four facts, each fact
 /// honest about whether it was even asked, and the verdict word closes the
-/// table exactly as `cutover`'s does — same vocabulary, same exit discipline.
+/// table exactly as `check cutover`'s does — same vocabulary, same exit
+/// discipline.
 #[test]
 fn a_retired_report_puts_four_facts_beside_each_ledger_entry() {
     assert_data_eq!(

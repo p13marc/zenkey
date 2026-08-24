@@ -4,11 +4,11 @@
 //! [`SampleRow`] is the only writer and [`parse_row`] the only reader, which
 //! is what makes the pipe symmetric. It was not, until #235: the claim lived
 //! in this doc comment while three hand-built writers — `.zrec`
-//! ([`mod@crate::record`]), `zenctl topic echo --format ndjson`, and zengui's
+//! ([`mod@crate::record`]), `zenctl echo --format ndjson`, and zengui's
 //! echo export — each assembled the object with `serde_json::json!` and two
 //! of them disagreed with this reader. `echo` wrote the zenoh *wire axes*
 //! under `"qos"`, where [`parse_row`] resolves a profile *name*, so every
-//! row of `topic echo --format ndjson | topic pub --from ndjson` was counted
+//! row of `zenctl echo --format ndjson | zenctl pub --from ndjson` was counted
 //! malformed; zengui wrote a payload byte *count* under `"bytes"`, which has
 //! meant base64 of the wire payload since RFC 09 §5.2. Both carried a doc
 //! comment asserting conformance. One struct is the repair — a dialect with
@@ -31,7 +31,7 @@ use serde::Serialize;
 /// One sample, as the explorers write it (#235).
 ///
 /// The write side of this module's dialect: `.zrec` rows (RFC 09 §5.2),
-/// `zenctl topic echo --format ndjson`, and zengui's echo export are all
+/// `zenctl echo --format ndjson`, and zengui's echo export are all
 /// this struct, so [`parse_row`] reads back what any of them wrote. Every
 /// optional field is `skip_serializing_if`: a writer that does not hold a
 /// fact omits it rather than nulling it, because a `null` here would claim

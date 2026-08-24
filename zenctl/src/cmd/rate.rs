@@ -2,7 +2,7 @@
 //! typed [`RateReport`](crate::report::RateReport) so `--format json` applies
 //! (issue #46) and the O6 eviction count is printed, never swallowed.
 //!
-//! One verb since #264. `topic hz` and `topic bw` were two spellings of one
+//! One verb since #307. `topic hz` and `topic bw` were two spellings of one
 //! observation: the same Monitor, the same window, the same eviction ledger,
 //! differing only in which number the table led with. `--bytes` is that
 //! choice, and it is a rendering flag, which is what it always was.

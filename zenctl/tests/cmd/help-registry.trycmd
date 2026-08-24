@@ -1,7 +1,7 @@
 The registry as files: the consumer's build lints, without the build. `lint`
 and `lock` reach no bus at all; `export` and `diff` do.
 
-`retired` left this family in #264 and answers as `check retired`. It reads
+`retired` left this family in #307 and answers as `check retired`. It reads
 the same ledger — the code still lives in `cmd/registry.rs` — but what it *is*
 is an exit-coded assertion, and those have one home.
 

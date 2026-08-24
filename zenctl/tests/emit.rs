@@ -178,8 +178,8 @@ fn the_json_document_holds_what_the_ndjson_stream_holds() {
 }
 
 /// A family with nothing to decompose emits its envelope and stops. Legitimate
-/// — `record`, `replay`, `cutover` and `expect` have no rows — and listed here
-/// so a fifth cannot join them by accident.
+/// — `record`, `replay`, `check cutover` and `check expect` have no rows — and
+/// listed here so a fifth cannot join them by accident.
 #[test]
 fn a_row_less_family_emits_exactly_one_line() {
     let mut d = doc();

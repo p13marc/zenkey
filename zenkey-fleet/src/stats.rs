@@ -1,6 +1,6 @@
 //! Windowed per-key statistics (issues #13/#15): message/byte counters and
-//! an exponentially-weighted rate, keyed by wire key. Backs `zenctl topic
-//! hz`/`bw`/`echo --rate` and zengui's tree badges.
+//! an exponentially-weighted rate, keyed by wire key. Backs `zenctl rate`
+//! (`--bytes` and all), `echo --rate`, and zengui's tree badges.
 //!
 //! Perf posture (report §14): lookups borrow (`&str` against the `String`
 //! keys — no per-sample allocation on the hot hit path); one allocation per
@@ -230,7 +230,7 @@ fn summarise(values: impl Iterator<Item = i64>) -> Option<LatencySummary> {
 
 /// The table. Feed it samples; read it per key or in aggregate.
 ///
-/// **Bounded.** A CLI runs for `--window` seconds and exits, so an unbounded
+/// **Bounded.** A CLI runs for `--for` seconds and exits, so an unbounded
 /// map was fine; a GUI left open overnight on a bus carrying content-addressed
 /// or per-request keys would grow one entry per key forever. The table
 /// therefore keeps at most [`DEFAULT_MAX_KEYS`] entries, evicting the

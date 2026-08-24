@@ -10,7 +10,7 @@ The refusal is offline by design: it happens before a session opens, so no
 traffic — not even a subscriber declaration — is spent on a selector the
 convention forbids.
 
-**Every one of them exits 2** since #264, and that is the change worth
+**Every one of them exits 2** since #307, and that is the change worth
 reading. It used to be a 1 on the listings and a 2 on the verdict verbs —
 *one* mistake with two exit codes, which is how a contract stops being a
 contract. A `$*` selector is this tool refusing what you typed, and refused

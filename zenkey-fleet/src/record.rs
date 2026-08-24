@@ -2,7 +2,7 @@
 //! etiquette, this module is normative for the format).
 //!
 //! A `.zrec` file is newline-delimited JSON in the explorers' one row
-//! dialect — the same shape `topic echo --format ndjson` emits and
+//! dialect — the same shape `echo --format ndjson` emits and
 //! [`crate::ingest::parse_row`] reads back — upgraded with what a pipe does
 //! not need but a capture does: a versioned header line naming what was
 //! asked, a lossless `"bytes"` payload (a `"value"` is a rendering), a
@@ -299,7 +299,7 @@ pub struct ZrecReader<R: BufRead> {
 
 impl<R: BufRead> ZrecReader<R> {
     /// Parse the header line. A file without one is not a `.zrec` — plain
-    /// ndjson pipes replay through `topic pub --from ndjson`, which needs
+    /// ndjson pipes replay through `zenctl pub --from ndjson`, which needs
     /// no base contract because the operator is the pacing.
     pub fn new(source: R) -> Result<Self> {
         let mut lines = source.lines();
@@ -397,7 +397,7 @@ pub struct ReplaySpec<'a> {
     /// Pacing scale: 2.0 replays twice as fast as captured.
     pub speed: f64,
     /// Replay recorded deletes that fall off the state class — the same
-    /// operator price as `topic retire` (RFC 04 §1.2, v1.12).
+    /// operator price as `zenctl retire` (RFC 04 §1.2, v1.12).
     pub i_know: bool,
     /// The profile a row that recorded none is published under.
     pub default_qos: QosProfile,

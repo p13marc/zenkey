@@ -5,7 +5,7 @@
 //! so the output could not be read a line at a time — which is the only reason
 //! ndjson exists. There is nothing to fix here beyond writing the impl: three
 //! of them genuinely have no rows, so their envelope *is* the document, on one
-//! line. `interface show` turns out to have two row kinds, and `blob probe`
+//! line. `interface show` turns out to have two row kinds, and `blob locate`
 //! has one plus the envelope it already argued for in a comment.
 
 use zenkey_fleet::report::{
