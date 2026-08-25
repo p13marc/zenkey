@@ -229,7 +229,7 @@ pub fn interval_of(secs: f64) -> Result<Duration> {
 /// The `topic list` filter flags, shared by the one-shot and watch paths.
 pub struct TopicFilter {
     pub producer: Option<String>,
-    pub class: Option<String>,
+    pub class: Option<zenkey::Class>,
     pub type_name: Option<String>,
     pub deprecated: bool,
 }
@@ -238,7 +238,7 @@ impl TopicFilter {
     pub fn apply(&self, slices: &zenkey_fleet::SliceSet) -> Result<crate::report::TopicList> {
         slices.topic_list(
             self.producer.as_deref(),
-            self.class.as_deref(),
+            self.class,
             self.type_name.as_deref(),
             self.deprecated,
         )

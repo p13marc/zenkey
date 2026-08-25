@@ -240,35 +240,19 @@ pub fn attachment_json(att: &zenoh::bytes::ZBytes) -> serde_json::Value {
     })
 }
 
-/// The wire's QoS axes as one stable token (#120):
-/// `priority/congestion/reliability`, `+express` when set — lowercase,
-/// cut/awk-friendly, never Debug formatting.
+/// The wire's QoS axes as one stable token (#120) — the engine's spelling.
+///
+/// A thin re-export, kept because `--fmt %q` and the sample renderer both
+/// reach for it by this name. The fifteen literals live in
+/// [`zenkey_fleet::report::qos_axes_token`], beside the `SampleRow.qos_axes`
+/// field they are the round-trip contract for (#353).
 pub fn qos_summary(
     priority: zenoh::qos::Priority,
     congestion_control: zenoh::qos::CongestionControl,
     reliability: zenoh::qos::Reliability,
     express: bool,
 ) -> String {
-    use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
-    let p = match priority {
-        P::RealTime => "real_time",
-        P::InteractiveHigh => "interactive_high",
-        P::InteractiveLow => "interactive_low",
-        P::DataHigh => "data_high",
-        P::Data => "data",
-        P::DataLow => "data_low",
-        P::Background => "background",
-    };
-    let c = match congestion_control {
-        Cc::Drop => "drop",
-        Cc::Block => "block",
-        _ => "other",
-    };
-    let r = match reliability {
-        R::BestEffort => "best_effort",
-        R::Reliable => "reliable",
-    };
-    format!("{p}/{c}/{r}{}", if express { "+express" } else { "" })
+    zenkey_fleet::report::qos_axes_token(priority, congestion_control, reliability, express)
 }
 
 /// The publishing entity, when SourceInfo rode the sample: `zid:eid#sn`.

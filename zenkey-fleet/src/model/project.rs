@@ -30,23 +30,19 @@ impl SliceSet {
     /// their metric tree belongs to the polled device, not to us. For those, this
     /// command can only tell you the shape. `zenctl echo` is what tells you
     /// the members.
+    /// `class` is a [`Class`], so there is no validation here and no error
+    /// to return for one: a caller that has a `Class` has already parsed it,
+    /// at whatever edge it came in from. This function used to re-check a
+    /// `&str` against its own copy of the vocabulary, with its own copy of
+    /// the sentence (#351).
     pub fn topic_list(
         &self,
         producer: Option<&str>,
-        class: Option<&str>,
+        class: Option<Class>,
         type_name: Option<&str>,
         deprecated: bool,
     ) -> Result<TopicList> {
         let slices = self.slices();
-        // The vocabulary is `zenkey::Class`; spelling it again here was a
-        // fifth copy of a three-token closed set (RFC 04 §1).
-        if let Some(c) = class
-            && Class::from_chunk(c).is_none()
-        {
-            return Err(anyhow!(
-                "unknown class {c:?} — the classes are telemetry, state, events (RFC 04 §1)"
-            ));
-        }
         let mut subjects = Vec::new();
         for slice in slices {
             if producer.is_some_and(|p| p != slice.name) {
@@ -55,7 +51,7 @@ impl SliceSet {
             for s in slice
                 .subjects
                 .iter()
-                .filter(|s| class.is_none_or(|c| c == s.class.token()))
+                .filter(|s| class.is_none_or(|c| s.class.is(&c)))
                 .filter(|s| type_name.is_none_or(|t| t == s.type_name))
             {
                 subjects.push(TopicRow {
@@ -424,7 +420,7 @@ mod tests {
         // compiled in — same code path as any `--base` drives.
         set(&slices).topic_list(None, None, None, false).unwrap();
         set(&slices)
-            .topic_list(Some("tc"), Some("state"), None, false)
+            .topic_list(Some("tc"), Some(Class::State), None, false)
             .unwrap();
         set(&slices).service_list(Some("tc"));
         set(&slices).interface_list();
@@ -528,7 +524,7 @@ mod tests {
     fn reports_serialize_to_stable_json() {
         let slices = tcgui_slices();
         let list = set(&slices)
-            .topic_list(Some("tc"), Some("state"), None, false)
+            .topic_list(Some("tc"), Some(Class::State), None, false)
             .unwrap();
         let json = serde_json::to_value(&list).unwrap();
         assert_eq!(json["subjects"][0]["producer"], "tc");
@@ -578,12 +574,19 @@ mod tests {
         assert!(info.payload_type.is_none());
     }
 
+    /// An unknown class is no longer this function's error to return: the
+    /// parameter is a `Class`, so it was rejected at whatever edge it came
+    /// in from — with the vocabulary in the message, spelled once (#351).
     #[test]
-    fn unknown_class_is_rejected() {
-        let err = set(&tcgui_slices())
-            .topic_list(None, Some("alerts"), None, false)
-            .unwrap_err();
-        assert!(err.to_string().contains("unknown class"), "got: {err}");
+    fn an_unknown_class_is_rejected_at_the_parse_not_here() {
+        let err = "alerts".parse::<Class>().unwrap_err().to_string();
+        assert!(err.contains("unknown class"), "got: {err}");
+        assert!(err.contains("telemetry, state, events"), "got: {err}");
+        // And the vocabulary the message lists is the enum's, not a copy.
+        assert_eq!(Class::chunks().len(), Class::ALL.len());
+        for c in Class::ALL {
+            assert_eq!(c.chunk().parse::<Class>().unwrap(), c);
+        }
     }
 
     #[test]

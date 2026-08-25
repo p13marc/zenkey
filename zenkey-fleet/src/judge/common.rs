@@ -19,7 +19,7 @@
 //! `retired::scope_note` stay where they are, because they are two different
 //! O5 statements about two different windows, not one statement said twice.
 
-use zenkey::grammar::with_base;
+use zenkey::grammar::{Class, with_base};
 
 use crate::SliceSet;
 use crate::model::facts::{KeyFacts, KeyShape, OriginKind};
@@ -106,12 +106,15 @@ pub fn new_prefix(base: &str) -> String {
 /// listen phase and the `--budget` observation share (#161, #221).
 pub fn data_plane_scopes(base: &str, slices: &SliceSet) -> Vec<String> {
     let mut scopes = Vec::new();
-    for class in ["telemetry", "state", "events"] {
+    for class in Class::ALL {
+        let class = class.chunk();
         scopes.push(with_base(base, format!("v1/*/{class}/**")));
     }
     for slice in slices.slices() {
         if let Some(origin) = &slice.service_origin {
-            for class in ["telemetry", "state", "events"] {
+            let origin = origin.token();
+            for class in Class::ALL {
+                let class = class.chunk();
                 scopes.push(with_base(base, format!("v1/{origin}/{class}/**")));
             }
         }

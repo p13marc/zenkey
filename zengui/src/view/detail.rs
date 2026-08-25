@@ -158,29 +158,19 @@ pub fn human_us(us: i64) -> String {
     }
 }
 
-/// The wire's QoS axes as one stable lowercase token — the same spelling
-/// `zenctl echo --fmt %q` prints, so the two frontends agree.
+/// The wire's QoS axes as one stable lowercase token.
+///
+/// The engine's spelling, not a copy of it: this is the token
+/// `SampleRow.qos_axes` carries and `parse_row` reads back, so the two
+/// frontends cannot describe one sample's QoS differently — which they
+/// previously guaranteed with a comment (#353).
 pub fn qos_token(entry: &crate::history::HistoryEntry) -> String {
-    use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
-    let p = match entry.priority {
-        P::RealTime => "real_time",
-        P::InteractiveHigh => "interactive_high",
-        P::InteractiveLow => "interactive_low",
-        P::DataHigh => "data_high",
-        P::Data => "data",
-        P::DataLow => "data_low",
-        P::Background => "background",
-    };
-    let c = match entry.congestion_control {
-        Cc::Drop => "drop",
-        Cc::Block => "block",
-        _ => "other",
-    };
-    let r = match entry.reliability {
-        R::BestEffort => "best_effort",
-        R::Reliable => "reliable",
-    };
-    format!("{p}/{c}/{r}{}", if entry.express { "+express" } else { "" })
+    zenkey_fleet::report::qos_axes_token(
+        entry.priority,
+        entry.congestion_control,
+        entry.reliability,
+        entry.express,
+    )
 }
 
 /// Declared-vs-observed (#120): the comparison nobody else in the field can

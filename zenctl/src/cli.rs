@@ -153,9 +153,13 @@ pub(crate) struct SelectorArgs {
     #[arg(long, conflicts_with = "selector")]
     pub(crate) origin: Option<String>,
     /// Only this class: telemetry, state, or events.
+    // Parsed at the edge (#351): clap rejects an unknown class with the
+    // vocabulary in the message, so no verb re-validates it. A `//` comment,
+    // not a doc one — this is a note to us, and a doc comment here is
+    // `--help` text.
     #[arg(long, conflicts_with = "selector",
           add = ArgValueCandidates::new(completion::classes))]
-    pub(crate) class: Option<String>,
+    pub(crate) class: Option<zenkey::Class>,
     /// Only this producer.
     #[arg(long, conflicts_with = "selector",
           add = ArgValueCandidates::new(completion::producers))]
@@ -1326,7 +1330,7 @@ pub(crate) enum TopicCmd {
         producer: Option<String>,
         /// Only this class: telemetry, state, or events.
         #[arg(long, add = ArgValueCandidates::new(completion::classes))]
-        class: Option<String>,
+        class: Option<zenkey::Class>,
         /// Only subjects carrying this payload type.
         #[arg(long, value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
         r#type: Option<String>,
