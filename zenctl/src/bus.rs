@@ -164,12 +164,19 @@ impl Bus {
     pub(crate) async fn slices_optional(&self) -> Result<Option<zenkey_fleet::SliceSet>> {
         match self.load_slices().await {
             Ok(set) => Ok(Some(set)),
-            Err(SliceFailure::Named(e)) => Err(crate::exit::unaskable!("{e}")),
+            Err(SliceFailure::Named(e)) => {
+                Err(crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e)))
+            }
             Err(SliceFailure::Unreachable(e)) => {
                 // The chain, not just `Display`: the engine's `Display` says
                 // *what* failed and the source says *why* (#348), so a bare
                 // format would announce "open session" and stop.
-                crate::degrade::announce(&crate::errors::render(&anyhow::Error::from(e)));
+                //
+                // `one_line`, not `errors::render`: this is a *note's* reason,
+                // rendered inside one parenthesised clause, and `render` is
+                // the top-level termination shape — three lines with
+                // `Error:`/`Caused by:` labels landing mid-sentence.
+                crate::degrade::announce(&zenkey_fleet::one_line(&e));
                 Ok(None)
             }
         }
@@ -315,7 +322,9 @@ impl SliceFailure {
             // reading on its own. Here the extra fact is that the user named
             // it, and a source they named that did not work is a refused
             // input whatever went wrong behind it.
-            SliceFailure::Named(e) => crate::exit::unaskable!("{e}"),
+            SliceFailure::Named(e) => {
+                crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e))
+            }
             SliceFailure::Unreachable(e) => e.into(),
         }
     }
@@ -331,7 +340,11 @@ impl SliceFailure {
 /// world being unavailable, and keeps its 1.
 fn open_error(f: zenkey_fleet::OpenFailure) -> anyhow::Error {
     match f {
-        zenkey_fleet::OpenFailure::Config(e) => crate::exit::unaskable!("{e}"),
+        // `one_line` defensively: `Config` carries an `Unaskable` today, which
+        // has no source, but `{e}` would silently drop one the day it does.
+        zenkey_fleet::OpenFailure::Config(e) => {
+            crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e))
+        }
         other => other.into_error().into(),
     }
 }
