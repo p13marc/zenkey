@@ -8,7 +8,6 @@
 //! Ports are ephemeral (`util::peer_pair`), so two test runs at once
 //! cannot collide.
 
-
 use zenkey::qos::QosProfile;
 use zenkey_fleet::declare_publication;
 use zenoh::sample::SampleKind;
