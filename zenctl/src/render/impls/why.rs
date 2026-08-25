@@ -3,7 +3,7 @@
 //! whose input was not fetched draws `?` and says why, never `✗` (RFC 09
 //! §5.1 O4).
 
-use zenkey_fleet::judge::why::is_cause;
+use zenkey_fleet::is_cause;
 
 use zenkey_fleet::report::{RungAnswer, WhyReport, WhyVerdict};
 

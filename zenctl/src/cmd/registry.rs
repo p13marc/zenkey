@@ -56,7 +56,7 @@ pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Res
         }
         ExportAs::Jsonschema => {
             let session = args.session().await?;
-            let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+            let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
             // Fetch here, where the session is; shape the document in
             // zenkey-build, where every other registry-in-document-out
             // exporter lives (#208).
@@ -152,7 +152,7 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
         // Stated before the window opens, not after (O5).
         eprintln!(
             "{}",
-            zenkey_fleet::judge::retired::scope_note(
+            zenkey_fleet::retired_scope_note(
                 entries,
                 &zenkey_fleet::new_prefix(args.base()),
                 window

@@ -202,7 +202,7 @@ fn repoint(
     work: &mut Workspace,
 ) -> Task<Message> {
     forget(dep, obs, tree, work);
-    dep.schema_store = Some(Arc::new(zenkey_fleet::model::decode::SchemaStore::new(
+    dep.schema_store = Some(Arc::new(zenkey_fleet::SchemaStore::new(
         dep.base(),
         dep.timeout(),
     )));

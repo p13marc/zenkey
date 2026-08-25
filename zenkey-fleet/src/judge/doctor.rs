@@ -6,7 +6,7 @@
 //!
 //! Check ids are **stable API**: scripts key on them (`--format json`), the
 //! GUI keys deltas on them. New checks add ids; nothing renames one. The full
-//! set is pinned in [`CHECK_IDS`](crate::judge::common::CHECK_IDS).
+//! set is pinned in [`crate::report::CheckId`].
 
 use std::time::Duration;
 

@@ -28,7 +28,7 @@ sub_state! {
         pub(crate) settings: Settings,
         pub(crate) session: Option<zenoh::Session>,
         /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
-        pub(crate) schema_store: Option<Arc<zenkey_fleet::model::decode::SchemaStore>>,
+        pub(crate) schema_store: Option<Arc<zenkey_fleet::SchemaStore>>,
         pub(crate) skeleton: Option<Arc<Skeleton>>,
         pub(crate) slices: Option<Arc<SliceSet>>,
         pub(crate) slice_source: SliceSource,

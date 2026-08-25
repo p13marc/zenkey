@@ -30,7 +30,7 @@
 //! the house pattern of [`crate::judge::condition`] (#227) and [`crate::judge::budget`]
 //! (#221): testable without a bus. Surfaces: `zenctl field <selector>
 //! [--for S]`, the doctor listen phase (#161) via the appended
-//! [`crate::judge::common::CHECK_IDS`], and — **deferred to a later zengui
+//! [`crate::report::CheckId`], and — **deferred to a later zengui
 //! window** — the Inspector field table with per-field sparklines through
 //! the existing `series.rs`/`spark.rs` gap-drawing. This chunk ships the
 //! engine and zenctl halves only.

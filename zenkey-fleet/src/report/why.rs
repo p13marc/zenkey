@@ -214,7 +214,7 @@ impl From<crate::report::Judgement> for WhyVerdict {
     }
 }
 
-/// The ladder, assembled. One rung per [`RUNG_IDS`](crate::judge::common::RUNG_IDS) entry, in order, always —
+/// The ladder, assembled. One rung per [`RungId`] entry, in order, always —
 /// a rung is never omitted, it degrades to `NotAsked`.
 #[derive(Debug, Clone, Serialize)]
 pub struct WhyReport {

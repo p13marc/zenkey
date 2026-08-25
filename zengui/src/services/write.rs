@@ -58,7 +58,7 @@ pub fn call(
 /// What one `Send` needs, gathered from the form before the future starts.
 pub struct Publish {
     pub session: zenoh::Session,
-    pub store: Arc<zenkey_fleet::model::decode::SchemaStore>,
+    pub store: Arc<zenkey_fleet::SchemaStore>,
     pub slices: Option<Arc<SliceSet>>,
     pub base: String,
     pub key: String,

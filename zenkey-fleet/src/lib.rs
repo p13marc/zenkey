@@ -173,10 +173,38 @@ pub use bus::write::{
 };
 pub use judge::budget::{BudgetObservation, join_budget};
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
+// Types reachable *through* root-exported ones — a caller that matches on
+// `KeyShape::V1` or walks a `Skeleton` needs these, and had to spell a module
+// path to name them (#350).
+pub use model::bounded::DEFAULT_MAX_KEYS;
+pub use model::facts::{ClassKind, OriginKind, SubjectFacts, V1Facts};
+pub use model::registry::UnionOutcome;
+pub use model::skeleton::{NodeStats, SkeletonCoverage, SkeletonNode, merge};
+pub use model::tree::TreeNode;
+// The rest of what the frontends actually reach for.
+pub use model::decode::{structural, structural_value};
+pub use tape::record::rfc3339_now;
+// The judging vocabulary a caller can drive directly (#349's evidence
+// structs among them).
+pub use judge::condition::{SilenceEvidence, TickEvidence, judge_doctor_check, judge_origin_down};
+pub use judge::retired::EntryEvidence;
+// The remaining items a frontend actually calls. Every one of these was
+// reachable only by module path (#350) — which said nothing about whether it
+// was ours to use.
+pub use judge::field::DEFAULT_MAX_PATHS;
+pub use judge::why::is_cause;
+// The two scope notes keep their own names rather than one: they are two
+// different O5 statements about two different windows, which is why
+// `judge/common.rs` declined to merge them. A name collision is not a reason
+// for an item to be unreachable from the root, though (#350).
 pub use judge::cutover::run_cutover;
+pub use judge::cutover::scope_note as cutover_scope_note;
 pub use judge::retired::run_retired;
+pub use judge::retired::scope_note as retired_scope_note;
 pub use judge::why::{WhyInputs, WhySpec, run_why};
-pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff};
+// `diff` is `value_diff` at the root: a bare `diff` beside `byte_diff` in a
+// crate that also has `schema_drift` and `slice::diff` reads as *the* diff.
+pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
 };

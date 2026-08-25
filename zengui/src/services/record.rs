@@ -69,7 +69,7 @@ async fn capture(
         zrec: zenkey_fleet::ZREC_VERSION,
         selectors,
         base,
-        captured_at: zenkey_fleet::tape::record::rfc3339_now(),
+        captured_at: zenkey_fleet::rfc3339_now(),
     };
     // Off the runtime, both halves (#332): iced drives this task on the same
     // runtime the monitor's drain runs on, so a blocking write per sample
@@ -137,7 +137,7 @@ pub(crate) fn write_window(
         zrec: zenkey_fleet::ZREC_VERSION,
         selectors,
         base,
-        captured_at: zenkey_fleet::tape::record::rfc3339_now(),
+        captured_at: zenkey_fleet::rfc3339_now(),
     };
     let mut writer =
         zenkey_fleet::ZrecWriter::new_at(out, &header, epoch).map_err(|e| e.to_string())?;

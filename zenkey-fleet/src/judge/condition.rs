@@ -68,7 +68,7 @@ pub enum Condition {
     /// unjudgeable and counted in the evidence, not the state.
     QosMismatch { selector: String },
     /// A doctor run reported at least one finding with this check id
-    /// (the stable [`crate::judge::common::CHECK_IDS`] vocabulary). A failed doctor run is
+    /// (the stable [`crate::report::CheckId`] vocabulary). A failed doctor run is
     /// unobservable for every doctor condition — never `ok`.
     DoctorCheck { check: CheckId },
     /// The origin holds no `alive` token on the liveliness roster

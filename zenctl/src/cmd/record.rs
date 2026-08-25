@@ -29,7 +29,7 @@ pub async fn run(
         zrec: ZREC_VERSION,
         selectors: vec![selector.clone()],
         base: args.base().to_string(),
-        captured_at: zenkey_fleet::tape::record::rfc3339_now(),
+        captured_at: zenkey_fleet::rfc3339_now(),
     };
     // Both halves off the runtime (#332): the create through `tokio::fs`,
     // and every row after it on the blocking pool behind the sink's queue.

@@ -33,7 +33,7 @@ pub async fn run(rules: &[String], every: f64, count: Option<u64>, args: &Bus) -
     // registry; with none loaded they observe and say what they could not
     // judge (O4), and doctor rules run their own asks.
     let slices = args.slices_optional().await?;
-    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
     let spec = WatchdogSpec {
         rules,
         tick,

@@ -37,7 +37,7 @@ pub async fn run(
     // missing registry (`no registry loaded…`) rather than claiming
     // `no schema served` about types nobody looked up (RFC 09 §5.1 O4; #246).
     let slices = crate::exit::asked("check expect", args.slices_optional().await);
-    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
     let spec = zenkey_fleet::ExpectSpec {
         selector: selector.clone(),
         within,

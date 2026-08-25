@@ -183,7 +183,7 @@ pub(crate) fn update(
             let (stop, stopped) = tokio::sync::oneshot::channel();
             let path = format!(
                 "zengui-{}.zrec",
-                zenkey_fleet::tape::record::rfc3339_now().replace(':', "-")
+                zenkey_fleet::rfc3339_now().replace(':', "-")
             );
             let base = dep.base().to_string();
             work.replay.recording = Some(RecordingHandle {
@@ -232,7 +232,7 @@ pub(crate) fn update(
                 state.rows.iter().map(|r| Arc::clone(&r.view)).collect();
             let path = format!(
                 "zengui-window-{}.zrec",
-                zenkey_fleet::tape::record::rfc3339_now().replace(':', "-")
+                zenkey_fleet::rfc3339_now().replace(':', "-")
             );
             work.replay.recorded = None;
             services::record::save_window(

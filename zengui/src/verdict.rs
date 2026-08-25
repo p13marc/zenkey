@@ -1,7 +1,7 @@
 //! The payload-conformance verdict cache (#164): what has been checked, for
 //! whom, and never on a render path.
 //!
-//! The engine's [`zenkey_fleet::model::decode::decode_sample`] may fetch a
+//! The engine's [`zenkey_fleet::decode_sample`] may fetch a
 //! producer's `describe` on a first miss, so it can touch the bus — which is
 //! why the justfile walkthrough bans schema decode from render paths, and why
 //! echo deliberately renders through the sync structural decode only

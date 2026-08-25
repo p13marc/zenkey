@@ -64,7 +64,7 @@ pub struct Status<'a> {
     /// Active watch selectors (coverage, O5).
     pub watched: &'a [String],
     /// What fed the skeleton, when one was built.
-    pub skeleton: Option<zenkey_fleet::model::skeleton::SkeletonCoverage>,
+    pub skeleton: Option<zenkey_fleet::SkeletonCoverage>,
     /// Keys retired because their watch was released (O6's third counter).
     pub keys_unwatched: u64,
     /// The last on-demand value fetch, for the selection.

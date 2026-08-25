@@ -59,7 +59,7 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
     } else {
         args.slices_optional().await?
     };
-    let store = zenkey_fleet::model::decode::SchemaStore::new(&base, args.timeout());
+    let store = zenkey_fleet::SchemaStore::new(&base, args.timeout());
 
     let session = args.session().await?;
     let fleet = args.fleet(&session);
@@ -214,7 +214,7 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         } else if hex_payload {
             // --hex: the decode pipeline still names the type, the payload
             // shows as bytes.
-            let type_name = zenkey_fleet::model::decode::decode_sample(
+            let type_name = zenkey_fleet::decode_sample(
                 &fleet,
                 &store,
                 slices.as_ref(),

@@ -19,7 +19,7 @@
 
 use iced::widget::{Column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet::model::decode::Rendering;
+use zenkey_fleet::Rendering;
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
 use crate::message::{Message, PaneMsg, SlotId};
@@ -77,7 +77,7 @@ fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
         )));
         return col.into();
     }
-    let rendered = zenkey_fleet::model::decode::structural(bytes);
+    let rendered = zenkey_fleet::structural(bytes);
     let (shown, elided) = clamp_document(&rendered);
     col = col.push(kit::mono(shown.to_string()));
     if elided > 0 {
