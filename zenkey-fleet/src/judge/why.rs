@@ -78,37 +78,23 @@ use anyhow::Result;
 use zenoh::Session;
 use zenoh::key_expr::keyexpr;
 
-use crate::judge::common::{EVIDENCE_CAP, RUNG_IDS};
+use crate::judge::common::EVIDENCE_CAP;
 use crate::model::examples::Examples;
 use crate::model::facts::{KeyShape, OriginKind, Registration, describe_key};
 use crate::model::registry::SliceSet;
 use crate::report::{DeclaredEntities, EntityKind, StorageInfo};
-use crate::report::{Rung, RungAnswer, ValueSource, WhyReport, WhyVerdict};
-
-/// The rungs whose `NotEstablished` is an *explanation* of silence. The
-/// others state facts that must never read as one: `publisher-declared`
-/// because publishers declare lazily (RFC 08 §6.1), `storage-coverage`
-/// because uncovered volatile state is a legitimate deployment (RFC 04
-/// §3.5), `stored-value` and `wire-heard` because an unanswered bounded ask
-/// is the very silence under investigation, and `admin-answered` because an
-/// absent admin space impairs the observation rather than explaining the
-/// key.
-const CAUSE_IDS: [&str; 5] = [
-    "scope-reach",
-    "key-parse",
-    "registry-declared",
-    "origin-alive",
-    "sample-freshness",
-];
+use crate::report::{Rung, RungAnswer, RungId, ValueSource, WhyReport, WhyVerdict};
 
 /// Whether one rung's answer counts as an established explanation.
 ///
 /// Public policy, not a rendering choice: both explorers and any script
-/// keying on the ndjson must agree on what exit 0 meant.
-pub fn is_cause(id: &str, answer: &RungAnswer) -> bool {
+/// keying on the ndjson must agree on what exit 0 meant. Which rungs qualify
+/// is [`RungId::is_cause_when_unestablished`] — the vocabulary owns its own
+/// policy, so the list cannot drift from the enum (#347).
+pub fn is_cause(id: RungId, answer: &RungAnswer) -> bool {
     match answer {
-        RungAnswer::Established => id == "wire-heard",
-        RungAnswer::NotEstablished { .. } => CAUSE_IDS.contains(&id),
+        RungAnswer::Established => id == RungId::WireHeard,
+        RungAnswer::NotEstablished { .. } => id.is_cause_when_unestablished(),
         // Neither unestablished pole is ever a cause: an unput or uncarried
         // question explains nothing (RFC 13, v1.24).
         RungAnswer::NotAsked | RungAnswer::Unobservable { .. } => false,
@@ -180,7 +166,7 @@ pub struct WhyInputs<'a> {
 /// Assemble the ladder from what was (and was not) fetched. Pure — every
 /// judgement over bus data is testable without a bus.
 pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
-    let mut rungs: Vec<Rung> = Vec::with_capacity(RUNG_IDS.len());
+    let mut rungs: Vec<Rung> = Vec::with_capacity(RungId::ALL.len());
     let mut impairments: Vec<String> = Vec::new();
     // The selector-parameter tail (`?k=v`) rides GETs but is not key algebra.
     let key = inputs.key.split('?').next().unwrap_or_default();
@@ -232,7 +218,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             }
         }
     };
-    rungs.push(rung("scope-reach", answer, evidence));
+    rungs.push(rung(RungId::ScopeReach, answer, evidence));
 
     // ── key-parse (RFC 09 §5.1 O2) ─────────────────────────────────────
     let (answer, evidence) = match &desc.facts.shape {
@@ -278,7 +264,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             vec![],
         ),
     };
-    rungs.push(rung("key-parse", answer, evidence));
+    rungs.push(rung(RungId::KeyParse, answer, evidence));
 
     // ── registry-declared (RFC 08 §2) ──────────────────────────────────
     let mut declared = false;
@@ -342,7 +328,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             (RungAnswer::Established, evidence)
         }
     };
-    rungs.push(rung("registry-declared", answer, evidence));
+    rungs.push(rung(RungId::RegistryDeclared, answer, evidence));
 
     // ── origin-alive (RFC 04 §5) ───────────────────────────────────────
     let mut alive = false;
@@ -412,7 +398,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             }
         },
     };
-    rungs.push(rung("origin-alive", answer, evidence));
+    rungs.push(rung(RungId::OriginAlive, answer, evidence));
 
     // ── publisher-declared (RFC 08 §6.1) ───────────────────────────────
     let (answer, evidence) = match inputs.entities {
@@ -478,7 +464,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             }
         }
     };
-    rungs.push(rung("publisher-declared", answer, evidence));
+    rungs.push(rung(RungId::PublisherDeclared, answer, evidence));
 
     // ── storage-coverage (RFC 09 §2 / RFC 04 §3.5) ─────────────────────
     let (answer, evidence) = match inputs.storages {
@@ -542,7 +528,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             }
         }
     };
-    rungs.push(rung("storage-coverage", answer, evidence));
+    rungs.push(rung(RungId::StorageCoverage, answer, evidence));
 
     // ── stored-value (RFC 04 §3.2) ─────────────────────────────────────
     let mut stored_age: Option<i64> = None;
@@ -589,7 +575,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             vec![],
         ),
     };
-    rungs.push(rung("stored-value", answer, evidence));
+    rungs.push(rung(RungId::StoredValue, answer, evidence));
 
     // ── sample-freshness (RFC 04 §1.2) ─────────────────────────────────
     let (answer, evidence) = match (declared_ttl, stored_age) {
@@ -635,7 +621,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             }
         }
     };
-    rungs.push(rung("sample-freshness", answer, evidence));
+    rungs.push(rung(RungId::SampleFreshness, answer, evidence));
 
     // ── admin-answered ─────────────────────────────────────────────────
     let (answer, evidence) = match inputs.admin_answered {
@@ -667,7 +653,7 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             vec![format!("{n} admin root document(s) answered @/*/*")],
         ),
     };
-    rungs.push(rung("admin-answered", answer, evidence));
+    rungs.push(rung(RungId::AdminAnswered, answer, evidence));
 
     // ── wire-heard (opt-in; RFC 09 §5.1 frugality) ─────────────────────
     let (answer, evidence) = match inputs.wire {
@@ -713,11 +699,13 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
             }
         }
     };
-    rungs.push(rung("wire-heard", answer, evidence));
+    rungs.push(rung(RungId::WireHeard, answer, evidence));
 
-    debug_assert_eq!(
+    // One rung per id, in order, always. This was a `debug_assert_eq!` —
+    // which is to say it did not run in the builds anyone ships (#347).
+    assert_eq!(
         rungs.iter().map(|r| r.id).collect::<Vec<_>>(),
-        RUNG_IDS,
+        RungId::ALL,
         "one rung per id, in order, always"
     );
 
@@ -739,20 +727,8 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
     }
 }
 
-fn rung(id: &'static str, answer: RungAnswer, evidence: Vec<String>) -> Rung {
-    let question = match id {
-        "scope-reach" => "does a `**` explorer scope reach this key?",
-        "key-parse" => "does it parse as a v1 key under the base?",
-        "registry-declared" => "does a loaded registry slice declare it?",
-        "origin-alive" => "is the origin on the liveliness roster?",
-        "publisher-declared" => "did any session declare a matching publisher?",
-        "storage-coverage" => "is a storage configured to capture it?",
-        "stored-value" => "does a stored value answer a bounded GET?",
-        "sample-freshness" => "is the last known sample within its declared ttl?",
-        "admin-answered" => "is the admin space answering at all?",
-        "wire-heard" => "did the key speak during a listen window?",
-        other => unreachable!("unknown rung id {other:?} — RUNG_IDS is the vocabulary"),
-    };
+fn rung(id: RungId, answer: RungAnswer, evidence: Vec<String>) -> Rung {
+    let question = id.question();
     Rung {
         id,
         question,
@@ -880,28 +856,6 @@ async fn listen_window(session: &Session, key: &str, window: Duration) -> Result
 mod tests {
     use super::*;
 
-    /// The id vocabulary is API: additions append, nothing renames. If this
-    /// test fails you are renaming a shipped rung id — don't (the
-    /// [`crate::judge::common::CHECK_IDS`] discipline, applied here).
-    #[test]
-    fn rung_ids_are_stable() {
-        assert_eq!(
-            RUNG_IDS,
-            [
-                "scope-reach",
-                "key-parse",
-                "registry-declared",
-                "origin-alive",
-                "publisher-declared",
-                "storage-coverage",
-                "stored-value",
-                "sample-freshness",
-                "admin-answered",
-                "wire-heard",
-            ]
-        );
-    }
-
     const KEY: &str = "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/root/used";
 
     const SLICE: &str = r#"
@@ -940,7 +894,7 @@ mod tests {
         }
     }
 
-    fn get(report: &WhyReport, id: &str) -> Rung {
+    fn get(report: &WhyReport, id: RungId) -> Rung {
         report
             .rungs
             .iter()
@@ -958,18 +912,18 @@ mod tests {
         let report = ladder(&nothing_fetched(KEY));
         assert_eq!(
             report.rungs.iter().map(|r| r.id).collect::<Vec<_>>(),
-            RUNG_IDS,
+            RungId::ALL,
             "one rung per id, in order, always"
         );
         for id in [
-            "registry-declared",
-            "origin-alive",
-            "publisher-declared",
-            "storage-coverage",
-            "stored-value",
-            "sample-freshness",
-            "admin-answered",
-            "wire-heard",
+            RungId::RegistryDeclared,
+            RungId::OriginAlive,
+            RungId::PublisherDeclared,
+            RungId::StorageCoverage,
+            RungId::StoredValue,
+            RungId::SampleFreshness,
+            RungId::AdminAnswered,
+            RungId::WireHeard,
         ] {
             assert_eq!(
                 get(&report, id).answer,
@@ -978,8 +932,14 @@ mod tests {
             );
         }
         // The two pure rungs always have their input — the key itself.
-        assert_eq!(get(&report, "scope-reach").answer, RungAnswer::Established);
-        assert_eq!(get(&report, "key-parse").answer, RungAnswer::Established);
+        assert_eq!(
+            get(&report, RungId::ScopeReach).answer,
+            RungAnswer::Established
+        );
+        assert_eq!(
+            get(&report, RungId::KeyParse).answer,
+            RungAnswer::Established
+        );
         assert_eq!(report.verdict, WhyVerdict::Impaired);
         assert!(!report.impairments.is_empty());
     }
@@ -1026,7 +986,7 @@ mod tests {
             wire: None,
         });
 
-        let publisher = get(&report, "publisher-declared");
+        let publisher = get(&report, RungId::PublisherDeclared);
         match &publisher.answer {
             RungAnswer::NotEstablished { reason } => {
                 assert!(
@@ -1057,11 +1017,11 @@ mod tests {
         inputs.slices = Some(&slices);
         let report = ladder(&inputs);
         assert!(matches!(
-            get(&report, "registry-declared").answer,
+            get(&report, RungId::RegistryDeclared).answer,
             RungAnswer::NotEstablished { .. }
         ));
         assert_eq!(report.verdict, WhyVerdict::Explained);
-        assert_eq!(report.causes(), ["registry-declared"]);
+        assert_eq!(report.causes(), [RungId::RegistryDeclared]);
     }
 
     /// An origin with no liveliness token is an established explanation —
@@ -1072,7 +1032,7 @@ mod tests {
         let mut inputs = nothing_fetched(KEY);
         inputs.roster = Some(&roster);
         let report = ladder(&inputs);
-        match get(&report, "origin-alive").answer {
+        match get(&report, RungId::OriginAlive).answer {
             RungAnswer::NotEstablished { ref reason } => {
                 assert!(reason.contains("no liveliness token"), "{reason}")
             }
@@ -1085,7 +1045,7 @@ mod tests {
         let mut inputs = nothing_fetched(KEY);
         inputs.roster = Some(&roster);
         let report = ladder(&inputs);
-        match get(&report, "origin-alive").answer {
+        match get(&report, RungId::OriginAlive).answer {
             RungAnswer::NotEstablished { ref reason } => {
                 assert!(
                     reason.contains("holds no liveliness token there"),
@@ -1103,7 +1063,7 @@ mod tests {
         let report = ladder(&nothing_fetched(
             "v1/h-aaaaaaaaaaaa/@rpc/sysinfo/introspect",
         ));
-        let scope = get(&report, "scope-reach");
+        let scope = get(&report, RungId::ScopeReach);
         assert!(matches!(scope.answer, RungAnswer::NotEstablished { .. }));
         assert!(
             scope.evidence.iter().any(|e| e.contains("RFC 03 §4 D2/D4")),
@@ -1113,7 +1073,7 @@ mod tests {
         // And the registry rung is NotAsked (a plane has no [[subject]]
         // surface), never "unregistered".
         assert_eq!(
-            get(&report, "registry-declared").answer,
+            get(&report, RungId::RegistryDeclared).answer,
             RungAnswer::NotAsked
         );
         assert_eq!(report.verdict, WhyVerdict::Explained);
@@ -1134,7 +1094,7 @@ mod tests {
         inputs.slices = Some(&slices);
         inputs.stored = Some(&stale);
         let report = ladder(&inputs);
-        match get(&report, "sample-freshness").answer {
+        match get(&report, RungId::SampleFreshness).answer {
             RungAnswer::NotEstablished { ref reason } => {
                 assert!(reason.contains("120s old against ttl_s 30"), "{reason}");
             }
@@ -1154,7 +1114,7 @@ mod tests {
         inputs.stored = Some(&fresh);
         let report = ladder(&inputs);
         assert_eq!(
-            get(&report, "sample-freshness").answer,
+            get(&report, RungId::SampleFreshness).answer,
             RungAnswer::Established
         );
     }
@@ -1174,7 +1134,7 @@ mod tests {
         inputs.slices = Some(&slices);
         inputs.stored = Some(&unstamped);
         let report = ladder(&inputs);
-        let rung = get(&report, "sample-freshness");
+        let rung = get(&report, RungId::SampleFreshness);
         assert_eq!(rung.answer, RungAnswer::NotAsked);
         assert!(
             rung.evidence.iter().any(|e| e.contains("no HLC timestamp")),
@@ -1196,9 +1156,12 @@ mod tests {
         let mut inputs = nothing_fetched(KEY);
         inputs.wire = Some(&heard);
         let report = ladder(&inputs);
-        assert_eq!(get(&report, "wire-heard").answer, RungAnswer::Established);
+        assert_eq!(
+            get(&report, RungId::WireHeard).answer,
+            RungAnswer::Established
+        );
         assert_eq!(report.verdict, WhyVerdict::Explained);
-        assert_eq!(report.causes(), ["wire-heard"]);
+        assert_eq!(report.causes(), [RungId::WireHeard]);
 
         let silent = WireWatch {
             window_s: 5.0,
@@ -1208,7 +1171,7 @@ mod tests {
         let mut inputs = nothing_fetched(KEY);
         inputs.wire = Some(&silent);
         let report = ladder(&inputs);
-        let rung = get(&report, "wire-heard");
+        let rung = get(&report, RungId::WireHeard);
         match rung.answer {
             RungAnswer::NotEstablished { ref reason } => {
                 assert!(reason.contains("not a verdict"), "{reason}")
@@ -1223,7 +1186,7 @@ mod tests {
             rung.evidence
         );
         assert!(
-            !report.causes().contains(&"wire-heard"),
+            !report.causes().contains(&RungId::WireHeard),
             "a silent bounded window is never a cause"
         );
     }
@@ -1235,7 +1198,7 @@ mod tests {
         let mut inputs = nothing_fetched("other/v1/h-aaaaaaaaaaaa/state/sysinfo/health");
         inputs.base = "zs";
         let report = ladder(&inputs);
-        match get(&report, "key-parse").answer {
+        match get(&report, RungId::KeyParse).answer {
             RungAnswer::NotEstablished { ref reason } => {
                 assert!(
                     reason.contains("does not sit under the configured base"),

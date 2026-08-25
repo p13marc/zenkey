@@ -17,7 +17,7 @@ use zenkey::{Declared, RegistrySlice};
 use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
 use crate::model::examples::Examples;
-use crate::report::{DoctorFinding, DoctorReport, DoctorSeverity};
+use crate::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity};
 
 /// What a doctor run should cost.
 #[derive(Debug, Clone)]
@@ -41,14 +41,14 @@ pub struct DoctorSpec {
 
 fn finding(
     severity: DoctorSeverity,
-    check: &str,
+    check: CheckId,
     subject: impl Into<String>,
     evidence: impl Into<String>,
     citation: Option<&str>,
 ) -> DoctorFinding {
     DoctorFinding {
         severity,
-        check: check.to_string(),
+        check,
         subject: subject.into(),
         evidence: evidence.into(),
         citation: citation.map(str::to_string),
@@ -122,7 +122,7 @@ pub async fn run_doctor(
                 Err(e) => {
                     findings.push(finding(
                         DoctorSeverity::Error,
-                        "slice-parse",
+                        CheckId::SliceParse,
                         format!("{}/{}", answer.origin, local.name),
                         format!("served slice does not parse: {e}"),
                         Some("RFC 08 §6"),
@@ -140,7 +140,7 @@ pub async fn run_doctor(
                 for f in &diff {
                     findings.push(finding(
                         DoctorSeverity::Error,
-                        "slice-sync",
+                        CheckId::SliceSync,
                         format!("{}/{}", answer.origin, local.name),
                         f.summary(),
                         Some("RFC 08 §6"),
@@ -194,7 +194,7 @@ pub async fn run_doctor(
     if routers.is_empty() {
         findings.push(finding(
             DoctorSeverity::Info,
-            "admin-unreachable",
+            CheckId::AdminUnreachable,
             "mesh",
             "no routers answered @/*/router (peer-only mesh, or the admin space is \
              disabled) — storage/version checks skipped",
@@ -208,7 +208,7 @@ pub async fn run_doctor(
         if versions.len() > 1 {
             findings.push(finding(
                 DoctorSeverity::Error,
-                "router-version-skew",
+                CheckId::RouterVersionSkew,
                 "mesh",
                 format!("router version skew across the mesh: {versions:?}"),
                 None,
@@ -256,7 +256,7 @@ pub async fn run_doctor(
     for gap in crate::model::decode::totality_gaps(&described, &slice_set) {
         findings.push(finding(
             DoctorSeverity::Error,
-            "describe-totality",
+            CheckId::DescribeTotality,
             gap.producer.clone(),
             format!(
                 "describe is not total — missing: {}",
@@ -273,7 +273,7 @@ pub async fn run_doctor(
             .collect();
         findings.push(finding(
             DoctorSeverity::Error,
-            "schema-drift",
+            CheckId::SchemaDrift,
             drift.type_name.clone(),
             format!("served with different schemas by {}", servers.join(", ")),
             Some("RFC 08 §7"),
@@ -282,7 +282,7 @@ pub async fn run_doctor(
     if undescribed > 0 {
         findings.push(finding(
             DoctorSeverity::Info,
-            "describe-missing",
+            CheckId::DescribeMissing,
             "fleet",
             format!(
                 "{undescribed} producer(s) serve no describe (a SHOULD; generic tools \
@@ -324,7 +324,7 @@ pub async fn run_doctor(
         if unstamped > 0 {
             findings.push(finding(
                 DoctorSeverity::Warning,
-                "unstamped-state",
+                CheckId::UnstampedState,
                 "fleet",
                 format!(
                     "{unstamped} state sample(s) carry no HLC timestamp — the deployment \
@@ -345,7 +345,7 @@ pub async fn run_doctor(
         if !uncovered.is_empty() {
             findings.push(finding(
                 DoctorSeverity::Info,
-                "storage-coverage",
+                CheckId::StorageCoverage,
                 "fleet",
                 format!(
                     "{} state famil(y|ies) have no storage coverage (volatile seeding \
@@ -423,7 +423,7 @@ const SAME_FINDING: &str = "more key(s) with the same finding";
 fn emit_capped(
     findings: &mut Vec<DoctorFinding>,
     ex: Examples<DoctorFinding>,
-    check: &str,
+    check: CheckId,
     tail: &str,
 ) {
     let more = ex.more(tail);
@@ -621,7 +621,7 @@ async fn observe_traffic(
         ex.push_with(|| {
             finding(
                 DoctorSeverity::Error,
-                "payload-undecodable",
+                CheckId::PayloadUndecodable,
                 key.clone(),
                 format!(
                     "payload does not decode as its declared type: {error} ({n} sample(s) tried)"
@@ -630,20 +630,20 @@ async fn observe_traffic(
             )
         });
     }
-    emit_capped(&mut findings, ex, "payload-undecodable", SAME_FINDING);
+    emit_capped(&mut findings, ex, CheckId::PayloadUndecodable, SAME_FINDING);
     let mut ex = Examples::new(FINDING_CAP);
     for (key, (violations, n)) in &invalid {
         ex.push_with(|| {
             finding(
                 DoctorSeverity::Error,
-                "payload-invalid",
+                CheckId::PayloadInvalid,
                 key.clone(),
                 format!("payload violates the served schema: {violations} ({n} sample(s) tried)"),
                 Some("RFC 08 §7"),
             )
         });
     }
-    emit_capped(&mut findings, ex, "payload-invalid", SAME_FINDING);
+    emit_capped(&mut findings, ex, CheckId::PayloadInvalid, SAME_FINDING);
     findings.extend(judge_qos_observed(&qos_bad));
     if !foreign_stampers.is_empty() {
         let mut named: Vec<String> = foreign_stampers
@@ -653,7 +653,7 @@ async fn observe_traffic(
         named.sort();
         findings.push(finding(
             DoctorSeverity::Info,
-            "timestamp-stamped-elsewhere",
+            CheckId::TimestampStampedElsewhere,
             "fleet".to_string(),
             format!(
                 "HLCs on this bus are stamped by {} node(s) that are not the publishing \
@@ -671,7 +671,7 @@ async fn observe_traffic(
         ex.push_with(|| {
             finding(
                 DoctorSeverity::Warning,
-                "unregistered-traffic",
+                CheckId::UnregisteredTraffic,
                 key.clone(),
                 format!(
                     "{n} sample(s) on a subject the producer's slice does not declare — \
@@ -681,7 +681,12 @@ async fn observe_traffic(
             )
         });
     }
-    emit_capped(&mut findings, ex, "unregistered-traffic", SAME_FINDING);
+    emit_capped(
+        &mut findings,
+        ex,
+        CheckId::UnregisteredTraffic,
+        SAME_FINDING,
+    );
     // Over-rate only, and only when provable: within any window no longer
     // than an hour, exceeding the hourly cap is conclusive. Absence or
     // under-rate in a bounded window is never a finding (O1/O4).
@@ -693,7 +698,7 @@ async fn observe_traffic(
             if *count > cap {
                 findings.push(finding(
                     DoctorSeverity::Warning,
-                    "rate-over-declared",
+                    CheckId::RateOverDeclared,
                     family.clone(),
                     format!(
                         "{count} event(s) in {window_s:.0}s exceeds the declared \
@@ -791,7 +796,7 @@ fn judge_qos_observed(
         ex.push_with(|| {
             finding(
                 DoctorSeverity::Warning,
-                "qos-observed-mismatch",
+                CheckId::QosObservedMismatch,
                 key.clone(),
                 format!(
                     "{bad} of {total} sample(s) did not ride the declared {declared} — this \
@@ -802,7 +807,12 @@ fn judge_qos_observed(
             )
         });
     }
-    emit_capped(&mut findings, ex, "qos-observed-mismatch", SAME_FINDING);
+    emit_capped(
+        &mut findings,
+        ex,
+        CheckId::QosObservedMismatch,
+        SAME_FINDING,
+    );
     findings
 }
 
@@ -866,7 +876,7 @@ fn judge_introspect_coverage(
     (answered < in_scope).then(|| {
         finding(
             DoctorSeverity::Error,
-            "introspect-coverage",
+            CheckId::IntrospectCoverage,
             "fleet",
             format!(
                 "{} of {} live producer(s) in scope did not answer introspect — \
@@ -901,7 +911,7 @@ fn judge_state_samples(
                 {
                     findings.push(finding(
                         DoctorSeverity::Error,
-                        "stale-state",
+                        CheckId::StaleState,
                         sample.key.clone(),
                         format!(
                             "{}s old against ttl {ttl}s (refresh <= ttl/2)",
@@ -954,7 +964,7 @@ fn judge_cardinality(
                     .unwrap_or(0);
                 findings.push(finding(
                     DoctorSeverity::Info,
-                    "cardinality-over-declared",
+                    CheckId::CardinalityOverDeclared,
                     format!("{}/{}", slice.name, s.path),
                     format!(
                         "exempt: rest-variable — a `{{var...}}` family is unbounded by \
@@ -989,7 +999,7 @@ fn judge_cardinality(
                 over.push_with(|| {
                     finding(
                         DoctorSeverity::Warning,
-                        "cardinality-over-declared",
+                        CheckId::CardinalityOverDeclared,
                         subject,
                         format!(
                             "{} distinct key(s) observed in {window_s:.0}s exceed the \
@@ -1007,7 +1017,7 @@ fn judge_cardinality(
     emit_capped(
         &mut findings,
         over,
-        "cardinality-over-declared",
+        CheckId::CardinalityOverDeclared,
         "more origin famil(y|ies) over their declared cardinality",
     );
     findings
@@ -1048,7 +1058,7 @@ mod tests {
         let findings = judge_cardinality(&slices, &obs, 10.0);
         assert_eq!(findings.len(), 1, "{findings:?}");
         let f = &findings[0];
-        assert_eq!(f.check, "cardinality-over-declared");
+        assert_eq!(f.check, CheckId::CardinalityOverDeclared);
         assert_eq!(f.severity, DoctorSeverity::Warning);
         assert_eq!(f.subject, "h-aaaaaaaaaaaa/sysinfo/disk/{mount}/used");
         assert!(f.evidence.contains("40 distinct key(s)"), "{}", f.evidence);
@@ -1236,7 +1246,7 @@ mod tests {
         ]);
         let locals = [slice_named("sysinfo")];
         let f = judge_introspect_coverage(&roster, Some(&locals), 1).expect("a finding");
-        assert_eq!(f.check, "introspect-coverage");
+        assert_eq!(f.check, CheckId::IntrospectCoverage);
         assert!(f.evidence.contains("1 of 2"), "{}", f.evidence);
         assert!(
             f.evidence.contains("the local registry names (sysinfo)"),
@@ -1312,7 +1322,7 @@ mod tests {
             1,
             "only the stale stamped sample is a finding"
         );
-        assert_eq!(findings[0].check, "stale-state");
+        assert_eq!(findings[0].check, CheckId::StaleState);
         assert!(findings[0].subject.contains("h-bbbbbbbbbbbb"));
         assert_eq!(unstamped, 1, "the unstamped sample is counted, not judged");
     }

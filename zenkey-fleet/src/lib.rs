@@ -172,7 +172,7 @@ pub use bus::write::{
     declare_publication,
 };
 pub use judge::budget::{BudgetObservation, join_budget};
-pub use judge::common::{CHECK_IDS, EXPANSION_CAP, RUNG_IDS, data_plane_scopes, new_prefix};
+pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
 pub use judge::cutover::run_cutover;
 pub use judge::retired::run_retired;
 pub use judge::why::{WhyInputs, WhySpec, run_why};

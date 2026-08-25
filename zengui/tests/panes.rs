@@ -1078,7 +1078,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
     let report = DoctorReport {
         findings: vec![DoctorFinding {
             severity: DoctorSeverity::Error,
-            check: "slice-sync".into(),
+            check: zenkey_fleet::report::CheckId::SliceSync,
             subject: "h-3fa9c2d41b7e/sysinfo".into(),
             evidence: "registry version differs: served 1.0, local 2.0".into(),
             citation: Some("RFC 08 §6".into()),
@@ -1121,7 +1121,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
     let second = DoctorReport {
         findings: vec![DoctorFinding {
             severity: DoctorSeverity::Info,
-            check: "describe-missing".into(),
+            check: zenkey_fleet::report::CheckId::DescribeMissing,
             subject: "fleet".into(),
             evidence: "1 producer(s) serve no describe".into(),
             citation: Some("RFC 08 §7".into()),

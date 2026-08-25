@@ -100,7 +100,7 @@ async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
     let sync: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == "slice-sync")
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::SliceSync)
         .collect();
     assert!(
         !sync.is_empty(),
@@ -146,11 +146,9 @@ async fn a_mute_live_producer_is_a_coverage_finding() {
     .expect("the token should become visible within 10s");
 
     assert!(
-        report
-            .findings
-            .iter()
-            .any(|f| f.check == "introspect-coverage"
-                && f.citation.as_deref() == Some("RFC 04 §5")),
+        report.findings.iter().any(|f| f.check
+            == zenkey_fleet::report::CheckId::IntrospectCoverage
+            && f.citation.as_deref() == Some("RFC 04 §5")),
         "a mute live producer must be a coverage finding, got: {:?}",
         report.findings
     );

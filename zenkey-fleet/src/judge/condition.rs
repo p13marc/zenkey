@@ -34,7 +34,7 @@ use anyhow::{Result, bail};
 
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
-use crate::report::DoctorReport;
+use crate::report::{CheckId, DoctorReport};
 use crate::report::{CondState, Judgement, Transition, WatchdogSummary};
 
 /// The closed condition vocabulary (#227), over the existing observation
@@ -70,7 +70,7 @@ pub enum Condition {
     /// A doctor run reported at least one finding with this check id
     /// (the stable [`crate::judge::common::CHECK_IDS`] vocabulary). A failed doctor run is
     /// unobservable for every doctor condition — never `ok`.
-    DoctorCheck { check: String },
+    DoctorCheck { check: CheckId },
     /// The origin holds no `alive` token on the liveliness roster
     /// (RFC 04 §5). A roster that could not be asked is unobservable —
     /// silence is not a verdict (RFC 05 §3.1).
@@ -126,15 +126,17 @@ impl Condition {
                 selector: sel.to_string(),
             },
             ["doctor", check] => {
-                if !crate::judge::common::CHECK_IDS.contains(check) {
+                let Some(check) = CheckId::parse(check) else {
                     bail!(
                         "doctor: {check:?} is not a check id — the stable vocabulary is: {}",
-                        crate::judge::common::CHECK_IDS.join(", ")
+                        CheckId::ALL
+                            .iter()
+                            .map(|c| c.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     );
-                }
-                Condition::DoctorCheck {
-                    check: check.to_string(),
-                }
+                };
+                Condition::DoctorCheck { check }
             }
             ["origin-down", origin] => Condition::OriginDown {
                 origin: origin.to_string(),
@@ -522,12 +524,10 @@ pub struct DoctorWatch {
 impl DoctorWatch {
     pub fn new() -> DoctorWatch {
         DoctorWatch {
-            checks: crate::judge::common::CHECK_IDS
+            checks: CheckId::ALL
                 .iter()
                 .map(|id| {
-                    let condition = Condition::DoctorCheck {
-                        check: id.to_string(),
-                    };
+                    let condition = Condition::DoctorCheck { check: *id };
                     let state = RuleState::new(condition.to_string());
                     (condition, state)
                 })
@@ -883,13 +883,13 @@ mod tests {
     use super::*;
     use crate::report::{DoctorFinding, DoctorSeverity};
 
-    fn report_with(checks: &[&str]) -> DoctorReport {
+    fn report_with(checks: &[CheckId]) -> DoctorReport {
         DoctorReport {
             findings: checks
                 .iter()
                 .map(|c| DoctorFinding {
                     severity: DoctorSeverity::Error,
-                    check: c.to_string(),
+                    check: *c,
                     subject: "s".into(),
                     evidence: "e".into(),
                     citation: None,
@@ -1123,7 +1123,7 @@ mod tests {
         let mut watch = DoctorWatch::new();
         let clean = report_with(&[]);
         let baseline = watch.observe(Ok(&clean), "t0");
-        assert_eq!(baseline.len(), crate::judge::common::CHECK_IDS.len());
+        assert_eq!(baseline.len(), CheckId::ALL.len());
         assert!(baseline.iter().all(|t| t.from.is_none()));
         assert!(baseline.iter().all(|t| t.to == CondState::Ok));
 
@@ -1132,7 +1132,7 @@ mod tests {
             "an unchanged run emits nothing"
         );
 
-        let drifted = report_with(&["schema-drift", "schema-drift"]);
+        let drifted = report_with(&[CheckId::SchemaDrift, CheckId::SchemaDrift]);
         let changes = watch.observe(Ok(&drifted), "t2");
         assert_eq!(changes.len(), 1, "only the changed check transitions");
         assert_eq!(changes[0].rule, "doctor schema-drift");
@@ -1142,7 +1142,7 @@ mod tests {
         let failed = watch.observe(Err("session lost"), "t3");
         assert_eq!(
             failed.len(),
-            crate::judge::common::CHECK_IDS.len(),
+            CheckId::ALL.len(),
             "a failed run is unobservable for every check — never ok"
         );
         assert!(failed.iter().all(|t| t.to == CondState::Unobservable));

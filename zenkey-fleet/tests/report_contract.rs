@@ -589,7 +589,7 @@ fn doctor_severities_are_the_stable_lowercase_vocabulary() {
     }
     let finding = DoctorFinding {
         severity: DoctorSeverity::Info,
-        check: "timestamp-stamped-elsewhere".into(),
+        check: zenkey_fleet::report::CheckId::TimestampStampedElsewhere,
         subject: "fleet".into(),
         evidence: "stamped by 1 node that is not the publisher".into(),
         citation: None,
@@ -853,7 +853,11 @@ fn a_why_rung_keeps_not_asked_distinct_on_the_wire() {
         .iter()
         .map(|r| r["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, zenkey_fleet::RUNG_IDS, "one rung per id, in order");
+    assert_eq!(
+        ids,
+        zenkey_fleet::report::RungId::ALL.map(zenkey_fleet::report::RungId::as_str),
+        "one rung per id, in order"
+    );
 
     let established = &v["rungs"][0];
     assert_eq!(established["answer"], "established");

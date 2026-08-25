@@ -151,7 +151,7 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
     let stuck: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == "field-stuck")
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldStuck)
         .collect();
     assert_eq!(stuck.len(), 1, "{:?}", report.findings);
     assert_eq!(stuck[0].subject, format!("{KEY} · temperature_c"));
@@ -169,11 +169,15 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
         report
             .findings
             .iter()
-            .all(|f| !(f.check == "field-stuck" && f.subject.ends_with("· seq"))),
+            .all(|f| !(f.check == zenkey_fleet::report::CheckId::FieldStuck
+                && f.subject.ends_with("· seq"))),
         "the moving field is not stuck"
     );
     assert!(
-        report.findings.iter().all(|f| f.check != "field-new"),
+        report
+            .findings
+            .iter()
+            .all(|f| f.check != zenkey_fleet::report::CheckId::FieldNew),
         "both paths are declared by the served schema: {:?}",
         report.findings
     );
@@ -258,7 +262,7 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
     let vanished: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == "field-vanished")
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldVanished)
         .collect();
     assert_eq!(vanished.len(), 1, "{:?}", report.findings);
     assert_eq!(vanished[0].subject, format!("{KEY} · opt"));
@@ -271,7 +275,7 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
     let new: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == "field-new")
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldNew)
         .collect();
     assert_eq!(new.len(), 1, "{:?}", report.findings);
     assert_eq!(new[0].subject, format!("{KEY} · extra"));
@@ -320,11 +324,16 @@ async fn the_doctor_listen_phase_flags_the_frozen_field() {
     let stuck: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == "field-stuck")
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldStuck)
         .collect();
     assert_eq!(stuck.len(), 1, "{:?}", report.findings);
     assert_eq!(stuck[0].subject, format!("{KEY} · temperature_c"));
     // Nothing served a describe here, so `field-new` has no declared surface
     // to judge against — unjudgeable is not new (O4).
-    assert!(report.findings.iter().all(|f| f.check != "field-new"));
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|f| f.check != zenkey_fleet::report::CheckId::FieldNew)
+    );
 }
