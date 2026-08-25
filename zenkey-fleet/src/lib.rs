@@ -70,6 +70,16 @@
 // docs.rs builds on nightly with `--cfg docsrs` (see Cargo.toml), which is
 // what lets each feature-gated item carry the feature that gates it. Inert
 // everywhere else — a stable `cargo doc` never sets the cfg (#325).
+//
+// **This is inferred, not annotated.** `doc_auto_cfg` was removed in Rust
+// 1.92 (rust-lang/rust#138907) by being folded into `doc_cfg`, so enabling
+// the feature here labels *every* `#[cfg(feature = "…")]` item, nested
+// modules included — verified against the nightly docs.rs uses by rendering
+// `judge::doctor`, `bus::body`, `model::decode` and `tape::generate` and
+// finding the badge on each. A hand-written
+// `#[cfg_attr(docsrs, doc(cfg(…)))]` beside a `#[cfg(…)]` is therefore
+// redundant, and a *wrong* one would render a lie; the ones still on the
+// re-exports below predate the merge and are harmless.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod bus;
