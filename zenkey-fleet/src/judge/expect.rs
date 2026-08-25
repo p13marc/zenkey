@@ -147,10 +147,17 @@ pub async fn run_expect(
     let mut violations: Examples<String> = Examples::new(FINDING_CAP);
     let mut ended_early = false;
 
+    // One timer for the whole window, not one per iteration (#346).
+    // `sleep_until` builds a future and registers a timer each time it
+    // is evaluated, and a `select!` in a loop evaluates it on every
+    // pass — at 100k samples/s that is 100k registrations a second for
+    // a deadline that never moves.
+    let window_over = tokio::time::sleep_until(deadline);
+    tokio::pin!(window_over);
     loop {
         let item = tokio::select! {
             item = events.recv() => item,
-            _ = tokio::time::sleep_until(deadline) => break,
+            () = &mut window_over => break,
         };
         match item {
             Some(StreamItem::Event(FleetEvent::Sample(s))) => {

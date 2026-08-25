@@ -3379,6 +3379,7 @@ fn the_fields_section_states_its_window_and_its_bounds() {
         keys_seen: 1,
         dropped: 2,
         undocumented: 3,
+        unread: 0,
         registry_loaded: false,
         paths: 512,
         max_paths: 512,

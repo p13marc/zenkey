@@ -229,12 +229,12 @@ impl<'a> BringUp<'a> {
                  key)",
             ));
         }
-        let queryable = self
-            .session
-            .declare_queryable(parsed)
-            .complete(false)
-            .await
-            .map_err(|e| Error::bus("declare queryable", key, e))?;
+        let queryable = crate::bus::teardown::declared(
+            "declare queryable",
+            key,
+            self.session.declare_queryable(parsed).complete(false),
+        )
+        .await?;
         self.responders.push(Responder {
             key: key.to_string(),
             queryable,
@@ -246,12 +246,14 @@ impl<'a> BringUp<'a> {
     /// the token structurally cannot precede the queryables ("alive ⇒
     /// callable", RFC 04 §5).
     pub async fn alive(self, alive_key: &str) -> Result<LiveProducer> {
-        let token = self
-            .session
-            .liveliness()
-            .declare_token(alive_key.to_string())
-            .await
-            .map_err(|e| Error::bus("declare alive token", alive_key, e))?;
+        let token = crate::bus::teardown::declared(
+            "declare alive token",
+            alive_key,
+            self.session
+                .liveliness()
+                .declare_token(alive_key.to_string()),
+        )
+        .await?;
         Ok(LiveProducer {
             token: Some(token),
             responders: self.responders,

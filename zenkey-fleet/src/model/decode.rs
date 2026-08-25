@@ -880,6 +880,22 @@ pub fn resolve_encoding(
     }
 }
 
+/// How many bytes an *observation* path will structurally decode.
+///
+/// `structural_value` parses the whole payload into a `serde_json::Value`, and
+/// the observation paths call it **per sample** on a drain loop — field
+/// intelligence has to, because a field that stopped moving is only visible
+/// sample by sample. Unbounded, a multi-megabyte payload spends that parse on
+/// every one of them, on the loop whose whole job is to keep up (#337's
+/// lesson, applied to CPU rather than to I/O).
+///
+/// The number and the doctrine are `zengui`'s, from #345 — *"past it the size
+/// is reported and the decode is skipped, which is stated, never silently
+/// empty"* — moved here because both frontends and the engine's own judges
+/// need it, and three copies of one limit would be three answers to one
+/// question (the #353 lesson).
+pub const OBSERVE_LIMIT: usize = 64 * 1024;
+
 /// The structural sniff as a **value** rather than as text — the same ladder
 /// [`structural`] renders, stopped one step earlier.
 ///

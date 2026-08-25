@@ -111,6 +111,10 @@ pub struct KeyFields {
     /// Samples that carried none (plain text, opaque bytes) — fields are
     /// unobservable for them, which is stated, not folded into absence (O4).
     pub undocumented: u64,
+    /// Samples whose payload was past [`crate::OBSERVE_LIMIT`] and therefore never
+    /// read. **Not** `undocumented`: "we did not look" is not "there was
+    /// nothing to see" (RFC 09 §5.1 O4).
+    pub unread: u64,
     /// Per dotted path, the stats.
     pub paths: BTreeMap<String, PathStats>,
 }
@@ -216,6 +220,15 @@ impl FieldObservation {
     /// Feed one sample. `doc` is the structural value when the payload
     /// carried one ([`crate::model::decode::structural_value`]); `None` counts the
     /// sample as undocumented rather than pretending its fields were absent.
+    pub fn observe_unread(&mut self, key: &str) {
+        self.keys.entry(key.to_string()).or_default().unread += 1;
+    }
+
+    /// Samples skipped because their payload was too large to read.
+    pub fn unread(&self) -> u64 {
+        self.keys.values().map(|k| k.unread).sum()
+    }
+
     pub fn observe(&mut self, key: &str, at_s: f64, doc: Option<&Value>) {
         let entry = self.keys.entry(key.to_string()).or_default();
         let Some(doc) = doc else {
@@ -570,16 +583,30 @@ pub async fn run_field(
     // evictions counted into the report (O6).
     let mut facts = crate::model::facts::FactsCache::default();
 
+    // One timer for the whole window, not one per iteration (#346).
+    // `sleep_until` builds a future and registers a timer each time it
+    // is evaluated, and a `select!` in a loop evaluates it on every
+    // pass — at 100k samples/s that is 100k registrations a second for
+    // a deadline that never moves.
+    let window_over = tokio::time::sleep_until(deadline);
+    tokio::pin!(window_over);
     loop {
         let item = tokio::select! {
             item = events.recv() => item,
-            _ = tokio::time::sleep_until(deadline) => break,
+            () = &mut window_over => break,
         };
         match item {
             Some(StreamItem::Event(FleetEvent::Sample(s))) => {
                 samples += 1;
-                let doc = crate::model::decode::structural_value(&s.payload.to_bytes());
-                obs.observe(&s.key, opened.elapsed().as_secs_f64(), doc.as_ref());
+                // Bounded, and the skip is counted rather than read as an
+                // absent document (#346).
+                let bytes = s.payload.to_bytes();
+                if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
+                    obs.observe_unread(&s.key);
+                } else {
+                    let doc = crate::model::decode::structural_value(&bytes);
+                    obs.observe(&s.key, opened.elapsed().as_secs_f64(), doc.as_ref());
+                }
                 facts.ensure(base, &s.key, slices);
             }
             Some(StreamItem::Dropped(n)) => dropped += n,
@@ -621,6 +648,7 @@ pub async fn run_field(
         keys_seen: obs.keys_seen(),
         dropped,
         undocumented: obs.undocumented(),
+        unread: obs.unread(),
         registry_loaded: slices.is_some(),
         paths: obs.paths(),
         max_paths: obs.max_paths(),

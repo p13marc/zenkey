@@ -628,12 +628,15 @@ impl Monitor {
         let mut tasks = Vec::new();
 
         for liveliness_sel in &spec.liveliness {
-            let subscriber = session
-                .liveliness()
-                .declare_subscriber(liveliness_sel)
-                .history(true)
-                .await
-                .map_err(|e| Error::bus("liveliness subscribe", liveliness_sel, e))?;
+            let subscriber = crate::bus::teardown::declared(
+                "liveliness subscribe",
+                liveliness_sel,
+                session
+                    .liveliness()
+                    .declare_subscriber(liveliness_sel)
+                    .history(true),
+            )
+            .await?;
             let core = Arc::clone(&core);
             tasks.push(tokio::spawn(async move {
                 while let Ok(sample) = subscriber.recv_async().await {
@@ -681,16 +684,18 @@ impl Monitor {
     /// layer beyond the channel's bound.
     pub async fn watch(&self, selector: &str) -> Result<WatchId> {
         let core = Arc::clone(&self.core);
-        let subscriber = self
-            .session
-            .declare_subscriber(selector)
-            .callback(move |sample| {
-                let view = SampleView::of(&sample);
-                let sn = view.source.map(|s| s.sn);
-                core.ingest(view, sn);
-            })
-            .await
-            .map_err(|e| Error::bus("subscribe", selector, e))?;
+        let subscriber = crate::bus::teardown::declared(
+            "subscribe",
+            selector,
+            self.session
+                .declare_subscriber(selector)
+                .callback(move |sample| {
+                    let view = SampleView::of(&sample);
+                    let sn = view.source.map(|s| s.sn);
+                    core.ingest(view, sn);
+                }),
+        )
+        .await?;
         let id = WatchId(self.next_watch.fetch_add(1, Ordering::Relaxed));
         self.watches.lock().await.insert(
             id,
@@ -768,25 +773,42 @@ impl Monitor {
         // 1) The subscriber, FIRST (RFC 04 §3.2).
         let core = Arc::clone(&self.core);
         let cb_gate = Arc::clone(&gate);
-        let subscriber = self
-            .session
-            .declare_subscriber(selector)
-            .callback(move |sample| {
-                let sn = sample.source_info().map(|si| si.source_sn());
-                let view = view_of(&sample);
-                if let Some(merge) = cb_gate.load_full()
-                    && !merge.admit(&view)
-                {
-                    return;
-                }
-                core.ingest(view, sn);
-            })
-            .await
-            .map_err(|e| Error::bus("seeded subscribe", selector, e))?;
+        let subscriber = crate::bus::teardown::declared(
+            "seeded subscribe",
+            selector,
+            self.session
+                .declare_subscriber(selector)
+                .callback(move |sample| {
+                    let sn = sample.source_info().map(|si| si.source_sn());
+                    let view = view_of(&sample);
+                    if let Some(merge) = cb_gate.load_full()
+                        && !merge.admit(&view)
+                    {
+                        return;
+                    }
+                    core.ingest(view, sn);
+                }),
+        )
+        .await?;
 
-        // 2) The seed GETs, AFTER — registered as this watch's seed task so
-        //    `unwatch` during the seed phase aborts it.
+        // 2) The watch is **registered before its seed task exists**, so the
+        //    boundary event can never name an id `watched()` does not list
+        //    (#346). It used to spawn first and insert after, and a seed that
+        //    completed inside that window announced a watch nothing could yet
+        //    see — an observer keying on `WatchSeeded { id }` had no watch to
+        //    key it to.
         let id = WatchId(self.next_watch.fetch_add(1, Ordering::Relaxed));
+        self.watches.lock().await.insert(
+            id,
+            WatchEntry {
+                selector: selector.to_string(),
+                subscriber,
+                seed_task: None,
+            },
+        );
+
+        // 3) The seed GETs, AFTER — attached to the entry so `unwatch` during
+        //    the seed phase aborts them.
         let seed_task = {
             let session = self.session.clone();
             let core = Arc::clone(&self.core);
@@ -833,14 +855,13 @@ impl Monitor {
                 let _ = core.tx.send(FleetEvent::WatchSeeded { id, coverage });
             })
         };
-        self.watches.lock().await.insert(
-            id,
-            WatchEntry {
-                selector: selector.to_string(),
-                subscriber,
-                seed_task: Some(seed_task),
-            },
-        );
+        match self.watches.lock().await.get_mut(&id) {
+            Some(entry) => entry.seed_task = Some(seed_task),
+            // `unwatch` won the race and took the entry away. Its own abort
+            // could not reach a task that did not exist yet, so this is where
+            // that ends.
+            None => seed_task.abort(),
+        }
         let _ = self.core.tx.send(FleetEvent::WatchChanged);
         Ok(id)
     }

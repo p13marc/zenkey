@@ -533,10 +533,17 @@ async fn observe_traffic(
     // Stamping nodes that are not the publisher (#213): zid → samples.
     let mut foreign_stampers: BTreeMap<String, u64> = BTreeMap::new();
 
+    // One timer for the whole window, not one per iteration (#346).
+    // `sleep_until` builds a future and registers a timer each time it
+    // is evaluated, and a `select!` in a loop evaluates it on every
+    // pass — at 100k samples/s that is 100k registrations a second for
+    // a deadline that never moves.
+    let window_over = tokio::time::sleep_until(deadline);
+    tokio::pin!(window_over);
     loop {
         let item = tokio::select! {
             item = events.recv() => item,
-            _ = tokio::time::sleep_until(deadline) => break,
+            () = &mut window_over => break,
         };
         match item {
             Some(crate::StreamItem::Event(crate::FleetEvent::Sample(s))) => {
@@ -553,8 +560,17 @@ async fn observe_traffic(
                 if let Some(crate::StampProvenance::Foreign { stamper }) = s.stamped_by {
                     *foreign_stampers.entry(stamper.to_string()).or_default() += 1;
                 }
-                let doc = crate::model::decode::structural_value(&s.payload.to_bytes());
-                fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
+                // Same bound as `run_field`'s drain (#346): the parse is
+                // per sample by design, so the payload size is what has to be
+                // bounded, and the skip is counted rather than read as an
+                // absent document.
+                let bytes = s.payload.to_bytes();
+                if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
+                    fields.observe_unread(&s.key);
+                } else {
+                    let doc = crate::model::decode::structural_value(&bytes);
+                    fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
+                }
                 facts_cache.ensure(base, &s.key, Some(slices));
                 let facts = facts_cache.get(&s.key).expect("just ensured this key");
                 match &facts.registration {

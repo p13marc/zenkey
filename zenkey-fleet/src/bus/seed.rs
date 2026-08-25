@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::{Error, Result};
+use crate::Result;
 use zenoh::Session;
 
 use crate::bus::monitor::SampleView;
@@ -273,9 +273,10 @@ pub async fn seed_subscribe(
     let merge = Arc::new(Merge::new());
 
     // 1) The subscriber, FIRST — anything published from here on is caught.
-    let subscriber = session
-        .declare_subscriber(selector.to_string())
-        .callback({
+    let subscriber = crate::bus::teardown::declared(
+        "seeded subscribe",
+        selector,
+        session.declare_subscriber(selector.to_string()).callback({
             let tx = tx.clone();
             let merge = Arc::clone(&merge);
             move |sample| {
@@ -284,9 +285,9 @@ pub async fn seed_subscribe(
                     tx.send_sample(view);
                 }
             }
-        })
-        .await
-        .map_err(|e| Error::bus("seeded subscribe", selector, e))?;
+        }),
+    )
+    .await?;
 
     // 2) The seed GETs, AFTER — and the completion boundary once both
     //    (or their opt-outs) resolve.
