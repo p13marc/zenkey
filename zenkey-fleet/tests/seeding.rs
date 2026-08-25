@@ -346,19 +346,68 @@ async fn a_seeded_watch_shows_pre_existing_state() {
 /// monitor (it holds the core), so it is still listening either way.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dropping_a_monitor_aborts_its_seed_tasks() {
-    let (_a, b) = timestamping_pair().await;
+    let (a, b) = timestamping_pair().await;
+
+    // **The seed has to be genuinely pending**, and nothing else here makes
+    // it so. `seed_get` loops until the reply channel closes, and with no
+    // queryable at all zenoh closes it as soon as the query resolves — so
+    // the boundary fired in microseconds and `SEED_TIMEOUT` never entered
+    // into it. The test then passed only when the machine was loaded enough
+    // to hold the query past the premise window, which is not a test.
+    //
+    // A queryable that takes the query and never answers holds it open until
+    // the *querier's* timeout, so the seed reliably runs the full
+    // `SEED_TIMEOUT` and the abort below is what decides the outcome.
+    let _blocker = a
+        .declare_queryable("wdrop/state/**")
+        .callback(move |query| {
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                drop(query);
+            });
+        })
+        .await
+        .expect("blocking queryable");
+    // A ready-probe declared AFTER the blocker, the same device
+    // `a_transition_in_the_seed_window_lands_exactly_once` uses: same-session
+    // declarations propagate in order, so once `b` can query this, `b` can
+    // reach the blocker. Without it the seed GET can go out before the
+    // blocker is visible, resolve against nobody, and void the premise —
+    // which is the second way this test was environmental.
+    let _ready = a
+        .declare_queryable("wdrop/ready")
+        .callback(|query| {
+            let q = query.clone();
+            tokio::spawn(async move {
+                q.reply("wdrop/ready", "ok").await.ok();
+            });
+        })
+        .await
+        .expect("ready queryable");
+    let probe_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let replies = b
+            .get("wdrop/ready")
+            .timeout(Duration::from_millis(300))
+            .await
+            .expect("probe get");
+        if replies.recv_async().await.is_ok() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < probe_deadline,
+            "routing never converged"
+        );
+    }
 
     let monitor = zenkey_fleet::Monitor::start(&b, zenkey_fleet::MonitorSpec::default())
         .await
         .expect("monitor");
     let mut events = monitor.events();
 
-    // The seed timeout is the margin this test runs on, and it is deliberately
-    // generous (#371). The boundary must still be *pending* when the monitor
-    // drops — a task that already announced proves nothing about aborting —
-    // and on a loaded machine the scheduler can hold this task off for a good
-    // fraction of a second between `watch_seeded` returning and `drop`. At
-    // 300 ms that lost the race; at two seconds it cannot plausibly.
+    // What the *querier* waits before giving up on the blocker above — so it
+    // is now what the seed's duration actually is, rather than an upper bound
+    // nothing approached.
     const SEED_TIMEOUT: Duration = Duration::from_secs(2);
     monitor
         .watch_seeded(
@@ -375,7 +424,17 @@ async fn dropping_a_monitor_aborts_its_seed_tasks() {
     // yet, so the abort below is what decides the outcome. If this ever trips,
     // the machine was slow enough to void the test — which is a legible
     // failure, unlike the silent one it replaces.
-    if let Ok(Some(item)) = tokio::time::timeout(Duration::from_millis(50), events.recv()).await {
+    //
+    // **Everything queued, not one item.** The stream also carries
+    // `StatsTick` (every 250 ms) and `WatchChanged`, so reading a single
+    // item could consume one of those, leave a `WatchSeeded` queued behind
+    // it, and pass a premise that is false — after which the loop below
+    // pulls that boundary and reports it as having "outlived the monitor"
+    // when it fired *before* the drop. That is this check's own failure
+    // wearing the other check's message, and it is what made this test flake
+    // under a loaded `--workspace` run while passing 12 times in isolation.
+    while let Ok(Some(item)) = tokio::time::timeout(Duration::from_millis(50), events.recv()).await
+    {
         assert!(
             !matches!(
                 item,
@@ -386,7 +445,7 @@ async fn dropping_a_monitor_aborts_its_seed_tasks() {
         );
     }
 
-    // Nothing answers the seed GETs, so the task would otherwise run its
+    // The blocker holds the seed GET, so the task would otherwise run its
     // timeout out and then announce the boundary.
     drop(monitor);
 
