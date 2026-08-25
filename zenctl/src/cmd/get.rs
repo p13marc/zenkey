@@ -8,9 +8,10 @@
 
 use anyhow::Result;
 
-use super::sample::{self, attachment_display, attachment_json, format_sample, hex, type_tag};
+use super::sample::{
+    self, SampleLine, attachment_display, attachment_json, format_sample, hex, type_tag,
+};
 use crate::Bus;
-use crate::input::Source;
 use zenkey_fleet::{Answer, FleetAnswer};
 
 /// The reply discipline as an exit code: 0 = value replies only, 1 = at
@@ -29,16 +30,19 @@ fn exit_code(answers: &[FleetAnswer]) -> i32 {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    selector: &str,
-    body: Option<&Source>,
-    raw: bool,
-    hex_payload: bool,
-    fmt: Option<&str>,
-    no_decode: bool,
-    args: &Bus,
-) -> Result<()> {
+pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::GetArgs {
+        selector,
+        body,
+        raw,
+        hex: hex_payload,
+        fmt,
+        no_decode,
+        bus: _,
+    } = cli;
+    let (selector, body, fmt) = (selector.as_str(), body.as_ref(), fmt.as_deref());
     // The raw seam: `$*` never reaches the session (RFC 03 §2).
     let selector = super::raw_selector(selector)?;
     let base = args.base().to_string();
@@ -163,20 +167,28 @@ pub async fn run(
                                 "{}",
                                 format_sample(
                                     fmt,
-                                    n,
-                                    &a.key,
-                                    &base,
-                                    type_name.as_deref(),
-                                    encoding.unwrap_or(""),
-                                    bytes.len(),
-                                    None,
-                                    &v.text,
-                                    a.attachment.as_ref().map(attachment_display).as_deref(),
-                                    // A reply is not a subscribe-path sample:
-                                    // FleetAnswer carries no QoS axes, and an
-                                    // empty field is honest (#120).
-                                    None,
-                                    None,
+                                    &SampleLine {
+                                        n,
+                                        wire_key: &a.key,
+                                        base: &base,
+                                        type_name: type_name.as_deref(),
+                                        encoding: encoding.unwrap_or(""),
+                                        payload_len: bytes.len(),
+                                        // A reply is not a subscribe-path
+                                        // sample: `FleetAnswer` carries no
+                                        // arrival stamp, no QoS axes and no
+                                        // SourceInfo, and an empty field is
+                                        // honest (#120).
+                                        timestamp: None,
+                                        value: &v.text,
+                                        attachment: a
+                                            .attachment
+                                            .as_ref()
+                                            .map(attachment_display)
+                                            .as_deref(),
+                                        qos: None,
+                                        source: None,
+                                    },
                                 )
                             );
                         } else {

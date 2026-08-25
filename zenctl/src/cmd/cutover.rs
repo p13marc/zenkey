@@ -14,7 +14,15 @@ use crate::Bus;
 /// This verb's name, spelled once (#355) — the dispatcher uses it too.
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check cutover");
 
-pub async fn run(old_root: &str, for_secs: f64, args: &Bus) -> Result<()> {
+pub async fn run(cli: crate::cli::CheckCutoverArgs) -> Result<()> {
+    let bus = ASKING.ask(Bus::resolve(&cli.bus));
+    let args = &bus;
+    let crate::cli::CheckCutoverArgs {
+        old_root,
+        for_secs,
+        bus: _,
+    } = cli;
+    let old_root = old_root.as_str();
     // The flag is seconds; the engine takes a `Duration`, which is what a
     // window *is* — the conversion belongs at this edge and nowhere deeper.
     let window = ASKING.ask(super::positive_secs("--for", for_secs));

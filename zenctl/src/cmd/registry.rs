@@ -14,7 +14,6 @@
 //! wearing the same name.
 
 use crate::cli::ExportAs;
-use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use zenkey::RegistrySlice;
@@ -26,7 +25,15 @@ use crate::Bus;
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check retired");
 
 /// What `registry export` emits.
-pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Result<()> {
+pub async fn export(cli: crate::cli::RegistryExportArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::RegistryExportArgs {
+        target,
+        producer,
+        bus: _,
+    } = cli;
+    let producer = producer.as_deref();
     let slices = args.slice_set().await?;
     let selected: Vec<&RegistrySlice> = slices
         .slices()
@@ -179,7 +186,9 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
 }
 
 /// `registry lint <dir>` — the consumer's build lints, without the build.
-pub fn lint(dir: &Path, ledger: Option<&PathBuf>, out: crate::cli::OutputArgs) -> Result<()> {
+pub fn lint(cli: crate::cli::RegistryLintArgs) -> Result<()> {
+    let crate::cli::RegistryLintArgs { dir, ledger, out } = cli;
+    let (dir, ledger) = (dir.as_path(), ledger.as_ref());
     let mut config = zenkey_build::Config::new()
         .registry_dir(dir)
         .no_rerun_if_changed();
@@ -209,7 +218,9 @@ pub fn lint(dir: &Path, ledger: Option<&PathBuf>, out: crate::cli::OutputArgs) -
 /// `registry lock <dir>` — regenerate the RFC 08 §3.1 compatibility lock.
 /// Refuses an incompatible rewrite without `--force`; a forced break prints
 /// every broken pin (loud by contract).
-pub fn lock(dir: &Path, force: bool, out: crate::cli::OutputArgs) -> Result<()> {
+pub fn lock(cli: crate::cli::RegistryLockArgs) -> Result<()> {
+    let crate::cli::RegistryLockArgs { dir, force, out } = cli;
+    let dir = dir.as_path();
     let update = zenkey_build::Config::new()
         .registry_dir(dir)
         .no_rerun_if_changed()

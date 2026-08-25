@@ -13,7 +13,20 @@ use zenkey_fleet::{RecordBounds, RecordReport, ZREC_VERSION, ZrecHeader, ZrecSin
 use crate::Bus;
 use crate::cli::SelectorArgs;
 
-pub async fn run(
+pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::RecordArgs {
+        selector,
+        out,
+        for_secs,
+        count,
+        bus: _,
+    } = cli;
+    run_inner(&selector, &out, for_secs, count, args).await
+}
+
+async fn run_inner(
     sel: &SelectorArgs,
     out: &str,
     for_secs: Option<f64>,

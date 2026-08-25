@@ -17,16 +17,21 @@ use crate::Bus;
 /// does not lift this; `--calls` explicitly can.
 const DEFAULT_COUNT: usize = 100;
 
-#[allow(clippy::too_many_arguments)]
-pub async fn rpc(
-    origin: &str,
-    producer: &str,
-    procedure: &str,
-    calls: Option<usize>,
-    concurrency: usize,
-    i_know: bool,
-    args: &Bus,
-) -> Result<()> {
+pub async fn rpc(cli: crate::cli::BenchRpcArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    // The note is this verb's own preamble, not the dispatcher's (#354).
+    eprintln!("{}", note(args.timeout()));
+    let crate::cli::BenchRpcArgs {
+        origin,
+        producer,
+        procedure,
+        calls,
+        concurrency,
+        i_know,
+        bus: _,
+    } = cli;
+    let (origin, producer, procedure) = (origin.as_str(), producer.as_str(), procedure.as_str());
     let target = zenkey_fleet::CallTarget::parse(origin)?;
     let slices = args.slices_optional().await?;
     let session = args.session().await?;

@@ -9,19 +9,27 @@
 
 use anyhow::Result;
 
-use crate::cli::SelectorArgs;
 use crate::{Bus, report};
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    sel: &SelectorArgs,
-    for_secs: f64,
-    per_key: bool,
-    loss: bool,
-    latency: bool,
-    bandwidth: bool,
-    args: &Bus,
-) -> Result<()> {
+pub async fn run(cli: crate::cli::RateArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::RateArgs {
+        selector,
+        for_secs,
+        bytes: bandwidth,
+        per_key,
+        loss,
+        latency,
+        bus: _,
+    } = cli;
+    let sel = &selector;
+    // `--latency` implies `--per-key`: a latency figure is a per-key
+    // statistic, and the aggregate table has no column to print it in. The
+    // rule used to live in the dispatcher, which passed `per_key || latency`
+    // as one argument and `latency` again as another — two adjacent bools in
+    // a run of four (#354).
+    let per_key = per_key || latency;
     let selector = super::selector_of(sel, args)?;
     let window = super::positive_secs("--for", for_secs)?;
     let session = args.session().await?;

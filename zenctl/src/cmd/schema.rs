@@ -24,14 +24,22 @@
 use anyhow::Result;
 
 use crate::Bus;
-use crate::input::Source;
 
 /// The verdict verb's name, spelled once (#355) — the dispatcher
 /// uses it too.
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check schema");
 
 /// `zenctl schema show <producer> [--type X] [--full]`.
-pub async fn show(producer: &str, type_filter: Option<&str>, full: bool, args: &Bus) -> Result<()> {
+pub async fn show(cli: crate::cli::SchemaShowArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::SchemaShowArgs {
+        producer,
+        type_name: type_filter,
+        full,
+        bus: _,
+    } = cli;
+    let (producer, type_filter) = (producer.as_str(), type_filter.as_deref());
     let session = args.session().await?;
     // Slices enrich the dump — the *types* come from the producer's served
     // `describe` (`zenkey_fleet::schema_dump`); slices only compute
@@ -60,14 +68,24 @@ pub async fn show(producer: &str, type_filter: Option<&str>, full: bool, args: &
 /// either verdict, for the same reason `check cutover` reserves its 2.
 ///
 /// This checks; it never publishes and never encodes.
-pub async fn check(
-    type_name: &str,
-    from: &Source,
-    producer: Option<&str>,
-    schema_set: Option<&std::path::Path>,
-    encoding: Option<&str>,
-    args: &Bus,
-) -> Result<()> {
+pub async fn check(cli: crate::cli::CheckSchemaArgs) -> Result<()> {
+    let bus = ASKING.ask(Bus::resolve(&cli.bus));
+    let args = &bus;
+    let crate::cli::CheckSchemaArgs {
+        type_name,
+        from,
+        producer,
+        schema_set,
+        encoding,
+        bus: _,
+    } = cli;
+    let (type_name, from, producer, schema_set, encoding) = (
+        type_name.as_str(),
+        &from,
+        producer.as_deref(),
+        schema_set.as_deref(),
+        encoding.as_deref(),
+    );
     use zenkey::schema::WireEncoding;
     use zenkey_fleet::Verdict;
 

@@ -19,7 +19,16 @@ use zenkey_fleet::report::Transition;
 
 use crate::Bus;
 
-pub async fn run(rules: &[String], every: f64, count: Option<u64>, args: &Bus) -> Result<()> {
+pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::WatchdogArgs {
+        rules,
+        every,
+        count,
+        bus: _,
+    } = cli;
+    let rules = rules.as_slice();
     // `--every`/`--count`, not `--tick`/`--ticks` (#307): one period flag and
     // one stop-bound flag across the whole tool.
     let tick = super::positive_secs("--every", every)?;

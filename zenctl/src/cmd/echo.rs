@@ -10,8 +10,8 @@
 use anyhow::Result;
 
 use super::sample::{
-    self, attachment_display, attachment_json, format_sample, hex, qos_summary, source_summary,
-    type_tag,
+    self, SampleLine, attachment_display, attachment_json, format_sample, hex, qos_summary,
+    source_summary, type_tag,
 };
 use crate::Bus;
 use crate::cli::EchoArgs;
@@ -292,17 +292,19 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
                     "{}",
                     format_sample(
                         fmt,
-                        seen,
-                        key,
-                        &base,
-                        type_name.as_deref(),
-                        encoding,
-                        bytes.len(),
-                        timestamp.as_deref(),
-                        &v.text,
-                        att.as_deref(),
-                        Some(&qos),
-                        source.as_deref(),
+                        &SampleLine {
+                            n: seen,
+                            wire_key: key,
+                            base: &base,
+                            type_name: type_name.as_deref(),
+                            encoding,
+                            payload_len: bytes.len(),
+                            timestamp: timestamp.as_deref(),
+                            value: &v.text,
+                            attachment: att.as_deref(),
+                            qos: Some(&qos),
+                            source: source.as_deref(),
+                        },
                     )
                 );
             } else {

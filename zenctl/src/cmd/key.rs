@@ -100,8 +100,32 @@ pub fn judge(op: crate::render::KeyOp, a: &str, b: &str) -> RelationVerdict {
     }
 }
 
-/// `key includes <a> <b>` / `key intersects <a> <b>`.
-pub fn relate(
+/// `key includes <a> <b>`. The op literal lives with the verb, not in the
+/// dispatcher that used to name both of them (#354).
+pub fn includes(cli: crate::cli::KeyIncludesArgs) -> Result<()> {
+    let crate::cli::KeyIncludesArgs { a, b, out } = cli;
+    relate(
+        crate::render::KeyOp::Includes,
+        &a,
+        &b,
+        out.format,
+        out.color,
+    )
+}
+
+/// `key intersects <a> <b>`.
+pub fn intersects(cli: crate::cli::KeyIntersectsArgs) -> Result<()> {
+    let crate::cli::KeyIntersectsArgs { a, b, out } = cli;
+    relate(
+        crate::render::KeyOp::Intersects,
+        &a,
+        &b,
+        out.format,
+        out.color,
+    )
+}
+
+fn relate(
     op: crate::render::KeyOp,
     a: &str,
     b: &str,

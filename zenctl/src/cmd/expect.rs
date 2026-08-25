@@ -6,24 +6,28 @@
 use anyhow::Result;
 
 use crate::Bus;
-use crate::cli::SelectorArgs;
 use crate::exit::unaskable;
 
 /// This verb's name, spelled once (#355) — the dispatcher uses it too.
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check expect");
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    sel: &SelectorArgs,
-    for_secs: f64,
-    at_least: Option<u64>,
-    rate_min: Option<f64>,
-    rate_max: Option<f64>,
-    valid_payload: bool,
-    qos: Option<&str>,
-    absent: bool,
-    args: &Bus,
-) -> Result<()> {
+pub async fn run(cli: crate::cli::CheckExpectArgs) -> Result<()> {
+    // A verdict verb: a failure before the question is asked is the reserved
+    // exit 2, never 1 (`exit::asked`'s rule).
+    let bus = ASKING.ask(Bus::resolve(&cli.bus));
+    let args = &bus;
+    let crate::cli::CheckExpectArgs {
+        selector,
+        for_secs,
+        at_least,
+        rate_min,
+        rate_max,
+        valid_payload,
+        qos,
+        absent,
+        bus: _,
+    } = cli;
+    let (sel, qos) = (&selector, qos.as_deref());
     // A verdict verb: a selector this tool refuses, or a window of zero
     // seconds, is a question that cannot be asked — `asked`'s reserved 2,
     // never the 1 that would claim a verdict.

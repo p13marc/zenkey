@@ -64,15 +64,17 @@ pub async fn dispatch(cli: crate::cli::PubArgs) -> Result<()> {
         }
         (None, Some(key), Some(body)) => {
             run(
-                &key,
-                &body,
-                cli.qos.as_deref(),
-                cli.encoding.as_deref(),
-                cli.times,
-                cli.every,
-                cli.no_validate,
-                cli.raw,
-                cli.attachment.as_ref(),
+                OneShot {
+                    key: &key,
+                    body: &body,
+                    qos: cli.qos.as_deref(),
+                    encoding: cli.encoding.as_deref(),
+                    times: cli.times,
+                    every: cli.every,
+                    no_validate: cli.no_validate,
+                    raw: cli.raw,
+                    attachment: cli.attachment.as_ref(),
+                },
                 &bus,
             )
             .await
@@ -124,19 +126,32 @@ fn resolve_qos(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    key: &str,
-    body: &Source,
-    qos: Option<&str>,
-    encoding: Option<&str>,
+/// One `pub <KEY> <BODY>`, named (#354): nine parameters of which four were
+/// adjacent `Option<&str>`/`&str`, and `dispatch` filled them positionally.
+struct OneShot<'a> {
+    key: &'a str,
+    body: &'a Source,
+    qos: Option<&'a str>,
+    encoding: Option<&'a str>,
     times: usize,
     every: f64,
     no_validate: bool,
     raw: bool,
-    attachment: Option<&Source>,
-    args: &Bus,
-) -> Result<()> {
+    attachment: Option<&'a Source>,
+}
+
+async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
+    let OneShot {
+        key,
+        body,
+        qos,
+        encoding,
+        times,
+        every,
+        no_validate,
+        raw,
+        attachment,
+    } = p;
     // An explicit --qos fails fast, before the body or the bus.
     let explicit_qos = qos.map(parse_qos).transpose()?;
     let typed = body.read()?;
@@ -234,7 +249,16 @@ async fn matching_note(
 }
 
 /// `zenctl retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
-pub async fn retire(key: &str, qos: &str, i_know: bool, args: &Bus) -> Result<()> {
+pub async fn retire(cli: crate::cli::RetireArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::RetireArgs {
+        key,
+        qos,
+        i_know,
+        bus: _,
+    } = cli;
+    let (key, qos) = (key.as_str(), qos.as_str());
     let qos = parse_qos(qos)?;
     // Slices enrich the guard rather than deciding it — a state key still
     // passes with none, because the class is in the key.

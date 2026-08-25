@@ -491,33 +491,7 @@ pub(crate) enum Command {
     /// the same rendering ladder as `echo` (served-schema decode →
     /// structural → text → hex). `@/**` browses the zenoh admin space.
     /// Exit codes: 0 values only, 1 an error reply, 2 silence.
-    Get {
-        /// Any key expression, params included (`key?k=v`).
-        #[arg(add = ArgValueCandidates::new(completion::keys))]
-        selector: String,
-        /// Query body: inline text, `@file`, or `-` for stdin — rides the
-        /// same encode ladder as `pub` when the selector's key part refines
-        /// to a registered subject.
-        #[arg(long, value_name = "TEXT|@FILE|-")]
-        body: Option<Source>,
-        /// Ship the body verbatim and print payloads as hex; no decode.
-        #[arg(long)]
-        raw: bool,
-        /// Decode the type name, print the payload as hex.
-        #[arg(long)]
-        hex: bool,
-        /// Per-reply line template — the `echo` % vocabulary
-        /// (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c}). %T renders `-`
-        /// and %q/%S render empty here: a reply carries no arrival stamp,
-        /// QoS axes or SourceInfo — those are subscription-side facts (#120).
-        #[arg(long, value_name = "TEMPLATE")]
-        fmt: Option<String>,
-        /// Skip schema decode; render structurally.
-        #[arg(long)]
-        no_decode: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Get(GetArgs),
     /// Subscribe and print decoded samples (on-bus).
     ///
     /// With a served `describe` schema (RFC 08 §7) payloads decode into
@@ -535,51 +509,13 @@ pub(crate) enum Command {
     /// State keys retire freely (retirement is the class's own semantics);
     /// anything else is an operator cleanup (v1.12) and needs --i-know.
     /// Wildcards are refused outright.
-    Retire {
-        /// Full wire key to retire (concrete — wildcards are refused).
-        #[arg(add = ArgValueCandidates::new(completion::keys))]
-        key: String,
-        /// QoS profile for the tombstone (RFC 04 §3). A retirement is the
-        /// final state transition, so it defaults to the reliable profile.
-        #[arg(long, default_value = "transition", add = ArgValueCandidates::new(completion::qos_profiles))]
-        qos: String,
-        /// Retire a key that is not state-shaped — the RFC 04 §1.2 (v1.12)
-        /// operator act. The refusal you are overriding names its reason.
-        #[arg(long = "i-know")]
-        i_know: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Retire(RetireArgs),
     /// Measure publish rate over a window (ros2-style), or bytes with --bytes.
     ///
     /// One verb, because they are one observation: `topic hz` and `topic bw`
     /// watched the same window through the same Monitor and differed only in
     /// which column the table led with (#307).
-    Rate {
-        #[command(flatten)]
-        selector: SelectorArgs,
-        /// Measurement window, seconds.
-        #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
-        for_secs: f64,
-        /// Lead with payload bandwidth instead of sample rate.
-        #[arg(long)]
-        bytes: bool,
-        /// Report each concrete key separately.
-        #[arg(long)]
-        per_key: bool,
-        /// Also report source-sequence gaps (needs publishers that attach
-        /// SourceInfo; absent info reads as zero, honestly labeled).
-        #[arg(long)]
-        loss: bool,
-        /// Also report observed pub→sub latency per key (implies --per-key):
-        /// arrival wall-clock minus publisher HLC — contains clock skew, and
-        /// is labeled as such; negative values are the skew evidence
-        /// (#119). Unstamped samples are counted, never treated as zero.
-        #[arg(long)]
-        latency: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Rate(RateArgs),
     /// Field intelligence over a window (#223): per-dotted-path statistics —
     /// presence, type stability, change count, numeric range, small-domain
     /// values — plus the three findings per-sample validation cannot see.
@@ -596,23 +532,7 @@ pub(crate) enum Command {
     /// §5.1 O6); with no registry loaded, stuck/new are unjudgeable and the
     /// report says so (O4). Findings are output, not verdicts — exit 0
     /// unless you opt in with `--fail-on`.
-    Field {
-        #[command(flatten)]
-        selector: SelectorArgs,
-        /// Observation window, seconds.
-        #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
-        for_secs: f64,
-        /// Bound on the per-path table, across every key the window sees.
-        #[arg(long, value_name = "N", default_value_t = 512)]
-        max_paths: usize,
-        /// Exit 1 when a finding at (or above) this severity exists —
-        /// `doctor`'s opt-in, on the verb that grew the same findings (#307).
-        /// Default: always exit 0.
-        #[arg(long, value_enum, value_name = "SEVERITY")]
-        fail_on: Option<FailOn>,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Field(FieldArgs),
     /// Capture a selector's traffic to a .zrec file (RFC 09 §5.2).
     ///
     /// Through the Monitor: a bus that outruns the disk surfaces as drop
@@ -620,21 +540,7 @@ pub(crate) enum Command {
     /// a capture is a bounded observer and says what it cost. Replay with
     /// `zenctl replay`; the file is ndjson (one row per line, payloads
     /// lossless as base64 `bytes`), so `jq` reads it too.
-    Record {
-        #[command(flatten)]
-        selector: SelectorArgs,
-        /// Output file.
-        #[arg(long, short = 'o', value_name = "FILE")]
-        out: String,
-        /// Stop after this many seconds.
-        #[arg(long = "for", value_name = "SECS")]
-        for_secs: Option<f64>,
-        /// Stop after this many samples (0 = until ctrl-c or --for).
-        #[arg(long, value_name = "N", default_value_t = 0)]
-        count: u64,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Record(RecordArgs),
     /// Replay a .zrec capture onto the bus — replay is PUBLISHING.
     ///
     /// Real puts through declared publishers, at the capture's own pacing
@@ -642,31 +548,7 @@ pub(crate) enum Command {
     /// old data WINS last-writer-wins against a live fleet, which is why
     /// the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the
     /// capture header's base is a contract (`--force-base` to override).
-    Replay {
-        /// The .zrec file to replay.
-        file: String,
-        /// Pacing scale: 2.0 replays twice as fast as captured.
-        #[arg(long, default_value_t = 1.0)]
-        speed: f64,
-        /// List every would-be put and publish nothing (no session is
-        /// even opened). Preview pacing is not simulated.
-        #[arg(long)]
-        dry_run: bool,
-        /// Replay even though the resolved base differs from the capture
-        /// header's.
-        #[arg(long)]
-        force_base: bool,
-        /// Replay recorded deletes that fall off the state class — the
-        /// same operator price as `retire` (RFC 04 §1.2, v1.12).
-        #[arg(long = "i-know")]
-        i_know: bool,
-        /// QoS profile for rows that recorded none.
-        #[arg(long, default_value = "refreshed",
-              add = ArgValueCandidates::new(completion::qos_profiles))]
-        qos: String,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Replay(ReplayArgs),
     /// Stand up a mock queryable: answer every query on a keyexpr with one
     /// static body, and log every ask (#121).
     ///
@@ -675,33 +557,7 @@ pub(crate) enum Command {
     /// the shell covers dynamic replies by restarting serve. (nuze and zsak
     /// own the embedded-language lane, at the cost of a Nushell dependency
     /// and a linked libpython respectively.)
-    Serve {
-        /// Key expression to serve (full wire form; wildcards welcome).
-        #[arg(add = ArgValueCandidates::new(completion::keys))]
-        keyexpr: String,
-        /// Reply body: inline text, `@file`, or `-` for stdin (read once) —
-        /// through the same encode ladder as `pub`.
-        reply: Source,
-        /// Wire encoding to declare on replies. Defaults to the registry's
-        /// declared encoding when the keyexpr refines, else none.
-        #[arg(long)]
-        encoding: Option<String>,
-        /// Do not refuse a body the served schema rejects.
-        #[arg(long)]
-        no_validate: bool,
-        /// Reply the bytes verbatim: no schema lookup, no refusal.
-        #[arg(long)]
-        raw: bool,
-        /// Declare the queryable complete — a claim this responder holds
-        /// ALL the data the expression names. Say it only when you mean it.
-        #[arg(long)]
-        complete: bool,
-        /// Exit after N queries (0 = until ctrl-c).
-        #[arg(long, value_name = "N", default_value_t = 0)]
-        count: usize,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Serve(ServeArgs),
     /// Generate registry-driven test traffic (#162): every declared subject
     /// of a producer, schema-synthesized payloads, declared QoS,
     /// class-conscious rates — a mock producer for testing consumers.
@@ -720,28 +576,7 @@ pub(crate) enum Command {
     /// segment". It is also the one zenctl verb where multicast is ON by
     /// default — scouting is the point, and a scout only listens for Hellos
     /// and joins nothing.
-    Scout {
-        /// Filter by advertised kind. Repeatable; default: all three.
-        #[arg(long, value_enum)]
-        what: Vec<ScoutWhat>,
-        /// Seconds to wait for Hellos (default 5; a context may override).
-        #[arg(long, value_name = "SECS")]
-        timeout: Option<u64>,
-        /// Endpoint to connect to, repeatable — reaches gossip scouting
-        /// where multicast is filtered.
-        #[arg(long, short = 'c')]
-        connect: Vec<String>,
-        /// Endpoint to listen on, repeatable.
-        #[arg(long, short = 'l')]
-        listen: Vec<String>,
-        /// Use a named context for endpoints/timeout defaults.
-        #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
-        context: Option<String>,
-        /// table = census (deduped by zid); ndjson = arrival log, one Hello
-        /// per line as heard.
-        #[command(flatten)]
-        out: OutputArgs,
-    },
+    Scout(ScoutArgs),
 
     // ── Judgement: exit-coded, under one contract (`crate::exit`) ─────────
     /// Exit-coded assertions, all on one contract: 0 = clean, 1 = a finding,
@@ -788,24 +623,7 @@ pub(crate) enum Command {
     /// ok / firing / unobservable — a drop under a completeness claim is
     /// "could not tell", never "ok", which is what keeps a 3am page honest.
     /// The first evaluation states each rule's baseline once, from null.
-    Watchdog {
-        /// One rule (repeatable): `rate-above <SEL> <HZ>`,
-        /// `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
-        /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`,
-        /// `doctor <CHECK-ID>`, `origin-down <ORIGIN>`, `dropped`.
-        /// Selectors are full wire form (this session is un-namespaced,
-        /// RFC 09 §5); a doctor rule runs the doctor once per tick.
-        #[arg(long = "rule", value_name = "RULE", required = true)]
-        rules: Vec<String>,
-        /// Seconds between evaluations — the one period flag (#307).
-        #[arg(long, value_name = "SECS", default_value_t = 5.0)]
-        every: f64,
-        /// Stop after N evaluations (default: run until interrupted).
-        #[arg(long, value_name = "N")]
-        count: Option<u64>,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Watchdog(WatchdogArgs),
 
     // ── Meta ──────────────────────────────────────────────────────────────
     /// Manage named connection contexts (config file).
@@ -843,40 +661,7 @@ pub(crate) enum CheckCmd {
     /// observation; 2 = the observation cannot carry the claim (drops under
     /// a completeness claim, session failure). `--absent` is legitimate
     /// ONLY because of that 2.
-    Expect {
-        #[command(flatten)]
-        selector: SelectorArgs,
-        /// Observation window, seconds.
-        #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
-        for_secs: f64,
-        /// Require at least N samples (default 1 unless --absent).
-        //
-        // `--at-least`, not `--count` (#307): `--count` is a stop bound
-        // everywhere else in the tool, and here it was an assertion — the
-        // one flag name that meant the opposite of itself.
-        #[arg(long, value_name = "N")]
-        at_least: Option<u64>,
-        /// Samples/second floor, measured over the full window.
-        #[arg(long, value_name = "HZ")]
-        rate_min: Option<f64>,
-        /// Samples/second ceiling, measured over the full window.
-        #[arg(long, value_name = "HZ")]
-        rate_max: Option<f64>,
-        /// Require every observed payload to validate against its served
-        /// schema (#159). "Unknowable" fails the assertion, with the reason.
-        #[arg(long)]
-        valid_payload: bool,
-        /// Require observed wire QoS to match: `declared` (each subject's
-        /// registry profile) or one profile name for everything.
-        #[arg(long, value_name = "declared|PROFILE",
-              add = ArgValueCandidates::new(completion::qos_profiles))]
-        qos: Option<String>,
-        /// Assert silence: no sample may match within the window.
-        #[arg(long, conflicts_with_all = ["at_least", "rate_min", "rate_max", "valid_payload", "qos"])]
-        absent: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Expect(CheckExpectArgs),
     /// Cutover acceptance, half one (RFC 09 §6): assert a retired key
     /// family SILENT while the new plane carries traffic.
     ///
@@ -885,16 +670,7 @@ pub(crate) enum CheckCmd {
     /// non-verdict, because a dead fleet passes the silence half for free.
     /// The leak check's meaning is stated, not inferred: anything outside
     /// `<base>/v1/` that is not the old root.
-    Cutover {
-        /// The retired key family (a full wire key expression).
-        #[arg(long = "old-root", value_name = "KEYEXPR")]
-        old_root: String,
-        /// Listening window, seconds.
-        #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
-        for_secs: f64,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Cutover(CheckCutoverArgs),
     /// The deprecation burn-down: which `[[deprecated]]` entries are actually
     /// finished. Exit 0 = every entry passes, 1 = a retired subject still
     /// speaks, 2 = unproven — silence is not a pass (RFC 05 §3.1).
@@ -921,66 +697,26 @@ pub(crate) enum CheckCmd {
     /// called directly; a hostname resolves through the RFC 06 §6 identity
     /// bridge first, and the probe FAILS if the bridge yields nothing.
     /// Fanning out is what `blob locate` does; this verb refuses to.
-    Probe {
-        /// Origin id (`h-…`) or hostname (resolved via the bridge).
-        target: String,
-        /// Producer name.
-        #[arg(add = ArgValueCandidates::new(completion::producers))]
-        producer: String,
-        /// Procedure path, e.g. `introspect`.
-        #[arg(add = ArgValueCandidates::new(completion::procedures))]
-        procedure: String,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Probe(CheckProbeArgs),
     /// Validate one payload against its schema — no bus write, exit-coded
     /// for CI (#159): 0 = valid, 1 = does not conform, 2 = could not check.
     ///
     /// The schema comes from a live `describe` (give --producer) or an
     /// offline SchemaSet JSON document (--schema-set; the registry TOMLs
     /// carry type *names*, not shapes, so a directory alone cannot check).
-    Schema {
-        /// Type name to validate against.
-        #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
-        type_name: String,
-        /// Payload: inline text, `@file`, or `-` for stdin.
-        #[arg(long, value_name = "TEXT|@FILE|-")]
-        from: Source,
-        /// Producer whose served `describe` carries the schema (live mode).
-        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
-        producer: Option<String>,
-        /// SchemaSet JSON document (RFC 08 §7) — offline mode, no session.
-        #[arg(long, value_name = "FILE")]
-        schema_set: Option<std::path::PathBuf>,
-        /// Wire encoding of the payload. Defaults to the schema kind's own
-        /// (json-schema → JSON, protobuf → protobuf, cdr → XCDR1).
-        #[arg(long)]
-        encoding: Option<String>,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Schema(CheckSchemaArgs),
 }
 
 #[derive(Subcommand)]
 pub(crate) enum KeyCmd {
     /// Does `a` include every key `b` can name? Exit 0 yes / 1 no / 2 invalid.
-    Includes {
-        a: String,
-        b: String,
-        #[command(flatten)]
-        out: OutputArgs,
-    },
+    Includes(KeyIncludesArgs),
     /// Can `a` and `b` name a common key? Exit 0 yes / 1 no / 2 invalid.
     ///
     /// When a 'no' is the convention's doing — `**` never crosses an
     /// `@`-chunk (RFC 03 §4 D2), `*` never matches a verbatim service
     /// origin (D4) — the output says so, with the citation.
-    Intersects {
-        a: String,
-        b: String,
-        #[command(flatten)]
-        out: OutputArgs,
-    },
+    Intersects(KeyIntersectsArgs),
     /// Canonicalize an expression, or print its parse error verbatim.
     Canon {
         expr: String,
@@ -1031,49 +767,13 @@ pub(crate) enum BenchCmd {
     /// repeating a write into a live fleet is a different act from measuring
     /// it. Exit 1 when any measured reply was an error envelope, 2 when
     /// nobody answered.
-    Rpc {
-        /// Origin to target: a host id, `*` for the fleet, or `@catalog`.
-        origin: String,
-        /// Producer name.
-        #[arg(add = ArgValueCandidates::new(completion::producers))]
-        producer: String,
-        /// Procedure path. `introspect` is the safe default: RFC 08 §6 makes
-        /// it a read every producer serves.
-        #[arg(default_value = "introspect", add = ArgValueCandidates::new(completion::procedures))]
-        procedure: String,
-        /// Calls to issue (default 100).
-        //
-        // `--calls`, not `--count` (#307): `--count` is a stop bound on a
-        // stream everywhere else, and this is the size of the experiment.
-        #[arg(long, value_name = "N")]
-        calls: Option<usize>,
-        /// Calls in flight at once (1 = strictly sequential).
-        #[arg(long, default_value_t = 1)]
-        concurrency: usize,
-        /// Bench a procedure the registry does not declare idempotent.
-        #[arg(long = "i-know")]
-        i_know: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Rpc(BenchRpcArgs),
 }
 
 #[derive(Subcommand)]
 pub(crate) enum SchemaCmd {
     /// Dump a producer's served payload schemas (`@rpc/<producer>/describe`).
-    Show {
-        /// Producer name, e.g. `sysinfo`.
-        #[arg(add = ArgValueCandidates::new(completion::producers))]
-        producer: String,
-        /// Show only this type (implies the full document).
-        #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
-        type_name: Option<String>,
-        /// Print every schema document in full, not just kind + hash.
-        #[arg(long)]
-        full: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Show(SchemaShowArgs),
 }
 
 #[derive(Subcommand)]
@@ -1083,19 +783,7 @@ pub(crate) enum RegistryCmd {
     /// `--as toml` round-trips through `--registry <dir>`; `--as jsonschema`
     /// bundles the producers' served `describe` schemas (RFC 08 §7);
     /// `--as asyncapi` maps subjects to channels and procedures to operations.
-    Export {
-        /// Output document. A foreign schema, so `--format` has no say over
-        /// it: passing both is a usage error, not a silent preference.
-        // #243. Enforced in `refuse_foreign_format` rather than by
-        // `conflicts_with`, which would fire on `ZENCTL_FORMAT` too.
-        #[arg(long = "as", value_enum, default_value = "toml")]
-        target: ExportAs,
-        /// Only this producer.
-        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
-        producer: Option<String>,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Export(RegistryExportArgs),
     /// Diff local `--registry` files against what the fleet serves.
     ///
     /// RFC 08 §6: a disagreement is a finding, not an ambiguity. `doctor`
@@ -1105,15 +793,7 @@ pub(crate) enum RegistryCmd {
         bus: BusArgs,
     },
     /// Run the RFC 08 §5 registry lints on a directory, as a build would.
-    Lint {
-        /// The registry directory (the one a build script points at).
-        dir: PathBuf,
-        /// Deprecation ledger; defaults to `<dir>/deprecated.lock`.
-        #[arg(long, value_name = "FILE")]
-        ledger: Option<PathBuf>,
-        #[command(flatten)]
-        out: OutputArgs,
-    },
+    Lint(RegistryLintArgs),
     /// Write or update the RFC 08 §3.1 compatibility lock (registry.lock).
     ///
     /// Additive evolution and `[[deprecated]]` retirement regenerate cleanly;
@@ -1121,15 +801,7 @@ pub(crate) enum RegistryCmd {
     /// path) is refused — retire and add a sibling instead. `--force`
     /// overrides, and prints every broken pin: the escape hatch is legal,
     /// silent it is not.
-    Lock {
-        /// The registry directory (the one a build script points at).
-        dir: PathBuf,
-        /// Rewrite pins over an incompatible edit — the loud break.
-        #[arg(long)]
-        force: bool,
-        #[command(flatten)]
-        out: OutputArgs,
-    },
+    Lock(RegistryLockArgs),
 }
 
 #[derive(Subcommand)]
@@ -1149,54 +821,21 @@ pub(crate) enum AdminCmd {
     /// Their pictures are unlabeled circles; ours says which of admin space
     /// and liveliness backs each element. Nodes whose admin space is off
     /// render "heard of, not queryable" — never omitted.
-    Graph {
-        /// Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
-        ///
-        /// A foreign schema, so `--format` has no say over it: passing both is
-        /// a usage error, not a silent preference.
-        // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
-        #[arg(long)]
-        dot: bool,
-        /// Also join liveliness origins to their sessions (#131) — one
-        /// extra admin sweep; attachments come from the admin sources or
-        /// they are shown as merely reported, never guessed.
-        #[arg(long)]
-        origins: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Graph(AdminGraphArgs),
 }
 
 #[derive(Subcommand)]
 pub(crate) enum StorageCmd {
     /// List configured storages and judge declared state families against
     /// them (covered / partial / uncovered — RFC 04 §4, issue #14).
-    List {
-        /// Re-render on change.
-        #[arg(long)]
-        watch: bool,
-        /// With --watch: seconds between re-renders.
-        #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
-        every: f64,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    List(StorageListArgs),
 }
 
 #[derive(Subcommand)]
 pub(crate) enum BlobCmd {
     /// Which producers declare which `@blob` tiers (registry only, no bus
     /// traffic). A declaration is a capability, never possession.
-    List {
-        /// Only this producer's declarations.
-        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
-        producer: Option<String>,
-        /// Only this tier: artifact, tree or store.
-        #[arg(long, add = ArgValueCandidates::new(completion::blob_tiers))]
-        tier: Option<String>,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    List(BlobListArgs),
     /// Ask every origin who holds an object, with a *tiny* reply
     /// (RFC 07 §2.5, total across tiers since v1.17): `have`/`manifest` for
     /// an artifact, `store/<algo>/have` for a chunk, `tree/<root>/have` for
@@ -1215,39 +854,7 @@ pub(crate) enum BlobCmd {
     },
     /// Fetch from **one** origin's concrete key, at data-low, verifying every
     /// reply against the content root before it reaches disk (RFC 07 §2.1).
-    Fetch {
-        /// `<id>`, `artifact/<id>`, `tree/<hex>` or `store/<algo>/<hex>`.
-        target: String,
-        /// The one origin to fetch from (`h-<12hex>` or `@service`) — as
-        /// reported by `zenctl blob locate`. A wildcard is not an origin.
-        //
-        // `--origin`, not `--from` (#307): `--from` names an input *source*
-        // in this tool (`pub --from ndjson`, `check schema --from @file`),
-        // and an origin is a place on the bus, not a source of bytes to
-        // read.
-        #[arg(long, value_name = "ORIGIN")]
-        origin: String,
-        /// Where to write. Defaults to the target's last chunk; the origin's
-        /// advisory filename is never used to choose a path.
-        #[arg(long, short = 'o', value_name = "PATH")]
-        out: Option<PathBuf>,
-        /// The content root the reference carried (RFC 07 §2.1). Every reply
-        /// is verified against it before disk.
-        #[arg(long, value_name = "HEX")]
-        root: Option<String>,
-        /// Accept whatever this origin serves, without a root to check it
-        /// against — trust-on-first-use, stated out loud.
-        #[arg(long, conflicts_with = "root")]
-        allow_unpinned: bool,
-        /// Replace an existing destination file.
-        #[arg(long)]
-        overwrite: bool,
-        /// Suppress progress on stderr.
-        #[arg(long, short = 'q')]
-        quiet: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Fetch(BlobFetchArgs),
 }
 
 #[derive(Subcommand)]
@@ -1324,45 +931,7 @@ pub(crate) enum TopicCmd {
     /// Reads each producer's served introspect slice off the live bus by
     /// default — so it works against *any* keyspace-v2 fleet (RFC 08 §6).
     /// With `--registry <dir>` it answers offline from local registry TOMLs.
-    List {
-        /// Only this producer.
-        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
-        producer: Option<String>,
-        /// Only this class: telemetry, state, or events.
-        #[arg(long, add = ArgValueCandidates::new(completion::classes))]
-        class: Option<zenkey::Class>,
-        /// Only subjects carrying this payload type.
-        #[arg(long, value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
-        r#type: Option<String>,
-        /// Also list retired subjects from each slice's `[[deprecated]]`
-        /// ledger (RFC 08 §6: which hosts still serve a deprecated subject).
-        #[arg(long)]
-        deprecated: bool,
-        /// Re-render on change. Appeared and disappeared subjects are marked
-        /// for one cycle; ndjson streams one snapshot object per cycle.
-        #[arg(long, conflicts_with = "budget")]
-        watch: bool,
-        /// With --watch: seconds between re-renders.
-        #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
-        every: f64,
-        /// Observe the bus and add a declared-vs-observed key-population
-        /// column (#221): distinct keys per `{var}` family, judged per origin
-        /// against the declared `cardinality` (RFC 08 §2). Over is a finding;
-        /// under is not — a bounded window proves a lower bound, never the
-        /// population — and `{path...}` families are exempt and say so.
-        #[arg(long)]
-        budget: bool,
-        /// With --budget: seconds to observe the key population.
-        #[arg(
-            long = "for",
-            value_name = "SECS",
-            default_value_t = 10.0,
-            requires = "budget"
-        )]
-        for_secs: f64,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    List(TopicListArgs),
     /// Describe one key or subject pattern.
     ///
     /// Accepts a full wire key (`<base>/v1/h-abc.../telemetry/sysinfo/cpu/usage`)
@@ -1389,19 +958,7 @@ pub(crate) enum NodeCmd {
         bus: BusArgs,
     },
     /// List live producers from the liveliness roster (on-bus).
-    List {
-        /// Join each producer against its served introspect slice (app +
-        /// registry version).
-        #[arg(long)]
-        verbose: bool,
-        /// Re-render on liveliness events (no polling — the bus pushes the
-        /// roster, so there is no `--every` here). Reflects a producer
-        /// stopping within one event.
-        #[arg(long)]
-        watch: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    List(NodeListArgs),
 }
 
 #[derive(Subcommand)]
@@ -1413,16 +970,7 @@ pub(crate) enum BaseCmd {
     /// storage configs) attributes every alive token to its base. An empty
     /// base (keys start at `v1/` on the wire) is reported as `(empty)` and
     /// selected with `--base ""`.
-    List {
-        /// Re-render on change.
-        #[arg(long)]
-        watch: bool,
-        /// With --watch: seconds between re-renders.
-        #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
-        every: f64,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    List(BaseListArgs),
 }
 
 #[derive(Subcommand)]
@@ -1440,48 +988,9 @@ pub(crate) enum ServiceCmd {
     /// `service list` says what exists across the fleet; this says what one
     /// producer offers and how to reach it — the question left over, and the
     /// one you have immediately before `service call`.
-    Info {
-        /// Producer name.
-        #[arg(add = ArgValueCandidates::new(completion::producers))]
-        producer: String,
-        /// Only this procedure path, e.g. `introspect`.
-        #[arg(add = ArgValueCandidates::new(completion::procedures))]
-        procedure: Option<String>,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Info(ServiceInfoArgs),
     /// Call a procedure (on-bus).
-    Call {
-        /// Origin to target: a host id (`h-3fa9c2d41b7e`), `*` for the whole
-        /// fleet, or `@catalog` for a service origin.
-        origin: String,
-        /// Producer name. Omit for a service origin, which has no producer chunk.
-        #[arg(add = ArgValueCandidates::new(completion::producers))]
-        producer: String,
-        /// Procedure path, e.g. `introspect` or `artifact/status`.
-        #[arg(add = ArgValueCandidates::new(completion::procedures))]
-        procedure: String,
-        /// Selector parameters, repeatable: `--param state=established`.
-        #[arg(long = "param", value_name = "K=V")]
-        params: Vec<String>,
-        /// Request body: inline JSON, `@file`, or `-` for stdin.
-        #[arg(long, value_name = "TEXT|@FILE|-")]
-        body: Option<Source>,
-        /// Attachment riding beside the request, verbatim — never
-        /// schema-encoded (#117's rule, on the call side: #126). Inline
-        /// text, `@file`, or `-` for stdin.
-        #[arg(long, value_name = "TEXT|@FILE|-")]
-        attachment: Option<Source>,
-        /// Skip the registry lookup (and with it the registry-layer
-        /// forbidden-fanout refusal and any body validation).
-        #[arg(long)]
-        no_validate: bool,
-        /// Send the request body verbatim: no schema lookup, no encoding.
-        #[arg(long)]
-        raw: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Call(ServiceCallArgs),
 }
 
 #[derive(Subcommand)]
@@ -1492,20 +1001,7 @@ pub(crate) enum InterfaceCmd {
         bus: BusArgs,
     },
     /// Show one payload type and every subject that carries it.
-    Show {
-        /// Type name, e.g. `TelemetryPoint`.
-        #[arg(add = ArgValueCandidates::new(completion::types))]
-        type_name: String,
-        /// Also fetch the served schema from every producer that carries it
-        /// (RFC 08 §7). Disagreeing hashes are reported as drift.
-        #[arg(long)]
-        schema: bool,
-        /// With --schema, print each schema document in full.
-        #[arg(long)]
-        full: bool,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
+    Show(InterfaceShowArgs),
 }
 
 /// Options shared by every command: the deployment base, the registry source,
@@ -1678,4 +1174,658 @@ pub(crate) fn gen_target_typed(matches: &clap::ArgMatches) -> bool {
             m.ids().any(|i| i.as_str() == id)
                 && m.value_source(id) == Some(ValueSource::CommandLine)
         })
+}
+
+/// The `get` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct GetArgs {
+    /// Any key expression, params included (`key?k=v`).
+    #[arg(add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) selector: String,
+    /// Query body: inline text, `@file`, or `-` for stdin — rides the
+    /// same encode ladder as `pub` when the selector's key part refines
+    /// to a registered subject.
+    #[arg(long, value_name = "TEXT|@FILE|-")]
+    pub(crate) body: Option<Source>,
+    /// Ship the body verbatim and print payloads as hex; no decode.
+    #[arg(long)]
+    pub(crate) raw: bool,
+    /// Decode the type name, print the payload as hex.
+    #[arg(long)]
+    pub(crate) hex: bool,
+    /// Per-reply line template — the `echo` % vocabulary
+    /// (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c}). %T renders `-`
+    /// and %q/%S render empty here: a reply carries no arrival stamp,
+    /// QoS axes or SourceInfo — those are subscription-side facts (#120).
+    #[arg(long, value_name = "TEMPLATE")]
+    pub(crate) fmt: Option<String>,
+    /// Skip schema decode; render structurally.
+    #[arg(long)]
+    pub(crate) no_decode: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `retire` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RetireArgs {
+    /// Full wire key to retire (concrete — wildcards are refused).
+    #[arg(add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) key: String,
+    /// QoS profile for the tombstone (RFC 04 §3). A retirement is the
+    /// final state transition, so it defaults to the reliable profile.
+    #[arg(long, default_value = "transition", add = ArgValueCandidates::new(completion::qos_profiles))]
+    pub(crate) qos: String,
+    /// Retire a key that is not state-shaped — the RFC 04 §1.2 (v1.12)
+    /// operator act. The refusal you are overriding names its reason.
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `rate` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RateArgs {
+    #[command(flatten)]
+    pub(crate) selector: SelectorArgs,
+    /// Measurement window, seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
+    pub(crate) for_secs: f64,
+    /// Lead with payload bandwidth instead of sample rate.
+    #[arg(long)]
+    pub(crate) bytes: bool,
+    /// Report each concrete key separately.
+    #[arg(long)]
+    pub(crate) per_key: bool,
+    /// Also report source-sequence gaps (needs publishers that attach
+    /// SourceInfo; absent info reads as zero, honestly labeled).
+    #[arg(long)]
+    pub(crate) loss: bool,
+    /// Also report observed pub→sub latency per key (implies --per-key):
+    /// arrival wall-clock minus publisher HLC — contains clock skew, and
+    /// is labeled as such; negative values are the skew evidence
+    /// (#119). Unstamped samples are counted, never treated as zero.
+    #[arg(long)]
+    pub(crate) latency: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `field` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct FieldArgs {
+    #[command(flatten)]
+    pub(crate) selector: SelectorArgs,
+    /// Observation window, seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
+    pub(crate) for_secs: f64,
+    /// Bound on the per-path table, across every key the window sees.
+    #[arg(long, value_name = "N", default_value_t = 512)]
+    pub(crate) max_paths: usize,
+    /// Exit 1 when a finding at (or above) this severity exists —
+    /// `doctor`'s opt-in, on the verb that grew the same findings (#307).
+    /// Default: always exit 0.
+    #[arg(long, value_enum, value_name = "SEVERITY")]
+    pub(crate) fail_on: Option<FailOn>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `record` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RecordArgs {
+    #[command(flatten)]
+    pub(crate) selector: SelectorArgs,
+    /// Output file.
+    #[arg(long, short = 'o', value_name = "FILE")]
+    pub(crate) out: String,
+    /// Stop after this many seconds.
+    #[arg(long = "for", value_name = "SECS")]
+    pub(crate) for_secs: Option<f64>,
+    /// Stop after this many samples (0 = until ctrl-c or --for).
+    #[arg(long, value_name = "N", default_value_t = 0)]
+    pub(crate) count: u64,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `replay` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct ReplayArgs {
+    /// The .zrec file to replay.
+    pub(crate) file: String,
+    /// Pacing scale: 2.0 replays twice as fast as captured.
+    #[arg(long, default_value_t = 1.0)]
+    pub(crate) speed: f64,
+    /// List every would-be put and publish nothing (no session is
+    /// even opened). Preview pacing is not simulated.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Replay even though the resolved base differs from the capture
+    /// header's.
+    #[arg(long)]
+    pub(crate) force_base: bool,
+    /// Replay recorded deletes that fall off the state class — the
+    /// same operator price as `retire` (RFC 04 §1.2, v1.12).
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
+    /// QoS profile for rows that recorded none.
+    #[arg(long, default_value = "refreshed",
+          add = ArgValueCandidates::new(completion::qos_profiles))]
+    pub(crate) qos: String,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `serve` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct ServeArgs {
+    /// Key expression to serve (full wire form; wildcards welcome).
+    #[arg(add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) keyexpr: String,
+    /// Reply body: inline text, `@file`, or `-` for stdin (read once) —
+    /// through the same encode ladder as `pub`.
+    pub(crate) reply: Source,
+    /// Wire encoding to declare on replies. Defaults to the registry's
+    /// declared encoding when the keyexpr refines, else none.
+    #[arg(long)]
+    pub(crate) encoding: Option<String>,
+    /// Do not refuse a body the served schema rejects.
+    #[arg(long)]
+    pub(crate) no_validate: bool,
+    /// Reply the bytes verbatim: no schema lookup, no refusal.
+    #[arg(long)]
+    pub(crate) raw: bool,
+    /// Declare the queryable complete — a claim this responder holds
+    /// ALL the data the expression names. Say it only when you mean it.
+    #[arg(long)]
+    pub(crate) complete: bool,
+    /// Exit after N queries (0 = until ctrl-c).
+    #[arg(long, value_name = "N", default_value_t = 0)]
+    pub(crate) count: usize,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `scout` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct ScoutArgs {
+    /// Filter by advertised kind. Repeatable; default: all three.
+    #[arg(long, value_enum)]
+    pub(crate) what: Vec<ScoutWhat>,
+    /// Seconds to wait for Hellos (default 5; a context may override).
+    #[arg(long, value_name = "SECS")]
+    pub(crate) timeout: Option<u64>,
+    /// Endpoint to connect to, repeatable — reaches gossip scouting
+    /// where multicast is filtered.
+    #[arg(long, short = 'c')]
+    pub(crate) connect: Vec<String>,
+    /// Endpoint to listen on, repeatable.
+    #[arg(long, short = 'l')]
+    pub(crate) listen: Vec<String>,
+    /// Use a named context for endpoints/timeout defaults.
+    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
+    pub(crate) context: Option<String>,
+    /// table = census (deduped by zid); ndjson = arrival log, one Hello
+    /// per line as heard.
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
+}
+
+/// The `watchdog` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct WatchdogArgs {
+    /// One rule (repeatable): `rate-above <SEL> <HZ>`,
+    /// `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
+    /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`,
+    /// `doctor <CHECK-ID>`, `origin-down <ORIGIN>`, `dropped`.
+    /// Selectors are full wire form (this session is un-namespaced,
+    /// RFC 09 §5); a doctor rule runs the doctor once per tick.
+    #[arg(long = "rule", value_name = "RULE", required = true)]
+    pub(crate) rules: Vec<String>,
+    /// Seconds between evaluations — the one period flag (#307).
+    #[arg(long, value_name = "SECS", default_value_t = 5.0)]
+    pub(crate) every: f64,
+    /// Stop after N evaluations (default: run until interrupted).
+    #[arg(long, value_name = "N")]
+    pub(crate) count: Option<u64>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `check expect` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct CheckExpectArgs {
+    #[command(flatten)]
+    pub(crate) selector: SelectorArgs,
+    /// Observation window, seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
+    pub(crate) for_secs: f64,
+    /// Require at least N samples (default 1 unless --absent).
+    //
+    // `--at-least`, not `--count` (#307): `--count` is a stop bound
+    // everywhere else in the tool, and here it was an assertion — the
+    // one flag name that meant the opposite of itself.
+    #[arg(long, value_name = "N")]
+    pub(crate) at_least: Option<u64>,
+    /// Samples/second floor, measured over the full window.
+    #[arg(long, value_name = "HZ")]
+    pub(crate) rate_min: Option<f64>,
+    /// Samples/second ceiling, measured over the full window.
+    #[arg(long, value_name = "HZ")]
+    pub(crate) rate_max: Option<f64>,
+    /// Require every observed payload to validate against its served
+    /// schema (#159). "Unknowable" fails the assertion, with the reason.
+    #[arg(long)]
+    pub(crate) valid_payload: bool,
+    /// Require observed wire QoS to match: `declared` (each subject's
+    /// registry profile) or one profile name for everything.
+    #[arg(long, value_name = "declared|PROFILE",
+          add = ArgValueCandidates::new(completion::qos_profiles))]
+    pub(crate) qos: Option<String>,
+    /// Assert silence: no sample may match within the window.
+    #[arg(long, conflicts_with_all = ["at_least", "rate_min", "rate_max", "valid_payload", "qos"])]
+    pub(crate) absent: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `check cutover` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct CheckCutoverArgs {
+    /// The retired key family (a full wire key expression).
+    #[arg(long = "old-root", value_name = "KEYEXPR")]
+    pub(crate) old_root: String,
+    /// Listening window, seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
+    pub(crate) for_secs: f64,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `check probe` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct CheckProbeArgs {
+    /// Origin id (`h-…`) or hostname (resolved via the bridge).
+    pub(crate) target: String,
+    /// Producer name.
+    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// Procedure path, e.g. `introspect`.
+    #[arg(add = ArgValueCandidates::new(completion::procedures))]
+    pub(crate) procedure: String,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `check schema` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct CheckSchemaArgs {
+    /// Type name to validate against.
+    #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
+    pub(crate) type_name: String,
+    /// Payload: inline text, `@file`, or `-` for stdin.
+    #[arg(long, value_name = "TEXT|@FILE|-")]
+    pub(crate) from: Source,
+    /// Producer whose served `describe` carries the schema (live mode).
+    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: Option<String>,
+    /// SchemaSet JSON document (RFC 08 §7) — offline mode, no session.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) schema_set: Option<std::path::PathBuf>,
+    /// Wire encoding of the payload. Defaults to the schema kind's own
+    /// (json-schema → JSON, protobuf → protobuf, cdr → XCDR1).
+    #[arg(long)]
+    pub(crate) encoding: Option<String>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `key includes` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct KeyIncludesArgs {
+    pub(crate) a: String,
+    pub(crate) b: String,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
+}
+
+/// The `key intersects` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct KeyIntersectsArgs {
+    pub(crate) a: String,
+    pub(crate) b: String,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
+}
+
+/// The `bench rpc` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct BenchRpcArgs {
+    /// Origin to target: a host id, `*` for the fleet, or `@catalog`.
+    pub(crate) origin: String,
+    /// Producer name.
+    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// Procedure path. `introspect` is the safe default: RFC 08 §6 makes
+    /// it a read every producer serves.
+    #[arg(default_value = "introspect", add = ArgValueCandidates::new(completion::procedures))]
+    pub(crate) procedure: String,
+    /// Calls to issue (default 100).
+    //
+    // `--calls`, not `--count` (#307): `--count` is a stop bound on a
+    // stream everywhere else, and this is the size of the experiment.
+    #[arg(long, value_name = "N")]
+    pub(crate) calls: Option<usize>,
+    /// Calls in flight at once (1 = strictly sequential).
+    #[arg(long, default_value_t = 1)]
+    pub(crate) concurrency: usize,
+    /// Bench a procedure the registry does not declare idempotent.
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `schema show` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct SchemaShowArgs {
+    /// Producer name, e.g. `sysinfo`.
+    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// Show only this type (implies the full document).
+    #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
+    pub(crate) type_name: Option<String>,
+    /// Print every schema document in full, not just kind + hash.
+    #[arg(long)]
+    pub(crate) full: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `registry export` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RegistryExportArgs {
+    /// Output document. A foreign schema, so `--format` has no say over
+    /// it: passing both is a usage error, not a silent preference.
+    // #243. Enforced in `refuse_foreign_format` rather than by
+    // `conflicts_with`, which would fire on `ZENCTL_FORMAT` too.
+    #[arg(long = "as", value_enum, default_value = "toml")]
+    pub(crate) target: ExportAs,
+    /// Only this producer.
+    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: Option<String>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `registry lint` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RegistryLintArgs {
+    /// The registry directory (the one a build script points at).
+    pub(crate) dir: PathBuf,
+    /// Deprecation ledger; defaults to `<dir>/deprecated.lock`.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) ledger: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
+}
+
+/// The `registry lock` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RegistryLockArgs {
+    /// The registry directory (the one a build script points at).
+    pub(crate) dir: PathBuf,
+    /// Rewrite pins over an incompatible edit — the loud break.
+    #[arg(long)]
+    pub(crate) force: bool,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
+}
+
+/// The `admin graph` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct AdminGraphArgs {
+    /// Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
+    ///
+    /// A foreign schema, so `--format` has no say over it: passing both is
+    /// a usage error, not a silent preference.
+    // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
+    #[arg(long)]
+    pub(crate) dot: bool,
+    /// Also join liveliness origins to their sessions (#131) — one
+    /// extra admin sweep; attachments come from the admin sources or
+    /// they are shown as merely reported, never guessed.
+    #[arg(long)]
+    pub(crate) origins: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `storage list` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct StorageListArgs {
+    /// Re-render on change.
+    #[arg(long)]
+    pub(crate) watch: bool,
+    /// With --watch: seconds between re-renders.
+    #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
+    pub(crate) every: f64,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `blob list` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct BlobListArgs {
+    /// Only this producer's declarations.
+    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: Option<String>,
+    /// Only this tier: artifact, tree or store.
+    #[arg(long, add = ArgValueCandidates::new(completion::blob_tiers))]
+    pub(crate) tier: Option<String>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `blob fetch` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct BlobFetchArgs {
+    /// `<id>`, `artifact/<id>`, `tree/<hex>` or `store/<algo>/<hex>`.
+    pub(crate) target: String,
+    /// The one origin to fetch from (`h-<12hex>` or `@service`) — as
+    /// reported by `zenctl blob locate`. A wildcard is not an origin.
+    //
+    // `--origin`, not `--from` (#307): `--from` names an input *source*
+    // in this tool (`pub --from ndjson`, `check schema --from @file`),
+    // and an origin is a place on the bus, not a source of bytes to
+    // read.
+    #[arg(long, value_name = "ORIGIN")]
+    pub(crate) origin: String,
+    /// Where to write. Defaults to the target's last chunk; the origin's
+    /// advisory filename is never used to choose a path.
+    #[arg(long, short = 'o', value_name = "PATH")]
+    pub(crate) out: Option<PathBuf>,
+    /// The content root the reference carried (RFC 07 §2.1). Every reply
+    /// is verified against it before disk.
+    #[arg(long, value_name = "HEX")]
+    pub(crate) root: Option<String>,
+    /// Accept whatever this origin serves, without a root to check it
+    /// against — trust-on-first-use, stated out loud.
+    #[arg(long, conflicts_with = "root")]
+    pub(crate) allow_unpinned: bool,
+    /// Replace an existing destination file.
+    #[arg(long)]
+    pub(crate) overwrite: bool,
+    /// Suppress progress on stderr.
+    #[arg(long, short = 'q')]
+    pub(crate) quiet: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `topic list` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct TopicListArgs {
+    /// Only this producer.
+    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: Option<String>,
+    /// Only this class: telemetry, state, or events.
+    #[arg(long, add = ArgValueCandidates::new(completion::classes))]
+    pub(crate) class: Option<zenkey::Class>,
+    /// Only subjects carrying this payload type.
+    #[arg(long, value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
+    pub(crate) r#type: Option<String>,
+    /// Also list retired subjects from each slice's `[[deprecated]]`
+    /// ledger (RFC 08 §6: which hosts still serve a deprecated subject).
+    #[arg(long)]
+    pub(crate) deprecated: bool,
+    /// Re-render on change. Appeared and disappeared subjects are marked
+    /// for one cycle; ndjson streams one snapshot object per cycle.
+    #[arg(long, conflicts_with = "budget")]
+    pub(crate) watch: bool,
+    /// With --watch: seconds between re-renders.
+    #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
+    pub(crate) every: f64,
+    /// Observe the bus and add a declared-vs-observed key-population
+    /// column (#221): distinct keys per `{var}` family, judged per origin
+    /// against the declared `cardinality` (RFC 08 §2). Over is a finding;
+    /// under is not — a bounded window proves a lower bound, never the
+    /// population — and `{path...}` families are exempt and say so.
+    #[arg(long)]
+    pub(crate) budget: bool,
+    /// With --budget: seconds to observe the key population.
+    #[arg(
+        long = "for",
+        value_name = "SECS",
+        default_value_t = 10.0,
+        requires = "budget"
+    )]
+    pub(crate) for_secs: f64,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `node list` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct NodeListArgs {
+    /// Join each producer against its served introspect slice (app +
+    /// registry version).
+    #[arg(long)]
+    pub(crate) verbose: bool,
+    /// Re-render on liveliness events (no polling — the bus pushes the
+    /// roster, so there is no `--every` here). Reflects a producer
+    /// stopping within one event.
+    #[arg(long)]
+    pub(crate) watch: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `base list` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct BaseListArgs {
+    /// Re-render on change.
+    #[arg(long)]
+    pub(crate) watch: bool,
+    /// With --watch: seconds between re-renders.
+    #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
+    pub(crate) every: f64,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `service info` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct ServiceInfoArgs {
+    /// Producer name.
+    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// Only this procedure path, e.g. `introspect`.
+    #[arg(add = ArgValueCandidates::new(completion::procedures))]
+    pub(crate) procedure: Option<String>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `service call` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct ServiceCallArgs {
+    /// Origin to target: a host id (`h-3fa9c2d41b7e`), `*` for the whole
+    /// fleet, or `@catalog` for a service origin.
+    pub(crate) origin: String,
+    /// Producer name. Omit for a service origin, which has no producer chunk.
+    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// Procedure path, e.g. `introspect` or `artifact/status`.
+    #[arg(add = ArgValueCandidates::new(completion::procedures))]
+    pub(crate) procedure: String,
+    /// Selector parameters, repeatable: `--param state=established`.
+    #[arg(long = "param", value_name = "K=V")]
+    pub(crate) params: Vec<String>,
+    /// Request body: inline JSON, `@file`, or `-` for stdin.
+    #[arg(long, value_name = "TEXT|@FILE|-")]
+    pub(crate) body: Option<Source>,
+    /// Attachment riding beside the request, verbatim — never
+    /// schema-encoded (#117's rule, on the call side: #126). Inline
+    /// text, `@file`, or `-` for stdin.
+    #[arg(long, value_name = "TEXT|@FILE|-")]
+    pub(crate) attachment: Option<Source>,
+    /// Skip the registry lookup (and with it the registry-layer
+    /// forbidden-fanout refusal and any body validation).
+    #[arg(long)]
+    pub(crate) no_validate: bool,
+    /// Send the request body verbatim: no schema lookup, no encoding.
+    #[arg(long)]
+    pub(crate) raw: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `interface show` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct InterfaceShowArgs {
+    /// Type name, e.g. `TelemetryPoint`.
+    #[arg(add = ArgValueCandidates::new(completion::types))]
+    pub(crate) type_name: String,
+    /// Also fetch the served schema from every producer that carries it
+    /// (RFC 08 §7). Disagreeing hashes are reported as drift.
+    #[arg(long)]
+    pub(crate) schema: bool,
+    /// With --schema, print each schema document in full.
+    #[arg(long)]
+    pub(crate) full: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
 }

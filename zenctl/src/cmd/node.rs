@@ -21,7 +21,21 @@ pub async fn info(origin: &str, args: &Bus) -> Result<()> {
     crate::render::emit_with(&mut std::io::stdout(), &info, args.format(), args.color())
 }
 
-pub async fn list(verbose: bool, args: &Bus) -> Result<()> {
+/// `node list`, with the `--watch` decision where the verb is (#354).
+pub async fn list(cli: crate::cli::NodeListArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let crate::cli::NodeListArgs {
+        verbose,
+        watch,
+        bus: _,
+    } = cli;
+    if watch {
+        return watching(verbose, &bus).await;
+    }
+    once(verbose, &bus).await
+}
+
+async fn once(verbose: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let roster = bus::roster(&args.fleet(&session), args.timeout()).await?;
 
@@ -54,7 +68,7 @@ pub async fn list(verbose: bool, args: &Bus) -> Result<()> {
 /// pushed by the bus, so the monitor subscribes (history-backed tokens seed
 /// the initial view) and every NodeUp/NodeDown re-renders. A producer
 /// stopping is reflected within one liveliness event (#56 acceptance).
-pub async fn watch(verbose: bool, args: &Bus) -> Result<()> {
+async fn watching(verbose: bool, args: &Bus) -> Result<()> {
     use std::collections::BTreeMap;
 
     use crate::cmd::watch::{render_cycle, validate_format};
