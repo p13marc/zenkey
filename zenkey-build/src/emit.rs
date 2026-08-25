@@ -313,12 +313,23 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         // {var...}). Ordering is derived through `zenkey::pattern` — the same
         // primitive runtime tools match with — so generator and runtime can
         // never disagree (the parity test in fixture-tests pins it).
-        let mut ordered: Vec<&SubjectEntry> = f.subjects.iter().collect();
-        ordered.sort_by(|a, b| {
-            let pa = zenkey::pattern::SubjectPattern::parse(&a.path).expect("linted");
-            let pb = zenkey::pattern::SubjectPattern::parse(&b.path).expect("linted");
-            pa.precedence().cmp(&pb.precedence())
-        });
+        // Parse once per entry, not twice per comparison (#321): the old
+        // closure re-parsed both operands — two `SubjectPattern`s, each with
+        // its own chunk `Vec` and text `String` — every time the sort looked
+        // at a pair, so an n-entry registry paid O(n log n) parses to order n
+        // patterns.
+        let mut ordered: Vec<(zenkey::pattern::SubjectPattern, &SubjectEntry)> = f
+            .subjects
+            .iter()
+            .map(|e| {
+                (
+                    zenkey::pattern::SubjectPattern::parse(&e.path).expect("linted"),
+                    e,
+                )
+            })
+            .collect();
+        ordered.sort_by(|(pa, _), (pb, _)| pa.precedence_cmp(pb));
+        let ordered: Vec<&SubjectEntry> = ordered.into_iter().map(|(_, e)| e).collect();
         let _ = writeln!(
             out,
             "        /// Refine a subject tail (chunks after the producer position).\n        pub fn parse(class: Class, tail: &[&str]) -> Option<Self> {{"

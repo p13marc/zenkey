@@ -639,39 +639,19 @@ mod tests {
     #[test]
     fn describe_key_prefers_the_literal_over_the_variable() {
         use zenkey::slice::{RegistrySlice, SubjectDecl};
-        let subject = |path: &str| SubjectDecl {
-            path: path.to_string(),
-            class: Class::Telemetry.into(),
-            type_name: if path.contains('{') {
+        let subject = |path: &str| {
+            let mut d = SubjectDecl::new(path, Class::Telemetry);
+            d.type_name = if path.contains('{') {
                 "VarPoint"
             } else {
                 "SpecialPoint"
             }
-            .to_string(),
-            common: None,
-            since: None,
-            description: None,
-            qos: None,
-            ttl_s: None,
-            unit: None,
-            rate: None,
-            cardinality: None,
-            encoding: None,
+            .to_string();
+            d
         };
-        let slice = RegistrySlice {
-            version: "1.0".into(),
-            app: "test".into(),
-            convention: 1,
-            name: "flowd".into(),
-            service_origin: None,
-            description: None,
-            // The {var} pattern is declared FIRST — declaration order must not win.
-            subjects: vec![subject("flow/{q}"), subject("flow/special")],
-            procedures: vec![],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        };
+        let mut slice = RegistrySlice::new("1.0", "test", "flowd");
+        // The {var} pattern is declared FIRST — declaration order must not win.
+        slice.subjects = vec![subject("flow/{q}"), subject("flow/special")];
         let slices = SliceSet::from_slices(vec![slice]);
         let d = describe_key(
             "",

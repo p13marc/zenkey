@@ -486,32 +486,12 @@ mod tests {
     use zenkey::slice::{ProcedureDecl, RegistrySlice, SubjectDecl};
 
     fn slice_with_state_subject() -> SliceSet {
-        SliceSet::from_slices(vec![RegistrySlice {
-            version: "1.0".into(),
-            app: "t".into(),
-            convention: 1,
-            name: "sysinfo".into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![SubjectDecl {
-                path: "health".into(),
-                class: zenkey::Class::State.into(),
-                type_name: "Health".into(),
-                common: None,
-                since: None,
-                description: None,
-                qos: None,
-                ttl_s: Some(900),
-                unit: None,
-                rate: None,
-                cardinality: None,
-                encoding: None,
-            }],
-            procedures: vec![],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        }])
+        let mut health = SubjectDecl::new("health", zenkey::Class::State);
+        health.type_name = "Health".into();
+        health.ttl_s = Some(900);
+        let mut slice = RegistrySlice::new("1.0", "t", "sysinfo");
+        slice.subjects = vec![health];
+        SliceSet::from_slices(vec![slice])
     }
 
     /// The five outcomes of the retire guard (RFC 04 §1.2, v1.12), each
@@ -601,30 +581,14 @@ mod tests {
     }
 
     fn slice_with_proc(kind: &str, fanout: Option<&str>) -> SliceSet {
-        SliceSet::from_slices(vec![RegistrySlice {
-            version: "1.0".into(),
-            app: "t".into(),
-            convention: 1,
-            name: "netring".into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![],
-            procedures: vec![ProcedureDecl {
-                path: "capture/trigger".into(),
-                kind: Some(Declared::parse(kind)),
-                reply: Some("Ack".into()),
-                request: None,
-                encoding: None,
-                fanout: fanout.map(Declared::parse),
-                idempotent: Some(false),
-                cardinality: None,
-                since: None,
-                description: None,
-            }],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        }])
+        let mut trigger = ProcedureDecl::new("capture/trigger");
+        trigger.kind = Some(Declared::parse(kind));
+        trigger.reply = Some("Ack".into());
+        trigger.fanout = fanout.map(Declared::parse);
+        trigger.idempotent = Some(false);
+        let mut slice = RegistrySlice::new("1.0", "t", "netring");
+        slice.procedures = vec![trigger];
+        SliceSet::from_slices(vec![slice])
     }
 
     #[test]

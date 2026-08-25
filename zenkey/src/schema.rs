@@ -47,6 +47,7 @@ impl SchemaKind {
     /// with the `.msg`/IDL source text carried informatively (v1.10).
     pub const CDR: &str = "cdr";
 
+    #[must_use]
     pub fn new(kind: impl Into<String>) -> Self {
         SchemaKind(kind.into())
     }
@@ -253,6 +254,7 @@ fn hash_value(v: &Value) -> String {
 
 impl TypeSchema {
     /// A `json-schema` entry from an explicit schema document.
+    #[must_use]
     pub fn json_schema(document: Value) -> TypeSchema {
         let hash = hash_value(&document);
         TypeSchema {
@@ -274,6 +276,7 @@ impl TypeSchema {
     /// `FileDescriptorSet` bytes (from `prost-build`'s
     /// `file_descriptor_set_path`). Serving needs no protobuf dependency —
     /// the bytes are carried base64.
+    #[must_use]
     pub fn protobuf(message: impl Into<String>, descriptor_set: &[u8]) -> TypeSchema {
         use base64::Engine as _;
         let digest = Sha256::digest(descriptor_set);
@@ -299,6 +302,7 @@ impl TypeSchema {
     /// human's copy of the schema, not the schema: two producers generating
     /// the same message from `.msg` and from IDL describe the same wire
     /// format, and drift detection must not call that a disagreement.
+    #[must_use]
     pub fn cdr(document: Value) -> TypeSchema {
         let mut hashed = serde_json::Map::new();
         for key in ["fields", "types"] {
@@ -391,8 +395,14 @@ impl TypeSchema {
 }
 
 /// A schema-set parse/build failure.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum SchemaError {
+    /// The reply is not well-formed JSON. The `serde_json` error is the
+    /// source, so a caller reaches its line and column (#317).
+    #[error("schema set does not parse: {0}")]
+    Json(#[from] serde_json::Error),
+    /// It parses as JSON but is not a schema set. No underlying error: this
+    /// crate is the one saying so.
     #[error("schema set does not parse: {0}")]
     Parse(String),
     #[error("unsupported schema_version {0} (this reader knows 1)")]
@@ -411,6 +421,7 @@ pub struct SchemaSet {
 
 impl SchemaSet {
     /// Start building a set (producer side).
+    #[must_use]
     pub fn builder(app: impl Into<String>) -> SchemaSetBuilder {
         SchemaSetBuilder {
             set: SchemaSet {
@@ -487,8 +498,7 @@ impl SchemaSet {
     /// fields are ignored, unknown kinds are retained as opaque entries —
     /// intolerant only of a missing/malformed required shape.
     pub fn parse(json: &str) -> Result<SchemaSet, SchemaError> {
-        let doc: Value =
-            serde_json::from_str(json).map_err(|e| SchemaError::Parse(e.to_string()))?;
+        let doc: Value = serde_json::from_str(json)?;
         let version = doc
             .get("schema_version")
             .and_then(Value::as_i64)
@@ -553,11 +563,13 @@ impl SchemaSetBuilder {
     }
 
     /// Register an explicit schema entry.
+    #[must_use]
     pub fn entry(mut self, name: impl Into<String>, schema: TypeSchema) -> Self {
         self.set.types.insert(name.into(), schema);
         self
     }
 
+    #[must_use]
     pub fn build(self) -> SchemaSet {
         self.set
     }
@@ -568,6 +580,7 @@ impl SchemaSetBuilder {
     /// # Panics
     /// On a coverage gap — this is the producer-side CI check, meant for a
     /// `static`/startup path where a gap must be loud.
+    #[must_use]
     pub fn build_verified(self, names: &[&str]) -> SchemaSet {
         if let Err(e) = self.set.verify_covers(names) {
             panic!("{e}");

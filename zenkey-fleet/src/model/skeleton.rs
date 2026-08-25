@@ -498,36 +498,15 @@ mod tests {
     use zenkey::slice::{RegistrySlice, SubjectDecl};
 
     fn subject(path: &str, class: &str) -> SubjectDecl {
-        SubjectDecl {
-            path: path.into(),
-            class: zenkey::Declared::parse(class),
-            type_name: "T".into(),
-            common: None,
-            since: None,
-            description: None,
-            qos: None,
-            ttl_s: None,
-            unit: None,
-            rate: None,
-            cardinality: None,
-            encoding: None,
-        }
+        let mut d = SubjectDecl::new(path, zenkey::Declared::parse(class));
+        d.type_name = "T".into();
+        d
     }
 
     fn host_slice(name: &str, subjects: Vec<SubjectDecl>) -> RegistrySlice {
-        RegistrySlice {
-            version: "1.0".into(),
-            app: "test".into(),
-            convention: 1,
-            name: name.into(),
-            service_origin: None,
-            description: None,
-            subjects,
-            procedures: vec![],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        }
+        let mut slice = RegistrySlice::new("1.0", "test", name);
+        slice.subjects = subjects;
+        slice
     }
 
     #[test]

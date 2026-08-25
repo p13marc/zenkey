@@ -59,6 +59,7 @@ impl V1Context {
     /// As [`with_origin`](Self::with_origin) with an already-validated
     /// [`Producer`] — the infallible form, and the one that carries an
     /// instance built by [`Producer::with_instance`].
+    #[must_use]
     pub fn with_producer(origin: Origin, producer: Producer) -> Self {
         Self { origin, producer }
     }
@@ -71,6 +72,7 @@ impl V1Context {
     /// `Producer::with_instance`'s rejection of 0, so `.with_instance(0)` was
     /// a no-op that read like a configuration (issue #322). Zero now has no
     /// spelling at all.
+    #[must_use]
     pub fn with_instance(mut self, instance: NonZeroU32) -> Self {
         self.producer = Producer::with_instance(self.producer.name(), instance.get())
             .expect("the name is already validated and a NonZeroU32 is never zero");
@@ -88,6 +90,7 @@ impl V1Context {
     /// The telemetry prefix: `v1/<origin>/telemetry/<producer>`.
     /// Metric suffixes append below it ({metric...} / {device}/{metric...}
     /// registry families).
+    #[must_use]
     pub fn telemetry_prefix(&self) -> Key {
         Key::from_canonical(format!(
             "{}/{}/{}/{}",
@@ -144,19 +147,23 @@ impl V1Context {
     // token cannot occur and they stay infallible — `build_key` is the same
     // assembly `state_key` runs after its check.
 
+    #[must_use]
     pub fn health_key(&self) -> Key {
         self.build_key(grammar::CLASS_STATE, &["health"])
     }
 
+    #[must_use]
     pub fn errors_key(&self) -> Key {
         self.build_key(grammar::CLASS_STATE, &["errors"])
     }
 
     /// The registration document (RFC: `state/<producer>/sensor`).
+    #[must_use]
     pub fn sensor_info_key(&self) -> Key {
         self.build_key(grammar::CLASS_STATE, &["sensor"])
     }
 
+    #[must_use]
     pub fn evidence_self_key(&self) -> Key {
         self.build_key(grammar::CLASS_STATE, &["evidence", "self"])
     }
@@ -168,11 +175,13 @@ impl V1Context {
     }
 
     /// Liveliness token key (RFC 04 §5) — machinery, not a data subject.
+    #[must_use]
     pub fn alive_key(&self) -> Key {
         grammar::alive_key(&self.origin, Some(&self.producer)).expect("producer context is valid")
     }
 
     /// Device liveliness token key (RFC 04 §5).
+    #[must_use]
     pub fn device_alive_key(&self, device: &str) -> Key {
         let device = chunk_slug(device);
         grammar::device_alive_key(&self.origin, &self.producer, &device)
@@ -216,6 +225,7 @@ impl V1Context {
     /// keyexpr in a document: meaningful only to a session set to the same
     /// deployment namespace. An un-namespaced reader must
     /// [`grammar::with_base`] it.
+    #[must_use]
     pub fn blob_prefix(&self, tier: grammar::BlobTier) -> Key {
         grammar::blob_tier_prefix(&self.origin, tier)
     }
@@ -255,6 +265,7 @@ pub struct BlobProbePrefix(String);
 
 impl BlobProbePrefix {
     /// The `*`-origin prefix for `tier`: `v1/*/@blob/<tier>`.
+    #[must_use]
     pub fn new(tier: grammar::BlobTier) -> Self {
         BlobProbePrefix(format!(
             "{}/*/{}/{}",
@@ -273,6 +284,7 @@ impl BlobProbePrefix {
     /// the wildcard origin legitimate here. `have` is a reserved Tier-2
     /// token and never a valid content address (§2.4). `algo` is slugged at
     /// the boundary like every generated variable.
+    #[must_use]
     pub fn store_have(algo: impl AsRef<str>) -> Self {
         let mut p = Self::new(grammar::BlobTier::Store).0;
         p.push('/');
@@ -288,6 +300,7 @@ impl BlobProbePrefix {
     /// and two counters, O(request) whatever the tree's size. The `<root>`
     /// is a validated [`grammar::ContentHash`], so the revoked
     /// caller-chosen name (§2.3) has no spelling here either.
+    #[must_use]
     pub fn tree_have(root: &grammar::ContentHash) -> Self {
         let mut p = Self::new(grammar::BlobTier::Tree).0;
         p.push('/');

@@ -42,14 +42,23 @@
 //! consumer's emitted-surface check reads the validated set through
 //! [`Config::conditional_subjects`] to exempt exactly those).
 
+// docs.rs builds on nightly with `--cfg docsrs` (see Cargo.toml), which is
+// what lets each feature-gated item carry the feature that gates it. Inert
+// everywhere else — a stable `cargo doc` never sets the cfg (#325).
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 mod emit;
 #[cfg(feature = "export")]
+#[cfg_attr(docsrs, doc(cfg(feature = "export")))]
 pub mod export;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use zenkey::grammar::{is_valid_plain_chunk, is_valid_verbatim_chunk};
+// One implementation of the registry pattern grammar (#320): the codegen
+// names `zenkey`'s types rather than keeping a second copy of the rules.
+use zenkey::pattern::{PatternChunk as Chunk, PatternError, SubjectPattern};
 use zenkey::{Fanout, SliceToken};
 
 /// A codegen failure. Lint variants carry the registry file they were found
@@ -65,8 +74,11 @@ pub enum Error {
         /// [`Config::write_compat_lock`] decides forceability on.
         kind: LintKind,
     },
+    /// `#[source]` on the inner error, so a caller can reach the
+    /// `io::ErrorKind` and tell "no registry dir" from "unreadable registry
+    /// dir" — the two the flattened form rendered identically (#317).
     #[error("registry dir {0:?}: {1}")]
-    Io(PathBuf, std::io::Error),
+    Io(PathBuf, #[source] std::io::Error),
     #[error(
         "OUT_DIR is not set and no out_file was given — call from a build script or set .out_file(..)"
     )]
@@ -193,13 +205,6 @@ fn opt_count(
             )
         }),
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Chunk {
-    Literal(String),
-    Var(String),
-    Rest(String),
 }
 
 pub(crate) struct SubjectEntry {
@@ -377,6 +382,7 @@ impl Default for Config {
 }
 
 impl Config {
+    #[must_use]
     pub fn new() -> Self {
         Config {
             registry_dir: PathBuf::from("registry"),
@@ -391,6 +397,7 @@ impl Config {
 
     /// The directory holding `*.toml` registry files (default `registry`,
     /// relative to the consuming crate's manifest).
+    #[must_use]
     pub fn registry_dir(mut self, dir: impl AsRef<Path>) -> Self {
         self.registry_dir = dir.as_ref().to_path_buf();
         self
@@ -398,6 +405,7 @@ impl Config {
 
     /// Where the generated module is written
     /// (default `$OUT_DIR/zenkey_registry.rs`).
+    #[must_use]
     pub fn out_file(mut self, f: impl AsRef<Path>) -> Self {
         self.out_file = Some(f.as_ref().to_path_buf());
         self
@@ -405,6 +413,7 @@ impl Config {
 
     /// The path the generated code uses to reach the `zenkey` crate
     /// (default `::zenkey`) — override for renamed-dependency setups.
+    #[must_use]
     pub fn zenkey_path(mut self, p: &str) -> Self {
         self.zenkey_path = p.to_string();
         self
@@ -413,6 +422,7 @@ impl Config {
     /// The append-only deprecation ledger
     /// (default `<registry_dir>/deprecated.lock`; a missing file is an empty
     /// ledger).
+    #[must_use]
     pub fn ledger(mut self, f: impl AsRef<Path>) -> Self {
         self.ledger = Some(f.as_ref().to_path_buf());
         self
@@ -421,6 +431,7 @@ impl Config {
     /// The compatibility lock (RFC 08 §3.1; default
     /// `<registry_dir>/registry.lock` — a missing file is an empty snapshot
     /// and fails as stale until regenerated).
+    #[must_use]
     pub fn compat_lock(mut self, f: impl AsRef<Path>) -> Self {
         self.compat_lock = Some(f.as_ref().to_path_buf());
         self
@@ -433,6 +444,7 @@ impl Config {
     /// Unlike its sibling [`ledger`](Self::ledger), this file is **not**
     /// append-only: a line leaves when its gating condition does, and the
     /// subject re-enters the emitted-surface check by deletion.
+    #[must_use]
     pub fn conditional_ledger(mut self, f: impl AsRef<Path>) -> Self {
         self.conditional = Some(f.as_ref().to_path_buf());
         self
@@ -440,6 +452,7 @@ impl Config {
 
     /// Suppress the `cargo::rerun-if-changed` lines (default on) — for
     /// calling outside a build script.
+    #[must_use]
     pub fn no_rerun_if_changed(mut self) -> Self {
         self.emit_rerun_if_changed = false;
         self
@@ -623,49 +636,41 @@ impl Config {
     }
 }
 
+/// Parse a registry subject path, and apply the reservations a *local*
+/// registry is held to.
+///
+/// The lexical rules are [`SubjectPattern::parse`]'s — one implementation,
+/// which is what `zenkey/src/pattern.rs`'s module doc has claimed since v1.5
+/// while this file kept a second hand-rolled copy of the same `{var}` /
+/// `{var...}` grammar. The parity was a coincidence, not a guarantee (#320).
+///
+/// What stays here is what does *not* belong there: `alive` is reserved at
+/// any position of any registered pattern (RFC 03 §3, v1.25 A5b), and
+/// `SubjectPattern` also parses patterns served by a *foreign* fleet, where
+/// this deployment's reservations do not apply.
 fn parse_pattern(file: &str, path: &str) -> Result<Vec<Chunk>, Error> {
-    let mut chunks = Vec::new();
-    let parts: Vec<&str> = path.split('/').collect();
-    for (i, part) in parts.iter().enumerate() {
-        if let Some(var) = part.strip_prefix('{').and_then(|p| p.strip_suffix("...}")) {
-            if i != parts.len() - 1 {
-                return Err(lint(
-                    file,
-                    format!("{path:?}: {{var...}} only in trailing position (RFC 08 §2)"),
-                ));
-            }
-            if !is_valid_plain_chunk(var) {
-                return Err(lint(
-                    file,
-                    format!("{path:?}: bad rest-variable name {var:?}"),
-                ));
-            }
-            chunks.push(Chunk::Rest(var.to_string()));
-        } else if let Some(var) = part.strip_prefix('{').and_then(|p| p.strip_suffix('}')) {
-            if !is_valid_plain_chunk(var) {
-                return Err(lint(file, format!("{path:?}: bad variable name {var:?}")));
-            }
-            chunks.push(Chunk::Var(var.to_string()));
-        } else {
-            if !is_valid_plain_chunk(part) {
-                return Err(lint(
-                    file,
-                    format!("{path:?}: chunk {part:?} violates RFC 03 §2"),
-                ));
-            }
-            if *part == "alive" {
-                return Err(lint(
-                    file,
-                    format!("{path:?}: `alive` is a reserved liveliness leaf (RFC 03 §3)"),
-                ));
-            }
-            chunks.push(Chunk::Literal(part.to_string()));
+    let parsed = SubjectPattern::parse(path).map_err(|e| match e {
+        PatternError::Empty => lint(file, "empty subject path"),
+        PatternError::RestNotTrailing(_) => lint(
+            file,
+            format!("{path:?}: {{var...}} only in trailing position (RFC 08 §2)"),
+        ),
+        PatternError::BadVarName(v) => lint(file, format!("{path:?}: bad variable name {v:?}")),
+        PatternError::BadChunk(c) => {
+            lint(file, format!("{path:?}: chunk {c:?} violates RFC 03 §2"))
+        }
+    })?;
+    for chunk in parsed.chunks() {
+        if let Chunk::Literal(l) = chunk
+            && l == "alive"
+        {
+            return Err(lint(
+                file,
+                format!("{path:?}: `alive` is a reserved liveliness leaf (RFC 03 §3)"),
+            ));
         }
     }
-    if chunks.is_empty() {
-        return Err(lint(file, "empty subject path"));
-    }
-    Ok(chunks)
+    Ok(parsed.chunks().to_vec())
 }
 
 pub(crate) fn camel(parts: &[&str]) -> String {

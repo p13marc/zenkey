@@ -338,30 +338,13 @@ fn the_call_mode_labels_forbidden_fanout() {
     use zengui::view::send::{SendForm, SendMode, pane};
     use zenkey::slice::{ProcedureDecl, RegistrySlice};
 
-    let slice = RegistrySlice {
-        version: "1.0".into(),
-        app: "t".into(),
-        convention: 1,
-        name: "netring".into(),
-        service_origin: None,
-        description: None,
-        subjects: vec![],
-        procedures: vec![ProcedureDecl {
-            path: "capture/trigger".into(),
-            kind: Some(zenkey::ProcedureKind::Write.into()),
-            reply: Some("Ack".into()),
-            request: None,
-            encoding: None,
-            fanout: Some(zenkey::Fanout::Forbidden.into()),
-            idempotent: Some(false),
-            cardinality: None,
-            since: None,
-            description: None,
-        }],
-        blob: vec![],
-        media: vec![],
-        deprecated: vec![],
-    };
+    let mut trigger = ProcedureDecl::new("capture/trigger");
+    trigger.kind = Some(zenkey::ProcedureKind::Write.into());
+    trigger.reply = Some("Ack".into());
+    trigger.fanout = Some(zenkey::Fanout::Forbidden.into());
+    trigger.idempotent = Some(false);
+    let mut slice = RegistrySlice::new("1.0", "t", "netring");
+    slice.procedures = vec![trigger];
     let slices = SliceSet::from_slices(vec![slice]);
 
     let form = SendForm {
@@ -437,30 +420,13 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
         })),
         ..SendForm::default()
     };
-    let slices = SliceSet::from_slices(vec![zenkey::slice::RegistrySlice {
-        version: "1.0".into(),
-        app: "t".into(),
-        convention: 1,
-        name: "netring".into(),
-        service_origin: None,
-        description: None,
-        subjects: vec![],
-        procedures: vec![zenkey::slice::ProcedureDecl {
-            path: "introspect".into(),
-            kind: Some(zenkey::ProcedureKind::Read.into()),
-            reply: Some("RegistrySlice".into()),
-            request: None,
-            encoding: None,
-            fanout: None,
-            idempotent: Some(true),
-            cardinality: None,
-            since: None,
-            description: None,
-        }],
-        blob: vec![],
-        media: vec![],
-        deprecated: vec![],
-    }]);
+    let mut introspect = zenkey::slice::ProcedureDecl::new("introspect");
+    introspect.kind = Some(zenkey::ProcedureKind::Read.into());
+    introspect.reply = Some("RegistrySlice".into());
+    introspect.idempotent = Some(true);
+    let mut netring = zenkey::slice::RegistrySlice::new("1.0", "t", "netring");
+    netring.procedures = vec![introspect];
+    let slices = SliceSet::from_slices(vec![netring]);
     let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
     assert!(
         ui.find("did not answer, though alive: h-bbbbbbbbbbbb")
@@ -477,30 +443,13 @@ fn the_call_mode_distinguishes_an_unasked_schema_from_an_empty_one() {
     use zengui::view::send::{SchemaField, SendForm, SendMode, pane};
     use zenkey::slice::{ProcedureDecl, RegistrySlice};
 
-    let slice = RegistrySlice {
-        version: "1.0".into(),
-        app: "t".into(),
-        convention: 1,
-        name: "netring".into(),
-        service_origin: None,
-        description: None,
-        subjects: vec![],
-        procedures: vec![ProcedureDecl {
-            path: "capture/start".into(),
-            kind: Some(zenkey::ProcedureKind::Write.into()),
-            reply: Some("Ack".into()),
-            request: Some("CaptureSpec".into()),
-            encoding: None,
-            fanout: None,
-            idempotent: Some(false),
-            cardinality: None,
-            since: None,
-            description: None,
-        }],
-        blob: vec![],
-        media: vec![],
-        deprecated: vec![],
-    };
+    let mut start = ProcedureDecl::new("capture/start");
+    start.kind = Some(zenkey::ProcedureKind::Write.into());
+    start.reply = Some("Ack".into());
+    start.request = Some("CaptureSpec".into());
+    start.idempotent = Some(false);
+    let mut slice = RegistrySlice::new("1.0", "t", "netring");
+    slice.procedures = vec![start];
     let slices = SliceSet::from_slices(vec![slice]);
     let roster = zengui::nodes::NodeRoster::default();
 
@@ -3035,37 +2984,17 @@ fn the_settings_overlay_labels_live_against_reconnect_and_states_each_cost() {
 fn projection_fixture() -> (SliceSet, zengui::nodes::NodeRoster, KeyTreeSnapshot) {
     use zenkey::slice::{DeprecationDecl, RegistrySlice, SubjectDecl};
 
-    let subject = |path: &str| SubjectDecl {
-        path: path.into(),
-        class: zenkey::Class::State.into(),
-        type_name: "Health".into(),
-        common: None,
-        since: None,
-        description: None,
-        qos: None,
-        ttl_s: None,
-        unit: None,
-        rate: None,
-        cardinality: None,
-        encoding: None,
+    let subject = |path: &str| {
+        let mut d = SubjectDecl::new(path, zenkey::Class::State);
+        d.type_name = "Health".into();
+        d
     };
-    let slice = RegistrySlice {
-        version: "1.0".into(),
-        app: "demo".into(),
-        convention: 1,
-        name: "sysinfo".into(),
-        service_origin: None,
-        description: None,
-        subjects: vec![subject("health"), subject("mode")],
-        procedures: vec![],
-        blob: vec![],
-        media: vec![],
-        deprecated: vec![DeprecationDecl {
-            path: "old/health".into(),
-            since: Some("0.9".into()),
-            replaced_by: Some("health".into()),
-        }],
-    };
+    let mut retired = DeprecationDecl::new("old/health");
+    retired.since = Some("0.9".into());
+    retired.replaced_by = Some("health".into());
+    let mut slice = RegistrySlice::new("1.0", "demo", "sysinfo");
+    slice.subjects = vec![subject("health"), subject("mode")];
+    slice.deprecated = vec![retired];
     let slices = SliceSet::from_slices(vec![slice]);
 
     let mut roster = zengui::nodes::NodeRoster::default();
@@ -3362,36 +3291,18 @@ fn the_tree_badges_the_budget_join() {
 
     // A registry that declares a tight budget (2) on the disk family and a
     // rest-variable family beside it.
-    let subject = |path: &str, class: &str, cardinality: Option<i64>| zenkey::slice::SubjectDecl {
-        path: path.into(),
-        class: zenkey::Declared::parse(class),
-        type_name: "T".into(),
-        common: None,
-        since: None,
-        description: None,
-        qos: None,
-        ttl_s: None,
-        unit: None,
-        rate: None,
-        cardinality,
-        encoding: None,
+    let subject = |path: &str, class: &str, cardinality: Option<i64>| {
+        let mut d = zenkey::slice::SubjectDecl::new(path, zenkey::Declared::parse(class));
+        d.type_name = "T".into();
+        d.cardinality = cardinality;
+        d
     };
-    let tight = SliceSet::from_slices(vec![zenkey::slice::RegistrySlice {
-        version: "1.0".into(),
-        app: "t".into(),
-        convention: 1,
-        name: "sysinfo".into(),
-        service_origin: None,
-        description: None,
-        subjects: vec![
-            subject("disk/{mount}/used", "telemetry", Some(2)),
-            subject("log/{path...}", "events", Some(1)),
-        ],
-        procedures: vec![],
-        blob: vec![],
-        media: vec![],
-        deprecated: vec![],
-    }]);
+    let mut tight_slice = zenkey::slice::RegistrySlice::new("1.0", "t", "sysinfo");
+    tight_slice.subjects = vec![
+        subject("disk/{mount}/used", "telemetry", Some(2)),
+        subject("log/{path...}", "events", Some(1)),
+    ];
+    let tight = SliceSet::from_slices(vec![tight_slice]);
 
     let over = [
         "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/used",

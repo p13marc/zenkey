@@ -142,7 +142,7 @@ pub async fn check(
             Verdict::NotValidated(reason) => not_checked(&reason.to_string()),
         },
         Err(e) => match &e {
-            zenkey::schema::decode::DecodeError::Malformed(..)
+            zenkey::schema::decode::DecodeError::Malformed { .. }
             | zenkey::schema::decode::DecodeError::WrongEncoding(_) => {
                 ("undecodable", vec![e.to_string()])
             }
@@ -201,55 +201,23 @@ mod tests {
     use zenkey::slice::{BlobDecl, ProcedureDecl, RegistrySlice, SubjectDecl};
 
     fn slice(name: &str, subject_type: &str, reply: Option<&str>) -> RegistrySlice {
-        RegistrySlice {
-            version: "1.0".into(),
-            app: "t".into(),
-            convention: 1,
-            name: name.into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![SubjectDecl {
-                path: "p".into(),
-                class: zenkey::Class::Telemetry.into(),
-                type_name: subject_type.into(),
-                common: None,
-                since: None,
-                description: None,
-                qos: None,
-                ttl_s: None,
-                unit: None,
-                rate: None,
-                cardinality: None,
-                encoding: None,
-            }],
-            procedures: reply
-                .map(|r| {
-                    vec![ProcedureDecl {
-                        path: "proc".into(),
-                        kind: Some(zenkey::ProcedureKind::Read.into()),
-                        reply: Some(r.into()),
-                        request: None,
-                        encoding: None,
-                        fanout: None,
-                        idempotent: Some(true),
-                        cardinality: None,
-                        since: None,
-                        description: None,
-                    }]
-                })
-                .unwrap_or_default(),
-            media: vec![],
-            blob: vec![BlobDecl {
-                tier: zenkey::BlobTier::Artifact.into(),
-                endpoints: vec![],
-                algo: None,
-                reference: Some("BlobRef".into()),
-                encoding: None,
-                since: None,
-                description: None,
-            }],
-            deprecated: vec![],
-        }
+        let mut subject = SubjectDecl::new("p", zenkey::Class::Telemetry);
+        subject.type_name = subject_type.into();
+        let mut blob = BlobDecl::new(zenkey::BlobTier::Artifact);
+        blob.reference = Some("BlobRef".into());
+        let mut slice = RegistrySlice::new("1.0", "t", name);
+        slice.subjects = vec![subject];
+        slice.blob = vec![blob];
+        slice.procedures = reply
+            .map(|r| {
+                let mut p = ProcedureDecl::new("proc");
+                p.kind = Some(zenkey::ProcedureKind::Read.into());
+                p.reply = Some(r.into());
+                p.idempotent = Some(true);
+                vec![p]
+            })
+            .unwrap_or_default();
+        slice
     }
 
     /// Every binding site counts as carrying the type — subject, procedure

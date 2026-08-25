@@ -258,30 +258,13 @@ mod tests {
     use zenkey::slice::{ProcedureDecl, RegistrySlice};
 
     fn slices(kind: &str, idempotent: Option<bool>) -> SliceSet {
-        SliceSet::from_slices(vec![RegistrySlice {
-            version: "1.0".into(),
-            app: "t".into(),
-            convention: 1,
-            name: "netring".into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![],
-            procedures: vec![ProcedureDecl {
-                path: "capture/trigger".into(),
-                kind: Some(zenkey::Declared::parse(kind)),
-                reply: Some("Ack".into()),
-                request: None,
-                encoding: None,
-                fanout: None,
-                idempotent,
-                cardinality: None,
-                since: None,
-                description: None,
-            }],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        }])
+        let mut trigger = ProcedureDecl::new("capture/trigger");
+        trigger.kind = Some(zenkey::Declared::parse(kind));
+        trigger.reply = Some("Ack".into());
+        trigger.idempotent = idempotent;
+        let mut slice = RegistrySlice::new("1.0", "t", "netring");
+        slice.procedures = vec![trigger];
+        SliceSet::from_slices(vec![slice])
     }
 
     /// The guard: only an explicit `idempotent = true` passes. "Undeclared"

@@ -1385,32 +1385,10 @@ mod tests {
     #[test]
     fn totality_gaps_check_only_served_producers() {
         use zenkey::slice::{RegistrySlice, SubjectDecl};
-        let slice = RegistrySlice {
-            version: "1".into(),
-            app: "a".into(),
-            convention: 1,
-            name: "sysinfo".into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![SubjectDecl {
-                path: "cpu".into(),
-                class: zenkey::Class::Telemetry.into(),
-                type_name: "TelemetryPoint".into(),
-                common: None,
-                since: None,
-                description: None,
-                qos: None,
-                ttl_s: None,
-                unit: None,
-                rate: None,
-                cardinality: None,
-                encoding: None,
-            }],
-            procedures: vec![],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        };
+        let mut subject = SubjectDecl::new("cpu", zenkey::Class::Telemetry);
+        subject.type_name = "TelemetryPoint".into();
+        let mut slice = RegistrySlice::new("1", "a", "sysinfo");
+        slice.subjects = vec![subject];
         let slices = crate::model::registry::SliceSet::from_slices(vec![slice]);
 
         // Served describe missing the referenced type: one gap.
@@ -1434,32 +1412,10 @@ mod tests {
     #[test]
     fn an_untyped_subject_is_not_a_totality_gap() {
         use zenkey::slice::{RegistrySlice, SubjectDecl};
-        let slice = RegistrySlice {
-            version: "1".into(),
-            app: "a".into(),
-            convention: 1,
-            name: "sysinfo".into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![SubjectDecl {
-                path: "raw".into(),
-                class: zenkey::Class::Telemetry.into(),
-                type_name: String::new(),
-                common: None,
-                since: None,
-                description: None,
-                qos: None,
-                ttl_s: None,
-                unit: None,
-                rate: None,
-                cardinality: None,
-                encoding: None,
-            }],
-            procedures: vec![],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        };
+        let mut subject = SubjectDecl::new("raw", zenkey::Class::Telemetry);
+        subject.type_name = String::new();
+        let mut slice = RegistrySlice::new("1", "a", "sysinfo");
+        slice.subjects = vec![subject];
         let slices = crate::model::registry::SliceSet::from_slices(vec![slice]);
         let served = SchemaSet::builder("a").build();
         assert!(

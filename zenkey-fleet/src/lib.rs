@@ -67,6 +67,11 @@
 //! crate has no stratum for `~/.config`, and forcing `dirs` and `toml` on a
 //! library consumer so two binaries could read a TOML file was the tell.
 
+// docs.rs builds on nightly with `--cfg docsrs` (see Cargo.toml), which is
+// what lets each feature-gated item carry the feature that gates it. Inert
+// everywhere else — a stable `cargo doc` never sets the cfg (#325).
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 pub mod bus;
 pub mod judge;
 pub mod model;
@@ -94,34 +99,43 @@ pub mod tape;
 // verbs below actually **return** are lifted to the root.
 
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use bus::body::{
     BodySource, PrepareMode, PrepareSpec, PreparedBody, encode_encoding, prepare_publish,
     prepare_request,
 };
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
     CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, run_watchdog,
 };
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::doctor::{DoctorSpec, run_doctor};
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run_field};
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{
     DEFAULT_MAX_PRODUCERS, DecodedSample, Rendering, SchemaStore, Sealed, StoreBounds,
     decode_sample, prewarm, schema_drift, schema_dump, schemas_for_type, totality_gaps,
 };
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use tape::generate::{
     GenPattern, GenSpec, MockProducer, build_plan, run_gen, serve_describe, synthetic_marker,
 };
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use tape::synth::Synth;
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use zenkey::schema::validate::{NotValidated, Verdict};
 
 pub use bus::admin::{
@@ -129,6 +143,7 @@ pub use bus::admin::{
     mesh_links, origin_attachments, render_dot, routers, state_coverage, storages, topology,
 };
 #[cfg(feature = "blob")]
+#[cfg_attr(docsrs, doc(cfg(feature = "blob")))]
 pub use bus::blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
 pub use bus::blob::{BlobTarget, blob_list, declared_by};
 pub use bus::discover::{AliveToken, discover_bases};
@@ -185,6 +200,7 @@ pub use report::{
     judgement_exit_code,
 };
 #[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use report::{CondState, Transition, WatchdogSummary};
 pub use tape::bench::{BenchSpec, run_bench};
 pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
@@ -195,4 +211,5 @@ pub use tape::record::{
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.
 #[cfg(feature = "blob")]
+#[cfg_attr(docsrs, doc(cfg(feature = "blob")))]
 pub use zblob;
