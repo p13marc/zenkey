@@ -33,18 +33,96 @@ pub struct DecodedPayload {
 }
 
 /// A decode/encode failure.
+///
+/// The three variants that wrap a codec's own error carry it boxed rather
+/// than stringified (#317). Three codecs means three unrelated error types
+/// (`serde_json`, `ciborium`, `prost`), so the box is what lets one variant
+/// hold any of them; `Display` is unchanged, because it still prints the
+/// inner error's `Display` — what changes is that `source()` now reaches it.
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
     #[error("no decoder for schema kind {0:?} — render structurally instead")]
     UnknownKind(String),
-    #[error("payload does not decode as {0}: {1}")]
-    Malformed(&'static str, String),
+    #[error("payload does not decode as {codec}: {message}")]
+    Malformed {
+        codec: &'static str,
+        message: String,
+        #[source]
+        cause: Option<BoxedCause>,
+    },
     #[error("encoding {0:?} is not decodable under this schema kind")]
     WrongEncoding(String),
-    #[error("schema entry is incomplete: {0}")]
-    BadSchema(String),
-    #[error("value does not conform for encoding: {0}")]
-    Encode(String),
+    #[error("schema entry is incomplete: {message}")]
+    BadSchema {
+        message: String,
+        #[source]
+        cause: Option<BoxedCause>,
+    },
+    #[error("value does not conform for encoding: {message}")]
+    Encode {
+        message: String,
+        #[source]
+        cause: Option<BoxedCause>,
+    },
+}
+
+/// A codec's own error, kept rather than flattened to text.
+pub type BoxedCause = Box<dyn std::error::Error + Send + Sync>;
+
+impl DecodeError {
+    /// A codec refused the bytes — its error is the cause.
+    pub fn malformed(codec: &'static str, cause: impl Into<BoxedCause>) -> Self {
+        let cause = cause.into();
+        DecodeError::Malformed {
+            codec,
+            message: cause.to_string(),
+            cause: Some(cause),
+        }
+    }
+
+    /// *This* crate refused the bytes: there is no underlying error, and
+    /// `source()` says so rather than inventing one.
+    pub fn malformed_here(codec: &'static str, message: impl Into<String>) -> Self {
+        DecodeError::Malformed {
+            codec,
+            message: message.into(),
+            cause: None,
+        }
+    }
+
+    /// A schema entry this build cannot use, explained by this crate.
+    pub fn bad_schema(message: impl Into<String>) -> Self {
+        DecodeError::BadSchema {
+            message: message.into(),
+            cause: None,
+        }
+    }
+
+    /// A schema entry a validator rejected — its error is the cause.
+    pub fn bad_schema_from(cause: impl Into<BoxedCause>) -> Self {
+        let cause = cause.into();
+        DecodeError::BadSchema {
+            message: cause.to_string(),
+            cause: Some(cause),
+        }
+    }
+
+    /// An encode failure from a codec.
+    pub fn encode(cause: impl Into<BoxedCause>) -> Self {
+        let cause = cause.into();
+        DecodeError::Encode {
+            message: cause.to_string(),
+            cause: Some(cause),
+        }
+    }
+
+    /// An encode refusal this crate made itself.
+    pub fn encode_here(message: impl Into<String>) -> Self {
+        DecodeError::Encode {
+            message: message.into(),
+            cause: None,
+        }
+    }
 }
 
 /// One schema kind's codec. Implementations are registered in a
@@ -95,8 +173,8 @@ impl JsonSchemaDecoder {
         let compiled = self.validators.get_or_compile(schema, |schema| {
             let doc = schema
                 .json_document()
-                .ok_or_else(|| DecodeError::BadSchema("missing json document".into()))?;
-            jsonschema::validator_for(doc).map_err(|e| DecodeError::BadSchema(e.to_string()))
+                .ok_or_else(|| DecodeError::bad_schema("missing json document"))?;
+            jsonschema::validator_for(doc).map_err(DecodeError::bad_schema_from)
         });
         match compiled {
             Ok(validator) => super::validate::validate_json(&validator, value),
@@ -140,13 +218,13 @@ impl PayloadDecoder for JsonSchemaDecoder {
         bytes: &[u8],
     ) -> Result<DecodedPayload, DecodeError> {
         let value: Value = match encoding {
-            WireEncoding::Json => serde_json::from_slice(bytes)
-                .map_err(|e| DecodeError::Malformed("json", e.to_string()))?,
+            WireEncoding::Json => {
+                serde_json::from_slice(bytes).map_err(|e| DecodeError::malformed("json", e))?
+            }
             WireEncoding::Cbor => {
-                let cbor: ciborium::Value = ciborium::from_reader(bytes)
-                    .map_err(|e| DecodeError::Malformed("cbor", e.to_string()))?;
-                serde_json::to_value(&cbor)
-                    .map_err(|e| DecodeError::Malformed("cbor->json", e.to_string()))?
+                let cbor: ciborium::Value =
+                    ciborium::from_reader(bytes).map_err(|e| DecodeError::malformed("cbor", e))?;
+                serde_json::to_value(&cbor).map_err(|e| DecodeError::malformed("cbor->json", e))?
             }
             other => return Err(DecodeError::WrongEncoding(format!("{other:?}"))),
         };
@@ -171,19 +249,16 @@ impl PayloadDecoder for JsonSchemaDecoder {
         // without the validator) cannot judge the value and lets it pass;
         // refusing on our own failure would punish the payload for the tool.
         if let Verdict::Invalid(errors) = self.verdict(schema, value) {
-            return Err(DecodeError::Encode(format!(
+            return Err(DecodeError::encode_here(format!(
                 "value violates the served schema: {}",
                 errors.join("; ")
             )));
         }
         match target {
-            WireEncoding::Json => {
-                serde_json::to_vec(value).map_err(|e| DecodeError::Encode(e.to_string()))
-            }
+            WireEncoding::Json => serde_json::to_vec(value).map_err(DecodeError::encode),
             WireEncoding::Cbor => {
                 let mut out = Vec::new();
-                ciborium::into_writer(value, &mut out)
-                    .map_err(|e| DecodeError::Encode(e.to_string()))?;
+                ciborium::into_writer(value, &mut out).map_err(DecodeError::encode)?;
                 Ok(out)
             }
             other => Err(DecodeError::WrongEncoding(format!("{other:?}"))),
@@ -223,14 +298,14 @@ impl ProtobufDecoder {
         self.descriptors.get_or_compile(schema, |schema| {
             let fds = schema
                 .protobuf_descriptor_set()
-                .ok_or_else(|| DecodeError::BadSchema("missing descriptor_b64".into()))?;
+                .ok_or_else(|| DecodeError::bad_schema("missing descriptor_b64"))?;
             let message = schema
                 .protobuf_message()
-                .ok_or_else(|| DecodeError::BadSchema("missing message name".into()))?;
+                .ok_or_else(|| DecodeError::bad_schema("missing message name"))?;
             let pool = prost_reflect::DescriptorPool::decode(fds.as_slice())
-                .map_err(|e| DecodeError::BadSchema(format!("descriptor set: {e}")))?;
+                .map_err(|e| DecodeError::bad_schema(format!("descriptor set: {e}")))?;
             pool.get_message_by_name(message)
-                .ok_or_else(|| DecodeError::BadSchema(format!("message {message:?} not in set")))
+                .ok_or_else(|| DecodeError::bad_schema(format!("message {message:?} not in set")))
         })
     }
 }
@@ -257,9 +332,9 @@ impl PayloadDecoder for ProtobufDecoder {
         }
         let desc = self.descriptor(schema)?;
         let msg = prost_reflect::DynamicMessage::decode((*desc).clone(), bytes)
-            .map_err(|e| DecodeError::Malformed("protobuf", e.to_string()))?;
-        let value = serde_json::to_value(&msg)
-            .map_err(|e| DecodeError::Malformed("protobuf->json", e.to_string()))?;
+            .map_err(|e| DecodeError::malformed("protobuf", e))?;
+        let value =
+            serde_json::to_value(&msg).map_err(|e| DecodeError::malformed("protobuf->json", e))?;
         Ok(DecodedPayload {
             value,
             notes: Vec::new(),
@@ -277,14 +352,11 @@ impl PayloadDecoder for ProtobufDecoder {
     ) -> Result<Vec<u8>, DecodeError> {
         use prost::Message as _;
         let desc = self.descriptor(schema)?;
-        let rendered =
-            serde_json::to_string(value).map_err(|e| DecodeError::Encode(e.to_string()))?;
+        let rendered = serde_json::to_string(value).map_err(DecodeError::encode)?;
         let mut deserializer = serde_json::Deserializer::from_str(&rendered);
         let msg = prost_reflect::DynamicMessage::deserialize((*desc).clone(), &mut deserializer)
-            .map_err(|e| DecodeError::Encode(e.to_string()))?;
-        deserializer
-            .end()
-            .map_err(|e| DecodeError::Encode(e.to_string()))?;
+            .map_err(DecodeError::encode)?;
+        deserializer.end().map_err(DecodeError::encode)?;
         Ok(msg.encode_to_vec())
     }
 }
@@ -531,7 +603,7 @@ mod validate_tests {
         let err = registry
             .encode(&s, &json!({"x": "seven"}), &WireEncoding::Json)
             .unwrap_err();
-        assert!(matches!(err, DecodeError::Encode(_)), "{err:?}");
+        assert!(matches!(err, DecodeError::Encode { .. }), "{err:?}");
         assert!(err.to_string().contains("violates"), "{err}");
         assert!(
             registry

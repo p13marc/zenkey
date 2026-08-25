@@ -71,22 +71,26 @@ fn class_selector(scope: Scope, class: &str) -> Selector {
 }
 
 /// Every state document in scope: `v1/<scope>/state/**`.
+#[must_use]
 pub fn all_state(scope: Scope) -> Selector {
     class_selector(scope, CLASS_STATE)
 }
 
 /// The telemetry firehose in scope: `v1/<scope>/telemetry/**`.
+#[must_use]
 pub fn all_telemetry(scope: Scope) -> Selector {
     class_selector(scope, CLASS_TELEMETRY)
 }
 
 /// Every event in scope: `v1/<scope>/events/**`.
+#[must_use]
 pub fn all_events(scope: Scope) -> Selector {
     class_selector(scope, CLASS_EVENTS)
 }
 
 /// One class's firehose in scope (the typed generalization of the three
 /// `all_*` helpers).
+#[must_use]
 pub fn all_of_class(scope: Scope, class: Class) -> Selector {
     class_selector(scope, class.chunk())
 }
@@ -94,6 +98,7 @@ pub fn all_of_class(scope: Scope, class: Class) -> Selector {
 /// Producer liveliness tokens in scope (RFC 04 §5):
 /// `v1/<scope>/state/*/alive`. Zero payload — the token key is the record.
 /// Service tokens are not in this set (D4); ask via [`service_alive`].
+#[must_use]
 pub fn all_liveliness(scope: Scope) -> Selector {
     Selector::from_canonical(format!(
         "{VERSION_CHUNK}/{}/{CLASS_STATE}/*/{SUBJECT_ALIVE}",
@@ -103,6 +108,7 @@ pub fn all_liveliness(scope: Scope) -> Selector {
 
 /// One producer's state subtree in scope:
 /// `v1/<scope>/state/<producer>[/<prefix…>]/**`.
+#[must_use]
 pub fn producer_state(scope: Scope, producer: &str, prefix: &[&str]) -> Selector {
     let mut out = format!(
         "{VERSION_CHUNK}/{}/{CLASS_STATE}/{}",
@@ -129,6 +135,7 @@ pub fn producer_state(scope: Scope, producer: &str, prefix: &[&str]) -> Selector
 /// stays inside the grammar's guarantees. The `@catalog` subjects are
 /// deliberately unspellable here: they are one service's state, and by D4 a
 /// `*` scope could not reach them anyway (see [`CommonFamily`]).
+#[must_use]
 pub fn common_family(scope: Scope, family: CommonFamily) -> Selector {
     let mut out = format!("{VERSION_CHUNK}/{}/{CLASS_STATE}/*", scope.chunk());
     for chunk in family.prefix() {
@@ -192,6 +199,7 @@ impl Producers {
 ///
 /// A service origin has no producer chunk — [`service_rpc`] is its builder,
 /// and a `*` scope could not reach it anyway (D4).
+#[must_use]
 pub fn rpc(scope: Scope, producer: Producers, procedure: &[&str]) -> Selector {
     let p = producer.chunk();
     let mut out = format!("{VERSION_CHUNK}/{}/{PLANE_RPC}/{p}", scope.chunk());
@@ -209,6 +217,7 @@ pub fn rpc(scope: Scope, producer: Producers, procedure: &[&str]) -> Selector {
 /// spelled out rather than reachable by passing `"*"` here: this builder's
 /// name says *one* producer across the fleet, and the two-wildcard form is a
 /// different question (RFC 08 §6's discovery sweep) that should read like one.
+#[must_use]
 pub fn fleet_rpc(producer: &str, procedure: &[&str]) -> Selector {
     rpc(Scope::fleet(), Producers::named(producer), procedure)
 }
@@ -216,6 +225,7 @@ pub fn fleet_rpc(producer: &str, procedure: &[&str]) -> Selector {
 /// One host's procedure key: `v1/<origin>/@rpc/<producer>/<procedure…>`.
 /// Takes a host origin — a service origin has no producer chunk
 /// ([`service_rpc`]).
+#[must_use]
 pub fn rpc_at(origin: &impl HostOrigin, producer: &str, procedure: &[&str]) -> Key {
     let mut out = format!(
         "{VERSION_CHUNK}/{}/{PLANE_RPC}/{}",
@@ -231,6 +241,7 @@ pub fn rpc_at(origin: &impl HostOrigin, producer: &str, procedure: &[&str]) -> K
 
 /// A service origin's procedure key (no producer chunk, RFC 06 §5):
 /// `v1/@<service>/@rpc/<procedure…>`.
+#[must_use]
 pub fn service_rpc(origin: &ServiceOrigin, procedure: &[&str]) -> Key {
     let mut out = format!("{VERSION_CHUNK}/{}/{PLANE_RPC}", origin.as_str());
     for chunk in procedure {
@@ -242,6 +253,7 @@ pub fn service_rpc(origin: &ServiceOrigin, procedure: &[&str]) -> Key {
 
 /// A service origin's liveliness token key (RFC 04 §5):
 /// `v1/@<service>/state/alive`.
+#[must_use]
 pub fn service_alive(origin: &ServiceOrigin) -> Key {
     Key::from_canonical(format!(
         "{VERSION_CHUNK}/{}/{CLASS_STATE}/{SUBJECT_ALIVE}",

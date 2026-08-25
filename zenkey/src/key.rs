@@ -96,11 +96,13 @@ pub mod __private {
     use super::{Key, Selector};
 
     /// Wrap a generated builder's concrete key string. Panics on a wildcard.
+    #[must_use]
     pub fn key_from_canonical(s: String) -> Key {
         Key::from_canonical(s)
     }
 
     /// Wrap a generated builder's selector string.
+    #[must_use]
     pub fn selector_from_canonical(s: String) -> Selector {
         Selector::from_canonical(s)
     }
@@ -204,6 +206,7 @@ impl Chunk {
     /// injective `_xNN_` escape; case-sensitive domains survive, G4).
     /// Always succeeds — this is the API boundary where application values
     /// become grammar-legal.
+    #[must_use]
     pub fn slug(value: impl AsRef<str>) -> Chunk {
         Chunk(chunk_slug(value.as_ref()))
     }

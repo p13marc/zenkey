@@ -1,10 +1,21 @@
 //! Subject-pattern matching (RFC 08 §1/§2, issue #7).
 //!
 //! One implementation of the registry's `{var}` / `{var...}` pattern
-//! semantics, shared by the codegen (`zenkey-build` orders generated parse
-//! arms by [`SubjectPattern::precedence`]) and by runtime tools (zenctl's
-//! subject refinement delegates here). Before v1.5 the two carried separate
-//! hand-rolled copies of the same rules with no parity guarantee.
+//! semantics, shared by the codegen (`zenkey-build` parses every registry
+//! path through [`SubjectPattern::parse`] and orders generated parse arms by
+//! [`SubjectPattern::precedence_cmp`]) and by runtime tools (zenctl's subject
+//! refinement delegates here).
+//!
+//! *This paragraph was aspirational until #320.* v1.5 moved precedence here
+//! and said the rest had followed; in fact `zenkey-build` kept its own
+//! `Chunk` enum and its own copy of the grammar — trailing-rest rule,
+//! variable-name check and all — reaching for this module in exactly one
+//! place. The parity it claimed was a coincidence for five minor versions.
+//! The codegen now names these types, and what stays on its side is only
+//! what does not belong here: `alive` is reserved at any position of a
+//! *locally registered* pattern (RFC 03 §3, v1.25 A5b), while this type also
+//! parses patterns served by a foreign fleet, where local reservations do
+//! not apply.
 //!
 //! Semantics (byte-compatible with the generated parse):
 //! - a **literal** chunk matches itself, exactly;
@@ -137,20 +148,31 @@ impl SubjectPattern {
         Some(binds)
     }
 
-    /// The parse-precedence key: per-position ranks (literal < var < rest),
-    /// compared lexicographically, ties broken by pattern text — exactly the
-    /// order the generated parse arms are emitted in.
-    pub fn precedence(&self) -> (Vec<u8>, &str) {
-        let ranks = self
-            .chunks
+    /// One position's parse-precedence rank: literal < var < rest.
+    fn rank(chunk: &PatternChunk) -> u8 {
+        match chunk {
+            PatternChunk::Literal(_) => 0,
+            PatternChunk::Var(_) => 1,
+            PatternChunk::Rest(_) => 2,
+        }
+    }
+
+    /// Compare two patterns by parse precedence: per-position ranks
+    /// (literal < var < rest) lexicographically, ties broken by pattern text
+    /// — exactly the order the generated parse arms are emitted in.
+    ///
+    /// A comparison, not a key, and that is the point (#321). The key form
+    /// built a `Vec<u8>` per call, so a `sort_by` over *n* patterns allocated
+    /// on the order of *n log n* times — inside the comparator, where the one
+    /// thing that must stay cheap is the comparison. Nothing about the
+    /// ordering changes; `Iterator::cmp` over the ranks is lexicographic in
+    /// the same way `Vec`'s `Ord` is, including on the prefix case.
+    pub fn precedence_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.chunks
             .iter()
-            .map(|c| match c {
-                PatternChunk::Literal(_) => 0u8,
-                PatternChunk::Var(_) => 1,
-                PatternChunk::Rest(_) => 2,
-            })
-            .collect();
-        (ranks, &self.text)
+            .map(Self::rank)
+            .cmp(other.chunks.iter().map(Self::rank))
+            .then_with(|| self.text.as_str().cmp(other.text.as_str()))
     }
 
     /// The selector tail for this family: `{var}` → `*`, `{var...}` → `**`.
@@ -205,7 +227,7 @@ pub fn best_match<'p>(
     tail: &[&str],
 ) -> Option<(usize, Vec<(&'p str, String)>)> {
     let mut order: Vec<usize> = (0..patterns.len()).collect();
-    order.sort_by(|&a, &b| patterns[a].precedence().cmp(&patterns[b].precedence()));
+    order.sort_by(|&a, &b| patterns[a].precedence_cmp(&patterns[b]));
     for idx in order {
         if let Some(binds) = patterns[idx].matches(tail) {
             return Some((idx, binds));
@@ -220,6 +242,58 @@ mod tests {
 
     fn p(s: &str) -> SubjectPattern {
         SubjectPattern::parse(s).unwrap()
+    }
+
+    /// Ordering is unchanged by #321 — the key became a comparison, not a
+    /// different order. Pinned against the *old* key form, computed here, so
+    /// a future edit to `precedence_cmp` cannot quietly reorder generated
+    /// parse arms.
+    #[test]
+    fn precedence_cmp_agrees_with_the_key_it_replaced() {
+        fn key(p: &SubjectPattern) -> (Vec<u8>, &str) {
+            let ranks = p
+                .chunks()
+                .iter()
+                .map(|c| match c {
+                    PatternChunk::Literal(_) => 0u8,
+                    PatternChunk::Var(_) => 1,
+                    PatternChunk::Rest(_) => 2,
+                })
+                .collect();
+            (ranks, p.as_str())
+        }
+        let pats: Vec<SubjectPattern> = [
+            "flow/red/count",
+            "flow/{quantile}/count",
+            "flow/{rest...}",
+            "{device}/count",
+            "{device}/{metric...}",
+            "a",
+            "a/b",
+            // Same ranks, different text — the tie-break.
+            "flow/{a}/count",
+            "flow/{b}/count",
+        ]
+        .iter()
+        .map(|p| SubjectPattern::parse(p).unwrap())
+        .collect();
+
+        for a in &pats {
+            for b in &pats {
+                assert_eq!(
+                    a.precedence_cmp(b),
+                    key(a).cmp(&key(b)),
+                    "{} vs {}",
+                    a.as_str(),
+                    b.as_str()
+                );
+            }
+        }
+        // And the property the ordering exists for: most literal first.
+        let mut order: Vec<&SubjectPattern> = pats.iter().collect();
+        order.sort_by(|a, b| a.precedence_cmp(b));
+        assert_eq!(order[0].as_str(), "a");
+        assert_eq!(order.last().unwrap().as_str(), "{device}/{metric...}");
     }
 
     #[test]

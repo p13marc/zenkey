@@ -293,7 +293,14 @@ impl SliceToken for ServiceOrigin {
 }
 
 /// One `[[subject]]` entry of a served registry slice.
+/// `#[non_exhaustive]`: every version of this type so far has been the
+/// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
+/// v1.16), and each of those was a breaking change for anyone
+/// constructing one. It is a *parse result*, not a thing callers build
+/// — [`parse_slice`] is the constructor — so the attribute costs the
+/// intended use nothing and stops the next field being a break (#325).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SubjectDecl {
     /// The subject pattern, base-relative to `<class>/<producer>` — e.g.
     /// `disk/{mount}/used`.
@@ -333,7 +340,14 @@ pub struct SubjectDecl {
 }
 
 /// One `[[procedure]]` entry of a served registry slice.
+/// `#[non_exhaustive]`: every version of this type so far has been the
+/// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
+/// v1.16), and each of those was a breaking change for anyone
+/// constructing one. It is a *parse result*, not a thing callers build
+/// — [`parse_slice`] is the constructor — so the attribute costs the
+/// intended use nothing and stops the next field being a break (#325).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ProcedureDecl {
     /// The procedure path, base-relative to the producer's `@rpc` root.
     pub path: String,
@@ -372,7 +386,14 @@ pub struct ProcedureDecl {
 /// Note the asymmetry, which was pre-existing rather than introduced here:
 /// `[[media]]` had a registry field table since v1.3 and codegen since v1.5,
 /// but did not appear in a slice until v1.16 ([`MediaDecl`]).
+/// `#[non_exhaustive]`: every version of this type so far has been the
+/// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
+/// v1.16), and each of those was a breaking change for anyone
+/// constructing one. It is a *parse result*, not a thing callers build
+/// — [`parse_slice`] is the constructor — so the attribute costs the
+/// intended use nothing and stops the next field being a break (#325).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlobDecl {
     /// `artifact` | `tree` | `store` (RFC 07 §2).
     pub tier: Declared<BlobTier>,
@@ -398,7 +419,14 @@ pub struct BlobDecl {
 /// fields stay optional, unknown vocabulary is carried rather than refused —
 /// this parser reads *foreign* slices, and the strict checks belong to that
 /// build's own `zenkey-build`.
+/// `#[non_exhaustive]`: every version of this type so far has been the
+/// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
+/// v1.16), and each of those was a breaking change for anyone
+/// constructing one. It is a *parse result*, not a thing callers build
+/// — [`parse_slice`] is the constructor — so the attribute costs the
+/// intended use nothing and stops the next field being a break (#325).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MediaDecl {
     /// Media sub-path after `@media/<producer>/` — the stream pattern
     /// (`{stream}/preview/jpeg`), same variable rules as a subject.
@@ -416,7 +444,14 @@ pub struct MediaDecl {
 }
 
 /// One `[[deprecated]]` entry — RFC 08 §3's append-only retirement ledger.
+/// `#[non_exhaustive]`: every version of this type so far has been the
+/// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
+/// v1.16), and each of those was a breaking change for anyone
+/// constructing one. It is a *parse result*, not a thing callers build
+/// — [`parse_slice`] is the constructor — so the attribute costs the
+/// intended use nothing and stops the next field being a break (#325).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DeprecationDecl {
     pub path: String,
     /// Registry version the retirement was recorded in.
@@ -426,7 +461,14 @@ pub struct DeprecationDecl {
 }
 
 /// What one build says it serves: the payload of an `introspect` reply.
+/// `#[non_exhaustive]`: every version of this type so far has been the
+/// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
+/// v1.16), and each of those was a breaking change for anyone
+/// constructing one. It is a *parse result*, not a thing callers build
+/// — [`parse_slice`] is the constructor — so the attribute costs the
+/// intended use nothing and stops the next field being a break (#325).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RegistrySlice {
     /// `[registry] version` — the number a version-skew check compares.
     pub version: String,
@@ -453,7 +495,119 @@ pub struct RegistrySlice {
     pub deprecated: Vec<DeprecationDecl>,
 }
 
+impl SubjectDecl {
+    /// A subject declaration with its two required columns; the optional
+    /// ones are `None` and assignable — the fields stay `pub`, and
+    /// `#[non_exhaustive]` blocks only literal construction.
+    #[must_use]
+    pub fn new(path: impl Into<String>, class: impl Into<Declared<Class>>) -> Self {
+        SubjectDecl {
+            path: path.into(),
+            class: class.into(),
+            type_name: String::new(),
+            common: None,
+            since: None,
+            description: None,
+            qos: None,
+            ttl_s: None,
+            unit: None,
+            rate: None,
+            cardinality: None,
+            encoding: None,
+        }
+    }
+}
+
+impl ProcedureDecl {
+    /// A procedure declaration with its one required column.
+    #[must_use]
+    pub fn new(path: impl Into<String>) -> Self {
+        ProcedureDecl {
+            path: path.into(),
+            kind: None,
+            reply: None,
+            request: None,
+            encoding: None,
+            fanout: None,
+            idempotent: None,
+            cardinality: None,
+            since: None,
+            description: None,
+        }
+    }
+}
+
+impl BlobDecl {
+    /// A blob-tier declaration with its one required column.
+    #[must_use]
+    pub fn new(tier: impl Into<Declared<BlobTier>>) -> Self {
+        BlobDecl {
+            tier: tier.into(),
+            endpoints: Vec::new(),
+            algo: None,
+            reference: None,
+            encoding: None,
+            since: None,
+            description: None,
+        }
+    }
+}
+
+impl MediaDecl {
+    /// A media-stream declaration with its two required columns.
+    #[must_use]
+    pub fn new(path: impl Into<String>, encoding: WireEncoding) -> Self {
+        MediaDecl {
+            path: path.into(),
+            encoding,
+            attachment: None,
+            cardinality: None,
+            since: None,
+            description: None,
+        }
+    }
+}
+
+impl DeprecationDecl {
+    /// A retirement-ledger entry with its one required column.
+    #[must_use]
+    pub fn new(path: impl Into<String>) -> Self {
+        DeprecationDecl {
+            path: path.into(),
+            since: None,
+            replaced_by: None,
+        }
+    }
+}
+
 impl RegistrySlice {
+    /// An empty slice with its required header. `convention` is the
+    /// keyspace-v2 major version, `1`; the collections start empty and are
+    /// assignable.
+    ///
+    /// [`parse_slice`] is how a slice normally arrives — this is for the
+    /// callers that build one to compare against.
+    #[must_use]
+    pub fn new(
+        version: impl Into<String>,
+        app: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
+        RegistrySlice {
+            version: version.into(),
+            app: app.into(),
+            convention: 1,
+            name: name.into(),
+            service_origin: None,
+            description: None,
+            subjects: Vec::new(),
+            procedures: Vec::new(),
+            blob: Vec::new(),
+            media: Vec::new(),
+            deprecated: Vec::new(),
+        }
+    }
+
     /// Subjects of one class.
     ///
     /// Takes the vocabulary, not a `&str`: `subjects_in("telementry")` used
@@ -506,16 +660,22 @@ impl RegistrySlice {
 }
 
 /// Why a slice would not parse.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SliceError(String);
-
-impl fmt::Display for SliceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "malformed registry slice: {}", self.0)
-    }
+///
+/// An enum with a real `source()` since #317: the TOML variant used to be a
+/// stringified `toml::de::Error` behind an empty `impl std::error::Error`, so
+/// a caller who wanted the span, or just to tell a syntax error from a
+/// missing header, had nothing to match on but the sentence.
+#[derive(Debug, thiserror::Error)]
+pub enum SliceError {
+    /// The reply is not well-formed TOML. The `toml` error is the source.
+    #[error("malformed registry slice: {0}")]
+    Toml(#[from] toml::de::Error),
+    /// The reply parses as TOML but is not a registry slice — a missing
+    /// header, a required field absent. There is no underlying error here:
+    /// this crate is the one saying so.
+    #[error("malformed registry slice: {0}")]
+    Shape(String),
 }
-
-impl std::error::Error for SliceError {}
 
 /// Parse an `introspect` reply — the raw registry TOML a build serves.
 ///
@@ -525,9 +685,9 @@ impl std::error::Error for SliceError {}
 /// view that exists to spot skew) and intolerant of *missing* ones (a slice
 /// without a version cannot be diffed, which is the whole point).
 pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
-    let doc: toml::Value = toml::from_str(toml_src).map_err(|e| SliceError(e.to_string()))?;
+    let doc: toml::Value = toml::from_str(toml_src)?;
 
-    let err = |m: &str| SliceError(m.to_string());
+    let err = |m: &str| SliceError::Shape(m.to_string());
     let s = |v: Option<&toml::Value>| v.and_then(|v| v.as_str()).map(str::to_string);
     // A closed-vocabulary column: recognised where this build knows the token,
     // carried verbatim where it does not (RFC 08 §6 — skew is a finding, and a
@@ -1133,6 +1293,32 @@ mod tests {
             Some("@catalog")
         );
         assert!(slice.serves_procedure("introspect"));
+    }
+
+    /// A parse failure carries the `toml` error, not a copy of its sentence
+    /// (#317). The chain is what a caller needs: `SliceError` says *which
+    /// producer's slice*, the source says *where in the file*.
+    #[test]
+    fn a_malformed_slice_keeps_the_toml_error_as_its_source() {
+        use std::error::Error as _;
+
+        let err = parse_slice("this is not = = toml").unwrap_err();
+        assert!(matches!(err, SliceError::Toml(_)), "{err:?}");
+
+        // The chain reaches the real error, and it is a `toml` one — the
+        // whole point: a caller can downcast to it rather than grep the text.
+        let source = err.source().expect("a toml error underneath");
+        assert!(
+            source.downcast_ref::<toml::de::Error>().is_some(),
+            "source was {source:?}"
+        );
+
+        // A slice that *is* TOML but is not a slice has no underlying error,
+        // and says so rather than inventing one.
+        let shape = parse_slice("[registry]\nversion = \"1.0\"\n").unwrap_err();
+        assert!(matches!(shape, SliceError::Shape(_)), "{shape:?}");
+        assert!(shape.source().is_none());
+        assert!(shape.to_string().contains("missing app"), "{shape}");
     }
 
     /// A closed-vocabulary column recognises what this build knows and keeps

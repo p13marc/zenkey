@@ -4,9 +4,16 @@ exactly what the build would say is the whole value of the command.
 
 No session: it goes straight to `zenkey_build::Config`.
 
+`warnings` carries the build's non-fatal diagnostics — the `cargo::warning=`
+lines a `build.rs` would print. Empty here, because every file in the fixture
+registry pins its entries; a file declaring `compat = "none"` appears in this
+list and the run still passes, since that is a warning and not a finding
+(#319 — it appeared nowhere at all before, because the diagnostic sat behind
+the `rerun-if-changed` flag this command turns off).
+
 ```console
 $ zenctl registry lint ../fixture-tests/registry
-{"dir":"../fixture-tests/registry","passed":true,"report":"registry-lint"}
+{"dir":"../fixture-tests/registry","passed":true,"report":"registry-lint","warnings":[]}
 
 ```
 

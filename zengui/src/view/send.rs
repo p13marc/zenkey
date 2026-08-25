@@ -970,32 +970,11 @@ mod tests {
     #[test]
     fn declared_qos_reads_only_the_registered_rung() {
         use zenkey::slice::{RegistrySlice, SubjectDecl};
-        let slice = RegistrySlice {
-            version: "1.0".into(),
-            app: "test".into(),
-            convention: 1,
-            name: "sysinfo".into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![SubjectDecl {
-                path: "health".into(),
-                class: zenkey::Class::State.into(),
-                type_name: "Health".into(),
-                common: None,
-                since: None,
-                description: None,
-                qos: Some(zenkey::QosProfile::Transition.into()),
-                ttl_s: None,
-                unit: None,
-                rate: None,
-                cardinality: None,
-                encoding: None,
-            }],
-            procedures: vec![],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        };
+        let mut health = SubjectDecl::new("health", zenkey::Class::State);
+        health.type_name = "Health".into();
+        health.qos = Some(zenkey::QosProfile::Transition.into());
+        let mut slice = RegistrySlice::new("1.0", "test", "sysinfo");
+        slice.subjects = vec![health];
         let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
         let facts = |key: &str| zenkey_fleet::describe_key("", key, Some(&slices)).facts;
         let registered = facts("v1/h-3fa9c2d41b7e/state/sysinfo/health");

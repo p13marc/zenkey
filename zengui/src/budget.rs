@@ -160,40 +160,20 @@ mod tests {
     use zenkey_fleet::model::stats::StatsTable;
 
     fn subject(path: &str, class: &str, cardinality: Option<i64>) -> zenkey::slice::SubjectDecl {
-        zenkey::slice::SubjectDecl {
-            path: path.into(),
-            class: zenkey::Declared::parse(class),
-            type_name: "T".into(),
-            common: None,
-            since: None,
-            description: None,
-            qos: None,
-            ttl_s: None,
-            unit: None,
-            rate: None,
-            cardinality,
-            encoding: None,
-        }
+        let mut d = zenkey::slice::SubjectDecl::new(path, zenkey::Declared::parse(class));
+        d.type_name = "T".into();
+        d.cardinality = cardinality;
+        d
     }
 
     fn fixture_slices() -> SliceSet {
-        SliceSet::from_slices(vec![zenkey::slice::RegistrySlice {
-            version: "1.0".into(),
-            app: "t".into(),
-            convention: 1,
-            name: "sysinfo".into(),
-            service_origin: None,
-            description: None,
-            subjects: vec![
-                subject("disk/{mount}/used", "telemetry", Some(2)),
-                subject("log/{path...}", "events", Some(1)),
-                subject("health", "state", None),
-            ],
-            procedures: vec![],
-            blob: vec![],
-            media: vec![],
-            deprecated: vec![],
-        }])
+        let mut slice = zenkey::slice::RegistrySlice::new("1.0", "t", "sysinfo");
+        slice.subjects = vec![
+            subject("disk/{mount}/used", "telemetry", Some(2)),
+            subject("log/{path...}", "events", Some(1)),
+            subject("health", "state", None),
+        ];
+        SliceSet::from_slices(vec![slice])
     }
 
     fn snapshot(keys: &[&str]) -> KeyTreeSnapshot {

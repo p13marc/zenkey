@@ -92,7 +92,7 @@ enum CdrType {
 }
 
 fn bad_schema(msg: impl Into<String>) -> DecodeError {
-    DecodeError::BadSchema(msg.into())
+    DecodeError::bad_schema(msg.into())
 }
 
 /// Resolve one `type` spelling against the document's `types` table.
@@ -204,16 +204,16 @@ impl<'a> Reader<'a> {
     /// Split the encapsulation header off, and read its endianness.
     fn new(bytes: &'a [u8]) -> Result<Reader<'a>, DecodeError> {
         if bytes.len() < 4 {
-            return Err(DecodeError::Malformed(
+            return Err(DecodeError::malformed_here(
                 "cdr",
-                "payload is shorter than the 4-byte encapsulation header".into(),
+                "payload is shorter than the 4-byte encapsulation header",
             ));
         }
         let le = match (bytes[0], bytes[1]) {
             (0x00, 0x00) => false,
             (0x00, 0x01) => true,
             (a, b) => {
-                return Err(DecodeError::Malformed(
+                return Err(DecodeError::malformed_here(
                     "cdr",
                     format!(
                         "encapsulation {a:#04x}{b:02x} is not XCDR1 PLAIN_CDR \
@@ -240,10 +240,10 @@ impl<'a> Reader<'a> {
 
     fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
         let end = self.pos.checked_add(n).ok_or_else(|| {
-            DecodeError::Malformed("cdr", "length overflows the address space".into())
+            DecodeError::malformed_here("cdr", "length overflows the address space")
         })?;
         if end > self.body.len() {
-            return Err(DecodeError::Malformed(
+            return Err(DecodeError::malformed_here(
                 "cdr",
                 format!(
                     "payload ends mid-value: wanted {n} bytes at offset {}, {} remain",
@@ -290,15 +290,15 @@ fn read(ty: &CdrType, r: &mut Reader<'_>) -> Result<Value, DecodeError> {
         CdrType::Str => {
             let len = read_scalar!(r, u32) as usize;
             if len == 0 {
-                return Err(DecodeError::Malformed(
+                return Err(DecodeError::malformed_here(
                     "cdr",
-                    "string length 0 — CDR counts the NUL terminator, so the minimum is 1".into(),
+                    "string length 0 — CDR counts the NUL terminator, so the minimum is 1",
                 ));
             }
             let raw = r.take(len)?;
             // The declared length includes the terminator; the value does not.
             let text = std::str::from_utf8(&raw[..len - 1])
-                .map_err(|e| DecodeError::Malformed("cdr", e.to_string()))?;
+                .map_err(|e| DecodeError::malformed_here("cdr", e.to_string()))?;
             Value::String(text.to_string())
         }
         CdrType::Array { of, len } => {
@@ -334,7 +334,7 @@ fn number(v: f64) -> Result<Value, DecodeError> {
     serde_json::Number::from_f64(v)
         .map(Value::Number)
         .ok_or_else(|| {
-            DecodeError::Malformed("cdr", format!("{v} has no JSON representation (NaN/inf)"))
+            DecodeError::malformed_here("cdr", format!("{v} has no JSON representation (NaN/inf)"))
         })
 }
 
@@ -363,7 +363,7 @@ macro_rules! write_scalar {
 }
 
 fn encode_err(msg: impl Into<String>) -> DecodeError {
-    DecodeError::Encode(msg.into())
+    DecodeError::encode_here(msg.into())
 }
 
 fn int<T>(v: &Value, name: &str) -> Result<T, DecodeError>

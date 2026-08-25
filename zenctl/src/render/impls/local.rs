@@ -593,13 +593,23 @@ impl Render for ContextAction {
 
 /// `registry lint` — the RFC 08 §5 lints, passed.
 ///
-/// Notes-only, deliberately. This command's stated value is *the build's own
-/// wording, verbatim*; a `{dir, passed, message}` struct would be a second
-/// shape to keep in step with `zenkey_build`'s, over an exit code and a
-/// sentence. A failure is still an `Err` carrying the build's text.
+/// Notes-only for the verdict, deliberately. This command's stated value is
+/// *the build's own wording, verbatim*; a `{dir, passed, message}` struct
+/// would be a second shape to keep in step with `zenkey_build`'s, over an
+/// exit code and a sentence. A failure is still an `Err` carrying the
+/// build's text.
+///
+/// `warnings` is the exception, and for the same reason rather than against
+/// it: a build's non-fatal diagnostics *are* the build's own wording, and
+/// this command reported none of them until #319 — the `compat = "none"`
+/// warning sat behind `emit_rerun_if_changed`, which this command turns off.
+/// A registry that had opted out of RFC 08 §3.1 checking passed silently.
 #[derive(Debug, Clone, Serialize)]
 pub struct LintReport {
     pub dir: String,
+    /// The build's `cargo::warning=` lines, verbatim. Empty is the ordinary
+    /// case; a non-empty list still `passed` — these are warnings.
+    pub warnings: Vec<String>,
 }
 
 impl Render for LintReport {
@@ -609,6 +619,7 @@ impl Render for LintReport {
         let mut e = serde_json::Map::new();
         e.insert("dir".into(), self.dir.clone().into());
         e.insert("passed".into(), true.into());
+        e.insert("warnings".into(), self.warnings.clone().into());
         e
     }
 
@@ -617,10 +628,17 @@ impl Render for LintReport {
     fn table(&self, _t: &mut Table) {}
 
     fn notes(&self) -> Vec<Note> {
-        vec![Note::summary(format!(
-            "{}: registry lints pass (RFC 08 §5).",
-            self.dir
-        ))]
+        let mut notes = vec![Note::summary(format!(
+            "{}: registry lints pass (RFC 08 §5){}",
+            self.dir,
+            if self.warnings.is_empty() {
+                "."
+            } else {
+                ", with warnings:"
+            }
+        ))];
+        notes.extend(self.warnings.iter().map(|w| Note::caveat(w.clone())));
+        notes
     }
 }
 

@@ -52,6 +52,11 @@
 //! un-namespaced debug tools (`zenctl`). Application code that reaches for a
 //! base to *build a key* has made a mistake: the session adds the base.
 
+// docs.rs builds on nightly with `--cfg docsrs` (see Cargo.toml), which is
+// what lets each feature-gated item carry the feature that gates it. Inert
+// everywhere else — a stable `cargo doc` never sets the cfg (#325).
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 pub mod alert;
 pub mod common_state;
 pub mod context;
@@ -63,6 +68,7 @@ pub mod pattern;
 pub mod profile;
 pub mod qos;
 #[cfg(feature = "schema")]
+#[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
 pub mod schema;
 pub mod selector;
 pub mod slice;

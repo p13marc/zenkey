@@ -188,10 +188,11 @@ pub fn lint(dir: &Path, ledger: Option<&PathBuf>, out: crate::cli::OutputArgs) -
         config = config.ledger(l);
     }
     match config.lint() {
-        Ok(()) => crate::render::emit_with(
+        Ok(warnings) => crate::render::emit_with(
             &mut std::io::stdout(),
             &crate::render::LintReport {
                 dir: dir.display().to_string(),
+                warnings: warnings.iter().map(ToString::to_string).collect(),
             },
             out.format,
             out.color,
@@ -209,7 +210,11 @@ pub fn lock(dir: &Path, force: bool, out: crate::cli::OutputArgs) -> Result<()> 
     let update = zenkey_build::Config::new()
         .registry_dir(dir)
         .no_rerun_if_changed()
-        .write_compat_lock(force)
+        .write_compat_lock(if force {
+            zenkey_build::OnIncompatible::ForceAndReport
+        } else {
+            zenkey_build::OnIncompatible::Refuse
+        })
         .map_err(|e| anyhow!("{e}"))?;
     crate::render::emit_with(
         &mut std::io::stdout(),

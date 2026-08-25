@@ -17,6 +17,16 @@ authors.workspace = true
 # graph is the reason `serde_json` is not unconditional.
 export = ["dep:serde_json"]
 
+# docs.rs builds once per published version and cannot be re-run for it, so
+# the feature-gated surface has to be right *before* the publish, not after
+# (#325). `all-features` documents every axis; the two rustdoc flags annotate
+# each item with the feature that gates it, which is the half a reader
+# actually needs — otherwise a `#[cfg(feature = "blob")]` item reads as
+# unconditionally available.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs", "-Zunstable-options", "--generate-link-to-definition"]
+
 [dependencies]
 # default-features = false: codegen needs only the chunk rules, never the
 # zenoh stack — a consumer's build-dependencies stay light.
