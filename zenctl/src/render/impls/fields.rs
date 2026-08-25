@@ -8,9 +8,11 @@
 //! silently clean (O4), and a stuck reading carries its own "observation,
 //! not a verdict" caveat so nobody pages off a constant-by-design field.
 
-use zenkey_fleet::report::{DoctorSeverity, FieldReport};
+use zenkey_fleet::report::FieldReport;
 
-use crate::render::{BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table};
+use crate::render::{
+    BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without,
+};
 
 impl Render for FieldReport {
     const FAMILY: &'static str = "field";
@@ -18,13 +20,7 @@ impl Render for FieldReport {
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
         // Everything except the rows and findings — the coverage and bound
         // claims must survive a truncated pipe.
-        let mut e = match serde_json::to_value(self).expect("a report serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        };
-        e.remove("rows");
-        e.remove("findings");
-        e
+        envelope_without(self, &["rows", "findings"])
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
@@ -64,11 +60,7 @@ impl Render for FieldReport {
             t.blank();
             let mut grid = Grid::unheaded(2);
             for f in &self.findings {
-                let mark = match f.severity {
-                    DoctorSeverity::Error => "✗",
-                    DoctorSeverity::Warning => "⚠",
-                    DoctorSeverity::Info => "·",
-                };
+                let mark = crate::render::style::mark(f.severity);
                 let citation = f
                     .citation
                     .as_deref()

@@ -14,15 +14,9 @@
 use zenkey_fleet::report::{CutoverReport, CutoverVerdict, ExpectReport, ExpectVerdict};
 use zenkey_fleet::{RecordReport, ReplayReport};
 
-use crate::render::{BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table};
-
-/// The struct as its own envelope.
-fn envelope_of<T: serde::Serialize>(v: &T) -> serde_json::Map<String, serde_json::Value> {
-    match serde_json::to_value(v).expect("a report serializes") {
-        serde_json::Value::Object(m) => m,
-        _ => unreachable!("a report is an object"),
-    }
-}
+use crate::render::{
+    BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_of,
+};
 
 impl Render for RecordReport {
     const FAMILY: &'static str = "record";

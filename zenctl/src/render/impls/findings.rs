@@ -11,7 +11,9 @@ use zenkey_fleet::report::{
     SchemaDump,
 };
 
-use crate::render::{BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table};
+use crate::render::{
+    BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without,
+};
 
 impl Render for DoctorReport {
     const FAMILY: &'static str = "doctor";
@@ -19,12 +21,7 @@ impl Render for DoctorReport {
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
         // Everything except the findings themselves, so an empty findings list
         // stays legible: what was checked, not just what was found.
-        let mut e = match serde_json::to_value(self).expect("a report serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        };
-        e.remove("findings");
-        e
+        envelope_without(self, &["findings"])
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
@@ -42,11 +39,7 @@ impl Render for DoctorReport {
             ]);
         }
         for f in &self.findings {
-            let mark = match f.severity {
-                DoctorSeverity::Error => "✗",
-                DoctorSeverity::Warning => "⚠",
-                DoctorSeverity::Info => "·",
-            };
+            let mark = crate::render::style::mark(f.severity);
             let citation = f
                 .citation
                 .as_deref()
@@ -263,11 +256,7 @@ impl Render for RetiredReport {
         // Everything except the entries themselves — the coverage claim (which
         // registries were read, what listened, what answered) must survive a
         // truncated pipe.
-        let mut e = match serde_json::to_value(self).expect("a report serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        };
-        e.remove("entries");
+        let mut e = envelope_without(self, &["entries"]);
         e.insert("entries".into(), self.entries.len().into());
         e
     }

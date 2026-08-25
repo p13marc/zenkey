@@ -49,16 +49,25 @@ pub async fn run(rules: &[String], every: f64, count: Option<u64>, args: &Bus) -
         spec.rules.len()
     );
     let mut out = std::io::stdout();
+    // The engine's emit callback cannot fail (#343 wants it to be a stream),
+    // so the first write error is kept here and answered for after the run —
+    // rather than dropped, which had this verb finish clean having emitted
+    // nothing (#360).
+    let mut write_failed: Option<std::io::Error> = None;
     let mut emit = |t: &Transition| {
         // Tagged (`"row":"transition"`) like every non-sample line of an
         // explorer stream, so a consumer can select or skip them by kind.
-        if let Ok(v) = serde_json::to_value(t) {
-            let _ = writeln!(
-                out,
-                "{}",
-                crate::render::Row::tagged("transition", v).into_line()
-            );
-            let _ = out.flush();
+        if write_failed.is_some() {
+            return;
+        }
+        let r = writeln!(
+            out,
+            "{}",
+            crate::render::Row::of("transition", t).into_line()
+        )
+        .and_then(|()| out.flush());
+        if let Err(e) = r {
+            write_failed = Some(e);
         }
     };
     let fleet = args.fleet(&session);
@@ -69,6 +78,13 @@ pub async fn run(rules: &[String], every: f64, count: Option<u64>, args: &Bus) -
             return Ok(());
         }
     };
+    if let Some(e) = write_failed {
+        // A closed pipe is the consumer saying "enough"; anything else is
+        // this verb's output not arriving, which is not a clean run.
+        if e.kind() != std::io::ErrorKind::BrokenPipe {
+            return Err(anyhow::Error::new(e).context("failed to write the transition stream"));
+        }
+    }
     eprintln!(
         "watchdog: {} tick(s), {} transition(s){}",
         summary.ticks,

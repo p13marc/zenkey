@@ -10,7 +10,7 @@
 
 use serde::Serialize;
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, Render, Row, Table, envelope_of};
 
 /// One producer's slice, as the completion cache holds it.
 #[derive(Debug, Clone, Serialize)]
@@ -128,10 +128,7 @@ impl Render for KeyRelation {
     const FAMILY: &'static str = "key-relation";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}
@@ -169,10 +166,7 @@ impl Render for KeyCanon {
     const FAMILY: &'static str = "key-canon";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}
@@ -250,10 +244,7 @@ impl Render for SchemaCheck {
     const FAMILY: &'static str = "schema-check";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}
@@ -297,10 +288,7 @@ impl Render for GenPlan<'_> {
     const FAMILY: &'static str = "gen-plan";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
@@ -377,10 +365,7 @@ impl Render for zenkey_fleet::report::GenReport {
     const FAMILY: &'static str = "gen";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}

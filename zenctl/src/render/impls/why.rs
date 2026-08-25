@@ -7,7 +7,7 @@ use zenkey_fleet::is_cause;
 
 use zenkey_fleet::report::{RungAnswer, WhyReport, WhyVerdict};
 
-use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without};
 
 impl Render for WhyReport {
     const FAMILY: &'static str = "why";
@@ -16,11 +16,7 @@ impl Render for WhyReport {
         // Everything except the rungs themselves — the verdict and the
         // impairments must survive a truncated pipe — plus the cause ids, so
         // a script need not re-derive the exit-0 policy.
-        let mut e = match serde_json::to_value(self).expect("a report serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        };
-        e.remove("rungs");
+        let mut e = envelope_without(self, &["rungs"]);
         e.insert("causes".into(), serde_json::json!(self.causes()));
         e
     }

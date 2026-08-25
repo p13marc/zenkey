@@ -118,6 +118,21 @@ pub const INFO: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Bright
 
 /// The severity vocabulary, styled. Kept beside the constants so the mapping
 /// is one thing to read.
+/// The glyph that *says* which severity a finding is, beside the colour that
+/// only repeats it (#200).
+///
+/// One ladder, not one per renderer: `findings.rs` and `fields.rs` each held
+/// a copy, so a fourth severity would have been two edits with nothing to
+/// fail if only one of them landed (#360).
+pub fn mark(s: zenkey_fleet::report::DoctorSeverity) -> &'static str {
+    use zenkey_fleet::report::DoctorSeverity as S;
+    match s {
+        S::Error => "✗",
+        S::Warning => "⚠",
+        S::Info => "·",
+    }
+}
+
 pub fn severity(s: zenkey_fleet::report::DoctorSeverity) -> Style {
     use zenkey_fleet::report::DoctorSeverity as S;
     match s {

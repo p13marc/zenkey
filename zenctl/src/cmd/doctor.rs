@@ -133,18 +133,33 @@ async fn transition_loop(
             Ok(report) => watch.observe(Ok(report), &at),
             Err(e) => watch.observe(Err(&e.to_string()), &at),
         };
-        for t in &transitions {
-            // Tagged (`"row":"transition"`) like every non-sample line of an
-            // explorer stream — the same kind tag `watchdog` writes.
-            if let Ok(v) = serde_json::to_value(t) {
-                let _ = writeln!(
+        // Tagged (`"row":"transition"`) like every non-sample line of an
+        // explorer stream — the same kind tag `watchdog` writes.
+        //
+        // Checked, unlike the `let _ = writeln!` this replaced (#360): this
+        // is the verb's primary output, and a run whose transitions went
+        // nowhere used to finish and exit 0 as if it had reported them.
+        // `Row::of` rather than `if let Ok(v) = serde_json::to_value(t)` for
+        // the same reason — serializing a `Transition` cannot fail, and the
+        // `if let` read as a line this verb was willing to drop.
+        let written = (|| -> std::io::Result<()> {
+            for t in &transitions {
+                writeln!(
                     out,
                     "{}",
-                    crate::render::Row::tagged("transition", v).into_line()
-                );
+                    crate::render::Row::of("transition", t).into_line()
+                )?;
             }
+            out.flush()
+        })();
+        if let Err(e) = written {
+            // A closed pipe is the consumer saying "enough" — `| head -1` is
+            // not a failure of the checks.
+            if e.kind() == std::io::ErrorKind::BrokenPipe {
+                return Ok(());
+            }
+            return Err(anyhow::Error::new(e).context("failed to write the transition stream"));
         }
-        let _ = out.flush();
         done += 1;
         if count.is_some_and(|n| done >= n) {
             return Ok(());

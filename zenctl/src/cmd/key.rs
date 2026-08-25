@@ -14,18 +14,23 @@ use zenoh::key_expr::KeyExpr;
 use crate::render::Format;
 
 /// The answer as an exit code: 0 yes, 1 no, 2 either expression invalid.
-pub enum Verdict {
+///
+/// Named for the question it answers — whether two key expressions stand in a
+/// [`KeyOp`](crate::render::KeyOp) relation — rather than `Verdict`, which
+/// collided by name with `zenkey_fleet::Verdict` and four `*Verdict` report
+/// types (#360).
+pub enum RelationVerdict {
     Yes,
     No { note: Option<String> },
     Invalid { which: &'static str, error: String },
 }
 
-impl Verdict {
+impl RelationVerdict {
     pub fn exit_code(&self) -> i32 {
         match self {
-            Verdict::Yes => 0,
-            Verdict::No { .. } => 1,
-            Verdict::Invalid { .. } => 2,
+            RelationVerdict::Yes => 0,
+            RelationVerdict::No { .. } => 1,
+            RelationVerdict::Invalid { .. } => 2,
         }
     }
 }
@@ -61,11 +66,11 @@ fn convention_note(a: &str, b: &str) -> Option<String> {
 }
 
 /// Evaluate one relation between two expressions.
-pub fn judge(op: crate::render::KeyOp, a: &str, b: &str) -> Verdict {
+pub fn judge(op: crate::render::KeyOp, a: &str, b: &str) -> RelationVerdict {
     let ka = match KeyExpr::new(a) {
         Ok(k) => k,
         Err(e) => {
-            return Verdict::Invalid {
+            return RelationVerdict::Invalid {
                 which: "first",
                 error: crate::errors::without_source_locations(&e.to_string()),
             };
@@ -74,7 +79,7 @@ pub fn judge(op: crate::render::KeyOp, a: &str, b: &str) -> Verdict {
     let kb = match KeyExpr::new(b) {
         Ok(k) => k,
         Err(e) => {
-            return Verdict::Invalid {
+            return RelationVerdict::Invalid {
                 which: "second",
                 error: crate::errors::without_source_locations(&e.to_string()),
             };
@@ -87,9 +92,9 @@ pub fn judge(op: crate::render::KeyOp, a: &str, b: &str) -> Verdict {
         crate::render::KeyOp::Intersects => ka.intersects(&kb),
     };
     if yes {
-        Verdict::Yes
+        RelationVerdict::Yes
     } else {
-        Verdict::No {
+        RelationVerdict::No {
             note: convention_note(a, b),
         }
     }
@@ -105,20 +110,20 @@ pub fn relate(
 ) -> Result<()> {
     let verdict = judge(op, a, b);
     match &verdict {
-        Verdict::Yes | Verdict::No { .. } => {
+        RelationVerdict::Yes | RelationVerdict::No { .. } => {
             let report = crate::render::KeyRelation {
                 op,
                 a: a.to_string(),
                 b: b.to_string(),
-                answer: matches!(verdict, Verdict::Yes),
+                answer: matches!(verdict, RelationVerdict::Yes),
                 note: match &verdict {
-                    Verdict::No { note } => note.clone(),
+                    RelationVerdict::No { note } => note.clone(),
                     _ => None,
                 },
             };
             crate::render::emit_with(&mut std::io::stdout(), &report, format, color)?;
         }
-        Verdict::Invalid { which, error } => {
+        RelationVerdict::Invalid { which, error } => {
             // The grammar's own message, verbatim (the keyfacts rule) — minus
             // the build machine's source location (#240).
             eprintln!("the {which} expression does not parse: {error}");
@@ -161,19 +166,19 @@ mod tests {
     fn the_relations_answer_and_the_codes_follow() {
         assert!(matches!(
             judge(crate::render::KeyOp::Includes, "a/**", "a/b/c"),
-            Verdict::Yes
+            RelationVerdict::Yes
         ));
         assert!(matches!(
             judge(crate::render::KeyOp::Includes, "a/b/c", "a/**"),
-            Verdict::No { .. }
+            RelationVerdict::No { .. }
         ));
         assert!(matches!(
             judge(crate::render::KeyOp::Intersects, "a/*/c", "a/b/*"),
-            Verdict::Yes
+            RelationVerdict::Yes
         ));
         assert!(matches!(
             judge(crate::render::KeyOp::Intersects, "a/b", "a/c"),
-            Verdict::No { .. }
+            RelationVerdict::No { .. }
         ));
         assert_eq!(
             judge(crate::render::KeyOp::Includes, "a/**", "a/b").exit_code(),
@@ -195,7 +200,7 @@ mod tests {
     #[test]
     fn a_convention_shaped_no_cites_the_rfc() {
         // D2: the media-safe scope really cannot see the plane.
-        let Verdict::No { note } = judge(
+        let RelationVerdict::No { note } = judge(
             crate::render::KeyOp::Includes,
             "v1/**",
             "v1/h-1/@rpc/p/introspect",
@@ -206,7 +211,7 @@ mod tests {
         assert!(note.contains("D2"), "{note}");
 
         // D4: a wildcard origin position does not match a service origin.
-        let Verdict::No { note } = judge(
+        let RelationVerdict::No { note } = judge(
             crate::render::KeyOp::Intersects,
             "v1/*/state/x",
             "v1/@catalog/state/x",
@@ -218,7 +223,8 @@ mod tests {
 
         // A plain algebra no gets no citation — the note is a diagnosis,
         // not a banner.
-        let Verdict::No { note } = judge(crate::render::KeyOp::Intersects, "a/b", "a/c") else {
+        let RelationVerdict::No { note } = judge(crate::render::KeyOp::Intersects, "a/b", "a/c")
+        else {
             panic!();
         };
         assert!(note.is_none());

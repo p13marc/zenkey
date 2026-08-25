@@ -12,18 +12,7 @@ use zenkey_fleet::report::{
     BlobFetchReport, BlobProbeReport, BlobTreeIndexReport, InterfaceShow, TopicInfo,
 };
 
-use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
-
-/// The struct, as an envelope. Used by the families whose whole content is
-/// report-level facts — deriving it from the serialization rather than
-/// assembling it field by field is what keeps `skip_serializing_if` working,
-/// which the three hand-built envelopes in `output.rs` did not (#232).
-fn envelope_of<T: serde::Serialize>(v: &T) -> serde_json::Map<String, serde_json::Value> {
-    match serde_json::to_value(v).expect("a report serializes") {
-        serde_json::Value::Object(m) => m,
-        _ => unreachable!("a report is an object"),
-    }
-}
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_of};
 
 impl Render for TopicInfo {
     const FAMILY: &'static str = "topic-info";
