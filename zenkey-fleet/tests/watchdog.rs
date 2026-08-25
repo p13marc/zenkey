@@ -75,7 +75,7 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
     // the second and third tick, so the silence has fired before the sample
     // breaks it and re-accumulates after.
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")
@@ -233,7 +233,7 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
     });
 
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")

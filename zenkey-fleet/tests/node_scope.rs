@@ -88,7 +88,7 @@ async fn node_info_asks_only_the_named_origin() {
     let _queryables = declare_introspect(&a, &asked).await;
 
     // Routing propagation is async; retry bounded until the fixture answers.
-    let info = tokio::time::timeout(Duration::from_secs(5), async {
+    let info = tokio::time::timeout(util::SETTLE, async {
         loop {
             let info = zenkey_fleet::node_info(
                 &zenkey_fleet::Fleet::new(&b, ""),

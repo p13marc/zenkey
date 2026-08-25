@@ -8,7 +8,6 @@
 //! Ports are ephemeral (`util::peer_pair`), so two test runs at once
 //! cannot collide.
 
-use std::time::Duration;
 
 use zenkey::qos::QosProfile;
 use zenkey_fleet::declare_publication;
@@ -31,7 +30,7 @@ async fn a_tombstone_reaches_the_subscriber_as_delete() {
     let events = publication.matching_events().await.expect("events");
     let subscriber = b.declare_subscriber(KEY).await.expect("subscriber");
     // The badge is the routability proof: no publish before it flips.
-    let matched = tokio::time::timeout(Duration::from_secs(5), events.recv())
+    let matched = tokio::time::timeout(util::SETTLE, events.recv())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");
@@ -44,12 +43,12 @@ async fn a_tombstone_reaches_the_subscriber_as_delete() {
     publication.retire().await.expect("retire");
     publication.undeclare().await.expect("undeclare");
 
-    let put = tokio::time::timeout(Duration::from_secs(5), subscriber.recv_async())
+    let put = tokio::time::timeout(util::SETTLE, subscriber.recv_async())
         .await
         .expect("put within 5s")
         .expect("subscriber alive");
     assert_eq!(put.kind(), SampleKind::Put);
-    let del = tokio::time::timeout(Duration::from_secs(5), subscriber.recv_async())
+    let del = tokio::time::timeout(util::SETTLE, subscriber.recv_async())
         .await
         .expect("delete within 5s")
         .expect("subscriber alive");
@@ -78,7 +77,7 @@ async fn the_monitor_reports_kind_delete() {
         .await
         .expect("declare publication");
     let matching = publication.matching_events().await.expect("events");
-    let matched = tokio::time::timeout(Duration::from_secs(5), matching.recv())
+    let matched = tokio::time::timeout(util::SETTLE, matching.recv())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");
@@ -87,7 +86,7 @@ async fn the_monitor_reports_kind_delete() {
     publication.retire().await.expect("retire");
 
     let view = loop {
-        let item = tokio::time::timeout(Duration::from_secs(5), events.recv())
+        let item = tokio::time::timeout(util::SETTLE, events.recv())
             .await
             .expect("event within 5s")
             .expect("stream alive");

@@ -132,7 +132,7 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
     });
     // The field window's subscriber raises the badge; then publish into it.
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")
@@ -243,7 +243,7 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
         }
     });
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")

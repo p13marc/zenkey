@@ -15,7 +15,7 @@ async fn drain_seed(
 ) -> (Vec<String>, zenkey_fleet::SeedCoverage) {
     let mut values = Vec::new();
     loop {
-        match tokio::time::timeout(Duration::from_secs(5), sub.recv())
+        match tokio::time::timeout(util::SETTLE, sub.recv())
             .await
             .expect("seed boundary within 5s")
             .expect("stream alive")
@@ -69,7 +69,7 @@ async fn history_seed_lands_before_the_boundary() {
 
     // Live after the boundary.
     publisher.put("v2").await.expect("live put");
-    let item = tokio::time::timeout(Duration::from_secs(5), sub.recv())
+    let item = tokio::time::timeout(util::SETTLE, sub.recv())
         .await
         .expect("live within 5s")
         .expect("stream alive");
@@ -212,12 +212,12 @@ async fn a_transition_in_the_seed_window_lands_exactly_once() {
     // Wait until (1) the subscriber's interest reached the publishing peer
     // (a network-propagation concern, not part of the seed contract) and
     // (2) the storage GET is in flight — then publish inside the window.
-    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+    let ev = tokio::time::timeout(util::SETTLE, matching.recv_async())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");
     assert!(ev.matching(), "the seed subscriber is a real subscriber");
-    tokio::time::timeout(Duration::from_secs(5), got_query.recv())
+    tokio::time::timeout(util::SETTLE, got_query.recv())
         .await
         .expect("the storage GET reaches the queryable within 5s")
         .expect("channel alive");
@@ -291,7 +291,7 @@ async fn a_seeded_watch_shows_pre_existing_state() {
     // Drain until the boundary; the cached value must arrive before it.
     let mut seen = Vec::new();
     let coverage = loop {
-        let item = tokio::time::timeout(Duration::from_secs(5), events.recv())
+        let item = tokio::time::timeout(util::SETTLE, events.recv())
             .await
             .expect("boundary within 5s")
             .expect("stream alive");
@@ -323,7 +323,7 @@ async fn a_seeded_watch_shows_pre_existing_state() {
     // Live samples keep flowing after the boundary (the merge is gone).
     publisher.put("live-after").await.expect("live put");
     loop {
-        let item = tokio::time::timeout(Duration::from_secs(5), events.recv())
+        let item = tokio::time::timeout(util::SETTLE, events.recv())
             .await
             .expect("live within 5s")
             .expect("stream alive");
@@ -352,22 +352,48 @@ async fn dropping_a_monitor_aborts_its_seed_tasks() {
         .await
         .expect("monitor");
     let mut events = monitor.events();
+
+    // The seed timeout is the margin this test runs on, and it is deliberately
+    // generous (#371). The boundary must still be *pending* when the monitor
+    // drops — a task that already announced proves nothing about aborting —
+    // and on a loaded machine the scheduler can hold this task off for a good
+    // fraction of a second between `watch_seeded` returning and `drop`. At
+    // 300 ms that lost the race; at two seconds it cannot plausibly.
+    const SEED_TIMEOUT: Duration = Duration::from_secs(2);
     monitor
         .watch_seeded(
             "wdrop/state/**",
             SeedPolicy {
-                timeout: Duration::from_millis(300),
+                timeout: SEED_TIMEOUT,
                 ..SeedPolicy::default()
             },
         )
         .await
         .expect("seeded watch");
 
+    // The premise, asserted rather than assumed: the boundary has not fired
+    // yet, so the abort below is what decides the outcome. If this ever trips,
+    // the machine was slow enough to void the test — which is a legible
+    // failure, unlike the silent one it replaces.
+    if let Ok(Some(item)) = tokio::time::timeout(Duration::from_millis(50), events.recv()).await {
+        assert!(
+            !matches!(
+                item,
+                zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::WatchSeeded { .. })
+            ),
+            "the seed announced before the monitor was dropped — the premise is void, \
+             not the code (raise SEED_TIMEOUT)"
+        );
+    }
+
     // Nothing answers the seed GETs, so the task would otherwise run its
     // timeout out and then announce the boundary.
     drop(monitor);
 
-    let listen = tokio::time::Instant::now() + Duration::from_secs(2);
+    // Listen past the timeout by a clear margin: a *detached* task announces
+    // at ~SEED_TIMEOUT, so a window shorter than that would pass either way
+    // and prove nothing.
+    let listen = tokio::time::Instant::now() + SEED_TIMEOUT * 2;
     while let Ok(Some(item)) = tokio::time::timeout_at(listen, events.recv()).await {
         assert!(
             !matches!(
