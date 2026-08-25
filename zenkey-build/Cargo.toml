@@ -30,7 +30,7 @@ rustdoc-args = ["--cfg", "docsrs", "-Zunstable-options", "--generate-link-to-def
 [dependencies]
 # default-features = false: codegen needs only the chunk rules, never the
 # zenoh stack — a consumer's build-dependencies stay light.
-zenkey = { version = "0.6.0", path = "../zenkey", default-features = false }
+zenkey = { version = "0.7.0", path = "../zenkey", default-features = false }
 thiserror = { workspace = true }
 serde_json = { workspace = true, optional = true }
 toml = "1"
