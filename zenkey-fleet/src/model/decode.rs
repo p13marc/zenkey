@@ -636,8 +636,8 @@ fn row(
     crate::report::SchemaRow {
         producer: producer.to_string(),
         type_name: type_name.to_string(),
-        kind: schema.kind().as_str().to_string(),
-        hash: schema.hash().to_string(),
+        kind: schema.kind_str().to_string(),
+        hash: schema.hash().unwrap_or_default().to_string(),
         document: full.then(|| schema_document(schema)),
     }
 }
@@ -652,7 +652,7 @@ fn schema_document(schema: &TypeSchema) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
     obj.insert(
         "kind".into(),
-        serde_json::Value::String(schema.kind().as_str().to_string()),
+        serde_json::Value::String(schema.kind_str().to_string()),
     );
     if let Some(m) = schema.protobuf_message() {
         obj.insert("message".into(), serde_json::Value::String(m.to_string()));
@@ -764,7 +764,16 @@ pub fn schema_drift(described: &[(String, SchemaSet)]) -> Vec<SchemaDrift> {
             by_name
                 .entry(name)
                 .or_default()
-                .push((producer.clone(), schema.hash().to_string()));
+                // An absent hash still groups as `""` here, deliberately
+                // unchanged by #323: it is pre-existing behaviour, and it is
+                // *wrong* — two producers that each served no identity read as
+                // agreement rather than as a question nobody answered
+                // (RFC 09 §5.1 O4). Filed separately rather than folded into a
+                // type change, because the fix is a report shape, not a cast.
+                .push((
+                    producer.clone(),
+                    schema.hash().unwrap_or_default().to_string(),
+                ));
         }
     }
     by_name
@@ -836,7 +845,7 @@ pub enum Rendering {
 /// (RFC 08 §7).
 pub fn resolve_encoding(
     sample_encoding: Option<&str>,
-    registry_encoding: Option<&str>,
+    registry_encoding: Option<&WireEncoding>,
     bytes: &[u8],
 ) -> WireEncoding {
     // Zenoh's default when a publisher sets nothing is the opaque
@@ -847,7 +856,7 @@ pub fn resolve_encoding(
         return WireEncoding::from_encoding_str(e);
     }
     if let Some(e) = registry_encoding {
-        return WireEncoding::from_encoding_str(e);
+        return e.clone();
     }
     // The sniff: JSON text starts with a JSON-ish byte; otherwise call it
     // CBOR (the reference profile default) and let the decoder's error path
@@ -1031,7 +1040,7 @@ pub async fn decode_sample(
         return DecodedSample::structural(None, NotValidated::NoRegistry, bytes);
     };
     let refined = zenkey::grammar::parse_full(base, wire_key).and_then(|parsed| {
-        let producer = match (&parsed.producer, &parsed.origin) {
+        let producer = match (parsed.producer(), &parsed.origin) {
             (Some(p), _) => p.name().to_string(),
             (None, zenkey::grammar::Origin::Service(s)) => {
                 slices.by_service_origin(s.as_str())?.name.clone()
@@ -1054,7 +1063,7 @@ pub async fn decode_sample(
         // "checked and passed", and not `NoRegistry`'s "nobody looked").
         return DecodedSample::structural(None, NotValidated::NoSchema, bytes);
     };
-    let encoding = resolve_encoding(sample_encoding, registry_encoding.as_deref(), bytes);
+    let encoding = resolve_encoding(sample_encoding, registry_encoding.as_ref(), bytes);
     match store.schema_for(session, &producer, &type_name).await {
         Some(schema) => match store.decode(&schema, &encoding, bytes) {
             Ok(decoded) => {
@@ -1201,12 +1210,12 @@ mod tests {
     fn encoding_resolution_order() {
         // Sample wins…
         assert_eq!(
-            resolve_encoding(Some("application/json"), Some("application/cbor"), b"x"),
+            resolve_encoding(Some("application/json"), Some(&WireEncoding::Cbor), b"x"),
             WireEncoding::Json
         );
         // …but the opaque default is "unsaid", so the registry speaks…
         assert_eq!(
-            resolve_encoding(Some("zenoh/bytes"), Some("application/cbor"), b"{"),
+            resolve_encoding(Some("zenoh/bytes"), Some(&WireEncoding::Cbor), b"{"),
             WireEncoding::Cbor
         );
         // …and with neither, the sniff.
@@ -1385,7 +1394,7 @@ mod tests {
             description: None,
             subjects: vec![SubjectDecl {
                 path: "cpu".into(),
-                class: "telemetry".into(),
+                class: zenkey::Class::Telemetry.into(),
                 type_name: "TelemetryPoint".into(),
                 common: None,
                 since: None,
@@ -1434,7 +1443,7 @@ mod tests {
             description: None,
             subjects: vec![SubjectDecl {
                 path: "raw".into(),
-                class: "telemetry".into(),
+                class: zenkey::Class::Telemetry.into(),
                 type_name: String::new(),
                 common: None,
                 since: None,

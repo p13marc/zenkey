@@ -37,9 +37,6 @@ use zenkey::{BlobProbePrefix, Key, RegistrySlice};
 
 use crate::report::{BlobList, BlobListSource, BlobTierRow};
 
-/// The three reserved tier tokens, in RFC 07 §2's order.
-const KNOWN_TIERS: [&str; 3] = ["artifact", "tree", "store"];
-
 /// What a blob command addresses: RFC 07 §2's three shapes, each validated.
 ///
 /// There is deliberately no `String` constructor for the content-addressed
@@ -240,12 +237,15 @@ pub fn blob_list(
             tiers.push(BlobTierRow {
                 producer: slice.name.clone(),
                 registry_version: slice.version.clone(),
-                known_tier: KNOWN_TIERS.contains(&decl.tier.as_str()),
-                tier: decl.tier.clone(),
+                known_tier: decl.tier.known().is_some(),
+                tier: decl.tier.token().to_string(),
                 endpoints: decl.endpoints.clone(),
                 algo: decl.algo.clone(),
                 reference: decl.reference.clone(),
-                encoding: decl.encoding.clone(),
+                encoding: decl
+                    .encoding
+                    .as_ref()
+                    .map(|e| e.as_encoding_str().to_string()),
                 since: decl.since.clone(),
                 description: decl.description.clone(),
                 origins: by_producer
@@ -270,7 +270,7 @@ pub fn blob_list(
 pub fn declared_by(slices: &[RegistrySlice], tier: BlobTier) -> Vec<String> {
     let mut names: BTreeSet<String> = BTreeSet::new();
     for slice in slices {
-        if slice.serves_blob_tier(tier.chunk()) {
+        if slice.serves_blob_tier(tier) {
             names.insert(slice.name.clone());
         }
     }

@@ -57,7 +57,7 @@ pub async fn run(
             &store,
             producer,
             request_type,
-            decl.encoding.as_deref(),
+            decl.encoding.as_ref(),
             zenkey_fleet::PrepareSpec {
                 declared_encoding: None,
                 body: typed,

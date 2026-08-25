@@ -61,17 +61,21 @@ impl<T> CompiledCache<T> {
 
     /// The compiled form for this schema, building it at most once per hash.
     ///
-    /// A schema whose hash is **empty** is never cached: the hash is the
-    /// identity, and caching every unhashed schema under `""` would hand one
-    /// type's interpreter to another. Such a schema simply pays the compile
-    /// each time, which is what it did before this cache existed.
+    /// A schema with **no hash** is never cached: the hash is the identity,
+    /// and caching every unhashed schema under one key would hand one type's
+    /// interpreter to another. Such a schema simply pays the compile each
+    /// time, which is what it did before this cache existed.
+    ///
+    /// That condition used to be `hash != ""` — a sentinel every caller had
+    /// to remember. [`TypeSchema::hash`] returns `Option<&str>` now, so the
+    /// case is the type's, not this function's (#323).
     pub fn get_or_compile<E>(
         &self,
         schema: &TypeSchema,
         build: impl FnOnce(&TypeSchema) -> Result<T, E>,
     ) -> Result<std::sync::Arc<T>, E> {
         let key = schema.hash();
-        if !key.is_empty() {
+        if let Some(key) = key {
             let entries = self.entries.lock().expect("compiled cache lock");
             if let Some(hit) = entries.get(key) {
                 return Ok(std::sync::Arc::clone(hit));
@@ -82,7 +86,7 @@ impl<T> CompiledCache<T> {
         // last insert wins — one wasted compile, never a wrong answer.
         self.compilations.fetch_add(1, Ordering::Relaxed);
         let compiled = std::sync::Arc::new(build(schema)?);
-        if !key.is_empty() {
+        if let Some(key) = key {
             let mut entries = self.entries.lock().expect("compiled cache lock");
             entries.insert(key.to_string(), std::sync::Arc::clone(&compiled));
         }

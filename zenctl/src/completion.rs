@@ -241,11 +241,17 @@ fn keys_in(set: &SliceSet) -> Vec<CompletionCandidate> {
     for slice in set.slices() {
         // A service origin is verbatim and known; a host origin is not ours
         // to guess, so it stays a wildcard the user replaces.
-        let origin = slice.service_origin.clone().unwrap_or_else(|| "*".into());
+        let origin = slice
+            .service_origin
+            .as_ref()
+            .map(zenkey::Declared::token)
+            .unwrap_or("*");
         for d in &slice.subjects {
             out.push(match &slice.service_origin {
-                Some(_) => format!("v1/{origin}/{}/{}", d.class, d.path),
-                None => format!("v1/{origin}/{}/{}/{}", d.class, slice.name, d.path),
+                Some(_) => format!("v1/{origin}/{}/{}", d.class.token(), d.path),
+                None => {
+                    format!("v1/{origin}/{}/{}/{}", d.class.token(), slice.name, d.path)
+                }
             });
         }
     }

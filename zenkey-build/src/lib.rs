@@ -50,6 +50,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use zenkey::grammar::{is_valid_plain_chunk, is_valid_verbatim_chunk};
+use zenkey::{Fanout, SliceToken};
 
 /// A codegen failure. Lint variants carry the registry file they were found
 /// in — surface them with `unwrap()` in the build script so the message
@@ -124,14 +125,6 @@ pub(crate) struct SubjectEntry {
     pub common: Option<String>,
     /// Optional declared payload encoding (RFC 08 §2, v1.5).
     pub encoding: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Fanout {
-    /// A `*`-origin fan-out call may target this procedure.
-    Allowed,
-    /// Fleet spellings are not generated for this procedure (RFC 05 §2.1, G2).
-    Forbidden,
 }
 
 pub(crate) struct ProcedureEntry {
@@ -967,8 +960,9 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             // Allowed for read/long-running; an explicit value must be one of
             // the two. Parsed since v1.5 (#9) — the builder-level refusal.
             let fanout = match entry.get("fanout").and_then(|v| v.as_str()) {
-                Some("allowed") => Fanout::Allowed,
-                Some("forbidden") => Fanout::Forbidden,
+                Some(token) if Fanout::from_token(token).is_some() => {
+                    Fanout::from_token(token).expect("checked by the guard")
+                }
                 Some(other) => {
                     return Err(lint(
                         &fname,

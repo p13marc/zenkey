@@ -25,6 +25,8 @@ pub mod decode;
 pub mod validate;
 
 use std::collections::BTreeMap;
+
+pub use crate::encoding::WireEncoding;
 use std::fmt;
 
 use serde_json::Value;
@@ -72,49 +74,165 @@ impl PartialEq<&str> for SchemaKind {
     }
 }
 
-/// The wire framing of a payload — a separate axis from its schema
-/// (RFC 08 §7): one `json-schema` document describes both the JSON and the
-/// CBOR framing of a type.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WireEncoding {
-    Json,
-    Cbor,
-    Protobuf,
-    /// OMG CDR, the DDS / ROS 2 framing (v1.10).
-    Cdr,
-    /// Anything else — carried verbatim, decoded only by sniff.
-    Other(String),
-}
-
-impl WireEncoding {
-    /// Map a middleware/registry encoding string (`application/cbor`, …).
-    ///
-    /// The alias sets are deliberately short. A spelling is listed once it has
-    /// been *seen*, not once it has been imagined: mapping a guessed media
-    /// type to a codec is how a tool ends up confidently decoding the wrong
-    /// bytes, and `Other` already renders honestly.
-    pub fn from_encoding_str(s: &str) -> WireEncoding {
-        match s {
-            "application/json" | "text/json" => WireEncoding::Json,
-            "application/cbor" => WireEncoding::Cbor,
-            "application/protobuf" | "application/x-protobuf" => WireEncoding::Protobuf,
-            "application/cdr" | "application/x-cdr" => WireEncoding::Cdr,
-            other => WireEncoding::Other(other.to_string()),
-        }
-    }
-}
-
 /// One type's schema entry in a [`SchemaSet`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeSchema {
-    kind: SchemaKind,
     /// `sha256:<hex>` over the schema's canonical bytes.
-    hash: String,
-    /// The full entry body (kind-specific fields included), minus `kind`
-    /// and `hash`. For `json-schema`: `{"schema": {...}}`. For `protobuf`:
-    /// `{"message": "...", "descriptor_b64": "..."}`. Unknown kinds keep
-    /// whatever they carried.
-    body: BTreeMap<String, Value>,
+    ///
+    /// `None` where the served document carried no identity — an absent or
+    /// empty `hash`. RFC 08 §7 says the hash "exists for client caching", and
+    /// an empty string is not an identity to cache under: two unrelated types
+    /// would share it. Spelling that as `None` is why
+    /// [`CompiledCache`](crate::schema::compiled::CompiledCache) no longer
+    /// compares against `""` (#323).
+    hash: Option<String>,
+    /// What kind of schema this is, and its kind-specific fields.
+    body: SchemaBody,
+}
+
+/// A schema entry's kind and the fields that kind carries (RFC 08 §7).
+///
+/// This is the tagged union the wire document always was: `kind` names the
+/// variant and the remaining keys are its fields. Carried as a
+/// `SchemaKind` + `BTreeMap<String, Value>` it was a union only by
+/// convention, so a `protobuf` entry with a `schema` key and no `message`
+/// was constructible, and every reader gated on `kind` by hand before
+/// reaching into the map (#323).
+///
+/// `Other` keeps RFC 08 §7's tolerance: a kind this build does not know is
+/// carried verbatim and re-serialized unchanged, never rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaBody {
+    /// `json-schema` — one JSON Schema document under `schema`.
+    JsonSchema { schema: Value },
+    /// `protobuf` — a message name and a base64 `FileDescriptorSet`.
+    Protobuf {
+        message: String,
+        descriptor_b64: String,
+    },
+    /// `cdr` — an ordered field list, an optional local type table, and an
+    /// optional informative `source` (v1.10).
+    Cdr {
+        fields: Value,
+        types: Option<Value>,
+        /// Informative only: deliberately outside the hash, because two
+        /// producers generating the same message from `.msg` and from IDL
+        /// describe the same wire format.
+        source: Option<Value>,
+    },
+    /// A kind this build does not know, carried verbatim.
+    Other {
+        kind: SchemaKind,
+        fields: BTreeMap<String, Value>,
+    },
+}
+
+impl SchemaBody {
+    /// The `kind` token this body serializes under.
+    pub fn kind(&self) -> SchemaKind {
+        match self {
+            SchemaBody::JsonSchema { .. } => SchemaKind::new(SchemaKind::JSON_SCHEMA),
+            SchemaBody::Protobuf { .. } => SchemaKind::new(SchemaKind::PROTOBUF),
+            SchemaBody::Cdr { .. } => SchemaKind::new(SchemaKind::CDR),
+            SchemaBody::Other { kind, .. } => kind.clone(),
+        }
+    }
+
+    /// The `kind` token, borrowed — for the common case of writing it into a
+    /// string or a report field without building a [`SchemaKind`].
+    pub fn kind_str(&self) -> &str {
+        match self {
+            SchemaBody::JsonSchema { .. } => SchemaKind::JSON_SCHEMA,
+            SchemaBody::Protobuf { .. } => SchemaKind::PROTOBUF,
+            SchemaBody::Cdr { .. } => SchemaKind::CDR,
+            SchemaBody::Other { kind, .. } => kind.as_str(),
+        }
+    }
+
+    /// The entry's fields, as the wire spells them — everything except
+    /// `kind` and `hash`.
+    pub fn fields(&self) -> BTreeMap<String, Value> {
+        let mut out = BTreeMap::new();
+        match self {
+            SchemaBody::JsonSchema { schema } => {
+                out.insert("schema".to_string(), schema.clone());
+            }
+            SchemaBody::Protobuf {
+                message,
+                descriptor_b64,
+            } => {
+                out.insert("message".to_string(), Value::String(message.clone()));
+                out.insert(
+                    "descriptor_b64".to_string(),
+                    Value::String(descriptor_b64.clone()),
+                );
+            }
+            SchemaBody::Cdr {
+                fields,
+                types,
+                source,
+            } => {
+                out.insert("fields".to_string(), fields.clone());
+                if let Some(t) = types {
+                    out.insert("types".to_string(), t.clone());
+                }
+                if let Some(src) = source {
+                    out.insert("source".to_string(), src.clone());
+                }
+            }
+            SchemaBody::Other { fields, .. } => out = fields.clone(),
+        }
+        out
+    }
+
+    /// Read a served entry: a known kind into its variant, anything else
+    /// carried whole.
+    fn parse(kind: &str, fields: BTreeMap<String, Value>) -> SchemaBody {
+        let take = |k: &str| fields.get(k).cloned();
+        match kind {
+            SchemaKind::JSON_SCHEMA => match take("schema") {
+                Some(schema) => SchemaBody::JsonSchema { schema },
+                // A `json-schema` entry with no document is not a
+                // `json-schema` entry this build can use — carried, not
+                // silently treated as an empty schema that validates
+                // everything.
+                None => SchemaBody::Other {
+                    kind: SchemaKind::new(kind),
+                    fields,
+                },
+            },
+            SchemaKind::PROTOBUF => {
+                match (
+                    take("message").and_then(|v| v.as_str().map(str::to_string)),
+                    take("descriptor_b64").and_then(|v| v.as_str().map(str::to_string)),
+                ) {
+                    (Some(message), Some(descriptor_b64)) => SchemaBody::Protobuf {
+                        message,
+                        descriptor_b64,
+                    },
+                    _ => SchemaBody::Other {
+                        kind: SchemaKind::new(kind),
+                        fields,
+                    },
+                }
+            }
+            SchemaKind::CDR => match take("fields") {
+                Some(f) => SchemaBody::Cdr {
+                    fields: f,
+                    types: take("types"),
+                    source: take("source"),
+                },
+                None => SchemaBody::Other {
+                    kind: SchemaKind::new(kind),
+                    fields,
+                },
+            },
+            _ => SchemaBody::Other {
+                kind: SchemaKind::new(kind),
+                fields,
+            },
+        }
+    }
 }
 
 /// Canonical-bytes hash (RFC 08 §7): serde_json compact serialization with
@@ -137,12 +255,9 @@ impl TypeSchema {
     /// A `json-schema` entry from an explicit schema document.
     pub fn json_schema(document: Value) -> TypeSchema {
         let hash = hash_value(&document);
-        let mut body = BTreeMap::new();
-        body.insert("schema".to_string(), document);
         TypeSchema {
-            kind: SchemaKind::new(SchemaKind::JSON_SCHEMA),
-            hash,
-            body,
+            hash: Some(hash),
+            body: SchemaBody::JsonSchema { schema: document },
         }
     }
 
@@ -168,16 +283,12 @@ impl TypeSchema {
             use std::fmt::Write as _;
             let _ = write!(hash, "{b:02x}");
         }
-        let mut body = BTreeMap::new();
-        body.insert("message".to_string(), Value::String(message.into()));
-        body.insert(
-            "descriptor_b64".to_string(),
-            Value::String(base64::engine::general_purpose::STANDARD.encode(descriptor_set)),
-        );
         TypeSchema {
-            kind: SchemaKind::new(SchemaKind::PROTOBUF),
-            hash,
-            body,
+            hash: Some(hash),
+            body: SchemaBody::Protobuf {
+                message: message.into(),
+                descriptor_b64: base64::engine::general_purpose::STANDARD.encode(descriptor_set),
+            },
         }
     }
 
@@ -196,68 +307,86 @@ impl TypeSchema {
             }
         }
         let hash = hash_value(&Value::Object(hashed));
-        let mut body = BTreeMap::new();
-        if let Some(obj) = document.as_object() {
-            for (k, v) in obj {
-                body.insert(k.clone(), v.clone());
-            }
-        }
         TypeSchema {
-            kind: SchemaKind::new(SchemaKind::CDR),
-            hash,
-            body,
+            hash: Some(hash),
+            body: SchemaBody::Cdr {
+                // `fields` is the one required key; a document without it is
+                // not a `cdr` entry, and `Value::Null` is what it carried.
+                fields: document.get("fields").cloned().unwrap_or(Value::Null),
+                types: document.get("types").cloned(),
+                source: document.get("source").cloned(),
+            },
         }
     }
 
-    pub fn kind(&self) -> &SchemaKind {
-        &self.kind
+    /// The `kind` token this entry serializes under.
+    pub fn kind(&self) -> SchemaKind {
+        self.body.kind()
     }
 
-    /// The `sha256:` cache/drift key.
-    pub fn hash(&self) -> &str {
-        &self.hash
+    /// The `kind` token, borrowed.
+    pub fn kind_str(&self) -> &str {
+        self.body.kind_str()
+    }
+
+    /// The entry's kind-specific fields, typed.
+    pub fn body(&self) -> &SchemaBody {
+        &self.body
+    }
+
+    /// The `sha256:` cache/drift key, when the served document carried one.
+    ///
+    /// `None` is *no identity*, which is why it is not a `&str`: an empty
+    /// string used to mean this, and every caller had to remember to check
+    /// for it (#323).
+    pub fn hash(&self) -> Option<&str> {
+        self.hash.as_deref()
     }
 
     /// The JSON Schema document, when this is a `json-schema` entry.
     pub fn json_document(&self) -> Option<&Value> {
-        (self.kind == SchemaKind::JSON_SCHEMA)
-            .then(|| self.body.get("schema"))
-            .flatten()
+        match &self.body {
+            SchemaBody::JsonSchema { schema } => Some(schema),
+            _ => None,
+        }
     }
 
     /// The protobuf message name, when this is a `protobuf` entry.
     pub fn protobuf_message(&self) -> Option<&str> {
-        (self.kind == SchemaKind::PROTOBUF)
-            .then(|| self.body.get("message").and_then(Value::as_str))
-            .flatten()
+        match &self.body {
+            SchemaBody::Protobuf { message, .. } => Some(message),
+            _ => None,
+        }
     }
 
     /// The ordered field list, when this is a `cdr` entry.
     pub fn cdr_fields(&self) -> Option<&Value> {
-        (self.kind == SchemaKind::CDR)
-            .then(|| self.body.get("fields"))
-            .flatten()
+        match &self.body {
+            SchemaBody::Cdr { fields, .. } => Some(fields),
+            _ => None,
+        }
     }
 
     /// The local type table of a `cdr` entry (absent when the message uses
     /// primitives only).
     pub fn cdr_types(&self) -> Option<&serde_json::Map<String, Value>> {
-        (self.kind == SchemaKind::CDR)
-            .then(|| self.body.get("types").and_then(Value::as_object))
-            .flatten()
+        match &self.body {
+            SchemaBody::Cdr { types, .. } => types.as_ref().and_then(Value::as_object),
+            _ => None,
+        }
     }
 
     /// The decoded `FileDescriptorSet` bytes, when this is a `protobuf` entry.
     pub fn protobuf_descriptor_set(&self) -> Option<Vec<u8>> {
         use base64::Engine as _;
-        (self.kind == SchemaKind::PROTOBUF)
-            .then(|| {
-                self.body
-                    .get("descriptor_b64")
-                    .and_then(Value::as_str)
-                    .and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())
-            })
-            .flatten()
+        match &self.body {
+            SchemaBody::Protobuf { descriptor_b64, .. } => {
+                base64::engine::general_purpose::STANDARD
+                    .decode(descriptor_b64)
+                    .ok()
+            }
+            _ => None,
+        }
     }
 }
 
@@ -334,13 +463,15 @@ impl SchemaSet {
         let mut types = serde_json::Map::new();
         for (name, t) in &self.types {
             let mut entry = serde_json::Map::new();
+            entry.insert("kind".to_string(), Value::String(t.kind_str().to_string()));
+            // The wire field is a string and stays one: `None` re-serializes
+            // as `""`, which is what a document with no identity carried in.
             entry.insert(
-                "kind".to_string(),
-                Value::String(t.kind.as_str().to_string()),
+                "hash".to_string(),
+                Value::String(t.hash.clone().unwrap_or_default()),
             );
-            entry.insert("hash".to_string(), Value::String(t.hash.clone()));
-            for (k, v) in &t.body {
-                entry.insert(k.clone(), v.clone());
+            for (k, v) in t.body.fields() {
+                entry.insert(k, v);
             }
             types.insert(name.clone(), Value::Object(entry));
         }
@@ -397,9 +528,8 @@ impl SchemaSet {
             types.insert(
                 name.clone(),
                 TypeSchema {
-                    kind: SchemaKind::new(kind),
-                    hash: hash.to_string(),
-                    body,
+                    hash: (!hash.is_empty()).then(|| hash.to_string()),
+                    body: SchemaBody::parse(kind, body),
                 },
             );
         }
@@ -490,7 +620,7 @@ mod tests {
         let b = TypeSchema::json_schema(serde_json::json!({"a": 2, "b": 1}));
         // Key order does not matter: BTree-backed maps serialize sorted.
         assert_eq!(a.hash(), b.hash());
-        assert!(a.hash().starts_with("sha256:"));
+        assert!(a.hash().is_some_and(|h| h.starts_with("sha256:")));
         let c = TypeSchema::json_schema(serde_json::json!({"a": 3}));
         assert_ne!(a.hash(), c.hash());
     }
@@ -514,7 +644,7 @@ mod tests {
         let set = SchemaSet::parse(json).unwrap();
         assert_eq!(set.len(), 2, "the unknown kind must not blind us to Health");
         assert!(set.get("Health").unwrap().json_document().is_some());
-        assert_eq!(set.get("Twist").unwrap().kind(), &SchemaKind::CDR);
+        assert_eq!(set.get("Twist").unwrap().kind(), SchemaKind::CDR);
         // Round-tripping preserves the entry verbatim, feature or no feature.
         assert_eq!(SchemaSet::parse(&set.to_json()).unwrap(), set);
     }
@@ -531,9 +661,71 @@ mod tests {
         }"#;
         let set = SchemaSet::parse(json).unwrap();
         assert_eq!(set.len(), 2);
-        assert_eq!(set.get("Weird").unwrap().kind(), &"cddl");
+        assert_eq!(set.get("Weird").unwrap().kind(), "cddl");
         // Opaque but present: a tool can still report it honestly.
         assert!(set.get("Weird").unwrap().json_document().is_none());
+        // …and it is `Other`, carrying every field it arrived with, so the
+        // re-serialization below is byte-identical in content (#323).
+        assert!(matches!(
+            set.get("Weird").unwrap().body(),
+            SchemaBody::Other { .. }
+        ));
+        let back = SchemaSet::parse(&set.to_json()).unwrap();
+        assert_eq!(back, set);
+    }
+
+    /// A served entry whose kind is known but whose required field is absent
+    /// is **not** that kind. It degrades to `Other` and is carried, rather
+    /// than becoming a `json-schema` with no document — which would validate
+    /// everything — or a `protobuf` with no message (#323).
+    #[test]
+    fn a_known_kind_missing_its_required_field_degrades_rather_than_lying() {
+        let json = r#"{
+            "schema_version": 1,
+            "app": "foreign",
+            "types": {
+                "NoDoc":  { "kind": "json-schema", "hash": "sha256:00" },
+                "NoMsg":  { "kind": "protobuf", "hash": "sha256:11", "descriptor_b64": "AA==" },
+                "NoField":{ "kind": "cdr", "hash": "sha256:22", "source": "x" }
+            }
+        }"#;
+        let set = SchemaSet::parse(json).unwrap();
+        for name in ["NoDoc", "NoMsg", "NoField"] {
+            let t = set.get(name).unwrap();
+            assert!(
+                matches!(t.body(), SchemaBody::Other { .. }),
+                "{name} should degrade to Other"
+            );
+            assert!(t.json_document().is_none());
+            assert!(t.protobuf_message().is_none());
+            assert!(t.cdr_fields().is_none());
+        }
+        // The kind token is still reported as served — degrading the *body*
+        // must not rewrite what the producer said it was.
+        assert_eq!(set.get("NoDoc").unwrap().kind_str(), "json-schema");
+    }
+
+    /// The hash is an identity, and "no identity" is `None`, not `""` — the
+    /// sentinel every caller used to have to remember (#323).
+    #[test]
+    fn an_absent_hash_is_none_and_re_serializes_as_it_arrived() {
+        let json = r#"{
+            "schema_version": 1,
+            "app": "foreign",
+            "types": { "Point": { "kind": "json-schema", "hash": "", "schema": {} } }
+        }"#;
+        let set = SchemaSet::parse(json).unwrap();
+        assert_eq!(set.get("Point").unwrap().hash(), None);
+        // The wire field is a string, so it goes back out as it came in.
+        assert!(set.to_json().contains(r#""hash":"""#));
+        assert_eq!(SchemaSet::parse(&set.to_json()).unwrap(), set);
+
+        // A schema this crate builds always has one.
+        assert!(
+            TypeSchema::json_schema(serde_json::json!({}))
+                .hash()
+                .is_some()
+        );
     }
 
     #[test]

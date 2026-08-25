@@ -89,7 +89,7 @@ pub fn format_sample(
                 }
             }
             Some('p') => {
-                if let Some(name) = parsed.as_ref().and_then(|p| p.producer.as_ref()) {
+                if let Some(name) = parsed.as_ref().and_then(|p| p.producer()) {
                     out.push_str(name.name());
                 }
             }

@@ -334,8 +334,8 @@ impl DecoderRegistry {
         encoding: &WireEncoding,
         bytes: &[u8],
     ) -> Result<DecodedPayload, DecodeError> {
-        self.find(schema.kind().as_str())
-            .ok_or_else(|| DecodeError::UnknownKind(schema.kind().as_str().to_string()))?
+        self.find(schema.kind_str())
+            .ok_or_else(|| DecodeError::UnknownKind(schema.kind_str().to_string()))?
             .decode(schema, encoding, bytes)
     }
 
@@ -346,8 +346,8 @@ impl DecoderRegistry {
         value: &Value,
         target: &WireEncoding,
     ) -> Result<Vec<u8>, DecodeError> {
-        self.find(schema.kind().as_str())
-            .ok_or_else(|| DecodeError::UnknownKind(schema.kind().as_str().to_string()))?
+        self.find(schema.kind_str())
+            .ok_or_else(|| DecodeError::UnknownKind(schema.kind_str().to_string()))?
             .encode(schema, value, target)
     }
 }

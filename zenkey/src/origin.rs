@@ -20,6 +20,7 @@ use std::io::Write as _;
 use std::path::Path;
 
 use crate::grammar::{KeyError, is_valid_host_origin};
+use crate::profile::OriginSalt;
 
 /// A validated `h-<12hex>` host origin id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -42,7 +43,7 @@ impl HostId {
     /// `machine_id` is trimmed of surrounding whitespace/newlines (the
     /// `/etc/machine-id` file ends in a newline) and lowercased before
     /// hashing, so both file forms derive identically.
-    pub fn from_machine_id(machine_id: &str, salt: &str) -> Self {
+    pub fn from_machine_id(machine_id: &str, salt: OriginSalt) -> Self {
         let normalized = machine_id.trim().to_ascii_lowercase();
         Self::digest(normalized.as_bytes(), salt)
     }
@@ -50,15 +51,15 @@ impl HostId {
     /// Fallback derivation from the most stable hardware identity available
     /// (primary MAC, serial) — RFC 06 §1.1 option 2. Same function, different
     /// input; the catalog's evidence model absorbs the confidence difference.
-    pub fn from_hardware_id(hardware_id: &str, salt: &str) -> Self {
+    pub fn from_hardware_id(hardware_id: &str, salt: OriginSalt) -> Self {
         let normalized = hardware_id.trim().to_ascii_lowercase();
         Self::digest(normalized.as_bytes(), salt)
     }
 
-    fn digest(id_bytes: &[u8], salt: &str) -> Self {
+    fn digest(id_bytes: &[u8], salt: OriginSalt) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(id_bytes);
-        hasher.update(salt.as_bytes());
+        hasher.update(salt.as_str().as_bytes());
         let hex = hasher
             .finalize()
             .iter()
@@ -72,7 +73,7 @@ impl HostId {
     /// 2. a persisted random id at `fallback_path`, created atomically
     ///    (create-exclusive; a racing loser re-reads the winner's file);
     /// 3. as a last resort, a fresh random id persisted best-effort.
-    pub fn mint(machine_id_path: &Path, fallback_path: &Path, salt: &str) -> Self {
+    pub fn mint(machine_id_path: &Path, fallback_path: &Path, salt: OriginSalt) -> Self {
         if let Ok(machine_id) = std::fs::read_to_string(machine_id_path) {
             let trimmed = machine_id.trim();
             if !trimmed.is_empty() {
@@ -162,7 +163,7 @@ impl LocalOrigin {
 
     /// Derive from an explicit seed with the application's salt (tests,
     /// containers, operator-provided ids).
-    pub fn from_seed(seed: &str, salt: &str) -> Self {
+    pub fn from_seed(seed: &str, salt: OriginSalt) -> Self {
         LocalOrigin(HostId::from_machine_id(seed, salt))
     }
 
@@ -343,7 +344,7 @@ mod tests {
 
     #[test]
     fn concrete_origin_chunks_and_bridges() {
-        let local = LocalOrigin::from_seed("machine-a", "example-salt-v1");
+        let local = LocalOrigin::from_seed("machine-a", OriginSalt::new("example-salt-v1"));
         let remote = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
         let svc = ServiceOrigin::catalog();
         fn chunk_of(o: &impl ConcreteOrigin) -> String {
@@ -373,14 +374,18 @@ mod tests {
     /// The RFC 06 §1 normative test vector: implementations MUST reproduce it.
     #[test]
     fn rfc_test_vector() {
-        let id = HostId::from_machine_id("b642b4217b34b1e8d3bd915fc65c4452", "example-salt-v1");
+        let id = HostId::from_machine_id(
+            "b642b4217b34b1e8d3bd915fc65c4452",
+            OriginSalt::new("example-salt-v1"),
+        );
         assert_eq!(id.as_str(), "h-20609002f7b6");
     }
 
     #[test]
     fn machine_id_trim_and_case_are_normalized() {
-        let a = HostId::from_machine_id("b642b4217b34b1e8d3bd915fc65c4452\n", "s");
-        let b = HostId::from_machine_id("  B642B4217B34B1E8D3BD915FC65C4452  ", "s");
+        let a = HostId::from_machine_id("b642b4217b34b1e8d3bd915fc65c4452\n", OriginSalt::new("s"));
+        let b =
+            HostId::from_machine_id("  B642B4217B34B1E8D3BD915FC65C4452  ", OriginSalt::new("s"));
         assert_eq!(a, b);
     }
 
@@ -397,8 +402,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("zsks-test-{}", std::process::id()));
         let path = dir.join("host-id");
         let _ = std::fs::remove_file(&path);
-        let first = HostId::mint(Path::new("/nonexistent/machine-id"), &path, "s");
-        let second = HostId::mint(Path::new("/nonexistent/machine-id"), &path, "s");
+        let first = HostId::mint(
+            Path::new("/nonexistent/machine-id"),
+            &path,
+            OriginSalt::new("s"),
+        );
+        let second = HostId::mint(
+            Path::new("/nonexistent/machine-id"),
+            &path,
+            OriginSalt::new("s"),
+        );
         assert_eq!(first, second);
         let _ = std::fs::remove_dir_all(&dir);
     }

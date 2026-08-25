@@ -77,13 +77,13 @@ pub fn parse_alive_key(key: &str) -> Option<AliveToken> {
         }
         // The 5-chunk tail is the host form (producer present), the 4-chunk
         // tail the service form (no producer chunk).
-        if (tail_len == 5) != parsed.producer.is_some() {
+        if (tail_len == 5) != parsed.producer().is_some() {
             continue;
         }
         return Some(AliveToken {
             base: chunks[..split].join("/"),
             origin: parsed.origin.chunk().to_string(),
-            producer: parsed.producer.as_ref().map(|p| p.chunk()),
+            producer: parsed.producer().map(|p| p.chunk()),
         });
     }
     None

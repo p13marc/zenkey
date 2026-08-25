@@ -141,21 +141,59 @@ pub fn common_family(scope: Scope, family: CommonFamily) -> Selector {
     Selector::from_canonical(out)
 }
 
+/// Which producer's `@rpc` surface a selector addresses: one by name, or
+/// every producer under the scope.
+///
+/// The producer position takes the same two-way choice the origin position
+/// does, so it gets the same treatment [`Scope`] gives that one. It used to
+/// be a `&str` with `"*"` as a magic value, which made the wildcard both
+/// spellable by accident and indistinguishable from a producer literally
+/// named `*` — and it meant one of the two wildcard positions in this module
+/// was typed and the other was not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Producers(ProducersInner);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ProducersInner {
+    All,
+    Named(String),
+}
+
+impl Producers {
+    /// Every producer under the scope (`*`) — the discovery sweep.
+    pub fn all() -> Producers {
+        Producers(ProducersInner::All)
+    }
+
+    /// One producer, by name. Panics on a name that is not a legal plain
+    /// chunk (RFC 03 §2) — these are registry constants, so an illegal one is
+    /// a programmer error reported eagerly rather than a malformed selector
+    /// sent to the bus.
+    pub fn named(producer: &str) -> Producers {
+        Producers(ProducersInner::Named(
+            legal_chunk(producer, "producer").to_string(),
+        ))
+    }
+
+    /// The producer-position chunk (`*` for every producer).
+    pub fn chunk(&self) -> &str {
+        match &self.0 {
+            ProducersInner::All => "*",
+            ProducersInner::Named(p) => p,
+        }
+    }
+}
+
 /// A procedure selector in an arbitrary scope:
-/// `v1/<scope>/@rpc/<producer>/<procedure…>`. `producer` may be `*` to reach
-/// every producer (the discovery sweep); the scope may be one origin, which is
-/// how a caller asks *one* node a fan-in question without sweeping the fleet
-/// (issue #96). Callers of the fleet scope MUST use query target `All`
-/// (RFC 05 §2.1).
+/// `v1/<scope>/@rpc/<producer>/<procedure…>`. The scope may be one origin,
+/// which is how a caller asks *one* node a fan-in question without sweeping
+/// the fleet (issue #96). Callers of the fleet scope MUST use query target
+/// `All` (RFC 05 §2.1).
 ///
 /// A service origin has no producer chunk — [`service_rpc`] is its builder,
 /// and a `*` scope could not reach it anyway (D4).
-pub fn rpc(scope: Scope, producer: &str, procedure: &[&str]) -> Selector {
-    let p = if producer == "*" {
-        "*"
-    } else {
-        legal_chunk(producer, "producer")
-    };
+pub fn rpc(scope: Scope, producer: Producers, procedure: &[&str]) -> Selector {
+    let p = producer.chunk();
     let mut out = format!("{VERSION_CHUNK}/{}/{PLANE_RPC}/{p}", scope.chunk());
     for chunk in procedure {
         out.push('/');
@@ -164,10 +202,15 @@ pub fn rpc(scope: Scope, producer: &str, procedure: &[&str]) -> Selector {
     Selector::from_canonical(out)
 }
 
-/// A fleet fan-in procedure selector: `v1/*/@rpc/<producer>/<procedure…>` —
-/// [`rpc`] at fleet scope.
+/// A fleet fan-in procedure selector for one named producer:
+/// `v1/*/@rpc/<producer>/<procedure…>` — [`rpc`] at fleet scope.
+///
+/// The all-producers sweep is `rpc(Scope::fleet(), Producers::all(), …)`,
+/// spelled out rather than reachable by passing `"*"` here: this builder's
+/// name says *one* producer across the fleet, and the two-wildcard form is a
+/// different question (RFC 08 §6's discovery sweep) that should read like one.
 pub fn fleet_rpc(producer: &str, procedure: &[&str]) -> Selector {
-    rpc(Scope::fleet(), producer, procedure)
+    rpc(Scope::fleet(), Producers::named(producer), procedure)
 }
 
 /// One host's procedure key: `v1/<origin>/@rpc/<producer>/<procedure…>`.
@@ -270,20 +313,25 @@ mod tests {
 
     #[test]
     fn rpc_shapes() {
-        assert_eq!(fleet_rpc("*", &["introspect"]), "v1/*/@rpc/*/introspect");
+        assert_eq!(
+            rpc(Scope::fleet(), Producers::all(), &["introspect"]),
+            "v1/*/@rpc/*/introspect"
+        );
         assert_eq!(fleet_rpc("netring", &["flows"]), "v1/*/@rpc/netring/flows");
         let o = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
         // One node's producers, not the fleet's (#96).
         assert_eq!(
-            rpc(Scope::origin(&o), "*", &["introspect"]),
+            rpc(Scope::origin(&o), Producers::all(), &["introspect"]),
             "v1/h-3fa9c2d41b7e/@rpc/*/introspect"
         );
         // …and it is strictly narrower than the fleet sweep it replaces.
-        assert!(fleet_rpc("*", &["introspect"]).includes(&rpc(
-            Scope::origin(&o),
-            "*",
-            &["introspect"]
-        )));
+        assert!(
+            rpc(Scope::fleet(), Producers::all(), &["introspect"]).includes(&rpc(
+                Scope::origin(&o),
+                Producers::all(),
+                &["introspect"]
+            ))
+        );
         assert_eq!(
             rpc_at(&o, "netring", &["capture_disk", "set"]),
             "v1/h-3fa9c2d41b7e/@rpc/netring/capture_disk/set"

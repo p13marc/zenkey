@@ -227,7 +227,7 @@ pub fn state_coverage(
     let mut rows = Vec::new();
     for slice in slices.slices() {
         for subject in &slice.subjects {
-            if subject.class != "state" {
+            if !subject.class.is(&zenkey::Class::State) {
                 continue;
             }
             let Ok(pattern) = zenkey::pattern::SubjectPattern::parse(&subject.path) else {

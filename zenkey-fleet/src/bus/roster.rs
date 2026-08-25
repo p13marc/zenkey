@@ -243,7 +243,7 @@ pub fn token_identity(base: &str, key: &str) -> Option<(String, String)> {
     let parsed = zenkey::grammar::parse_full(base, key)?;
     let origin = parsed.origin.chunk().to_string();
     let producer = parsed
-        .producer
+        .producer()
         .as_ref()
         .map(|p| p.chunk())
         .unwrap_or_else(|| origin.trim_start_matches('@').to_string());
@@ -354,10 +354,12 @@ impl Node {
     /// This node's producers' `introspect`, and nothing else's.
     fn introspect_selector(&self) -> String {
         match self {
-            Node::Host(o) => {
-                zenkey::selector::rpc(zenkey::selector::Scope::origin(o), "*", &["introspect"])
-                    .to_string()
-            }
+            Node::Host(o) => zenkey::selector::rpc(
+                zenkey::selector::Scope::origin(o),
+                zenkey::selector::Producers::all(),
+                &["introspect"],
+            )
+            .to_string(),
             Node::Service(o) => zenkey::selector::service_rpc(o, &["introspect"]).to_string(),
         }
     }
@@ -409,8 +411,7 @@ pub async fn node_info(
             };
             alive.push(
                 parsed
-                    .producer
-                    .as_ref()
+                    .producer()
                     .map(|p| p.chunk())
                     .unwrap_or_else(|| parsed.origin.chunk().trim_start_matches('@').to_string()),
             );
@@ -466,7 +467,7 @@ pub async fn node_info(
                 subjects: slice.map(|s| s.subjects.len()).unwrap_or(0),
                 procedures: slice.map(|s| s.procedures.len()).unwrap_or(0),
                 blob_tiers: slice
-                    .map(|s| s.blob.iter().map(|b| b.tier.clone()).collect())
+                    .map(|s| s.blob.iter().map(|b| b.tier.token().to_string()).collect())
                     .unwrap_or_default(),
                 media: slice
                     .map(|s| {
@@ -474,7 +475,7 @@ pub async fn node_info(
                             .iter()
                             .map(|m| MediaStreamInfo {
                                 path: m.path.clone(),
-                                encoding: m.encoding.clone(),
+                                encoding: m.encoding.as_encoding_str().to_string(),
                             })
                             .collect()
                     })
@@ -495,7 +496,7 @@ pub async fn node_info(
         for slice in &mine {
             for subject in &slice.subjects {
                 let Some(ttl) = subject.ttl_s else { continue };
-                if subject.class != "state" {
+                if !subject.class.is(&zenkey::Class::State) {
                     continue;
                 }
                 // Newest sample whose tail refines to this subject.
@@ -503,7 +504,7 @@ pub async fn node_info(
                     .iter()
                     .filter_map(|s| {
                         let parsed = zenkey::grammar::parse_full(base, &s.key)?;
-                        let p = parsed.producer.as_ref()?.name().to_string();
+                        let p = parsed.producer()?.name().to_string();
                         if p != slice.name {
                             return None;
                         }

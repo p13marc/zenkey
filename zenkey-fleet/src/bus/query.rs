@@ -616,7 +616,11 @@ impl RepeatingRegistry {
     pub async fn declare(fleet: &Fleet<'_>, timeout: Duration) -> Result<Self> {
         // This session is un-namespaced on purpose (RFC 09 §5), so it must
         // spell the base itself — exactly as `service call` composes its key.
-        let wildcard = fleet.wire(zenkey::selector::fleet_rpc("*", &["introspect"]));
+        let wildcard = fleet.wire(zenkey::selector::rpc(
+            zenkey::selector::Scope::fleet(),
+            zenkey::selector::Producers::all(),
+            &["introspect"],
+        ));
         let catalog = fleet.wire(zenkey::selector::service_rpc(
             &zenkey::ServiceOrigin::catalog(),
             &["introspect"],

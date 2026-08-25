@@ -11,8 +11,8 @@
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use zenkey::RegistrySlice;
 use zenkey::grammar::with_base;
+use zenkey::{Declared, RegistrySlice};
 
 use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
@@ -61,9 +61,17 @@ fn finding(
 fn rpc_key(base: &str, slice: &RegistrySlice, procedure: &str) -> Result<String> {
     Ok(match &slice.service_origin {
         Some(origin) => {
-            let o = zenkey::ServiceOrigin::new(origin)
-                .map_err(|e| anyhow!("bad service origin in slice {}: {e}", slice.name))?;
-            with_base(base, zenkey::selector::service_rpc(&o, &[procedure]))
+            // The slice already validated it on parse — `Other` here means the
+            // chunk is not a legal verbatim origin, which is the same finding
+            // the hand-rolled `ServiceOrigin::new` used to report.
+            let o = origin.known().ok_or_else(|| {
+                anyhow!(
+                    "bad service origin in slice {}: {:?}",
+                    slice.name,
+                    origin.token()
+                )
+            })?;
+            with_base(base, zenkey::selector::service_rpc(o, &[procedure]))
         }
         None => with_base(base, zenkey::selector::fleet_rpc(&slice.name, &[procedure])),
     })
@@ -290,7 +298,8 @@ pub async fn run_doctor(
         let mut unstamped = 0usize;
         for slice in slice_set.slices() {
             for subject in &slice.subjects {
-                let (Some(ttl), "state") = (subject.ttl_s, subject.class.as_str()) else {
+                let (Some(ttl), true) = (subject.ttl_s, subject.class.is(&zenkey::Class::State))
+                else {
                     continue;
                 };
                 let Ok(pattern) = zenkey::pattern::SubjectPattern::parse(&subject.path) else {
@@ -529,7 +538,7 @@ async fn observe_traffic(
                         if let (Some(profile), Some(declared)) = (sf.declared_qos(), &sf.qos) {
                             let entry = qos_bad
                                 .entry(s.key.clone())
-                                .or_insert_with(|| (declared.clone(), 0, 0));
+                                .or_insert_with(|| (declared.token().to_string(), 0, 0));
                             entry.2 += 1;
                             if !s.qos_matches(profile) {
                                 entry.1 += 1;
@@ -543,7 +552,7 @@ async fn observe_traffic(
                                 Some(p) => format!("{p}/{}", sf.path),
                                 None => format!("{}/{}", v.origin, sf.path),
                             };
-                            *event_counts.entry((family, rate.clone())).or_default() += 1;
+                            *event_counts.entry((family, rate.token())).or_default() += 1;
                         }
                         let budget = decode_budget.entry(s.key.clone()).or_default();
                         if *budget < DECODE_BUDGET {
@@ -830,9 +839,10 @@ fn judge_introspect_coverage(
                 let base_name = zenkey::grammar::Producer::parse_chunk(producer)
                     .map(|p| p.name().to_string())
                     .unwrap_or_else(|_| producer.to_string());
-                locals
-                    .iter()
-                    .any(|l| l.name == base_name || l.service_origin.as_deref() == Some(origin))
+                locals.iter().any(|l| {
+                    l.name == base_name
+                        || l.service_origin.as_ref().map(Declared::token) == Some(origin)
+                })
             };
             let in_scope: usize = roster
                 .iter()

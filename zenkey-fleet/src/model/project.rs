@@ -19,6 +19,7 @@ use crate::report::{
     CarrierRow, InterfaceList, InterfaceShow, InterfaceTypeRow, ServiceInfo, ServiceList,
     ServiceProcedure, ServiceRow, TopicInfo, TopicList, TopicRow,
 };
+use zenkey::{Class, Declared};
 
 impl SliceSet {
     /// `topic list` — every registered subject in the given slices.
@@ -37,8 +38,10 @@ impl SliceSet {
         deprecated: bool,
     ) -> Result<TopicList> {
         let slices = self.slices();
+        // The vocabulary is `zenkey::Class`; spelling it again here was a
+        // fifth copy of a three-token closed set (RFC 04 §1).
         if let Some(c) = class
-            && !["telemetry", "state", "events"].contains(&c)
+            && Class::from_chunk(c).is_none()
         {
             return Err(anyhow!(
                 "unknown class {c:?} — the classes are telemetry, state, events (RFC 04 §1)"
@@ -52,13 +55,13 @@ impl SliceSet {
             for s in slice
                 .subjects
                 .iter()
-                .filter(|s| class.is_none_or(|c| c == s.class))
+                .filter(|s| class.is_none_or(|c| c == s.class.token()))
                 .filter(|s| type_name.is_none_or(|t| t == s.type_name))
             {
                 subjects.push(TopicRow {
                     producer: slice.name.clone(),
                     registry_version: slice.version.clone(),
-                    class: s.class.clone(),
+                    class: s.class.token().to_string(),
                     path: s.path.clone(),
                     type_name: s.type_name.clone(),
                     open_ended: s.path.contains("..."),
@@ -125,7 +128,12 @@ impl SliceSet {
                 procedures.push(ServiceRow {
                     producer: slice.name.clone(),
                     registry_version: slice.version.clone(),
-                    kind: p.kind.clone(),
+                    kind: p
+                        .kind
+                        .as_ref()
+                        .map(Declared::token)
+                        .unwrap_or_default()
+                        .to_string(),
                     path: p.path.clone(),
                     request: p.request.clone(),
                     reply: p.reply.clone(),
@@ -150,7 +158,11 @@ impl SliceSet {
                 known.join(", ")
             ));
         };
-        let origin = slice.service_origin.as_deref().unwrap_or("{origin}");
+        let origin = slice
+            .service_origin
+            .as_ref()
+            .map(Declared::token)
+            .unwrap_or("{origin}");
         let procedures = slice
             .procedures
             .iter()
@@ -162,12 +174,17 @@ impl SliceSet {
                     None => format!("v1/{origin}/@rpc/{}/{}", slice.name, p.path),
                 },
                 path: p.path.clone(),
-                kind: p.kind.clone(),
+                kind: p
+                    .kind
+                    .as_ref()
+                    .map(Declared::token)
+                    .unwrap_or_default()
+                    .to_string(),
                 request: p.request.clone(),
                 reply: p.reply.clone(),
-                fanout: p.fanout.clone(),
+                fanout: p.fanout.as_ref().map(|f| f.token().to_string()),
                 idempotent: p.idempotent,
-                encoding: p.encoding.clone(),
+                encoding: p.encoding.as_ref().map(|e| e.as_encoding_str().to_string()),
                 since: p.since.clone(),
                 description: p.description.clone(),
             })
@@ -185,7 +202,7 @@ impl SliceSet {
         Ok(ServiceInfo {
             producer: slice.name.clone(),
             registry_version: slice.version.clone(),
-            service_origin: slice.service_origin.clone(),
+            service_origin: slice.service_origin.as_ref().map(|o| o.token().to_string()),
             description: slice.description.clone(),
             procedures,
         })
@@ -239,7 +256,7 @@ impl SliceSet {
                 if s.type_name == type_name {
                     carriers.push(CarrierRow {
                         producer: slice.name.clone(),
-                        class: s.class.clone(),
+                        class: s.class.token().to_string(),
                         path: s.path.clone(),
                     });
                 }
@@ -252,7 +269,7 @@ impl SliceSet {
                     carriers.push(CarrierRow {
                         producer: slice.name.clone(),
                         class: "@blob".to_string(),
-                        path: b.tier.clone(),
+                        path: b.tier.token().to_string(),
                     });
                 }
             }
@@ -392,8 +409,14 @@ mod tests {
         assert_eq!(slice.subjects[0].type_name, "NetworkInterface");
         // The optional metadata columns ride the slice when declared.
         assert_eq!(slice.subjects[0].ttl_s, Some(30));
-        assert_eq!(slice.subjects[0].qos.as_deref(), Some("refreshed"));
-        assert_eq!(slice.procedures[0].kind, "write");
+        assert_eq!(
+            slice.subjects[0].qos.as_ref().and_then(Declared::known),
+            Some(&zenkey::QosProfile::Refreshed)
+        );
+        assert_eq!(
+            slice.procedures[0].kind.as_ref().and_then(Declared::known),
+            Some(&zenkey::ProcedureKind::Write)
+        );
 
         let slices = tcgui_slices();
 
@@ -428,7 +451,7 @@ mod tests {
         let slice = parse_slice(&src).unwrap();
         assert_eq!(slice.media.len(), 1);
         assert_eq!(slice.media[0].path, "{stream}/preview/jpeg");
-        assert_eq!(slice.media[0].encoding, "image/jpeg");
+        assert_eq!(slice.media[0].encoding.as_encoding_str(), "image/jpeg");
         assert_eq!(slice.media[0].attachment.as_deref(), Some("FrameMeta"));
 
         // The pre-v1.16 posture, pinned: no [[media]] = empty, no error.
@@ -457,9 +480,9 @@ mod tests {
             TCGUI_SLICE
         );
         let slice = parse_slice(&src).unwrap();
-        assert!(slice.serves_blob_tier("artifact"));
-        assert!(slice.serves_blob_tier("store"));
-        assert!(!slice.serves_blob_tier("tree"));
+        assert!(slice.serves_blob_tier(zenkey::BlobTier::Artifact));
+        assert!(slice.serves_blob_tier(zenkey::BlobTier::Store));
+        assert!(!slice.serves_blob_tier(zenkey::BlobTier::Tree));
         assert_eq!(slice.blob[0].endpoints, ["manifest", "have"]);
         assert_eq!(slice.blob[1].algo.as_deref(), Some("blake3"));
 

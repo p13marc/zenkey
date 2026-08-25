@@ -75,8 +75,8 @@ pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Res
                         .map(|(name, schema)| zenkey_build::export::BundledType {
                             name,
                             document: schema.json_document(),
-                            kind: schema.kind().as_str(),
-                            hash: schema.hash(),
+                            kind: schema.kind_str(),
+                            hash: schema.hash().unwrap_or_default(),
                         })
                 })
                 .collect();

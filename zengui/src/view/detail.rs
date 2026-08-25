@@ -187,8 +187,13 @@ pub fn qos_token(entry: &crate::history::HistoryEntry) -> String {
 /// render, because nobody else holds a registry that declares QoS.
 /// `None` = the declared name is not a profile, so there is nothing to
 /// judge (O4).
-pub fn qos_verdict(declared: &str, entry: &crate::history::HistoryEntry) -> Option<bool> {
-    let profile = zenkey::qos::QosProfile::from_name(declared)?;
+pub fn qos_verdict(
+    declared: &zenkey::Declared<zenkey::QosProfile>,
+    entry: &crate::history::HistoryEntry,
+) -> Option<bool> {
+    // The slice recognised the token on parse; a profile this build cannot
+    // name is one it cannot judge against, which is `None` — not a mismatch.
+    let profile = *declared.known()?;
     Some(
         entry.priority == profile.priority()
             && entry.congestion_control == profile.congestion_control()
@@ -786,9 +791,18 @@ mod tests {
     fn declared_vs_observed_judges_axes_not_names() {
         use zenkey::qos::QosProfile;
         let observed_alert = entry(QosProfile::Alert);
-        assert_eq!(qos_verdict("alert", &observed_alert), Some(true));
-        assert_eq!(qos_verdict("sampled", &observed_alert), Some(false));
-        assert_eq!(qos_verdict("not-a-profile", &observed_alert), None);
+        assert_eq!(
+            qos_verdict(&zenkey::Declared::parse("alert"), &observed_alert),
+            Some(true)
+        );
+        assert_eq!(
+            qos_verdict(&zenkey::Declared::parse("sampled"), &observed_alert),
+            Some(false)
+        );
+        assert_eq!(
+            qos_verdict(&zenkey::Declared::parse("not-a-profile"), &observed_alert),
+            None
+        );
     }
 
     /// The token spelling is byte-for-byte the CLI's %q, so the two

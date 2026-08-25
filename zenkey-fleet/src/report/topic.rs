@@ -8,6 +8,7 @@
 use crate::model::facts::{KeyDescription, KeyShape, Registration};
 use serde::Serialize;
 use std::collections::BTreeMap;
+use zenkey::RateClass;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TopicRow {
@@ -219,8 +220,8 @@ impl TopicInfo {
                 info.variables = s.vars.iter().cloned().collect();
                 info.payload_type = Some(s.type_name.clone());
                 info.unit = s.unit.clone();
-                info.qos = s.qos.clone();
-                info.encoding = s.encoding.clone();
+                info.qos = s.qos.as_ref().map(|q| q.token().to_string());
+                info.encoding = s.encoding.as_ref().map(|e| e.as_encoding_str().to_string());
                 info.ttl_s = s.ttl_s;
                 // Declared since v1.0, dropped on this path until #221 — the
                 // field existed and was never filled.
@@ -230,7 +231,7 @@ impl TopicInfo {
                 // died at this boundary; `since`/`description` never even
                 // left the slice. The no-dead-field pin in
                 // `report_contract.rs` now guards the whole struct.
-                info.rate = s.rate.clone();
+                info.rate = s.rate.as_ref().map(RateClass::token);
                 info.since = s.since.clone();
                 info.description = s.description.clone();
             }

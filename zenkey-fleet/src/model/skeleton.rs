@@ -190,8 +190,8 @@ impl Skeleton {
                     // Service origin: no producer chunk (RFC 03 §1.5).
                     let mut path = base_chunks.clone();
                     path.push(SkeletonChunk::Literal("v1".into()));
-                    path.push(SkeletonChunk::Literal(origin.clone()));
-                    path.push(SkeletonChunk::Literal(subject.class.clone()));
+                    path.push(SkeletonChunk::Literal(origin.token().to_string()));
+                    path.push(SkeletonChunk::Literal(subject.class.token().to_string()));
                     path.extend(tail.clone());
                     root.insert(
                         &path,
@@ -220,7 +220,7 @@ impl Skeleton {
                     let mut path = base_chunks.clone();
                     path.push(SkeletonChunk::Literal("v1".into()));
                     path.push(SkeletonChunk::Var("origin".into()));
-                    path.push(SkeletonChunk::Literal(subject.class.clone()));
+                    path.push(SkeletonChunk::Literal(subject.class.token().to_string()));
                     path.push(SkeletonChunk::Literal(slice.name.clone()));
                     path.extend(tail.clone());
                     root.insert(
@@ -236,7 +236,7 @@ impl Skeleton {
                         let mut path = base_chunks.clone();
                         path.push(SkeletonChunk::Literal("v1".into()));
                         path.push(SkeletonChunk::Literal(origin.clone()));
-                        path.push(SkeletonChunk::Literal(subject.class.clone()));
+                        path.push(SkeletonChunk::Literal(subject.class.token().to_string()));
                         path.push(SkeletonChunk::Literal(slice.name.clone()));
                         path.extend(tail.clone());
                         root.insert(
@@ -500,7 +500,7 @@ mod tests {
     fn subject(path: &str, class: &str) -> SubjectDecl {
         SubjectDecl {
             path: path.into(),
-            class: class.into(),
+            class: zenkey::Declared::parse(class),
             type_name: "T".into(),
             common: None,
             since: None,
@@ -575,7 +575,7 @@ mod tests {
     #[test]
     fn skeleton_places_service_origins_without_a_producer_chunk() {
         let mut slice = host_slice("catalog", vec![subject("entity/{id}", "state")]);
-        slice.service_origin = Some("@catalog".into());
+        slice.service_origin = Some(zenkey::Declared::parse("@catalog"));
         let slices = SliceSet::from_slices(vec![slice]);
         let skel = Skeleton::build("", &slices, &BTreeMap::new(), None);
         let state = &skel.root.children["v1"].children["@catalog"].children["state"];

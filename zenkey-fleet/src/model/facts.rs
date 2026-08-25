@@ -21,6 +21,8 @@
 use crate::model::bounded::BoundedLru;
 use crate::model::registry::SliceSet;
 use zenkey::grammar::{self, BlobTier, Class, ClassOrPlane, Origin, Plane, StructuralKey};
+use zenkey::qos::QosProfile;
+use zenkey::{Declared, RateClass, WireEncoding};
 
 /// Everything zengui knows about one wire key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,12 +123,12 @@ pub struct SubjectFacts {
     /// Variable bindings from the match, e.g. `[("mount", "var-log")]`.
     pub vars: Vec<(String, String)>,
     pub unit: Option<String>,
-    pub qos: Option<String>,
-    pub encoding: Option<String>,
+    pub qos: Option<Declared<QosProfile>>,
+    pub encoding: Option<WireEncoding>,
     pub ttl_s: Option<i64>,
     /// The declared events rate class (`rare` | `low` | `burst(n/h)`,
     /// RFC 04 §1.3) — carried so observers can judge over-rate (#161).
-    pub rate: Option<String>,
+    pub rate: Option<RateClass>,
     /// The declared key-population bound (RFC 08 §2) — carried so observers
     /// can judge over-declared cardinality (#221).
     pub cardinality: Option<i64>,
@@ -140,16 +142,17 @@ pub struct SubjectFacts {
 }
 
 impl SubjectFacts {
-    /// The declared QoS profile, parsed into the closed RFC 04 §3 vocabulary.
+    /// The declared QoS profile, where the registry names one this build
+    /// knows.
     ///
     /// `None` means the registry declares no profile for this subject — or
     /// names one outside the vocabulary, which the RFC 08 §5 lints reject at
     /// the producer's build; a live slice can still carry anything, and an
-    /// unparseable name must not be mistaken for a parsed one (#158).
-    pub fn declared_qos(&self) -> Option<zenkey::qos::QosProfile> {
-        self.qos
-            .as_deref()
-            .and_then(zenkey::qos::QosProfile::from_name)
+    /// unparseable name must not be mistaken for a parsed one (#158). The
+    /// slice draws that line on parse now, so this reads it rather than
+    /// re-deriving it.
+    pub fn declared_qos(&self) -> Option<QosProfile> {
+        self.qos.as_ref().and_then(Declared::known).copied()
     }
 }
 
@@ -423,9 +426,9 @@ impl V1Facts {
             origin_kind,
             class,
             class_kind,
-            producer: parsed.producer.as_ref().map(|p| p.name().to_string()),
-            instance: parsed.producer.as_ref().and_then(|p| p.instance()),
-            blob_tier: parsed.blob_tier.map(|t| tier_chunk(t).to_string()),
+            producer: parsed.producer().map(|p| p.name().to_string()),
+            instance: parsed.producer().and_then(|p| p.instance()),
+            blob_tier: parsed.blob_tier().map(|t| tier_chunk(t).to_string()),
             subject: parsed.subject.iter().map(|s| (*s).to_string()).collect(),
         }
     }
@@ -638,7 +641,7 @@ mod tests {
         use zenkey::slice::{RegistrySlice, SubjectDecl};
         let subject = |path: &str| SubjectDecl {
             path: path.to_string(),
-            class: "telemetry".to_string(),
+            class: Class::Telemetry.into(),
             type_name: if path.contains('{') {
                 "VarPoint"
             } else {
@@ -703,7 +706,7 @@ mod tests {
             type_name: "Point".into(),
             vars: vec![],
             unit: None,
-            qos: qos.map(str::to_string),
+            qos: qos.map(Declared::parse),
             encoding: None,
             ttl_s: None,
             rate: None,

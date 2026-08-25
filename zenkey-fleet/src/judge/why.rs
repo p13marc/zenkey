@@ -332,8 +332,8 @@ pub fn ladder(inputs: &WhyInputs<'_>) -> WhyReport {
                 sf.path,
                 sf.type_name,
                 sf.qos
-                    .as_deref()
-                    .map(|q| format!(", qos {q}"))
+                    .as_ref()
+                    .map(|q| format!(", qos {}", q.token()))
                     .unwrap_or_default(),
             )];
             if let Some(ttl) = sf.ttl_s {

@@ -53,11 +53,10 @@ fn generated_parse_agrees_with_best_match_over_the_corpus() {
     for (name, toml_src) in registry::REGISTRIES {
         let slice = zenkey::parse_slice(toml_src).unwrap();
         for class in [Class::Telemetry, Class::State, Class::Events] {
-            let class_str = class.chunk();
             let patterns: Vec<SubjectPattern> = slice
                 .subjects
                 .iter()
-                .filter(|s| s.class == class_str)
+                .filter(|s| s.class.is(&class))
                 .map(|s| SubjectPattern::parse(&s.path).unwrap())
                 .collect();
             if patterns.is_empty() {
@@ -72,8 +71,10 @@ fn generated_parse_agrees_with_best_match_over_the_corpus() {
                     let interpretive =
                         best_match(&patterns, &refs).map(|(i, _)| patterns[i].as_str().to_string());
                     assert_eq!(
-                        generated, interpretive,
-                        "{name}/{class_str}: divergence on tail {refs:?}"
+                        generated,
+                        interpretive,
+                        "{name}/{}: divergence on tail {refs:?}",
+                        class.chunk()
                     );
                     checked += 1;
                 }

@@ -268,7 +268,7 @@ mod tests {
             subjects: vec![],
             procedures: vec![ProcedureDecl {
                 path: "capture/trigger".into(),
-                kind: kind.into(),
+                kind: Some(zenkey::Declared::parse(kind)),
                 reply: Some("Ack".into()),
                 request: None,
                 encoding: None,

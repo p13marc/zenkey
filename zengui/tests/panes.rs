@@ -348,11 +348,11 @@ fn the_call_mode_labels_forbidden_fanout() {
         subjects: vec![],
         procedures: vec![ProcedureDecl {
             path: "capture/trigger".into(),
-            kind: "write".into(),
+            kind: Some(zenkey::ProcedureKind::Write.into()),
             reply: Some("Ack".into()),
             request: None,
             encoding: None,
-            fanout: Some("forbidden".into()),
+            fanout: Some(zenkey::Fanout::Forbidden.into()),
             idempotent: Some(false),
             cardinality: None,
             since: None,
@@ -447,7 +447,7 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
         subjects: vec![],
         procedures: vec![zenkey::slice::ProcedureDecl {
             path: "introspect".into(),
-            kind: "read".into(),
+            kind: Some(zenkey::ProcedureKind::Read.into()),
             reply: Some("RegistrySlice".into()),
             request: None,
             encoding: None,
@@ -487,7 +487,7 @@ fn the_call_mode_distinguishes_an_unasked_schema_from_an_empty_one() {
         subjects: vec![],
         procedures: vec![ProcedureDecl {
             path: "capture/start".into(),
-            kind: "write".into(),
+            kind: Some(zenkey::ProcedureKind::Write.into()),
             reply: Some("Ack".into()),
             request: Some("CaptureSpec".into()),
             encoding: None,
@@ -3037,7 +3037,7 @@ fn projection_fixture() -> (SliceSet, zengui::nodes::NodeRoster, KeyTreeSnapshot
 
     let subject = |path: &str| SubjectDecl {
         path: path.into(),
-        class: "state".into(),
+        class: zenkey::Class::State.into(),
         type_name: "Health".into(),
         common: None,
         since: None,
@@ -3364,7 +3364,7 @@ fn the_tree_badges_the_budget_join() {
     // rest-variable family beside it.
     let subject = |path: &str, class: &str, cardinality: Option<i64>| zenkey::slice::SubjectDecl {
         path: path.into(),
-        class: class.into(),
+        class: zenkey::Declared::parse(class),
         type_name: "T".into(),
         common: None,
         since: None,
