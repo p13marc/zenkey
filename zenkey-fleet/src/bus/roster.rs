@@ -354,10 +354,12 @@ impl Node {
     /// This node's producers' `introspect`, and nothing else's.
     fn introspect_selector(&self) -> String {
         match self {
-            Node::Host(o) => {
-                zenkey::selector::rpc(zenkey::selector::Scope::origin(o), "*", &["introspect"])
-                    .to_string()
-            }
+            Node::Host(o) => zenkey::selector::rpc(
+                zenkey::selector::Scope::origin(o),
+                zenkey::selector::Producers::all(),
+                &["introspect"],
+            )
+            .to_string(),
             Node::Service(o) => zenkey::selector::service_rpc(o, &["introspect"]).to_string(),
         }
     }
