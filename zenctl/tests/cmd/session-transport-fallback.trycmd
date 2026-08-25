@@ -22,7 +22,7 @@ dropped them at the report boundary — dead fields on the wire until now.
 
 ```console
 $ zenctl topic info --format table --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
-no session (failed to open Zenoh session); answering from --registry only: ../fixture-tests/registry.
+no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
 That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
 key       v1/h-3fa9c2d41b7e/state/sysinfo/health
 verdict   registered
@@ -53,7 +53,7 @@ and this is where the corpus states it:
 
 ```console
 $ zenctl topic info --format ndjson --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
-no session (failed to open Zenoh session); answering from --registry only: ../fixture-tests/registry.
+no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
 That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
 {"class":"state","description":"sensor health document (framework; absorbs the legacy @/status running flag)","key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","note":"","origin":"h-3fa9c2d41b7e","payload_type":"HealthSnapshot","producer":"sysinfo","report":"topic-info","since":"1.0","subject":"health","ttl_s":120,"verdict":"registered"}
 

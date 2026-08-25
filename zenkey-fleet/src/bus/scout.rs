@@ -11,7 +11,7 @@
 //! warning): a scout only listens for Hellos and joins nothing.
 
 use crate::report::HelloView;
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use zenoh::config::WhatAmIMatcher;
 use zenoh::handlers::FifoChannelHandler;
 use zenoh::scouting::Hello;
@@ -69,8 +69,7 @@ pub async fn scout(
 
     let inner = zenoh::scout(what, config)
         .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
-        .context("failed to start scouting")?;
+        .map_err(|e| Error::bus("scout", "", e))?;
     Ok(ScoutStream { inner })
 }
 

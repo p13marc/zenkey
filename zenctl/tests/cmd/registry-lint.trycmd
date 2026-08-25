@@ -17,11 +17,17 @@ $ zenctl registry lint ../fixture-tests/registry
 
 ```
 
-A directory that is not a registry fails, naming what it looked for:
+A directory that is not a registry fails, naming what it looked for — and
+exits **2, not 1**: nothing was linted, so "a finding" would be a verdict on a
+question nobody could ask (#348). A registry that lints *badly* still exits 1;
+that is this command answering the question it was asked.
 
 ```console
 $ zenctl registry lint ../fixture-tests/registry/nonexistent
-? 1
-Error: registry dir "../fixture-tests/registry/nonexistent": No such file or directory (os error 2)
+? 2
+Error: registry dir "../fixture-tests/registry/nonexistent"
+
+Caused by:
+    No such file or directory (os error 2)
 
 ```

@@ -30,7 +30,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use crate::{Error, Result};
 
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
@@ -93,9 +93,12 @@ impl Condition {
         let hz = |s: &str, kind: &str| -> Result<f64> {
             let v: f64 = s
                 .parse()
-                .map_err(|_| anyhow::anyhow!("{kind}: {s:?} is not a number"))?;
+                .map_err(|_| Error::unaskable(format!("{kind} {s:?}"), "is not a number"))?;
             if !v.is_finite() || v < 0.0 {
-                bail!("{kind}: the threshold must be a finite non-negative number");
+                return Err(Error::unaskable(
+                    kind.to_string(),
+                    "the threshold must be a finite non-negative number",
+                ));
             }
             Ok(v)
         };
@@ -112,7 +115,10 @@ impl Condition {
             ["silent-for", sel, n] => {
                 let for_s = hz(n, "silent-for")?;
                 if for_s <= 0.0 {
-                    bail!("silent-for: the span must be a positive number of seconds");
+                    return Err(Error::unaskable(
+                        "silent-for",
+                        "the span must be a positive number of seconds",
+                    ));
                 }
                 Condition::SilentFor {
                     selector: sel.to_string(),
@@ -127,14 +133,17 @@ impl Condition {
             },
             ["doctor", check] => {
                 let Some(check) = CheckId::parse(check) else {
-                    bail!(
-                        "doctor: {check:?} is not a check id — the stable vocabulary is: {}",
-                        CheckId::ALL
-                            .iter()
-                            .map(|c| c.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
+                    return Err(Error::unaskable(
+                        format!("doctor {check:?}"),
+                        format!(
+                            "is not a check id — the stable vocabulary is: {}",
+                            CheckId::ALL
+                                .iter()
+                                .map(|c| c.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    ));
                 };
                 Condition::DoctorCheck { check }
             }
@@ -142,10 +151,15 @@ impl Condition {
                 origin: origin.to_string(),
             },
             ["dropped"] => Condition::Dropped,
-            _ => bail!(
-                "not a rule: {rule:?} — the vocabulary is closed (no expressions, \
-                 no templating): {VOCABULARY}"
-            ),
+            _ => {
+                return Err(Error::unaskable(
+                    format!("{rule:?}"),
+                    format!(
+                        "is not a rule — the vocabulary is closed (no \
+                         expressions, no templating): {VOCABULARY}"
+                    ),
+                ));
+            }
         })
     }
 
@@ -748,7 +762,7 @@ pub async fn run_watchdog(
                     .selector()
                     .map(|sel| {
                         zenoh::key_expr::KeyExpr::try_from(sel.to_string())
-                            .map_err(|e| anyhow::anyhow!("{sel:?} is not a key expression: {e}"))
+                            .map_err(|e| Error::unaskable_from(format!("{sel:?}"), e))
                     })
                     .transpose()?,
                 counters: TickCounters::default(),

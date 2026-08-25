@@ -26,7 +26,8 @@ pub async fn run(rules: &[String], every: f64, count: Option<u64>, args: &Bus) -
     let rules: Vec<Condition> = rules
         .iter()
         .map(|r| Condition::parse(r))
-        .collect::<Result<_>>()?;
+        .collect::<std::result::Result<_, _>>()
+        .map_err(anyhow::Error::from)?;
 
     let session = args.session().await?;
     // Slices enrich: `qos-mismatch` and `invalid-payload` judge against the

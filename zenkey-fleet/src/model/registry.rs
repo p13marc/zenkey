@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::report::SliceDisagreement;
 use crate::report::{ProducerDiff, RegistryDiff};
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use zenkey::{Declared, RegistrySlice, parse_slice};
 
 /// One slice's subject patterns, parsed once and grouped by class.
@@ -79,21 +79,16 @@ impl SliceSet {
         let mut set = SliceSet::default();
         for dir in dirs {
             let mut paths: Vec<_> = std::fs::read_dir(dir)
-                .map_err(|e| anyhow!("--registry {}: {e}", dir.display()))?
+                .map_err(|e| Error::io(dir, e))?
                 .filter_map(|e| e.ok().map(|e| e.path()))
                 .filter(|p| p.extension().is_some_and(|e| e == "toml"))
                 .filter(|p| p.file_name().is_none_or(|n| n != "types.toml"))
                 .collect();
             paths.sort();
             for path in paths {
-                let text = std::fs::read_to_string(&path)
-                    .map_err(|e| anyhow!("{}: {e}", path.display()))?;
-                let slice = parse_slice(&text).map_err(|e| {
-                    anyhow!(
-                        "{}: does not parse as a registry slice: {e}",
-                        path.display()
-                    )
-                })?;
+                let text = std::fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
+                let slice = parse_slice(&text)
+                    .map_err(|e| Error::malformed_from(path.display().to_string(), e))?;
                 set.push(slice, text);
             }
         }
@@ -196,12 +191,13 @@ impl SliceSet {
     /// Repeated invocations and dynamic shell completion read this instead
     /// of round-tripping the bus.
     pub fn write_cache(&self, dir: &Path) -> Result<()> {
-        std::fs::create_dir_all(dir)?;
+        std::fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
         for (slice, raw) in self.slices.iter().zip(&self.raw) {
             if raw.is_empty() {
                 continue; // from_slices sets: nothing faithful to persist
             }
-            std::fs::write(dir.join(format!("{}.toml", slice.name)), raw)?;
+            let path = dir.join(format!("{}.toml", slice.name));
+            std::fs::write(&path, raw).map_err(|e| Error::io(&path, e))?;
         }
         Ok(())
     }

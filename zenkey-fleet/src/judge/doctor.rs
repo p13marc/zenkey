@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use zenkey::grammar::with_base;
 use zenkey::{Declared, RegistrySlice};
 
@@ -64,11 +64,12 @@ fn rpc_key(base: &str, slice: &RegistrySlice, procedure: &str) -> Result<String>
             // The slice already validated it on parse — `Other` here means the
             // chunk is not a legal verbatim origin, which is the same finding
             // the hand-rolled `ServiceOrigin::new` used to report.
+            // A *served* slice said this, so it is the peer that is
+            // malformed — not the caller, and not the fabric.
             let o = origin.known().ok_or_else(|| {
-                anyhow!(
-                    "bad service origin in slice {}: {:?}",
-                    slice.name,
-                    origin.token()
+                Error::malformed(
+                    format!("slice {}", slice.name),
+                    format!("carries {:?} as a service origin", origin.token()),
                 )
             })?;
             with_base(base, zenkey::selector::service_rpc(o, &[procedure]))

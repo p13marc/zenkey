@@ -44,7 +44,11 @@ prost-reflect = { workspace = true, optional = true }
 zenoh = { workspace = true }
 zenoh-ext = { workspace = true }
 tokio = { workspace = true }
-anyhow = { workspace = true }
+# The crate's own error surface (#348) — a published library owes its
+# consumers a type to match on, not a sentence to grep. `anyhow` left with
+# it: an engine that classifies its own failures has nothing to erase them
+# into.
+thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The `.zrec` row dialect carries wire payloads lossless (RFC 09 §5.2) —

@@ -12,7 +12,7 @@
 //! any of these functions needs a session, a terminal or an exit code, which
 //! is the whole test for whether it belongs in the engine.
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 
 use crate::SliceSet;
 use crate::report::{
@@ -149,9 +149,13 @@ impl SliceSet {
         let Some(slice) = self.get(producer) else {
             let mut known: Vec<&str> = self.slices().iter().map(|s| s.name.as_str()).collect();
             known.sort_unstable();
-            return Err(anyhow!(
-                "no slice declares producer {producer:?}.\nknown producers: {}",
-                known.join(", ")
+            // The caller named a producer; nothing was asked of the bus.
+            return Err(Error::unaskable(
+                format!("producer {producer:?}"),
+                format!(
+                    "no slice declares it.\nknown producers: {}",
+                    known.join(", ")
+                ),
             ));
         };
         let origin = slice
@@ -190,9 +194,12 @@ impl SliceSet {
         {
             let mut known: Vec<&str> = slice.procedures.iter().map(|p| p.path.as_str()).collect();
             known.sort_unstable();
-            return Err(anyhow!(
-                "{producer} declares no procedure {want:?}.\nit declares: {}",
-                known.join(", ")
+            return Err(Error::unaskable(
+                format!("procedure {want:?}"),
+                format!(
+                    "{producer} declares no such procedure.\nit declares: {}",
+                    known.join(", ")
+                ),
             ));
         }
         Ok(ServiceInfo {
@@ -288,9 +295,12 @@ impl SliceSet {
                 .collect();
             known.sort();
             known.dedup();
-            return Err(anyhow!(
-                "no registered subject carries {type_name:?}.\nknown types: {}",
-                known.join(", ")
+            return Err(Error::unaskable(
+                format!("type {type_name:?}"),
+                format!(
+                    "no registered subject carries it.\nknown types: {}",
+                    known.join(", ")
+                ),
             ));
         }
 

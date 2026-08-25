@@ -164,9 +164,12 @@ impl Bus {
     pub(crate) async fn slices_optional(&self) -> Result<Option<zenkey_fleet::SliceSet>> {
         match self.load_slices().await {
             Ok(set) => Ok(Some(set)),
-            Err(SliceFailure::Named(e)) => Err(e),
+            Err(SliceFailure::Named(e)) => Err(crate::exit::unaskable!("{e}")),
             Err(SliceFailure::Unreachable(e)) => {
-                crate::degrade::announce(&format!("{e:#}"));
+                // The chain, not just `Display`: the engine's `Display` says
+                // *what* failed and the source says *why* (#348), so a bare
+                // format would announce "open session" and stop.
+                crate::degrade::announce(&crate::errors::render(&anyhow::Error::from(e)));
                 Ok(None)
             }
         }
@@ -295,9 +298,9 @@ enum SliceFailure {
     /// A `--registry` dir, or a `--zenoh-config` file, that the user named and
     /// that did not work. Never degraded past — a silent structural echo in
     /// place of a refusal is how a typo becomes a wrong answer.
-    Named(anyhow::Error),
+    Named(zenkey_fleet::Error),
     /// The bus did not answer. A verb slices only enrich may continue.
-    Unreachable(anyhow::Error),
+    Unreachable(zenkey_fleet::Error),
 }
 
 impl SliceFailure {
@@ -307,8 +310,13 @@ impl SliceFailure {
     /// The fork already existed; this is the one line that spends it.
     fn into_error(self) -> anyhow::Error {
         match self {
-            SliceFailure::Named(e) => crate::exit::unaskable!("{e:#}"),
-            SliceFailure::Unreachable(e) => e,
+            // Promoted, not merely forwarded: the *engine* may well have
+            // classified a missing `--registry` dir as `Io`, which is a fair
+            // reading on its own. Here the extra fact is that the user named
+            // it, and a source they named that did not work is a refused
+            // input whatever went wrong behind it.
+            SliceFailure::Named(e) => crate::exit::unaskable!("{e}"),
+            SliceFailure::Unreachable(e) => e.into(),
         }
     }
 }
@@ -323,8 +331,8 @@ impl SliceFailure {
 /// world being unavailable, and keeps its 1.
 fn open_error(f: zenkey_fleet::OpenFailure) -> anyhow::Error {
     match f {
-        zenkey_fleet::OpenFailure::Config(e) => crate::exit::unaskable!("{e:#}"),
-        other => other.into_error(),
+        zenkey_fleet::OpenFailure::Config(e) => crate::exit::unaskable!("{e}"),
+        other => other.into_error().into(),
     }
 }
 

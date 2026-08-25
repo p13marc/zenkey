@@ -31,7 +31,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Result, bail};
+use crate::{Error, Result};
 use zenkey::grammar::{self, BlobTier, ContentHash, Origin};
 use zenkey::{BlobProbePrefix, Key, RegistrySlice};
 
@@ -78,27 +78,35 @@ impl BlobTarget {
     pub fn parse(spec: &str) -> Result<BlobTarget> {
         let spec = spec.trim().trim_matches('/');
         if spec.is_empty() {
-            bail!(
-                "empty blob target: expected <id>, artifact/<id>, tree/<hex>, or store/<algo>/<hex>"
-            );
+            return Err(Error::unaskable(
+                "blob target",
+                "is empty: expected <id>, artifact/<id>, tree/<hex>, or \
+                 store/<algo>/<hex>",
+            ));
         }
         let parts: Vec<&str> = spec.split('/').collect();
         match parts.as_slice() {
             ["artifact", id] => Self::artifact(id),
-            ["tree"] => bail!(
-                "tree/ needs the tree's root hash: `tree/<hex>` (RFC 07 §2.3 — a tree is keyed by its own root, and a caller-chosen name has no spelling)"
-            ),
+            ["tree"] => Err(Error::unaskable(
+                "tree/",
+                "needs the tree's root hash: `tree/<hex>` (RFC 07 §2.3 — a tree \
+                 is keyed by its own root, and a caller-chosen name has no \
+                 spelling)",
+            )),
             ["tree", root] => Ok(BlobTarget::Tree {
                 root: content_hash(root, "tree")?,
             }),
-            ["store"] | ["store", _] => {
-                bail!("store/ needs both chunks: `store/<algo>/<hex>` (RFC 07 §2.4)")
-            }
+            ["store"] | ["store", _] => Err(Error::unaskable(
+                "store/",
+                "needs both chunks: `store/<algo>/<hex>` (RFC 07 §2.4)",
+            )),
             ["store", algo, hash] => {
                 if !grammar::is_valid_plain_chunk(algo) {
-                    bail!(
-                        "`{algo}` is not a valid algorithm chunk: RFC 03 §2 requires [a-z0-9]([a-z0-9._-]*[a-z0-9])?"
-                    );
+                    return Err(Error::unaskable(
+                        algo.to_string(),
+                        "is not a valid algorithm chunk: RFC 03 §2 requires \
+                         [a-z0-9]([a-z0-9._-]*[a-z0-9])?",
+                    ));
                 }
                 Ok(BlobTarget::Store {
                     algo: (*algo).to_string(),
@@ -106,9 +114,11 @@ impl BlobTarget {
                 })
             }
             [id] => Self::artifact(id),
-            _ => bail!(
-                "`{spec}` is not a blob target: expected <id>, artifact/<id>, tree/<hex>, or store/<algo>/<hex>"
-            ),
+            _ => Err(Error::unaskable(
+                spec.to_string(),
+                "is not a blob target: expected <id>, artifact/<id>, tree/<hex>, \
+                 or store/<algo>/<hex>",
+            )),
         }
     }
 
@@ -125,9 +135,13 @@ impl BlobTarget {
             } else {
                 ""
             };
-            bail!(
-                "`{id}` is not a valid artifact id: RFC 03 §2 requires one plain chunk matching [a-z0-9]([a-z0-9._-]*[a-z0-9])?{hint}"
-            );
+            return Err(Error::unaskable(
+                id.to_string(),
+                format!(
+                    "is not a valid artifact id: RFC 03 §2 requires one plain \
+                     chunk matching [a-z0-9]([a-z0-9._-]*[a-z0-9])?{hint}"
+                ),
+            ));
         }
         Ok(BlobTarget::Artifact { id: id.to_string() })
     }
@@ -190,8 +204,12 @@ impl BlobTarget {
 
 fn content_hash(text: &str, tier: &str) -> Result<ContentHash> {
     ContentHash::parse(text).map_err(|e| {
-        anyhow::anyhow!(
-            "`{text}` is not a content hash for `{tier}`: {e} (RFC 07 §2.3/§2.4 — the key is the digest, so it is lowercase hex of even length)"
+        Error::unaskable(
+            text.to_string(),
+            format!(
+                "is not a content hash for `{tier}`: {e} (RFC 07 §2.3/§2.4 — \
+                 the key is the digest, so it is lowercase hex of even length)"
+            ),
         )
     })
 }

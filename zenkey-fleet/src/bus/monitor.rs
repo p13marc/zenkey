@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use arc_swap::ArcSwap;
 use tokio::sync::broadcast;
 use zenoh::Session;
@@ -602,7 +602,7 @@ impl Monitor {
                 .declare_subscriber(liveliness_sel)
                 .history(true)
                 .await
-                .map_err(|e| anyhow!("liveliness subscribe {liveliness_sel}: {e}"))?;
+                .map_err(|e| Error::bus("liveliness subscribe", liveliness_sel, e))?;
             let core = Arc::clone(&core);
             tasks.push(tokio::spawn(async move {
                 while let Ok(sample) = subscriber.recv_async().await {
@@ -659,7 +659,7 @@ impl Monitor {
                 core.ingest(view, sn);
             })
             .await
-            .map_err(|e| anyhow!("subscribe {selector}: {e}"))?;
+            .map_err(|e| Error::bus("subscribe", selector, e))?;
         let id = WatchId(self.next_watch.fetch_add(1, Ordering::Relaxed));
         self.watches.lock().await.insert(
             id,
@@ -751,7 +751,7 @@ impl Monitor {
                 core.ingest(view, sn);
             })
             .await
-            .map_err(|e| anyhow!("seeded subscribe {selector}: {e}"))?;
+            .map_err(|e| Error::bus("seeded subscribe", selector, e))?;
 
         // 2) The seed GETs, AFTER — registered as this watch's seed task so
         //    `unwatch` during the seed phase aborts it.
@@ -822,9 +822,12 @@ impl Monitor {
     pub async fn unwatch(&self, id: WatchId) -> Result<()> {
         let mut entry = {
             let mut watches = self.watches.lock().await;
-            watches
-                .remove(&id)
-                .ok_or_else(|| anyhow!("unknown watch id {id:?}"))?
+            watches.remove(&id).ok_or_else(|| {
+                Error::unaskable(
+                    format!("watch id {id:?}"),
+                    "is not a watch this monitor holds",
+                )
+            })?
         };
         // A released watch must not keep ingesting seed replies: the seed
         // task dies with the watch (its boundary event simply never fires —
@@ -836,7 +839,7 @@ impl Monitor {
             .subscriber
             .undeclare()
             .await
-            .map_err(|e| anyhow!("undeclare {}: {e}", entry.selector))?;
+            .map_err(|e| Error::bus("undeclare", &entry.selector, e))?;
         let kept: Vec<String> = {
             let watches = self.watches.lock().await;
             watches.values().map(|w| w.selector.clone()).collect()
@@ -923,7 +926,11 @@ impl Monitor {
         if failed.is_empty() {
             Ok(())
         } else {
-            Err(anyhow!("undeclare {}", failed.join("; ")))
+            Err(Error::bus(
+                "undeclare",
+                failed.join("; "),
+                "one or more handles refused",
+            ))
         }
     }
 }

@@ -30,7 +30,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::Result;
 
 use crate::judge::common::FINDING_CAP;
 use crate::judge::condition;

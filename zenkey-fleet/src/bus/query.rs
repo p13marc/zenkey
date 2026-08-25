@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use zenkey::{RegistrySlice, parse_slice};
 use zenoh::Session;
 use zenoh::qos::Priority;
@@ -254,7 +254,7 @@ pub(crate) async fn disciplined_get(
     if opts.accept_any {
         builder = builder.accept_replies(zenoh::query::ReplyKeyExpr::Any);
     }
-    builder.await.map_err(|e| anyhow::anyhow!("{e}"))
+    builder.await.map_err(|e| Error::bus("get", "", e))
 }
 
 /// Call a procedure and collect **every** reply, attributed by origin.
@@ -271,7 +271,7 @@ pub(crate) async fn disciplined_get(
 pub async fn fleet_get(fleet: &Fleet<'_>, key: &str, opts: &GetOpts) -> Result<Vec<FleetAnswer>> {
     let replies = disciplined_get(fleet.session(), key, opts)
         .await
-        .with_context(|| format!("query failed: {key}"))?;
+        .map_err(|e| Error::bus("query", key.to_string(), e))?;
     let (answers, elided) = collect_answers(fleet.base(), replies, opts.max_replies).await;
     opts.note_elided(elided);
     Ok(answers)
@@ -417,8 +417,7 @@ async fn declare(
     }
     let querier = builder
         .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
-        .with_context(|| format!("declare querier failed: {key}"))?;
+        .map_err(|e| Error::bus("declare querier", key.to_string(), e))?;
     Ok(RepeatingQuery {
         querier,
         base: fleet.base().to_string(),
@@ -455,8 +454,7 @@ impl RepeatingQuery {
         }
         let replies = builder
             .await
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .with_context(|| format!("repeating query failed: {}", self.key()))?;
+            .map_err(|e| Error::bus("query", self.key(), e))?;
         let (answers, elided) = collect_answers(&self.base, replies, self.max_replies).await;
         self.note_elided(elided);
         Ok(answers)
@@ -501,8 +499,7 @@ impl RepeatingQuery {
             .querier
             .get()
             .await
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .with_context(|| format!("repeating query failed: {}", self.key()))?;
+            .map_err(|e| Error::bus("query", self.key(), e))?;
         let mut out = Vec::new();
         let mut elided = 0u64;
         while let Ok(reply) = replies.recv_async().await {
@@ -523,7 +520,7 @@ impl RepeatingQuery {
         self.querier
             .undeclare()
             .await
-            .map_err(|e| anyhow::anyhow!("undeclare querier: {e}"))
+            .map_err(|e| Error::bus("undeclare querier", "", e))
     }
 
     /// Whether any queryable currently matches **this querier** — "someone
@@ -535,7 +532,7 @@ impl RepeatingQuery {
             .matching_status()
             .await
             .map(|s| s.matching())
-            .map_err(|e| anyhow::anyhow!("matching status: {e}"))
+            .map_err(|e| Error::bus("matching status", "", e))
     }
 
     /// Event-driven matching changes for this querier — same honesty bounds
@@ -700,7 +697,7 @@ pub async fn state_snapshot(
 ) -> Result<Vec<StateSample>> {
     let replies = disciplined_get(session, selector, &GetOpts::new(timeout))
         .await
-        .with_context(|| format!("state snapshot failed: {selector}"))?;
+        .map_err(|e| Error::bus("state snapshot", selector, e))?;
     let mut out = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         if max.is_some_and(|m| out.len() >= m) {
@@ -799,12 +796,12 @@ pub async fn fetch_value(session: &Session, key: &str, spec: FetchSpec) -> Resul
             }
         })
         .await
-        .map_err(|e| anyhow::anyhow!("window subscribe {key}: {e}"))?;
+        .map_err(|e| Error::bus("window subscribe", key, e))?;
     let caught = tokio::time::timeout(spec.window, rx).await;
     subscriber
         .undeclare()
         .await
-        .map_err(|e| anyhow::anyhow!("window undeclare {key}: {e}"))?;
+        .map_err(|e| Error::bus("window undeclare", key, e))?;
     if let Ok(Ok(v)) = caught {
         return Ok(FetchOutcome::Value(v));
     }
@@ -849,7 +846,7 @@ async fn get_latest(
     // sample's OWN key — outside the `<key>/@adv/**` selector.
     let replies = disciplined_get(session, selector, &GetOpts::new(timeout).accept_any())
         .await
-        .map_err(|e| anyhow::anyhow!("get {selector}: {e}"))?;
+        .map_err(|e| Error::bus("get", selector, e))?;
     let mut candidates = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else { continue };

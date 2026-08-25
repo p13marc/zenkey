@@ -10,7 +10,7 @@
 
 use std::future::Future;
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 
 /// Undeclare every item, then report what failed — all of it, in one error
 /// naming each item by the label it was drained under.
@@ -26,13 +26,19 @@ where
     let mut failed = Vec::new();
     for (label, item) in items {
         if let Err(e) = undeclare(item).await {
-            failed.push(format!("{label}: {e}"));
+            // The whole chain: `Display` alone names the operation, and the
+            // per-handle reason is what a teardown report is for (#348).
+            failed.push(format!("{label}: {}", crate::one_line(&e)));
         }
     }
     if failed.is_empty() {
         Ok(())
     } else {
-        Err(anyhow!("undeclare {}", failed.join("; ")))
+        Err(Error::bus(
+            "undeclare",
+            failed.join("; "),
+            "one or more handles refused",
+        ))
     }
 }
 
@@ -55,7 +61,7 @@ mod tests {
             ],
             |outcome: std::result::Result<(), &str>| {
                 visited.fetch_add(1, Ordering::Relaxed);
-                async move { outcome.map_err(|e| anyhow!("{e}")) }
+                async move { outcome.map_err(|e| Error::bus("undeclare", "handle", e)) }
             },
         )
         .await
@@ -63,8 +69,13 @@ mod tests {
         .to_string();
 
         assert_eq!(visited.load(Ordering::Relaxed), 4, "every item was drained");
-        assert!(err.contains("second: busy"), "{err}");
-        assert!(err.contains("fourth: gone"), "{err}");
+        // Each failure is named *and* carries its reason. The exact join is
+        // not the property; both halves being present is (#348 moved the
+        // reason from `Display` into `source`, so this reads the chain).
+        for (label, reason) in [("second", "busy"), ("fourth", "gone")] {
+            assert!(err.contains(label), "{label} missing from: {err}");
+            assert!(err.contains(reason), "{reason} missing from: {err}");
+        }
     }
 
     /// A clean teardown says nothing.

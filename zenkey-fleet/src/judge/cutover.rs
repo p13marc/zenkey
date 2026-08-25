@@ -21,7 +21,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::{Error, Result};
 
 use crate::judge::common::{FINDING_CAP, new_prefix};
 use crate::model::examples::Examples;
@@ -47,7 +47,7 @@ pub async fn run_cutover(
     window: Duration,
 ) -> Result<CutoverReport> {
     let old_expr = zenoh::key_expr::KeyExpr::try_from(old_root.to_string())
-        .map_err(|e| anyhow::anyhow!("--old-root {old_root:?} is not a key expression: {e}"))?;
+        .map_err(|e| Error::unaskable_from(format!("--old-root {old_root:?}"), e))?;
     let new_prefix = new_prefix(fleet.base());
 
     let monitor = crate::Monitor::start(fleet.session(), crate::MonitorSpec::default()).await?;

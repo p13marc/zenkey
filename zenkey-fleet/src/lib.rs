@@ -73,6 +73,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod bus;
+pub mod error;
 pub mod judge;
 pub mod model;
 pub mod report;
@@ -191,6 +192,7 @@ pub use judge::retired::EntryEvidence;
 // The remaining items a frontend actually calls. Every one of these was
 // reachable only by module path (#350) — which said nothing about whether it
 // was ours to use.
+pub use error::{BoxedCause, Error, Result, one_line};
 pub use judge::field::DEFAULT_MAX_PATHS;
 pub use judge::why::is_cause;
 // The two scope notes keep their own names rather than one: they are two

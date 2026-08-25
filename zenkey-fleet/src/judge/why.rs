@@ -74,7 +74,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::Result;
 use zenoh::Session;
 use zenoh::key_expr::keyexpr;
 

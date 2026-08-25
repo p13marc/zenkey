@@ -102,11 +102,22 @@ pub(crate) use unaskable;
 ///
 /// Called from `main`, once, so the choice is made in exactly one place.
 pub fn code_for(err: &anyhow::Error) -> i32 {
-    if err.chain().any(|c| c.is::<Unaskable>()) {
-        NO_VERDICT
-    } else {
-        FINDING
-    }
+    let unaskable = err.chain().any(|c| {
+        // This tool's own refusals…
+        c.is::<Unaskable>()
+            // …and the engine's, which it now states in its own type
+            // (#348). Before that, an engine failure carried no marker at
+            // all, so *every* one of them landed on FINDING — which is how
+            // `zenctl registry lint /nonexistent` came to exit 1, telling CI
+            // that a registry had lint findings when the directory was not
+            // there. The engine always knew which of its failures were
+            // refusals of the caller's input; it had nowhere to say so.
+            || c.downcast_ref::<zenkey_fleet::Error>()
+                .is_some_and(zenkey_fleet::Error::is_unaskable)
+            || c.downcast_ref::<zenkey_build::Error>()
+                .is_some_and(zenkey_build::Error::is_unaskable)
+    });
+    if unaskable { NO_VERDICT } else { FINDING }
 }
 
 /// The verdict verbs' pre-run guard (seam 2 of the module doc).
@@ -117,10 +128,14 @@ pub fn code_for(err: &anyhow::Error) -> i32 {
 /// *before* the verdict in this instead: the error is rendered in the one
 /// shape and the process takes the reserved 2. Listings and acts keep their 1;
 /// their exit codes carry no verdict to protect.
-pub fn asked<T>(verb: &str, result: anyhow::Result<T>) -> T {
+pub fn asked<T, E>(verb: &str, result: std::result::Result<T, E>) -> T
+where
+    E: Into<anyhow::Error>,
+{
     match result {
         Ok(v) => v,
         Err(e) => {
+            let e: anyhow::Error = e.into();
             eprintln!("{}", crate::errors::render(&e));
             eprintln!(
                 "{verb}: the question could not be asked — exit 2, the reserved \

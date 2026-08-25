@@ -23,7 +23,7 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::Result;
 use zenkey::slice::{DeprecationDecl, RegistrySlice};
 
 use crate::judge::common::new_prefix;

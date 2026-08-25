@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow, bail};
+use crate::{Error, Result};
 use zenkey::qos::QosProfile;
 use zenoh::Session;
 use zenoh::sample::SampleKind;
@@ -116,8 +116,14 @@ impl<W: Write> ZrecWriter<W> {
     /// really had, so the file is indistinguishable from one recorded
     /// deliberately at that moment.
     pub fn new_at(mut out: W, header: &ZrecHeader, epoch: Instant) -> Result<Self> {
-        serde_json::to_writer(&mut out, header).context("write .zrec header")?;
-        out.write_all(b"\n").context("write .zrec header")?;
+        serde_json::to_writer(&mut out, header).map_err(|e| Error::Io {
+            path: std::path::PathBuf::new(),
+            source: e.into(),
+        })?;
+        out.write_all(b"\n").map_err(|e| Error::Io {
+            path: std::path::PathBuf::new(),
+            source: e,
+        })?;
         Ok(ZrecWriter {
             out,
             epoch,
@@ -165,19 +171,30 @@ impl<W: Write> ZrecWriter<W> {
         }
         self.out
             .write_all(row.to_line().as_bytes())
-            .context("write .zrec row")?;
-        self.out.write_all(b"\n").context("write .zrec row")?;
+            .map_err(|e| Error::Io {
+                path: std::path::PathBuf::new(),
+                source: e,
+            })?;
+        self.out.write_all(b"\n").map_err(|e| Error::Io {
+            path: std::path::PathBuf::new(),
+            source: e,
+        })?;
         self.samples += 1;
         Ok(())
     }
 
     /// Write a drop record where the gap happened (O6 on a file).
     pub fn write_dropped(&mut self, n: u64) -> Result<()> {
-        serde_json::to_writer(&mut self.out, &serde_json::json!({ "dropped": n }))
-            .context("write .zrec drop record")?;
-        self.out
-            .write_all(b"\n")
-            .context("write .zrec drop record")?;
+        serde_json::to_writer(&mut self.out, &serde_json::json!({ "dropped": n })).map_err(
+            |e| Error::Io {
+                path: std::path::PathBuf::new(),
+                source: e.into(),
+            },
+        )?;
+        self.out.write_all(b"\n").map_err(|e| Error::Io {
+            path: std::path::PathBuf::new(),
+            source: e,
+        })?;
         self.dropped += n;
         Ok(())
     }
@@ -189,7 +206,10 @@ impl<W: Write> ZrecWriter<W> {
 
     /// Flush and hand the sink back.
     pub fn finish(mut self) -> Result<W> {
-        self.out.flush().context("flush .zrec")?;
+        self.out.flush().map_err(|e| Error::Io {
+            path: std::path::PathBuf::new(),
+            source: e,
+        })?;
         Ok(self.out)
     }
 }
@@ -292,8 +312,15 @@ impl ZrecSink {
         });
         match opened.await {
             Ok(None) => Ok(ZrecSink { tx, state, writer }),
-            Ok(Some(reason)) => Err(anyhow!(reason)),
-            Err(_) => Err(anyhow!("the .zrec writer stopped before it opened")),
+            // The writer names the file in its own message; this is the
+            // open failing, which is I/O against a path the caller gave.
+            Ok(Some(reason)) => Err(Error::Io {
+                path: std::path::PathBuf::new(),
+                source: std::io::Error::other(reason),
+            }),
+            Err(_) => Err(Error::Internal(
+                "the .zrec writer stopped before it opened".into(),
+            )),
         }
     }
 
@@ -323,8 +350,8 @@ impl ZrecSink {
             .lock()
             .expect("sink failure lock")
             .clone();
-        Err(anyhow!(
-            failure.unwrap_or_else(|| "the .zrec writer stopped".to_string())
+        Err(Error::Internal(
+            failure.unwrap_or_else(|| "the .zrec writer stopped".to_string()),
         ))
     }
 
@@ -351,7 +378,9 @@ impl ZrecSink {
         let ZrecSink { tx, state, writer } = self;
         drop(tx);
         drop(state);
-        writer.await.context("the .zrec writer panicked")?
+        writer
+            .await
+            .map_err(|e| Error::Internal(format!("the .zrec writer panicked: {e}")))?
     }
 }
 
@@ -455,16 +484,21 @@ impl<R: BufRead> ZrecReader<R> {
         let mut lines = source.lines();
         let first = lines
             .next()
-            .ok_or_else(|| anyhow!("empty file — not a .zrec (no header line)"))?
-            .context("read .zrec header")?;
+            .ok_or_else(|| Error::malformed(".zrec", "empty file — no header line"))?
+            .map_err(|e| Error::Io {
+                path: std::path::PathBuf::new(),
+                source: e,
+            })?;
         let header: ZrecHeader = serde_json::from_str(&first)
-            .map_err(|e| anyhow!("line 1 is not a .zrec header: {e}"))?;
+            .map_err(|e| Error::malformed_with(".zrec line 1", "is not a header", e))?;
         if header.zrec != ZREC_VERSION {
-            bail!(
-                "unsupported .zrec version {} (this reader speaks {})",
-                header.zrec,
-                ZREC_VERSION
-            );
+            return Err(Error::malformed(
+                ".zrec",
+                format!(
+                    "unsupported version {} (this reader speaks {ZREC_VERSION})",
+                    header.zrec
+                ),
+            ));
         }
         Ok(ZrecReader {
             header,
@@ -566,7 +600,9 @@ impl ZrecSource {
                 header: header?,
                 rx,
             }),
-            Err(_) => Err(anyhow!("the .zrec reader stopped before it opened")),
+            Err(_) => Err(Error::Internal(
+                "the .zrec reader stopped before it opened".into(),
+            )),
         }
     }
 
@@ -727,7 +763,10 @@ pub async fn replay(
         default_qos,
     } = spec;
     if !(speed.is_finite() && speed > 0.0) {
-        bail!("--speed must be a positive number (got {speed})");
+        return Err(Error::unaskable(
+            "--speed",
+            format!("must be a positive number (got {speed})"),
+        ));
     }
     let base = reader.header().base.clone();
     let mut report = ReplayReport {
@@ -756,7 +795,7 @@ pub async fn replay(
     // The one fatal error a row can raise, held rather than thrown: the
     // publishers are undeclared first, and only then does it go back to the
     // caller (#327).
-    let mut fatal: Option<anyhow::Error> = None;
+    let mut fatal: Option<Error> = None;
     while let Some(item) = reader.next().await {
         let (row, t_us) = match item {
             Ok(ZrecItem::Sample { row, t_us, .. }) => (row, t_us),

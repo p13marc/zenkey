@@ -15,7 +15,7 @@ and without retry.
 ```console
 $ zenctl check cutover --old-root 'old/**' --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
-Error: failed to open Zenoh session
+Error: failed to open the Zenoh session
 
 Caused by:
     Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
@@ -29,7 +29,7 @@ and its session open honours it too — not just the observation window.
 ```console
 $ zenctl check expect 'v1/**' --for 1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
-Error: failed to open Zenoh session
+Error: failed to open the Zenoh session
 
 Caused by:
     Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
@@ -68,7 +68,7 @@ not a claim about the payload.
 ```console
 $ zenctl check schema --type Health --from '{}' --producer sysinfo --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
-not checked: no session, so sysinfo's served describe is out of reach: failed to open Zenoh session: Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+not checked: no session, so sysinfo's served describe is out of reach: failed to open the Zenoh session: Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
 
 ```
 

@@ -19,7 +19,7 @@
 //! - a refusal happens **before** the bus, and the caller can opt out of the
 //!   refusal ([`PrepareMode`]) without opting out of the labelling.
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use zenkey::schema::{SchemaKind, TypeSchema, WireEncoding};
 use zenoh::Session;
 
@@ -186,8 +186,13 @@ pub async fn prepare_request(
             });
         }
         Err(e) => {
-            return Err(anyhow!(
-                "body is not JSON but {producer} declares schema-validated type {type_name} — {e}"
+            // The caller handed us this body.
+            return Err(Error::unaskable(
+                "body",
+                format!(
+                    "is not JSON but {producer} declares schema-validated type \
+                     {type_name} — {e}"
+                ),
             ));
         }
     };
@@ -215,7 +220,10 @@ pub async fn prepare_request(
                 "body rejected by {type_name}'s served schema ({e}) — sent as typed anyway"
             )),
         }),
-        Err(e) => Err(anyhow!("body rejected by {type_name}'s served schema: {e}")),
+        Err(e) => Err(Error::unaskable(
+            "body",
+            format!("rejected by {type_name}'s served schema: {e}"),
+        )),
     }
 }
 

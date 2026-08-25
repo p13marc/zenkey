@@ -77,7 +77,7 @@ pub enum Error {
     /// `#[source]` on the inner error, so a caller can reach the
     /// `io::ErrorKind` and tell "no registry dir" from "unreadable registry
     /// dir" — the two the flattened form rendered identically (#317).
-    #[error("registry dir {0:?}: {1}")]
+    #[error("registry dir {0:?}")]
     Io(PathBuf, #[source] std::io::Error),
     #[error(
         "OUT_DIR is not set and no out_file was given — call from a build script or set .out_file(..)"
@@ -119,6 +119,23 @@ pub enum LintKind {
     /// an illegal field. **Never** forceable: forcing past one of these would
     /// write a lock for a registry that does not lint.
     Invalid,
+}
+
+impl Error {
+    /// Whether this failure means the question could not be *put* — the
+    /// caller's input was refused before any check ran.
+    ///
+    /// A **lint failure is not** one of these: finding a lint violation is
+    /// this crate answering the question it was asked, and `zenctl registry
+    /// lint` exits 1 for it by design. A registry directory that does not
+    /// exist is the opposite — nothing was linted, and reporting a finding
+    /// would be a verdict on a question nobody could ask (#348).
+    pub fn is_unaskable(&self) -> bool {
+        match self {
+            Error::Io(..) | Error::NoOutDir => true,
+            Error::Lint { .. } => false,
+        }
+    }
 }
 
 impl LintKind {

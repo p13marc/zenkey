@@ -87,6 +87,11 @@ pub enum KeyError {
     MalformedBlobKey(&'static str, &'static str),
     #[error("not a v1 key: {0}")]
     Parse(String),
+    /// A class chunk outside RFC 04 §1's three. Its own variant rather than
+    /// a [`Parse`](KeyError::Parse): "not a v1 key" is the wrong sentence
+    /// for `--class alerts`, which is not a key at all.
+    #[error("unknown class {chunk:?} — the classes are {} (RFC 04 §1)", Class::chunks().join(", "))]
+    UnknownClass { chunk: String },
 }
 
 // Chunk lexical rules (RFC 03 §2, §1.3). The registry linter (`zenkey-build`)
@@ -354,11 +359,8 @@ impl std::str::FromStr for Class {
     /// human names one. The error lists the vocabulary, so a caller does not
     /// have to (#351).
     fn from_str(s: &str) -> Result<Self, KeyError> {
-        Class::from_chunk(s).ok_or_else(|| {
-            KeyError::Parse(format!(
-                "unknown class {s:?} — the classes are {} (RFC 04 §1)",
-                Class::chunks().join(", ")
-            ))
+        Class::from_chunk(s).ok_or_else(|| KeyError::UnknownClass {
+            chunk: s.to_string(),
         })
     }
 }

@@ -39,7 +39,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::Result;
 use serde_json::Value;
 use zenoh::Session;
 
