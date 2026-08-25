@@ -454,10 +454,52 @@ pub struct MediaDecl {
 #[non_exhaustive]
 pub struct DeprecationDecl {
     pub path: String,
+    /// Which declared surface was retired (RFC 08 §3, v1.26).
+    ///
+    /// Absent in the TOML means [`DeprecatedKind::Subject`], which is what
+    /// every entry written before the amendment was — and `to_toml` omits
+    /// the field for that value, so a pre-v1.26 slice round-trips byte for
+    /// byte.
+    pub kind: DeprecatedKind,
     /// Registry version the retirement was recorded in.
     pub since: Option<String>,
     /// What replaced it, if anything.
     pub replaced_by: Option<String>,
+}
+
+/// Which declared surface a `[[deprecated]]` entry retires (RFC 08 §3, v1.26).
+///
+/// Retirement covered subjects only, which left a removed procedure with no
+/// sanctioned exit at all: the `registry.lock` pin failed as *vanished
+/// without retirement*, and the ledger entry meant to be the exit was never
+/// consulted for it (#377).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DeprecatedKind {
+    #[default]
+    Subject,
+    Procedure,
+}
+
+impl DeprecatedKind {
+    /// The token the registry TOML and both ledgers spell it with.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeprecatedKind::Subject => "subject",
+            DeprecatedKind::Procedure => "procedure",
+        }
+    }
+}
+
+impl std::str::FromStr for DeprecatedKind {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<DeprecatedKind, ()> {
+        match s {
+            "subject" => Ok(DeprecatedKind::Subject),
+            "procedure" => Ok(DeprecatedKind::Procedure),
+            _ => Err(()),
+        }
+    }
 }
 
 /// What one build says it serves: the payload of an `introspect` reply.
@@ -569,11 +611,19 @@ impl MediaDecl {
 }
 
 impl DeprecationDecl {
-    /// A retirement-ledger entry with its one required column.
+    /// A retirement-ledger entry with its one required column, retiring a
+    /// subject. [`DeprecationDecl::of`] retires a procedure.
     #[must_use]
     pub fn new(path: impl Into<String>) -> Self {
+        DeprecationDecl::of(DeprecatedKind::Subject, path)
+    }
+
+    /// The same, naming which surface is retired (RFC 08 §3, v1.26).
+    #[must_use]
+    pub fn of(kind: DeprecatedKind, path: impl Into<String>) -> Self {
         DeprecationDecl {
             path: path.into(),
+            kind,
             since: None,
             replaced_by: None,
         }
@@ -813,8 +863,19 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
 
     let mut deprecated = Vec::new();
     for e in array("deprecated") {
+        let path = s(e.get("path")).ok_or_else(|| err("[[deprecated]] missing path"))?;
+        let kind = match s(e.get("kind")) {
+            None => DeprecatedKind::Subject,
+            Some(k) => k.parse().map_err(|()| {
+                err(&format!(
+                    "[[deprecated]] {path:?} has kind = {k:?} — it is `subject` \
+                     (the default) or `procedure`"
+                ))
+            })?,
+        };
         deprecated.push(DeprecationDecl {
-            path: s(e.get("path")).ok_or_else(|| err("[[deprecated]] missing path"))?,
+            path,
+            kind,
             since: s(e.get("since")),
             replaced_by: s(e.get("replaced_by")),
         });
@@ -975,6 +1036,11 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
     for d in &slice.deprecated {
         out.push_str("\n[[deprecated]]\n");
         out.push_str(&format!("path = {}\n", s(&d.path)));
+        // Omitted for the default, so a pre-v1.26 slice round-trips byte for
+        // byte through this exporter.
+        if d.kind != DeprecatedKind::Subject {
+            out.push_str(&format!("kind = {}\n", s(d.kind.as_str())));
+        }
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "replaced_by", d.replaced_by.as_deref());
     }
@@ -1131,7 +1197,11 @@ pub fn diff(served: &RegistrySlice, local: &RegistrySlice) -> Vec<SliceFinding> 
     // A host that still serves what its own ledger retired. Quiet until the
     // first deprecation lands, and exactly the question that needs SSH today.
     for d in &served.deprecated {
-        if served.serves_subject(&d.path) || served.serves_procedure(&d.path) {
+        let still_served = match d.kind {
+            DeprecatedKind::Subject => served.serves_subject(&d.path),
+            DeprecatedKind::Procedure => served.serves_procedure(&d.path),
+        };
+        if still_served {
             out.push(SliceFinding::ServesDeprecated {
                 path: d.path.clone(),
                 replaced_by: d.replaced_by.clone(),
@@ -1218,12 +1288,67 @@ mod tests {
             path = "flows/legacy"
             since = "2.0"
             replaced_by = "flows/{proto}/count"
+            [[deprecated]]
+            kind = "procedure"
+            path = "flows/reset"
+            since = "2.0"
             "#;
         let parsed = parse_slice(source).unwrap();
         let emitted = to_toml(&parsed);
         let back = parse_slice(&emitted)
             .unwrap_or_else(|e| panic!("exported TOML must re-parse: {e}\n---\n{emitted}"));
         assert_eq!(back, parsed, "exported TOML:\n{emitted}");
+    }
+
+    /// Retirement names its kind (RFC 08 §3, v1.26), and the default is the
+    /// only thing a pre-amendment slice could have meant.
+    #[test]
+    fn a_deprecation_without_a_kind_is_a_subject_and_stays_unwritten() {
+        let source = r#"
+            [registry]
+            version = "1.0"
+            app = "t"
+            convention = 1
+            [producer]
+            name = "p"
+            [[deprecated]]
+            path = "old"
+            [[deprecated]]
+            kind = "procedure"
+            path = "reset"
+            "#;
+        let parsed = parse_slice(source).unwrap();
+        assert_eq!(parsed.deprecated[0].kind, DeprecatedKind::Subject);
+        assert_eq!(parsed.deprecated[1].kind, DeprecatedKind::Procedure);
+        let emitted = to_toml(&parsed);
+        // The subject entry gains no field it did not have; the procedure
+        // entry says which it is.
+        assert!(
+            emitted.contains("[[deprecated]]\npath = \"old\"\n"),
+            "{emitted}"
+        );
+        assert!(
+            emitted.contains("path = \"reset\"\nkind = \"procedure\"\n"),
+            "{emitted}"
+        );
+    }
+
+    /// An unknown `kind` is a refusal, not a silent subject.
+    #[test]
+    fn a_deprecation_with_an_unknown_kind_is_refused() {
+        let source = r#"
+            [registry]
+            version = "1.0"
+            app = "t"
+            convention = 1
+            [producer]
+            name = "p"
+            [[deprecated]]
+            kind = "media"
+            path = "old"
+            "#;
+        let e = parse_slice(source).expect_err("kind is a closed vocabulary");
+        assert!(e.to_string().contains("`procedure`"), "{e}");
     }
 
     /// A service slice keeps its `[service] origin` through the round trip —

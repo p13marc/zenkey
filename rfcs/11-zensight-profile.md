@@ -1,6 +1,6 @@
 # 11 — Reference Application Profile: ZenSight
 
-**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25 and v1.26 — see [CHANGELOG.md](CHANGELOG.md)*
 
 > **Registry location note (2026-07).** The registry *data* this profile
 > describes (`registry/*.toml` for the ten producers and `@catalog`, plus
@@ -252,8 +252,46 @@ adopters. Each row instantiates the neutral pattern of
 | netlink `@/commands/expectations` | `@rpc/netlink/expectations/set` + read at `@rpc/netlink/expectations` |
 | netring `@/commands/capture_disk` (`capture_now`) | `@rpc/netring/capture/trigger` (write) + `state/netring/capture` (mode/occupancy) + `events/netring/capture/<ulid>` |
 | systemd `@/commands/action` (gated) | `@rpc/systemd/action` (write; gate unchanged, plus per-key ACL) |
-| parallax `@/commands/stream` (`OpenStream`…) | `@rpc/parallax/stream/open`, `…/stream/close`, `…/stream/keyframe` (writes) |
+| parallax `@/commands/stream` (`OpenStream`…) | `@rpc/parallax/stream/set` (write, `Command<StreamControl>` → `Ack`: `OpenStream`, `CloseStream`, `RequestKeyframe`), plus `@rpc/parallax/stream/report` for receiver feedback ([07 §1.1](07-bulk-planes.md)) |
 | parallax `@/query/streams`, `@/status/streams` | `state/parallax/stream/<stream>` (catalogue + status as LWW docs; a closed stream keeps its doc with `open: false` — tombstone on *removal from config*, not on close, or the UI loses the "openable streams" catalogue) |
+
+*Corrected in v1.26.* The stream row named three write procedures —
+`stream/open`, `stream/close`, `stream/keyframe` — that nothing has ever
+served; the profile ships one, `stream/set`, carrying a tagged union. See
+[07 §1.1](07-bulk-planes.md), where the convention-level shape is now
+stated and the reasoning recorded.
+
+### 5.1 The `streams` procedure is profile-local (v1.26)
+
+`parallax.toml` registers, and the reference sensor serves, a read
+procedure `@rpc/parallax/streams` replying with the whole stream catalogue
+in one round trip. The v1.22 changelog called it "phantom" on the grounds
+that 07 §1 advertised tiers via a procedure the convention never defined;
+that correction was right about the *convention* and wrong about the
+*deployment*, because the procedure is live and consumers call it.
+
+It is settled here rather than in a normative chapter, and it stays:
+
+- **The normative catalogue is the per-stream `state` documents.** A
+  consumer that follows the convention and nothing else subscribes or GETs
+  `state/parallax/stream/*` and is complete — the seed rules of
+  [05 §4](05-control-rpc.md) make that its own late-joiner path. Nothing
+  about tier discovery depends on this procedure.
+- **`streams` is a profile-local convenience over that same data**: one
+  round trip for N streams instead of a subscription that stays live. It is
+  legitimate exactly as [08 §6.1](08-registry.md) requires — registered and
+  served, never registered-and-absent — and it is named here so that
+  another adopter neither inherits it nor collides with the name.
+- **It is not promoted to the convention.** A catalogue-in-one-call
+  procedure is a shape any producer of a many-instance `state` family
+  might want; blessing this one would bless a general mechanism on the
+  strength of a single profile's convenience. If that mechanism is wanted,
+  it is its own amendment to [05 §5](05-control-rpc.md), not a parallax
+  entry read as precedent.
+- **It is not removed.** Removal would be a retirement
+  ([08 §3](08-registry.md)) that costs the reference sensor and its viewers
+  a working path to buy a contradiction that this subsection resolves for
+  free.
 
 The generic first row covers, by name, every shipped config-style topic not
 listed individually: logs `filter` → `@rpc/logs/filter/set` + read at

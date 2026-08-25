@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.7, v1.8, v1.11, v1.16, v1.17 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.7, v1.8, v1.11, v1.16, v1.17, v1.25 and v1.26 — see [CHANGELOG.md](CHANGELOG.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -55,9 +55,10 @@ Rules:
   any sample whose attachment says keyframe (parameter sets inline or
   prepended). Note the matching listener signals only the
   no-viewers ↔ some-viewers *edge*: an Nth viewer joining beside a current
-  one produces no event and obtains its immediate keyframe via
-  `@rpc/<producer>/stream/keyframe`
-  ([05-control-rpc.md §3](05-control-rpc.md)) instead of waiting out a GOP.
+  one produces no event and obtains its immediate keyframe by calling the
+  producer's **stream-control procedure** with a keyframe request
+  (§1.1, [05-control-rpc.md §3](05-control-rpc.md)) instead of waiting out
+  a GOP.
 - **Viewer selectors are exact, on both media shapes.** A preview subscribes
   to its exact `…/preview/<format>` key; a video viewer subscribes to the
   exact `…/<stream>/video/<codec>/<tier>` key of the one tier it chose. There
@@ -79,10 +80,145 @@ Rules:
   ([06-identity.md §6](06-identity.md)), and MUST resolve it rather than
   paper over it with a wildcard.
 - **Stream control is `@rpc`**, stream status/catalogue is `state`
-  ([05-control-rpc.md §3](05-control-rpc.md)); stream *stats*
+  (§1.1, [05-control-rpc.md §3](05-control-rpc.md)); stream *stats*
   (fps/kbps/drops/viewers) are ordinary `telemetry` under
   `telemetry/<producer>/<stream>/stats/…` — charts light up for free.
   `@media` carries pixels and nothing else.
+
+### 1.1 The control surface: two procedures, and what a viewer may ask for (v1.26)
+
+*Added in v1.26. §1 named `@rpc/<producer>/stream/open`, `…/stream/close`
+and `…/stream/keyframe`, and [11 §5](11-zensight-profile.md) mapped the
+incumbent channel onto the same three — three keys nothing has ever served.
+What ships, in the reference sensor and in its registry, is **one**
+procedure carrying a tagged union. The shipped shape is also the better one:
+three procedures would mean three registry entries, three ACL prefixes and
+three idempotency notes for one refcounted lifecycle, while the tagged
+request already carries the discriminator.*
+
+A producer of `@media` offers exactly two procedures
+([05-control-rpc.md §3](05-control-rpc.md)):
+
+| Key | Kind | Request | Reply |
+|---|---|---|---|
+| `@rpc/<producer>/stream/set` | write | a tagged stream-control command (reference: `Command<StreamControl>` — `OpenStream`, `CloseStream`, `RequestKeyframe`) | `Ack` |
+| `@rpc/<producer>/stream/report` | write | `MediaReceiverReport` | `Ack` |
+
+**`stream/set`** is the lifecycle and the keyframe request. It is one key
+because it is one refcounted lifecycle: opening is a claim on a stream that
+closing releases, and a keyframe request is a nudge inside that claim.
+
+**`stream/report`** is receiver feedback, and it exists because a consumer
+that measures its own health has nowhere else to put the measurement.
+[04-planes.md §2 R6](04-planes.md) is unambiguous — an instruction or a
+question goes to `@rpc`, and the data planes are strictly producer→consumer
+— and §1 above closes the other door: `@media` carries pixels and nothing
+else. A report travels consumer→producer, which is a direction the data
+classes do not have.
+
+Why `@rpc` is the right home rather than a new plane or a per-consumer key:
+
+- **Zero keyspace cost.** No new keys, no cardinality budget, no
+  tombstones. N viewers of one stream are N callers of one key, told apart
+  by a consumer id **in the payload** — never in the key
+  ([03-grammar.md §2](03-grammar.md): per-consumer data never touches keys).
+- **Reliability comes free.** `@rpc` is reliable, and feedback that was
+  itself lossy under the conditions it reports would be worse than none.
+- **It composes with the ACL story.** `…/@rpc/<producer>/stream/report` is
+  a literal prefix an ACL can allow separately from `stream/set`: a viewer
+  may report without being allowed to open or close streams.
+- **Silence is already specified.** [05-control-rpc.md §3.1](05-control-rpc.md)
+  says exactly what an empty reply set does and does not mean, so a viewer
+  needs no new vocabulary for a producer that has gone away.
+
+A report is a **snapshot**, so the procedure is `idempotent = true`: a
+re-send is harmless. Its rate belongs in the registry entry rather than in
+prose — the registry is where a review can refuse a budget
+([04-planes.md §2](04-planes.md)) — and a consumer MUST NOT report per
+frame; the reference cadence is one report per stream per few seconds.
+
+### 1.2 Adaptation is receiver-driven (v1.26, normative)
+
+*Added in v1.26. §1's tier design already says this — "the subscription
+**is** the quality choice", and two operators on different links must not
+fight over one encoder's settings — but it never stated the consequence,
+and the consequence is the thing an implementer gets wrong once §1.1's
+feedback exists.*
+
+- **A consumer adapts by changing which tier key it subscribes to.** That
+  is the sanctioned mechanism, and it is per-consumer by construction.
+- **A producer MUST NOT re-tune a shared tier in response to one
+  consumer's feedback.** Tier parameters are the producer's declared offer,
+  advertised in the stream catalogue
+  ([05-control-rpc.md §5](05-control-rpc.md)); a viewer chooses among them,
+  it does not negotiate them. Two viewers share a tier; one is on a
+  degraded link and reports loss; dropping that tier's bitrate degrades the
+  healthy viewer's picture for a reason it cannot see, caused by a peer it
+  does not know exists. That is exactly the fight §1 was written to end.
+- **Feedback informs the producer; it does not command it.** Reports are
+  for observability, alerting, capacity planning and operator decisions.
+  Where a producer does act on *aggregate* feedback it MUST state its
+  arbitration rule — whose report wins when N viewers share a tier — and
+  that rule MUST NOT be "the most recent report".
+- **The escape hatch, named.** A genuinely per-consumer encoder is a **tier
+  of its own**. A deployment that needs one viewer's private rate opens a
+  tier; it does not mutate a shared one.
+
+### 1.3 The frame-age clock (v1.26)
+
+*Added in v1.26. Every consumer-side behaviour this plane is growing — a
+frame-age deadline, §1.1's receiver report, a quality controller — rests on
+one question §1 did not answer: against which clock is a frame late?*
+
+`FrameMeta`'s `pts_ns`/`dts_ns`/`duration_ns` are **pipeline-clock** values:
+an arbitrary monotonic origin, meaningful only within one producer's
+pipeline and **not comparable across hosts**. That is deliberate and does
+not change — widening the metadata to carry a wallclock would make every
+producer's schema carry a field only a cross-host consumer wants.
+
+The clock a consumer may use is the one already on every sample: **the
+publisher's HLC timestamp**, stamped by the middleware when the session
+enables timestamping and surfaced as the sample's timestamp in every
+binding. A deployment that wants frame age therefore enables timestamping
+on producer sessions; where it does not, frame age is **not asked**, never
+zero ([09-operations.md §5.1 O4](09-operations.md)).
+
+Frame age is `arrival − sample timestamp`, and it MUST be reported the way
+every other cross-host subtraction in this convention is: as **observed
+skewed latency** — an observation, never a verdict on the transport.
+Negative values are shown, not clamped; a negative age *is* the clock-skew
+evidence, and clamping it to zero destroys the only signal that says the
+number cannot be trusted.
+
+### 1.4 Browser consumers (v1.26, informative)
+
+*Added in v1.26. The full §1 consumer story — catalogue from `state`,
+control via `@rpc`, pixels from an exact tier key — is reachable from a
+browser tab today, with no gateway and no transcoding: the middleware's
+TypeScript binding gives a page `get`, subscribers, publishers, liveliness
+and the sample attachment, and WebCodecs decodes what arrives. Two of the
+things such a consumer needs are consequences of the rules above that the
+rules do not state.*
+
+**Parameter sets inline or prepended is what makes the plane
+browser-consumable at all.** The keyframe promise above already requires
+it. What is worth stating is why it is load-bearing off-Rust: WebCodecs
+assumes Annex-B framing precisely when no out-of-band `description` is
+supplied, and a consumer with no out-of-band parameter sets has nothing to
+put in a `description` anyway. A publisher that quietly relied on
+out-of-band SPS/PPS would look conformant and be undecodable in a browser.
+
+**The codec string is derived from the bitstream, not from the wire.**
+WebCodecs wants a fully specified codec (`avc1.<6 hex>`); nothing on the
+wire carries it, because `FrameMeta` deliberately does not and the
+`Encoding` is only the container/codec family (`video/h264`). The consumer
+reads it from the first keyframe's SPS — which it can only do *because* of
+the inline-parameter-set promise. This is a consequence, not a new
+requirement: no producer field is added.
+
+**MTU slicing buys nothing here.** Losing one best-effort fragment loses
+the whole sample, so slicing a frame trades one drop for several chances of
+one — on the plane that already declares a stale frame worthless.
 
 ## 2. `@blob` — bulk and content-addressed transfer
 
