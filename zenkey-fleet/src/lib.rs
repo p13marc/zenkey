@@ -118,7 +118,9 @@ pub use judge::doctor::{DoctorSpec, run_doctor};
 pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use judge::field::{DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, run_field};
+pub use judge::field::{
+    DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, KeyFields, PathStats, run_field,
+};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{
@@ -179,9 +181,11 @@ pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
 // path to name them (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::facts::{ClassKind, OriginKind, SubjectFacts, V1Facts};
-pub use model::registry::UnionOutcome;
-pub use model::skeleton::{NodeStats, SkeletonCoverage, SkeletonNode, merge};
-pub use model::tree::TreeNode;
+pub use model::registry::{SliceSource, UnionOutcome};
+pub use model::skeleton::{
+    DeclRef, Evidence, NodeStats, SkeletonChunk, SkeletonCoverage, SkeletonNode, merge,
+};
+pub use model::tree::{TreeNode, TreeRow, TreeRows};
 // The rest of what the frontends actually reach for.
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -212,7 +216,7 @@ pub use judge::cutover::run_cutover;
 pub use judge::cutover::scope_note as cutover_scope_note;
 pub use judge::retired::run_retired;
 pub use judge::retired::scope_note as retired_scope_note;
-pub use judge::why::{WhyInputs, WhySpec, run_why};
+pub use judge::why::{StoredLookup, StoredValue, WhyInputs, WhySpec, WireWatch, run_why};
 // `diff` is `value_diff` at the root: a bare `diff` beside `byte_diff` in a
 // crate that also has `schema_drift` and `slice::diff` reads as *the* diff.
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};

@@ -22,6 +22,7 @@
 use zenkey::grammar::{Class, with_base};
 
 use crate::SliceSet;
+#[cfg(feature = "decode")]
 use crate::model::facts::{KeyFacts, KeyShape, OriginKind};
 
 // The stable id vocabularies used to live here as two `[&str; N]`. They are
@@ -65,6 +66,10 @@ pub const EXPANSION_CAP: usize = 3;
 /// listen phase (#161) and the watchdog's windows (#227) alike. One
 /// spelling, because two would eventually disagree about what a rehearsal
 /// looks like.
+///
+/// Gated with its callers: every judge that watches a window is
+/// `decode`-gated, so without the feature this is dead code and says so.
+#[cfg(feature = "decode")]
 pub(crate) fn is_synthetic_marker(attachment: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(attachment)
         .ok()
@@ -77,7 +82,8 @@ pub(crate) fn is_synthetic_marker(attachment: &[u8]) -> bool {
 ///
 /// Used by `field` to attribute a path and by `doctor` to attribute a
 /// finding, and the two must attribute identically or the same key gets two
-/// producers in one report.
+/// producers in one report. Gated with them.
+#[cfg(feature = "decode")]
 pub(crate) fn producer_of(facts: &KeyFacts, slices: Option<&SliceSet>) -> Option<String> {
     let KeyShape::V1(v) = &facts.shape else {
         return None;
@@ -128,6 +134,7 @@ mod tests {
 
     /// #162's marker as #161 reads it: a JSON object with `"synthetic": true`.
     /// Anything else — other attachments, non-JSON bytes — is real traffic.
+    #[cfg(feature = "decode")]
     #[test]
     fn the_synthetic_marker_is_recognised_and_nothing_else_is() {
         assert!(is_synthetic_marker(

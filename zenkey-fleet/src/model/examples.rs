@@ -17,11 +17,16 @@
 
 /// A bounded example list that remembers how many it turned away.
 ///
+/// `pub(crate)`: it is a judge-internal collector, held in the private
+/// fields of report shapes and never named by any supported signature —
+/// so by the crate-root rule (see `lib.rs`) it has no business being
+/// public at all.
+///
 /// `total` counts every item offered, `len` how many are held: the two are
 /// what makes "… and N more" honest, and neither can drift from the other
 /// because nothing else feeds them.
 #[derive(Debug, Clone)]
-pub struct Examples<T> {
+pub(crate) struct Examples<T> {
     kept: Vec<T>,
     total: usize,
     cap: usize,
@@ -80,14 +85,6 @@ impl<T> Examples<T> {
         self.total - self.kept.len()
     }
 
-    pub fn len(&self) -> usize {
-        self.kept.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.kept.is_empty()
-    }
-
     pub fn as_slice(&self) -> &[T] {
         &self.kept
     }
@@ -126,7 +123,7 @@ mod tests {
         for i in 0..10 {
             ex.push(format!("k{i}"));
         }
-        assert_eq!(ex.len(), 3);
+        assert_eq!(ex.as_slice().len(), 3);
         assert_eq!(ex.total(), 10);
         assert_eq!(ex.dropped(), 7);
         assert_eq!(ex.as_slice()[0], "k0", "the first offered are the kept");

@@ -6,7 +6,7 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased — the command tree, the flags, and the exit contract (#307)
+## 0.5.0 (2026-08-25) — the command tree, the flags, and the exit contract (#307)
 
 **This is a breaking change with no alias layer and no deprecation shims.**
 The old spellings are gone, not warned about. That is deliberate: an alias
