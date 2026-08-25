@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25 and v1.26 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -217,16 +217,45 @@ to Zenoh reliability × congestion control × priority:
 | `refreshed` | best-effort | drop | data | no | `state` that self-heals (see rule below) |
 | `transition` | reliable | block | data | no | `state` written on transition; `events` |
 | `alert` | reliable | block | interactive-high | **yes** | `state/*/alert/*` |
-| `frame` | best-effort | drop | interactive-high | **yes** | `@media` (a stale frame is worthless; the encoder must never block) |
+| `frame` | best-effort | drop | interactive-high | no *(v1.26)* | `@media` (a stale frame is worthless; the encoder must never block) |
 
-**The `express` axis (v1.5).** Zenoh's per-message `express` flag bypasses
-transport batching for lower latency at the cost of batching efficiency. It
-is a fourth axis of the profile table, not a per-key knob: `alert` and
-`frame` — the two profiles whose whole point is latency — set it; the three
-throughput-shaped profiles do not. The vocabulary stays closed at five
-profiles; the rejected alternative (a per-key `express` override in the
-registry) is recorded in the v1.5 changelog — it would reopen the exact
-per-key QoS bikeshed the closed profile set exists to prevent.
+**The `express` axis (v1.5, corrected in v1.26).** Zenoh's per-message
+`express` flag bypasses transport batching for lower latency at the cost of
+batching efficiency. It is a fourth axis of the profile table, not a per-key
+knob, and exactly one profile sets it: **`alert`**.
+
+v1.5 set it on `alert` *and* `frame`, on the reading that both are
+"latency-shaped". That axis was the wrong one, and the reason is in what
+`express` actually does. Batching engages **only under back-pressure** —
+Zenoh's own configuration text is explicit that "batching is activated by the
+network back-pressure", and its `time_limit` is the maximum a message is
+retained for batching *when back-pressure happens*. So on an unsaturated link
+`express` changes nothing at all; it only ever acts when the link is already
+saturated. That is precisely where it works against `frame`: `frame` is
+`drop`, so the sanctioned response to saturation is to **shed stale frames**,
+and spending per-message framing overhead at that moment reduces the goodput
+that decides how many frames survive. Express and drop pull against each
+other on the same profile.
+
+`alert` is the opposite case and keeps it: reliable, `block`, rare, tiny — a
+saturated link is exactly when an alert flank is most urgent, and there are
+few enough of them that the overhead is noise.
+
+The rule the axis actually encodes is therefore **rare-and-must-arrive versus
+continuous-and-sheddable**, not latency-shaped versus throughput-shaped. Only
+the first takes `express`.
+
+The vocabulary stays closed at five profiles; the rejected alternative (a
+per-key `express` override in the registry) is recorded in the v1.5 changelog
+— it would reopen the exact per-key QoS bikeshed the closed profile set
+exists to prevent.
+
+*Transition.* `express` is one of the four axes the observed-QoS check
+compares (`qos-observed-mismatch`, [09-operations.md §5.1](09-operations.md)),
+so a `@media` publisher built against v1.5 and not yet rebuilt is reported as
+deviating from its declared `frame` until it is. That is the check working:
+the finding names what actually rode the wire, and an operator who sees it on
+a fleet mid-upgrade is reading a true statement about a mixed fleet.
 
 Note that the `alert` row's default binds a *family*, not a class, and the
 registry's per-class default mechanism cannot see a family: an alert-family
@@ -234,7 +263,8 @@ subject therefore **declares** `qos = "alert"` in its registry entry rather
 than relying on any default, and the registry lint enforces it
 ([08-registry.md §2/§5](08-registry.md), v1.23) — a silent fall to the
 `state` class default would make the firing flank drop-eligible on the one
-family the express axis exists for.
+family the express axis exists for, which since v1.26 is the *only* family
+it exists for.
 
 The `refreshed`/`transition` split inside `state` is about the **cost of
 waiting out a missed write**, not about self-healing: *all* live state

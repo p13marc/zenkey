@@ -314,10 +314,50 @@ pub(crate) struct RegistryFile {
     pub procedures: Vec<ProcedureEntry>,
     pub media: Vec<MediaEntry>,
     pub blob: Vec<BlobEntry>,
-    pub deprecated: Vec<String>,
+    pub deprecated: Vec<Deprecated>,
     /// The file's compatibility level (RFC 08 §3.1): `backward` (default)
     /// pins its entries in `registry.lock`; `none` opts out, loudly.
     pub compat: Compat,
+}
+
+/// One `[[deprecated]]` entry: what was retired, and which kind of thing it
+/// was (RFC 08 §3, v1.26).
+///
+/// The `kind` is why this is a struct and not the bare path it used to be.
+/// Retirement was checked for subjects only, so a procedure removed from a
+/// `compat = "backward"` file failed `registry.lock` with *"pinned entry
+/// vanished without retirement"* and had no sanctioned exit — the ledger
+/// entry that was supposed to be the exit was never consulted for it
+/// (#377).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Deprecated {
+    pub kind: EntryKind,
+    pub path: String,
+}
+
+/// Which declared surface a pin or a retirement is about (RFC 08 §3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntryKind {
+    Subject,
+    Procedure,
+}
+
+impl EntryKind {
+    /// The token `registry.lock` and `deprecated.lock` spell it with.
+    pub fn token(self) -> &'static str {
+        match self {
+            EntryKind::Subject => "subject",
+            EntryKind::Procedure => "procedure",
+        }
+    }
+
+    fn parse(s: &str) -> Option<EntryKind> {
+        match s {
+            "subject" => Some(EntryKind::Subject),
+            "procedure" => Some(EntryKind::Procedure),
+            _ => None,
+        }
+    }
 }
 
 /// A registry file's declared compatibility level (RFC 08 §3.1).
@@ -1447,24 +1487,46 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             }
         }
 
-        let mut deprecated = Vec::new();
+        let mut deprecated: Vec<Deprecated> = Vec::new();
         if let Some(arr) = doc.get("deprecated").and_then(|v| v.as_array()) {
             for entry in arr {
-                deprecated.push(
-                    entry
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| lint(&fname, "[[deprecated]] missing path"))?
-                        .to_string(),
-                );
+                let path = entry
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| lint(&fname, "[[deprecated]] missing path"))?
+                    .to_string();
+                // `kind` defaults to `subject`, so every registry written
+                // before v1.26 means exactly what it did (RFC 08 §3).
+                let kind = match entry.get("kind").and_then(|v| v.as_str()) {
+                    None => EntryKind::Subject,
+                    Some(k) => EntryKind::parse(k).ok_or_else(|| {
+                        lint(
+                            &fname,
+                            format!(
+                                "[[deprecated]] {path:?} has kind = {k:?} — it is \
+                                 `subject` (the default) or `procedure` (RFC 08 §3)"
+                            ),
+                        )
+                    })?,
+                };
+                deprecated.push(Deprecated { kind, path });
             }
         }
-        // Deprecated paths may never be re-registered as live subjects.
+        // A deprecated path is never re-registered — per kind, because a
+        // subject and a procedure of the same name are two declarations.
         for d in &deprecated {
-            if subjects.iter().any(|s| &s.path == d) {
+            let live = match d.kind {
+                EntryKind::Subject => subjects.iter().any(|s| s.path == d.path),
+                EntryKind::Procedure => procedures.iter().any(|p| p.path == d.path),
+            };
+            if live {
                 return Err(lint(
                     &fname,
-                    format!("deprecated path {d:?} re-registered as a live subject (RFC 08 §3)"),
+                    format!(
+                        "deprecated path {:?} re-registered as a live {} (RFC 08 §3)",
+                        d.path,
+                        d.kind.token()
+                    ),
                 ));
             }
         }
@@ -1713,10 +1775,16 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
             }
             None => {
                 let (kind, producer, path) = key;
-                let retired = kind == "subject"
-                    && files
-                        .iter()
-                        .any(|f| &f.name == producer && f.deprecated.iter().any(|d| d == path));
+                // Both kinds retire (RFC 08 §3, v1.26): this used to read
+                // `kind == "subject"`, which left a removed procedure with no
+                // sanctioned exit at all — the `[[deprecated]]` entry that is
+                // supposed to be the exit was never consulted for it (#377).
+                let retired = EntryKind::parse(kind).is_some_and(|k| {
+                    files.iter().any(|f| {
+                        &f.name == producer
+                            && f.deprecated.iter().any(|d| d.kind == k && &d.path == path)
+                    })
+                });
                 let compat_off = files
                     .iter()
                     .any(|f| &f.name == producer && f.compat == Compat::None);
@@ -1849,7 +1917,11 @@ fn check_conditional_ledger(
         let file = files.iter().find(|f| f.name == producer);
         let live = file.is_some_and(|f| f.subjects.iter().any(|s| s.path == spath));
         if !live {
-            let retired = file.is_some_and(|f| f.deprecated.iter().any(|d| d == spath));
+            let retired = file.is_some_and(|f| {
+                f.deprecated
+                    .iter()
+                    .any(|d| d.kind == EntryKind::Subject && d.path == spath)
+            });
             return Err(lint(
                 "conditional.lock",
                 format!(
@@ -1873,27 +1945,56 @@ fn check_conditional_ledger(
     Ok(entries)
 }
 
+/// One `deprecated.lock` line, in either spelling (RFC 08 §3).
+///
+/// `<kind>\t<producer>\t<path>` since v1.26; a two-field
+/// `<producer>\t<path>` line is the older spelling and means `subject`, so
+/// every ledger written before the amendment keeps validating and nothing
+/// asks anyone to rewrite one.
+fn parse_ledger_line(l: &str) -> Result<(EntryKind, &str, &str), Error> {
+    let fields: Vec<&str> = l.split('\t').collect();
+    match fields.as_slice() {
+        [producer, path] => Ok((EntryKind::Subject, producer, path)),
+        [kind, producer, path] => match EntryKind::parse(kind) {
+            Some(k) => Ok((k, producer, path)),
+            None => Err(lint(
+                "deprecated.lock",
+                format!(
+                    "ledger line {l:?} starts with {kind:?} — a three-field line \
+                     is `<kind>\\t<producer>\\t<path>`, kind `subject` or \
+                     `procedure` (RFC 08 §3)"
+                ),
+            )),
+        },
+        _ => Err(lint("deprecated.lock", format!("bad ledger line {l:?}"))),
+    }
+}
+
 fn check_deprecation_ledger(ledger_path: &Path, files: &[RegistryFile]) -> Result<(), Error> {
     let ledger = std::fs::read_to_string(ledger_path).unwrap_or_default();
-    let mut ledger_entries: Vec<(&str, &str)> = Vec::new();
+    let mut ledger_entries: Vec<(EntryKind, &str, &str)> = Vec::new();
     for l in ledger
         .lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
     {
-        ledger_entries.push(
-            l.split_once('\t')
-                .ok_or_else(|| lint("deprecated.lock", format!("bad ledger line {l:?}")))?,
-        );
+        ledger_entries.push(parse_ledger_line(l)?);
     }
-    for (producer, path) in &ledger_entries {
-        let present = files
-            .iter()
-            .any(|f| f.name == *producer && f.deprecated.iter().any(|d| d == path));
+    for (kind, producer, path) in &ledger_entries {
+        let present = files.iter().any(|f| {
+            f.name == *producer
+                && f.deprecated
+                    .iter()
+                    .any(|d| d.kind == *kind && d.path == *path)
+        });
         if !present {
             return Err(lint(
                 "deprecated.lock",
                 format!(
-                    "ledger entry {producer}\t{path} has no [[deprecated]] entry — deprecations are append-only, restore it (RFC 08 §3)"
+                    "ledger entry {}{producer}\t{path} has no [[deprecated]] entry — deprecations are append-only, restore it (RFC 08 §3)",
+                    match kind {
+                        EntryKind::Subject => String::new(),
+                        k => format!("{}\t", k.token()),
+                    }
                 ),
             ));
         }
@@ -1902,13 +2003,21 @@ fn check_deprecation_ledger(ledger_path: &Path, files: &[RegistryFile]) -> Resul
         for d in &f.deprecated {
             let listed = ledger_entries
                 .iter()
-                .any(|(p, path)| *p == f.name && path == d);
+                .any(|(k, p, path)| *k == d.kind && *p == f.name && *path == d.path);
             if !listed {
+                // The suggested line keeps the two-field spelling for a
+                // subject: the common case asks for no new syntax.
+                let line = match d.kind {
+                    EntryKind::Subject => format!("{}\t{}", f.name, d.path),
+                    k => format!("{}\t{}\t{}", k.token(), f.name, d.path),
+                };
                 return Err(lint(
                     "deprecated.lock",
                     format!(
-                        "[[deprecated]] {d:?} in {} is not in the ledger — append `{}\t{d}` to the ledger file",
-                        f.name, f.name
+                        "[[deprecated]] {} {:?} in {} is not in the ledger — append `{line}` to the ledger file",
+                        d.kind.token(),
+                        d.path,
+                        f.name
                     ),
                 ));
             }
@@ -2598,6 +2707,90 @@ mod tests {
                 .is_ok()
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const PROCEDURE_V1: &str = "[[procedure]]\npath = \"rotate\"\nkind = \"write\"\nrequest = \"RotateReq\"\nreply = \"Ack\"\nsince = \"1.0\"\ndescription = \"d\"\n";
+
+    /// The gap #377 names: a procedure had **no** sanctioned exit. Removing
+    /// one from a `compat = "backward"` file failed the lock, and the
+    /// `[[deprecated]]` entry that is supposed to be the exit was not
+    /// consulted for it.
+    #[test]
+    fn a_procedure_retires_through_the_same_ledger_a_subject_does() {
+        let dir = lock_dir("retire-procedure");
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}\n{PROCEDURE_V1}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+
+        let retired = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}\n[[deprecated]]\nkind = \"procedure\"\npath = \"rotate\"\ngone = \"1.1\"\n"
+        );
+        std::fs::write(dir.join("t.toml"), &retired).unwrap();
+        std::fs::write(dir.join("deprecated.lock"), "procedure\tt\trotate\n").unwrap();
+        let update = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+        assert_eq!(update.retired, 1);
+        assert!(update.forced.is_empty(), "retirement is not a break");
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .is_ok()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Kind is part of the identity: a `[[deprecated]]` subject says nothing
+    /// about the procedure of the same name, whose pin stays.
+    #[test]
+    fn retiring_a_subject_does_not_release_a_procedure_of_the_same_name() {
+        let dir = lock_dir("retire-wrong-kind");
+        let dual_subject = "[[subject]]\npath = \"dual\"\nclass = \"state\"\ntype = \"D\"\nttl_s = 900\nsince = \"1.0\"\ndescription = \"d\"\n";
+        let dual_procedure = "[[procedure]]\npath = \"dual\"\nkind = \"read\"\nrequest = \"Q\"\nreply = \"A\"\nsince = \"1.0\"\ndescription = \"d\"\n";
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{dual_subject}\n{dual_procedure}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+
+        // Both leave the file; only the subject is retired.
+        let wrong = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[deprecated]]\npath = \"dual\"\ngone = \"1.1\"\n"
+        );
+        std::fs::write(dir.join("t.toml"), &wrong).unwrap();
+        std::fs::write(dir.join("deprecated.lock"), "t\tdual\n").unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .expect_err("the procedure vanished with no retirement of its own");
+        let err = err.to_string();
+        assert!(err.contains("vanished without retirement"), "{err}");
+        assert!(err.contains("procedure"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The two-field ledger line is the pre-v1.26 spelling and still means
+    /// `subject` — no existing ledger is asked to change.
+    #[test]
+    fn the_old_two_field_ledger_line_still_reads_as_a_subject() {
+        assert_eq!(
+            parse_ledger_line("t\thealth").unwrap(),
+            (EntryKind::Subject, "t", "health")
+        );
+        assert_eq!(
+            parse_ledger_line("procedure\tt\trotate").unwrap(),
+            (EntryKind::Procedure, "t", "rotate")
+        );
+        let err = parse_ledger_line("nonsense\tt\trotate").unwrap_err();
+        assert!(err.to_string().contains("`procedure`"), "{err}");
     }
 
     /// Retirement through `[[deprecated]]` is the sanctioned exit: the pin is

@@ -54,11 +54,18 @@ impl QosProfile {
         }
     }
 
-    /// The `express` axis (RFC 04 §3, v1.5/E1): bypass transport batching
-    /// for the two latency-shaped profiles. Plain metadata, so not gated on
-    /// the `zenoh` feature.
+    /// The `express` axis (RFC 04 §3): bypass transport batching. Plain
+    /// metadata, so not gated on the `zenoh` feature.
+    ///
+    /// **`alert` alone, since v1.26.** v1.5 also set it on `frame`, reading
+    /// both as "latency-shaped". Batching engages only under back-pressure,
+    /// so `express` is a no-op on an unsaturated link and acts only when the
+    /// link is already saturated — which is where `frame`, a `drop` profile,
+    /// is supposed to be shedding stale frames rather than spending
+    /// per-message overhead on the goodput that decides how many survive.
+    /// The axis is rare-and-must-arrive versus continuous-and-sheddable.
     pub fn express(self) -> bool {
-        matches!(self, Self::Alert | Self::Frame)
+        matches!(self, Self::Alert)
     }
 
     #[cfg(feature = "zenoh")]
@@ -92,9 +99,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn express_is_the_latency_pair() {
+    fn express_is_the_rare_and_must_arrive_profile_alone() {
         assert!(QosProfile::Alert.express());
-        assert!(QosProfile::Frame.express());
+        // `frame` lost it in v1.26: express only acts under back-pressure,
+        // and under back-pressure a `drop` profile is meant to shed.
+        assert!(!QosProfile::Frame.express());
         assert!(!QosProfile::Sampled.express());
         assert!(!QosProfile::Refreshed.express());
         assert!(!QosProfile::Transition.express());

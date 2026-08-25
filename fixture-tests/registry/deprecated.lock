@@ -1,7 +1,9 @@
 # Append-only deprecation ledger (RFC 08 §3/§5).
-# One line per retired subject: <producer>\t<path>. Lines are never removed;
-# build.rs fails if a ledger line loses its [[deprecated]] entry or a
-# [[deprecated]] entry is missing from the ledger.
+# One line per retirement. Two spellings, both current (RFC 08 §3, v1.26):
+#   <producer>\t<path>              a retired subject (the pre-v1.26 form)
+#   <kind>\t<producer>\t<path>      kind is `subject` or `procedure`
+# Lines are never removed; build.rs fails if a ledger line loses its
+# [[deprecated]] entry or a [[deprecated]] entry is missing from the ledger.
 logs	logs/ingest/received_total
 logs	logs/ingest/parsed_total
 logs	logs/ingest/parse_failed_total

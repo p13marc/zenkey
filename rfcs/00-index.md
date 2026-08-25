@@ -6,13 +6,23 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.25** (2026-08-23; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.26** (2026-08-25; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.26** (2026-08-25) — the media-consumer batch: `frame` loses
+  `express` and `alert` keeps it (04 §3, the first wire-observable
+  change since ratification); the stream control surface is the two
+  procedures that are actually served, `stream/set` and the newly
+  ratified `stream/report` (07 §1.1, 11 §5); adaptation is receiver-driven
+  and a producer MUST NOT re-tune a shared tier from one report (07 §1.2);
+  the frame-age clock is the sample timestamp, read as observed skewed
+  latency (07 §1.3); browser consumers and their two consequences
+  (07 §1.4); retirement covers procedures (08 §3); the `streams`
+  procedure is profile-local (11 §5.1).
 - **v1.25** (2026-08-23) — the reconciliation batch: one seeding story
   (04 §3), the conditional-subject ledger specified (08 §6.1), the
   framework state set defined once (04 §1.4), alert-key precision and the
@@ -23,9 +33,6 @@ what changed and what deliberately did not — is
   [13](13-observer-conformance.md) (the judgment shape, O1–O7,
   `.zrec`, cutover acceptance); [09](09-operations.md) returns to a
   purely informative cookbook, tombstones keeping old citations alive.
-- **v1.23** (2026-08-23) — the alert profile is declared, not defaulted:
-  an alert-family `state` entry MUST declare `qos = "alert"` or stronger
-  ([08 §2/§5](08-registry.md)).
 
 ---
 

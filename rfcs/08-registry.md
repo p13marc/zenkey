@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25 and v1.26 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -191,6 +191,12 @@ class       = "telemetry"
 since       = "1.0"
 gone        = "1.2"                          # still reserved; never reused
 replaced_by = "flow/red/p50_ms"
+
+[[deprecated]]
+kind        = "procedure"                    # subject (default) | procedure (§3, v1.26)
+path        = "flow/reset"
+since       = "1.0"
+gone        = "1.2"
 ```
 
 Open-depth subjects use the rest-variable, in their **own producer's**
@@ -443,12 +449,26 @@ Each registry *file* versions independently (its producer's stream);
 adopting the convention starts its own files at 1.0 — there is no global
 registry version to coordinate.
 
-- **Deprecate, never reuse.** A retired subject keeps its registry entry
-  (`gone` + `replaced_by`) forever; its path is never rebound to a
-  different meaning or type. Renames are additions plus deprecations
+- **Deprecate, never reuse.** A retired subject **or procedure** keeps its
+  registry entry (`gone` + `replaced_by`) forever; its path is never rebound
+  to a different meaning or shape. Renames are additions plus deprecations
   (OTel's model; [02-principles.md P10](02-principles.md)).
   `[[deprecated]]` entries are **append-only**: CI fails if one disappears
   from the file — that is what makes never-reuse mechanically checkable.
+
+  *Kind, added in v1.26.* A `[[deprecated]]` entry carries
+  `kind = "subject" | "procedure"`, defaulting to `subject` — so every
+  registry file written before this amendment means exactly what it did.
+  The default was previously the *only* thing the mechanism could express,
+  and §3.1 pins both kinds: a procedure removed from a `compat = "backward"`
+  file therefore failed the lock as *vanished without retirement* with **no
+  sanctioned exit at all**, because the `[[deprecated]]` entry that is the
+  exit was never consulted for it. The `deprecated.lock` ledger carries the
+  kind as a leading field — `<kind>\t<producer>\t<path>` — and a two-field
+  `<producer>\t<path>` line remains valid and means `subject`, so no
+  existing ledger is rewritten. Kind is part of the identity: retiring the
+  subject `dual` says nothing about a procedure of the same name, and
+  neither releases the other's pin.
 - **A subject's payload type may evolve compatibly** (additive fields) under
   the payload format's own rules (self-describing encodings — CBOR/JSON —
   tolerate additive change). An incompatible payload change is a **new
@@ -478,7 +498,7 @@ Every registry file declares a **compatibility level** in its header:
 
 | `compat =` | Meaning |
 |---|---|
-| `"backward"` *(default)* | Existing subject paths keep their **class and payload type**; existing procedures keep their **kind and request/reply shapes**. Additive evolution (new subjects, new procedures, new optional metadata) is free. Removal happens **only** through `[[deprecated]]` — §3's deprecate-never-reuse, now checked. |
+| `"backward"` *(default)* | Existing subject paths keep their **class and payload type**; existing procedures keep their **kind and request/reply shapes**. Additive evolution (new subjects, new procedures, new optional metadata) is free. Removal happens **only** through `[[deprecated]]` — §3's deprecate-never-reuse, now checked, and since v1.26 checkable for procedures as well as subjects. |
 | `"none"` | Unchecked — the escape hatch for a registry still finding its shape. Legal, and **loud**: the build warns per file, every build, and the file's entries are unpinned. |
 
 The mechanism is **`registry.lock`**, a generated snapshot beside
