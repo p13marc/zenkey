@@ -38,13 +38,41 @@ pub struct SchemaDump {
     pub missing: Asked<Vec<String>>,
 }
 
-/// Two producers serving one type name with different hashes — "a `doctor`
-/// finding" by RFC 08 §7's own words (issue #41).
+/// One producer's identity claim for a type name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SchemaServer {
+    pub producer: String,
+    /// The `sha256:` identity this producer served, if it served one.
+    ///
+    /// `NotAsked` means the describe reply carried **no** hash — which is not
+    /// an empty hash, and is the distinction the flat `(String, String)` shape
+    /// could not make: two producers that each said nothing compared equal and
+    /// were reported as agreeing (#370).
+    #[serde(skip_serializing_if = "Asked::is_not_asked")]
+    pub hash: Asked<String>,
+}
+
+/// What comparing a type name's identity claims established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriftVerdict {
+    /// Two or more producers served *different* identities. A defect —
+    /// RFC 08 §7 calls it a `doctor` finding in as many words.
+    Disagree,
+    /// At least one producer served no identity at all, so agreement cannot
+    /// be established. **Not a defect**: an unanswered question, and reporting
+    /// it as agreement was the O4 failure (RFC 09 §5.1) this exists to name.
+    Unjudgeable,
+}
+
+/// One type name's identity claims across the fleet — "a `doctor` finding" by
+/// RFC 08 §7's own words (issue #41), with the O4 split #370 added.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SchemaDrift {
     pub type_name: String,
-    /// Every (producer, hash) pair observed for the name.
-    pub servers: Vec<(String, String)>,
+    /// Every producer observed serving the name, and what it claimed.
+    pub servers: Vec<SchemaServer>,
+    pub verdict: DriftVerdict,
 }
 
 /// A type the producer's slice references that its served describe set does

@@ -22,7 +22,7 @@ use zenkey::schema::{SchemaSet, TypeSchema, WireEncoding};
 use zenoh::Session;
 
 use crate::model::registry::SliceSet;
-use crate::report::{SchemaDrift, TotalityGap};
+use crate::report::{DriftVerdict, SchemaDrift, SchemaServer, TotalityGap};
 
 /// How many producers one store remembers anything about (#340).
 ///
@@ -756,32 +756,45 @@ pub async fn schemas_for_type(
 
 /// Compute drift across a described fleet. Pure — feed it whatever describe
 /// replies were gathered (the store's cache, or a fresh sweep).
+///
+/// Reports a name **only when more than one producer serves it**, because
+/// with one server there is nothing to compare; a lone producer that served no
+/// identity is degraded caching (RFC 08 §7), not a disagreement.
+///
+/// Two producers that each served *no* identity used to compare equal — both
+/// flattened to `""` — and were reported as agreeing: a "no drift" verdict on
+/// a question nobody answered (#370, RFC 09 §5.1 O4). They are
+/// [`DriftVerdict::Unjudgeable`] now, which is neither agreement nor a defect.
 pub fn schema_drift(described: &[(String, SchemaSet)]) -> Vec<SchemaDrift> {
     use std::collections::BTreeMap;
-    let mut by_name: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
+    let mut by_name: BTreeMap<&str, Vec<SchemaServer>> = BTreeMap::new();
     for (producer, set) in described {
         for (name, schema) in set.iter() {
-            by_name
-                .entry(name)
-                .or_default()
-                // An absent hash still groups as `""` here, deliberately
-                // unchanged by #323: it is pre-existing behaviour, and it is
-                // *wrong* — two producers that each served no identity read as
-                // agreement rather than as a question nobody answered
-                // (RFC 09 §5.1 O4). Filed separately rather than folded into a
-                // type change, because the fix is a report shape, not a cast.
-                .push((
-                    producer.clone(),
-                    schema.hash().unwrap_or_default().to_string(),
-                ));
+            by_name.entry(name).or_default().push(SchemaServer {
+                producer: producer.clone(),
+                hash: schema.hash().map(str::to_string).into(),
+            });
         }
     }
     by_name
         .into_iter()
-        .filter(|(_, servers)| servers.iter().any(|(_, h)| h != &servers[0].1))
-        .map(|(name, servers)| SchemaDrift {
-            type_name: name.to_string(),
-            servers,
+        .filter(|(_, servers)| servers.len() > 1)
+        .filter_map(|(name, servers)| {
+            let claimed: Vec<&String> = servers.iter().filter_map(|s| s.hash.as_option()).collect();
+            let verdict = if claimed.len() < servers.len() {
+                // Somebody did not say. Whatever the rest agree on, agreement
+                // across the fleet is not established.
+                DriftVerdict::Unjudgeable
+            } else if claimed.iter().any(|h| *h != claimed[0]) {
+                DriftVerdict::Disagree
+            } else {
+                return None;
+            };
+            Some(SchemaDrift {
+                type_name: name.to_string(),
+                servers,
+                verdict,
+            })
         })
         .collect()
 }
@@ -1362,9 +1375,53 @@ mod tests {
         assert_eq!(drift.len(), 1);
         assert_eq!(drift[0].type_name, "T");
         assert_eq!(drift[0].servers.len(), 3, "every server is named");
+        assert_eq!(drift[0].verdict, DriftVerdict::Disagree);
         // p1 and p3 agree; p2 is the odd one out — the caller can see which.
-        assert_eq!(drift[0].servers[0].1, drift[0].servers[2].1);
-        assert_ne!(drift[0].servers[0].1, drift[0].servers[1].1);
+        assert_eq!(drift[0].servers[0].hash, drift[0].servers[2].hash);
+        assert_ne!(drift[0].servers[0].hash, drift[0].servers[1].hash);
+
+        // Two producers that each served *no* identity are not agreeing —
+        // they answered nothing, and "no drift" would be a verdict on a
+        // question nobody put (#370, RFC 09 §5.1 O4).
+        let unhashed = |app: &str| {
+            SchemaSet::parse(&format!(
+                r#"{{"schema_version":1,"app":"{app}","types":{{"T":{{"kind":"json-schema","hash":"","schema":{{}}}}}}}}"#
+            ))
+            .unwrap()
+        };
+        let silent = vec![
+            ("p1".to_string(), unhashed("app")),
+            ("p2".to_string(), unhashed("app")),
+        ];
+        let drift = schema_drift(&silent);
+        assert_eq!(drift.len(), 1, "silence is reported, not read as agreement");
+        assert_eq!(drift[0].verdict, DriftVerdict::Unjudgeable);
+        assert!(
+            drift[0].servers.iter().all(|s| s.hash.is_not_asked()),
+            "and it names who did not say"
+        );
+
+        // One that says and one that does not is likewise unjudgeable — the
+        // half that answered cannot establish fleet-wide agreement alone.
+        let mixed = vec![
+            ("p1".to_string(), unhashed("app")),
+            (
+                "p2".to_string(),
+                SchemaSet::builder("app")
+                    .entry(
+                        "T",
+                        zenkey::schema::TypeSchema::json_schema(
+                            serde_json::json!({"type":"object"}),
+                        ),
+                    )
+                    .build(),
+            ),
+        ];
+        assert_eq!(schema_drift(&mixed)[0].verdict, DriftVerdict::Unjudgeable);
+
+        // A *lone* producer with no identity is nothing to compare against,
+        // so it is not a drift question at all.
+        assert!(schema_drift(&[("p1".to_string(), unhashed("app"))]).is_empty());
 
         // All agreeing: no finding.
         let described = vec![

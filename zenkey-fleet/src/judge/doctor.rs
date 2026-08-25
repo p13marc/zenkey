@@ -17,7 +17,7 @@ use zenkey::{Declared, RegistrySlice};
 use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
 use crate::model::examples::Examples;
-use crate::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity};
+use crate::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity, DriftVerdict};
 
 /// What a doctor run should cost.
 #[derive(Debug, Clone)]
@@ -270,13 +270,39 @@ pub async fn run_doctor(
         let servers: Vec<String> = drift
             .servers
             .iter()
-            .map(|(p, h)| format!("{p} ({h})"))
+            .map(|s| match s.hash.as_option() {
+                Some(h) => format!("{} ({h})", s.producer),
+                None => format!("{} (no identity served)", s.producer),
+            })
             .collect();
+        // The two verdicts are not the same finding. A disagreement is a
+        // defect; a producer that served no identity leaves the question
+        // *unanswered*, and calling that an error would be the mirror of the
+        // bug #370 fixed — reporting a verdict nobody's evidence supports.
+        let (severity, evidence) = match drift.verdict {
+            DriftVerdict::Disagree => (
+                DoctorSeverity::Error,
+                format!("served with different schemas by {}", servers.join(", ")),
+            ),
+            DriftVerdict::Unjudgeable => (
+                DoctorSeverity::Warning,
+                format!(
+                    "agreement cannot be judged — {} served no schema identity: {} \
+                     (RFC 09 §5.1 O4; the hash exists for exactly this, RFC 08 §7)",
+                    drift
+                        .servers
+                        .iter()
+                        .filter(|s| s.hash.is_not_asked())
+                        .count(),
+                    servers.join(", ")
+                ),
+            ),
+        };
         findings.push(finding(
-            DoctorSeverity::Error,
+            severity,
             CheckId::SchemaDrift,
             drift.type_name.clone(),
-            format!("served with different schemas by {}", servers.join(", ")),
+            evidence,
             Some("RFC 08 §7"),
         ));
     }
