@@ -636,8 +636,8 @@ fn row(
     crate::report::SchemaRow {
         producer: producer.to_string(),
         type_name: type_name.to_string(),
-        kind: schema.kind().as_str().to_string(),
-        hash: schema.hash().to_string(),
+        kind: schema.kind_str().to_string(),
+        hash: schema.hash().unwrap_or_default().to_string(),
         document: full.then(|| schema_document(schema)),
     }
 }
@@ -652,7 +652,7 @@ fn schema_document(schema: &TypeSchema) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
     obj.insert(
         "kind".into(),
-        serde_json::Value::String(schema.kind().as_str().to_string()),
+        serde_json::Value::String(schema.kind_str().to_string()),
     );
     if let Some(m) = schema.protobuf_message() {
         obj.insert("message".into(), serde_json::Value::String(m.to_string()));
@@ -764,7 +764,16 @@ pub fn schema_drift(described: &[(String, SchemaSet)]) -> Vec<SchemaDrift> {
             by_name
                 .entry(name)
                 .or_default()
-                .push((producer.clone(), schema.hash().to_string()));
+                // An absent hash still groups as `""` here, deliberately
+                // unchanged by #323: it is pre-existing behaviour, and it is
+                // *wrong* — two producers that each served no identity read as
+                // agreement rather than as a question nobody answered
+                // (RFC 09 §5.1 O4). Filed separately rather than folded into a
+                // type change, because the fix is a report shape, not a cast.
+                .push((
+                    producer.clone(),
+                    schema.hash().unwrap_or_default().to_string(),
+                ));
         }
     }
     by_name

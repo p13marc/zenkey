@@ -129,7 +129,7 @@ pub async fn check(
         Some(name) => WireEncoding::from_encoding_str(&name),
         None => not_checked(&format!(
             "schema kind {:?} has no known framing — pass --encoding",
-            schema.kind().as_str()
+            schema.kind_str()
         )),
     };
 
@@ -152,7 +152,7 @@ pub async fn check(
 
     let report = crate::render::SchemaCheck {
         type_name: type_name.to_string(),
-        kind: schema.kind().as_str().to_string(),
+        kind: schema.kind_str().to_string(),
         verdict: verdict.to_string(),
         detail,
     };

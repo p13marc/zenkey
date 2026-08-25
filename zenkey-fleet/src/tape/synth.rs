@@ -54,7 +54,7 @@ impl Synth {
     /// cannot be synthesized here (unknown kind) — the caller degrades with
     /// a stated note, never silently.
     pub fn instance(&self, schema: &TypeSchema, tick: u64) -> Option<Value> {
-        match schema.kind().as_str() {
+        match schema.kind_str() {
             zenkey::schema::SchemaKind::JSON_SCHEMA => schema
                 .json_document()
                 .map(|doc| self.json_schema_value(doc, "", tick, 0)),
