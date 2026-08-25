@@ -15,11 +15,22 @@ env:
   # on vm-runner-01; S3 endpoint+credentials come from the runner's env_file
   RUSTC_WRAPPER: /srv/cache/bin/sccache
   CARGO_INCREMENTAL: "0"
+  # Same cap as ci.yml: cargo otherwise defaults to nproc (6 on
+  # vm-runner-01) against a lane capacity of 2.
+  CARGO_BUILD_JOBS: "2"
 
 jobs:
   crates-io-libs:
     if: inputs.lane == 'crates-io-libs'
     runs-on: ubuntu-24.04
+    # The same constraint ci.yml's `test` job carries, and for the same
+    # measured reason: unconstrained, zengui's pane tests segfault on a
+    # headless runner at 12/128 runs. This lane runs the identical
+    # `cargo test --workspace` and had no such env, so roughly one dispatch
+    # in ten failed its gate before publishing anything — a flaky guard on
+    # an operation that cannot be undone.
+    env:
+      WGPU_BACKEND: gl
     steps:
       - uses: https://data.forgejo.org/actions/checkout@v7
       - uses: https://github.com/dtolnay/rust-toolchain@stable
