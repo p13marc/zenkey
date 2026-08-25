@@ -54,6 +54,14 @@ use std::path::PathBuf;
 /// (itself a box), `std::io::Error`, `serde_json::Error`, a `JoinError`.
 pub type BoxedCause = Box<dyn std::error::Error + Send + Sync>;
 
+/// [`Error::Io`]'s Display, kept total (see the variant's own doc).
+fn path_or_local_io(path: &std::path::Path) -> String {
+    match path.as_os_str().is_empty() {
+        true => "local I/O".to_string(),
+        false => path.display().to_string(),
+    }
+}
+
 /// Why a fleet operation could not answer.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -92,10 +100,17 @@ pub enum Error {
 
     /// Local filesystem I/O — a `.zrec`, a registry directory, a config.
     ///
-    /// Carries the path, and the `io::ErrorKind` is reachable through
-    /// [`source`](std::error::Error::source): "no such directory" and
-    /// "permission denied" are different answers to give a user.
-    #[error("{}", path.display())]
+    /// Carries the path where there is one, and the `io::ErrorKind` is
+    /// reachable through [`source`](std::error::Error::source): "no such
+    /// directory" and "permission denied" are different answers to give a
+    /// user.
+    ///
+    /// The path may be **empty**, and the Display says so rather than
+    /// rendering to nothing: a writer generic over `W: Write` (the `.zrec`
+    /// sink) genuinely does not know where its bytes are going. An error
+    /// whose `Display` is the empty string is not a smaller error — it is a
+    /// blank `Error:` line and a blank `Caused by:` under it.
+    #[error("{}", path_or_local_io(path))]
     Io {
         path: PathBuf,
         #[source]
@@ -265,6 +280,36 @@ mod tests {
 
     /// `Display` says what failed; `source` says why; `one_line` joins them.
     ///
+    /// No variant's `Display` may be empty. The `.zrec` writer is generic
+    /// over `W: Write` and has no path to name, so it builds `Error::Io`
+    /// with `PathBuf::new()` — which rendered to the empty string, and
+    /// surfaced a disk-full mid-capture as a blank `Error:` with a blank
+    /// `Caused by:` under it.
+    #[test]
+    fn no_display_is_blank() {
+        let cases = [
+            Error::io(
+                std::path::PathBuf::new(),
+                std::io::Error::other("disk full"),
+            ),
+            Error::io("/tmp/x", std::io::Error::other("disk full")),
+            Error::bus("subscribe", "v1/**", "no route"),
+            Error::unaskable_from("v1/$*/**", "`*` may only follow `/`"),
+            Error::Internal("something".into()),
+        ];
+        for e in &cases {
+            assert!(!e.to_string().is_empty(), "blank Display: {e:?}");
+            assert!(!one_line(e).starts_with(':'), "blank head: {}", one_line(e));
+        }
+        assert_eq!(
+            one_line(&Error::io(
+                std::path::PathBuf::new(),
+                std::io::Error::other("disk full")
+            )),
+            "local I/O: disk full"
+        );
+    }
+
     /// No variant's `Display` may repeat its own source's text — doing that
     /// once produced `registry dir "/x": No such file` followed immediately
     /// by `Caused by: No such file`, which the CLI corpus caught.

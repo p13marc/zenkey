@@ -293,7 +293,7 @@ impl ZrecSink {
                     w
                 }
                 Err(e) => {
-                    let _ = ready.send(Some(format!("{e:#}")));
+                    let _ = ready.send(Some(crate::one_line(&e)));
                     return Err(e);
                 }
             };
@@ -303,7 +303,8 @@ impl ZrecSink {
                     ZrecLine::Dropped(n) => writer.write_dropped(n),
                 };
                 if let Err(e) = wrote {
-                    *task_state.failure.lock().expect("sink failure lock") = Some(format!("{e:#}"));
+                    *task_state.failure.lock().expect("sink failure lock") =
+                        Some(crate::one_line(&e));
                     return Err(e);
                 }
             }
