@@ -17,7 +17,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use zenoh::Session;
 
 use crate::bus::query::GetOpts;
@@ -57,7 +57,7 @@ pub async fn admin_get_within(
 ) -> Result<Vec<AdminEntry>> {
     let replies = crate::bus::query::disciplined_get(session, selector, opts)
         .await
-        .map_err(|e| anyhow!("admin get {selector}: {e}"))?;
+        .map_err(|e| Error::bus("admin get", selector, e))?;
     let mut out = Vec::new();
     let mut elided = 0u64;
     while let Ok(reply) = replies.recv_async().await {

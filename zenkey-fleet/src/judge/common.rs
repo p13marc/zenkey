@@ -3,79 +3,31 @@
 //! Before this module existed, each of these lived wherever it was first
 //! needed and the others reached across for it: `doctor` reached into
 //! `field` for `producer_of`, `expect` and `condition` reached into
-//! `doctor` for `is_synthetic_marker` and [`CHECK_IDS`], `retired` reached
+//! `doctor` for `is_synthetic_marker` and the check ids, `retired` reached
 //! into `cutover` for the new-plane prefix, and `doctor` reached into
 //! `budget` for a cap. Each reach was individually reasonable and
 //! collectively said that the judging layer had no shared vocabulary — only
 //! a first-mover for every word in it.
 //!
 //! What belongs here: the things **more than one judge must agree about**.
-//! A check id that a script keys on, a marker that decides whether traffic
-//! is real, the prefix that defines "the new plane", the ceilings on how
-//! many offenders a report names. What does not: any check's own logic, and
+//! A marker that decides whether traffic is real, the prefix that defines
+//! "the new plane", the ceilings on how many offenders a report names. What
+//! does not: the id vocabularies, which went to [`crate::report`] with #347
+//! because they are serde-pinned wire shapes and that is where those live;
+//! any check's own logic; and
 //! any sentence written in one judge's voice — `cutover::scope_note` and
 //! `retired::scope_note` stay where they are, because they are two different
 //! O5 statements about two different windows, not one statement said twice.
 
-use zenkey::grammar::with_base;
+use zenkey::grammar::{Class, with_base};
 
 use crate::SliceSet;
 use crate::model::facts::{KeyFacts, KeyShape, OriginKind};
 
-// ─── the stable id vocabularies ─────────────────────────────────────────────
-//
-// Both of these are **API**: scripts key on them (`--format json`), the GUI
-// keys deltas on them. New checks and new rungs append; nothing renames one.
-// They sit together because they are the same promise made twice, and
-// because `why`'s module doc has always described its rung ids as "the
-// CHECK_IDS discipline, applied here" — a citation across modules that is
-// now a citation to a neighbour.
-
-/// Every check id [`run_doctor`](crate::judge::doctor::run_doctor) can emit —
-/// the stable vocabulary, never renamed.
-pub const CHECK_IDS: [&str; 21] = [
-    "slice-parse",
-    "slice-sync",
-    "introspect-coverage",
-    "admin-unreachable",
-    "router-version-skew",
-    "describe-totality",
-    "schema-drift",
-    "describe-missing",
-    "stale-state",
-    "unstamped-state",
-    "storage-coverage",
-    // The `--for` passive phase (#161) — traffic judged as it rides.
-    "payload-undecodable",
-    "payload-invalid",
-    "qos-observed-mismatch",
-    "unregistered-traffic",
-    "rate-over-declared",
-    "timestamp-stamped-elsewhere",
-    // Key-population budgets (#221): declared `cardinality` vs the observed
-    // expansion count, per origin. `{path...}` families are exempt and say so.
-    "cardinality-over-declared",
-    // Field intelligence (#223): per-dotted-path judgement over the listen
-    // window — the failure modes per-sample validation cannot see.
-    "field-vanished",
-    "field-stuck",
-    "field-new",
-];
-
-/// Every rung id the `why` ladder can emit — the same promise as
-/// [`CHECK_IDS`], for the same reason.
-pub const RUNG_IDS: [&str; 10] = [
-    "scope-reach",
-    "key-parse",
-    "registry-declared",
-    "origin-alive",
-    "publisher-declared",
-    "storage-coverage",
-    "stored-value",
-    "sample-freshness",
-    "admin-answered",
-    "wire-heard",
-];
+// The stable id vocabularies used to live here as two `[&str; N]`. They are
+// `report::CheckId` and `report::RungId` now (#347) — serde-pinned wire
+// shapes, so `CLAUDE.md`'s placement rule puts them under `report/`, with
+// their stability tests beside them.
 
 // ─── the caps ───────────────────────────────────────────────────────────────
 //
@@ -154,12 +106,15 @@ pub fn new_prefix(base: &str) -> String {
 /// listen phase and the `--budget` observation share (#161, #221).
 pub fn data_plane_scopes(base: &str, slices: &SliceSet) -> Vec<String> {
     let mut scopes = Vec::new();
-    for class in ["telemetry", "state", "events"] {
+    for class in Class::ALL {
+        let class = class.chunk();
         scopes.push(with_base(base, format!("v1/*/{class}/**")));
     }
     for slice in slices.slices() {
         if let Some(origin) = &slice.service_origin {
-            for class in ["telemetry", "state", "events"] {
+            let origin = origin.token();
+            for class in Class::ALL {
+                let class = class.chunk();
                 scopes.push(with_base(base, format!("v1/{origin}/{class}/**")));
             }
         }
@@ -170,41 +125,6 @@ pub fn data_plane_scopes(base: &str, slices: &SliceSet) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The id vocabulary is API: additions append, nothing renames. If this
-    /// test fails you are renaming a shipped check id — don't.
-    #[test]
-    fn check_ids_are_stable() {
-        assert_eq!(
-            CHECK_IDS,
-            [
-                "slice-parse",
-                "slice-sync",
-                "introspect-coverage",
-                "admin-unreachable",
-                "router-version-skew",
-                "describe-totality",
-                "schema-drift",
-                "describe-missing",
-                "stale-state",
-                "unstamped-state",
-                "storage-coverage",
-                "payload-undecodable",
-                "payload-invalid",
-                "qos-observed-mismatch",
-                "unregistered-traffic",
-                "rate-over-declared",
-                // #213: appended, as the rule above requires.
-                "timestamp-stamped-elsewhere",
-                // #221: appended.
-                "cardinality-over-declared",
-                // #223: appended.
-                "field-vanished",
-                "field-stuck",
-                "field-new",
-            ]
-        );
-    }
 
     /// #162's marker as #161 reads it: a JSON object with `"synthetic": true`.
     /// Anything else — other attachments, non-JSON bytes — is real traffic.

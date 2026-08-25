@@ -56,7 +56,7 @@ pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Res
         }
         ExportAs::Jsonschema => {
             let session = args.session().await?;
-            let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+            let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
             // Fetch here, where the session is; shape the document in
             // zenkey-build, where every other registry-in-document-out
             // exporter lives (#208).
@@ -143,7 +143,7 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
                  files — pass --registry <dir> (or set one on the active context)"
             ))
         } else {
-            zenkey_fleet::SliceSet::from_dirs(&dirs)
+            zenkey_fleet::SliceSet::from_dirs(&dirs).map_err(anyhow::Error::from)
         },
     );
     let session = crate::exit::asked("check retired", args.session().await);
@@ -152,7 +152,7 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
         // Stated before the window opens, not after (O5).
         eprintln!(
             "{}",
-            zenkey_fleet::judge::retired::scope_note(
+            zenkey_fleet::retired_scope_note(
                 entries,
                 &zenkey_fleet::new_prefix(args.base()),
                 window
@@ -198,8 +198,12 @@ pub fn lint(dir: &Path, ledger: Option<&PathBuf>, out: crate::cli::OutputArgs) -
             out.color,
         ),
         // The build's own wording, verbatim — the value of this command is
-        // that it says exactly what the build would.
-        Err(e) => Err(anyhow!("{e}")),
+        // that it says exactly what the build would. Carried as the *error*,
+        // not `format!`ed into a new one: `anyhow!("{e}")` renders the same
+        // sentence and throws the type away, and the type is what
+        // `exit::code_for` reads to tell a missing directory (no verdict,
+        // exit 2) from a lint finding (a finding, exit 1) — #348.
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -215,7 +219,7 @@ pub fn lock(dir: &Path, force: bool, out: crate::cli::OutputArgs) -> Result<()> 
         } else {
             zenkey_build::OnIncompatible::Refuse
         })
-        .map_err(|e| anyhow!("{e}"))?;
+        .map_err(anyhow::Error::from)?;
     crate::render::emit_with(
         &mut std::io::stdout(),
         &crate::render::LockReport {

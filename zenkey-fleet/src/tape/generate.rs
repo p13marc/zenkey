@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use zenkey::grammar::with_base;
 use zenkey::pattern::{PatternChunk, SubjectPattern};
 use zenkey::qos::QosProfile;
@@ -73,7 +73,10 @@ impl Fault {
             .find(|f| f.as_str() == s)
             .ok_or_else(|| {
                 let known = Fault::ALL.map(Fault::as_str).join(", ");
-                anyhow!("unknown fault kind {s:?} — known kinds: {known}")
+                Error::unaskable(
+                    format!("--fault {s:?}"),
+                    format!("is not a known fault kind — known kinds: {known}"),
+                )
             })
     }
 
@@ -272,8 +275,9 @@ pub async fn build_plan(
             {
                 continue;
             }
-            let pattern = SubjectPattern::parse(&subject.path)
-                .map_err(|e| anyhow!("{}/{}: {e}", slice.name, subject.path))?;
+            let pattern = SubjectPattern::parse(&subject.path).map_err(|e| {
+                Error::unaskable(format!("{}/{}", slice.name, subject.path), e.to_string())
+            })?;
             let mut tail: Vec<String> = Vec::new();
             let mut synthetic_vars: Vec<String> = Vec::new();
             let mut unique_tail_idx = None;
@@ -716,12 +720,12 @@ pub async fn run_gen(
     // `first_errors` names the plan's first entries to complain, not the
     // scheduler's.
     let mut done: Vec<Option<(u64, u64, Vec<String>)>> = vec![None; plan.len()];
-    let mut failed: Option<anyhow::Error> = None;
+    let mut failed: Option<Error> = None;
     while let Some(joined) = tasks.join_next().await {
         match joined {
             Ok((i, s, r, errs)) => done[i] = Some((s, r, errs)),
             Err(e) => {
-                failed = Some(anyhow!("gen task: {e}"));
+                failed = Some(Error::Internal(format!("a gen task did not join: {e}")));
                 break;
             }
         }
@@ -931,7 +935,7 @@ rate = "rare"
             assert_eq!(Fault::parse(f.as_str()).unwrap(), f);
         }
         let err = Fault::parse("scramble").unwrap_err().to_string();
-        assert!(err.contains("unknown fault kind"), "{err}");
+        assert!(err.contains("is not a known fault kind"), "{err}");
         assert!(err.contains("truncate"), "the vocabulary is named: {err}");
     }
 

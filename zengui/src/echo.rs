@@ -93,16 +93,14 @@ impl EchoLine {
         } else if len > DECODE_LIMIT {
             format!("<{len} bytes — too large to preview>")
         } else {
-            truncate(zenkey_fleet::model::decode::structural(
-                &view.payload.to_bytes(),
-            ))
+            truncate(zenkey_fleet::structural(&view.payload.to_bytes()))
         };
         let attachment = view.attachment.as_ref().map(|a| {
             let alen = a.len();
             if alen > DECODE_LIMIT {
                 format!("<{alen} bytes — too large to preview>")
             } else {
-                truncate(zenkey_fleet::model::decode::structural(&a.to_bytes()))
+                truncate(zenkey_fleet::structural(&a.to_bytes()))
             }
         });
         EchoLine {

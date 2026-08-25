@@ -10,7 +10,7 @@ that happened.
 ```console
 $ zenctl gen --fault scramble
 ? 2
-Error: unknown fault kind "scramble" — known kinds: truncate, wrong-type, extra-field, unregistered-key, wrong-qos, missing-encoding, unstamped
+Error: --fault "scramble": is not a known fault kind — known kinds: truncate, wrong-type, extra-field, unregistered-key, wrong-qos, missing-encoding, unstamped
 
 ```
 

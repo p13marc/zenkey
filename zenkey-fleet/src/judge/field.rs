@@ -30,7 +30,7 @@
 //! the house pattern of [`crate::judge::condition`] (#227) and [`crate::judge::budget`]
 //! (#221): testable without a bus. Surfaces: `zenctl field <selector>
 //! [--for S]`, the doctor listen phase (#161) via the appended
-//! [`crate::judge::common::CHECK_IDS`], and — **deferred to a later zengui
+//! [`crate::report::CheckId`], and — **deferred to a later zengui
 //! window** — the Inspector field table with per-field sparklines through
 //! the existing `series.rs`/`spark.rs` gap-drawing. This chunk ships the
 //! engine and zenctl halves only.
@@ -39,7 +39,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::Result;
 use serde_json::Value;
 use zenoh::Session;
 
@@ -47,7 +47,7 @@ use crate::judge::common::{FINDING_CAP, producer_of};
 use crate::model::decode::SchemaStore;
 use crate::model::examples::Examples;
 use crate::model::registry::SliceSet;
-use crate::report::{DoctorFinding, DoctorSeverity, FieldReport, FieldRow};
+use crate::report::{CheckId, DoctorFinding, DoctorSeverity, FieldReport, FieldRow};
 
 /// Default bound on the per-path table, across every key the window sees. A
 /// high-cardinality document can blow a path table the way a `{var}` family
@@ -450,7 +450,7 @@ pub fn judge_fields(
             if judge_vanished(stats, fields.documents) {
                 vanished.push_with(|| DoctorFinding {
                     severity: DoctorSeverity::Warning,
-                    check: "field-vanished".into(),
+                    check: CheckId::FieldVanished,
                     subject: format!("{key} · {path}"),
                     evidence: format!(
                         "present in {} of {} document sample(s) in {window_s:.0}s, absent \
@@ -467,7 +467,7 @@ pub fn judge_fields(
                 let ttl = c.ttl_s.unwrap_or(0);
                 stuck.push_with(|| DoctorFinding {
                     severity: DoctorSeverity::Warning,
-                    check: "field-stuck".into(),
+                    check: CheckId::FieldStuck,
                     subject: format!("{key} · {path}"),
                     evidence: format!(
                         "value {} unchanged across {} sample(s) spanning {:.1}s — at least \
@@ -487,7 +487,7 @@ pub fn judge_fields(
             if judge_new(path, c.declared.as_ref()) {
                 new.push_with(|| DoctorFinding {
                     severity: DoctorSeverity::Warning,
-                    check: "field-new".into(),
+                    check: CheckId::FieldNew,
                     subject: format!("{key} · {path}"),
                     evidence: format!(
                         "present in {} of {} document sample(s) but never declared by the \
@@ -506,16 +506,16 @@ pub fn judge_fields(
     }
     let mut findings = Vec::new();
     for (check, hits) in [
-        ("field-vanished", vanished),
-        ("field-stuck", stuck),
-        ("field-new", new),
+        (CheckId::FieldVanished, vanished),
+        (CheckId::FieldStuck, stuck),
+        (CheckId::FieldNew, new),
     ] {
         let more = hits.more("more path(s) with the same finding");
         findings.extend(hits.into_vec());
         if let Some(evidence) = more {
             findings.push(DoctorFinding {
                 severity: DoctorSeverity::Info,
-                check: check.into(),
+                check,
                 subject: "fleet".into(),
                 evidence,
                 citation: None,
@@ -749,7 +749,7 @@ mod tests {
         let findings = judge_fields(&obs, 5.0, &BTreeMap::new());
         let vanished: Vec<_> = findings
             .iter()
-            .filter(|f| f.check == "field-vanished")
+            .filter(|f| f.check == CheckId::FieldVanished)
             .collect();
         assert_eq!(vanished.len(), 1, "{findings:?}");
         assert!(vanished[0].subject.ends_with("· opt"));
@@ -772,7 +772,7 @@ mod tests {
         assert!(
             judge_fields(&obs, 3.0, &BTreeMap::new())
                 .iter()
-                .all(|f| f.check != "field-vanished")
+                .all(|f| f.check != CheckId::FieldVanished)
         );
     }
 
@@ -822,7 +822,7 @@ mod tests {
         let findings = judge_fields(&obs, 8.0, &ctx);
         let stuck: Vec<_> = findings
             .iter()
-            .filter(|f| f.check == "field-stuck")
+            .filter(|f| f.check == CheckId::FieldStuck)
             .collect();
         assert_eq!(stuck.len(), 1, "{findings:?}");
         assert!(stuck[0].subject.ends_with("· temperature_c"));
@@ -880,7 +880,10 @@ mod tests {
         )]
         .into();
         let findings = judge_fields(&obs, 1.0, &ctx);
-        let new: Vec<_> = findings.iter().filter(|f| f.check == "field-new").collect();
+        let new: Vec<_> = findings
+            .iter()
+            .filter(|f| f.check == CheckId::FieldNew)
+            .collect();
         assert_eq!(new.len(), 1, "{findings:?}");
         assert!(new[0].subject.ends_with("· extra"));
         assert!(new[0].evidence.contains("Health"), "{}", new[0].evidence);
@@ -932,7 +935,7 @@ mod tests {
         assert!(
             judge_fields(&obs, 6.0, &BTreeMap::new())
                 .iter()
-                .all(|f| f.check != "field-vanished"),
+                .all(|f| f.check != CheckId::FieldVanished),
             "five undocumented samples are five unobservables, not a vanish"
         );
     }

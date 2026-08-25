@@ -45,7 +45,7 @@ pub async fn run(
     } else {
         args.slices_optional().await?
     };
-    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
     let key_part = keyexpr.split('?').next().unwrap_or(keyexpr);
     let prepared = zenkey_fleet::prepare_publish(
         &args.fleet(&session),
@@ -118,11 +118,9 @@ pub async fn run(
             });
             // Present only when the query carried one — absent, never null.
             if let Some(p) = &view.payload {
-                obj["payload"] = zenkey_fleet::model::decode::structural_value(&p.to_bytes())
-                    .unwrap_or_else(|| {
-                        serde_json::Value::String(zenkey_fleet::model::decode::structural(
-                            &p.to_bytes(),
-                        ))
+                obj["payload"] =
+                    zenkey_fleet::structural_value(&p.to_bytes()).unwrap_or_else(|| {
+                        serde_json::Value::String(zenkey_fleet::structural(&p.to_bytes()))
                     });
                 obj["payload_bytes"] = p.len().into();
             }
@@ -143,7 +141,7 @@ pub async fn run(
             let body = match &view.payload {
                 Some(p) => format!(
                     "  body: {} ({} bytes)",
-                    zenkey_fleet::model::decode::structural(&p.to_bytes()),
+                    zenkey_fleet::structural(&p.to_bytes()),
                     p.len()
                 ),
                 None => String::new(),

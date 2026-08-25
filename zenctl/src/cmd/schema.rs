@@ -30,13 +30,13 @@ use crate::input::Source;
 pub async fn show(producer: &str, type_filter: Option<&str>, full: bool, args: &Bus) -> Result<()> {
     let session = args.session().await?;
     // Slices enrich the dump — the *types* come from the producer's served
-    // `describe` (`zenkey_fleet::model::decode::schema_dump`); slices only compute
+    // `describe` (`zenkey_fleet::schema_dump`); slices only compute
     // which declared ones are missing. `None` here is the honest degradation
     // (`slices_optional` says so out loud), and it stays `None` into the dump
     // so "totality not checked" cannot render as "nothing missing"
     // (RFC 09 §5.1 O4; #246).
     let slices = args.slices_optional().await?;
-    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
     let report = zenkey_fleet::schema_dump(
         &store,
         &session,
@@ -107,7 +107,7 @@ pub async fn check(
                     crate::errors::without_source_locations(&format!("{e:#}"))
                 )),
             };
-            let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+            let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
             match store.schema_for(&session, p, type_name).await {
                 Some(s) => s,
                 None => not_checked(&format!(
@@ -134,7 +134,7 @@ pub async fn check(
     };
 
     // A session-less store still decodes (it only needs one for fetching).
-    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
     let (verdict, detail): (&str, Vec<String>) = match store.decode(&schema, &wire, &bytes) {
         Ok(decoded) => match decoded.verdict {
             Verdict::Valid => ("valid", decoded.notes),

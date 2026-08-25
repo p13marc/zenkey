@@ -25,7 +25,7 @@ pub async fn run(target: &str, producer: &str, procedure: &str, args: &Bus) -> R
         Err(_) => {
             // A human identity: resolve through the sanctioned bridge
             // (health documents carry host_id beside source, §6.2).
-            let (matches, seen) = zenkey_fleet::bus::roster::bridge_resolve(
+            let (matches, seen) = zenkey_fleet::bridge_resolve(
                 &args.fleet(&session),
                 producer,
                 target,

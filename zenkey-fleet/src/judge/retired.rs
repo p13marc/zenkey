@@ -23,11 +23,11 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::Result;
 use zenkey::slice::{DeprecationDecl, RegistrySlice};
 
 use crate::judge::common::new_prefix;
-use crate::report::{CutoverVerdict, RetiredEntry, RetiredReport};
+use crate::report::{Asked, CutoverVerdict, RetiredEntry, RetiredReport};
 
 /// The scope sentence the listen phase operates under — rendered by the
 /// caller *before* the window opens (O5): a user watching a long silence
@@ -74,20 +74,44 @@ pub fn retired_selector(slice: &RegistrySlice, path: &str) -> String {
 /// life carried traffic — its replacement when one is declared, the v1 plane
 /// otherwise. Everything short of that is `Unproven`: a replacement nobody
 /// has heard speak proves nothing, and neither does a window that never ran.
-pub fn entry_verdict(
-    wire_samples: Option<u64>,
-    still_declared: Option<bool>,
-    subscribers: Option<usize>,
-    life_samples: Option<u64>,
-) -> CutoverVerdict {
-    if wire_samples.is_some_and(|n| n > 0)
-        || still_declared == Some(true)
-        || subscribers.is_some_and(|n| n > 0)
+///
+/// A named-field struct, because the four arguments used to be `Option<u64>`,
+/// `Option<bool>`, `Option<usize>`, `Option<u64>` — with the two `u64`s
+/// separated by the other two, so a transposition compiled and returned a
+/// plausible wrong verdict (#349).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EntryEvidence {
+    /// Samples heard on the retired family itself. `NotAsked` is an
+    /// unlistened window — never a zero.
+    pub wire_samples: Asked<u64>,
+    /// Whether a served slice still declares the retired path active
+    /// (RFC 08 §6.1). `Asked<bool>`, not `Option<bool>`: "we did not ask"
+    /// and "we asked and it does not" are different facts, and this crate
+    /// already spells that distinction this way (#349).
+    pub still_declared: Asked<bool>,
+    /// Sessions still subscribed to the retired family — a consumer that has
+    /// not moved is a migration that is not done.
+    pub subscribers: Asked<usize>,
+    /// Samples heard on the *proof of life*: the replacement where one is
+    /// declared, the v1 plane otherwise.
+    pub life_samples: Asked<u64>,
+}
+
+pub fn entry_verdict(ev: EntryEvidence) -> CutoverVerdict {
+    let EntryEvidence {
+        wire_samples,
+        still_declared,
+        subscribers,
+        life_samples,
+    } = ev;
+    if wire_samples.as_option().is_some_and(|n| *n > 0)
+        || still_declared.as_option() == Some(&true)
+        || subscribers.as_option().is_some_and(|n| *n > 0)
     {
         return CutoverVerdict::OldStillSpeaks;
     }
-    match (wire_samples, life_samples) {
-        (Some(0), Some(n)) if n > 0 => CutoverVerdict::Pass,
+    match (wire_samples.as_option(), life_samples.as_option()) {
+        (Some(0), Some(n)) if *n > 0 => CutoverVerdict::Pass,
         _ => CutoverVerdict::Unproven,
     }
 }
@@ -300,7 +324,12 @@ pub async fn run_retired(
                 still_declared,
                 subscribers,
                 replacement_samples: replacement_samples.into(),
-                verdict: entry_verdict(wire_samples, still_declared, subscribers, life),
+                verdict: entry_verdict(EntryEvidence {
+                    wire_samples: wire_samples.into(),
+                    still_declared: still_declared.into(),
+                    subscribers: subscribers.into(),
+                    life_samples: life.into(),
+                }),
             }
         })
         .collect();
@@ -324,6 +353,23 @@ pub async fn run_retired(
 mod tests {
     use super::*;
 
+    /// The old positional spelling, kept for the tests that read well that
+    /// way — but as a *local* helper, so the published signature is the
+    /// named-field one a caller cannot transpose (#349).
+    fn verdict(
+        wire_samples: Option<u64>,
+        still_declared: Option<bool>,
+        subscribers: Option<usize>,
+        life_samples: Option<u64>,
+    ) -> CutoverVerdict {
+        entry_verdict(EntryEvidence {
+            wire_samples: wire_samples.into(),
+            still_declared: still_declared.into(),
+            subscribers: subscribers.into(),
+            life_samples: life_samples.into(),
+        })
+    }
+
     fn slice(toml: &str) -> RegistrySlice {
         zenkey::parse_slice(toml).expect("fixture slice parses")
     }
@@ -334,12 +380,12 @@ mod tests {
     #[test]
     fn a_silent_replacement_is_unproven_not_a_pass() {
         assert_eq!(
-            entry_verdict(Some(0), Some(false), Some(0), Some(0)),
+            verdict(Some(0), Some(false), Some(0), Some(0)),
             CutoverVerdict::Unproven
         );
         // …while a speaking replacement over an observed-silent entry passes.
         assert_eq!(
-            entry_verdict(Some(0), Some(false), Some(0), Some(12)),
+            verdict(Some(0), Some(false), Some(0), Some(12)),
             CutoverVerdict::Pass
         );
     }
@@ -350,18 +396,18 @@ mod tests {
     fn any_sign_of_life_beats_everything_else() {
         // Heard on the wire, even against a busy replacement.
         assert_eq!(
-            entry_verdict(Some(3), Some(false), Some(0), Some(10_000)),
+            verdict(Some(3), Some(false), Some(0), Some(10_000)),
             CutoverVerdict::OldStillSpeaks
         );
         // Still declared active by a served slice — the §6.1 lie — with no
         // listen window at all.
         assert_eq!(
-            entry_verdict(None, Some(true), None, None),
+            verdict(None, Some(true), None, None),
             CutoverVerdict::OldStillSpeaks
         );
         // A session still subscribed: a consumer that has not moved.
         assert_eq!(
-            entry_verdict(Some(0), Some(false), Some(1), Some(12)),
+            verdict(Some(0), Some(false), Some(1), Some(12)),
             CutoverVerdict::OldStillSpeaks
         );
     }
@@ -371,14 +417,11 @@ mod tests {
     #[test]
     fn an_unlistened_entry_cannot_pass() {
         assert_eq!(
-            entry_verdict(None, Some(false), Some(0), None),
+            verdict(None, Some(false), Some(0), None),
             CutoverVerdict::Unproven
         );
         // Even introspect and admin silence on every axis proves nothing.
-        assert_eq!(
-            entry_verdict(None, None, None, None),
-            CutoverVerdict::Unproven
-        );
+        assert_eq!(verdict(None, None, None, None), CutoverVerdict::Unproven);
     }
 
     /// The wire family a ledger entry maps to: class unknown, so `*` — which

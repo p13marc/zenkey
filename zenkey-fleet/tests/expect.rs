@@ -54,7 +54,7 @@ async fn presence_meets_early_and_a_clean_shortfall_is_not_met() {
 
     // The expect window's subscriber raises the badge; then publish into it.
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")
@@ -134,7 +134,7 @@ async fn absence_is_scoped_clean_and_conclusively_breakable() {
         }
     });
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")
@@ -203,7 +203,7 @@ qos = "transition"
             }
         });
         assert!(
-            tokio::time::timeout(Duration::from_secs(5), matching.recv())
+            tokio::time::timeout(util::SETTLE, matching.recv())
                 .await
                 .expect("matching within 5s")
                 .expect("listener alive")

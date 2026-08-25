@@ -111,7 +111,7 @@ pub fn qos_choices() -> &'static [QosChoice] {
 /// The declared profile behind a classified key, when there is one (#158).
 /// Drives the picker default until the user takes the picker over.
 pub fn declared_qos(facts: Option<&KeyFacts>) -> Option<QosProfile> {
-    use zenkey_fleet::model::facts::Registration;
+    use zenkey_fleet::Registration;
     match facts.map(|f| &f.registration) {
         Some(Registration::Registered(s)) => s.declared_qos(),
         _ => None,

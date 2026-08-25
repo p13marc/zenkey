@@ -22,7 +22,7 @@
 pub struct DecodedValue {
     /// The decode itself: rendering, verdict, and the decode error behind an
     /// `Undecodable` (#164).
-    pub sample: zenkey_fleet::model::decode::DecodedSample,
+    pub sample: zenkey_fleet::DecodedSample,
     /// The rendered document: pretty-printed for a schema decode, the
     /// structural rendering otherwise. Empty means the payload rendered to
     /// nothing, which the pane states as a byte count.
@@ -30,8 +30,8 @@ pub struct DecodedValue {
 }
 
 impl DecodedValue {
-    pub fn new(sample: zenkey_fleet::model::decode::DecodedSample) -> DecodedValue {
-        use zenkey_fleet::model::decode::Rendering;
+    pub fn new(sample: zenkey_fleet::DecodedSample) -> DecodedValue {
+        use zenkey_fleet::Rendering;
         let document = match &sample.rendering {
             Rendering::Typed(d) => serde_json::to_string_pretty(&d.value).unwrap_or_default(),
             Rendering::Structural(s) => s.clone(),

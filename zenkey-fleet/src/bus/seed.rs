@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use zenoh::Session;
 
 use crate::bus::monitor::SampleView;
@@ -286,7 +286,7 @@ pub async fn seed_subscribe(
             }
         })
         .await
-        .map_err(|e| anyhow!("seeded subscribe {selector}: {e}"))?;
+        .map_err(|e| Error::bus("seeded subscribe", selector, e))?;
 
     // 2) The seed GETs, AFTER — and the completion boundary once both
     //    (or their opt-outs) resolve.

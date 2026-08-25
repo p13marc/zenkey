@@ -188,7 +188,7 @@ pub(crate) fn update(
             // every session open — launch and each reconnect — sat a disk
             // access on a frame. Its answer lands on `ContextMsg::Refreshed`.
             let contexts = services::context::refresh();
-            dep.schema_store = Some(Arc::new(zenkey_fleet::model::decode::SchemaStore::new(
+            dep.schema_store = Some(Arc::new(zenkey_fleet::SchemaStore::new(
                 dep.base(),
                 dep.timeout(),
             )));

@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use crate::model::bounded::BoundedLru;
 
-use anyhow::Result;
+use crate::Result;
 use zenkey::schema::decode::{DecodeError, DecodedPayload, DecoderRegistry};
 use zenkey::schema::validate::{NotValidated, Verdict};
 use zenkey::schema::{SchemaSet, TypeSchema, WireEncoding};

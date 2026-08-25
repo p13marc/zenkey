@@ -34,14 +34,14 @@ async fn a_publication_sees_its_own_subscribers_appear_and_leave() {
     );
 
     let subscriber = b.declare_subscriber(KEY).await.expect("subscriber");
-    let ev = tokio::time::timeout(Duration::from_secs(5), events.recv())
+    let ev = tokio::time::timeout(util::SETTLE, events.recv())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");
     assert!(ev, "a matching subscriber must raise the badge");
 
     subscriber.undeclare().await.expect("undeclare subscriber");
-    let ev = tokio::time::timeout(Duration::from_secs(5), events.recv())
+    let ev = tokio::time::timeout(util::SETTLE, events.recv())
         .await
         .expect("unmatching event within 5s")
         .expect("listener alive");
@@ -68,7 +68,7 @@ async fn a_repeating_query_sees_a_server_appear() {
         .callback(|_| {})
         .await
         .expect("queryable");
-    let ev = tokio::time::timeout(Duration::from_secs(5), events.recv())
+    let ev = tokio::time::timeout(util::SETTLE, events.recv())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");

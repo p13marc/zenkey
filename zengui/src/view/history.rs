@@ -304,7 +304,7 @@ fn diff_section<'a>(
 
     match (&prev.value, &entry.value) {
         (Some(old), Some(new)) => {
-            let d = zenkey_fleet::model::diff::diff(old, new, MAX_CHANGES);
+            let d = zenkey_fleet::value_diff(old, new, MAX_CHANGES);
             if d.is_empty() {
                 return col
                     .push(kit::muted(
@@ -359,7 +359,7 @@ enum Tone {
 fn bytes_view<'a>(prev: &HistoryEntry, entry: &HistoryEntry, sp: Spacing) -> Element<'a, Message> {
     let old = prev.payload.to_bytes();
     let new = entry.payload.to_bytes();
-    let d = zenkey_fleet::model::diff::byte_diff(&old, &new);
+    let d = zenkey_fleet::byte_diff(&old, &new);
     let which = match (prev.value.is_some(), entry.value.is_some()) {
         (false, false) => "neither sample has a structural form",
         (true, false) => "this sample has no structural form",

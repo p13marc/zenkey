@@ -12,10 +12,10 @@ use zenkey_fleet::report::{DoctorFinding, DoctorReport};
 /// Findings are identified by `(check id, subject)` for delta purposes;
 /// evidence and severity drift count as "unchanged" — the *fact* persists,
 /// its wording may move.
-pub type FindingKey = (String, String);
+pub type FindingKey = (zenkey_fleet::report::CheckId, String);
 
 fn key_of(f: &DoctorFinding) -> FindingKey {
-    (f.check.clone(), f.subject.clone())
+    (f.check, f.subject.clone())
 }
 
 /// One run-over-run delta.
@@ -159,10 +159,10 @@ mod tests {
     use super::*;
     use zenkey_fleet::report::DoctorSeverity;
 
-    fn finding(check: &str, subject: &str) -> DoctorFinding {
+    fn finding(check: zenkey_fleet::report::CheckId, subject: &str) -> DoctorFinding {
         DoctorFinding {
             severity: DoctorSeverity::Error,
-            check: check.into(),
+            check,
             subject: subject.into(),
             evidence: "e".into(),
             citation: None,
@@ -210,21 +210,27 @@ mod tests {
     #[test]
     fn deltas_key_on_check_and_subject() {
         let prev = report(vec![
-            finding("slice-sync", "h-1/sysinfo"),
-            finding("stale-state", "v1/h-1/state/p/health"),
+            finding(zenkey_fleet::report::CheckId::SliceSync, "h-1/sysinfo"),
+            finding(
+                zenkey_fleet::report::CheckId::StaleState,
+                "v1/h-1/state/p/health",
+            ),
         ]);
-        let mut changed = finding("slice-sync", "h-1/sysinfo");
+        let mut changed = finding(zenkey_fleet::report::CheckId::SliceSync, "h-1/sysinfo");
         changed.evidence = "different wording".into();
-        let cur = report(vec![changed, finding("schema-drift", "TelemetryPoint")]);
+        let cur = report(vec![
+            changed,
+            finding(zenkey_fleet::report::CheckId::SchemaDrift, "TelemetryPoint"),
+        ]);
 
         let d = delta(&prev, &cur);
         assert_eq!(d.unchanged, 1, "evidence drift is still the same finding");
         assert_eq!(d.fixed.len(), 1);
-        assert_eq!(d.fixed[0].check, "stale-state");
-        assert!(
-            d.new
-                .contains(&("schema-drift".to_string(), "TelemetryPoint".to_string()))
-        );
+        assert_eq!(d.fixed[0].check, zenkey_fleet::report::CheckId::StaleState);
+        assert!(d.new.contains(&(
+            zenkey_fleet::report::CheckId::SchemaDrift,
+            "TelemetryPoint".to_string()
+        )));
     }
 
     fn run(base: &str, findings: Vec<DoctorFinding>) -> DoctorRun {
@@ -238,7 +244,10 @@ mod tests {
     fn a_failed_run_keeps_the_baseline() {
         let mut state = DoctorState::default();
         state.finish(
-            Ok(run("acme", vec![finding("slice-sync", "h-1/p")])),
+            Ok(run(
+                "acme",
+                vec![finding(zenkey_fleet::report::CheckId::SliceSync, "h-1/p")],
+            )),
             "acme",
         );
         assert!(state.current.is_some());
@@ -256,13 +265,22 @@ mod tests {
     fn a_run_from_another_base_is_not_evidence_here() {
         let mut state = DoctorState::default();
         state.finish(
-            Ok(run("acme", vec![finding("slice-sync", "h-1/p")])),
+            Ok(run(
+                "acme",
+                vec![finding(zenkey_fleet::report::CheckId::SliceSync, "h-1/p")],
+            )),
             "acme",
         );
         assert!(state.current.is_some());
 
         state.clear();
-        state.finish(Ok(run("acme", vec![finding("stale-state", "k")])), "other");
+        state.finish(
+            Ok(run(
+                "acme",
+                vec![finding(zenkey_fleet::report::CheckId::StaleState, "k")],
+            )),
+            "other",
+        );
         assert!(
             state.current.is_none(),
             "a run about acme says nothing about other"
@@ -273,21 +291,45 @@ mod tests {
 
     #[test]
     fn finding_targets_resolve_by_subject_shape() {
-        assert_eq!(finding_target(&finding("x", "fleet"), ""), None);
-        assert_eq!(finding_target(&finding("x", "mesh"), ""), None);
         assert_eq!(
             finding_target(
-                &finding("stale-state", "v1/h-3fa9c2d41b7e/state/p/health"),
+                &finding(zenkey_fleet::report::CheckId::SliceSync, "fleet"),
+                ""
+            ),
+            None
+        );
+        assert_eq!(
+            finding_target(
+                &finding(zenkey_fleet::report::CheckId::SliceSync, "mesh"),
+                ""
+            ),
+            None
+        );
+        assert_eq!(
+            finding_target(
+                &finding(
+                    zenkey_fleet::report::CheckId::StaleState,
+                    "v1/h-3fa9c2d41b7e/state/p/health"
+                ),
                 ""
             ),
             Some(Target::Key("v1/h-3fa9c2d41b7e/state/p/health".into()))
         );
         assert_eq!(
-            finding_target(&finding("slice-sync", "h-3fa9c2d41b7e/sysinfo"), ""),
+            finding_target(
+                &finding(
+                    zenkey_fleet::report::CheckId::SliceSync,
+                    "h-3fa9c2d41b7e/sysinfo"
+                ),
+                ""
+            ),
             Some(Target::Node("h-3fa9c2d41b7e".into()))
         );
         assert_eq!(
-            finding_target(&finding("schema-drift", "TelemetryPoint"), ""),
+            finding_target(
+                &finding(zenkey_fleet::report::CheckId::SchemaDrift, "TelemetryPoint"),
+                ""
+            ),
             None,
             "a bare type name navigates nowhere"
         );

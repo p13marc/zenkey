@@ -135,7 +135,7 @@ pub struct Decoded {
     /// The registered type name, when the key refined to one.
     pub type_name: Option<String>,
     /// What to show: typed fields, or the structural fallback.
-    pub rendering: zenkey_fleet::model::decode::Rendering,
+    pub rendering: zenkey_fleet::Rendering,
     /// The #159 conformance verdict — `None` under `--no-decode`, which never
     /// asked and so has nothing to report (RFC 09 §5.1 O4). Not
     /// `Verdict::NotValidated`: "we did not look" is not a finding.
@@ -155,7 +155,7 @@ pub struct Decoded {
 /// (RFC 09 §5.1 O4; #246).
 pub async fn decode(
     fleet: &zenkey_fleet::Fleet<'_>,
-    store: &zenkey_fleet::model::decode::SchemaStore,
+    store: &zenkey_fleet::SchemaStore,
     slices: Option<&zenkey_fleet::SliceSet>,
     key: &str,
     encoding: Option<&str>,
@@ -165,15 +165,12 @@ pub async fn decode(
     if no_decode {
         return Decoded {
             type_name: None,
-            rendering: zenkey_fleet::model::decode::Rendering::Structural(
-                zenkey_fleet::model::decode::structural(bytes),
-            ),
+            rendering: zenkey_fleet::Rendering::Structural(zenkey_fleet::structural(bytes)),
             verdict: None,
             decode_error: None,
         };
     }
-    let d = zenkey_fleet::model::decode::decode_sample(fleet, store, slices, key, encoding, bytes)
-        .await;
+    let d = zenkey_fleet::decode_sample(fleet, store, slices, key, encoding, bytes).await;
     Decoded {
         type_name: d.type_name,
         rendering: d.rendering,
@@ -193,14 +190,14 @@ pub struct Value {
 
 /// The rendering as printable text. One spelling for `get` and `echo`,
 /// which had two identical ones (#210).
-pub fn value_of(rendering: &zenkey_fleet::model::decode::Rendering) -> Value {
+pub fn value_of(rendering: &zenkey_fleet::Rendering) -> Value {
     match rendering {
-        zenkey_fleet::model::decode::Rendering::Typed(d) => Value {
+        zenkey_fleet::Rendering::Typed(d) => Value {
             text: serde_json::to_string(&d.value).unwrap_or_default(),
             typed: true,
             notes: d.notes.clone(),
         },
-        zenkey_fleet::model::decode::Rendering::Structural(text) => Value {
+        zenkey_fleet::Rendering::Structural(text) => Value {
             text: text.clone(),
             typed: false,
             notes: Vec::new(),
@@ -225,7 +222,7 @@ pub fn attachment_display(att: &zenoh::bytes::ZBytes) -> String {
     let bytes = att.to_bytes();
     format!(
         "{} ({} bytes)",
-        zenkey_fleet::model::decode::structural(&bytes),
+        zenkey_fleet::structural(&bytes),
         bytes.len()
     )
 }
@@ -235,40 +232,23 @@ pub fn attachment_display(att: &zenoh::bytes::ZBytes) -> String {
 /// exists — present-only-when-present, never null-when-absent.
 pub fn attachment_json(att: &zenoh::bytes::ZBytes) -> serde_json::Value {
     let bytes = att.to_bytes();
-    zenkey_fleet::model::decode::structural_value(&bytes).unwrap_or_else(|| {
-        serde_json::Value::String(zenkey_fleet::model::decode::structural(&bytes))
-    })
+    zenkey_fleet::structural_value(&bytes)
+        .unwrap_or_else(|| serde_json::Value::String(zenkey_fleet::structural(&bytes)))
 }
 
-/// The wire's QoS axes as one stable token (#120):
-/// `priority/congestion/reliability`, `+express` when set — lowercase,
-/// cut/awk-friendly, never Debug formatting.
+/// The wire's QoS axes as one stable token (#120) — the engine's spelling.
+///
+/// A thin re-export, kept because `--fmt %q` and the sample renderer both
+/// reach for it by this name. The fifteen literals live in
+/// [`zenkey_fleet::report::qos_axes_token`], beside the `SampleRow.qos_axes`
+/// field they are the round-trip contract for (#353).
 pub fn qos_summary(
     priority: zenoh::qos::Priority,
     congestion_control: zenoh::qos::CongestionControl,
     reliability: zenoh::qos::Reliability,
     express: bool,
 ) -> String {
-    use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
-    let p = match priority {
-        P::RealTime => "real_time",
-        P::InteractiveHigh => "interactive_high",
-        P::InteractiveLow => "interactive_low",
-        P::DataHigh => "data_high",
-        P::Data => "data",
-        P::DataLow => "data_low",
-        P::Background => "background",
-    };
-    let c = match congestion_control {
-        Cc::Drop => "drop",
-        Cc::Block => "block",
-        _ => "other",
-    };
-    let r = match reliability {
-        R::BestEffort => "best_effort",
-        R::Reliable => "reliable",
-    };
-    format!("{p}/{c}/{r}{}", if express { "+express" } else { "" })
+    zenkey_fleet::report::qos_axes_token(priority, congestion_control, reliability, express)
 }
 
 /// The publishing entity, when SourceInfo rode the sample: `zid:eid#sn`.
@@ -419,18 +399,17 @@ mod tests {
     /// which is the argument for moving both rather than the one that broke.
     #[test]
     fn a_rendering_flattens_the_same_way_for_both_verbs() {
-        let typed =
-            zenkey_fleet::model::decode::Rendering::Typed(zenkey::schema::decode::DecodedPayload {
-                value: serde_json::json!({"status": "ok"}),
-                notes: vec!["a field the schema did not name".to_string()],
-                verdict: zenkey_fleet::Verdict::Valid,
-            });
+        let typed = zenkey_fleet::Rendering::Typed(zenkey::schema::decode::DecodedPayload {
+            value: serde_json::json!({"status": "ok"}),
+            notes: vec!["a field the schema did not name".to_string()],
+            verdict: zenkey_fleet::Verdict::Valid,
+        });
         let v = value_of(&typed);
         assert_eq!(v.text, r#"{"status":"ok"}"#);
         assert!(v.typed, "a schema produced it — the tag is <T>, not <T?>");
         assert_eq!(v.notes.len(), 1, "decode notes are never silently dropped");
 
-        let structural = zenkey_fleet::model::decode::Rendering::Structural("42".to_string());
+        let structural = zenkey_fleet::Rendering::Structural("42".to_string());
         let v = value_of(&structural);
         assert_eq!(v.text, "42");
         assert!(!v.typed);

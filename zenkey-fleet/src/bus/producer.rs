@@ -34,7 +34,7 @@
 //!   survivor). The responder holds its declared key and replies on it;
 //!   the query's key is never consulted.
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use zenoh::Session;
 use zenoh::handlers::FifoChannelHandler;
 use zenoh::liveliness::LivelinessToken;
@@ -144,9 +144,7 @@ impl Responder {
             Some(e) => reply.encoding(e),
             None => reply,
         };
-        reply
-            .await
-            .map_err(|e| anyhow!("reply on {}: {e}", self.key))
+        reply.await.map_err(|e| Error::bus("reply", &self.key, e))
     }
 
     /// Refuse on Zenoh's reply-error channel with a [`ReservedError`]
@@ -163,7 +161,7 @@ impl Responder {
             .reply_err(error.envelope(message))
             .encoding("application/json")
             .await
-            .map_err(|e| anyhow!("reply_err on {}: {e}", self.key))
+            .map_err(|e| Error::bus("reply_err", &self.key, e))
     }
 
     /// Undeclare, acknowledged.
@@ -171,7 +169,7 @@ impl Responder {
         self.queryable
             .undeclare()
             .await
-            .map_err(|e| anyhow!("undeclare {}: {e}", self.key))
+            .map_err(|e| Error::bus("undeclare", &self.key, e))
     }
 }
 
@@ -179,7 +177,7 @@ impl Responder {
 /// one API in which the wrong order is unrepresentable.
 ///
 /// ```no_run
-/// # async fn demo(session: zenoh::Session) -> anyhow::Result<()> {
+/// # async fn demo(session: zenoh::Session) -> zenkey_fleet::Result<()> {
 /// let mut up = zenkey_fleet::bus::producer::BringUp::new(&session);
 /// up.serve("v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect").await?;
 /// up.serve("v1/h-3fa9c2d41b7e/@rpc/sysinfo/describe").await?;
@@ -221,12 +219,14 @@ impl<'a> BringUp<'a> {
     ///   short-circuits `BestMatching` callers to a single reply).
     pub async fn serve(&mut self, key: &str) -> Result<&Responder> {
         let parsed = zenoh::key_expr::KeyExpr::try_from(key.to_string())
-            .map_err(|e| anyhow!("declare queryable {key}: {e}"))?;
+            .map_err(|e| Error::bus("declare queryable", key, e))?;
         if parsed.is_wild() {
-            return Err(anyhow!(
-                "declare queryable {key}: a producer serves its own concrete \
-                 key, never a wildcard (RFC 05 §2.1 — replies are attributed \
-                 by their concrete reply key)"
+            // The caller handed us the key; nothing was declared.
+            return Err(Error::unaskable(
+                key.to_string(),
+                "a producer serves its own concrete key, never a wildcard \
+                 (RFC 05 §2.1 — replies are attributed by their concrete reply \
+                 key)",
             ));
         }
         let queryable = self
@@ -234,7 +234,7 @@ impl<'a> BringUp<'a> {
             .declare_queryable(parsed)
             .complete(false)
             .await
-            .map_err(|e| anyhow!("declare queryable {key}: {e}"))?;
+            .map_err(|e| Error::bus("declare queryable", key, e))?;
         self.responders.push(Responder {
             key: key.to_string(),
             queryable,
@@ -251,7 +251,7 @@ impl<'a> BringUp<'a> {
             .liveliness()
             .declare_token(alive_key.to_string())
             .await
-            .map_err(|e| anyhow!("declare alive token {alive_key}: {e}"))?;
+            .map_err(|e| Error::bus("declare alive token", alive_key, e))?;
         Ok(LiveProducer {
             token: Some(token),
             responders: self.responders,
@@ -296,7 +296,7 @@ impl LiveProducer {
             token
                 .undeclare()
                 .await
-                .map_err(|e| anyhow!("retract alive token: {e}"))?;
+                .map_err(|e| Error::bus("retract alive token", "", e))?;
         }
         let declared: Vec<(String, Responder)> = self
             .responders

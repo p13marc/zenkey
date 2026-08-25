@@ -182,3 +182,96 @@ pub struct SampleRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decode_error: Option<String>,
 }
+
+/// The wire's QoS axes as one stable token: `priority/congestion/reliability`,
+/// `+express` when set — lowercase, cut/awk-friendly, never `Debug`.
+///
+/// **The engine's word, not a frontend's.** This is the spelling
+/// [`SampleRow::qos_axes`] carries, which
+/// [`parse_row`](crate::tape::ingest::parse_row) reads back for
+/// `pub --from ndjson` and `.zrec` replay (RFC 09 §5.2) — so it is a
+/// round-trip contract, not a rendering choice. Both frontends used to spell
+/// it independently, fifteen literals each, agreeing by a comment that said
+/// they agreed (#353). The precedent is `LatencyReport::caveat`, worded here
+/// in #213 for exactly this reason: two frontends must not be able to
+/// describe one fact differently.
+pub fn qos_axes_token(
+    priority: zenoh::qos::Priority,
+    congestion_control: zenoh::qos::CongestionControl,
+    reliability: zenoh::qos::Reliability,
+    express: bool,
+) -> String {
+    use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
+    let p = match priority {
+        P::RealTime => "real_time",
+        P::InteractiveHigh => "interactive_high",
+        P::InteractiveLow => "interactive_low",
+        P::DataHigh => "data_high",
+        P::Data => "data",
+        P::DataLow => "data_low",
+        P::Background => "background",
+    };
+    let c = match congestion_control {
+        Cc::Drop => "drop",
+        Cc::Block => "block",
+        // `CongestionControl` is `#[non_exhaustive]` upstream: a variant this
+        // build has never heard of renders as `other` rather than as one of
+        // the two it knows.
+        _ => "other",
+    };
+    let r = match reliability {
+        R::BestEffort => "best_effort",
+        R::Reliable => "reliable",
+    };
+    format!("{p}/{c}/{r}{}", if express { "+express" } else { "" })
+}
+
+#[cfg(test)]
+mod qos_axes_tests {
+    use super::*;
+    use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
+
+    /// The token is a round-trip contract, not a rendering: `.zrec` replay
+    /// and `pub --from ndjson` read it back (RFC 09 §5.2). Pinned here rather
+    /// than in either frontend, because it is neither frontend's (#353).
+    #[test]
+    fn the_axes_token_is_stable() {
+        assert_eq!(
+            qos_axes_token(P::Data, Cc::Drop, R::BestEffort, false),
+            "data/drop/best_effort"
+        );
+        assert_eq!(
+            qos_axes_token(P::RealTime, Cc::Block, R::Reliable, true),
+            "real_time/block/reliable+express"
+        );
+        assert_eq!(
+            qos_axes_token(P::InteractiveHigh, Cc::Block, R::Reliable, false),
+            "interactive_high/block/reliable"
+        );
+        assert_eq!(
+            qos_axes_token(P::Background, Cc::Drop, R::BestEffort, true),
+            "background/drop/best_effort+express"
+        );
+    }
+
+    /// Every declared profile renders a token, and the five are distinct —
+    /// which is what makes declared-vs-observed a comparison at all (#120).
+    #[test]
+    fn every_qos_profile_has_a_distinct_axes_token() {
+        let tokens: Vec<String> = zenkey::QosProfile::ALL
+            .iter()
+            .map(|p| {
+                qos_axes_token(
+                    p.priority(),
+                    p.congestion_control(),
+                    p.reliability(),
+                    p.express(),
+                )
+            })
+            .collect();
+        let mut unique = tokens.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), tokens.len(), "{tokens:?}");
+    }
+}

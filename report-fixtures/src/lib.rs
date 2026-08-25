@@ -283,21 +283,21 @@ pub fn doctor_report() -> DoctorReport {
         findings: vec![
             DoctorFinding {
                 severity: DoctorSeverity::Error,
-                check: "slice-sync".into(),
+                check: CheckId::SliceSync,
                 subject: format!("{ORIGIN}/sysinfo"),
                 evidence: "does not serve state health".into(),
                 citation: Some("RFC 08 §6".into()),
             },
             DoctorFinding {
                 severity: DoctorSeverity::Warning,
-                check: "qos-observed-mismatch".into(),
+                check: CheckId::QosObservedMismatch,
                 subject: format!("{ORIGIN}/sysinfo/health"),
                 evidence: "declared refreshed, observed data/drop/reliable".into(),
                 citation: None,
             },
             DoctorFinding {
                 severity: DoctorSeverity::Info,
-                check: "timestamp-stamped-elsewhere".into(),
+                check: CheckId::TimestampStampedElsewhere,
                 subject: "fleet".into(),
                 evidence: "stamped by 1 node that is not the publisher".into(),
                 citation: Some("RFC 09 §5.1 O7".into()),
@@ -372,7 +372,7 @@ pub fn field_report() -> FieldReport {
         ],
         findings: vec![DoctorFinding {
             severity: DoctorSeverity::Warning,
-            check: "field-stuck".into(),
+            check: CheckId::FieldStuck,
             subject: format!("{key} · temperature_c"),
             evidence: "value 21.5 unchanged across 40 sample(s) spanning 29.5s — at \
                        least 3× the declared ttl_s 5s — while the key kept publishing. \
@@ -1164,10 +1164,12 @@ pub fn attachments() -> Vec<zenkey_fleet::OriginAttachment> {
 /// never read as a bug (RFC 08 §6.1), and `NotAsked` rungs that say why they
 /// were not asked (RFC 09 §5.1 O4) — under the `Healthy` verdict (exit 1).
 pub fn why_report() -> zenkey_fleet::WhyReport {
-    use zenkey_fleet::report::{Rung, RungAnswer};
-    let rung = |id: &'static str, question: &'static str, answer, evidence: &[&str]| Rung {
+    use zenkey_fleet::report::{Rung, RungAnswer, RungId};
+    // The question is the id's own now (#347), so this fixture no longer
+    // restates it — and can no longer restate it *wrongly*.
+    let rung = |id: RungId, answer, evidence: &[&str]| Rung {
         id,
-        question,
+        question: id.question(),
         answer,
         evidence: evidence.iter().map(|e| (*e).to_string()).collect(),
     };
@@ -1176,14 +1178,12 @@ pub fn why_report() -> zenkey_fleet::WhyReport {
         base: String::new(),
         rungs: vec![
             rung(
-                "scope-reach",
-                "does a `**` explorer scope reach this key?",
+                RungId::ScopeReach,
                 RungAnswer::Established,
                 &["the `v1/**` explorer scope intersects this key"],
             ),
             rung(
-                "key-parse",
-                "does it parse as a v1 key under the base?",
+                RungId::KeyParse,
                 RungAnswer::Established,
                 &[
                     "origin h-3fa9c2d41b7e (host), class telemetry, producer sysinfo, \
@@ -1191,20 +1191,17 @@ pub fn why_report() -> zenkey_fleet::WhyReport {
                 ],
             ),
             rung(
-                "registry-declared",
-                "does a loaded registry slice declare it?",
+                RungId::RegistryDeclared,
                 RungAnswer::Established,
                 &["declared as disk/{mount}/used (TelemetryPoint)"],
             ),
             rung(
-                "origin-alive",
-                "is the origin on the liveliness roster?",
+                RungId::OriginAlive,
                 RungAnswer::Established,
                 &["h-3fa9c2d41b7e is on the roster with producer(s): sysinfo"],
             ),
             rung(
-                "publisher-declared",
-                "did any session declare a matching publisher?",
+                RungId::PublisherDeclared,
                 RungAnswer::NotEstablished {
                     reason: "declared, alive, never published — publishers declare \
                              lazily (RFC 08 §6.1): no publisher declaration exists \
@@ -1215,8 +1212,7 @@ pub fn why_report() -> zenkey_fleet::WhyReport {
                 &[],
             ),
             rung(
-                "storage-coverage",
-                "is a storage configured to capture it?",
+                RungId::StorageCoverage,
                 RungAnswer::Established,
                 &[
                     "storage latest@aabbccdd (v1/*/telemetry/**) captures every key \
@@ -1224,8 +1220,7 @@ pub fn why_report() -> zenkey_fleet::WhyReport {
                 ],
             ),
             rung(
-                "stored-value",
-                "does a stored value answer a bounded GET?",
+                RungId::StoredValue,
                 RungAnswer::NotEstablished {
                     reason: "none of get, @adv cache returned a value — which is \
                              silence, not proof no value exists (RFC 05 §3.1)"
@@ -1234,20 +1229,17 @@ pub fn why_report() -> zenkey_fleet::WhyReport {
                 &[],
             ),
             rung(
-                "sample-freshness",
-                "is the last known sample within its declared ttl?",
+                RungId::SampleFreshness,
                 RungAnswer::NotAsked,
                 &["no sample in hand to age — the stored-value rung found none"],
             ),
             rung(
-                "admin-answered",
-                "is the admin space answering at all?",
+                RungId::AdminAnswered,
                 RungAnswer::Established,
                 &["1 admin root document(s) answered @/*/*"],
             ),
             rung(
-                "wire-heard",
-                "did the key speak during a listen window?",
+                RungId::WireHeard,
                 RungAnswer::NotAsked,
                 &["not listened — the data plane costs one deliberate action \
                      (RFC 09 §5.1, v1.18 frugality); pass --for <SECS> to watch \

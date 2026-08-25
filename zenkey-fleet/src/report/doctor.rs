@@ -6,8 +6,114 @@
 //! how long, and — crucially — what was **dropped** (RFC 09 §5.1 O6): a
 //! clean report over a lossy window is not a clean fleet.
 
+use std::fmt;
+
 use super::asked::{Asked, u64_is_zero};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+/// Every check [`run_doctor`](crate::judge::doctor::run_doctor) can emit.
+///
+/// **Stable API**: scripts key on these through `--format json`, and the GUI
+/// keys deltas on them. New checks append; nothing renames one — which is
+/// exactly why this is an enum and no longer a `[&str; 21]` beside a
+/// `check: String`. The wire spelling is unchanged (kebab-case, one token per
+/// variant), and `check_ids_are_stable` still pins the list (#347).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CheckId {
+    SliceParse,
+    SliceSync,
+    IntrospectCoverage,
+    AdminUnreachable,
+    RouterVersionSkew,
+    DescribeTotality,
+    SchemaDrift,
+    DescribeMissing,
+    StaleState,
+    UnstampedState,
+    StorageCoverage,
+    // The `--for` passive phase (#161) — traffic judged as it rides.
+    PayloadUndecodable,
+    PayloadInvalid,
+    QosObservedMismatch,
+    UnregisteredTraffic,
+    RateOverDeclared,
+    TimestampStampedElsewhere,
+    /// Key-population budgets (#221): declared `cardinality` vs the observed
+    /// expansion count, per origin. `{path...}` families are exempt and say so.
+    CardinalityOverDeclared,
+    // Field intelligence (#223): per-dotted-path judgement over the listen
+    // window — the failure modes per-sample validation cannot see.
+    FieldVanished,
+    FieldStuck,
+    FieldNew,
+}
+
+impl CheckId {
+    /// Every check id, in the order the doctor reports them.
+    pub const ALL: [CheckId; 21] = [
+        CheckId::SliceParse,
+        CheckId::SliceSync,
+        CheckId::IntrospectCoverage,
+        CheckId::AdminUnreachable,
+        CheckId::RouterVersionSkew,
+        CheckId::DescribeTotality,
+        CheckId::SchemaDrift,
+        CheckId::DescribeMissing,
+        CheckId::StaleState,
+        CheckId::UnstampedState,
+        CheckId::StorageCoverage,
+        CheckId::PayloadUndecodable,
+        CheckId::PayloadInvalid,
+        CheckId::QosObservedMismatch,
+        CheckId::UnregisteredTraffic,
+        CheckId::RateOverDeclared,
+        CheckId::TimestampStampedElsewhere,
+        CheckId::CardinalityOverDeclared,
+        CheckId::FieldVanished,
+        CheckId::FieldStuck,
+        CheckId::FieldNew,
+    ];
+
+    /// The wire token, exactly as it serializes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CheckId::SliceParse => "slice-parse",
+            CheckId::SliceSync => "slice-sync",
+            CheckId::IntrospectCoverage => "introspect-coverage",
+            CheckId::AdminUnreachable => "admin-unreachable",
+            CheckId::RouterVersionSkew => "router-version-skew",
+            CheckId::DescribeTotality => "describe-totality",
+            CheckId::SchemaDrift => "schema-drift",
+            CheckId::DescribeMissing => "describe-missing",
+            CheckId::StaleState => "stale-state",
+            CheckId::UnstampedState => "unstamped-state",
+            CheckId::StorageCoverage => "storage-coverage",
+            CheckId::PayloadUndecodable => "payload-undecodable",
+            CheckId::PayloadInvalid => "payload-invalid",
+            CheckId::QosObservedMismatch => "qos-observed-mismatch",
+            CheckId::UnregisteredTraffic => "unregistered-traffic",
+            CheckId::RateOverDeclared => "rate-over-declared",
+            CheckId::TimestampStampedElsewhere => "timestamp-stamped-elsewhere",
+            CheckId::CardinalityOverDeclared => "cardinality-over-declared",
+            CheckId::FieldVanished => "field-vanished",
+            CheckId::FieldStuck => "field-stuck",
+            CheckId::FieldNew => "field-new",
+        }
+    }
+
+    /// Read a check id a caller supplied — `doctor --transitions`, a
+    /// `check expect` condition, a script's filter.
+    pub fn parse(token: &str) -> Option<CheckId> {
+        CheckId::ALL.into_iter().find(|c| c.as_str() == token)
+    }
+}
+
+impl fmt::Display for CheckId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 /// How bad a doctor finding is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -28,9 +134,10 @@ pub enum DoctorSeverity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorFinding {
     pub severity: DoctorSeverity,
-    /// Stable check id (kebab-case), e.g. `slice-sync`, `introspect-coverage`,
-    /// `schema-drift`, `stale-state`.
-    pub check: String,
+    /// Which check fired. Serializes to the same kebab-case token it always
+    /// has; it is a type now so a typo is a compile error rather than a
+    /// finding nothing matches (#347).
+    pub check: CheckId,
     /// What the finding is about (producer, key, or mesh-level subject).
     pub subject: String,
     /// The observed evidence, human-readable.
@@ -132,7 +239,7 @@ mod tests {
         let report = DoctorReport {
             findings: vec![DoctorFinding {
                 severity: DoctorSeverity::Error,
-                check: "slice-sync".into(),
+                check: CheckId::SliceSync,
                 subject: "h-3fa9c2d41b7e/sysinfo".into(),
                 evidence: "registry version differs: served 1.0, local 2.0".into(),
                 citation: Some("RFC 08 §6".into()),
@@ -253,5 +360,58 @@ mod tests {
         };
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["observation"]["facts_evicted"], 5);
+    }
+}
+
+#[cfg(test)]
+mod check_id_tests {
+    use super::*;
+
+    /// The id vocabulary is API: additions append, nothing renames. If this
+    /// test fails you are renaming a shipped check id — don't.
+    ///
+    /// It asserts the *wire* spelling, not the variant names, which is the
+    /// half that is promised: #347 turned a `[&str; 21]` into an enum, and
+    /// this is what proves the turn cost nothing on the wire.
+    #[test]
+    fn check_ids_are_stable() {
+        assert_eq!(
+            CheckId::ALL.map(CheckId::as_str),
+            [
+                "slice-parse",
+                "slice-sync",
+                "introspect-coverage",
+                "admin-unreachable",
+                "router-version-skew",
+                "describe-totality",
+                "schema-drift",
+                "describe-missing",
+                "stale-state",
+                "unstamped-state",
+                "storage-coverage",
+                "payload-undecodable",
+                "payload-invalid",
+                "qos-observed-mismatch",
+                "unregistered-traffic",
+                "rate-over-declared",
+                "timestamp-stamped-elsewhere",
+                "cardinality-over-declared",
+                "field-vanished",
+                "field-stuck",
+                "field-new",
+            ]
+        );
+    }
+
+    /// `as_str`, serde and `parse` are one vocabulary, not three.
+    #[test]
+    fn every_check_id_round_trips_through_serde_and_parse() {
+        for id in CheckId::ALL {
+            let json = serde_json::to_string(&id).unwrap();
+            assert_eq!(json, format!("\"{}\"", id.as_str()));
+            assert_eq!(serde_json::from_str::<CheckId>(&json).unwrap(), id);
+            assert_eq!(CheckId::parse(id.as_str()), Some(id));
+        }
+        assert_eq!(CheckId::parse("slice-sinc"), None);
     }
 }

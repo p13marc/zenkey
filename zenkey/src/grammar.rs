@@ -87,6 +87,11 @@ pub enum KeyError {
     MalformedBlobKey(&'static str, &'static str),
     #[error("not a v1 key: {0}")]
     Parse(String),
+    /// A class chunk outside RFC 04 §1's three. Its own variant rather than
+    /// a [`Parse`](KeyError::Parse): "not a v1 key" is the wrong sentence
+    /// for `--class alerts`, which is not a key at all.
+    #[error("unknown class {chunk:?} — the classes are {} (RFC 04 §1)", Class::chunks().join(", "))]
+    UnknownClass { chunk: String },
 }
 
 // Chunk lexical rules (RFC 03 §2, §1.3). The registry linter (`zenkey-build`)
@@ -316,6 +321,19 @@ pub enum Class {
 }
 
 impl Class {
+    /// Every data class, in RFC 04 §1's order. The vocabulary is closed, so
+    /// anything built from this cannot drift from the enum — the same
+    /// discipline `QosProfile::ALL` has carried since v1.5, and the reason
+    /// three separate `["telemetry", "state", "events"]` arrays could be
+    /// deleted (#351).
+    pub const ALL: [Class; 3] = [Class::Telemetry, Class::State, Class::Events];
+
+    /// The classes, as the chunks they appear as — for an error message that
+    /// lists them, or a picker.
+    pub fn chunks() -> [&'static str; 3] {
+        [CLASS_TELEMETRY, CLASS_STATE, CLASS_EVENTS]
+    }
+
     pub fn chunk(self) -> &'static str {
         match self {
             Class::Telemetry => CLASS_TELEMETRY,
@@ -331,6 +349,25 @@ impl Class {
             CLASS_EVENTS => Some(Class::Events),
             _ => None,
         }
+    }
+}
+
+impl std::str::FromStr for Class {
+    type Err = KeyError;
+
+    /// Parse a class chunk — for a CLI flag, a config field, anywhere a
+    /// human names one. The error lists the vocabulary, so a caller does not
+    /// have to (#351).
+    fn from_str(s: &str) -> Result<Self, KeyError> {
+        Class::from_chunk(s).ok_or_else(|| KeyError::UnknownClass {
+            chunk: s.to_string(),
+        })
+    }
+}
+
+impl fmt::Display for Class {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.chunk())
     }
 }
 

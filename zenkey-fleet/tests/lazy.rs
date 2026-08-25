@@ -47,7 +47,7 @@ async fn watch_and_unwatch_are_visible_at_the_routing_layer() {
 
     // Watch: the publisher sees a subscriber appear (event-driven, no sleep).
     let id = monitor.watch("demo/lazy/**").await.expect("watch");
-    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+    let ev = tokio::time::timeout(util::SETTLE, matching.recv_async())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");
@@ -55,7 +55,7 @@ async fn watch_and_unwatch_are_visible_at_the_routing_layer() {
 
     // Traffic lands in stats.
     publisher.put("hello").await.unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(util::SETTLE, async {
         loop {
             if monitor.core().with_stats(|s| s.len()) > 0 {
                 break;
@@ -69,7 +69,7 @@ async fn watch_and_unwatch_are_visible_at_the_routing_layer() {
     // Unwatch: undeclare is acknowledged, the publisher's matching flips
     // back, and the stats retire under the O6 counter.
     monitor.unwatch(id).await.expect("unwatch");
-    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+    let ev = tokio::time::timeout(util::SETTLE, matching.recv_async())
         .await
         .expect("unmatching event within 5s")
         .expect("listener alive");
@@ -115,14 +115,14 @@ async fn shutdown_undeclares_every_watch() {
     // the last of them is gone, so this proves the drain, not one undeclare.
     monitor.watch("demo/down/**").await.expect("watch");
     monitor.watch("demo/**").await.expect("second watch");
-    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+    let ev = tokio::time::timeout(util::SETTLE, matching.recv_async())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");
     assert!(ev.matching(), "the watches declared real subscribers");
 
     monitor.shutdown().await.expect("acknowledged teardown");
-    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+    let ev = tokio::time::timeout(util::SETTLE, matching.recv_async())
         .await
         .expect("unmatching event within 5s")
         .expect("listener alive");
@@ -167,7 +167,7 @@ async fn a_failed_watch_takes_down_the_ones_that_came_up() {
         .watching(["demo/half/**"])
         .await
         .expect("the first selector declares");
-    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+    let ev = tokio::time::timeout(util::SETTLE, matching.recv_async())
         .await
         .expect("matching event within 5s")
         .expect("listener alive");
@@ -181,7 +181,7 @@ async fn a_failed_watch_takes_down_the_ones_that_came_up() {
         .expect_err("an empty chunk is not a key expression")
         .to_string();
     assert!(err.contains("subscribe"), "{err}");
-    let ev = tokio::time::timeout(Duration::from_secs(5), matching.recv_async())
+    let ev = tokio::time::timeout(util::SETTLE, matching.recv_async())
         .await
         .expect("unmatching event within 5s")
         .expect("listener alive");

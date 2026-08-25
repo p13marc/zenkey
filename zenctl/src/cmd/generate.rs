@@ -126,7 +126,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
 
     let session = args.session().await?;
     let slices = args.slice_set().await?;
-    let store = zenkey_fleet::model::decode::SchemaStore::new(args.base(), args.timeout());
+    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
     let set = match schema_set {
         Some(path) => Some(
             zenkey::schema::SchemaSet::parse(&std::fs::read_to_string(path)?).map_err(|e| {
@@ -170,7 +170,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
     };
 
     let fleet = args.fleet(&session);
-    let plan = zenkey_fleet::tape::generate::build_plan(
+    let plan = zenkey_fleet::build_plan(
         Some(&fleet),
         &store,
         &slices,
@@ -212,14 +212,8 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
 
     // The RFC 08 halves for the impersonated producers, on request.
     let mock = if serve_describe {
-        let m = zenkey_fleet::tape::generate::serve_describe(
-            &fleet,
-            &origin,
-            &slices,
-            set.as_ref(),
-            producer,
-        )
-        .await?;
+        let m =
+            zenkey_fleet::serve_describe(&fleet, &origin, &slices, set.as_ref(), producer).await?;
         eprintln!(
             "serving introspect{} on {} impersonated @rpc key(s)",
             if set.is_some() { "+describe" } else { "" },
@@ -230,7 +224,7 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
         None
     };
 
-    let report = zenkey_fleet::tape::generate::run_gen(&fleet, &plan, &spec).await?;
+    let report = zenkey_fleet::run_gen(&fleet, &plan, &spec).await?;
     drop(mock);
 
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;

@@ -114,7 +114,7 @@ fn a_forgotten_deployment_needs_no_merge_cache_reset() {
 
 /// A tick that changes nothing about the key set or the watch set.
 fn tick(keys: usize, evicted: u64, unwatched: u64, watched: &Arc<[String]>) -> BusTick {
-    let stats = zenkey_fleet::model::stats::StatsTable::new();
+    let stats = zenkey_fleet::StatsTable::new();
     BusTick {
         tree: Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats)),
         samples: Vec::new(),
@@ -225,7 +225,7 @@ fn a_presentation_change_does_not_re_merge_the_tree() {
 
     // A new observed snapshot is a different tree, and must not be served
     // from the cache.
-    let stats = zenkey_fleet::model::stats::StatsTable::new();
+    let stats = zenkey_fleet::StatsTable::new();
     app.obs.observed = Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats));
     app.tree.reflatten(&app.dep, &app.obs);
     assert!(
@@ -497,7 +497,7 @@ fn traffic(epoch: std::time::Instant) -> Vec<zenkey_fleet::SampleView> {
 fn canonical(app: &Zengui) -> String {
     use std::fmt::Write;
     let mut out = String::new();
-    fn node(out: &mut String, path: &str, n: &zenkey_fleet::model::tree::TreeNode) {
+    fn node(out: &mut String, path: &str, n: &zenkey_fleet::TreeNode) {
         writeln!(
             out,
             "{path} c={} b={} r={:016x} sc={} sb={} sr={:016x} sk={}",

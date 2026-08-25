@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use crate::{Error, Result};
 use zenkey::grammar::{self, ContentHash, Origin};
 use zenkey::{RegistrySlice, RemoteOrigin, ServiceOrigin};
 use zenoh::qos::Priority;
@@ -184,12 +184,13 @@ async fn probe_tier2(
                     Vec::new(),
                 ));
             }
-            let parsed: zblob::Hash = hash.as_str().parse().map_err(|e| {
-                anyhow!("`{hash}` is not a content address the reference client accepts: {e}")
-            })?;
+            let parsed: zblob::Hash = hash
+                .as_str()
+                .parse()
+                .map_err(|e| Error::unaskable_from(hash.to_string(), e))?;
             let have_key = zblob::keys::store_have_key(&probe_prefix, zblob::HashAlgo::Blake3);
             let want = zblob::wire::encode(&zblob::wire::WantList::new(vec![parsed]))
-                .map_err(|e| anyhow!("encoding the want-list: {e}"))?;
+                .map_err(|e| Error::Internal(format!("encoding the want-list: {e}")))?;
             let answers = fleet_get(
                 fleet,
                 &have_key,
@@ -222,9 +223,10 @@ async fn probe_tier2(
             // the fetch agreeing about what is askable, instead of the probe
             // returning an honest-looking "nobody holds it" for a root no
             // holder could ever have.
-            let parsed: zblob::Hash = root.as_str().parse().map_err(|e| {
-                anyhow!("`{root}` is not a content address the reference client accepts: {e}")
-            })?;
+            let parsed: zblob::Hash = root
+                .as_str()
+                .parse()
+                .map_err(|e| Error::unaskable_from(root.to_string(), e))?;
             let have_key = zblob::keys::tree_have_key(&probe_prefix, &parsed.to_string());
             let answers = fleet_get(
                 fleet,
@@ -256,9 +258,9 @@ async fn probe_tier2(
             });
             Ok(report(vec![have_key], None, holders))
         }
-        BlobTarget::Artifact { .. } => {
-            bail!("tier-1 target reached the tier-2 probe path — a bug in blob_probe")
-        }
+        BlobTarget::Artifact { .. } => Err(Error::Internal(
+            "tier-1 target reached the tier-2 probe path — a bug in blob_probe".into(),
+        )),
     }
 }
 
@@ -324,11 +326,11 @@ async fn write_atomically(dest: &Path, bytes: &[u8]) -> Result<()> {
     let name = dest
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .ok_or_else(|| anyhow!("`{}` names no file to write", dest.display()))?;
+        .ok_or_else(|| Error::unaskable(dest.display().to_string(), "names no file to write"))?;
     if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
         tokio::fs::create_dir_all(parent)
             .await
-            .with_context(|| format!("creating {}", parent.display()))?;
+            .map_err(|e| Error::io(parent, e))?;
     }
     let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = dest.with_file_name(format!(".{name}.{}.{seq}.zenkey-tmp", std::process::id()));
@@ -339,11 +341,11 @@ async fn write_atomically(dest: &Path, bytes: &[u8]) -> Result<()> {
     };
     if let Err(e) = write.await {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e).with_context(|| format!("writing {}", tmp.display()));
+        return Err(Error::io(&tmp, e));
     }
     if let Err(e) = tokio::fs::rename(&tmp, dest).await {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e).with_context(|| format!("moving into place at {}", dest.display()));
+        return Err(Error::io(dest, e));
     }
     Ok(())
 }
@@ -481,18 +483,12 @@ pub async fn blob_fetch(
     };
 
     let prefix = grammar::with_base(base, target.prefix_at(&origin).as_str());
-    let key = grammar::with_base(
-        base,
-        target
-            .key_at(&origin)
-            .context("building the concrete blob key")?
-            .as_str(),
-    );
+    let key = grammar::with_base(base, target.key_at(&origin)?.as_str());
 
     let prefix = zblob::QueryPrefix::new(prefix).map_err(|e| {
-        anyhow!(
-            "`{origin_chunk}`'s artifact prefix is not queryable: {e}",
-            origin_chunk = origin.chunk()
+        Error::unaskable(
+            format!("{}'s artifact prefix", origin.chunk()),
+            format!("is not queryable: {e}"),
         )
     })?;
     let client = zblob::BlobClient::builder(session, prefix)
@@ -510,9 +506,10 @@ pub async fn blob_fetch(
 
     let request = match &spec.root {
         Some(root) => {
-            let parsed: zblob::Hash = root.as_str().parse().map_err(|e| {
-                anyhow!("`{root}` is not a content root the reference client accepts: {e}")
-            })?;
+            let parsed: zblob::Hash = root
+                .as_str()
+                .parse()
+                .map_err(|e| Error::unaskable_from(root.to_string(), e))?;
             zblob::DownloadRequest::pinned(id, parsed)
         }
         None => zblob::DownloadRequest::new(id),
@@ -529,7 +526,7 @@ pub async fn blob_fetch(
         // produce — a hash mismatch above all — says which origin produced it.
         // A verification failure that does not name its source is an
         // unactionable one.
-        .map_err(|e| anyhow!("{}: {e}", origin.chunk()))?;
+        .map_err(|e| Error::bus("fetch", origin.chunk(), e.to_string()))?;
 
     Ok(BlobFetchReport {
         origin: origin.chunk().to_string(),
@@ -567,11 +564,15 @@ async fn fetch_tier2(
     match target {
         BlobTarget::Store { algo, hash } => {
             if algo != zblob::Hash::ALGO {
-                bail!(
-                    "`{}` cannot be fetched by this build: the reference client speaks `{}` only (RFC 07 §2.4 — addressing is per-algorithm)",
+                return Err(Error::unaskable(
                     target.spelling(),
-                    zblob::Hash::ALGO
-                );
+                    format!(
+                        "cannot be fetched by this build: the reference client \
+                         speaks `{}` only (RFC 07 §2.4 — addressing is \
+                         per-algorithm)",
+                        zblob::Hash::ALGO
+                    ),
+                ));
             }
             // The key *is* the pin (RFC 07 §2.1), so a caller-supplied root
             // is either redundant or a contradiction — and a contradiction
@@ -579,28 +580,34 @@ async fn fetch_tier2(
             if let Some(pin) = &spec.root
                 && pin != hash
             {
-                bail!(
-                    "the pinned root {pin} contradicts the content address {hash}: a store fetch is pinned by its key (RFC 07 §2.1) — drop the pin, or fetch the address you mean"
-                );
+                return Err(Error::unaskable(
+                    format!("the pinned root {pin}"),
+                    format!(
+                        "contradicts the content address {hash}: a store fetch \
+                         is pinned by its key (RFC 07 §2.1) — drop the pin, or \
+                         fetch the address you mean"
+                    ),
+                ));
             }
-            let parsed: zblob::Hash = hash.as_str().parse().map_err(|e| {
-                anyhow!("`{hash}` is not a content address the reference client accepts: {e}")
-            })?;
+            let parsed: zblob::Hash = hash
+                .as_str()
+                .parse()
+                .map_err(|e| Error::unaskable_from(hash.to_string(), e))?;
             let prefix_str = grammar::with_base(
                 base,
                 grammar::blob_tier_prefix(origin, grammar::BlobTier::Store).as_str(),
             );
             let prefix = zblob::QueryPrefix::new(prefix_str.clone())
-                .map_err(|e| anyhow!("`{prefix_str}` is not a queryable prefix: {e}"))?;
+                .map_err(|e| Error::unaskable_from(prefix_str.to_string(), e))?;
             let key = zblob::keys::store_key(prefix.as_str(), zblob::HashAlgo::Blake3, &parsed);
             // Refuse *before* fetching — 0.3's own `Overwrite::Refuse`
             // semantics: a destination that will be refused is not worth a
             // byte of transfer.
             if !spec.overwrite && tokio::fs::try_exists(dest).await.unwrap_or(false) {
-                bail!(
-                    "`{}` already exists — pass overwrite to replace it",
-                    dest.display()
-                );
+                return Err(Error::unaskable(
+                    dest.display().to_string(),
+                    "already exists — pass overwrite to replace it",
+                ));
             }
             let client = zblob::StoreClient::builder(session, prefix)
                 .query_timeout(spec.timeout)
@@ -619,12 +626,14 @@ async fn fetch_tier2(
                         received: 0,
                         total: 1,
                     });
-                    bail!("{}: cancelled", origin.chunk());
+                    return Err(Error::bus("fetch", origin.chunk(), "cancelled"));
                 }
                 // The origin is named for the same reason blob_fetch names
                 // it: a verification failure that does not say which origin
                 // produced it is unactionable.
-                Some(fetched) => fetched.map_err(|e| anyhow!("{}: {e}", origin.chunk()))?,
+                Some(fetched) => {
+                    fetched.map_err(|e| Error::bus("fetch", origin.chunk(), e.to_string()))?
+                }
             };
             on_progress(BlobProgress::Chunk {
                 index: 0,
@@ -653,13 +662,17 @@ async fn fetch_tier2(
                 priority: priority_name(FETCH_PRIORITY).to_string(),
             })
         }
-        BlobTarget::Tree { .. } => bail!(
-            "`{}` is inspected, not downloaded, by this explorer: a validated index summary needs no content store (RFC 07 §2.3, v1.17) — the frontends route tree targets to the tree-index report; materializing a tree is the reference client's `download_tree`, which needs a store this build deliberately does not keep",
-            target.spelling()
-        ),
-        BlobTarget::Artifact { .. } => {
-            bail!("tier-1 target reached the tier-2 fetch path — a bug in blob_fetch")
-        }
+        BlobTarget::Tree { .. } => Err(Error::unaskable(
+            target.spelling(),
+            "is inspected, not downloaded, by this explorer: a validated index \
+             summary needs no content store (RFC 07 §2.3, v1.17) — the \
+             frontends route tree targets to the tree-index report; \
+             materializing a tree is the reference client's `download_tree`, \
+             which needs a store this build deliberately does not keep",
+        )),
+        BlobTarget::Artifact { .. } => Err(Error::Internal(
+            "tier-1 target reached the tier-2 fetch path — a bug in blob_fetch".into(),
+        )),
     }
 }
 
@@ -685,12 +698,13 @@ pub async fn blob_tree_index(
         grammar::blob_tier_prefix(&origin, grammar::BlobTier::Store).as_str(),
     );
     let tree_prefix = zblob::QueryPrefix::new(tree_str.clone())
-        .map_err(|e| anyhow!("`{tree_str}` is not a queryable prefix: {e}"))?;
+        .map_err(|e| Error::unaskable_from(tree_str.to_string(), e))?;
     let store_prefix = zblob::QueryPrefix::new(store_str.clone())
-        .map_err(|e| anyhow!("`{store_str}` is not a queryable prefix: {e}"))?;
-    let parsed: zblob::Hash = root.as_str().parse().map_err(|e| {
-        anyhow!("`{root}` is not a content address the reference client accepts: {e}")
-    })?;
+        .map_err(|e| Error::unaskable_from(store_str.to_string(), e))?;
+    let parsed: zblob::Hash = root
+        .as_str()
+        .parse()
+        .map_err(|e| Error::unaskable_from(root.to_string(), e))?;
     let key = zblob::keys::tree_key(tree_prefix.as_str(), root.as_str());
     // No priority setter: the reference client defaults to data-low, which is
     // FETCH_PRIORITY — the §2.6 conformant untouched default.
@@ -700,7 +714,7 @@ pub async fn blob_tree_index(
     let index = client
         .fetch_index_by_root(&parsed)
         .await
-        .map_err(|e| anyhow!("{}: {e}", origin.chunk()))?;
+        .map_err(|e| Error::bus("fetch", origin.chunk(), e.to_string()))?;
     Ok(crate::report::BlobTreeIndexReport {
         origin: origin.chunk().to_string(),
         key,
@@ -720,13 +734,18 @@ pub async fn blob_tree_index(
 fn parse_origin(origin: &str) -> Result<Origin> {
     if let Some(service) = origin.strip_prefix('@') {
         let _ = service;
-        let svc = ServiceOrigin::new(origin)
-            .map_err(|e| anyhow!("`{origin}` is not a service origin: {e}"))?;
+        let svc =
+            ServiceOrigin::new(origin).map_err(|e| Error::unaskable_from(origin.to_string(), e))?;
         return Ok(Origin::Service(svc));
     }
     let host = RemoteOrigin::parse(origin).map_err(|e| {
-        anyhow!(
-            "`{origin}` is not one concrete origin: {e}. A fetch names exactly one holder (RFC 07 §2.5) — probe first, then fetch from an origin the probe reported."
+        Error::unaskable(
+            origin.to_string(),
+            format!(
+                "is not one concrete origin: {e}. A fetch names exactly one \
+                 holder (RFC 07 §2.5) — probe first, then fetch from an origin \
+                 the probe reported."
+            ),
         )
     })?;
     Ok(Origin::Host(host.host_id().clone()))

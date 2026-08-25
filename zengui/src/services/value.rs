@@ -39,7 +39,7 @@ pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
 /// itself, never omitted and never dressed as `NoSchema` (#164, #246).
 #[allow(clippy::too_many_arguments)]
 pub fn decode(
-    store: Arc<zenkey_fleet::model::decode::SchemaStore>,
+    store: Arc<zenkey_fleet::SchemaStore>,
     session: zenoh::Session,
     slices: Option<Arc<zenkey_fleet::SliceSet>>,
     base: String,
@@ -50,7 +50,7 @@ pub fn decode(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let d = zenkey_fleet::model::decode::decode_sample(
+            let d = zenkey_fleet::decode_sample(
                 &zenkey_fleet::Fleet::new(&session, &base),
                 &store,
                 slices.as_deref(),
@@ -78,7 +78,7 @@ pub fn decode(
 /// producer's `describe` on a first miss. The render paths only ever *read*
 /// the cache this lands in.
 pub fn validate(
-    store: Arc<zenkey_fleet::model::decode::SchemaStore>,
+    store: Arc<zenkey_fleet::SchemaStore>,
     session: zenoh::Session,
     slices: Option<Arc<zenkey_fleet::SliceSet>>,
     base: String,
@@ -89,7 +89,7 @@ pub fn validate(
             let fleet = zenkey_fleet::Fleet::new(&session, &base);
             let mut out = Vec::with_capacity(batch.len());
             for (key, encoding, bytes) in batch {
-                let d = zenkey_fleet::model::decode::decode_sample(
+                let d = zenkey_fleet::decode_sample(
                     &fleet,
                     &store,
                     slices.as_deref(),
@@ -117,19 +117,19 @@ pub fn field(
     session: zenoh::Session,
     base: String,
     slices: Option<Arc<zenkey_fleet::SliceSet>>,
-    store: Arc<zenkey_fleet::model::decode::SchemaStore>,
+    store: Arc<zenkey_fleet::SchemaStore>,
     key: String,
     window: std::time::Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet::judge::field::FieldSpec {
+            let spec = zenkey_fleet::FieldSpec {
                 selector: key,
                 window,
-                max_paths: zenkey_fleet::judge::field::DEFAULT_MAX_PATHS,
+                max_paths: zenkey_fleet::DEFAULT_MAX_PATHS,
             };
             let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            zenkey_fleet::judge::field::run_field(&fleet, slices.as_deref(), &store, &spec)
+            zenkey_fleet::run_field(&fleet, slices.as_deref(), &store, &spec)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
@@ -160,12 +160,12 @@ pub fn why(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet::judge::why::WhySpec {
+            let spec = zenkey_fleet::WhySpec {
                 timeout,
                 listen: None,
             };
             let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            zenkey_fleet::judge::why::run_why(&fleet, &key, slices.as_deref(), &spec)
+            zenkey_fleet::run_why(&fleet, &key, slices.as_deref(), &spec)
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
@@ -184,7 +184,7 @@ pub fn why(
 /// *is* an answer.
 pub fn request_schema(
     session: zenoh::Session,
-    store: Arc<zenkey_fleet::model::decode::SchemaStore>,
+    store: Arc<zenkey_fleet::SchemaStore>,
     producer: String,
     request: String,
 ) -> Task<Message> {

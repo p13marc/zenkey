@@ -34,7 +34,7 @@ async fn a_watched_sample_carries_its_attachment() {
         .expect("declare");
     let matching = publication.matching_events().await.expect("events");
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")
@@ -51,7 +51,7 @@ async fn a_watched_sample_carries_its_attachment() {
 
     let mut views = Vec::new();
     while views.len() < 2 {
-        let item = tokio::time::timeout(Duration::from_secs(5), events.recv())
+        let item = tokio::time::timeout(util::SETTLE, events.recv())
             .await
             .expect("event within 5s")
             .expect("stream alive");
@@ -142,7 +142,7 @@ async fn a_fetched_value_carries_the_attachment() {
 
     // The fetch's window subscriber raises the badge; then publish into it.
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")

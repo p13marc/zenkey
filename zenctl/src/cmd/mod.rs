@@ -87,7 +87,7 @@ pub fn selector_of(sel: &SelectorArgs, args: &Bus) -> Result<String> {
         None => compose_selector(
             args,
             sel.origin.as_deref(),
-            sel.class.as_deref(),
+            sel.class,
             sel.producer.as_deref(),
         ),
     }
@@ -99,20 +99,13 @@ pub fn selector_of(sel: &SelectorArgs, args: &Bus) -> Result<String> {
 pub fn compose_selector(
     args: &Bus,
     origin: Option<&str>,
-    class: Option<&str>,
+    class: Option<zenkey::Class>,
     producer: Option<&str>,
 ) -> Result<String> {
-    if let Some(c) = class
-        && !["telemetry", "state", "events"].contains(&c)
-    {
-        // A closed vocabulary the user missed: exit 2, `--qos`'s neighbour
-        // (`crate::exit`).
-        return Err(unaskable!(
-            "unknown class {c:?} — the classes are telemetry, state, events (RFC 04 §1)"
-        ));
-    }
+    // No validation here: `--class` is a `zenkey::Class` and clap rejected
+    // anything else at the edge, with the vocabulary in the message (#351).
     let origin = origin.unwrap_or("*");
-    let class = class.unwrap_or("*");
+    let class = class.map_or("*", zenkey::Class::chunk);
     let rel = match producer {
         Some(p) => format!("v1/{origin}/{class}/{p}/**"),
         None if class == "*" => format!("v1/{origin}/**"),
@@ -150,14 +143,25 @@ mod tests {
             "zs/v1/*/**"
         );
         assert_eq!(
-            compose_selector(&args, Some("h-3fa9c2d41b7e"), Some("state"), None).unwrap(),
+            compose_selector(
+                &args,
+                Some("h-3fa9c2d41b7e"),
+                Some(zenkey::Class::State),
+                None
+            )
+            .unwrap(),
             "zs/v1/h-3fa9c2d41b7e/state/**"
         );
         assert_eq!(
             compose_selector(&args, None, None, Some("tc")).unwrap(),
             "zs/v1/*/*/tc/**"
         );
-        assert!(compose_selector(&args, None, Some("alerts"), None).is_err());
+        // The rejection moved to the edge: `--class` is a `zenkey::Class`,
+        // so an unknown one never reaches this function — clap refuses it,
+        // naming the vocabulary once rather than in three places (#351).
+        let bad = "alerts".parse::<zenkey::Class>().unwrap_err().to_string();
+        assert!(bad.contains("telemetry, state, events"), "{bad}");
+        assert!(bad.contains("RFC 04 §1"), "{bad}");
 
         // The empty base composes bare `v1/…` selectors (observer identity).
         let args = crate::bus::tests::bus_of(Some(""));
@@ -166,7 +170,7 @@ mod tests {
             "v1/*/**"
         );
         assert_eq!(
-            compose_selector(&args, None, Some("state"), None).unwrap(),
+            compose_selector(&args, None, Some(zenkey::Class::State), None).unwrap(),
             "v1/*/state/**"
         );
     }

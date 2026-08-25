@@ -57,7 +57,7 @@ async fn a_complete_queryable_does_not_collapse_the_declared_fleet() {
     .await
     .expect("declare");
     // Routing propagation is async; retry bounded until both peers answer.
-    let answers = tokio::time::timeout(Duration::from_secs(5), async {
+    let answers = tokio::time::timeout(util::SETTLE, async {
         loop {
             let answers = repeating.fetch().await.expect("fetch");
             if answers.len() >= 2 {
@@ -110,7 +110,7 @@ async fn parameters_ride_per_get_not_in_the_declared_key() {
 
     // Routing propagation is async; the first answered fetch is the start
     // of the assertion, bounded like every wait in this suite.
-    let first = tokio::time::timeout(Duration::from_secs(5), async {
+    let first = tokio::time::timeout(util::SETTLE, async {
         loop {
             let answers = repeating
                 .fetch_with("round=1", None)

@@ -97,7 +97,7 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
             .expect("declare");
     let matching = publication.matching_events().await.expect("matching");
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), matching.recv())
+        tokio::time::timeout(util::SETTLE, matching.recv())
             .await
             .expect("matching within 5s")
             .expect("listener alive")
@@ -148,7 +148,7 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
         .expect("gate");
     let gate_matching = gate.matching_events().await.expect("gate matching");
     assert!(
-        tokio::time::timeout(Duration::from_secs(5), gate_matching.recv())
+        tokio::time::timeout(util::SETTLE, gate_matching.recv())
             .await
             .expect("gate matching within 5s")
             .expect("listener alive")
@@ -181,7 +181,7 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
 
     let mut views = Vec::new();
     while views.len() < 3 {
-        let item = tokio::time::timeout(Duration::from_secs(5), replayed.recv())
+        let item = tokio::time::timeout(util::SETTLE, replayed.recv())
             .await
             .expect("replayed event within 5s")
             .expect("stream alive");

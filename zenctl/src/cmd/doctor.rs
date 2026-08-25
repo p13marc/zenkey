@@ -128,7 +128,7 @@ async fn transition_loop(
             }
             outcome = zenkey_fleet::run_doctor(&fleet, locals, spec) => outcome,
         };
-        let at = zenkey_fleet::tape::record::rfc3339_now();
+        let at = zenkey_fleet::rfc3339_now();
         let transitions = match &outcome {
             Ok(report) => watch.observe(Ok(report), &at),
             Err(e) => watch.observe(Err(&e.to_string()), &at),

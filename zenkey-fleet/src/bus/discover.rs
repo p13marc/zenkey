@@ -21,7 +21,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::Result;
 use zenkey::grammar::{self, ClassOrPlane, SUBJECT_ALIVE, VERSION_CHUNK};
 use zenoh::Session;
 

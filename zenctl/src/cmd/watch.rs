@@ -229,19 +229,21 @@ pub fn interval_of(secs: f64) -> Result<Duration> {
 /// The `topic list` filter flags, shared by the one-shot and watch paths.
 pub struct TopicFilter {
     pub producer: Option<String>,
-    pub class: Option<String>,
+    pub class: Option<zenkey::Class>,
     pub type_name: Option<String>,
     pub deprecated: bool,
 }
 
 impl TopicFilter {
     pub fn apply(&self, slices: &zenkey_fleet::SliceSet) -> Result<crate::report::TopicList> {
-        slices.topic_list(
-            self.producer.as_deref(),
-            self.class.as_deref(),
-            self.type_name.as_deref(),
-            self.deprecated,
-        )
+        slices
+            .topic_list(
+                self.producer.as_deref(),
+                self.class,
+                self.type_name.as_deref(),
+                self.deprecated,
+            )
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -265,7 +267,8 @@ pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::Bus) -> R
             filter.apply(&zenkey_fleet::SliceSet::from_slices(slices))
         };
         poll_loop(interval, args.format(), args.color(), fetch).await?;
-        repeating.undeclare().await
+        repeating.undeclare().await?;
+        Ok(())
     } else {
         // Dirs given: the union set (bus wins, dirs fill) per cycle, same
         // sourcing as the one-shot command.

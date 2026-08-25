@@ -3,7 +3,7 @@
 //! whose input was not fetched draws `?` and says why, never `✗` (RFC 09
 //! §5.1 O4).
 
-use zenkey_fleet::judge::why::is_cause;
+use zenkey_fleet::is_cause;
 
 use zenkey_fleet::report::{RungAnswer, WhyReport, WhyVerdict};
 
@@ -52,7 +52,7 @@ impl Render for WhyReport {
                     Cell::styled("!", crate::render::style::UNPROVEN)
                 }
             };
-            grid.row([mark, Cell::text(r.id), Cell::text(r.question)]);
+            grid.row([mark, Cell::text(r.id.as_str()), Cell::text(r.question)]);
             if let RungAnswer::NotEstablished { reason } | RungAnswer::Unobservable { reason } =
                 &r.answer
             {
@@ -94,7 +94,11 @@ impl Render for WhyReport {
         notes.push(match self.verdict {
             WhyVerdict::Explained => Note::summary(format!(
                 "an explanation was established by: {} (exit 0).",
-                causes.join(", ")
+                causes
+                    .iter()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )),
             WhyVerdict::Healthy => Note::summary(
                 "no cause established and everything checked looks healthy (exit 1) \

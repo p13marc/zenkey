@@ -183,11 +183,9 @@ fn procedures_in(set: &SliceSet) -> Vec<CompletionCandidate> {
 /// The three classes — a closed vocabulary (RFC 04 §1), so this one is exact
 /// rather than cached.
 pub fn classes() -> Vec<CompletionCandidate> {
-    candidates(
-        ["telemetry", "state", "events"]
-            .into_iter()
-            .map(str::to_string),
-    )
+    // Read off the enum, like the QoS profiles below — a fourth hand-written
+    // copy of a three-token closed set was one too many (#351).
+    candidates(zenkey::Class::ALL.iter().map(|c| c.chunk().to_string()))
 }
 
 /// The five QoS profiles — likewise closed (RFC 04 §3), read off the enum so

@@ -133,11 +133,7 @@ impl TreeState {
                 &empty_skeleton
             }
         };
-        let merged = Arc::new(zenkey_fleet::model::skeleton::merge(
-            skeleton,
-            &obs.observed,
-            &obs.watched,
-        ));
+        let merged = Arc::new(zenkey_fleet::merge(skeleton, &obs.observed, &obs.watched));
         self.merged_cache = Some(MergedCache {
             skeleton: dep.skeleton.clone(),
             observed: Arc::clone(&obs.observed),

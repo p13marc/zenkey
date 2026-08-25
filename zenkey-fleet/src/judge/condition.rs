@@ -30,11 +30,11 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use crate::{Error, Result};
 
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
-use crate::report::DoctorReport;
+use crate::report::{CheckId, DoctorReport};
 use crate::report::{CondState, Judgement, Transition, WatchdogSummary};
 
 /// The closed condition vocabulary (#227), over the existing observation
@@ -68,9 +68,9 @@ pub enum Condition {
     /// unjudgeable and counted in the evidence, not the state.
     QosMismatch { selector: String },
     /// A doctor run reported at least one finding with this check id
-    /// (the stable [`crate::judge::common::CHECK_IDS`] vocabulary). A failed doctor run is
+    /// (the stable [`crate::report::CheckId`] vocabulary). A failed doctor run is
     /// unobservable for every doctor condition — never `ok`.
-    DoctorCheck { check: String },
+    DoctorCheck { check: CheckId },
     /// The origin holds no `alive` token on the liveliness roster
     /// (RFC 04 §5). A roster that could not be asked is unobservable —
     /// silence is not a verdict (RFC 05 §3.1).
@@ -93,9 +93,12 @@ impl Condition {
         let hz = |s: &str, kind: &str| -> Result<f64> {
             let v: f64 = s
                 .parse()
-                .map_err(|_| anyhow::anyhow!("{kind}: {s:?} is not a number"))?;
+                .map_err(|_| Error::unaskable(format!("{kind} {s:?}"), "is not a number"))?;
             if !v.is_finite() || v < 0.0 {
-                bail!("{kind}: the threshold must be a finite non-negative number");
+                return Err(Error::unaskable(
+                    kind.to_string(),
+                    "the threshold must be a finite non-negative number",
+                ));
             }
             Ok(v)
         };
@@ -112,7 +115,10 @@ impl Condition {
             ["silent-for", sel, n] => {
                 let for_s = hz(n, "silent-for")?;
                 if for_s <= 0.0 {
-                    bail!("silent-for: the span must be a positive number of seconds");
+                    return Err(Error::unaskable(
+                        "silent-for",
+                        "the span must be a positive number of seconds",
+                    ));
                 }
                 Condition::SilentFor {
                     selector: sel.to_string(),
@@ -126,24 +132,34 @@ impl Condition {
                 selector: sel.to_string(),
             },
             ["doctor", check] => {
-                if !crate::judge::common::CHECK_IDS.contains(check) {
-                    bail!(
-                        "doctor: {check:?} is not a check id — the stable vocabulary is: {}",
-                        crate::judge::common::CHECK_IDS.join(", ")
-                    );
-                }
-                Condition::DoctorCheck {
-                    check: check.to_string(),
-                }
+                let Some(check) = CheckId::parse(check) else {
+                    return Err(Error::unaskable(
+                        format!("doctor {check:?}"),
+                        format!(
+                            "is not a check id — the stable vocabulary is: {}",
+                            CheckId::ALL
+                                .iter()
+                                .map(|c| c.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    ));
+                };
+                Condition::DoctorCheck { check }
             }
             ["origin-down", origin] => Condition::OriginDown {
                 origin: origin.to_string(),
             },
             ["dropped"] => Condition::Dropped,
-            _ => bail!(
-                "not a rule: {rule:?} — the vocabulary is closed (no expressions, \
-                 no templating): {VOCABULARY}"
-            ),
+            _ => {
+                return Err(Error::unaskable(
+                    format!("{rule:?}"),
+                    format!(
+                        "is not a rule — the vocabulary is closed (no \
+                         expressions, no templating): {VOCABULARY}"
+                    ),
+                ));
+            }
         })
     }
 
@@ -161,6 +177,23 @@ impl Condition {
 
     /// Judge one observation window. `None` for the conditions that are not
     /// window-scoped ([`Condition::DoctorCheck`], [`Condition::OriginDown`]).
+    /// Judge this condition against everything one tick observed.
+    ///
+    /// **The single entry point**, and why `run_watchdog` has no `expect`s
+    /// left (#352). The three judges below each returned `None` for the
+    /// variants they do not own, which forced the caller to assert a
+    /// partition the compiler could not see — four times, every one
+    /// discharging the same claim. This match *is* the partition, and each
+    /// arm hands its judge exactly the evidence that judge needs, so none of
+    /// them has a `None` to return.
+    pub fn judge(&self, ev: &TickEvidence<'_>) -> Eval {
+        match self {
+            Condition::DoctorCheck { check } => judge_doctor_check(*check, ev.doctor),
+            Condition::OriginDown { origin } => judge_origin_down(origin, ev.roster),
+            _ => self.judge_window_total(ev.window),
+        }
+    }
+
     pub fn judge_window(&self, w: &CondWindow) -> Option<Eval> {
         let synth = if w.synthetic > 0 {
             format!("; {} synthetic-marked (RFC 09 §5.3)", w.synthetic)
@@ -206,10 +239,13 @@ impl Condition {
                 Eval { state, evidence }
             }
             Condition::SilentFor { for_s, .. } => {
-                let sample_within = w.last_sample_ago_s.map(|ago| ago < *for_s) == Some(true);
-                let span_observed = w.observed_s >= *for_s;
-                let drop_free = w.last_drop_ago_s.map(|ago| ago >= *for_s) != Some(false);
-                let state = CondState::from(judge_silence(sample_within, span_observed, drop_free));
+                let ev = SilenceEvidence {
+                    sample_within: w.last_sample_ago_s.map(|ago| ago < *for_s) == Some(true),
+                    span_observed: w.observed_s >= *for_s,
+                    drop_free: w.last_drop_ago_s.map(|ago| ago >= *for_s) != Some(false),
+                };
+                let SilenceEvidence { span_observed, .. } = ev;
+                let state = CondState::from(judge_silence(ev));
                 let evidence = match state {
                     CondState::Ok => format!(
                         "a sample rode {:.1}s ago, inside the {for_s:.1}s span{synth}",
@@ -271,6 +307,26 @@ impl Condition {
                 ),
             },
             Condition::DoctorCheck { .. } | Condition::OriginDown { .. } => return None,
+        })
+    }
+
+    /// [`judge_window`](Self::judge_window) for the variants that *have* a
+    /// window — total, because [`judge`](Self::judge) has already routed the
+    /// other two elsewhere.
+    fn judge_window_total(&self, w: &CondWindow) -> Eval {
+        debug_assert!(
+            !matches!(
+                self,
+                Condition::DoctorCheck { .. } | Condition::OriginDown { .. }
+            ),
+            "judge() routes these two to their own evidence"
+        );
+        self.judge_window(w).unwrap_or_else(|| Eval {
+            // Unreachable through `judge`; if some future variant reaches it,
+            // "I have no window for this" is the honest answer, not a panic
+            // in a watchdog that is supposed to keep running.
+            state: CondState::Unobservable,
+            evidence: "this rule is not judged against a sample window".into(),
         })
     }
 
@@ -404,7 +460,32 @@ pub fn judge_excess(over: bool, dropped: u64) -> Judgement {
 /// inside the span conclusively breaks the silence; silence is provable only
 /// over a span the observer actually watched (O4) drop-free (O6) — otherwise
 /// unobservable, never clean.
-pub fn judge_silence(sample_within: bool, span_observed: bool, drop_free: bool) -> Judgement {
+/// What one silence claim rests on — three facts that are all `bool` and all
+/// about the same span.
+///
+/// A struct rather than three positional parameters, because this feeds a
+/// *judgement* and a transposition of two identically-typed booleans returns
+/// a plausible wrong verdict with no compile error (#349).
+/// `judge_shortfall`/`judge_excess` keep their positional `(bool, u64)` —
+/// not transposable, so not a hazard.
+#[derive(Debug, Clone, Copy)]
+pub struct SilenceEvidence {
+    /// A sample rode inside the claimed span — the conclusive break.
+    pub sample_within: bool,
+    /// The observer actually watched the whole span (O4). A span it did not
+    /// watch is not a span it can call silent.
+    pub span_observed: bool,
+    /// The observer dropped nothing inside the span (O6). "Nothing arrived"
+    /// under drops is a completeness claim the observation cannot carry.
+    pub drop_free: bool,
+}
+
+pub fn judge_silence(ev: SilenceEvidence) -> Judgement {
+    let SilenceEvidence {
+        sample_within,
+        span_observed,
+        drop_free,
+    } = ev;
     if sample_within {
         Judgement::NotEstablished {
             reason: "a sample rode inside the span".into(),
@@ -420,6 +501,51 @@ pub fn judge_silence(sample_within: bool, span_observed: bool, drop_free: bool) 
             reason: "the observer dropped inside the span — silence is unprovable (O6)".into(),
         }
     }
+}
+
+/// Everything one watchdog tick observed, in the three shapes the conditions
+/// are judged against.
+///
+/// `doctor` and `roster` are `Option` because a tick only runs those asks if
+/// some rule wants them — and "not run this tick" is *unobservable*, which is
+/// the honest reading and the one the caller used to assert away with
+/// `.expect("a doctor rule ran the doctor")` (#352).
+pub struct TickEvidence<'e> {
+    pub window: &'e CondWindow,
+    pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
+    pub roster: Option<Result<&'e BTreeMap<String, Vec<String>>, &'e str>>,
+}
+
+/// Judge one doctor check against this tick's run — total, and total in the
+/// "did not run" direction too.
+pub fn judge_doctor_check(check: CheckId, outcome: Option<Result<&DoctorReport, &str>>) -> Eval {
+    let Some(outcome) = outcome else {
+        return Eval {
+            state: CondState::Unobservable,
+            evidence: "the doctor did not run this tick".into(),
+        };
+    };
+    Condition::DoctorCheck { check }
+        .judge_doctor(outcome)
+        .expect("a DoctorCheck is judged by the doctor")
+}
+
+/// Judge one origin against this tick's roster ask — likewise total.
+pub fn judge_origin_down(
+    origin: &str,
+    roster: Option<Result<&BTreeMap<String, Vec<String>>, &str>>,
+) -> Eval {
+    let Some(roster) = roster else {
+        return Eval {
+            state: CondState::Unobservable,
+            evidence: "the roster was not asked this tick".into(),
+        };
+    };
+    Condition::OriginDown {
+        origin: origin.to_string(),
+    }
+    .judge_roster(roster)
+    .expect("an OriginDown is judged by the roster")
 }
 
 // ─── observations and evaluations ───────────────────────────────────────────
@@ -474,16 +600,25 @@ pub struct Eval {
 /// `None` — transitions, not states.
 #[derive(Debug, Clone)]
 pub struct RuleState {
-    rule: String,
+    /// The condition itself, not its `Display`.
+    ///
+    /// It used to hold the rendered string and clone it into every
+    /// transition, with the two representations kept equal only by a
+    /// round-trip test — a second representation of a value that was
+    /// `Clone` and in scope (#352). The rendering happens where the
+    /// `Transition` is built, once, from the one source.
+    rule: Condition,
     state: Option<CondState>,
 }
 
 impl RuleState {
-    pub fn new(rule: impl Into<String>) -> RuleState {
-        RuleState {
-            rule: rule.into(),
-            state: None,
-        }
+    pub fn new(rule: Condition) -> RuleState {
+        RuleState { rule, state: None }
+    }
+
+    /// The condition this state tracks.
+    pub fn rule(&self) -> &Condition {
+        &self.rule
     }
 
     /// The last observed state; `None` until the first evaluation.
@@ -500,7 +635,7 @@ impl RuleState {
         let from = self.state;
         self.state = Some(eval.state);
         Some(Transition {
-            rule: self.rule.clone(),
+            rule: self.rule.to_string(),
             from,
             to: eval.state,
             at: at.into(),
@@ -510,27 +645,23 @@ impl RuleState {
 }
 
 /// Run-over-run delta over a doctor report: one [`RuleState`] per stable
-/// check id ([`crate::judge::common::CHECK_IDS`]), fed by `doctor --transitions`. The
+/// check id ([`CheckId`]), fed by `doctor --transitions`. The
 /// first run states the baseline (one transition per check id); every later run yields
 /// only genuine changes. A failed run flips every check to `unobservable` —
 /// a doctor that could not run has not said the fleet is healthy.
 #[derive(Debug, Clone)]
 pub struct DoctorWatch {
-    checks: Vec<(Condition, RuleState)>,
+    /// One state per check. A `Vec<(Condition, RuleState)>` until #352 — the
+    /// condition was in both halves of the pair.
+    checks: Vec<RuleState>,
 }
 
 impl DoctorWatch {
     pub fn new() -> DoctorWatch {
         DoctorWatch {
-            checks: crate::judge::common::CHECK_IDS
+            checks: CheckId::ALL
                 .iter()
-                .map(|id| {
-                    let condition = Condition::DoctorCheck {
-                        check: id.to_string(),
-                    };
-                    let state = RuleState::new(condition.to_string());
-                    (condition, state)
-                })
+                .map(|id| RuleState::new(Condition::DoctorCheck { check: *id }))
                 .collect(),
         }
     }
@@ -539,10 +670,12 @@ impl DoctorWatch {
     pub fn observe(&mut self, outcome: Result<&DoctorReport, &str>, at: &str) -> Vec<Transition> {
         self.checks
             .iter_mut()
-            .filter_map(|(condition, state)| {
-                let eval = condition
-                    .judge_doctor(outcome)
-                    .expect("doctor conditions judge doctor runs");
+            .filter_map(|state| {
+                let Condition::DoctorCheck { check } = *state.rule() else {
+                    // Unconstructible: `new` builds only `DoctorCheck`s.
+                    return None;
+                };
+                let eval = judge_doctor_check(check, Some(outcome));
                 state.observe(eval, at)
             })
             .collect()
@@ -601,24 +734,41 @@ pub async fn run_watchdog(
         synthetic: u64,
     }
 
-    let mut states: Vec<RuleState> = spec
-        .rules
-        .iter()
-        .map(|c| RuleState::new(c.to_string()))
-        .collect();
+    /// One rule's whole per-run state, together.
+    ///
+    /// This was four `Vec`s held in lockstep by index — `states`,
+    /// `keyexprs`, `counters`, `last_sample` — across a hundred and thirty
+    /// lines, with nothing structurally preventing them from disagreeing in
+    /// length, and a `counters.fill(default())` reset that could silently
+    /// miss one of them (#352).
+    struct RuleRuntime {
+        rule: Condition,
+        /// The rule's selector, compiled once for sample attribution.
+        keyexpr: Option<zenoh::key_expr::KeyExpr<'static>>,
+        counters: TickCounters,
+        last_sample: Option<tokio::time::Instant>,
+        state: RuleState,
+    }
 
-    // Per-rule selector, compiled once for sample attribution — and compiled
-    // *before* the monitor exists, so its `?` has nothing to tear down (#336).
-    let keyexprs: Vec<Option<zenoh::key_expr::KeyExpr<'static>>> = spec
+    // Compiled *before* the monitor exists, so the `?` has nothing to tear
+    // down (#336).
+    let mut rules: Vec<RuleRuntime> = spec
         .rules
         .iter()
         .map(|rule| {
-            rule.selector()
-                .map(|sel| {
-                    zenoh::key_expr::KeyExpr::try_from(sel.to_string())
-                        .map_err(|e| anyhow::anyhow!("{sel:?} is not a key expression: {e}"))
-                })
-                .transpose()
+            Ok(RuleRuntime {
+                rule: rule.clone(),
+                keyexpr: rule
+                    .selector()
+                    .map(|sel| {
+                        zenoh::key_expr::KeyExpr::try_from(sel.to_string())
+                            .map_err(|e| Error::unaskable_from(format!("{sel:?}"), e))
+                    })
+                    .transpose()?,
+                counters: TickCounters::default(),
+                last_sample: None,
+                state: RuleState::new(rule.clone()),
+            })
         })
         .collect::<Result<_>>()?;
     let mut watched: Vec<String> = Vec::new();
@@ -660,8 +810,6 @@ pub async fn run_watchdog(
     let monitor = monitor.watching(&watched).await?;
 
     let started = tokio::time::Instant::now();
-    let mut counters: Vec<TickCounters> = vec![TickCounters::default(); spec.rules.len()];
-    let mut last_sample: Vec<Option<tokio::time::Instant>> = vec![None; spec.rules.len()];
     let mut last_drop: Option<tokio::time::Instant> = None;
     let mut dropped_tick: u64 = 0;
     // Bounded (#107): the watchdog runs until stopped, so an unbounded
@@ -753,17 +901,17 @@ pub async fn run_watchdog(
                     // Decode once per sample (budgeted per key per tick),
                     // shared by every invalid-payload rule the key matches.
                     let mut verdict: Option<crate::Verdict> = None;
-                    for (i, rule) in spec.rules.iter().enumerate() {
-                        let Some(sel) = &keyexprs[i] else { continue };
+                    for rt in rules.iter_mut() {
+                        let Some(sel) = &rt.keyexpr else { continue };
                         if !sel.intersects(&key) {
                             continue;
                         }
-                        counters[i].samples += 1;
+                        rt.counters.samples += 1;
                         if synthetic {
-                            counters[i].synthetic += 1;
+                            rt.counters.synthetic += 1;
                         }
-                        last_sample[i] = Some(tokio::time::Instant::now());
-                        match rule {
+                        rt.last_sample = Some(tokio::time::Instant::now());
+                        match &rt.rule {
                             Condition::InvalidPayload { .. } => {
                                 if verdict.is_none() {
                                     let budget = decode_budget.entry(s.key.clone()).or_default();
@@ -788,9 +936,9 @@ pub async fn run_watchdog(
                                     }
                                 }
                                 if let Some(v) = &verdict {
-                                    counters[i].checked += 1;
+                                    rt.counters.checked += 1;
                                     if !matches!(v, crate::Verdict::Valid) {
-                                        counters[i].invalid += 1;
+                                        rt.counters.invalid += 1;
                                     }
                                 }
                             }
@@ -801,9 +949,9 @@ pub async fn run_watchdog(
                                     &facts.registration
                                     && let Some(profile) = sf.declared_qos()
                                 {
-                                    counters[i].qos_judged += 1;
+                                    rt.counters.qos_judged += 1;
                                     if !s.qos_matches(profile) {
-                                        counters[i].qos_mismatched += 1;
+                                        rt.counters.qos_mismatched += 1;
                                     }
                                 }
                             }
@@ -830,41 +978,39 @@ pub async fn run_watchdog(
         };
         let now = tokio::time::Instant::now();
         let at = crate::tape::record::rfc3339_now();
-        for (i, rule) in spec.rules.iter().enumerate() {
-            let eval = match rule {
-                Condition::DoctorCheck { .. } => {
-                    let outcome = doctor_outcome
-                        .as_ref()
-                        .expect("a doctor rule ran the doctor");
-                    rule.judge_doctor(outcome.as_ref().map_err(String::as_str))
-                }
-                Condition::OriginDown { .. } => {
-                    let outcome = roster_outcome
-                        .as_ref()
-                        .expect("an origin rule asked the roster");
-                    rule.judge_roster(outcome.as_ref().map_err(String::as_str))
-                }
-                _ => rule.judge_window(&CondWindow {
-                    window_s: (now - last_eval).as_secs_f64(),
-                    observed_s: (now - started).as_secs_f64(),
-                    samples: counters[i].samples,
-                    dropped: dropped_tick,
-                    last_sample_ago_s: last_sample[i].map(|t| (now - t).as_secs_f64()),
-                    last_drop_ago_s: last_drop.map(|t| (now - t).as_secs_f64()),
-                    invalid: counters[i].invalid,
-                    checked: counters[i].checked,
-                    qos_mismatched: counters[i].qos_mismatched,
-                    qos_judged: counters[i].qos_judged,
-                    synthetic: counters[i].synthetic,
-                }),
-            }
-            .expect("every rule kind has a judge");
-            if let Some(transition) = states[i].observe(eval, &at) {
+        for rt in rules.iter_mut() {
+            let window = CondWindow {
+                window_s: (now - last_eval).as_secs_f64(),
+                observed_s: (now - started).as_secs_f64(),
+                samples: rt.counters.samples,
+                dropped: dropped_tick,
+                last_sample_ago_s: rt.last_sample.map(|t| (now - t).as_secs_f64()),
+                last_drop_ago_s: last_drop.map(|t| (now - t).as_secs_f64()),
+                invalid: rt.counters.invalid,
+                checked: rt.counters.checked,
+                qos_mismatched: rt.counters.qos_mismatched,
+                qos_judged: rt.counters.qos_judged,
+                synthetic: rt.counters.synthetic,
+            };
+            let eval = rt.rule.judge(&TickEvidence {
+                window: &window,
+                doctor: doctor_outcome
+                    .as_ref()
+                    .map(|o| o.as_ref().map_err(String::as_str)),
+                roster: roster_outcome
+                    .as_ref()
+                    .map(|o| o.as_ref().map_err(String::as_str)),
+            });
+            if let Some(transition) = rt.state.observe(eval, &at) {
                 summary.transitions += 1;
                 emit(&transition);
             }
         }
-        counters.fill(TickCounters::default());
+        // One reset, over one collection — the four-`Vec` version had a
+        // `counters.fill(..)` that could miss a sibling (#352).
+        for rt in rules.iter_mut() {
+            rt.counters = TickCounters::default();
+        }
         dropped_tick = 0;
         decode_budget.clear();
         summary.ticks += 1;
@@ -883,13 +1029,13 @@ mod tests {
     use super::*;
     use crate::report::{DoctorFinding, DoctorSeverity};
 
-    fn report_with(checks: &[&str]) -> DoctorReport {
+    fn report_with(checks: &[CheckId]) -> DoctorReport {
         DoctorReport {
             findings: checks
                 .iter()
                 .map(|c| DoctorFinding {
                     severity: DoctorSeverity::Error,
-                    check: c.to_string(),
+                    check: *c,
                     subject: "s".into(),
                     evidence: "e".into(),
                     citation: None,
@@ -952,11 +1098,21 @@ mod tests {
         assert_eq!(judge_shortfall(true, 0), Judgement::Established);
         // …while "enough seen" is conclusive: a drop only hides more.
         assert_eq!(wire(judge_shortfall(false, 9)), CondState::Ok);
-        // Silence: unprovable over a dropped or unwatched span.
-        assert!(judge_silence(false, true, false).is_unobservable());
-        assert!(judge_silence(false, false, true).is_unobservable());
-        assert_eq!(judge_silence(false, true, true), Judgement::Established);
-        assert_eq!(wire(judge_silence(true, true, false)), CondState::Ok);
+        // Silence: unprovable over a dropped or unwatched span. Named fields
+        // rather than three bare `bool`s, which is the whole of #349 — read
+        // the old spelling `judge_silence(false, true, false)` and say which
+        // one was the drop.
+        let silence = |sample_within, span_observed, drop_free| {
+            judge_silence(SilenceEvidence {
+                sample_within,
+                span_observed,
+                drop_free,
+            })
+        };
+        assert!(silence(false, true, false).is_unobservable());
+        assert!(silence(false, false, true).is_unobservable());
+        assert_eq!(silence(false, true, true), Judgement::Established);
+        assert_eq!(wire(silence(true, true, false)), CondState::Ok);
     }
 
     /// The wire projection's documented mapping, polarity note included:
@@ -1070,8 +1226,11 @@ mod tests {
             state,
             evidence: "e".into(),
         };
-        let mut rs = RuleState::new("dropped");
+        // The condition itself, not its rendering — which is the point of
+        // #352: the two can no longer disagree.
+        let mut rs = RuleState::new(Condition::Dropped);
         let first = rs.observe(eval(CondState::Ok), "t0").expect("baseline");
+        assert_eq!(first.rule, "dropped", "the transition renders its rule");
         assert_eq!(first.from, None, "the baseline comes from null (O4)");
         assert_eq!(first.to, CondState::Ok);
         assert!(rs.observe(eval(CondState::Ok), "t1").is_none());
@@ -1123,7 +1282,7 @@ mod tests {
         let mut watch = DoctorWatch::new();
         let clean = report_with(&[]);
         let baseline = watch.observe(Ok(&clean), "t0");
-        assert_eq!(baseline.len(), crate::judge::common::CHECK_IDS.len());
+        assert_eq!(baseline.len(), CheckId::ALL.len());
         assert!(baseline.iter().all(|t| t.from.is_none()));
         assert!(baseline.iter().all(|t| t.to == CondState::Ok));
 
@@ -1132,7 +1291,7 @@ mod tests {
             "an unchanged run emits nothing"
         );
 
-        let drifted = report_with(&["schema-drift", "schema-drift"]);
+        let drifted = report_with(&[CheckId::SchemaDrift, CheckId::SchemaDrift]);
         let changes = watch.observe(Ok(&drifted), "t2");
         assert_eq!(changes.len(), 1, "only the changed check transitions");
         assert_eq!(changes[0].rule, "doctor schema-drift");
@@ -1142,7 +1301,7 @@ mod tests {
         let failed = watch.observe(Err("session lost"), "t3");
         assert_eq!(
             failed.len(),
-            crate::judge::common::CHECK_IDS.len(),
+            CheckId::ALL.len(),
             "a failed run is unobservable for every check — never ok"
         );
         assert!(failed.iter().all(|t| t.to == CondState::Unobservable));

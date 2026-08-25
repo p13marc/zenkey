@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use crate::{Error, Result};
 use zenoh::Session;
 
 /// How long [`open_reporting`] gives `zenoh::open` before calling the
@@ -136,13 +136,15 @@ pub async fn open_with_config(
 #[derive(Debug)]
 pub enum OpenFailure {
     /// The config could not be built: a bad file, or a refused namespace.
-    Config(anyhow::Error),
-    /// The config was fine; the session could not be brought up.
-    Transport(anyhow::Error),
+    /// Always an [`Error::Unaskable`] — the user named the file.
+    Config(Error),
+    /// The config was fine; the session could not be brought up. Always an
+    /// [`Error::Bus`].
+    Transport(Error),
 }
 
 impl OpenFailure {
-    pub fn into_error(self) -> anyhow::Error {
+    pub fn into_error(self) -> Error {
         match self {
             OpenFailure::Config(e) | OpenFailure::Transport(e) => e,
         }
@@ -197,14 +199,21 @@ async fn opened_within<E: std::fmt::Display>(
 ) -> Result<Session, OpenFailure> {
     match tokio::time::timeout(deadline, open).await {
         Ok(Ok(session)) => Ok(session),
-        Ok(Err(e)) => Err(OpenFailure::Transport(
-            anyhow::anyhow!("{e}").context("failed to open Zenoh session"),
-        )),
-        Err(_) => Err(OpenFailure::Transport(anyhow::anyhow!(
-            "the Zenoh session did not open within {deadline:?} — the config \
-             parsed, so this is the transport: an endpoint that never settles, \
-             a listener that never binds, or a peer that never answers"
-        ))),
+        Ok(Err(e)) => Err(OpenFailure::Transport(Error::Bus {
+            op: "failed to open",
+            target: "the Zenoh session".into(),
+            source: e.to_string().into(),
+        })),
+        Err(_) => Err(OpenFailure::Transport(Error::Bus {
+            op: "failed to open",
+            target: "the Zenoh session".into(),
+            source: format!(
+                "did not open within {deadline:?} — the config parsed, so this \
+                 is the transport: an endpoint that never settles, a listener \
+                 that never binds, or a peer that never answers"
+            )
+            .into(),
+        })),
     }
 }
 
@@ -229,7 +238,9 @@ async fn config_off_runtime(
     let listen = listen.to_vec();
     tokio::task::spawn_blocking(move || build_config(Some(&path), &connect, &listen, scouting))
         .await
-        .context("reading the zenoh config")?
+        // A join failure here is this crate's own task management, not the
+        // user's file and not the fabric.
+        .map_err(|e| Error::Internal(format!("the config read task did not join: {e}")))?
 }
 
 /// The explorer config in one place: un-namespaced, explicit endpoints,
@@ -253,21 +264,24 @@ fn build_config(
 ) -> Result<zenoh::Config> {
     let mut config = match file {
         Some(path) => {
-            let config = zenoh::Config::from_file(path)
-                .map_err(|e| anyhow::anyhow!("{e}"))
-                .with_context(|| format!("zenoh config {}", path.display()))?;
+            // The user named this file, so its failure is theirs to fix.
+            let config = zenoh::Config::from_file(path).map_err(|e| {
+                Error::unaskable(format!("zenoh config {}", path.display()), e.to_string())
+            })?;
             // The one thing a passthrough refuses: an explorer with a
             // namespace strips keys on ingress and would lie about the wire.
             if let Ok(ns) = config.get_json("namespace")
                 && ns != "null"
             {
-                bail!(
-                    "{} sets a session namespace ({ns}) — an explorer runs \
-                     un-namespaced so it sees the wire as it really is \
-                     (RFC 09 §5); remove the namespace from the file, or use \
-                     --base to name the deployment",
-                    path.display()
-                );
+                return Err(Error::unaskable(
+                    format!("zenoh config {}", path.display()),
+                    format!(
+                        "sets a session namespace ({ns}) — an explorer runs \
+                         un-namespaced so it sees the wire as it really is \
+                         (RFC 09 §5); remove the namespace from the file, or \
+                         use --base to name the deployment"
+                    ),
+                ));
             }
             config
         }
@@ -387,13 +401,16 @@ mod tests {
         let stalled = std::future::pending::<std::result::Result<Session, String>>();
         match opened_within(Duration::from_millis(10), stalled).await {
             Err(OpenFailure::Transport(e)) => {
-                let text = format!("{e:#}");
+                // The chain: `Display` names the operation and the deadline
+                // explanation rides underneath (#348). `{:#}` is an `anyhow`
+                // idiom and does nothing here.
+                let text = crate::one_line(&e);
                 assert!(
                     text.contains("did not open within"),
                     "the deadline is named, so an operator knows what to raise: {text}"
                 );
             }
-            Err(OpenFailure::Config(e)) => panic!("a deadline is not a config error: {e:#}"),
+            Err(OpenFailure::Config(e)) => panic!("a deadline is not a config error: {e}"),
             Ok(_) => panic!("a pending future opened a session"),
         }
     }

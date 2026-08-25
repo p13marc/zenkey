@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::report::{Freshness, MediaStreamInfo, NodeInfo, ProducerInfo};
-use anyhow::Result;
+use crate::{Error, Result};
 use zenkey::grammar::with_base;
 
 /// The fleet-presence roster: who is up, and what they run.
@@ -333,11 +333,16 @@ impl Node {
         if origin.starts_with('@') {
             zenkey::ServiceOrigin::new(origin)
                 .map(Node::Service)
-                .map_err(|e| anyhow::anyhow!("{e}"))
+                .map_err(Error::from)
         } else {
             zenkey::origin::RemoteOrigin::parse(origin)
                 .map(Node::Host)
-                .map_err(|e| anyhow::anyhow!("{e} — a hostname is not an origin (RFC 06 §6)"))
+                .map_err(|e| {
+                    Error::unaskable(
+                        "origin",
+                        format!("{e} — a hostname is not an origin (RFC 06 §6)"),
+                    )
+                })
         }
     }
 

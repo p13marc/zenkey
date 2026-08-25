@@ -237,7 +237,7 @@ async fn a_protobuf_subject_is_published_as_protobuf_and_decodes_back() {
     )
     .await
     .expect("publication");
-    let sample = tokio::time::timeout(Duration::from_secs(5), async {
+    let sample = tokio::time::timeout(util::SETTLE, async {
         loop {
             publication
                 .send(prepared.bytes.clone(), None)

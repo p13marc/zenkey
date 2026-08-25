@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow, bail};
+use crate::{Error, Result};
 
 use crate::bus::query::{Answer, RepeatingQuery, declare_repeating};
 use crate::bus::write::CallTarget;
@@ -63,30 +63,35 @@ fn check_idempotent(slices: Option<&SliceSet>, producer: &str, procedure: &str) 
         return Ok(());
     }
     let Some(slices) = slices else {
-        bail!(
-            "no registry loaded, so {producer}/{procedure}'s idempotence is unknown — a \
-             benchmark repeats a call N times, and \"not asked\" is not \"safe to repeat\" \
-             (RFC 09 §5.1 O4). Load a registry, or pass --i-know."
-        );
+        return Err(Error::unaskable(
+            format!("{producer}/{procedure}"),
+            "no registry is loaded, so its idempotence is unknown — a benchmark \
+             repeats a call N times, and \"not asked\" is not \"safe to repeat\" \
+             (RFC 09 §5.1 O4). Load a registry, or pass --i-know.",
+        ));
     };
     let decl = slices
         .get(producer)
         .and_then(|s| s.procedures.iter().find(|p| p.path == procedure));
     match decl {
         Some(d) if d.idempotent == Some(true) => Ok(()),
-        Some(d) => bail!(
-            "{producer}/{procedure} declares kind = {:?}, idempotent = {} — repeating it is a \
-             write into a live fleet, not a measurement. Pass --i-know to mean it.",
-            d.kind,
-            match d.idempotent {
-                Some(false) => "false",
-                _ => "(undeclared)",
-            }
-        ),
-        None => bail!(
-            "the loaded registry does not declare {producer}/{procedure}, so nothing says it \
-             is safe to repeat. Pass --i-know to bench it anyway."
-        ),
+        Some(d) => Err(Error::unaskable(
+            format!("{producer}/{procedure}"),
+            format!(
+                "declares kind = {:?}, idempotent = {} — repeating it is a write \
+                 into a live fleet, not a measurement. Pass --i-know to mean it.",
+                d.kind,
+                match d.idempotent {
+                    Some(false) => "false",
+                    _ => "(undeclared)",
+                }
+            ),
+        )),
+        None => Err(Error::unaskable(
+            format!("{producer}/{procedure}"),
+            "the loaded registry does not declare it, so nothing says it is safe \
+             to repeat. Pass --i-know to bench it anyway.",
+        )),
     }
 }
 
@@ -166,7 +171,7 @@ pub async fn run_bench(
         check_idempotent(slices, spec.producer, spec.procedure)?;
     }
     if spec.count == 0 {
-        bail!("--calls 0 measures nothing");
+        return Err(Error::unaskable("--calls 0", "measures nothing"));
     }
 
     let segments: Vec<&str> = spec.procedure.split('/').collect();
@@ -185,7 +190,7 @@ pub async fn run_bench(
     let querier = std::sync::Arc::new(
         declare_repeating(fleet, &key, spec.timeout)
             .await
-            .map_err(|e| anyhow!("declare querier {key}: {e}"))?,
+            .map_err(|e| Error::bus("declare querier", key.clone(), e))?,
     );
 
     let concurrency = spec.concurrency.max(1).min(spec.count);
@@ -214,7 +219,7 @@ pub async fn run_bench(
     } = tally;
     let elapsed = started.elapsed();
     std::sync::Arc::try_unwrap(querier)
-        .map_err(|_| anyhow!("bench tasks outlived the run"))?
+        .map_err(|_| Error::Internal("bench tasks outlived the run".into()))?
         .undeclare()
         .await?;
 
@@ -331,7 +336,10 @@ mod tests {
         );
 
         // The three it must not be confused with.
-        tally.record(Ok(Err(anyhow!("the GET failed"))), &mut per_origin);
+        tally.record(
+            Ok(Err(Error::bus("get", "", "the GET failed"))),
+            &mut per_origin,
+        );
         tally.record(Ok(Ok(vec![])), &mut per_origin);
         tally.record(
             Ok(Ok(vec![(

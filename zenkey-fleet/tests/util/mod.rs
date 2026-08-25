@@ -18,6 +18,22 @@
 #![allow(dead_code)]
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+/// How long a bus test waits before calling a hang a hang (#371).
+///
+/// **This is a net, not an assertion.** Every use of it is wrapped around a
+/// `recv()` that returns the instant its event arrives, so a generous value
+/// costs a passing run nothing and costs a hanging run only the wait. What a
+/// tight value costs is a *false* failure: these suites run in one
+/// `cargo test --workspace` job alongside every other test binary, and under
+/// that load a settle that normally takes milliseconds can take seconds.
+///
+/// Two of them at five seconds were the whole of #371 — read as "the seed
+/// task outlived its monitor" and "presence did not meet", neither of which
+/// was true. A timeout that is *the property under test* still has to be
+/// tight; none of these are.
+pub const SETTLE: Duration = Duration::from_secs(20);
 
 /// A loopback endpoint on a port the OS has just told us is free.
 ///

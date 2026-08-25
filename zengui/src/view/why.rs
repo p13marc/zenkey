@@ -113,7 +113,14 @@ pub fn section(state: &WhyState, slot: SlotId, sp: Spacing) -> Column<'_, Messag
     // with, worded so "healthy" never over-claims.
     let causes = report.causes();
     col = col.push(kit::muted(match report.verdict {
-        WhyVerdict::Explained => format!("explained — cause established by: {}", causes.join(", ")),
+        WhyVerdict::Explained => format!(
+            "explained — cause established by: {}",
+            causes
+                .iter()
+                .map(|c| c.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         WhyVerdict::Healthy => "no cause established, and everything checked looks healthy \
              (\"declared, alive, never published\" lands here on purpose — \
              publishers declare lazily, RFC 08 §6.1)"

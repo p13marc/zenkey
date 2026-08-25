@@ -30,7 +30,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use anyhow::Result;
+use crate::Result;
 
 use crate::judge::common::FINDING_CAP;
 use crate::judge::condition;
@@ -272,8 +272,13 @@ pub async fn run_expect(
         // drops is unobservable, never ok (O6): `--absent` is `silent-for`
         // over the whole window, the ceiling is `rate-above` asserted quiet.
         let met_states = [
-            spec.absent
-                .then(|| condition::judge_silence(false, true, dropped == 0)),
+            spec.absent.then(|| {
+                condition::judge_silence(condition::SilenceEvidence {
+                    sample_within: false,
+                    span_observed: true,
+                    drop_free: dropped == 0,
+                })
+            }),
             spec.rate_max
                 .map(|_| condition::judge_excess(false, dropped)),
         ];

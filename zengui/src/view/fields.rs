@@ -195,7 +195,7 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
     for f in &report.findings {
         col = col.push(
             row![
-                kit::badge_severity(severity_tone(f.severity), &f.check),
+                kit::badge_severity(severity_tone(f.severity), f.check.as_str()),
                 kit::mono(f.subject.clone()),
             ]
             .spacing(sp.sm)

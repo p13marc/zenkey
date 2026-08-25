@@ -104,7 +104,7 @@ async fn observed_qos_and_unregistered_traffic_become_findings() {
     let qos: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == "qos-observed-mismatch")
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::QosObservedMismatch)
         .collect();
     assert_eq!(qos.len(), 1, "{:?}", report.findings);
     assert_eq!(qos[0].subject, "v1/h-abababababab/state/demo/health");
@@ -118,7 +118,7 @@ async fn observed_qos_and_unregistered_traffic_become_findings() {
     let unreg: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == "unregistered-traffic")
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::UnregisteredTraffic)
         .collect();
     assert_eq!(unreg.len(), 1, "{:?}", report.findings);
     assert_eq!(unreg[0].subject, "v1/h-abababababab/state/demo/undeclared");
@@ -185,7 +185,7 @@ async fn over_rate_events_are_findings_and_synthetic_traffic_is_counted() {
     let over: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == "rate-over-declared")
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::RateOverDeclared)
         .collect();
     assert_eq!(over.len(), 1, "{:?}", report.findings);
     assert_eq!(over[0].subject, "demo/boom/{id}");

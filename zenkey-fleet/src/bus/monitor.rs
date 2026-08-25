@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use arc_swap::ArcSwap;
 use tokio::sync::broadcast;
 use zenoh::Session;
@@ -273,6 +273,22 @@ pub struct MonitorCore {
     /// bounded by bytes *and* age. Its own mutex, never held with the stats
     /// lock — the two bounds are different facts and different contention.
     retain: Mutex<Retention>,
+    /// Monotonic tick ordering, so an **older** fold can never overwrite a
+    /// newer snapshot.
+    ///
+    /// #330 moved the periodic fold to the blocking pool, which opened the
+    /// window: `tick_off_runtime` copies the rows, hands the fold away, and
+    /// publishes when it comes back — so a synchronous `tick()` taken *later*
+    /// (a seed boundary, an unwatch) can publish first and then be overwritten
+    /// by the earlier fold's stale result. The seed test caught it as
+    /// "the seeded key is already in the tree at the boundary tick" failing
+    /// with an empty tree while its own coverage said the reply had arrived.
+    ///
+    /// A `Mutex` rather than an atomic pair: the check and the store must be
+    /// one step, and it is only ever taken on the *write* path — a tick, not
+    /// a read. Readers stay lock-free through the `ArcSwap`.
+    tick_seq: AtomicU64,
+    published_seq: Mutex<u64>,
 }
 
 impl MonitorCore {
@@ -289,6 +305,8 @@ impl MonitorCore {
             tree: ArcSwap::from_pointee(KeyTreeSnapshot::default()),
             dropped: AtomicU64::new(0),
             retain: Mutex::new(Retention::new(RetentionBudget::default())),
+            tick_seq: AtomicU64::new(0),
+            published_seq: Mutex::new(0),
         })
     }
 
@@ -391,8 +409,8 @@ impl MonitorCore {
     /// takes [`tick_off_runtime`](Self::tick_off_runtime) instead, which puts
     /// it on the blocking pool where that much CPU belongs.
     pub fn tick(&self) {
-        let rows = self.stats_rows();
-        self.publish(KeyTreeSnapshot::fold(rows));
+        let (rows, seq) = self.stats_rows();
+        self.publish(KeyTreeSnapshot::fold(rows), seq);
     }
 
     /// [`tick`](Self::tick) with the fold on the blocking pool (#330): the
@@ -402,23 +420,36 @@ impl MonitorCore {
     /// that publish a snapshot as part of another operation (a seed boundary,
     /// an unwatch).
     pub async fn tick_off_runtime(&self) {
-        let rows = self.stats_rows();
+        let (rows, seq) = self.stats_rows();
         match tokio::task::spawn_blocking(move || KeyTreeSnapshot::fold(rows)).await {
-            Ok(snapshot) => self.publish(snapshot),
+            Ok(snapshot) => self.publish(snapshot, seq),
             // A blocking-pool panic must not take the tick task with it: the
             // snapshot simply does not advance this tick, and says so.
             Err(e) => tracing::warn!("key-tree fold: {e}"),
         }
     }
 
-    /// The rows the fold needs — the entire critical section of a tick.
-    fn stats_rows(&self) -> crate::model::tree::TreeRows {
-        self.stats.lock().expect("stats lock").rows()
+    /// The rows the fold needs — the entire critical section of a tick —
+    /// stamped with the order they were taken in.
+    fn stats_rows(&self) -> (crate::model::tree::TreeRows, u64) {
+        // The sequence is taken *with* the rows, under the stats lock, so two
+        // ticks can never disagree about which of them saw the newer table.
+        let stats = self.stats.lock().expect("stats lock");
+        let seq = self.tick_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        (stats.rows(), seq)
     }
 
     /// Publish a folded snapshot and announce it. Lock-free: an `ArcSwap`
     /// store and a bounded send.
-    fn publish(&self, snapshot: KeyTreeSnapshot) {
+    fn publish(&self, snapshot: KeyTreeSnapshot, seq: u64) {
+        let mut published = self.published_seq.lock().expect("tick seq lock");
+        if seq <= *published {
+            // An older fold finished last. Dropping it is the whole point: the
+            // newer snapshot is already the truth, and storing this one would
+            // walk the tree backwards (#330's window).
+            return;
+        }
+        *published = seq;
         self.tree.store(Arc::new(snapshot));
         let _ = self.tx.send(FleetEvent::StatsTick);
     }
@@ -602,7 +633,7 @@ impl Monitor {
                 .declare_subscriber(liveliness_sel)
                 .history(true)
                 .await
-                .map_err(|e| anyhow!("liveliness subscribe {liveliness_sel}: {e}"))?;
+                .map_err(|e| Error::bus("liveliness subscribe", liveliness_sel, e))?;
             let core = Arc::clone(&core);
             tasks.push(tokio::spawn(async move {
                 while let Ok(sample) = subscriber.recv_async().await {
@@ -659,7 +690,7 @@ impl Monitor {
                 core.ingest(view, sn);
             })
             .await
-            .map_err(|e| anyhow!("subscribe {selector}: {e}"))?;
+            .map_err(|e| Error::bus("subscribe", selector, e))?;
         let id = WatchId(self.next_watch.fetch_add(1, Ordering::Relaxed));
         self.watches.lock().await.insert(
             id,
@@ -751,7 +782,7 @@ impl Monitor {
                 core.ingest(view, sn);
             })
             .await
-            .map_err(|e| anyhow!("seeded subscribe {selector}: {e}"))?;
+            .map_err(|e| Error::bus("seeded subscribe", selector, e))?;
 
         // 2) The seed GETs, AFTER — registered as this watch's seed task so
         //    `unwatch` during the seed phase aborts it.
@@ -822,9 +853,12 @@ impl Monitor {
     pub async fn unwatch(&self, id: WatchId) -> Result<()> {
         let mut entry = {
             let mut watches = self.watches.lock().await;
-            watches
-                .remove(&id)
-                .ok_or_else(|| anyhow!("unknown watch id {id:?}"))?
+            watches.remove(&id).ok_or_else(|| {
+                Error::unaskable(
+                    format!("watch id {id:?}"),
+                    "is not a watch this monitor holds",
+                )
+            })?
         };
         // A released watch must not keep ingesting seed replies: the seed
         // task dies with the watch (its boundary event simply never fires —
@@ -836,7 +870,7 @@ impl Monitor {
             .subscriber
             .undeclare()
             .await
-            .map_err(|e| anyhow!("undeclare {}: {e}", entry.selector))?;
+            .map_err(|e| Error::bus("undeclare", &entry.selector, e))?;
         let kept: Vec<String> = {
             let watches = self.watches.lock().await;
             watches.values().map(|w| w.selector.clone()).collect()
@@ -923,7 +957,11 @@ impl Monitor {
         if failed.is_empty() {
             Ok(())
         } else {
-            Err(anyhow!("undeclare {}", failed.join("; ")))
+            Err(Error::bus(
+                "undeclare",
+                failed.join("; "),
+                "one or more handles refused",
+            ))
         }
     }
 }
@@ -962,6 +1000,44 @@ impl Drop for Monitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fold that started earlier must never overwrite one that started
+    /// later, however long it takes to come back.
+    ///
+    /// #330 moved the periodic fold to the blocking pool and opened exactly
+    /// that window: `tick_off_runtime` copies the rows, hands the fold away,
+    /// and publishes on return — so a synchronous `tick()` taken *after* it
+    /// (a seed boundary, an unwatch) could publish first and then be
+    /// overwritten by the earlier fold's stale result. It surfaced as the
+    /// seeding test's "the seeded key is already in the tree at the boundary
+    /// tick" failing with an empty tree while its own coverage line said the
+    /// seed reply had arrived.
+    ///
+    /// Driven through `publish` directly, because reproducing the interleave
+    /// through the blocking pool is exactly the race that only shows up under
+    /// load — the ordering rule is the property, and it is testable.
+    #[test]
+    fn an_older_fold_never_walks_the_tree_backwards() {
+        let core = MonitorCore::new(8);
+
+        // Two ticks, taken in order: the second sees a key the first did not.
+        let (empty_rows, first) = core.stats_rows();
+        core.ingest(view("v1/h-3fa9c2d41b7e/telemetry/p/x", 4), None);
+        let (seeded_rows, second) = core.stats_rows();
+        assert!(second > first, "the sequence orders the two takes");
+
+        // The *newer* fold lands first — the seed boundary's synchronous tick.
+        core.publish(KeyTreeSnapshot::fold(seeded_rows), second);
+        assert_eq!(core.tree().keys, 1, "the boundary tick published");
+
+        // …and the older one, back from the blocking pool, is dropped.
+        core.publish(KeyTreeSnapshot::fold(empty_rows), first);
+        assert_eq!(
+            core.tree().keys,
+            1,
+            "an older fold overwrote a newer snapshot — the tree walked backwards"
+        );
+    }
 
     fn view(key: &str, len: usize) -> SampleView {
         SampleView {
@@ -1118,7 +1194,7 @@ mod tests {
 
         // Phase 1 — everything the lock is held for.
         let t0 = Instant::now();
-        let rows = core.stats_rows();
+        let (rows, _seq) = core.stats_rows();
         let copy = t0.elapsed();
         assert_eq!(rows.rows.len(), KEYS);
         let copied_rows = rows.rows.len();

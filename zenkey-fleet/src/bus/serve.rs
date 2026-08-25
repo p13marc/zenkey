@@ -12,7 +12,7 @@
 //! linked libpython; the shell covers dynamic cases by restarting the
 //! responder.
 
-use anyhow::{Result, anyhow};
+use crate::{Error, Result};
 use zenoh::Session;
 use zenoh::handlers::FifoChannelHandler;
 
@@ -71,13 +71,13 @@ pub async fn declare_responder(
     complete: bool,
 ) -> Result<MockResponder> {
     let parsed = zenoh::key_expr::KeyExpr::try_from(keyexpr.to_string())
-        .map_err(|e| anyhow!("declare queryable {keyexpr}: {e}"))?;
+        .map_err(|e| Error::bus("declare queryable", keyexpr, e))?;
     let concrete = !parsed.is_wild();
     let queryable = session
         .declare_queryable(parsed)
         .complete(complete)
         .await
-        .map_err(|e| anyhow!("declare queryable {keyexpr}: {e}"))?;
+        .map_err(|e| Error::bus("declare queryable", keyexpr, e))?;
     Ok(MockResponder {
         queryable,
         keyexpr: keyexpr.to_string(),
@@ -149,6 +149,6 @@ impl MockResponder {
         self.queryable
             .undeclare()
             .await
-            .map_err(|e| anyhow!("undeclare queryable: {e}"))
+            .map_err(|e| Error::bus("undeclare queryable", "", e))
     }
 }

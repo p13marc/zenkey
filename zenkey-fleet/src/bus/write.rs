@@ -18,7 +18,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, bail};
+use crate::{Error, Result};
 use zenkey::origin::{HostId, ServiceOrigin};
 use zenkey::qos::QosProfile;
 use zenkey::{Declared, Fanout, ProcedureKind};
@@ -60,7 +60,7 @@ pub async fn declare_publication(
         .priority(qos.priority())
         .express(qos.express())
         .await
-        .map_err(|e| anyhow!("declare publisher {key}: {e}"))?;
+        .map_err(|e| Error::bus("declare publisher", key, e))?;
     Ok(Publication {
         publisher,
         encoding: encoding.map(str::to_string),
@@ -101,7 +101,7 @@ impl Publication {
             None => put,
         };
         put.await
-            .map_err(|e| anyhow!("put {}: {e}", self.publisher.key_expr()))
+            .map_err(|e| Error::bus("put", self.publisher.key_expr().as_str(), e))
     }
 
     /// Publish a tombstone — an authoritative retirement (RFC 04 §1.2),
@@ -113,7 +113,7 @@ impl Publication {
         self.publisher
             .delete()
             .await
-            .map_err(|e| anyhow!("delete {}: {e}", self.publisher.key_expr()))
+            .map_err(|e| Error::bus("delete", self.publisher.key_expr().as_str(), e))
     }
 
     /// Undeclare, acknowledged.
@@ -121,7 +121,7 @@ impl Publication {
         self.publisher
             .undeclare()
             .await
-            .map_err(|e| anyhow!("undeclare publisher: {e}"))
+            .map_err(|e| Error::bus("undeclare publisher", "", e))
     }
 
     /// Whether any subscriber currently matches **this publication** — a
@@ -135,7 +135,7 @@ impl Publication {
             .matching_status()
             .await
             .map(|s| s.matching())
-            .map_err(|e| anyhow!("matching status: {e}"))
+            .map_err(|e| Error::bus("matching status", "", e))
     }
 
     /// Event-driven matching changes for this publication — the badge feed.
@@ -145,7 +145,7 @@ impl Publication {
             .publisher
             .matching_listener()
             .await
-            .map_err(|e| anyhow!("matching listener: {e}"))?;
+            .map_err(|e| Error::bus("matching listener", "", e))?;
         Ok(MatchingEvents { listener })
     }
 }
@@ -187,11 +187,12 @@ pub fn check_retire(
     force: bool,
 ) -> Result<RetireClass> {
     if key.contains('*') || key.contains('$') {
-        bail!(
-            "{key} is a wildcard — a tombstone is addressed to one concrete key; \
-             a wildcard delete is not an operator act, it is a blast radius \
-             (RFC 04 §1.2, v1.12). Not overridable."
-        );
+        return Err(Error::unaskable(
+            key,
+            "is a wildcard — a tombstone is addressed to one concrete key; a \
+             wildcard delete is not an operator act, it is a blast radius \
+             (RFC 04 §1.2, v1.12). Not overridable.",
+        ));
     }
     let facts = crate::model::facts::describe_key(base, key, slices).facts;
     use crate::model::facts::{ClassKind, KeyShape, Registration};
@@ -209,13 +210,16 @@ pub fn check_retire(
                     class: v.class.clone(),
                 });
             }
-            bail!(
-                "{key} is {class}-shaped — RFC 04 §1: a delete there is meaningless \
-                 and MUST NOT be sent by the class's publisher. Retiring it anyway \
-                 is an operator cleanup (RFC 04 §1.2, v1.12) — pass --i-know to \
-                 mean it.",
-                class = v.class
-            );
+            Err(Error::unaskable(
+                key,
+                format!(
+                    "is {}-shaped — RFC 04 §1: a delete there is meaningless and \
+                     MUST NOT be sent by the class's publisher. Retiring it anyway \
+                     is an operator cleanup (RFC 04 §1.2, v1.12) — pass --i-know \
+                     to mean it.",
+                    v.class
+                ),
+            ))
         }
         KeyShape::V1(v) => {
             if force {
@@ -223,12 +227,15 @@ pub fn check_retire(
                     class: v.class.clone(),
                 });
             }
-            bail!(
-                "{key} sits on the {class} plane — a plane key answers GETs or \
-                 carries frames; a tombstone there is at most a storage purge \
-                 (RFC 04 §1.2, v1.12) — pass --i-know to mean it.",
-                class = v.class
-            );
+            Err(Error::unaskable(
+                key,
+                format!(
+                    "sits on the {} plane — a plane key answers GETs or carries \
+                     frames; a tombstone there is at most a storage purge \
+                     (RFC 04 §1.2, v1.12) — pass --i-know to mean it.",
+                    v.class
+                ),
+            ))
         }
         KeyShape::NotUnderBase | KeyShape::Unparsed { .. } => {
             let reason = match &facts.shape {
@@ -238,11 +245,14 @@ pub fn check_retire(
             if force {
                 return Ok(RetireClass::Unclassified { reason });
             }
-            bail!(
-                "cannot classify {key} under base {base:?} ({reason}) — 'not asked' \
-                 is not 'state' (RFC 09 §5.1 O4); pass --i-know to retire an \
-                 unclassified key."
-            );
+            Err(Error::unaskable(
+                key,
+                format!(
+                    "cannot be classified under base {base:?} ({reason}) — 'not \
+                     asked' is not 'state' (RFC 09 §5.1 O4); pass --i-know to \
+                     retire an unclassified key."
+                ),
+            ))
         }
     }
 }
@@ -263,7 +273,7 @@ impl MatchingEvents {
         let listener = querier
             .matching_listener()
             .await
-            .map_err(|e| anyhow!("matching listener: {e}"))?;
+            .map_err(|e| Error::bus("matching listener", "", e))?;
         Ok(MatchingEvents { listener })
     }
 
@@ -297,13 +307,14 @@ impl CallTarget {
             return Ok(CallTarget::Fleet);
         }
         if s.starts_with('@') {
-            return Ok(CallTarget::Service(
-                ServiceOrigin::new(s).map_err(|e| anyhow!("{e}"))?,
-            ));
+            return Ok(CallTarget::Service(ServiceOrigin::new(s)?));
         }
-        HostId::parse(s)
-            .map(CallTarget::Host)
-            .map_err(|e| anyhow!("{e} — a hostname is not an origin; resolve it first (RFC 06 §6)"))
+        HostId::parse(s).map(CallTarget::Host).map_err(|e| {
+            Error::unaskable(
+                "origin",
+                format!("{e} — a hostname is not an origin; resolve it first (RFC 06 §6)"),
+            )
+        })
     }
 }
 
@@ -400,10 +411,13 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
             } else {
                 "is a write with no declared fanout, which defaults to forbidden (RFC 08 §2)"
             };
-            bail!(
-                "procedure {producer}/{procedure} {declared} — a \
-                 fleet (`*`) call to it is refused (RFC 05 §2.1); name one origin"
-            );
+            return Err(Error::unaskable(
+                format!("procedure {producer}/{procedure}"),
+                format!(
+                    "{declared} — a fleet (`*`) call to it is refused \
+                     (RFC 05 §2.1); name one origin"
+                ),
+            ));
         }
     }
 
@@ -577,7 +591,7 @@ mod tests {
         let err = check_retire("acme", "other/v1/h-3fa9c2d41b7e/state/x/y", None, false)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("cannot classify"), "{err}");
+        assert!(err.contains("cannot be classified"), "{err}");
     }
 
     fn slice_with_proc(kind: &str, fanout: Option<&str>) -> SliceSet {

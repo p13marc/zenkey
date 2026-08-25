@@ -10,7 +10,7 @@ which is why it can be a test.
 ```console
 $ zenctl topic list --zenoh-config tests/cmd/fixtures/namespaced.json5
 ? 2
-Error: tests/cmd/fixtures/namespaced.json5 sets a session namespace ("zensight") — an explorer runs un-namespaced so it sees the wire as it really is (RFC 09 §5); remove the namespace from the file, or use --base to name the deployment
+Error: zenoh config tests/cmd/fixtures/namespaced.json5: sets a session namespace ("zensight") — an explorer runs un-namespaced so it sees the wire as it really is (RFC 09 §5); remove the namespace from the file, or use --base to name the deployment
 
 ```
 
