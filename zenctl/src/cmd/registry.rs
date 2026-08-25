@@ -21,6 +21,10 @@ use zenkey::RegistrySlice;
 
 use crate::Bus;
 
+/// The verdict verb's name, spelled once (#355) — the dispatcher
+/// uses it too.
+pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check retired");
+
 /// What `registry export` emits.
 pub async fn export(target: ExportAs, producer: Option<&str>, args: &Bus) -> Result<()> {
     let slices = args.slice_set().await?;
@@ -127,26 +131,22 @@ pub async fn diff(args: &Bus) -> Result<()> {
 /// session, the rendering, and the exit code.
 pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
     // Seconds off the flag, a `Duration` from here in.
-    let listen = for_secs
-        .map(|secs| crate::exit::asked("check retired", super::positive_secs("--for", secs)));
+    let listen = for_secs.map(|secs| ASKING.ask(super::positive_secs("--for", secs)));
     // A verdict verb: every pre-run failure below goes through `asked`'s
     // exit 2 — an exit 1 here would read "a retired subject still speaks"
     // about a ledger nobody could walk.
     let dirs = args.registry_dirs();
     // The ledger source is the dirs alone, never the bus union: the served
     // slices are a *fact to check against* (§6.1), not a second ledger.
-    let local = crate::exit::asked(
-        "check retired",
-        if dirs.is_empty() {
-            Err(anyhow!(
-                "check retired walks the [[deprecated]] ledger of local registry \
+    let local = ASKING.ask(if dirs.is_empty() {
+        Err(anyhow!(
+            "check retired walks the [[deprecated]] ledger of local registry \
                  files — pass --registry <dir> (or set one on the active context)"
-            ))
-        } else {
-            zenkey_fleet::SliceSet::from_dirs(&dirs).map_err(anyhow::Error::from)
-        },
-    );
-    let session = crate::exit::asked("check retired", args.session().await);
+        ))
+    } else {
+        zenkey_fleet::SliceSet::from_dirs(&dirs).map_err(anyhow::Error::from)
+    });
+    let session = ASKING.ask(args.session().await);
     let entries: usize = local.slices().iter().map(|s| s.deprecated.len()).sum();
     if let Some(window) = listen {
         // Stated before the window opens, not after (O5).
@@ -160,8 +160,7 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
         );
     }
     let registries: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
-    let report = crate::exit::asked(
-        "check retired",
+    let report = ASKING.ask(
         zenkey_fleet::run_retired(
             &args.fleet(&session),
             &local,

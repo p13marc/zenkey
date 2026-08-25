@@ -34,24 +34,27 @@ use anyhow::Result;
 use crate::Bus;
 use crate::cli::WhyArgs;
 
+/// The verdict verb's name, spelled once (#355).
+pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("why");
+
 pub async fn run(args: WhyArgs) -> Result<()> {
     // A verdict verb: every pre-run failure is `asked`'s exit 2, never 1 —
     // exit 1 here means "a cause was found", which a bus that would not open
     // has no standing to claim. A `$*` selector is the same kind of failure:
     // a question that cannot be asked (RFC 03 §2).
-    let bus = crate::exit::asked("why", Bus::resolve(&args.bus));
-    let selector = crate::exit::asked("why", super::selector_of(&args.selector, &bus));
+    let bus = ASKING.ask(Bus::resolve(&args.bus));
+    let selector = ASKING.ask(super::selector_of(&args.selector, &bus));
     // The registry through the one degradation door (#210): unavailable is
     // `None` — announced once, and rendered as "not asked" by the rung.
-    let slices = crate::exit::asked("why", bus.slices_optional().await);
-    let session = crate::exit::asked("why", bus.session().await);
+    let slices = ASKING.ask(bus.slices_optional().await);
+    let session = ASKING.ask(bus.session().await);
 
     // Stated before the window opens, not after (O5): a user watching a
     // silence deserves to know what is being watched, and that the window is
     // the only data-plane cost of this run.
     let listen = match args.for_secs {
         Some(secs) => {
-            let d = crate::exit::asked("why", super::positive_secs("--for", secs));
+            let d = ASKING.ask(super::positive_secs("--for", secs));
             eprintln!(
                 "why: listening {secs}s on {selector} — the one rung that costs the \
                  data plane; everything else was control-plane sweeps (RFC 09 §5.1)."
@@ -65,10 +68,8 @@ pub async fn run(args: WhyArgs) -> Result<()> {
         timeout: bus.timeout(),
         listen,
     };
-    let report = crate::exit::asked(
-        "why",
-        zenkey_fleet::run_why(&bus.fleet(&session), &selector, slices.as_ref(), &spec).await,
-    );
+    let report = ASKING
+        .ask(zenkey_fleet::run_why(&bus.fleet(&session), &selector, slices.as_ref(), &spec).await);
     crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())?;
 
     // A library returns a verdict, a command exits with it — through the

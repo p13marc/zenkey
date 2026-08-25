@@ -16,6 +16,10 @@ use anyhow::{Result, bail};
 
 use crate::Bus;
 
+/// The verdict verb's name, spelled once (#355) — the dispatcher
+/// uses it too.
+pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check probe");
+
 pub async fn run(target: &str, producer: &str, procedure: &str, args: &Bus) -> Result<()> {
     let session = args.session().await?;
 

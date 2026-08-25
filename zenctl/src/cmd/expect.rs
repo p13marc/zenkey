@@ -9,6 +9,9 @@ use crate::Bus;
 use crate::cli::SelectorArgs;
 use crate::exit::unaskable;
 
+/// This verb's name, spelled once (#355) — the dispatcher uses it too.
+pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check expect");
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     sel: &SelectorArgs,
@@ -24,19 +27,19 @@ pub async fn run(
     // A verdict verb: a selector this tool refuses, or a window of zero
     // seconds, is a question that cannot be asked — `asked`'s reserved 2,
     // never the 1 that would claim a verdict.
-    let selector = crate::exit::asked("check expect", super::selector_of(sel, args));
-    let within = crate::exit::asked("check expect", super::positive_secs("--for", for_secs));
-    let qos = crate::exit::asked("check expect", qos_check(qos));
+    let selector = ASKING.ask(super::selector_of(sel, args));
+    let within = ASKING.ask(super::positive_secs("--for", for_secs));
+    let qos = ASKING.ask(qos_check(qos));
 
     // A session that will not open is the impaired exit (`asked`'s 2), never
     // 1 — "not met" is a claim about a window that was actually watched.
-    let session = crate::exit::asked("check expect", args.session().await);
+    let session = ASKING.ask(args.session().await);
     // Slices enrich: `--valid-payload` and `--qos declared` degrade to
     // explained violations when nothing is loaded, and the report says why.
     // `None` stays `None` into the engine so each violation names the
     // missing registry (`no registry loaded…`) rather than claiming
     // `no schema served` about types nobody looked up (RFC 09 §5.1 O4; #246).
-    let slices = crate::exit::asked("check expect", args.slices_optional().await);
+    let slices = ASKING.ask(args.slices_optional().await);
     let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
     let spec = zenkey_fleet::ExpectSpec {
         selector: selector.clone(),
@@ -50,18 +53,19 @@ pub async fn run(
     };
 
     eprintln!(
-        "check expect: watching {selector} for {for_secs}s — subscriber declared \
-         before the window opened (RFC 09 §5.1 O4)"
+        "{}: watching {selector} for {for_secs}s — subscriber declared \
+         before the window opened (RFC 09 §5.1 O4)",
+        ASKING.verb()
     );
     let report =
         match zenkey_fleet::run_expect(&args.fleet(&session), slices.as_ref(), &store, &spec).await
         {
             Ok(r) => r,
+            // The observation never stood up — that is the impaired exit,
+            // never "not met". Through the same seam as the other two exits
+            // now (#355), rather than an inline pair that bypassed it.
             Err(e) => {
-                // The observation never stood up — that is the impaired exit,
-                // never "not met".
-                eprintln!("check expect: observation could not be established: {e}");
-                std::process::exit(crate::exit::NO_VERDICT);
+                ASKING.unobservable(format_args!("observation could not be established: {e}"))
             }
         };
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;

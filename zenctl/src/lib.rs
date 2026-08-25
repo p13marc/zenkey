@@ -283,12 +283,20 @@ pub async fn run() -> Result<()> {
             let bus = Bus::resolve(&bus)?;
             cmd::admin::graph(dot, origins, &bus).await
         }
-        Command::Key(KeyCmd::Includes { a, b, out }) => {
-            cmd::key::relate("includes", &a, &b, out.format, out.color)
-        }
-        Command::Key(KeyCmd::Intersects { a, b, out }) => {
-            cmd::key::relate("intersects", &a, &b, out.format, out.color)
-        }
+        Command::Key(KeyCmd::Includes { a, b, out }) => cmd::key::relate(
+            crate::render::KeyOp::Includes,
+            &a,
+            &b,
+            out.format,
+            out.color,
+        ),
+        Command::Key(KeyCmd::Intersects { a, b, out }) => cmd::key::relate(
+            crate::render::KeyOp::Intersects,
+            &a,
+            &b,
+            out.format,
+            out.color,
+        ),
         Command::Key(KeyCmd::Canon { expr, out }) => cmd::key::canon(&expr, out.format, out.color),
         Command::Bench(BenchCmd::Rpc {
             origin,
@@ -462,7 +470,7 @@ pub async fn run() -> Result<()> {
         }) => {
             // A verdict verb: a failure before the question is asked is the
             // reserved exit 2, never 1 (`exit::asked`'s rule).
-            let bus = exit::asked("check expect", Bus::resolve(&bus));
+            let bus = cmd::expect::ASKING.ask(Bus::resolve(&bus));
             cmd::expect::run(
                 &selector,
                 for_secs,
@@ -481,11 +489,11 @@ pub async fn run() -> Result<()> {
             for_secs,
             bus,
         }) => {
-            let bus = exit::asked("check cutover", Bus::resolve(&bus));
+            let bus = cmd::cutover::ASKING.ask(Bus::resolve(&bus));
             cmd::cutover::run(&old_root, for_secs, &bus).await
         }
         Command::Check(CheckCmd::Retired { for_secs, bus }) => {
-            let bus = exit::asked("check retired", Bus::resolve(&bus));
+            let bus = cmd::registry::ASKING.ask(Bus::resolve(&bus));
             cmd::registry::retired(for_secs, &bus).await
         }
         Command::Check(CheckCmd::Probe {
@@ -494,7 +502,7 @@ pub async fn run() -> Result<()> {
             procedure,
             bus,
         }) => {
-            let bus = exit::asked("check probe", Bus::resolve(&bus));
+            let bus = cmd::probe::ASKING.ask(Bus::resolve(&bus));
             cmd::probe::run(&target, &producer, &procedure, &bus).await
         }
         Command::Check(CheckCmd::Schema {
@@ -505,7 +513,7 @@ pub async fn run() -> Result<()> {
             encoding,
             bus,
         }) => {
-            let bus = exit::asked("check schema", Bus::resolve(&bus));
+            let bus = cmd::schema::ASKING.ask(Bus::resolve(&bus));
             cmd::schema::check(
                 &type_name,
                 &from,
