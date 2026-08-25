@@ -10,9 +10,8 @@
 //! An application declares exactly one profile, as a static:
 //!
 //! ```
-//! use zenkey::AppProfile;
+//! use zenkey::{AppName, AppProfile, OriginSalt};
 //!
-//! use zenkey::{AppName, OriginSalt};
 //! static PROFILE: AppProfile = AppProfile::new(
 //!     AppName::new("acme-fleet"),
 //!     OriginSalt::new("acme-fleet-host-id-v1"),

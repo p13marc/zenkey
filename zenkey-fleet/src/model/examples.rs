@@ -32,6 +32,11 @@ pub(crate) struct Examples<T> {
     cap: usize,
 }
 
+// `budget` uses `new`/`push_with`/`into_vec`; the rest of the surface is
+// reached only by the `decode`-gated judges (`doctor`, `field`, `expect`).
+// With the feature off they are genuinely dead, which is a fact about the
+// build, not an omission — saying so beats gating six methods one by one.
+#[cfg_attr(not(feature = "decode"), allow(dead_code))]
 impl<T> Examples<T> {
     /// A collector holding at most `cap` examples.
     pub fn new(cap: usize) -> Self {

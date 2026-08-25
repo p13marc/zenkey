@@ -93,3 +93,16 @@ pub use slice::{
     Declared, Fanout, ProcedureKind, RateClass, RegistrySlice, SliceFinding, SliceToken,
     parse_slice, to_toml as slice_to_toml,
 };
+
+/// The crate README's first snippet, compiled (#324's aftermath).
+///
+/// It is the adoption example on the crates.io landing page, and it silently
+/// stopped compiling when `AppProfile::new` took its two constants as
+/// newtypes: nothing built it, so nothing said so. `#[cfg(doctest)]` means
+/// the file is *tested* and never rendered — the crate docs stay as they
+/// are, and the two illustrative blocks that reference an application's own
+/// generated module are fenced `rust,ignore`, which is the honest label for
+/// code that cannot be compiled here.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

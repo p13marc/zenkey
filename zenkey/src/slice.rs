@@ -687,7 +687,7 @@ impl RegistrySlice {
     ///
     /// `BlobTier::Artifact` is the ordinary spelling; a [`Declared`] asks the
     /// same question about a tier token only a newer fleet member knows,
-    /// which is what [`diff`] needs to call skew skew.
+    /// which is what [`diff`] needs to call skew.
     pub fn serves_blob_tier(&self, tier: impl Into<Declared<BlobTier>>) -> bool {
         let tier = tier.into();
         self.blob.iter().any(|b| b.tier == tier)
@@ -1508,6 +1508,10 @@ mod tests {
         assert_eq!(RateClass::parse("low").cap_per_hour(), Some(60));
         assert_eq!(RateClass::parse("burst(240/h)"), RateClass::Burst(240));
         assert_eq!(RateClass::parse("burst(240/h)").cap_per_hour(), Some(240));
+        // The `/h` is the unit and it is required: `burst(240)` names no
+        // period, so it is a token this build cannot read rather than a
+        // budget of 240 per something.
+        assert_eq!(RateClass::parse("burst(240)").cap_per_hour(), None);
 
         // An unreadable spelling is carried, and its cap is *unknown* — which
         // is not "unlimited", and callers must not read it as one.

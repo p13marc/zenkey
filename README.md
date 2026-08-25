@@ -31,8 +31,15 @@ layout, none of those can be written down.
 ## Adopting it
 
 ```rust
-// One static per application: name + origin salt (RFC 06 §1).
-static PROFILE: zenkey::AppProfile = zenkey::AppProfile::new("acme-fleet", "acme-fleet-host-id-v1");
+// One static per application: name + origin salt (RFC 06 §1). Each half is
+// named at the call site, because two adjacent `&'static str`s in the wrong
+// order used to compile into a working profile with the wrong salt.
+use zenkey::{AppName, AppProfile, OriginSalt};
+
+static PROFILE: AppProfile = AppProfile::new(
+    AppName::new("acme-fleet"),
+    OriginSalt::new("acme-fleet-host-id-v1"),
+);
 ```
 
 ```rust

@@ -30,11 +30,18 @@ An application declares its **profile** — its name and origin salt, the two
 constants RFC 06 §1 leaves to the application:
 
 ```rust
-use zenkey::{AppProfile, V1Context};
+use zenkey::{AppName, AppProfile, OriginSalt, V1Context};
 
-static PROFILE: AppProfile = AppProfile::new("acme-fleet", "acme-fleet-host-id-v1");
+// Each half is named at the call site: the two constants are both
+// `&'static str` and sit next to each other, so a transposition used to
+// compile into a working profile with the wrong salt (#324).
+static PROFILE: AppProfile = AppProfile::new(
+    AppName::new("acme-fleet"),
+    OriginSalt::new("acme-fleet-host-id-v1"),
+);
 
-let ctx = V1Context::for_producer(&PROFILE, "sysinfo");
+// The producer name is validated (RFC 03 §1.5), so this is a `Result`.
+let ctx = V1Context::for_producer(&PROFILE, "sysinfo").unwrap();
 let health = ctx.health_key();     // "v1/h-3fa9c2d41b7e/state/sysinfo/health"
 ```
 
@@ -46,14 +53,14 @@ script. This crate ships no registry.
 
 **Build** — an unregistered subject does not construct:
 
-```rust
+```rust,ignore
 let key = sysinfo::key(ctx.origin(), &sysinfo::Subject::DiskUsed { mount: "_".into() })?;
 ```
 
 **Parse** — the direction that deletes positional `split('/')` from consumers:
 a metric name refines straight into a typed subject with its variables named:
 
-```rust
+```rust,ignore
 match sysinfo::Subject::parse_metric(&metric) {
     Some(sysinfo::Subject::DiskUsed { mount }) => …,     // not parts[1]
     None => { /* unregistered — drop it, loudly */ }

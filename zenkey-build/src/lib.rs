@@ -1150,17 +1150,22 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             // Allowed for read/long-running; an explicit value must be one of
             // the two. Parsed since v1.5 (#9) — the builder-level refusal.
             let fanout = match entry.get("fanout").and_then(|v| v.as_str()) {
-                Some(token) if Fanout::from_token(token).is_some() => {
-                    Fanout::from_token(token).expect("checked by the guard")
-                }
-                Some(other) => {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "procedure {ppath:?}: unknown fanout {other:?} (allowed|forbidden)"
-                        ),
-                    ));
-                }
+                // One parse, in the pattern. This was a match guard calling
+                // `from_token` and an arm body calling it again behind
+                // `.expect("checked by the guard")` — the invariant written
+                // out by hand across the guard/body boundary, where the
+                // pattern can just carry it.
+                Some(token) => match Fanout::from_token(token) {
+                    Some(f) => f,
+                    None => {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "procedure {ppath:?}: unknown fanout {token:?} (allowed|forbidden)"
+                            ),
+                        ));
+                    }
+                },
                 None => {
                     if kind == "write" {
                         Fanout::Forbidden

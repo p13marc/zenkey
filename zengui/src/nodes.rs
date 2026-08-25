@@ -82,7 +82,6 @@ impl NodeRoster {
             // producer (same fallback as the engine's roster()).
             let producer = parsed
                 .producer()
-                .as_ref()
                 .map(|p| p.chunk())
                 .unwrap_or_else(|| origin.trim_start_matches('@').to_string());
             let presence = self
