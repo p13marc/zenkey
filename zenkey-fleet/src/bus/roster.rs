@@ -244,7 +244,6 @@ pub fn token_identity(base: &str, key: &str) -> Option<(String, String)> {
     let origin = parsed.origin.chunk().to_string();
     let producer = parsed
         .producer()
-        .as_ref()
         .map(|p| p.chunk())
         .unwrap_or_else(|| origin.trim_start_matches('@').to_string());
     Some((origin, producer))

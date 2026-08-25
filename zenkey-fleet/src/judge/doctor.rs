@@ -470,16 +470,13 @@ fn emit_capped(
 
 /// The declared events rate class as an hourly cap (RFC 04 §1.3):
 /// `rare` ≤ 1/h, `low` ≤ 1/min, `burst(n/h)` a declared cap.
-pub(crate) fn rate_cap_per_hour(rate: &str) -> Option<u64> {
-    match rate {
-        "rare" => Some(1),
-        "low" => Some(60),
-        other => other
-            .strip_prefix("burst(")?
-            .strip_suffix("/h)")?
-            .parse()
-            .ok(),
-    }
+struct RateWindow {
+    /// The declared hourly cap, from [`RateClass::cap_per_hour`]. `None` is
+    /// a rate token this build cannot read — "cannot judge", never a
+    /// guessed budget (RFC 09 §5.1 O4).
+    cap: Option<u64>,
+    /// Samples seen on the family during the window.
+    seen: u64,
 }
 
 /// The passive listening phase: watch the data planes for `window`, judge
@@ -528,8 +525,9 @@ async fn observe_traffic(
     let mut qos_bad: BTreeMap<String, (String, u64, u64)> = BTreeMap::new();
     let mut undecodable: BTreeMap<String, (String, u64)> = BTreeMap::new();
     let mut invalid: BTreeMap<String, (String, u64)> = BTreeMap::new();
-    // Per-family event counts: (family subject, declared rate) → count.
-    let mut event_counts: BTreeMap<(String, String), u64> = BTreeMap::new();
+    // Per-family event counts: (family subject, declared rate) → what was
+    // seen and what was declared.
+    let mut event_counts: BTreeMap<(String, String), RateWindow> = BTreeMap::new();
     // Stamping nodes that are not the publisher (#213): zid → samples.
     let mut foreign_stampers: BTreeMap<String, u64> = BTreeMap::new();
 
@@ -595,7 +593,18 @@ async fn observe_traffic(
                                 Some(p) => format!("{p}/{}", sf.path),
                                 None => format!("{}/{}", v.origin, sf.path),
                             };
-                            *event_counts.entry((family, rate.token())).or_default() += 1;
+                            // The cap is taken from the typed `RateClass`
+                            // here, where it is in hand — this used to
+                            // stringify the token and re-parse it below
+                            // through a second copy of RFC 04 §1.3's
+                            // mapping (#350's sweep).
+                            event_counts
+                                .entry((family, rate.token()))
+                                .or_insert_with(|| RateWindow {
+                                    cap: rate.cap_per_hour(),
+                                    seen: 0,
+                                })
+                                .seen += 1;
                         }
                         let budget = decode_budget.entry(s.key.clone()).or_default();
                         if *budget < DECODE_BUDGET {
@@ -734,11 +743,11 @@ async fn observe_traffic(
     // than an hour, exceeding the hourly cap is conclusive. Absence or
     // under-rate in a bounded window is never a finding (O1/O4).
     if window <= Duration::from_secs(3600) {
-        for ((family, rate), count) in &event_counts {
-            let Some(cap) = rate_cap_per_hour(rate) else {
+        for ((family, rate), RateWindow { cap, seen: count }) in &event_counts {
+            let Some(cap) = cap else {
                 continue;
             };
-            if *count > cap {
+            if count > cap {
                 findings.push(finding(
                     DoctorSeverity::Warning,
                     CheckId::RateOverDeclared,
@@ -1172,17 +1181,6 @@ mod tests {
         let quiet = judge_cardinality(&slices, &Default::default(), 5.0);
         assert_eq!(quiet.len(), 1);
         assert!(quiet[0].evidence.starts_with("exempt: rest-variable"));
-    }
-
-    /// RFC 04 §1.3's closed vocabulary, as hourly caps — and everything
-    /// else says "cannot judge", never a guessed budget.
-    #[test]
-    fn rate_caps_follow_the_declared_classes() {
-        assert_eq!(rate_cap_per_hour("rare"), Some(1));
-        assert_eq!(rate_cap_per_hour("low"), Some(60));
-        assert_eq!(rate_cap_per_hour("burst(100/h)"), Some(100));
-        assert_eq!(rate_cap_per_hour("burst(100)"), None);
-        assert_eq!(rate_cap_per_hour("often"), None);
     }
 
     /// Deep-review D4: the qos-observed-mismatch cap bounds *violators*, not

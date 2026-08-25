@@ -406,10 +406,25 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
             ),
         };
         if forbidden {
-            let declared = if proc_decl.fanout.is_some() {
-                "declares fanout = \"forbidden\""
-            } else {
-                "is a write with no declared fanout, which defaults to forbidden (RFC 08 §2)"
+            // Three cases, because the guard above has three. Reading
+            // `fanout.is_some()` folded the middle one into the first and
+            // told the operator the slice "declares fanout = \"forbidden\""
+            // when it declared something this build cannot read — a claim
+            // that sends them grepping the registry for a string that is
+            // not in it.
+            let declared = match proc_decl.fanout.as_ref() {
+                Some(f) if f.is(&Fanout::Forbidden) => {
+                    "declares fanout = \"forbidden\"".to_string()
+                }
+                Some(f) => format!(
+                    "declares fanout = {:?}, a token this build does not know — \
+                     RFC 08 §2 defaults a write to forbidden and an unreadable \
+                     spelling is not a licence",
+                    f.token()
+                ),
+                None => "is a write with no declared fanout, which defaults to forbidden \
+                         (RFC 08 §2)"
+                    .to_string(),
             };
             return Err(Error::unaskable(
                 format!("procedure {producer}/{procedure}"),
@@ -667,6 +682,34 @@ mod tests {
         .to_string();
         assert!(err.contains("defaults to forbidden"), "{err}");
         assert!(err.contains("RFC 08 §2"), "{err}");
+        assert!(err.contains("RFC 05 §2.1"), "{err}");
+
+        // A token this build cannot read is refused too — and the refusal
+        // says which token, rather than claiming the slice declared
+        // "forbidden" and sending the operator to grep for a string that is
+        // not in their registry.
+        let err = call(
+            &crate::Fleet::new(&session, ""),
+            CallSpec {
+                target: &CallTarget::Fleet,
+                producer: "netring",
+                procedure: "capture/trigger",
+                params: &[],
+                body: None,
+                attachment: None,
+                timeout: Duration::from_millis(100),
+                slices: Some(&slice_with_proc("write", Some("per-iface"))),
+            },
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("per-iface"), "{err}");
+        assert!(err.contains("does not know"), "{err}");
+        assert!(
+            !err.contains("declares fanout = \"forbidden\""),
+            "the slice declared no such thing: {err}"
+        );
         assert!(err.contains("RFC 05 §2.1"), "{err}");
 
         // An explicit `fanout = "allowed"` write still fans out, and a read
