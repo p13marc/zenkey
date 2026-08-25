@@ -236,7 +236,7 @@ pub struct SendForm {
     /// How many lines the bound has discarded (O6).
     pub dropped: u64,
     /// The last refusal, when a send did not happen at all.
-    pub error: Option<String>,
+    pub error: Option<crate::services::ServiceError>,
     /// The v1.12 confirmation: retiring a key that is not state-shaped is an
     /// operator cleanup, priced with the same `--i-know` vocabulary as the
     /// CLI. The engine's `check_retire` stays the judge — this only arms it.
@@ -251,7 +251,7 @@ pub struct SendForm {
     /// (no schema fetched yet), which is not "the request has no fields".
     pub request_fields: Option<Vec<SchemaField>>,
     /// The last call outcome: a report, or the refusal/error text.
-    pub outcome: Option<Result<CallReport, String>>,
+    pub outcome: Option<Result<CallReport, crate::services::ServiceError>>,
 }
 
 impl SendForm {
@@ -356,16 +356,16 @@ pub enum SendMsg {
     RetireIKnowToggled(bool),
     /// A prepare→declare→send round finished: the prepared body's provenance,
     /// the declared publication (kept when repeating), and its matching status.
-    Ready(Result<Arc<crate::message::PublishOutcome>, String>),
+    Ready(Result<Arc<crate::message::PublishOutcome>, crate::services::ServiceError>),
     /// One repeat tick fired.
     Tick,
     /// A repeat send landed (or did not).
-    Sent(Result<usize, String>),
+    Sent(Result<usize, crate::services::ServiceError>),
     /// The armed publication was undeclared.
-    Stopped(Result<(), String>),
+    Stopped(Result<(), crate::services::ServiceError>),
     /// A retire round finished (#115): the tombstone shipped (with the
     /// publication's matching fact), or it did not.
-    Retired(Result<Option<bool>, String>),
+    Retired(Result<Option<bool>, crate::services::ServiceError>),
 
     // ── call mode ───────────────────────────────────────────────────────
     ProducerPicked(String),
@@ -379,7 +379,7 @@ pub enum SendMsg {
     RequestSchema(Option<Vec<SchemaField>>),
     /// The call finished — its report, or why it did not (#176). Its `Err`
     /// is written into [`SendForm::outcome`].
-    Done(Result<Arc<zenkey_fleet::report::CallReport>, String>),
+    Done(Result<Arc<zenkey_fleet::report::CallReport>, crate::services::ServiceError>),
 }
 
 /// Whether retiring this key is the v1.12 operator act — i.e. anything but a
@@ -855,7 +855,7 @@ fn non_repliers(
 /// The per-origin outcome list — a genuinely different rendering of a
 /// genuinely different result, kept whole through the #184 merge.
 fn outcome_view<'a>(
-    outcome: &'a Result<CallReport, String>,
+    outcome: &'a Result<CallReport, crate::services::ServiceError>,
     form: &'a SendForm,
     roster: &'a crate::nodes::NodeRoster,
     sp: Spacing,

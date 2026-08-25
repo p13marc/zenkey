@@ -20,7 +20,11 @@ use crate::view::tokens::Spacing;
 #[derive(Debug, Clone)]
 pub enum NodesMsg {
     /// The one-shot `node_info` landed.
-    InfoLoaded(String, String, Result<Arc<NodeInfo>, String>),
+    InfoLoaded(
+        String,
+        String,
+        Result<Arc<NodeInfo>, crate::services::ServiceError>,
+    ),
     /// Click-through: land on the origin's subtree in the key tree.
     ShowInTree(String),
 }
@@ -31,7 +35,7 @@ pub enum DetailState {
     #[default]
     NotAsked,
     Loading(String),
-    Loaded(String, Result<Arc<NodeInfo>, String>),
+    Loaded(String, Result<Arc<NodeInfo>, crate::services::ServiceError>),
 }
 
 /// Everything the pane renders (args struct per the `DetailData` precedent).

@@ -24,7 +24,7 @@ pub enum DoctorMsg {
     /// The `--listen` window in seconds (#161); empty = off.
     ListenChanged(String),
     /// A run finished.
-    Done(Result<crate::doctor::DoctorRun, String>),
+    Done(Result<crate::doctor::DoctorRun, crate::services::ServiceError>),
     /// A finding row was clicked — navigate to its subject.
     FindingClicked(usize),
     /// Drop every cached `describe` so the next decode asks the bus again

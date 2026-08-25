@@ -1294,10 +1294,9 @@ pub struct TreeData<'a> {
     pub pivot: Pivot,
     /// The find-in-tree query; empty = no filter.
     pub search: &'a str,
-    /// Scroll offset, and…
-    pub scroll_y: f32,
-    /// …the viewport height: together, the virtual window.
-    pub viewport_h: f32,
+    /// The virtual window: where the list is scrolled to and how much of it
+    /// is on screen (#360).
+    pub viewport: crate::view::kit::Viewport,
     /// Per-key projections, for the row badges.
     pub facts: &'a FactsIndex,
     /// Per-key payload-conformance verdicts (#164) — the cache the tick's
@@ -1373,7 +1372,7 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
     // The density-scaled row height (#192): the window arithmetic and the
     // fixed row containers must agree on it, or the scrollbar lies.
     let row_h = d.sp.row(ROW_HEIGHT, crate::view::tokens::CAPTION_LINE);
-    let (first, last) = kit::window(flat.rows.len(), d.scroll_y, d.viewport_h, row_h);
+    let (first, last) = kit::window(flat.rows.len(), d.viewport, row_h);
     let mut col = Column::new();
     if first > 0 {
         col = col.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * row_h)));
@@ -1387,7 +1386,7 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
         col = col.push(
             iced::widget::container(row_view(
                 shape,
-                &r,
+                r,
                 RowContext {
                     arena: &flat.arena,
                     facts: d.facts,
@@ -1415,12 +1414,7 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
     }
     iced::widget::scrollable(col)
         .height(Length::Fill)
-        .on_scroll(|viewport| {
-            Message::Workspace(WorkspaceMsg::TreeScrolled(
-                viewport.absolute_offset().y,
-                viewport.bounds().height,
-            ))
-        })
+        .on_scroll(|viewport| Message::Workspace(WorkspaceMsg::TreeScrolled(viewport.into())))
         .into()
 }
 
@@ -1454,7 +1448,7 @@ struct RowContext<'a> {
     sp: Spacing,
 }
 
-fn row_view<'a>(shape: &RowShape, r: &TreeRow, cx: RowContext<'a>) -> Element<'a, Message> {
+fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a, Message> {
     let RowContext {
         arena,
         facts,
@@ -1479,15 +1473,16 @@ fn row_view<'a>(shape: &RowShape, r: &TreeRow, cx: RowContext<'a>) -> Element<'a
     };
 
     let is_selected = r.target.is_some() && selected == r.target.as_deref();
-    let name = kit::caption(r.chunk.clone())
-        .font(iced::Font::MONOSPACE)
-        .style(move |theme: &iced::Theme| text::Style {
-            color: Some(if is_selected {
-                colors(theme).primary()
-            } else {
-                colors(theme).text()
-            }),
-        });
+    let name =
+        kit::caption(r.chunk)
+            .font(iced::Font::MONOSPACE)
+            .style(move |theme: &iced::Theme| text::Style {
+                color: Some(if is_selected {
+                    colors(theme).primary()
+                } else {
+                    colors(theme).text()
+                }),
+            });
 
     let mut line = row![name].spacing(sp.xs).align_y(iced::Alignment::Center);
 
@@ -1537,8 +1532,8 @@ fn row_view<'a>(shape: &RowShape, r: &TreeRow, cx: RowContext<'a>) -> Element<'a
         }
         NodeStatus::Observed(_) => {}
     }
-    if let Some(ty) = &r.decl_type {
-        line = line.push(kit::muted(ty.clone()));
+    if let Some(ty) = r.decl_type {
+        line = line.push(kit::muted(ty));
     }
 
     // The key-population budget (#221), on the offending family's subtree
@@ -1603,16 +1598,16 @@ fn row_view<'a>(shape: &RowShape, r: &TreeRow, cx: RowContext<'a>) -> Element<'a
     // Observation is opt-in, per subtree (issue #85). The toggle reflects
     // *this app's* watches, not global coverage — and only rows standing for
     // a real wire subtree offer it (pivot groups are synthetic).
-    let watch: Element<'a, Message> = match &r.target {
+    let watch: Element<'a, Message> = match r.target {
         Some(t) => {
-            let watch_label = if watches.mine.contains(t) {
+            let watch_label = if watches.mine.contains(&t) {
                 "◉"
             } else {
                 "○"
             };
             kit::link(kit::caption(watch_label))
                 .padding([0.0, sp.xs])
-                .on_press(Message::Subject(SubjectMsg::WatchToggled(t.clone())))
+                .on_press(Message::Subject(SubjectMsg::WatchToggled(t)))
                 .into()
         }
         None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
@@ -2429,7 +2424,11 @@ mod tests {
         assert_eq!(piv.total_keys, 50_000);
 
         // The frame cost is the window, not the row count.
-        let (first, last) = kit::window(flat.rows.len(), 25_000.0 * ROW_HEIGHT, 900.0, ROW_HEIGHT);
+        let (first, last) = kit::window(
+            flat.rows.len(),
+            kit::Viewport::scrolled(25_000.0 * ROW_HEIGHT, 900.0),
+            ROW_HEIGHT,
+        );
         println!(
             "window at mid-scroll: rows {first}..{last} of {}",
             flat.rows.len()
@@ -2440,18 +2439,23 @@ mod tests {
     /// The scroll window is exact row arithmetic with overscan, clamped.
     #[test]
     fn the_window_is_bounded_and_covers_the_viewport() {
-        let (first, last) = kit::window(50_000, 0.0, 600.0, ROW_HEIGHT);
+        let (first, last) = kit::window(50_000, kit::Viewport::default(), ROW_HEIGHT);
         assert_eq!(first, 0);
         assert!(
             (26..=60).contains(&last),
             "viewport rows + overscan: {last}"
         );
 
-        let (first, last) = kit::window(50_000, 25_000.0 * ROW_HEIGHT, 600.0, ROW_HEIGHT);
+        let (first, last) = kit::window(
+            50_000,
+            kit::Viewport::scrolled(25_000.0 * ROW_HEIGHT, 600.0),
+            ROW_HEIGHT,
+        );
         assert!((25_000 - kit::OVERSCAN..=25_000).contains(&first));
         assert!(last > 25_000);
 
-        let (first, last) = kit::window(10, 1_000_000.0, 600.0, ROW_HEIGHT);
+        let (first, last) =
+            kit::window(10, kit::Viewport::scrolled(1_000_000.0, 600.0), ROW_HEIGHT);
         assert_eq!((first, last), (10, 10), "clamped past the end");
     }
 }

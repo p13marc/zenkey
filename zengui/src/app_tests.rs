@@ -744,7 +744,7 @@ fn a_failed_zrec_open_restores_the_row_with_its_note() {
 
     open(
         &mut app,
-        ReplayMsg::Loaded("missing.zrec".to_string(), Err("no such file".to_string())),
+        ReplayMsg::Loaded("missing.zrec".to_string(), Err("no such file".into())),
     );
     assert!(app.work.replay.replay_loading.is_none());
     assert_eq!(
@@ -752,7 +752,10 @@ fn a_failed_zrec_open_restores_the_row_with_its_note() {
         Some("missing.zrec"),
         "the row comes back with the path that failed"
     );
-    assert_eq!(app.work.replay.replay_note.as_deref(), Some("no such file"));
+    assert_eq!(
+        app.work.replay.replay_note.as_ref().map(|e| e.to_string()),
+        Some("no such file".to_string())
+    );
     assert!(app.work.replay.replay.is_none(), "no mode was entered");
 }
 

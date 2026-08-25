@@ -88,19 +88,21 @@ pub enum BusMsg {
     /// The link changed state.
     Link(LinkState),
     /// A session was opened (or could not be).
-    SessionOpened(Result<zenoh::Session, String>),
+    SessionOpened(Result<zenoh::Session, crate::services::ServiceError>),
     /// The monitor started (lazily — no data-plane watches yet unless eager).
-    MonitorStarted(Result<Arc<Monitor>, String>),
+    MonitorStarted(Result<Arc<Monitor>, crate::services::ServiceError>),
     /// The declared-keyspace skeleton was (re)built, with the liveliness
     /// roster the build task gathered anyway (#61 seeds the node roster
     /// from it instead of throwing it away).
-    SkeletonBuilt(Result<(Arc<Skeleton>, Arc<LiveRoster>), String>),
+    SkeletonBuilt(Result<(Arc<Skeleton>, Arc<LiveRoster>), crate::services::ServiceError>),
     /// The base sweep finished. An empty list is *not* a verdict (RFC 05 §3.1).
-    BasesDiscovered(Result<Vec<DiscoveredBase>, String>),
+    BasesDiscovered(Result<Vec<DiscoveredBase>, crate::services::ServiceError>),
     /// Registry slices arrived, from the bus or from `--registry` dirs.
-    SlicesLoaded(Result<Arc<SliceSet>, String>),
+    SlicesLoaded(Result<Arc<SliceSet>, crate::services::ServiceError>),
     /// The §6.1 union arrived: (set, from_bus, dirs_only, disagreements).
-    SlicesUnionLoaded(Result<(Arc<SliceSet>, crate::view::status::UnionCounts), String>),
+    SlicesUnionLoaded(
+        Result<(Arc<SliceSet>, crate::view::status::UnionCounts), crate::services::ServiceError>,
+    ),
     /// One bounded validation batch finished (#164): per checked key, the
     /// payload-conformance verdict of its newest sample. Lands in the
     /// verdict cache; the render paths only look up.
@@ -134,7 +136,7 @@ pub enum DeploymentMsg {
     /// `"(scope)"` path, which was read in exactly one place — the string
     /// interpolated into a failure warning. Two halves of one operation
     /// landing in two groups, held together by a fake key (#175).
-    ScopeWatchesReleased(Result<(), String>),
+    ScopeWatchesReleased(Result<(), crate::services::ServiceError>),
     /// Apply/release the scope preset's selectors as watches — the eager
     /// mode, made explicit and labelled by its cost.
     ScopeWatchToggled,
@@ -266,11 +268,14 @@ pub enum SubjectMsg {
     /// Carries the row's display path.
     WatchToggled(String),
     /// A watch was declared for the given display path.
-    WatchStarted(String, Result<WatchId, String>),
+    WatchStarted(String, Result<WatchId, crate::services::ServiceError>),
     /// A watch was released for the given display path.
-    WatchReleased(String, Result<(), String>),
+    WatchReleased(String, Result<(), crate::services::ServiceError>),
     /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
-    ValueFetched(String, Result<Arc<FetchOutcome>, String>),
+    ValueFetched(
+        String,
+        Result<Arc<FetchOutcome>, crate::services::ServiceError>,
+    ),
     /// The fetched value's schema decode finished (§6.4 item 5's inspector):
     /// (key, the whole decoded sample — rendering, verdict and the decode
     /// error behind an `Undecodable`, #164 — with the document text rendered
@@ -309,7 +314,7 @@ pub enum WorkspaceMsg {
     TreeSearchChanged(String),
     /// The tree scrolled: (absolute y offset, viewport height) — what the
     /// virtualized window renders against (issue #65).
-    TreeScrolled(f32, f32),
+    TreeScrolled(crate::view::kit::Viewport),
     /// Show a pane (#180): `Inspector` reveals the Inspector dock; every
     /// other value becomes the Workbench dock's tool and reveals *it*. The
     /// message survives the tab strip it was named for, because it is what
@@ -395,7 +400,7 @@ pub enum ChromeMsg {
     /// The preferences write landed (#255). Still best-effort — the `Err`
     /// goes to the status strip's prefs note and a `tracing::warn!`, never
     /// into the way of what the user was doing.
-    PrefsSaved(Result<(), String>),
+    PrefsSaved(Result<(), crate::services::ServiceError>),
 }
 
 /// A message from a pane-shaped surface (#176): the right-hand panes, the
@@ -630,14 +635,14 @@ impl RightPane {
 }
 
 /// What the link is doing, so the UI never has to infer it from emptiness.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LinkState {
     Connecting,
     /// The event pump is running; coverage comes from [`BusTick::watched`].
     Pumping,
     /// The stream ended; `Subscription::run_with` will restart it.
     Ended,
-    Failed(String),
+    Failed(crate::services::ServiceError),
 }
 
 /// One stats-tick's worth of bus activity, coalesced.

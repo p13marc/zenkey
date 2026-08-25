@@ -48,7 +48,7 @@ sub_state! {
         /// The find-in-tree query; empty = no filter.
         pub(crate) tree_search: String,
         /// Scroll position + viewport height, driving the virtual window.
-        pub(crate) tree_scroll: (f32, f32),
+        pub(crate) tree_scroll: crate::view::kit::Viewport,
         pub(crate) expanded: crate::expansion::Expansion,
         /// The last merge, kept while its three inputs are unchanged (#177).
         ///
@@ -88,7 +88,7 @@ impl Default for TreeState {
             flat: view::tree::Flattened::empty(),
             pivot: view::tree::Pivot::default(),
             tree_search: String::new(),
-            tree_scroll: (0.0, 600.0),
+            tree_scroll: crate::view::kit::Viewport::default(),
             expanded: crate::expansion::Expansion::new(),
             merged_cache: None,
             shape_reused: 0,

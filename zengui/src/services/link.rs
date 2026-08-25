@@ -5,6 +5,7 @@ use std::time::Duration;
 use iced::Task;
 
 use crate::message::{BusMsg, Message};
+use crate::services::{ServiceError, ServiceResult};
 
 /// What the four connection settings name.
 ///
@@ -18,10 +19,10 @@ async fn session(
     connect: Vec<String>,
     listen: Vec<String>,
     scouting: Option<bool>,
-) -> Result<zenoh::Session, String> {
+) -> ServiceResult<zenoh::Session> {
     zenkey_fleet::open_with_config(zenoh_config.as_deref(), &connect, &listen, scouting)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(ServiceError::of)
 }
 
 /// Open a session at launch, or after a reconnect.
@@ -64,7 +65,7 @@ pub fn discover_bases(session: &zenoh::Session, timeout: Duration) -> Task<Messa
         async move {
             zenkey_fleet::discover_bases(&session, timeout)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
         },
         |r| Message::Bus(BusMsg::BasesDiscovered(r)),
     )

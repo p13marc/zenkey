@@ -191,8 +191,9 @@ impl Series {
 /// would draw a line across the very thing the delete announced.
 pub fn value_series(ring: &HistoryRing, path: &str) -> Series {
     let mut series = Series::new();
-    // `iter` is newest-first; a series reads the other way.
-    for entry in ring.iter().collect::<Vec<_>>().into_iter().rev() {
+    // `iter` is newest-first; a series reads the other way, and the ring's
+    // iterator is double-ended, so reading it backwards costs nothing.
+    for entry in ring.iter().rev() {
         match entry.value.as_ref().filter(|_| !entry.is_delete) {
             Some(v) => match value_at(v, path) {
                 Some(f) => series.push(f),

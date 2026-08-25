@@ -26,6 +26,7 @@ use iced::Task;
 use zenkey_fleet::{Monitor, MonitorCore, SampleView};
 
 use crate::message::{Message, WorkspaceMsg};
+use crate::services::{ServiceError, ServiceResult};
 use crate::view::replay::ReplayMsg;
 
 /// Record every watched selector until `stop` fires.
@@ -64,7 +65,7 @@ async fn capture(
     path: String,
     base: String,
     stop: tokio::sync::oneshot::Receiver<()>,
-) -> Result<crate::view::replay::Recorded, String> {
+) -> ServiceResult<crate::view::replay::Recorded> {
     let header = zenkey_fleet::ZrecHeader {
         zrec: zenkey_fleet::ZREC_VERSION,
         selectors,
@@ -76,12 +77,12 @@ async fn capture(
     // stalled the drain and the capture recorded its own drops.
     let file = tokio::fs::File::create(&path)
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(ServiceError::of)?
         .into_std()
         .await;
     let sink = zenkey_fleet::ZrecSink::spawn(std::io::BufWriter::new(file), &header)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(ServiceError::of)?;
     let mut events = core.events();
     let recording = zenkey_fleet::record(
         &mut events,
@@ -94,9 +95,9 @@ async fn capture(
         // sample in first, however much traffic is queued behind it.
         biased;
         _ = stop => {}
-        r = recording => r.map_err(|e| e.to_string())?,
+        r = recording => r.map_err(ServiceError::of)?,
     }
-    let (samples, dropped) = sink.finish().await.map_err(|e| e.to_string())?;
+    let (samples, dropped) = sink.finish().await.map_err(ServiceError::of)?;
     Ok(crate::view::replay::Recorded {
         samples,
         dropped,
@@ -114,7 +115,7 @@ pub fn load(path: String) -> Task<Message> {
     Task::perform(
         async move {
             let parsed = std::fs::File::open(&path)
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
                 .and_then(|f| crate::replay::ReplayState::load(&path, std::io::BufReader::new(f)));
             (path, parsed.map(crate::replay::LoadedReplay::new))
         },
@@ -136,7 +137,7 @@ pub(crate) fn write_window(
     selectors: Vec<String>,
     base: String,
     out: impl std::io::Write,
-) -> Result<u64, String> {
+) -> ServiceResult<u64> {
     let header = zenkey_fleet::ZrecHeader {
         zrec: zenkey_fleet::ZREC_VERSION,
         selectors,
@@ -144,12 +145,12 @@ pub(crate) fn write_window(
         captured_at: zenkey_fleet::rfc3339_now(),
     };
     let mut writer =
-        zenkey_fleet::ZrecWriter::new_at(out, &header, epoch).map_err(|e| e.to_string())?;
+        zenkey_fleet::ZrecWriter::new_at(out, &header, epoch).map_err(ServiceError::of)?;
     for view in rows {
-        writer.write_sample(view).map_err(|e| e.to_string())?;
+        writer.write_sample(view).map_err(ServiceError::of)?;
     }
     let (samples, _) = writer.counts();
-    writer.finish().map_err(|e| e.to_string())?;
+    writer.finish().map_err(ServiceError::of)?;
     Ok(samples)
 }
 
@@ -167,7 +168,7 @@ pub fn save_window(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+            let file = std::fs::File::create(&path).map_err(ServiceError::of)?;
             let samples =
                 write_window(&rows, epoch, selectors, base, std::io::BufWriter::new(file))?;
             Ok(crate::view::replay::Recorded {

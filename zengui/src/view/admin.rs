@@ -39,7 +39,7 @@ const MAX_ENTITIES: usize = 200;
 pub enum AdminMsg {
     /// The sweep button — the only way the admin space is ever queried.
     Run,
-    Done(Result<std::sync::Arc<AdminSweep>, String>),
+    Done(Result<std::sync::Arc<AdminSweep>, crate::services::ServiceError>),
     /// Show or hide one row's raw admin document.
     RawToggled(String),
     /// A coverage row's producer, sent to the tree's search box. A pane never

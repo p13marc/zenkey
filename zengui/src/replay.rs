@@ -173,8 +173,11 @@ impl ReplayState {
     /// Load a `.zrec` into memory. A capture is bounded by construction
     /// (RecordBounds or an operator's ctrl-c), so whole-file loading is the
     /// honest simple thing — and scrubbing needs random access anyway.
-    pub fn load(path: &str, source: impl BufRead) -> Result<ReplayState, String> {
-        let mut reader = ZrecReader::new(source).map_err(|e| e.to_string())?;
+    pub fn load(
+        path: &str,
+        source: impl BufRead,
+    ) -> Result<ReplayState, crate::services::ServiceError> {
+        let mut reader = ZrecReader::new(source).map_err(crate::services::ServiceError::of)?;
         let header = reader.header().clone();
         let mut rows = Vec::new();
         let mut capture_dropped = 0u64;

@@ -34,12 +34,12 @@ use crate::view::{kit, theme};
 /// claimed as coverage, so it is not counted — the same rule
 /// `StatsTable::retire_unwatched` applies from the other side.
 pub(crate) fn key_is_watched(watched: &[String], key: &str) -> bool {
-    let Ok(ke) = zenoh::key_expr::KeyExpr::new(key.to_string()) else {
+    let Ok(ke) = zenoh::key_expr::KeyExpr::new(key) else {
         return false;
     };
     watched
         .iter()
-        .filter_map(|sel| zenoh::key_expr::KeyExpr::new(sel.clone()).ok())
+        .filter_map(|sel| zenoh::key_expr::KeyExpr::new(sel.as_str()).ok())
         .any(|sel| sel.intersects(&ke))
 }
 
@@ -224,8 +224,7 @@ fn locator<'a>(
         flat: &tree.flat,
         pivot: tree.pivot,
         search: &tree.tree_search,
-        scroll_y: tree.tree_scroll.0,
-        viewport_h: tree.tree_scroll.1,
+        viewport: tree.tree_scroll,
         facts: &dep.facts,
         verdicts: &work.verdicts.payloads,
         budgets: obs.budgets.as_deref(),

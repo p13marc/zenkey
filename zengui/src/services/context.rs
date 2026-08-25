@@ -14,7 +14,9 @@
 use iced::Task;
 
 use crate::message::{Message, PaneMsg};
+use crate::services::{ServiceError, ServiceResult};
 use crate::view::contexts::{ContextForm, ContextMsg};
+use zenkey_explorer_config::StoredContext;
 
 fn done(m: ContextMsg) -> Message {
     Message::Pane(PaneMsg::Context(m))
@@ -28,7 +30,7 @@ pub fn refresh() -> Task<Message> {
         async {
             zenkey_explorer_config::load()
                 .map(|c| (c.contexts.keys().cloned().collect(), c.current))
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
         },
         |r| done(ContextMsg::Refreshed(r)),
     )
@@ -38,7 +40,7 @@ pub fn refresh() -> Task<Message> {
 pub fn load(name: String) -> Task<Message> {
     Task::perform(
         async move {
-            let config = zenkey_explorer_config::load().map_err(|e| e.to_string())?;
+            let config = zenkey_explorer_config::load().map_err(ServiceError::of)?;
             let stored = config
                 .contexts
                 .get(&name)
@@ -58,8 +60,8 @@ pub fn load(name: String) -> Task<Message> {
 pub fn select(name: String) -> Task<Message> {
     Task::perform(
         async move {
-            let result = (|| {
-                let mut config = zenkey_explorer_config::load().map_err(|e| e.to_string())?;
+            let result = (|| -> ServiceResult<(Box<StoredContext>, Option<String>)> {
+                let mut config = zenkey_explorer_config::load().map_err(ServiceError::of)?;
                 let stored = config
                     .contexts
                     .get(&name)
@@ -87,8 +89,8 @@ pub fn save(snapshot: ContextForm, select: bool) -> Task<Message> {
     let name = snapshot.name.trim().to_string();
     Task::perform(
         async move {
-            let result = (|| {
-                let mut config = zenkey_explorer_config::load().map_err(|e| e.to_string())?;
+            let result = (|| -> ServiceResult<Vec<String>> {
+                let mut config = zenkey_explorer_config::load().map_err(ServiceError::of)?;
                 let mut applied = Ok(());
                 zenkey_explorer_config::upsert(&mut config, &name, |c| {
                     applied = snapshot.apply_to(c);
@@ -97,7 +99,7 @@ pub fn save(snapshot: ContextForm, select: bool) -> Task<Message> {
                 if select {
                     config.current = Some(name.clone());
                 }
-                zenkey_explorer_config::save(&config).map_err(|e| e.to_string())?;
+                zenkey_explorer_config::save(&config).map_err(ServiceError::of)?;
                 Ok(config.contexts.keys().cloned().collect())
             })();
             (name, result)

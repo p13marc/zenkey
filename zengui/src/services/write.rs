@@ -14,26 +14,47 @@ use zenkey::qos::QosProfile;
 use zenkey_fleet::{Publication, SliceSet};
 
 use crate::message::{Message, PaneMsg, PublishOutcome};
+use crate::services::ServiceError;
 use crate::view::send::SendMsg;
+
+/// What one RPC needs, gathered from the form before the future starts.
+///
+/// A struct rather than ten positional parameters (#360): `base`, `target`,
+/// `producer` and `procedure` are four adjacent `String`s, and any permutation
+/// of them compiles into a call to the wrong thing.
+pub struct Call {
+    pub session: zenoh::Session,
+    pub base: String,
+    /// The call target, as typed — the engine parses it (a bad target is an
+    /// answer, not a panic).
+    pub target: String,
+    pub producer: String,
+    pub procedure: String,
+    pub params: Vec<String>,
+    pub body: Option<Vec<u8>>,
+    pub attachment: Option<Vec<u8>>,
+    pub timeout: std::time::Duration,
+    pub slices: Option<Arc<SliceSet>>,
+}
 
 /// One RPC, whose target the engine parses (a bad target is an answer, not a
 /// panic).
-#[allow(clippy::too_many_arguments)] // Nine of these are the call's own form.
-pub fn call(
-    session: zenoh::Session,
-    base: String,
-    target: String,
-    producer: String,
-    procedure: String,
-    params: Vec<String>,
-    body: Option<Vec<u8>>,
-    attachment: Option<Vec<u8>>,
-    timeout: std::time::Duration,
-    slices: Option<Arc<SliceSet>>,
-) -> Task<Message> {
+pub fn call(c: Call) -> Task<Message> {
     Task::perform(
         async move {
-            let target = zenkey_fleet::CallTarget::parse(&target).map_err(|e| e.to_string())?;
+            let Call {
+                session,
+                base,
+                target,
+                producer,
+                procedure,
+                params,
+                body,
+                attachment,
+                timeout,
+                slices,
+            } = c;
+            let target = zenkey_fleet::CallTarget::parse(&target).map_err(ServiceError::of)?;
             zenkey_fleet::call(
                 &zenkey_fleet::Fleet::new(&session, &base),
                 zenkey_fleet::CallSpec {
@@ -49,7 +70,7 @@ pub fn call(
             )
             .await
             .map(Arc::new)
-            .map_err(|e| e.to_string())
+            .map_err(ServiceError::of)
         },
         |r| Message::Pane(PaneMsg::Send(SendMsg::Done(r))),
     )
@@ -99,7 +120,7 @@ pub fn publish(p: Publish) -> Task<Message> {
                 },
             )
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(ServiceError::of)?;
             let publication = zenkey_fleet::declare_publication(
                 &session,
                 &key,
@@ -107,14 +128,14 @@ pub fn publish(p: Publish) -> Task<Message> {
                 prepared.encoding.as_deref(),
             )
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(ServiceError::of)?;
             publication
                 .send(
                     prepared.bytes.clone(),
                     attachment.as_ref().map(|a| a.as_ref().clone()),
                 )
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(ServiceError::of)?;
             // The badge is a routing fact about this publisher and nothing
             // else; an error asking is "not asked" (O4), never "nobody
             // listens".
@@ -125,7 +146,7 @@ pub fn publish(p: Publish) -> Task<Message> {
             let publication = if repeat {
                 Some(Arc::new(publication))
             } else {
-                publication.undeclare().await.map_err(|e| e.to_string())?;
+                publication.undeclare().await.map_err(ServiceError::of)?;
                 None
             };
             Ok(Arc::new(PublishOutcome {
@@ -154,7 +175,7 @@ pub fn repeat(
                 )
                 .await
                 .map(|()| bytes.len())
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
         },
         |r| Message::Pane(PaneMsg::Send(SendMsg::Sent(r))),
     )
@@ -163,7 +184,7 @@ pub fn repeat(
 /// Acknowledged undeclare. A drop would undeclare too, but silently.
 pub fn undeclare(publication: Publication) -> Task<Message> {
     Task::perform(
-        async move { publication.undeclare().await.map_err(|e| e.to_string()) },
+        async move { publication.undeclare().await.map_err(ServiceError::of) },
         |r| Message::Pane(PaneMsg::Send(SendMsg::Stopped(r))),
     )
 }
@@ -177,10 +198,10 @@ pub fn retire(session: zenoh::Session, key: String) -> Task<Message> {
             let publication =
                 zenkey_fleet::declare_publication(&session, &key, QosProfile::Transition, None)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(ServiceError::of)?;
             let matching = publication.matching_status().await.ok();
-            publication.retire().await.map_err(|e| e.to_string())?;
-            publication.undeclare().await.map_err(|e| e.to_string())?;
+            publication.retire().await.map_err(ServiceError::of)?;
+            publication.undeclare().await.map_err(ServiceError::of)?;
             Ok(matching)
         },
         |r| Message::Pane(PaneMsg::Send(SendMsg::Retired(r))),

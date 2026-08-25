@@ -43,7 +43,7 @@ pub enum FieldsMsg {
     /// The window input, seconds.
     WindowChanged(String),
     /// A window finished.
-    Done(Result<Arc<FieldReport>, String>),
+    Done(Result<Arc<FieldReport>, crate::services::ServiceError>),
 }
 
 /// One numeric path's sparkline, built when the report lands — from the
@@ -65,7 +65,7 @@ pub struct FieldsState {
     /// The key the running (or landed) observation was asked about — the
     /// staleness guard: a report for a superseded subject never lands.
     pub asked: Option<String>,
-    pub report: Option<Result<Arc<FieldReport>, String>>,
+    pub report: Option<Result<Arc<FieldReport>, crate::services::ServiceError>>,
     /// Sparklines for up to `SPARK_ROWS` numeric paths, built at landing.
     pub sparks: Vec<PathSpark>,
 }

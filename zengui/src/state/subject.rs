@@ -43,7 +43,7 @@ sub_state! {
         /// with the selection.
         pub(crate) selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
         /// The last on-demand fetch: (key, outcome-or-error).
-        pub(crate) fetched: Option<(String, Result<Arc<FetchOutcome>, String>)>,
+        pub(crate) fetched: Option<(String, Result<Arc<FetchOutcome>, crate::services::ServiceError>)>,
         /// The decode of the last fetched value — the whole
         /// [`crate::value::DecodedValue`]: the decode, verdict included
         /// (#164), plus the document rendered from it once (#345).
@@ -55,7 +55,7 @@ sub_state! {
         /// and that placement is the behaviour: a new subject is a new
         /// timeline, so it starts at the top rather than wherever the last
         /// key's list happened to be.
-        pub(crate) history_scroll: (f32, f32),
+        pub(crate) history_scroll: crate::view::kit::Viewport,
         /// The slot key's history recording (issue #63). Created on selection
         /// (or cloned at pin time, #257), dropped with the slot — which is
         /// what makes unpinning stop the cost, since there is then nothing
@@ -94,7 +94,7 @@ impl SubjectSlot {
             selected_latency: None,
             fetched: None,
             decoded: None,
-            history_scroll: (0.0, 600.0),
+            history_scroll: crate::view::kit::Viewport::default(),
             history: None,
             rate_series: crate::series::RateSampler::new(),
             series_leaf: None,

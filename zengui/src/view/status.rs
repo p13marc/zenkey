@@ -32,7 +32,7 @@ pub struct UnionCounts {
 }
 
 /// Where registry slices came from, if anywhere.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SliceSource {
     /// Not loaded. Every registration badge reads "—" until this changes.
     None,
@@ -44,7 +44,7 @@ pub enum SliceSource {
     },
     /// The §6.1 union: served wins, dirs fill, disagreement is data.
     Union(UnionCounts),
-    Failed(String),
+    Failed(crate::services::ServiceError),
 }
 
 impl SliceSource {
@@ -83,7 +83,7 @@ pub struct Status<'a> {
     /// The last on-demand value fetch, for the selection.
     pub fetched: Option<&'a (
         String,
-        Result<std::sync::Arc<zenkey_fleet::FetchOutcome>, String>,
+        Result<std::sync::Arc<zenkey_fleet::FetchOutcome>, crate::services::ServiceError>,
     )>,
     /// The scope's short name. The long explanation lives in the location bar; the
     /// strip must stay narrow enough to fit, or its right-hand end — which is

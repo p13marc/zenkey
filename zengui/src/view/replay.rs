@@ -37,7 +37,10 @@ pub enum ReplayMsg {
     Open,
     /// The parse finished (#255): the path it ran against, and the loaded
     /// state or why not. Clears the loading claim either way.
-    Loaded(String, Result<crate::replay::LoadedReplay, String>),
+    Loaded(
+        String,
+        Result<crate::replay::LoadedReplay, crate::services::ServiceError>,
+    ),
     /// Show or hide the open row.
     OpenToggled,
     /// Play/pause.
@@ -53,7 +56,7 @@ pub enum ReplayMsg {
     /// Start or stop recording the current watches to a `.zrec`.
     RecordToggled,
     /// A recording finished (or failed): what it wrote — or why not.
-    RecordFinished(Result<Recorded, String>),
+    RecordFinished(Result<Recorded, crate::services::ServiceError>),
     /// Enter the retained window from live (#217) — or, from inside it,
     /// back to live. The live/retained toggle on the scrubber.
     RetainedToggled,

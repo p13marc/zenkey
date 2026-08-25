@@ -107,16 +107,16 @@ pub(crate) fn update(
             let decode_task = match (&outcome, &dep.session, &dep.schema_store) {
                 (Ok(out), Some(session), Some(store)) => {
                     if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
-                        services::value::decode(
-                            Arc::clone(store),
-                            session.clone(),
-                            dep.slices.clone(),
-                            dep.base().to_string(),
-                            key.clone(),
-                            v.key.clone(),
-                            v.encoding.clone(),
-                            v.payload.clone(),
-                        )
+                        services::value::decode(services::value::Decode {
+                            store: Arc::clone(store),
+                            session: session.clone(),
+                            slices: dep.slices.clone(),
+                            base: dep.base().to_string(),
+                            fetched_key: key.clone(),
+                            wire_key: v.key.clone(),
+                            encoding: v.encoding.clone(),
+                            bytes: v.payload.clone(),
+                        })
                     } else {
                         Task::none()
                     }
@@ -178,7 +178,7 @@ fn select(
         .map(|k| crate::history::HistoryRecorder::new(k, dep.settings.history_entries));
     // A new subject is a new timeline: it starts at the top rather than
     // wherever the last key's list happened to be scrolled (#183).
-    sub.history_scroll = (0.0, sub.history_scroll.1);
+    sub.history_scroll = sub.history_scroll.to_top();
     // The plotted series belong to the same subject (issue #64): they start
     // empty, and stop being fed when it goes away.
     sub.rate_series = crate::series::RateSampler::new();

@@ -37,7 +37,10 @@ pub enum BlobMsg {
     AllowUnpinnedToggled(bool),
     /// The probe button — the only way the bus is asked who holds this.
     Probe,
-    ProbeDone(String, Result<std::sync::Arc<BlobProbeReport>, String>),
+    ProbeDone(
+        String,
+        Result<std::sync::Arc<BlobProbeReport>, crate::services::ServiceError>,
+    ),
     /// A holder row was chosen. The *only* way an origin enters a fetch.
     HolderPicked(usize),
     /// Copy the selected holder's advisory filename into the destination
@@ -51,13 +54,19 @@ pub enum BlobMsg {
     Progress(zenkey_fleet::report::BlobProgress, u64),
     FetchDone(
         String,
-        Result<std::sync::Arc<zenkey_fleet::report::BlobFetchReport>, String>,
+        Result<
+            std::sync::Arc<zenkey_fleet::report::BlobFetchReport>,
+            crate::services::ServiceError,
+        >,
     ),
     /// A `tree/<root>` target's outcome: the validated index summary
     /// (RFC 07 §2.3, v1.17) — inspection, not download.
     InspectDone(
         String,
-        Result<std::sync::Arc<zenkey_fleet::report::BlobTreeIndexReport>, String>,
+        Result<
+            std::sync::Arc<zenkey_fleet::report::BlobTreeIndexReport>,
+            crate::services::ServiceError,
+        >,
     ),
     Cancel,
 }
@@ -183,7 +192,7 @@ fn target_row(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
     match &state.target {
         Some(Err(e)) => {
             col = col.push(
-                kit::body(e.clone()).style(|theme: &iced::Theme| text::Style {
+                kit::body(e.to_string()).style(|theme: &iced::Theme| text::Style {
                     color: Some(colors(theme).danger()),
                 }),
             );

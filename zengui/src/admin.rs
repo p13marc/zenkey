@@ -46,7 +46,7 @@ pub struct AdminSweep {
 pub struct AdminState {
     pub in_flight: bool,
     pub sweep: Option<Arc<AdminSweep>>,
-    pub error: Option<String>,
+    pub error: Option<crate::services::ServiceError>,
     /// Sweeps completed this session. A sweep that ran and found nothing is an
     /// observation; never-run is not — this is what tells them apart.
     pub runs: usize,
@@ -70,7 +70,11 @@ impl AdminState {
     /// window is no longer looking at, so it is dropped rather than shown. A
     /// failure keeps the last good sweep: deltas against nothing would be
     /// worse than a stale table with an error beside it.
-    pub fn finish(&mut self, outcome: Result<Arc<AdminSweep>, String>, base: &str) {
+    pub fn finish(
+        &mut self,
+        outcome: Result<Arc<AdminSweep>, crate::services::ServiceError>,
+        base: &str,
+    ) {
         self.in_flight = false;
         match outcome {
             Ok(sweep) if sweep.base == base => {

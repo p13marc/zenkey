@@ -22,7 +22,7 @@ pub enum Probe {
     NotAsked,
     InFlight,
     Done(Arc<BlobProbeReport>),
-    Failed(String),
+    Failed(crate::services::ServiceError),
 }
 
 /// A fetch's state, same discipline.
@@ -48,7 +48,7 @@ pub enum Fetch {
     /// A `tree/<root>` target: inspected, not downloaded (RFC 07 §2.3,
     /// v1.17) — the validated index summary, no content store involved.
     Inspected(Arc<zenkey_fleet::report::BlobTreeIndexReport>),
-    Failed(String),
+    Failed(crate::services::ServiceError),
 }
 
 /// The pane's whole state.
@@ -68,7 +68,7 @@ pub struct BlobState {
     /// The parse verdict for `target_input`, recomputed per keystroke. Shown,
     /// never auto-corrected: an id we silently rewrote would be an id the user
     /// did not ask about.
-    pub target: Option<Result<BlobTarget, String>>,
+    pub target: Option<Result<BlobTarget, crate::services::ServiceError>>,
     pub probe: Probe,
     /// Index into the probe's holders — **the only way an origin is chosen**.
     pub holder: Option<usize>,
@@ -85,7 +85,7 @@ impl BlobState {
         self.target = if input.trim().is_empty() {
             None
         } else {
-            Some(BlobTarget::parse(&input).map_err(|e| e.to_string()))
+            Some(BlobTarget::parse(&input).map_err(crate::services::ServiceError::of))
         };
         self.target_input = input;
         // A new target invalidates the old answers: holders of *that* id say
@@ -155,7 +155,7 @@ impl BlobState {
     /// `clear()` already reset the pane; there is nothing true to add.
     pub fn probe_finished(
         &mut self,
-        outcome: Result<Arc<BlobProbeReport>, String>,
+        outcome: Result<Arc<BlobProbeReport>, crate::services::ServiceError>,
         ran_against: &str,
         base: &str,
     ) {
@@ -176,7 +176,7 @@ impl BlobState {
     /// user started on the new base.
     pub fn fetch_finished(
         &mut self,
-        outcome: Result<Arc<BlobFetchReport>, String>,
+        outcome: Result<Arc<BlobFetchReport>, crate::services::ServiceError>,
         ran_against: &str,
         base: &str,
     ) {
@@ -198,7 +198,10 @@ impl BlobState {
     /// touch its cancel token (which an inspection never owns).
     pub fn inspect_finished(
         &mut self,
-        outcome: Result<Arc<zenkey_fleet::report::BlobTreeIndexReport>, String>,
+        outcome: Result<
+            Arc<zenkey_fleet::report::BlobTreeIndexReport>,
+            crate::services::ServiceError,
+        >,
         ran_against: &str,
         base: &str,
     ) {
@@ -358,7 +361,7 @@ mod tests {
         let mut state = BlobState::default();
         state.set_target("01HQXK8F9C2N4PZQ".into());
         let err = state.target.as_ref().unwrap().as_ref().unwrap_err();
-        assert!(err.contains("lowercase"), "{err}");
+        assert!(err.to_string().contains("lowercase"), "{err}");
         // The field still holds what was typed: the pane shows a verdict, it
         // does not rewrite the user's input.
         assert_eq!(state.target_input, "01HQXK8F9C2N4PZQ");

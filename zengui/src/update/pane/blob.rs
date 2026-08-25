@@ -100,7 +100,9 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
                 hex => match zenkey::ContentHash::parse(hex) {
                     Ok(h) => Some(h),
                     Err(e) => {
-                        blob.fetch = crate::blob::Fetch::Failed(format!("root: {e}"));
+                        blob.fetch = crate::blob::Fetch::Failed(crate::services::ServiceError::of(
+                            anyhow::Error::new(e).context("bad blob root"),
+                        ));
                         return Task::none();
                     }
                 },

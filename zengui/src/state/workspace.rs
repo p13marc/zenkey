@@ -419,7 +419,7 @@ sub_state! {
         /// Scroll position + viewport height, driving the virtual window
         /// (#183). Session-lived, unlike the timeline's: the stream is about
         /// the session, not about the subject.
-        pub(crate) echo_scroll: (f32, f32),
+        pub(crate) echo_scroll: crate::view::kit::Viewport,
     }
 }
 
@@ -438,13 +438,13 @@ sub_state! {
         /// not an empty capture and not a hung window (RFC 09 §5.1 O4).
         pub(crate) replay_loading: Option<String>,
         /// Why the last open failed, shown beside the path box.
-        pub(crate) replay_note: Option<String>,
+        pub(crate) replay_note: Option<crate::services::ServiceError>,
         /// A capture in flight (the location bar's record toggle): the stop signal
         /// and where it is writing.
         pub(crate) recording: Option<RecordingHandle>,
         /// The last finished capture, for the status strip: (samples, dropped,
         /// path) or the failure.
-        pub(crate) recorded: Option<Result<crate::view::replay::Recorded, String>>,
+        pub(crate) recorded: Option<Result<crate::view::replay::Recorded, crate::services::ServiceError>>,
     }
 }
 
@@ -481,7 +481,7 @@ impl Workspace {
             echo: EchoPane {
                 echo: EchoRing::new(echo_lines),
                 echo_view: view::echo::EchoView::new(),
-                echo_scroll: (0.0, 600.0),
+                echo_scroll: crate::view::kit::Viewport::default(),
             },
             replay: ReplayMode::default(),
         }

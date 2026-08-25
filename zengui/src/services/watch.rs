@@ -12,6 +12,7 @@ use iced::Task;
 use zenkey_fleet::{Monitor, MonitorSpec, WatchId};
 
 use crate::message::{BusMsg, DeploymentMsg, Message, SubjectMsg};
+use crate::services::ServiceError;
 
 /// Start the pump.
 ///
@@ -36,7 +37,7 @@ pub fn start_monitor(
             )
             .await
             .map(Arc::new)
-            .map_err(|e| e.to_string())
+            .map_err(ServiceError::of)
         },
         |r| Message::Bus(BusMsg::MonitorStarted(r)),
     )
@@ -87,7 +88,7 @@ pub fn subtree(
             monitor
                 .watch_seeded(&selector, policy)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
         },
         move |r| Message::Subject(SubjectMsg::WatchStarted(path.clone(), r)),
     )
@@ -96,7 +97,7 @@ pub fn subtree(
 /// Release one subtree's watch.
 pub fn release(monitor: Arc<Monitor>, path: String, id: WatchId) -> Task<Message> {
     Task::perform(
-        async move { monitor.unwatch(id).await.map_err(|e| e.to_string()) },
+        async move { monitor.unwatch(id).await.map_err(ServiceError::of) },
         move |r| Message::Subject(SubjectMsg::WatchReleased(path.clone(), r)),
     )
 }
@@ -145,7 +146,7 @@ pub fn release_scope(monitor: Arc<Monitor>, ids: Vec<WatchId>) -> Task<Message> 
 /// past frames are not what the viewer asked for.
 pub fn media(monitor: Arc<Monitor>, key: String) -> Task<Message> {
     Task::perform(
-        async move { monitor.watch(&key).await.map_err(|e| e.to_string()) },
+        async move { monitor.watch(&key).await.map_err(ServiceError::of) },
         |r| {
             Message::Pane(crate::message::PaneMsg::Media(
                 crate::view::media::MediaMsg::Watched(r),

@@ -38,7 +38,7 @@ pub enum MediaMsg {
     /// Subscribe to the composed exact key.
     View,
     /// The watch was declared (or refused).
-    Watched(Result<WatchId, String>),
+    Watched(Result<WatchId, crate::services::ServiceError>),
     /// Release the watch.
     Stop,
     /// The watch was released.
@@ -147,7 +147,7 @@ pub struct MediaState {
     pub producer: String,
     pub subpath: String,
     pub viewing: Option<Viewing>,
-    pub error: Option<String>,
+    pub error: Option<crate::services::ServiceError>,
 }
 
 /// Whether iced can decode this declared encoding today. The honest list,
@@ -263,7 +263,7 @@ pub fn section<'a>(
 
     if let Some(e) = &state.error {
         col = col.push(
-            kit::body(e.clone()).style(|theme: &iced::Theme| text::Style {
+            kit::body(e.to_string()).style(|theme: &iced::Theme| text::Style {
                 color: Some(super::theme::colors(theme).danger()),
             }),
         );
