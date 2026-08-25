@@ -95,20 +95,34 @@ pub enum KeyError {
 
 /// RFC 03 §2: `[a-z0-9]([a-z0-9._-]*[a-z0-9])?` — lowercase, must start and
 /// end alphanumeric, no wildcards, no `%`, no uppercase.
-pub fn is_valid_plain_chunk(chunk: &str) -> bool {
-    let bytes = chunk.as_bytes();
-    let alnum = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
-    match bytes {
-        [] => false,
-        [one] => alnum(*one),
-        [first, mid @ .., last] => {
-            alnum(*first)
-                && alnum(*last)
-                && mid
-                    .iter()
-                    .all(|&b| alnum(b) || b == b'.' || b == b'_' || b == b'-')
-        }
+pub const fn is_valid_plain_chunk(chunk: &str) -> bool {
+    // `const` so a compile-time constant can be *checked* at compile time
+    // (#324: `AppName::new` asserts on it in a `const` context). That is the
+    // only reason for the index loop — the rule is unchanged, and the closure
+    // and slice patterns it replaced are not available in a `const fn`.
+    const fn alnum(b: u8) -> bool {
+        b.is_ascii_lowercase() || b.is_ascii_digit()
     }
+    let bytes = chunk.as_bytes();
+    let n = bytes.len();
+    if n == 0 || !alnum(bytes[0]) {
+        return false;
+    }
+    if n == 1 {
+        return true;
+    }
+    if !alnum(bytes[n - 1]) {
+        return false;
+    }
+    let mut i = 1;
+    while i < n - 1 {
+        let b = bytes[i];
+        if !(alnum(b) || b == b'.' || b == b'_' || b == b'-') {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 /// RFC 03 §2: `@[a-z0-9][a-z0-9_-]*` (the `@v<int>` version form is a special

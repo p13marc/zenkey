@@ -81,7 +81,7 @@ pub use grammar::{
 pub use key::__private;
 pub use key::{Chunk, Key, Selector};
 pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};
-pub use profile::AppProfile;
+pub use profile::{AppName, AppProfile, OriginSalt};
 pub use qos::QosProfile;
 pub use slice::{
     Declared, Fanout, ProcedureKind, RateClass, RegistrySlice, SliceFinding, SliceToken,

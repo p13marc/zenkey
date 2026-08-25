@@ -441,7 +441,10 @@ mod tests {
     /// `for_producer` mints through the profile — end to end, once.
     #[test]
     fn for_producer_uses_profile_origin() {
-        static PROFILE: AppProfile = AppProfile::new("zenkey-ctx-test", "ctx-test-salt");
+        static PROFILE: AppProfile = AppProfile::new(
+            crate::AppName::new("zenkey-ctx-test"),
+            crate::OriginSalt::new("ctx-test-salt"),
+        );
         let a = V1Context::for_producer(&PROFILE, "sysinfo").unwrap();
         let b = V1Context::for_producer(&PROFILE, "netlink").unwrap();
         assert_eq!(a.origin(), b.origin());
@@ -455,7 +458,10 @@ mod tests {
     /// producer in the fleet onto one name.
     #[test]
     fn a_bad_producer_name_errs_instead_of_renaming() {
-        static PROFILE: AppProfile = AppProfile::new("zenkey-ctx-test", "ctx-test-salt");
+        static PROFILE: AppProfile = AppProfile::new(
+            crate::AppName::new("zenkey-ctx-test"),
+            crate::OriginSalt::new("ctx-test-salt"),
+        );
         for bad in ["has spaces", "Sysinfo", "ipv6-2", "-lead", "", "store"] {
             assert!(
                 V1Context::for_producer(&PROFILE, bad).is_err(),
