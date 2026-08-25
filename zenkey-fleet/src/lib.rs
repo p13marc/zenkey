@@ -183,17 +183,25 @@ pub use model::registry::UnionOutcome;
 pub use model::skeleton::{NodeStats, SkeletonCoverage, SkeletonNode, merge};
 pub use model::tree::TreeNode;
 // The rest of what the frontends actually reach for.
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{structural, structural_value};
 pub use tape::record::rfc3339_now;
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{SilenceEvidence, TickEvidence, judge_doctor_check, judge_origin_down};
 pub use judge::retired::EntryEvidence;
 // The remaining items a frontend actually calls. Every one of these was
 // reachable only by module path (#350) — which said nothing about whether it
 // was ours to use.
 pub use error::{BoxedCause, Error, Result, one_line};
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::field::DEFAULT_MAX_PATHS;
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::why::is_cause;
 // The two scope notes keep their own names rather than one: they are two
 // different O5 statements about two different windows, which is why
