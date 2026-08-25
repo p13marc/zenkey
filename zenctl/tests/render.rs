@@ -1545,6 +1545,7 @@ fn a_context_action_is_an_envelope_and_a_sentence() {
 fn a_registry_lint_is_notes_only_and_says_so_in_json() {
     let pass = zenctl::render::LintReport {
         dir: "registry".into(),
+        warnings: Vec::new(),
     };
     assert_eq!(table(&pass), "");
     assert!(notes(&pass).contains("registry lints pass (RFC 08 §5)."));
@@ -1552,6 +1553,40 @@ fn a_registry_lint_is_notes_only_and_says_so_in_json() {
         serde_json::from_str(ndjson(&pass).lines().next().unwrap()).unwrap();
     assert_eq!(doc["passed"], true);
     assert_eq!(doc["dir"], "registry");
+    assert_eq!(doc["warnings"], serde_json::json!([]));
+}
+
+/// A registry that opted out of RFC 08 §3.1 checking is *reported*, in both
+/// renderings, and still passes — it is a warning, not a finding (#319).
+///
+/// It reported nothing at all before: the warning sat behind
+/// `emit_rerun_if_changed`, and this command turns that off to keep cargo
+/// directives out of its stdout. The flag governs directives only now.
+#[test]
+fn a_registry_lint_reports_the_build_s_warnings_and_still_passes() {
+    let warned = zenctl::render::LintReport {
+        dir: "registry".into(),
+        warnings: vec![
+            "legacy declares compat = \"none\" — its entries are unpinned and \
+             incompatible edits pass unchecked (RFC 08 §3.1)"
+                .to_string(),
+        ],
+    };
+    // The person sees it…
+    let text = notes(&warned);
+    assert!(text.contains("with warnings:"), "{text}");
+    assert!(text.contains("compat = \"none\""), "{text}");
+    // …and so does the script, without it becoming a failure.
+    let doc: serde_json::Value =
+        serde_json::from_str(ndjson(&warned).lines().next().unwrap()).unwrap();
+    assert_eq!(doc["passed"], true);
+    assert_eq!(doc["warnings"].as_array().unwrap().len(), 1);
+    assert!(
+        doc["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("compat = \"none\"")
+    );
 }
 
 /// A forced break is loud by contract (RFC 08 §3.1): every broken pin is a row

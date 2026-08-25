@@ -58,7 +58,13 @@ use zenkey::{Fanout, SliceToken};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("registry lint failed [{file}]: {message}")]
-    Lint { file: String, message: String },
+    Lint {
+        file: String,
+        message: String,
+        /// What kind of lint failure this is — the thing
+        /// [`Config::write_compat_lock`] decides forceability on.
+        kind: LintKind,
+    },
     #[error("registry dir {0:?}: {1}")]
     Io(PathBuf, std::io::Error),
     #[error(
@@ -67,10 +73,97 @@ pub enum Error {
     NoOutDir,
 }
 
+/// What kind of registry-lint failure an [`Error::Lint`] reports.
+///
+/// Exists because forceability used to be decided by string-matching the
+/// error's own prose: `msg.contains("incompatible registry edit") ||
+/// msg.contains("vanished")`. Rewording either message — both of them
+/// multi-line paragraphs that read like something an editor would tidy —
+/// silently changed what `--force` would and would not overwrite, with no
+/// test that would notice. (The word "vanished" is already used as a *subject
+/// path* in this crate's own conditional-ledger tests, which is how close
+/// that coupling sits to an accidental match.) #318.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LintKind {
+    /// A pinned entry changed shape — the edit RFC 08 §3.1 forbids under
+    /// `compat = "backward"`. Overwritable with an explicit force.
+    Incompatible,
+    /// A pinned entry disappeared without a retirement. Same: overwritable
+    /// with an explicit force.
+    Vanished,
+    /// The lock is behind the registry — entries added, retirements not yet
+    /// recorded. Additive evolution is free; the snapshot just has to follow.
+    ///
+    /// Not a failure to force past: it is the case
+    /// [`Config::write_compat_lock`] **exists to fix**, so that call proceeds
+    /// through it without a force at all.
+    Stale,
+    /// A line of the lock file itself does not parse. Never forceable, and
+    /// never proceeded past: overwriting a lock you could not read is how a
+    /// corrupt file becomes a silent reset.
+    BadLine,
+    /// Everything else — a malformed registry entry, a ledger disagreement,
+    /// an illegal field. **Never** forceable: forcing past one of these would
+    /// write a lock for a registry that does not lint.
+    Invalid,
+}
+
+impl LintKind {
+    /// Whether an explicit force may overwrite past this failure.
+    pub fn is_forceable(self) -> bool {
+        matches!(self, LintKind::Incompatible | LintKind::Vanished)
+    }
+
+    /// Whether [`Config::write_compat_lock`] proceeds through this failure
+    /// without being asked — true only for [`Stale`](LintKind::Stale), the
+    /// drift it is called to resolve.
+    pub fn is_resolved_by_writing(self) -> bool {
+        matches!(self, LintKind::Stale)
+    }
+}
+
+/// What `write_compat_lock` should do when the existing lock and the registry
+/// disagree incompatibly.
+///
+/// A `bool` named `force` at a call site says nothing about which way round
+/// it goes; these two names do (#318).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnIncompatible {
+    /// Refuse the write and return the failure. The default.
+    Refuse,
+    /// Overwrite, and report every pin that was broken so the caller can
+    /// print them — the escape hatch is legal, silent it is not.
+    ForceAndReport,
+}
+
+/// A registry diagnostic that is **not** a failure.
+///
+/// Returned as a value rather than printed, so the same check reaches a
+/// build script (as `cargo::warning=`) and a CLI (`zenctl registry lint`)
+/// without either one deciding what the other sees (#319).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryWarning {
+    /// The registry file the warning is about.
+    pub file: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for RegistryWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.file, self.message)
+    }
+}
+
 fn lint(file: &str, message: impl Into<String>) -> Error {
+    lint_kind(file, message, LintKind::Invalid)
+}
+
+fn lint_kind(file: &str, message: impl Into<String>, kind: LintKind) -> Error {
     Error::Lint {
         file: file.to_string(),
         message: message.into(),
+        kind,
     }
 }
 
@@ -360,7 +453,13 @@ impl Config {
             None => Path::new(&std::env::var("OUT_DIR").map_err(|_| Error::NoOutDir)?)
                 .join("zenkey_registry.rs"),
         };
-        let generated = self.generate_string()?;
+        let (generated, warnings) = self.generate_string_checked()?;
+        // Emitting is the *build's* job. `checked` returns them as values so
+        // `lint()` reports the same set without printing cargo directives
+        // into a CLI's stdout (#319).
+        for w in warnings {
+            println!("cargo::warning={w}");
+        }
         std::fs::write(&out, generated).map_err(|e| Error::Io(out, e))?;
         Ok(())
     }
@@ -368,9 +467,14 @@ impl Config {
     /// As [`generate`](Self::generate), returning the generated source
     /// instead of writing it.
     pub fn generate_string(&self) -> Result<String, Error> {
-        self.checked()?;
-        let files = load_registry(&self.registry_dir)?;
-        Ok(emit::emit(&files, &self.zenkey_path))
+        self.generate_string_checked().map(|(source, _)| source)
+    }
+
+    /// As [`generate_string`](Self::generate_string), also returning the
+    /// non-fatal diagnostics the build would emit as `cargo::warning=`.
+    pub fn generate_string_checked(&self) -> Result<(String, Vec<RegistryWarning>), Error> {
+        let (files, warnings) = self.checked()?;
+        Ok((emit::emit(&files, &self.zenkey_path), warnings))
     }
 
     /// Every check `generate` runs, and **nothing else** (issue #50):
@@ -381,11 +485,19 @@ impl Config {
     /// what a build says, and a build stops at the first lint. A lint that
     /// reported *more* than the build would be a different tool wearing the
     /// same name.
-    pub fn lint(&self) -> Result<(), Error> {
-        self.checked().map(|_| ())
+    ///
+    /// It reported *less* until #319: the `compat = "none"` warning sat
+    /// inside `if emit_rerun_if_changed`, and `zenctl registry lint` calls
+    /// `.no_rerun_if_changed()` — correctly, for the cargo directives — so a
+    /// registry that had opted out of RFC 08 §3.1 checking was never flagged
+    /// by the tool whose whole job is to say what the build says. The flag
+    /// governs cargo directives only now, and the warnings come back as
+    /// values.
+    pub fn lint(&self) -> Result<Vec<RegistryWarning>, Error> {
+        self.checked().map(|(_, warnings)| warnings)
     }
 
-    fn checked(&self) -> Result<Vec<RegistryFile>, Error> {
+    fn checked(&self) -> Result<(Vec<RegistryFile>, Vec<RegistryWarning>), Error> {
         if self.emit_rerun_if_changed {
             println!("cargo::rerun-if-changed={}", self.registry_dir.display());
             if let Some(l) = &self.ledger {
@@ -404,17 +516,19 @@ impl Config {
         check_conditional_ledger(&self.conditional_path(), &files)?;
         check_type_table(&self.registry_dir, &files)?;
         // The compatibility lock (RFC 08 §3.1): opting out is legal and loud.
-        for f in files.iter().filter(|f| f.compat == Compat::None) {
-            if self.emit_rerun_if_changed {
-                println!(
-                    "cargo::warning={} declares compat = \"none\" — its entries are \
-                     unpinned and incompatible edits pass unchecked (RFC 08 §3.1)",
-                    f.name
-                );
-            }
-        }
+        // "Loud" is the caller's to arrange — this collects, it does not print.
+        let warnings: Vec<RegistryWarning> = files
+            .iter()
+            .filter(|f| f.compat == Compat::None)
+            .map(|f| RegistryWarning {
+                file: f.name.clone(),
+                message: "declares compat = \"none\" — its entries are unpinned and \
+                          incompatible edits pass unchecked (RFC 08 §3.1)"
+                    .to_string(),
+            })
+            .collect();
         check_compat_lock(&self.compat_lock_path(), &files)?;
-        Ok(files)
+        Ok((files, warnings))
     }
 
     fn compat_lock_path(&self) -> PathBuf {
@@ -451,10 +565,18 @@ impl Config {
     /// Write (or update) the RFC 08 §3.1 compatibility lock — the
     /// regeneration half of the check [`generate`](Self::generate) and
     /// [`lint`](Self::lint) enforce. Additive and retirement drift writes
-    /// cleanly; an **incompatible** rewrite is refused unless `force`, and a
-    /// forced write reports every broken pin so the caller can print them —
-    /// the escape hatch is legal, silent it is not.
-    pub fn write_compat_lock(&self, force: bool) -> Result<CompatLockUpdate, Error> {
+    /// cleanly; an **incompatible** rewrite is refused unless the caller
+    /// passes [`OnIncompatible::ForceAndReport`], and a forced write reports
+    /// every broken pin so the caller can print them — the escape hatch is
+    /// legal, silent it is not.
+    ///
+    /// A failure that is *not* about a broken pin — a malformed lock line —
+    /// is never forceable and is always returned. That was a bug until #318:
+    /// the old string match classified it as "not incompatible", and neither
+    /// arm of the `if` then fired, so the error was dropped on the floor and
+    /// the corrupt lock was overwritten instead of reported. Matching on
+    /// [`LintKind`] made the third case impossible to leave out.
+    pub fn write_compat_lock(&self, on: OnIncompatible) -> Result<CompatLockUpdate, Error> {
         let files = load_registry(&self.registry_dir)?;
         let path = self.compat_lock_path();
         let created = !path.exists();
@@ -463,14 +585,20 @@ impl Config {
         match check {
             Ok(()) => {}
             Err(e) => {
-                let msg = e.to_string();
-                let incompatible =
-                    msg.contains("incompatible registry edit") || msg.contains("vanished");
-                if incompatible && !force {
+                let kind = match &e {
+                    Error::Lint { kind, .. } => *kind,
+                    _ => return Err(e),
+                };
+                if kind.is_resolved_by_writing() {
+                    // Stale is the drift this call exists to resolve: the
+                    // rewrite below *is* the fix, so it proceeds silently.
+                } else if kind.is_forceable() && on == OnIncompatible::ForceAndReport {
+                    forced.push(e.to_string());
+                } else {
+                    // Refused, or a failure no rewrite can resolve — either
+                    // way the caller hears about it rather than getting a
+                    // fresh lock over the top of it.
                     return Err(e);
-                }
-                if incompatible {
-                    forced.push(msg);
                 }
             }
         }
@@ -1523,7 +1651,11 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
         for l in lines {
             let mut it = l.splitn(4, '\t');
             let (Some(kind), Some(producer), Some(path)) = (it.next(), it.next(), it.next()) else {
-                return Err(lint(fname, format!("bad lock line {l:?}")));
+                return Err(lint_kind(
+                    fname,
+                    format!("bad lock line {l:?}"),
+                    LintKind::BadLine,
+                ));
             };
             m.insert(
                 (kind.to_string(), producer.to_string(), path.to_string()),
@@ -1546,7 +1678,7 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
             Some(new_line) if new_line == line => {}
             Some(new_line) => {
                 // Same path, different shape — the exact edit §3 forbids.
-                return Err(lint(
+                return Err(lint_kind(
                     fname,
                     format!(
                         "incompatible registry edit (RFC 08 §3.1, compat = \"backward\"):\n  \
@@ -1554,6 +1686,7 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
                          an existing path never changes shape — retire it through \
                          [[deprecated]] and add a sibling (`sockets` → `sockets2`, RFC 08 §3)"
                     ),
+                    LintKind::Incompatible,
                 ));
             }
             None => {
@@ -1570,7 +1703,7 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
                     // is append-only), or the file opting out loudly.
                     stale.push(line.clone());
                 } else {
-                    return Err(lint(
+                    return Err(lint_kind(
                         fname,
                         format!(
                             "pinned entry vanished without retirement (RFC 08 §3.1):\n  {line}\n\
@@ -1578,6 +1711,7 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
                              deprecated.lock ledger), never by deletion — or the file \
                              declares compat = \"none\" and says so out loud"
                         ),
+                        LintKind::Vanished,
                     ));
                 }
             }
@@ -1593,7 +1727,7 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
         if missing.len() > 10 {
             sample.push(format!("… and {} more", missing.len() - 10));
         }
-        return Err(lint(
+        return Err(lint_kind(
             fname,
             format!(
                 "stale lock: {} unpinned entr(y/ies), {} retired line(s) lingering — \
@@ -1604,6 +1738,7 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
                 if sample.is_empty() { "" } else { "\n  " },
                 sample.join("\n  ")
             ),
+            LintKind::Stale,
         ));
     }
     Ok(())
@@ -1778,7 +1913,9 @@ mod tests {
         // Bootstrap the §3.1 lock so lint tests exercise *their* lint, not
         // the missing-snapshot bootstrap (which has its own tests below). An
         // unloadable registry fails identically with or without this.
-        let _ = Config::new().registry_dir(&dir).write_compat_lock(false);
+        let _ = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse);
         let out = Config::new().registry_dir(&dir).generate_string();
         let _ = std::fs::remove_dir_all(&dir);
         out
@@ -2075,7 +2212,7 @@ mod tests {
         std::fs::write(dir.join("t.toml"), &reg).unwrap();
         Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
         // No types.toml: lint inactive.
         Config::new().registry_dir(&dir).generate_string().unwrap();
@@ -2361,7 +2498,7 @@ mod tests {
         std::fs::write(dir.join("t.toml"), &base).unwrap();
         Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
         assert!(
             Config::new()
@@ -2387,14 +2524,14 @@ mod tests {
         // …and the regeneration tool refuses the same edit without force.
         let err = Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap_err()
             .to_string();
         assert!(err.contains("incompatible"), "{err}");
         // Forced, it writes — and reports the break, loudly.
         let update = Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(true)
+            .write_compat_lock(OnIncompatible::ForceAndReport)
             .unwrap();
         assert!(!update.forced.is_empty(), "a forced break is never silent");
         let _ = std::fs::remove_dir_all(&dir);
@@ -2409,7 +2546,7 @@ mod tests {
         std::fs::write(dir.join("t.toml"), &base).unwrap();
         Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
 
         let added = format!(
@@ -2427,7 +2564,7 @@ mod tests {
 
         let update = Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
         assert_eq!(update.added, 1);
         assert!(update.forced.is_empty());
@@ -2450,7 +2587,7 @@ mod tests {
         std::fs::write(dir.join("t.toml"), &base).unwrap();
         Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
 
         let retired = format!(
@@ -2460,7 +2597,7 @@ mod tests {
         std::fs::write(dir.join("deprecated.lock"), "t\thealth\n").unwrap();
         let update = Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
         assert_eq!(update.retired, 1);
         assert!(update.forced.is_empty(), "retirement is not a break");
@@ -2470,6 +2607,67 @@ mod tests {
                 .no_rerun_if_changed()
                 .lint()
                 .is_ok()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Forceability is a property of the failure, not of its prose (#318).
+    ///
+    /// The old classifier was `msg.contains("incompatible registry edit") ||
+    /// msg.contains("vanished")` over two multi-line paragraphs that read
+    /// like something an editor would tidy. This asserts the four kinds
+    /// directly, so rewording a message cannot move a failure between
+    /// "forceable" and "refused" without this test failing first.
+    #[test]
+    fn forceability_is_the_kind_not_the_wording() {
+        assert!(LintKind::Incompatible.is_forceable());
+        assert!(LintKind::Vanished.is_forceable());
+        // Stale is not *forced* past — it is what the write resolves.
+        assert!(!LintKind::Stale.is_forceable());
+        assert!(LintKind::Stale.is_resolved_by_writing());
+        // And the two that a rewrite must never paper over.
+        for k in [LintKind::BadLine, LintKind::Invalid] {
+            assert!(!k.is_forceable(), "{k:?}");
+            assert!(!k.is_resolved_by_writing(), "{k:?}");
+        }
+    }
+
+    /// A lock file that does not parse is reported, not overwritten.
+    ///
+    /// This was the bug the string match hid: `bad lock line` matched neither
+    /// sentinel, so `incompatible` was false, *neither* arm of the old `if`
+    /// fired, the error was dropped, and the corrupt lock was silently
+    /// replaced. A reset is not a repair (#318).
+    #[test]
+    fn a_corrupt_lock_is_reported_rather_than_reset() {
+        let dir = lock_dir("corrupt");
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        std::fs::write(dir.join("registry.lock"), "this is not a lock line\n").unwrap();
+
+        let err = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Lint {
+                kind: LintKind::BadLine,
+                ..
+            }
+        ));
+        // Not forceable either: forcing is for broken pins, not for a file
+        // this build could not read in the first place.
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .write_compat_lock(OnIncompatible::ForceAndReport)
+                .is_err()
+        );
+        // And the file the caller could not read is still there to look at.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("registry.lock")).unwrap(),
+            "this is not a lock line\n"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2486,20 +2684,31 @@ mod tests {
         std::fs::write(dir.join("t.toml"), &base).unwrap();
         Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
         std::fs::write(
             dir.join("t.toml"),
             base.replace("type = \"Health\"", "type = \"Health2\""),
         )
         .unwrap();
-        assert!(
-            Config::new()
-                .registry_dir(&dir)
-                .no_rerun_if_changed()
-                .lint()
-                .is_ok()
-        );
+        // …and the opt-out is *reported*, through both doors, whether or not
+        // cargo directives are being emitted (#319). `no_rerun_if_changed`
+        // used to suppress this warning along with the directives, which is
+        // exactly the door `zenctl registry lint` goes through.
+        let quiet = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .expect("compat = \"none\" is legal");
+        assert_eq!(quiet.len(), 1, "{quiet:?}");
+        assert_eq!(quiet[0].file, "t");
+        assert!(quiet[0].message.contains("compat = \"none\""), "{quiet:?}");
+
+        let loud = Config::new()
+            .registry_dir(&dir)
+            .lint()
+            .expect("compat = \"none\" is legal");
+        assert_eq!(loud, quiet, "the flag governs cargo directives, not checks");
 
         let err = lint_one(
             "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\ncompat = \"sometimes\"\n[producer]\nname = \"t\"\n",
@@ -2519,13 +2728,13 @@ mod tests {
         std::fs::write(dir.join("conditional.lock"), ledger).unwrap();
         Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
         let lint = Config::new()
             .registry_dir(&dir)
             .no_rerun_if_changed()
             .lint();
-        let entries = lint.and_then(|()| {
+        let entries = lint.and_then(|_| {
             Config::new()
                 .registry_dir(&dir)
                 .no_rerun_if_changed()
@@ -2544,7 +2753,7 @@ mod tests {
         std::fs::write(dir.join("t.toml"), toml).unwrap();
         Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
         assert!(
             Config::new()
@@ -2628,7 +2837,7 @@ mod tests {
         std::fs::write(dir.join("conditional.lock"), "t\told\tfeature ebpf\n").unwrap();
         Config::new()
             .registry_dir(&dir)
-            .write_compat_lock(false)
+            .write_compat_lock(OnIncompatible::Refuse)
             .unwrap();
         let err = Config::new()
             .registry_dir(&dir)
