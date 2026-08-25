@@ -10,7 +10,7 @@
 
 use serde::Serialize;
 
-use crate::render::{Cell, Grid, Note, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, Render, Row, Table, envelope_of};
 
 /// One producer's slice, as the completion cache holds it.
 #[derive(Debug, Clone, Serialize)]
@@ -83,9 +83,34 @@ impl Render for CacheReport {
 /// algebra is `zenoh-keyexpr`'s, not the fleet's. No second frontend renders a
 /// key-relation verdict, and pinning `{op, a, b, answer}` into the shared
 /// contract would freeze a shape nobody else reads.
+/// Which relation `key includes` / `key intersects` asked about.
+///
+/// A closed set the compiler can check. As a `String` it was matched with a
+/// `_` fallback in **two** places — here and `cmd/key.rs` — so a third
+/// relation added tomorrow would compute *and* render as `intersects`,
+/// silently and in two different files (#356).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyOp {
+    /// Every key `b` names is one `a` names.
+    Includes,
+    /// `a` and `b` can name a key in common.
+    Intersects,
+}
+
+impl KeyOp {
+    /// The wire token, exactly as it serializes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KeyOp::Includes => "includes",
+            KeyOp::Intersects => "intersects",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct KeyRelation {
-    pub op: String,
+    pub op: KeyOp,
     pub a: String,
     pub b: String,
     pub answer: bool,
@@ -103,20 +128,17 @@ impl Render for KeyRelation {
     const FAMILY: &'static str = "key-relation";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}
 
     fn table(&self, t: &mut Table) {
-        let verb = match (self.op.as_str(), self.answer) {
-            ("includes", true) => format!("includes every key {} names", self.b),
-            ("includes", false) => format!("does not include all of {}", self.b),
-            (_, true) => format!("and {} can name a common key", self.b),
-            (_, false) => format!("and {} share no key", self.b),
+        let verb = match (self.op, self.answer) {
+            (KeyOp::Includes, true) => format!("includes every key {} names", self.b),
+            (KeyOp::Includes, false) => format!("does not include all of {}", self.b),
+            (KeyOp::Intersects, true) => format!("and {} can name a common key", self.b),
+            (KeyOp::Intersects, false) => format!("and {} share no key", self.b),
         };
         t.line(format!(
             "{} — {} {verb}",
@@ -144,10 +166,7 @@ impl Render for KeyCanon {
     const FAMILY: &'static str = "key-canon";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}
@@ -171,13 +190,50 @@ impl Render for KeyCanon {
 /// document is a CLI invocation's answer — one payload, one schema, one exit
 /// code — rather than an observation of a fleet. zengui validates inline and
 /// renders the `Verdict` itself.
+/// What checking one payload against one schema established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SchemaCheckVerdict {
+    /// Decoded and conformant. Exit 0.
+    Valid,
+    /// Decoded and does not conform. A finding — exit 1.
+    Invalid,
+    /// The bytes are not readable as the declared encoding. Also a finding:
+    /// the payload was checked, and this is what checking found.
+    Undecodable,
+}
+
+impl std::fmt::Display for SchemaCheckVerdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SchemaCheckVerdict::Valid => "valid",
+            SchemaCheckVerdict::Invalid => "invalid",
+            SchemaCheckVerdict::Undecodable => "undecodable",
+        })
+    }
+}
+
+impl SchemaCheckVerdict {
+    /// The exit code this verdict earns (`crate::exit`).
+    pub fn exit_code(self) -> i32 {
+        match self {
+            SchemaCheckVerdict::Valid => crate::exit::CLEAN,
+            SchemaCheckVerdict::Invalid | SchemaCheckVerdict::Undecodable => crate::exit::FINDING,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SchemaCheck {
     #[serde(rename = "type")]
     pub type_name: String,
     pub kind: String,
-    /// `valid`, `invalid`, `undecodable`, or `not-validated: <reason>`.
-    pub verdict: String,
+    /// What the check established. A `not-validated` payload never reaches
+    /// this document — it exits 2 through `not_checked` before the report is
+    /// built — so the vocabulary here is the three outcomes that *are* a
+    /// verdict, and the exit code comes off a `match` on it rather than a
+    /// string comparison (#356).
+    pub verdict: SchemaCheckVerdict,
     /// The failing constraints, or the decoder's notes. Absent when there is
     /// nothing to say, rather than an empty array meaning the same thing.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -188,10 +244,7 @@ impl Render for SchemaCheck {
     const FAMILY: &'static str = "schema-check";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}
@@ -235,10 +288,7 @@ impl Render for GenPlan<'_> {
     const FAMILY: &'static str = "gen-plan";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
@@ -315,10 +365,7 @@ impl Render for zenkey_fleet::report::GenReport {
     const FAMILY: &'static str = "gen";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        match serde_json::to_value(self).expect("serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        }
+        envelope_of(self)
     }
 
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}

@@ -30,7 +30,7 @@ pub enum WhyMsg {
     /// The "why?" button — and the palette's entry. Runs on the subject key.
     Run,
     /// A ladder finished.
-    Done(Result<Arc<WhyReport>, String>),
+    Done(Result<Arc<WhyReport>, crate::services::ServiceError>),
 }
 
 /// The section's state — follows the subject.
@@ -40,7 +40,7 @@ pub struct WhyState {
     /// The key the running (or landed) ladder was asked about — the
     /// staleness guard.
     pub asked: Option<String>,
-    pub report: Option<Result<Arc<WhyReport>, String>>,
+    pub report: Option<Result<Arc<WhyReport>, crate::services::ServiceError>>,
 }
 
 impl WhyState {

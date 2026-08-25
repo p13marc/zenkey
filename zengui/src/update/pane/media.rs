@@ -64,7 +64,7 @@ pub(crate) fn update(
             ) {
                 Ok(k) => k,
                 Err(e) => {
-                    media.error = Some(e);
+                    media.error = Some(e.into());
                     return Task::none();
                 }
             };

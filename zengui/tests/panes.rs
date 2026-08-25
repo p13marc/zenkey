@@ -153,8 +153,7 @@ fn the_tree_renders_the_registration_state() {
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
-        scroll_y: 0.0,
-        viewport_h: 600.0,
+        viewport: Default::default(),
         facts: &facts,
         verdicts: &verdicts,
         budgets: None,
@@ -203,8 +202,7 @@ fn density_changes_the_grid_never_the_claims() {
             flat: &flat,
             pivot: tree::Pivot::Chunks,
             search: "",
-            scroll_y: 0.0,
-            viewport_h: 600.0,
+            viewport: Default::default(),
             facts: &facts,
             verdicts: &verdicts,
             budgets: None,
@@ -237,8 +235,7 @@ fn an_unresolved_tree_claims_neither_way() {
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
-        scroll_y: 0.0,
-        viewport_h: 600.0,
+        viewport: Default::default(),
         facts: &facts,
         verdicts: &verdicts,
         budgets: None,
@@ -271,8 +268,7 @@ fn foreign_keys_render_without_convention_labels() {
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
-        scroll_y: 0.0,
-        viewport_h: 600.0,
+        viewport: Default::default(),
         facts: &facts,
         verdicts: &verdicts,
         budgets: None,
@@ -306,8 +302,7 @@ fn the_empty_tree_explains_itself() {
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
-        scroll_y: 0.0,
-        viewport_h: 600.0,
+        viewport: Default::default(),
         facts: &facts,
         verdicts: &verdicts,
         budgets: None,
@@ -668,7 +663,7 @@ fn the_detail_pane_tags_decode_provenance() {
     let mut facts = KeyFacts::project("", key);
     facts.resolve(&slices);
 
-    let fetched: Result<Arc<FetchOutcome>, String> =
+    let fetched: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
         Ok(Arc::new(FetchOutcome::Value(FetchedValue {
             key: key.to_string(),
             payload: zenoh::bytes::ZBytes::from(br#"{"value":42.0}"#.to_vec()),
@@ -710,9 +705,10 @@ fn the_detail_pane_tags_decode_provenance() {
     assert!(ui.find("hex").is_ok(), "the hex side is present");
 
     // The attributed nothing.
-    let none: Result<Arc<FetchOutcome>, String> = Ok(Arc::new(FetchOutcome::None {
-        attempted: ["get", "@adv cache", "subscribe window"],
-    }));
+    let none: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
+        Ok(Arc::new(FetchOutcome::None {
+            attempted: ["get", "@adv cache", "subscribe window"],
+        }));
     let mut ui = simulator::<Message, _, _>(section(DetailData {
         slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
@@ -833,7 +829,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             decoded: None,
             series: None,
             history: None,
-            history_scroll: (0.0, 600.0),
+            history_scroll: Default::default(),
             watched: false,
             latency: None,
             blob,
@@ -1229,11 +1225,11 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         keys_evicted: 0,
         facts_cached: 0,
         facts_evicted: 0,
-        totals: (0, 0, 0.0),
+        totals: Default::default(),
         slices: &source,
         seeding: 0,
         seeded_watches: 0,
-        seed_totals: (0, 0, 0),
+        seed_totals: Default::default(),
         unreachable: false,
         prefs_note: Some("zengui.toml does not parse (bad) — using defaults"),
         replaying: false,
@@ -1510,7 +1506,7 @@ fn the_history_pane_says_why_it_is_empty() {
         key: None,
         recorder: None,
         watched: false,
-        scroll: (0.0, 600.0),
+        scroll: Default::default(),
     }));
     assert!(ui.find("Nothing selected").is_ok());
 
@@ -1522,7 +1518,7 @@ fn the_history_pane_says_why_it_is_empty() {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: false,
-        scroll: (0.0, 600.0),
+        scroll: Default::default(),
     }));
     assert!(
         ui.find("Not watched — nothing is being recorded").is_ok(),
@@ -1540,7 +1536,7 @@ fn the_history_pane_says_why_it_is_empty() {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
-        scroll: (0.0, 600.0),
+        scroll: Default::default(),
     }));
     assert!(ui.find("No samples yet").is_ok());
     assert!(
@@ -1572,7 +1568,7 @@ fn the_history_pane_diffs_consecutive_payloads() {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
-        scroll: (0.0, 600.0),
+        scroll: Default::default(),
     }));
     assert!(
         ui.find("~ value  41.0 → 42.0").is_ok(),
@@ -1614,7 +1610,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
             key: Some(REGISTERED),
             recorder: Some(&rec),
             watched: true,
-            scroll: (0.0, 600.0),
+            scroll: Default::default(),
         }));
         assert!(ui.find("▸ t-1").is_ok(), "the focused row is marked");
         assert!(
@@ -1636,7 +1632,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
             key: Some(REGISTERED),
             recorder: Some(&rec),
             watched: true,
-            scroll: (0.0, 600.0),
+            scroll: Default::default(),
         }));
         assert!(
             ui.find("new value after retirement — not a change to the previous value")
@@ -1665,7 +1661,7 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
         key: Some(FOREIGN),
         recorder: Some(&rec),
         watched: true,
-        scroll: (0.0, 600.0),
+        scroll: Default::default(),
     }));
     assert!(
         ui.find("neither sample has a structural form — compared as bytes, not as fields")
@@ -1690,7 +1686,7 @@ fn the_history_pane_counts_what_it_evicted() {
         key: Some(REGISTERED),
         recorder: Some(&rec),
         watched: true,
-        scroll: (0.0, 600.0),
+        scroll: Default::default(),
     }));
     assert!(
         ui.find("recording since selection · 3 retained · 7 evicted (ring full)")
@@ -2077,11 +2073,11 @@ fn the_projection_cache_discloses_its_bound() {
         keys_evicted: 7,
         facts_cached: 118,
         facts_evicted: 312,
-        totals: (0, 0, 0.0),
+        totals: Default::default(),
         slices: &source,
         seeding: 0,
         seeded_watches: 0,
-        seed_totals: (0, 0, 0),
+        seed_totals: Default::default(),
         unreachable: false,
         prefs_note: None,
         replaying: false,
@@ -2123,11 +2119,11 @@ fn an_untripped_cache_bound_says_nothing() {
         keys_evicted: 0,
         facts_cached: 12,
         facts_evicted: 0,
-        totals: (0, 0, 0.0),
+        totals: Default::default(),
         slices: &source,
         seeding: 0,
         seeded_watches: 0,
-        seed_totals: (0, 0, 0),
+        seed_totals: Default::default(),
         unreachable: false,
         prefs_note: None,
         replaying: false,
@@ -2550,11 +2546,11 @@ fn the_strip_reports_replay_over_the_link() {
         keys_evicted: 0,
         facts_cached: 3,
         facts_evicted: 0,
-        totals: (0, 0, 0.0),
+        totals: Default::default(),
         slices: &source,
         seeding: 0,
         seeded_watches: 0,
-        seed_totals: (0, 0, 0),
+        seed_totals: Default::default(),
         unreachable: false,
         prefs_note: None,
         replaying: true,
@@ -3035,7 +3031,7 @@ fn projection_inspector<'a>(
         decoded: None,
         series: None,
         history: None,
-        history_scroll: (0.0, 600.0),
+        history_scroll: Default::default(),
         watched: false,
         latency: None,
         blob,
@@ -3156,7 +3152,7 @@ fn the_decoded_pane_renders_three_verdict_states_and_keeps_the_silences_apart() 
     use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
 
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
-    let fetched: Result<Arc<FetchOutcome>, String> =
+    let fetched: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
         Ok(Arc::new(FetchOutcome::Value(FetchedValue {
             key: key.to_string(),
             payload: zenoh::bytes::ZBytes::from(br#"{"status":"ok"}"#.to_vec()),
@@ -3262,7 +3258,7 @@ fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
         &view,
         None,
         ring.next_seq(),
-        (0.0, 600.0),
+        Default::default(),
         &verdicts,
         sp(),
     ))));
@@ -3324,8 +3320,7 @@ fn the_tree_badges_the_budget_join() {
         flat: &flat,
         pivot: tree::Pivot::Chunks,
         search: "",
-        scroll_y: 0.0,
-        viewport_h: 600.0,
+        viewport: Default::default(),
         facts: &facts,
         verdicts: &verdicts,
         budgets: Some(&badges),
@@ -3379,6 +3374,7 @@ fn the_fields_section_states_its_window_and_its_bounds() {
         keys_seen: 1,
         dropped: 2,
         undocumented: 3,
+        unread: 0,
         registry_loaded: false,
         paths: 512,
         max_paths: 512,

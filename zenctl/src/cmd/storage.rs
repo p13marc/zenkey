@@ -40,7 +40,21 @@ pub async fn coverage(
 }
 
 /// The storages and their coverage, once.
-pub async fn list(args: &Bus) -> Result<()> {
+/// `storage list`, with the `--watch` decision where the verb is (#354).
+pub async fn list(cli: crate::cli::StorageListArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let crate::cli::StorageListArgs {
+        watch,
+        every,
+        bus: _,
+    } = cli;
+    if watch {
+        return crate::cmd::watch::storage_list(every, &bus).await;
+    }
+    once(&bus).await
+}
+
+async fn once(args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let storages = zenkey_fleet::storages(&session, args.timeout()).await?;
     let coverage = coverage(args, &storages).await;

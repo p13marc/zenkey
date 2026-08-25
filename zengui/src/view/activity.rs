@@ -36,7 +36,7 @@ pub(crate) struct ActivityData<'a> {
     pub dock: &'a ActivityDock,
     pub echo: &'a EchoRing,
     pub echo_view: &'a echo::EchoView,
-    pub echo_scroll: (f32, f32),
+    pub echo_scroll: crate::view::kit::Viewport,
     /// The subject key, when Echo is pinned to follow it.
     pub follow: Option<&'a str>,
     /// The payload-verdict cache (#164) — echo rows look their badges up in
@@ -148,7 +148,11 @@ fn replay_stream<'a>(
     }
     if let Some(done) = &r.recorded {
         col = col.push(kit::muted(match done {
-            Ok((samples, dropped, path)) => format!(
+            Ok(crate::view::replay::Recorded {
+                samples,
+                dropped,
+                path,
+            }) => format!(
                 "recorded {samples} sample(s) to {path} ({dropped} dropped — in-file ledger)"
             ),
             Err(e) => format!("recording failed: {e}"),

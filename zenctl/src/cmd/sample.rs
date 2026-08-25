@@ -7,21 +7,48 @@
 /// `attachment` is the already-rendered attachment text; `%a` expands to it,
 /// or to an empty field when the sample carried none (the line shape stays
 /// stable for cut/awk, like `%{path}`).
-#[allow(clippy::too_many_arguments)]
-pub fn format_sample(
-    fmt: &str,
-    n: usize,
-    wire_key: &str,
-    base: &str,
-    type_name: Option<&str>,
-    encoding: &str,
-    payload_len: usize,
-    timestamp: Option<&str>,
-    value: &str,
-    attachment: Option<&str>,
-    qos: Option<&str>,
-    source: Option<&str>,
-) -> String {
+/// Everything one `--fmt` line can name (#354).
+///
+/// Twelve positional parameters, seven of them `&str` or `Option<&str>`, is
+/// twelve chances to file a sample's encoding as its value — and every one of
+/// them compiles. Named, they cannot be transposed.
+#[derive(Debug, Clone, Copy)]
+pub struct SampleLine<'a> {
+    /// The line counter `%n` prints.
+    pub n: usize,
+    /// The full wire key, base included.
+    pub wire_key: &'a str,
+    /// The deployment base `wire_key` is parsed against.
+    pub base: &'a str,
+    /// The registry-declared payload type, when one is known.
+    pub type_name: Option<&'a str>,
+    pub encoding: &'a str,
+    pub payload_len: usize,
+    /// The arrival stamp — a subscribe-path fact; `None` on a reply (#120).
+    pub timestamp: Option<&'a str>,
+    /// The rendered payload.
+    pub value: &'a str,
+    /// The already-rendered attachment text, or `None` when there was none.
+    pub attachment: Option<&'a str>,
+    /// The QoS axes — a subscribe-path fact; `None` on a reply (#120).
+    pub qos: Option<&'a str>,
+    pub source: Option<&'a str>,
+}
+
+pub fn format_sample(fmt: &str, s: &SampleLine<'_>) -> String {
+    let SampleLine {
+        n,
+        wire_key,
+        base,
+        type_name,
+        encoding,
+        payload_len,
+        timestamp,
+        value,
+        attachment,
+        qos,
+        source,
+    } = *s;
     let parsed = zenkey::grammar::parse_full(base, wire_key);
     let mut out = String::with_capacity(fmt.len() + value.len());
     let mut chars = fmt.chars();
@@ -274,17 +301,19 @@ mod tests {
     fn format_sample_extracts_payload_fields() {
         let line = format_sample(
             "%{iface.name} up=%{iface.up} missing=[%{no.such}]",
-            1,
-            "k",
-            "",
-            None,
-            "application/json",
-            2,
-            None,
-            r#"{"iface":{"name":"eth0","up":true}}"#,
-            None,
-            None,
-            None,
+            &SampleLine {
+                n: 1,
+                wire_key: "k",
+                base: "",
+                type_name: None,
+                encoding: "application/json",
+                payload_len: 2,
+                timestamp: None,
+                value: r#"{"iface":{"name":"eth0","up":true}}"#,
+                attachment: None,
+                qos: None,
+                source: None,
+            },
         );
         assert_eq!(line, "eth0 up=true missing=[]");
     }
@@ -293,17 +322,19 @@ mod tests {
     fn format_sample_expands_fields() {
         let line = format_sample(
             "%n %o %c/%p %s <%t> %v (%l B, %e)",
-            3,
-            "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
-            "tcgui",
-            Some("NetworkInterface"),
-            "application/json",
-            12,
-            None,
-            r#"{"up":true}"#,
-            None,
-            None,
-            None,
+            &SampleLine {
+                n: 3,
+                wire_key: "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
+                base: "tcgui",
+                type_name: Some("NetworkInterface"),
+                encoding: "application/json",
+                payload_len: 12,
+                timestamp: None,
+                value: r#"{"up":true}"#,
+                attachment: None,
+                qos: None,
+                source: None,
+            },
         );
         assert_eq!(
             line,
@@ -313,17 +344,19 @@ mod tests {
         assert_eq!(
             format_sample(
                 "%%|%K\\t.",
-                1,
-                "b/v1/h-3fa9c2d41b7e/state/tc/x",
-                "b",
-                None,
-                "e",
-                0,
-                None,
-                "v",
-                None,
-                None,
-                None,
+                &SampleLine {
+                    n: 1,
+                    wire_key: "b/v1/h-3fa9c2d41b7e/state/tc/x",
+                    base: "b",
+                    type_name: None,
+                    encoding: "e",
+                    payload_len: 0,
+                    timestamp: None,
+                    value: "v",
+                    attachment: None,
+                    qos: None,
+                    source: None,
+                },
             ),
             "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
         );
@@ -335,7 +368,20 @@ mod tests {
     fn the_attachment_field_is_empty_when_absent() {
         let line = |att: Option<&str>| {
             format_sample(
-                "%v|%a", 1, "k", "", None, "e", 0, None, "v", att, None, None,
+                "%v|%a",
+                &SampleLine {
+                    n: 1,
+                    wire_key: "k",
+                    base: "",
+                    type_name: None,
+                    encoding: "e",
+                    payload_len: 0,
+                    timestamp: None,
+                    value: "v",
+                    attachment: att,
+                    qos: None,
+                    source: None,
+                },
             )
         };
         assert_eq!(line(Some("meta (4 bytes)")), "v|meta (4 bytes)");
@@ -378,17 +424,19 @@ mod tests {
         );
         let line = format_sample(
             "%q|%S",
-            1,
-            "k",
-            "",
-            None,
-            "e",
-            0,
-            None,
-            "v",
-            None,
-            Some("data/drop/reliable"),
-            None,
+            &SampleLine {
+                n: 1,
+                wire_key: "k",
+                base: "",
+                type_name: None,
+                encoding: "e",
+                payload_len: 0,
+                timestamp: None,
+                value: "v",
+                attachment: None,
+                qos: Some("data/drop/reliable"),
+                source: None,
+            },
         );
         assert_eq!(line, "data/drop/reliable|");
     }

@@ -24,10 +24,22 @@
 use anyhow::Result;
 
 use crate::Bus;
-use crate::input::Source;
+
+/// The verdict verb's name, spelled once (#355) — the dispatcher
+/// uses it too.
+pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check schema");
 
 /// `zenctl schema show <producer> [--type X] [--full]`.
-pub async fn show(producer: &str, type_filter: Option<&str>, full: bool, args: &Bus) -> Result<()> {
+pub async fn show(cli: crate::cli::SchemaShowArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::SchemaShowArgs {
+        producer,
+        type_name: type_filter,
+        full,
+        bus: _,
+    } = cli;
+    let (producer, type_filter) = (producer.as_str(), type_filter.as_deref());
     let session = args.session().await?;
     // Slices enrich the dump — the *types* come from the producer's served
     // `describe` (`zenkey_fleet::schema_dump`); slices only compute
@@ -56,14 +68,24 @@ pub async fn show(producer: &str, type_filter: Option<&str>, full: bool, args: &
 /// either verdict, for the same reason `check cutover` reserves its 2.
 ///
 /// This checks; it never publishes and never encodes.
-pub async fn check(
-    type_name: &str,
-    from: &Source,
-    producer: Option<&str>,
-    schema_set: Option<&std::path::Path>,
-    encoding: Option<&str>,
-    args: &Bus,
-) -> Result<()> {
+pub async fn check(cli: crate::cli::CheckSchemaArgs) -> Result<()> {
+    let bus = ASKING.ask(Bus::resolve(&cli.bus));
+    let args = &bus;
+    let crate::cli::CheckSchemaArgs {
+        type_name,
+        from,
+        producer,
+        schema_set,
+        encoding,
+        bus: _,
+    } = cli;
+    let (type_name, from, producer, schema_set, encoding) = (
+        type_name.as_str(),
+        &from,
+        producer.as_deref(),
+        schema_set.as_deref(),
+        encoding.as_deref(),
+    );
     use zenkey::schema::WireEncoding;
     use zenkey_fleet::Verdict;
 
@@ -135,16 +157,17 @@ pub async fn check(
 
     // A session-less store still decodes (it only needs one for fetching).
     let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
-    let (verdict, detail): (&str, Vec<String>) = match store.decode(&schema, &wire, &bytes) {
+    use crate::render::SchemaCheckVerdict as V;
+    let (verdict, detail): (V, Vec<String>) = match store.decode(&schema, &wire, &bytes) {
         Ok(decoded) => match decoded.verdict {
-            Verdict::Valid => ("valid", decoded.notes),
-            Verdict::Invalid(errors) => ("invalid", errors),
+            Verdict::Valid => (V::Valid, decoded.notes),
+            Verdict::Invalid(errors) => (V::Invalid, errors),
             Verdict::NotValidated(reason) => not_checked(&reason.to_string()),
         },
         Err(e) => match &e {
             zenkey::schema::decode::DecodeError::Malformed { .. }
             | zenkey::schema::decode::DecodeError::WrongEncoding(_) => {
-                ("undecodable", vec![e.to_string()])
+                (V::Undecodable, vec![e.to_string()])
             }
             _ => not_checked(&e.to_string()),
         },
@@ -153,24 +176,26 @@ pub async fn check(
     let report = crate::render::SchemaCheck {
         type_name: type_name.to_string(),
         kind: schema.kind_str().to_string(),
-        verdict: verdict.to_string(),
+        verdict,
         detail,
     };
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
-    if verdict != "valid" {
-        // The finding (`crate::exit`): the payload was checked and does not
-        // conform.
-        std::process::exit(crate::exit::FINDING);
+    // Off a `match` on the verdict, not a string comparison — which is the
+    // one thing `crate::exit` exists to stop being spelled twice (#356).
+    match report.verdict.exit_code() {
+        crate::exit::CLEAN => Ok(()),
+        code => std::process::exit(code),
     }
-    Ok(())
 }
 
 /// Exit 2: the check never happened — reserved so CI can tell "nonconformant"
 /// from "unobservable", the same split `check cutover` and `check probe`
 /// guard (`crate::exit`).
 fn not_checked(reason: &str) -> ! {
-    eprintln!("not checked: {reason}");
-    std::process::exit(crate::exit::NO_VERDICT);
+    // Through the same seam as every other exit-2 (#355): this used to spell
+    // the code and the message itself, so it was a fourth statement of a
+    // contract `crate::exit` exists to state once.
+    ASKING.unobservable(format_args!("not checked: {reason}"))
 }
 
 /// The producers that carry a type name, from the loaded slices — who to ask

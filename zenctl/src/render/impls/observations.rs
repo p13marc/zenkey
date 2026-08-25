@@ -13,7 +13,7 @@
 
 use zenkey_fleet::report::{RouterList, ScoutReport};
 
-use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without};
 
 impl Render for ScoutReport {
     const FAMILY: &'static str = "scout";
@@ -176,15 +176,9 @@ impl Render for TopologyView<'_> {
     const FAMILY: &'static str = "admin-graph";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        let mut e = match serde_json::to_value(self.report).expect("a report serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        };
         // The rows carry these; the envelope carries what was asked and how
         // much of it answered.
-        e.remove("nodes");
-        e.remove("edges");
-        e
+        envelope_without(self.report, &["nodes", "edges"])
     }
 
     /// **Three row kinds on one stream.** They used to be concatenated with no

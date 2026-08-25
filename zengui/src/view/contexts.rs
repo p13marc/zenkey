@@ -56,7 +56,7 @@ pub struct ContextForm {
     /// Query timeout in seconds; empty = the 5s default.
     pub timeout: String,
     /// The last action's outcome, rendered verbatim.
-    pub status: Option<Result<String, String>>,
+    pub status: Option<Result<String, crate::services::ServiceError>>,
 }
 
 /// Messages the pane emits.
@@ -86,17 +86,20 @@ pub enum ContextMsg {
     /// message lives where its *failure* is displayed: the `Err` is written
     /// into `ContextForm::status`, beside the picker that started it, and
     /// nowhere else. It is this pane's async result like any other.
-    Switched(Result<zenoh::Session, String>),
+    Switched(Result<zenoh::Session, crate::services::ServiceError>),
     /// The session-open re-read of the shared config landed (#67, #255):
     /// the known names, and the store's own `current` pointer.
-    Refreshed(Result<(Vec<String>, Option<String>), String>),
+    Refreshed(Result<(Vec<String>, Option<String>), crate::services::ServiceError>),
     /// [`ContextMsg::Load`]'s answer (#255): the named context's values,
     /// ready for the editor.
-    Loaded(Result<(String, Box<StoredContext>), String>),
+    Loaded(Result<(String, Box<StoredContext>), crate::services::ServiceError>),
     /// [`ContextMsg::Selected`]'s answer (#255): the stored context, plus —
     /// inside `Ok` — why the shared `current` pointer could not be written,
     /// when it could not (the switch itself still proceeds).
-    Activated(String, Result<(Box<StoredContext>, Option<String>), String>),
+    Activated(
+        String,
+        Result<(Box<StoredContext>, Option<String>), crate::services::ServiceError>,
+    ),
     /// The editor's write to the shared config landed (#255), with the
     /// re-read name list. `select` is the save-and-switch flow: the context
     /// is applied only once its write actually did (its failure aborts the
@@ -104,7 +107,7 @@ pub enum ContextMsg {
     Saved {
         name: String,
         select: bool,
-        result: Result<Vec<String>, String>,
+        result: Result<Vec<String>, crate::services::ServiceError>,
     },
 }
 
@@ -331,7 +334,7 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     if let Some(status) = &form.status {
         col = col.push(match status {
             Ok(s) => kit::muted(s.clone()),
-            Err(e) => kit::body(e.clone())
+            Err(e) => kit::body(e.to_string())
                 .style(|theme: &iced::Theme| text::Style {
                     color: Some(colors(theme).danger()),
                 })

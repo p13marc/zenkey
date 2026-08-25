@@ -67,7 +67,7 @@ pub struct DoctorState {
     /// baseline (deltas against nothing would misreport everything as new).
     pub previous: Option<Arc<DoctorReport>>,
     pub delta: Option<Delta>,
-    pub error: Option<String>,
+    pub error: Option<crate::services::ServiceError>,
     /// How many times the schema cache has been cleared this session
     /// (issue #101) — shown so the button is visibly a thing that happened,
     /// not a no-op the user has to guess at.
@@ -85,7 +85,11 @@ impl DoctorState {
     /// catches the one that lands after the switch. The `Err` arm is *not*
     /// base-guarded, same asymmetry as admin: an error carries no base to
     /// judge, and it rides the Ok carrier only.
-    pub fn finish(&mut self, outcome: Result<DoctorRun, String>, base: &str) {
+    pub fn finish(
+        &mut self,
+        outcome: Result<DoctorRun, crate::services::ServiceError>,
+        base: &str,
+    ) {
         self.in_flight = false;
         match outcome {
             Ok(run) if run.base == base => {

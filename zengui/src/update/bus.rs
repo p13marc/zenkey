@@ -33,16 +33,11 @@ pub(crate) fn apply_tick(
     // replayed ticks included, harmlessly (revalidation staleness only).
     work.verdicts.payloads.advance();
     // Decided *before* the fields below are overwritten (#177).
-    let held = shape_held(
-        (obs.keys, obs.keys_evicted, obs.keys_unwatched),
-        (tick.keys, tick.keys_evicted, tick.keys_unwatched),
-        &obs.watched,
-        &tick.watched,
-    );
+    let held = shape_held((&*obs).into(), tick.into(), &obs.watched, &tick.watched);
     // Per tick, not per frame: one bounded lock per *slot* for its key's
     // latency summary (#119, #257 — the fan-out is bounded by the pin
     // count, not the bus). None when unselected, unobserved, or unstamped.
-    for slot in sub.slots.iter_mut() {
+    for slot in sub.all_mut() {
         slot.selected_latency = match (slot.current.key(), &obs.monitor) {
             // During replay the live monitor's stats are about a different
             // world than the panes are showing — consulting them would put
@@ -75,9 +70,9 @@ pub(crate) fn apply_tick(
             if let Some(path) = path {
                 obs.seeding_paths.remove(&path);
             }
-            obs.seed_totals.0 += coverage.history_replies.unwrap_or(0);
-            obs.seed_totals.1 += coverage.storage_replies.unwrap_or(0);
-            obs.seed_totals.2 += coverage.superseded;
+            obs.seed_totals.history += coverage.history_replies.unwrap_or(0);
+            obs.seed_totals.storage += coverage.storage_replies.unwrap_or(0);
+            obs.seed_totals.superseded += coverage.superseded;
             obs.seeded_watches += 1;
         }
     }
@@ -89,7 +84,7 @@ pub(crate) fn apply_tick(
     // count is what says whether the EWMA moved: it never decays on its
     // own, so an unchanged count is silence, and the sampler records a gap
     // rather than a confident flat line.
-    for slot in sub.slots.iter_mut() {
+    for slot in sub.all_mut() {
         if let Some(rec) = slot.history.as_ref() {
             let chunks: Vec<&str> = rec.key.split('/').collect();
             let observed = tick.tree.node(&chunks).map(|n| (n.count, n.rate_hz));
@@ -104,7 +99,7 @@ pub(crate) fn apply_tick(
         // Every slot's recorder is fed from this one stream (#257) — a pin
         // costs a bounded ring, never a second subscription — and each
         // recorder keeps only its own key's samples.
-        for slot in sub.slots.iter_mut() {
+        for slot in sub.all_mut() {
             if let Some(rec) = slot.history.as_mut() {
                 rec.observe(sample);
             }
@@ -132,7 +127,7 @@ pub(crate) fn apply_tick(
     // The chart's inputs all advanced above — the history ring, the rate
     // sampler, the facts behind the unit. Rebuilt once per slot here rather
     // than once per frame (#178, #257).
-    for slot in sub.slots.iter_mut() {
+    for slot in sub.all_mut() {
         slot.refresh_series(dep);
     }
     // The tree's shape survived, so point it at this tick's numbers
@@ -249,12 +244,8 @@ pub(crate) fn update(
             // The skeleton is built FROM the slices — (re)build it now.
             build_skeleton(dep)
         }
-        BusMsg::SlicesUnionLoaded(Ok((slices, from_bus, dirs_only, disagreements))) => {
-            dep.slice_source = SliceSource::Union {
-                from_bus,
-                dirs_only,
-                disagreements,
-            };
+        BusMsg::SlicesUnionLoaded(Ok((slices, counts))) => {
+            dep.slice_source = SliceSource::Union(counts);
             dep.slices = Some(slices);
             reresolve_registrations(dep);
             refresh_blob_list(dep, work);

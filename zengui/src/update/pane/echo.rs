@@ -53,8 +53,8 @@ pub(crate) fn update(echo: &mut EchoPane, msg: EchoMsg, cx: Ctx) -> Task<Message
                 Subject::Key(key),
             ))))
         }
-        EchoMsg::Scrolled(y, h) => {
-            echo.echo_scroll = (y, h.max(100.0));
+        EchoMsg::Scrolled(vp) => {
+            echo.echo_scroll = vp;
             Task::none()
         }
         EchoMsg::FollowSubjectToggled => {
@@ -65,7 +65,7 @@ pub(crate) fn update(echo: &mut EchoPane, msg: EchoMsg, cx: Ctx) -> Task<Message
             let text = view::echo::export(
                 &echo.echo,
                 &echo.echo_view,
-                cx.sub.follow().current.key(),
+                cx.sub.follow.current.key(),
                 cx.dep.base(),
             );
             iced::clipboard::write(text)

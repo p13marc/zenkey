@@ -14,16 +14,19 @@ use zenkey_fleet::{ReplayEvent, ReplayTarget, ZrecSource};
 
 use crate::Bus;
 
-#[allow(clippy::too_many_arguments)] // clap surface
-pub async fn run(
-    file: &str,
-    speed: f64,
-    dry_run: bool,
-    force_base: bool,
-    i_know: bool,
-    qos: &str,
-    args: &Bus,
-) -> Result<()> {
+pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::ReplayArgs {
+        file,
+        speed,
+        dry_run,
+        force_base,
+        i_know,
+        qos,
+        bus: _,
+    } = cli;
+    let (file, qos) = (file.as_str(), qos.as_str());
     // The `--qos` name is checked here, before a byte is read: the engine
     // takes the closed enum, so an unknown profile is a refusal rather than a
     // per-row "malformed" event partway through a replay.

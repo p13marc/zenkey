@@ -101,11 +101,11 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                     let keys = tree.keys;
                     let keys_evicted = tree.evicted;
                     let keys_unwatched = tree.unwatched;
-                    let totals = (
-                        tree.root.subtree_count,
-                        tree.root.subtree_bytes,
-                        tree.root.subtree_rate_hz,
-                    );
+                    let totals = crate::message::WatchedTotals {
+                        samples: tree.root.subtree_count,
+                        bytes: tree.root.subtree_bytes,
+                        rate_hz: tree.root.subtree_rate_hz,
+                    };
                     yield Message::Bus(BusMsg::Tick(Arc::new(BusTick {
                         tree,
                         samples: std::mem::take(&mut samples),

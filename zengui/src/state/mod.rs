@@ -157,7 +157,13 @@ mod tests {
             // per pin (#257). The container holds the slots and the id mint;
             // everything derived lives *in* a slot, so dropping a pin drops
             // exactly its own evidence.
-            ("sub", &["slots", "next_slot"]),
+            //
+            // `follow` and `pins` were one `slots: Vec` with "index 0 is the
+            // follow slot" as a comment, defended by three methods (#358).
+            // Same invalidation — a re-scope clears every slot — but the
+            // follow slot is now structurally not a pin, so `unpin` needs no
+            // guard to refuse it.
+            ("sub", &["follow", "pins", "next_slot"]),
             // One slot: a subject and everything derived from it — the old
             // singular `SubjectState`, per slot since #257. Invalidated by
             // that slot's subject moving (the follow slot's, by the user

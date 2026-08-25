@@ -173,8 +173,11 @@ impl ReplayState {
     /// Load a `.zrec` into memory. A capture is bounded by construction
     /// (RecordBounds or an operator's ctrl-c), so whole-file loading is the
     /// honest simple thing — and scrubbing needs random access anyway.
-    pub fn load(path: &str, source: impl BufRead) -> Result<ReplayState, String> {
-        let mut reader = ZrecReader::new(source).map_err(|e| e.to_string())?;
+    pub fn load(
+        path: &str,
+        source: impl BufRead,
+    ) -> Result<ReplayState, crate::services::ServiceError> {
+        let mut reader = ZrecReader::new(source).map_err(crate::services::ServiceError::of)?;
         let header = reader.header().clone();
         let mut rows = Vec::new();
         let mut capture_dropped = 0u64;
@@ -360,11 +363,11 @@ impl ReplayState {
         let keys = tree.keys;
         let keys_evicted = tree.evicted;
         let keys_unwatched = tree.unwatched;
-        let totals = (
-            tree.root.subtree_count,
-            tree.root.subtree_bytes,
-            tree.root.subtree_rate_hz,
-        );
+        let totals = crate::message::WatchedTotals {
+            samples: tree.root.subtree_count,
+            bytes: tree.root.subtree_bytes,
+            rate_hz: tree.root.subtree_rate_hz,
+        };
         Arc::new(BusTick {
             tree,
             samples,
@@ -435,7 +438,7 @@ mod tests {
         // Same instant again → same fold.
         let again = state.scrub_to(600_000);
         assert_eq!(again.keys, back.keys);
-        assert_eq!(again.totals.0, back.totals.0);
+        assert_eq!(again.totals.samples, back.totals.samples);
 
         // Forward from here replays only the unfed tail.
         let fwd = state.scrub_to(1_500_000);

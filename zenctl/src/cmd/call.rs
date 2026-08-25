@@ -5,18 +5,28 @@ use anyhow::Result;
 use crate::Bus;
 use crate::input::Source;
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    origin: &str,
-    producer: &str,
-    procedure: &str,
-    params: &[String],
-    body: Option<&Source>,
-    attachment: Option<&Source>,
-    no_validate: bool,
-    raw: bool,
-    args: &Bus,
-) -> Result<()> {
+pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::ServiceCallArgs {
+        origin,
+        producer,
+        procedure,
+        params,
+        body,
+        attachment,
+        no_validate,
+        raw,
+        bus: _,
+    } = cli;
+    let (origin, producer, procedure, params, body, attachment) = (
+        origin.as_str(),
+        producer.as_str(),
+        procedure.as_str(),
+        params.as_slice(),
+        body.as_ref(),
+        attachment.as_ref(),
+    );
     // The typed target refuses a hostname outright (RFC 06 §6) and makes a
     // fleet call a deliberate variant; the engine's `call` composes the key
     // through the typed builders and applies the fan-in discipline plus the

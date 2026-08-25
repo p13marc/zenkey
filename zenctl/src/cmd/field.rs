@@ -16,7 +16,21 @@ use crate::cli::{FailOn, SelectorArgs};
 use crate::exit::unaskable;
 use crate::report::DoctorSeverity;
 
-pub async fn run(
+pub async fn run(cli: crate::cli::FieldArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::FieldArgs {
+        selector,
+        for_secs,
+        max_paths,
+        fail_on,
+        bus: _,
+    } = cli;
+    let sel = &selector;
+    run_inner(sel, for_secs, max_paths, fail_on, args).await
+}
+
+async fn run_inner(
     sel: &SelectorArgs,
     for_secs: f64,
     max_paths: usize,

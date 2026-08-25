@@ -29,7 +29,8 @@ the reason silence is never a verdict (RFC 05 §3.1).
 ```console
 $ zenctl check schema --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Nope --from '{}'
 ? 2
-not checked: tests/cmd/fixtures/sysinfo.schemaset.json carries no type "Nope"
+check schema: not checked: tests/cmd/fixtures/sysinfo.schemaset.json carries no type "Nope"
+check schema: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
@@ -44,6 +45,7 @@ actually hits here is a literal `@` they did not mean as a path.
 ```console
 $ zenctl check schema --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from @tests/cmd/fixtures/no-such-payload.json
 ? 2
-not checked: --from: cannot read tests/cmd/fixtures/no-such-payload.json — a leading @ means "read this path": No such file or directory (os error 2)
+check schema: not checked: --from: cannot read tests/cmd/fixtures/no-such-payload.json — a leading @ means "read this path": No such file or directory (os error 2)
+check schema: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```

@@ -22,7 +22,14 @@ pub async fn routers(args: &Bus) -> Result<()> {
 
 /// `admin graph` — the mesh as the admin space answered it (#118), as a
 /// table, `--dot` Graphviz for piping (`| dot -Tsvg`), or json/ndjson.
-pub async fn graph(dot: bool, origins: bool, args: &Bus) -> Result<()> {
+pub async fn graph(cli: crate::cli::AdminGraphArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::AdminGraphArgs {
+        dot,
+        origins,
+        bus: _,
+    } = cli;
     let session = args.session().await?;
     let report = zenkey_fleet::topology(&session, args.timeout()).await?;
     // The origin join is opt-in (#131): it costs one more admin sweep, and

@@ -73,11 +73,12 @@ pub async fn declare_responder(
     let parsed = zenoh::key_expr::KeyExpr::try_from(keyexpr.to_string())
         .map_err(|e| Error::bus("declare queryable", keyexpr, e))?;
     let concrete = !parsed.is_wild();
-    let queryable = session
-        .declare_queryable(parsed)
-        .complete(complete)
-        .await
-        .map_err(|e| Error::bus("declare queryable", keyexpr, e))?;
+    let queryable = crate::bus::teardown::declared(
+        "declare queryable",
+        keyexpr,
+        session.declare_queryable(parsed).complete(complete),
+    )
+    .await?;
     Ok(MockResponder {
         queryable,
         keyexpr: keyexpr.to_string(),

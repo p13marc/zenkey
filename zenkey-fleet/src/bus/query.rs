@@ -415,9 +415,7 @@ async fn declare(
     if accept_any {
         builder = builder.accept_replies(zenoh::query::ReplyKeyExpr::Any);
     }
-    let querier = builder
-        .await
-        .map_err(|e| Error::bus("declare querier", key.to_string(), e))?;
+    let querier = crate::bus::teardown::declared("declare querier", &key, builder).await?;
     Ok(RepeatingQuery {
         querier,
         base: fleet.base().to_string(),
@@ -781,9 +779,10 @@ pub async fn fetch_value(session: &Session, key: &str, spec: FetchSpec) -> Resul
     // the window closes, provably.
     let (tx, rx) = tokio::sync::oneshot::channel::<FetchedValue>();
     let tx = std::sync::Mutex::new(Some(tx));
-    let subscriber = session
-        .declare_subscriber(key)
-        .callback(move |sample| {
+    let subscriber = crate::bus::teardown::declared(
+        "window subscribe",
+        key,
+        session.declare_subscriber(key).callback(move |sample| {
             if let Some(tx) = tx.lock().expect("fetch window lock").take() {
                 let _ = tx.send(FetchedValue {
                     key: sample.key_expr().as_str().to_string(),
@@ -794,9 +793,9 @@ pub async fn fetch_value(session: &Session, key: &str, spec: FetchSpec) -> Resul
                     source: ValueSource::Window,
                 });
             }
-        })
-        .await
-        .map_err(|e| Error::bus("window subscribe", key, e))?;
+        }),
+    )
+    .await?;
     let caught = tokio::time::timeout(spec.window, rx).await;
     subscriber
         .undeclare()

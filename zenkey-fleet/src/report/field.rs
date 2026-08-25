@@ -54,6 +54,11 @@ pub struct FieldReport {
     /// Samples carrying no structural document — fields unobservable for
     /// them, counted apart from absence (O4).
     pub undocumented: u64,
+    /// Samples whose payload was past the observation limit and therefore
+    /// never read — distinct from `undocumented`, which means the payload was
+    /// read and carried no document (RFC 09 §5.1 O6).
+    #[serde(skip_serializing_if = "u64_is_zero")]
+    pub unread: u64,
     /// Whether a registry was loaded: without one, declared `ttl_s` and type
     /// names are unknown and `field-stuck`/`field-new` are unjudgeable.
     pub registry_loaded: bool,
@@ -91,6 +96,7 @@ mod tests {
             keys_seen: 1,
             dropped: 0,
             undocumented: 2,
+            unread: 0,
             registry_loaded: true,
             paths: 2,
             max_paths: 512,

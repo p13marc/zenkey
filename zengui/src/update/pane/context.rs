@@ -35,7 +35,7 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
             Task::done(Message::Bus(BusMsg::SessionOpened(Ok(session))))
         }
         ContextMsg::Switched(Err(e)) => {
-            form.status = Some(Err(format!("could not connect: {e}")));
+            form.status = Some(Err(e.context("could not connect")));
             // The link fact goes where every other link fact goes. Both
             // variants of `Switched` now land through `Bus`, which is the
             // honest reading: a context switch is a session open that the
@@ -106,14 +106,14 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
             // it be — pure, so it stays on the click, where the red text
             // appears next to the field still holding the typo.
             if let Err(e) = form.to_stored() {
-                form.status = Some(Err(e));
+                form.status = Some(Err(e.into()));
                 return Task::none();
             }
             services::context::save(form.clone(), false)
         }
         ContextMsg::SaveAndSelect => {
             if let Err(e) = form.to_stored() {
-                form.status = Some(Err(e));
+                form.status = Some(Err(e.into()));
                 return Task::none();
             }
             // The switch waits for `Saved`: applying a context whose write
@@ -141,7 +141,7 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
                 let stored = match form.to_stored() {
                     Ok(s) => s,
                     Err(e) => {
-                        form.status = Some(Err(e));
+                        form.status = Some(Err(e.into()));
                         return Task::none();
                     }
                 };
@@ -169,10 +169,10 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
             // (issue #189).
             form.status = Some(match pointer {
                 None => Ok(format!("switched to {name}")),
-                Some(e) => Err(format!(
+                Some(e) => Err(crate::services::ServiceError::msg(format!(
                     "switched to {name}, but the shared `current` pointer \
                      could not be written: {e}"
-                )),
+                ))),
             });
             Task::done(Message::Deployment(DeploymentMsg::ContextApplied {
                 name: Some(name),

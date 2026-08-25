@@ -255,9 +255,9 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
                 cx.dep.slices.as_deref(),
                 bench.send_form.retire_i_know,
             ) {
-                let e = e.to_string();
-                bench.send_form.error = Some(e.clone());
+                let e = crate::services::ServiceError::of(e);
                 bench.send_form.log(false, format!("refused: {e}"));
+                bench.send_form.error = Some(e);
                 return stop;
             }
             bench.send_form.in_flight = true;
@@ -316,7 +316,7 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             // output, not projected deployment state.
             let form = &mut bench.send_form;
             form.in_flight = false;
-            form.outcome = Some(outcome.map(|r| (*r).clone()).map_err(|e| e.to_string()));
+            form.outcome = Some(outcome.map(|r| (*r).clone()));
             Task::none()
         }
         SendMsg::ProducerPicked(p) => {
@@ -406,10 +406,18 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             let slices = cx.dep.slices.clone();
             form.in_flight = true;
             form.outcome = None;
-            services::write::call(
-                session, base, target, producer, procedure, params, body, attachment, timeout,
+            services::write::call(services::write::Call {
+                session,
+                base,
+                target,
+                producer,
+                procedure,
+                params,
+                body,
+                attachment,
+                timeout,
                 slices,
-            )
+            })
         }
     }
 }

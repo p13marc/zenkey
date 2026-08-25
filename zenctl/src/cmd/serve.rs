@@ -7,19 +7,21 @@
 use anyhow::Result;
 
 use crate::Bus;
-use crate::input::Source;
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    keyexpr: &str,
-    reply: &Source,
-    encoding: Option<&str>,
-    no_validate: bool,
-    raw: bool,
-    complete: bool,
-    count: usize,
-    args: &Bus,
-) -> Result<()> {
+pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::ServeArgs {
+        keyexpr,
+        reply,
+        encoding,
+        no_validate,
+        raw,
+        complete,
+        count,
+        bus: _,
+    } = cli;
+    let (keyexpr, reply, encoding) = (keyexpr.as_str(), &reply, encoding.as_deref());
     // RFC 05 §2.1 (G-05c): `@rpc` queryables are **never** declared
     // complete — one complete queryable short-circuits every default
     // (`BestMatching`) fleet call to a single reply. Refused before any

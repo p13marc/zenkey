@@ -50,7 +50,8 @@ mod impls;
 pub use impls::RateView;
 pub use impls::local::{
     CacheAction, CacheReport, CachedSlice, ContextAction, ContextList, ContextRow, ContextShow,
-    GenPlan, GetReport, KeyCanon, KeyRelation, LintReport, LockReport, SchemaCheck,
+    GenPlan, GetReport, KeyCanon, KeyOp, KeyRelation, LintReport, LockReport, SchemaCheck,
+    SchemaCheckVerdict,
 };
 pub use impls::observations::TopologyView;
 pub mod style;
@@ -79,16 +80,24 @@ pub enum Format {
 impl Format {
     /// Resolve `auto` against the output stream: a table for a person, ndjson
     /// for whatever is on the other end of the pipe.
-    pub fn resolved(self) -> Format {
+    ///
+    /// It returns a [`Mode`] and not a `Format`, which is the whole point of
+    /// that type: "we have decided" is not the same thing as "we have not".
+    /// Returning a `Format` left `Auto` in the result, and the one caller then
+    /// had to write an `unreachable!` for a variant this function is defined
+    /// never to produce (#360).
+    pub fn resolved(self) -> Mode {
         match self {
+            Format::Table => Mode::Table,
+            Format::Json => Mode::Json,
+            Format::Ndjson => Mode::Ndjson,
             Format::Auto => {
                 if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
-                    Format::Table
+                    Mode::Table
                 } else {
-                    Format::Ndjson
+                    Mode::Ndjson
                 }
             }
-            other => other,
         }
     }
 }
@@ -303,6 +312,38 @@ impl Row {
     }
 }
 
+/// The struct as its own envelope (#232).
+///
+/// Deriving the envelope from the serialization rather than assembling it
+/// field by field is what keeps `skip_serializing_if` working, which the three
+/// hand-built envelopes in `output.rs` did not. Thirteen impls carried a copy
+/// of this `match … { Object(m) => m, _ => unreachable!() }`; the panic paths
+/// are stated once here, where the invariant lives — every `Render` is a
+/// `Serialize` struct, and a struct serializes to an object.
+pub(crate) fn envelope_of<T: Serialize>(v: &T) -> serde_json::Map<String, serde_json::Value> {
+    match serde_json::to_value(v).expect("a report serializes") {
+        serde_json::Value::Object(m) => m,
+        _ => unreachable!("a report is an object"),
+    }
+}
+
+/// The struct as its own envelope, minus the fields the rows carry.
+///
+/// The envelope is what survives a truncated pipe: what was asked (O5), why
+/// nothing was (O4), what the bound cost (O6). The row vectors are removed
+/// because they are emitted as rows — naming them here is the same list, in
+/// the same place, as the `rows()` beneath it.
+pub(crate) fn envelope_without<T: Serialize>(
+    v: &T,
+    rows: &[&str],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut e = envelope_of(v);
+    for k in rows {
+        e.remove(*k);
+    }
+    e
+}
+
 /// A report, and the three ways it can be shown.
 pub trait Render: Serialize {
     /// The family name: the envelope's `report` field, and the key a snapshot
@@ -414,13 +455,7 @@ impl Mode {
     /// in 24 renderers and `cmd/*` in 16 more, each re-deriving the same
     /// three-way decision, and six of them collapsing two of the three (#198).
     pub fn of(format: Format) -> Mode {
-        match format.resolved() {
-            Format::Table => Mode::Table,
-            Format::Json => Mode::Json,
-            Format::Ndjson => Mode::Ndjson,
-            // `resolved()` never yields it, and the compiler cannot know that.
-            Format::Auto => unreachable!("Format::Auto is resolved before it is matched"),
-        }
+        format.resolved()
     }
 
     /// Whether the consumer on the other end is a program.

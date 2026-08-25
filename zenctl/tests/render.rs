@@ -1070,7 +1070,7 @@ eeff0011  peer    —      (heard of, not queryable)
 #[test]
 fn a_key_relation_carries_its_convention_note_once() {
     let no = zenctl::render::KeyRelation {
-        op: "includes".into(),
+        op: zenctl::render::KeyOp::Includes,
         a: "v1/**".into(),
         b: "v1/h-3fa9/@rpc/sysinfo/introspect".into(),
         answer: false,
@@ -1116,7 +1116,7 @@ fn a_schema_check_omits_an_empty_detail_list() {
     let valid = zenctl::render::SchemaCheck {
         type_name: "Health".into(),
         kind: "json-schema".into(),
-        verdict: "valid".into(),
+        verdict: zenctl::render::SchemaCheckVerdict::Valid,
         detail: vec![],
     };
     let doc: serde_json::Value = serde_json::from_str(ndjson(&valid).trim()).unwrap();
@@ -1132,7 +1132,7 @@ fn a_schema_check_omits_an_empty_detail_list() {
     assert_eq!(table(&valid), "Health (json-schema): valid\n");
 
     let invalid = zenctl::render::SchemaCheck {
-        verdict: "invalid".into(),
+        verdict: zenctl::render::SchemaCheckVerdict::Invalid,
         detail: vec![r#"/status: "melted" is not one of "ok", "degraded" or "down""#.into()],
         ..valid
     };

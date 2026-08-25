@@ -6,13 +6,10 @@
 //! segment". The two are independent signals; neither replaces the other.
 
 use crate::cli::ScoutWhat;
-use std::time::Duration;
 
 use anyhow::Result;
 use zenkey_fleet::HelloView;
 use zenoh::config::WhatAmIMatcher;
-
-use crate::render::Format;
 
 /// The kinds of node a scout listens for.
 /// Fold the repeated `--what` flags into zenoh's matcher; no flags = all.
@@ -37,14 +34,30 @@ fn dedup_by_zid(hellos: Vec<HelloView>) -> Vec<HelloView> {
         .collect()
 }
 
-pub async fn run(
-    what: &[ScoutWhat],
-    timeout: Duration,
-    connect: &[String],
-    listen: &[String],
-    format: Format,
-    color: crate::render::ColorChoice,
-) -> Result<()> {
+pub async fn run(cli: crate::cli::ScoutArgs) -> Result<()> {
+    let crate::cli::ScoutArgs {
+        what,
+        timeout,
+        connect,
+        listen,
+        context,
+        out,
+    } = cli;
+    // No `BusArgs` here: --base/--registry are meaningless before a session
+    // exists. Contexts still resolve, for endpoints and timeout — and this is
+    // the caller that proves the ladders must take scalars: when they demanded
+    // a `BusArgs`, this verb grew its own copy of two of them instead (#209).
+    //
+    // A bad name is an `Err` here too, and for the same reason it is one in
+    // `Bus::resolve`: this was the *second* `exit(2)` for one failure, and two
+    // exit codes for one mistake is how a contract stops being a contract.
+    let stored = crate::context::active(context.as_deref())?;
+    let stored = stored.as_ref();
+    let connect = crate::resolve::endpoints(&connect, stored.map(|c| c.connect.as_slice()));
+    let listen = crate::resolve::endpoints(&listen, stored.map(|c| c.listen.as_slice()));
+    let timeout = crate::resolve::timeout(timeout, stored);
+    let (what, connect, listen) = (what.as_slice(), connect.as_slice(), listen.as_slice());
+    let (format, color) = (out.format, out.color);
     let stream = zenkey_fleet::scout(matcher(what), connect, listen).await?;
     let deadline = tokio::time::Instant::now() + timeout;
     let mut heard: Vec<HelloView> = Vec::new();

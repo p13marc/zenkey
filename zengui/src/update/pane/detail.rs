@@ -32,8 +32,8 @@ pub(crate) fn history(slot: &mut SubjectSlot, msg: HistoryMsg) -> Task<Message> 
     // View-only state, and it is not the recorder's: a scroll offset survives
     // a `Clear` and a subject that has no recorder can still be scrolled to
     // the top.
-    if let HistoryMsg::Scrolled(y, h) = msg {
-        slot.history_scroll = (y, h.max(100.0));
+    if let HistoryMsg::Scrolled(vp) = msg {
+        slot.history_scroll = vp;
         return Task::none();
     }
     if let Some(rec) = slot.history.as_mut() {

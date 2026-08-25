@@ -120,6 +120,56 @@ pub fn code_for(err: &anyhow::Error) -> i32 {
     if unaskable { NO_VERDICT } else { FINDING }
 }
 
+/// One verdict verb, carrying its own name.
+///
+/// The name used to be a string literal at every site that could exit for it:
+/// five in `lib.rs`, five more in `cmd/expect.rs` alone, plus two inline
+/// `eprintln!` + `exit(NO_VERDICT)` pairs that never reached [`asked`] at all
+/// (#355). Ten spellings of one fact, in a module whose whole point is that
+/// the contract be stated once.
+///
+/// Each verdict verb declares one `const` of these in its own module, and the
+/// dispatcher uses that rather than repeating the literal — so a new verb
+/// names itself in exactly one place, and cannot report under a different
+/// name from one exit path to another.
+#[derive(Debug, Clone, Copy)]
+pub struct Asking(&'static str);
+
+impl Asking {
+    pub const fn new(verb: &'static str) -> Asking {
+        Asking(verb)
+    }
+
+    /// The verb's name, as its messages spell it.
+    pub fn verb(self) -> &'static str {
+        self.0
+    }
+
+    /// [`asked`], with the name already carried.
+    pub fn ask<T, E>(self, result: std::result::Result<T, E>) -> T
+    where
+        E: Into<anyhow::Error>,
+    {
+        asked(self.0, result)
+    }
+
+    /// The observation never stood up — the reserved 2, not the 1 that would
+    /// claim a verdict about a window nobody watched.
+    ///
+    /// The third exit path, and the one that used to be spelled inline: same
+    /// code, same shape of message, now through the same seam as the other
+    /// two.
+    pub fn unobservable(self, why: impl std::fmt::Display) -> ! {
+        eprintln!("{}: {why}", self.0);
+        eprintln!(
+            "{}: the question could not be asked — exit 2, the reserved \
+             non-verdict (1 here would claim a verdict this run never reached)",
+            self.0
+        );
+        std::process::exit(NO_VERDICT);
+    }
+}
+
 /// The verdict verbs' pre-run guard (seam 2 of the module doc).
 ///
 /// `check cutover` against a bus that would not open used to exit 1 through

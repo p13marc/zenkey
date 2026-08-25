@@ -15,6 +15,9 @@ use iced::Task;
 use zenkey_fleet::{Skeleton, SliceSet};
 
 use crate::message::{BusMsg, Message, PaneMsg};
+use anyhow::Context as _;
+
+use crate::services::ServiceError;
 use crate::view::admin::AdminMsg;
 use crate::view::blob::BlobMsg;
 use crate::view::doctor::DoctorMsg;
@@ -27,7 +30,7 @@ pub fn slices(session: zenoh::Session, base: String, timeout: Duration) -> Task<
             SliceSet::from_bus(&zenkey_fleet::Fleet::new(&session, &base), timeout)
                 .await
                 .map(Arc::new)
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
         },
         |r| Message::Bus(BusMsg::SlicesLoaded(r)),
     )
@@ -48,12 +51,14 @@ pub fn slices_union(
                 .map(|out| {
                     (
                         Arc::new(out.set),
-                        out.from_bus.len(),
-                        out.dirs_only.len(),
-                        out.disagreements.len(),
+                        crate::view::status::UnionCounts {
+                            from_bus: out.from_bus.len(),
+                            dirs_only: out.dirs_only.len(),
+                            disagreements: out.disagreements.len(),
+                        },
                     )
                 })
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
         },
         |r| Message::Bus(BusMsg::SlicesUnionLoaded(r)),
     )
@@ -97,7 +102,7 @@ pub fn node_info(
             let out = zenkey_fleet::node_info(&fleet, &origin, timeout, true)
                 .await
                 .map(Arc::new)
-                .map_err(|e| e.to_string());
+                .map_err(ServiceError::of);
             (origin, base, out)
         },
         |(origin, ran, out)| Message::Pane(PaneMsg::Nodes(NodesMsg::InfoLoaded(origin, ran, out))),
@@ -124,7 +129,11 @@ pub fn doctor(
                 true => None,
                 false => match SliceSet::from_dirs(&dirs) {
                     Ok(set) => Some(set),
-                    Err(e) => return Err(format!("registry dirs: {e}")),
+                    Err(e) => {
+                        return Err(ServiceError::of(
+                            anyhow::Error::new(e).context("failed to read the registry dirs"),
+                        ));
+                    }
                 },
             };
             zenkey_fleet::run_doctor(
@@ -137,7 +146,7 @@ pub fn doctor(
                 report: Arc::new(r),
                 base,
             })
-            .map_err(|e| e.to_string())
+            .map_err(ServiceError::of)
         },
         |out| Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(out))),
     )
@@ -162,13 +171,16 @@ pub fn admin(
         async move {
             let routers = zenkey_fleet::routers(&session, timeout)
                 .await
-                .map_err(|e| e.to_string())?;
+                .context("failed to list the routers")
+                .map_err(ServiceError::of)?;
             let storages = zenkey_fleet::storages(&session, timeout)
                 .await
-                .map_err(|e| e.to_string())?;
+                .context("failed to list the storages")
+                .map_err(ServiceError::of)?;
             let declared = zenkey_fleet::declared_entities(&session, timeout)
                 .await
-                .map_err(|e| e.to_string())?;
+                .context("failed to list the declared entities")
+                .map_err(ServiceError::of)?;
             let (coverage, coverage_note) = match slices.as_deref() {
                 Some(set) => (zenkey_fleet::state_coverage(set, &base, &storages), None),
                 None => (
@@ -184,13 +196,15 @@ pub fn admin(
             };
             let topology = zenkey_fleet::topology(&session, timeout)
                 .await
-                .map_err(|e| e.to_string())?;
+                .context("failed to read the topology")
+                .map_err(ServiceError::of)?;
             let origins = zenkey_fleet::origin_attachments(
                 &zenkey_fleet::Fleet::new(&session, &base),
                 timeout,
             )
             .await
-            .map_err(|e| e.to_string())?;
+            .context("failed to read the origin attachments")
+            .map_err(ServiceError::of)?;
             Ok(Arc::new(crate::admin::AdminSweep {
                 routers,
                 storage: zenkey_fleet::report::StorageList { storages, coverage },
@@ -238,7 +252,7 @@ pub fn blob_probe(
             let out = zenkey_fleet::blob_probe(&fleet, &target, &slices, timeout)
                 .await
                 .map(Arc::new)
-                .map_err(|e| e.to_string());
+                .map_err(ServiceError::of);
             (base, out)
         },
         |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::ProbeDone(ran, out))),
@@ -261,7 +275,7 @@ pub fn blob_tree(
             let out = zenkey_fleet::blob_tree_index(&fleet, &origin, &root, timeout)
                 .await
                 .map(Arc::new)
-                .map_err(|e| e.to_string());
+                .map_err(ServiceError::of);
             (base, out)
         },
         |(ran, out)| Message::Pane(PaneMsg::Blob(BlobMsg::InspectDone(ran, out))),
@@ -331,7 +345,7 @@ pub fn blob_fetch(f: BlobFetch) -> Task<Message> {
         let out = zenkey_fleet::blob_fetch(&fleet, &origin, &target, &dest, &spec, &sink)
             .await
             .map(Arc::new)
-            .map_err(|e| e.to_string());
+            .map_err(ServiceError::of);
         (base, out)
     };
     Task::run(

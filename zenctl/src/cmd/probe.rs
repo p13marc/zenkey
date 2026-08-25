@@ -16,7 +16,20 @@ use anyhow::{Result, bail};
 
 use crate::Bus;
 
-pub async fn run(target: &str, producer: &str, procedure: &str, args: &Bus) -> Result<()> {
+/// The verdict verb's name, spelled once (#355) — the dispatcher
+/// uses it too.
+pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check probe");
+
+pub async fn run(cli: crate::cli::CheckProbeArgs) -> Result<()> {
+    let bus = ASKING.ask(Bus::resolve(&cli.bus));
+    let args = &bus;
+    let crate::cli::CheckProbeArgs {
+        target,
+        producer,
+        procedure,
+        bus: _,
+    } = cli;
+    let (target, producer, procedure) = (target.as_str(), producer.as_str(), procedure.as_str());
     let session = args.session().await?;
 
     let (host, via) = match zenkey::origin::HostId::parse(target) {

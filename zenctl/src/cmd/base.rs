@@ -13,7 +13,21 @@ use crate::Bus;
 use crate::report;
 
 /// The bases in use, once.
-pub async fn list(args: &Bus) -> Result<()> {
+/// `base list`, with the `--watch` decision where the verb is (#354).
+pub async fn list(cli: crate::cli::BaseListArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let crate::cli::BaseListArgs {
+        watch,
+        every,
+        bus: _,
+    } = cli;
+    if watch {
+        return crate::cmd::watch::base_list(every, &bus).await;
+    }
+    once(&bus).await
+}
+
+async fn once(args: &Bus) -> Result<()> {
     let session = args.session().await?;
     let bases = zenkey_fleet::discover_bases(&session, args.timeout()).await?;
     crate::render::emit_with(

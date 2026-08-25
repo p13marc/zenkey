@@ -17,7 +17,7 @@ use zenkey::{Declared, RegistrySlice};
 use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
 use crate::model::examples::Examples;
-use crate::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity};
+use crate::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity, DriftVerdict};
 
 /// What a doctor run should cost.
 #[derive(Debug, Clone)]
@@ -270,13 +270,39 @@ pub async fn run_doctor(
         let servers: Vec<String> = drift
             .servers
             .iter()
-            .map(|(p, h)| format!("{p} ({h})"))
+            .map(|s| match s.hash.as_option() {
+                Some(h) => format!("{} ({h})", s.producer),
+                None => format!("{} (no identity served)", s.producer),
+            })
             .collect();
+        // The two verdicts are not the same finding. A disagreement is a
+        // defect; a producer that served no identity leaves the question
+        // *unanswered*, and calling that an error would be the mirror of the
+        // bug #370 fixed — reporting a verdict nobody's evidence supports.
+        let (severity, evidence) = match drift.verdict {
+            DriftVerdict::Disagree => (
+                DoctorSeverity::Error,
+                format!("served with different schemas by {}", servers.join(", ")),
+            ),
+            DriftVerdict::Unjudgeable => (
+                DoctorSeverity::Warning,
+                format!(
+                    "agreement cannot be judged — {} served no schema identity: {} \
+                     (RFC 09 §5.1 O4; the hash exists for exactly this, RFC 08 §7)",
+                    drift
+                        .servers
+                        .iter()
+                        .filter(|s| s.hash.is_not_asked())
+                        .count(),
+                    servers.join(", ")
+                ),
+            ),
+        };
         findings.push(finding(
-            DoctorSeverity::Error,
+            severity,
             CheckId::SchemaDrift,
             drift.type_name.clone(),
-            format!("served with different schemas by {}", servers.join(", ")),
+            evidence,
             Some("RFC 08 §7"),
         ));
     }
@@ -507,10 +533,17 @@ async fn observe_traffic(
     // Stamping nodes that are not the publisher (#213): zid → samples.
     let mut foreign_stampers: BTreeMap<String, u64> = BTreeMap::new();
 
+    // One timer for the whole window, not one per iteration (#346).
+    // `sleep_until` builds a future and registers a timer each time it
+    // is evaluated, and a `select!` in a loop evaluates it on every
+    // pass — at 100k samples/s that is 100k registrations a second for
+    // a deadline that never moves.
+    let window_over = tokio::time::sleep_until(deadline);
+    tokio::pin!(window_over);
     loop {
         let item = tokio::select! {
             item = events.recv() => item,
-            _ = tokio::time::sleep_until(deadline) => break,
+            () = &mut window_over => break,
         };
         match item {
             Some(crate::StreamItem::Event(crate::FleetEvent::Sample(s))) => {
@@ -527,8 +560,17 @@ async fn observe_traffic(
                 if let Some(crate::StampProvenance::Foreign { stamper }) = s.stamped_by {
                     *foreign_stampers.entry(stamper.to_string()).or_default() += 1;
                 }
-                let doc = crate::model::decode::structural_value(&s.payload.to_bytes());
-                fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
+                // Same bound as `run_field`'s drain (#346): the parse is
+                // per sample by design, so the payload size is what has to be
+                // bounded, and the skip is counted rather than read as an
+                // absent document.
+                let bytes = s.payload.to_bytes();
+                if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
+                    fields.observe_unread(&s.key);
+                } else {
+                    let doc = crate::model::decode::structural_value(&bytes);
+                    fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
+                }
                 facts_cache.ensure(base, &s.key, Some(slices));
                 let facts = facts_cache.get(&s.key).expect("just ensured this key");
                 match &facts.registration {

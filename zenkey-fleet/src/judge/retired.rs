@@ -230,10 +230,17 @@ pub async fn run_retired(
         // `**`, and undeclared on every exit including a `?` (#336).
         let monitor = monitor.watching(["**"]).await?;
         let deadline = tokio::time::Instant::now() + window;
+        // One timer for the whole window, not one per iteration (#346).
+        // `sleep_until` builds a future and registers a timer each time it
+        // is evaluated, and a `select!` in a loop evaluates it on every
+        // pass — at 100k samples/s that is 100k registrations a second for
+        // a deadline that never moves.
+        let window_over = tokio::time::sleep_until(deadline);
+        tokio::pin!(window_over);
         loop {
             let item = tokio::select! {
                 item = events.recv() => item,
-                _ = tokio::time::sleep_until(deadline) => break,
+                () = &mut window_over => break,
             };
             match item {
                 Some(crate::StreamItem::Event(crate::FleetEvent::Sample(s))) => {

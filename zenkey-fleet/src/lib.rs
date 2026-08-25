@@ -185,7 +185,7 @@ pub use model::tree::TreeNode;
 // The rest of what the frontends actually reach for.
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use model::decode::{structural, structural_value};
+pub use model::decode::{OBSERVE_LIMIT, structural, structural_value};
 pub use tape::record::rfc3339_now;
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
@@ -196,6 +196,7 @@ pub use judge::retired::EntryEvidence;
 // The remaining items a frontend actually calls. Every one of these was
 // reachable only by module path (#350) — which said nothing about whether it
 // was ours to use.
+pub use bus::teardown::DECLARE_TIMEOUT;
 pub use error::{BoxedCause, Error, Result, one_line};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -251,3 +252,29 @@ pub use tape::record::{
 #[cfg(feature = "blob")]
 #[cfg_attr(docsrs, doc(cfg(feature = "blob")))]
 pub use zblob;
+
+/// `Send` on the public futures, asserted at compile time (#346).
+///
+/// Every bus-facing entry point in this crate is awaited from a `tokio::spawn`
+/// or an `iced::Task`, both of which require `Send`. Nothing said so: the
+/// property held because `zengui` happens to use iced, and would have broken
+/// on the first `Rc` or non-`Send` guard held across an `.await` — at a call
+/// site in *another* crate, with the error pointing anywhere but here.
+///
+/// A `const` block, so it costs nothing at runtime and fails the build here.
+#[cfg(all(test, feature = "decode"))]
+const _: () = {
+    const fn assert_send<T: Send>() {}
+
+    #[allow(dead_code)]
+    fn engine_futures_are_send() {
+        // One per layer, chosen because each holds something across an await
+        // that a careless change would make non-`Send`: a session, a lock
+        // guard, a decoder registry.
+        assert_send::<crate::Fleet<'_>>();
+        assert_send::<crate::SliceSet>();
+        assert_send::<crate::SchemaStore>();
+        assert_send::<crate::Monitor>();
+        assert_send::<crate::Error>();
+    }
+};

@@ -42,6 +42,42 @@ where
     }
 }
 
+/// How long a declaration may take before this crate calls it a failure.
+///
+/// A `declare_subscriber`/`declare_queryable`/`declare_token` that never
+/// returns hangs the tool with nothing to report, which is exactly the shape
+/// #341 fixed for `zenoh::open` — and [`OPEN_TIMEOUT`](crate::OPEN_TIMEOUT) is
+/// the precedent this follows. Shorter than the open, because a declaration
+/// happens against a session that is already up (#346).
+pub const DECLARE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Await one declaration under [`DECLARE_TIMEOUT`], naming what stalled.
+///
+/// A stall is an [`Error::Bus`] like any other declare failure: the caller's
+/// input was fine, the fabric did not complete the operation. RFC 13 §3 — a
+/// tool that cannot obtain an observation says so rather than waiting forever
+/// in silence.
+pub(crate) async fn declared<T, E>(
+    op: &'static str,
+    target: impl std::fmt::Display,
+    // `IntoFuture`, not `Future`: zenoh's declaration builders are builders
+    // until awaited, which is what lets a caller pass one straight in.
+    builder: impl std::future::IntoFuture<Output = std::result::Result<T, E>>,
+) -> Result<T>
+where
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(DECLARE_TIMEOUT, builder.into_future()).await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(Error::bus(op, target.to_string(), e.to_string())),
+        Err(_) => Err(Error::bus(
+            op,
+            target.to_string(),
+            format!("did not complete within {DECLARE_TIMEOUT:?}"),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

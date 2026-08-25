@@ -18,7 +18,16 @@ pub async fn list(args: &Bus) -> Result<()> {
 
 /// One type: its shape, and optionally the schemas its carriers actually
 /// serve.
-pub async fn show(type_name: &str, schema: bool, full: bool, args: &Bus) -> Result<()> {
+pub async fn show(cli: crate::cli::InterfaceShowArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::InterfaceShowArgs {
+        type_name,
+        schema,
+        full,
+        bus: _,
+    } = cli;
+    let type_name = type_name.as_str();
     let slices = args.slices().await?;
     let mut report =
         zenkey_fleet::SliceSet::from_slices(slices.clone()).interface_show(type_name)?;

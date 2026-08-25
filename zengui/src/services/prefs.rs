@@ -10,6 +10,7 @@ use iced::Task;
 
 use crate::message::{ChromeMsg, Message};
 use crate::prefs::Prefs;
+use crate::services::ServiceError;
 
 /// Persist a snapshot of the preferences. Lands on [`ChromeMsg::PrefsSaved`]:
 /// still best-effort — a preference that cannot be written must not fail
@@ -17,7 +18,7 @@ use crate::prefs::Prefs;
 /// failure now has a landing to be shown from (#255).
 pub fn save(prefs: Prefs) -> Task<Message> {
     Task::perform(
-        async move { prefs.save_to(&Prefs::path()).map_err(|e| e.to_string()) },
+        async move { prefs.save_to(&Prefs::path()).map_err(ServiceError::of) },
         |r| Message::Chrome(ChromeMsg::PrefsSaved(r)),
     )
 }

@@ -878,6 +878,9 @@ pub async fn run_watchdog(
         };
         let mut sweep = std::pin::pin!(sweep);
         let mut swept = None;
+        // One timer per tick, not one per drained sample (#346).
+        let tick_over = tokio::time::sleep_until(deadline);
+        tokio::pin!(tick_over);
         while !closed {
             let item = tokio::select! {
                 item = events.recv() => item,
@@ -887,7 +890,7 @@ pub async fn run_watchdog(
                     swept = Some(outcome);
                     continue;
                 }
-                _ = tokio::time::sleep_until(deadline), if swept.is_some() => break,
+                () = &mut tick_over, if swept.is_some() => break,
             };
             match item {
                 Some(StreamItem::Event(FleetEvent::Sample(s))) => {

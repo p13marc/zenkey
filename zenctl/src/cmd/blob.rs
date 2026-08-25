@@ -32,7 +32,15 @@ use crate::Bus;
 /// Answers offline from `--registry` alone. The liveliness join is attempted
 /// only when a session is available; when it is not, `origins` stays `None` and
 /// renders as "not asked" rather than as an empty set (RFC 09 §5.1 O4).
-pub async fn list(producer: Option<&str>, tier: Option<&str>, args: &Bus) -> Result<()> {
+pub async fn list(cli: crate::cli::BlobListArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::BlobListArgs {
+        producer,
+        tier,
+        bus: _,
+    } = cli;
+    let (producer, tier) = (producer.as_deref(), tier.as_deref());
     let has_dirs = !args.registry_dirs().is_empty();
     let slices = args.slices().await?;
 
@@ -75,17 +83,25 @@ pub async fn locate(target: &str, args: &Bus) -> Result<()> {
 }
 
 /// `blob fetch <target> --origin <origin> -o <path>` — one origin, verified.
-#[allow(clippy::too_many_arguments)]
-pub async fn fetch(
-    target: &str,
-    from: &str,
-    out: Option<&Path>,
-    root: Option<&str>,
-    allow_unpinned: bool,
-    overwrite: bool,
-    quiet: bool,
-    args: &Bus,
-) -> Result<()> {
+pub async fn fetch(cli: crate::cli::BlobFetchArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::BlobFetchArgs {
+        target,
+        origin: from,
+        out,
+        root,
+        allow_unpinned,
+        overwrite,
+        quiet,
+        bus: _,
+    } = cli;
+    let (target, from, out, root) = (
+        target.as_str(),
+        from.as_str(),
+        out.as_deref(),
+        root.as_deref(),
+    );
     let spec = target;
     let target = BlobTarget::parse(target)?;
 

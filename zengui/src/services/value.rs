@@ -5,6 +5,7 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::message::{Message, PaneMsg, SubjectMsg};
+use crate::services::ServiceError;
 
 /// Fetch the selected key's current value.
 ///
@@ -17,7 +18,7 @@ pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
             let out = zenkey_fleet::fetch_value(&session, &key, zenkey_fleet::FetchSpec::default())
                 .await
                 .map(Arc::new)
-                .map_err(|e| e.to_string());
+                .map_err(ServiceError::of);
             (key, out)
         },
         |(key, out)| Message::Subject(SubjectMsg::ValueFetched(key, out)),
@@ -37,19 +38,34 @@ pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
 /// `slices: None` = no registry was loaded; the decode still runs, so the
 /// verdict is `NotValidated(NoRegistry)` — "nobody looked" rendered as
 /// itself, never omitted and never dressed as `NoSchema` (#164, #246).
-#[allow(clippy::too_many_arguments)]
-pub fn decode(
-    store: Arc<zenkey_fleet::SchemaStore>,
-    session: zenoh::Session,
-    slices: Option<Arc<zenkey_fleet::SliceSet>>,
-    base: String,
-    fetched_key: String,
-    wire_key: String,
-    encoding: String,
-    bytes: zenoh::bytes::ZBytes,
-) -> Task<Message> {
+pub struct Decode {
+    pub store: Arc<zenkey_fleet::SchemaStore>,
+    pub session: zenoh::Session,
+    pub slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    pub base: String,
+    /// What the *selection* asked for — the landing message is keyed by it.
+    pub fetched_key: String,
+    /// What the reply actually carried. Usually equal to `fetched_key`, and a
+    /// field rather than a position because transposing the two filed a decode
+    /// under the wrong key and nothing complained (#360).
+    pub wire_key: String,
+    pub encoding: String,
+    pub bytes: zenoh::bytes::ZBytes,
+}
+
+pub fn decode(d: Decode) -> Task<Message> {
     Task::perform(
         async move {
+            let Decode {
+                store,
+                session,
+                slices,
+                base,
+                fetched_key,
+                wire_key,
+                encoding,
+                bytes,
+            } = d;
             let d = zenkey_fleet::decode_sample(
                 &zenkey_fleet::Fleet::new(&session, &base),
                 &store,
@@ -132,7 +148,7 @@ pub fn field(
             zenkey_fleet::run_field(&fleet, slices.as_deref(), &store, &spec)
                 .await
                 .map(Arc::new)
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
         },
         // The landing carries the asking slot's id (#257): a pinned
         // Inspector's report comes home to the pin, never to the dock.
@@ -168,7 +184,7 @@ pub fn why(
             zenkey_fleet::run_why(&fleet, &key, slices.as_deref(), &spec)
                 .await
                 .map(Arc::new)
-                .map_err(|e| e.to_string())
+                .map_err(ServiceError::of)
         },
         // The asking slot's id rides the landing (#257).
         move |out| Message::Pane(PaneMsg::Why(slot, crate::view::why::WhyMsg::Done(out))),

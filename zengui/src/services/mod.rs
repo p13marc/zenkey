@@ -47,3 +47,7 @@ pub mod sweep;
 pub mod value;
 pub mod watch;
 pub mod write;
+
+mod error;
+
+pub use error::{ServiceError, ServiceResult};

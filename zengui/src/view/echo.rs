@@ -261,7 +261,7 @@ pub enum EchoMsg {
     Export,
     /// The stream scrolled: (absolute y offset, viewport height) — what the
     /// virtualized window renders against (#183).
-    Scrolled(f32, f32),
+    Scrolled(crate::view::kit::Viewport),
     /// Pin the stream to the workspace's subject, or unpin it (#183).
     FollowSubjectToggled,
 }
@@ -280,7 +280,7 @@ pub fn section<'a>(
     view: &'a EchoView,
     selection: Option<&'a str>,
     next_seq: u64,
-    scroll: (f32, f32),
+    scroll: crate::view::kit::Viewport,
     verdicts: &'a crate::verdict::VerdictCache,
     sp: Spacing,
 ) -> Column<'a, Message> {
@@ -325,7 +325,7 @@ pub fn section<'a>(
     // O(visible) (#183), the same window the tree and the timeline use —
     // at the density-scaled row height (#192).
     let row_h = sp.row(ROW_HEIGHT, CAPTION_LINE);
-    let (first, last) = kit::window(lines.len(), scroll.0, scroll.1, row_h);
+    let (first, last) = kit::window(lines.len(), scroll, row_h);
     let mut body = Column::new();
     if first > 0 {
         body = body.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * row_h)));
@@ -356,12 +356,7 @@ pub fn section<'a>(
     } else {
         iced::widget::scrollable(body)
             .height(Length::Fill)
-            .on_scroll(|viewport| {
-                msg(EchoMsg::Scrolled(
-                    viewport.absolute_offset().y,
-                    viewport.bounds().height,
-                ))
-            })
+            .on_scroll(|viewport| msg(EchoMsg::Scrolled(viewport.into())))
             .into()
     };
 

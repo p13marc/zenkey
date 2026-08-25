@@ -600,13 +600,16 @@ pub async fn run_gen(
 
             let base_interval = Duration::from_secs_f64(1.0 / entry.rate_hz);
             let mut tick: u64 = 0;
+            let run_over = tokio::time::sleep_until(deadline);
+            tokio::pin!(run_over);
             loop {
                 if let Some(cap) = entry.events_cap
                     && sent >= cap
                 {
                     // The declared budget is spent; the entry idles out the
-                    // rest of the run rather than out-shouting the registry.
-                    tokio::time::sleep_until(deadline).await;
+                    // rest of the run rather than out-shouting the registry —
+                    // on the run's own timer, not a second one.
+                    (&mut run_over).await;
                     break;
                 }
                 // Body: synthesize + encode, or the labelled placeholder.
@@ -701,9 +704,12 @@ pub async fn run_gen(
                         base_interval.div_f64(progress)
                     }
                 };
+                // The run's own deadline is one timer (#346); the interval
+                // is genuinely per-iteration, because it moves — `Ramp`
+                // recomputes it every pass.
                 tokio::select! {
                     _ = tokio::time::sleep(interval) => {}
-                    _ = tokio::time::sleep_until(deadline) => break,
+                    () = &mut run_over => break,
                 }
                 if tokio::time::Instant::now() >= deadline {
                     break;

@@ -11,14 +11,25 @@ use anyhow::Result;
 
 use crate::Bus;
 
-pub async fn run(old_root: &str, for_secs: f64, args: &Bus) -> Result<()> {
+/// This verb's name, spelled once (#355) — the dispatcher uses it too.
+pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check cutover");
+
+pub async fn run(cli: crate::cli::CheckCutoverArgs) -> Result<()> {
+    let bus = ASKING.ask(Bus::resolve(&cli.bus));
+    let args = &bus;
+    let crate::cli::CheckCutoverArgs {
+        old_root,
+        for_secs,
+        bus: _,
+    } = cli;
+    let old_root = old_root.as_str();
     // The flag is seconds; the engine takes a `Duration`, which is what a
     // window *is* — the conversion belongs at this edge and nowhere deeper.
-    let window = crate::exit::asked("check cutover", super::positive_secs("--for", for_secs));
+    let window = ASKING.ask(super::positive_secs("--for", for_secs));
     // A verdict verb: a session that will not open is `asked`'s exit 2 — an
     // exit 1 here would read "the old family still speaks" about a bus
     // nobody listened to.
-    let session = crate::exit::asked("check cutover", args.session().await);
+    let session = ASKING.ask(args.session().await);
     let base = args.base().to_string();
 
     // Stated before the window opens, not after: a user watching a 30-second
@@ -28,10 +39,8 @@ pub async fn run(old_root: &str, for_secs: f64, args: &Bus) -> Result<()> {
         zenkey_fleet::cutover_scope_note(old_root, &zenkey_fleet::new_prefix(&base), window)
     );
 
-    let report = crate::exit::asked(
-        "check cutover",
-        zenkey_fleet::run_cutover(&args.fleet(&session), old_root, window).await,
-    );
+    let report =
+        ASKING.ask(zenkey_fleet::run_cutover(&args.fleet(&session), old_root, window).await);
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     // The one part that cannot move: a library returns a verdict, a command
     // exits with it.

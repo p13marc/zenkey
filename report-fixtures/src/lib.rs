@@ -336,6 +336,7 @@ pub fn field_report() -> FieldReport {
         keys_seen: 1,
         dropped: 0,
         undocumented: 2,
+        unread: 0,
         registry_loaded: true,
         paths: 2,
         max_paths: 2,

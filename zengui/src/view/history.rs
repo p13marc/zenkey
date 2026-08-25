@@ -41,7 +41,7 @@ pub enum HistoryMsg {
     Clear,
     /// The timeline scrolled: (absolute y offset, viewport height) — what the
     /// virtualized window renders against (#183).
-    Scrolled(f32, f32),
+    Scrolled(crate::view::kit::Viewport),
 }
 
 fn msg(slot: SlotId, m: HistoryMsg) -> Message {
@@ -61,7 +61,7 @@ pub struct HistoryData<'a> {
     /// reach the recorder — the load-bearing distinction of this pane.
     pub watched: bool,
     /// Scroll position + viewport height, driving the virtual window (#183).
-    pub scroll: (f32, f32),
+    pub scroll: crate::view::kit::Viewport,
     /// The dock's resolved spacing grid (#192).
     pub sp: Spacing,
 }
@@ -161,7 +161,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     // Two lines of text per row: density shaves the row's air, not its type
     // (#192) — the window arithmetic and the containers share the result.
     let row_h = sp.row(ROW_HEIGHT, 2.0 * CAPTION_LINE);
-    let (first, last) = kit::window(total, data.scroll.0, data.scroll.1, row_h);
+    let (first, last) = kit::window(total, data.scroll, row_h);
     let mut rows = Column::new();
     if first > 0 {
         rows = rows.push(iced::widget::Space::new().height(Length::Fixed(first as f32 * row_h)));
@@ -187,12 +187,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
         iced::widget::scrollable(rows)
             .height(Length::FillPortion(3))
             .width(Length::Fill)
-            .on_scroll(move |viewport| {
-                msg(
-                    slot,
-                    HistoryMsg::Scrolled(viewport.absolute_offset().y, viewport.bounds().height),
-                )
-            }),
+            .on_scroll(move |viewport| msg(slot, HistoryMsg::Scrolled(viewport.into()))),
     );
 
     col = col.push(diff_section(rec, focus, sp));

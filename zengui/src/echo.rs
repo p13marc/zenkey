@@ -18,7 +18,10 @@ use zenkey_fleet::SampleView;
 /// Attempting a structural decode of a multi-megabyte payload to render a
 /// one-line preview would burn the whole tick budget for a string nobody reads.
 ///
-/// The app's **one** preview-decode bound (#345): the echo line here, the
+/// The app's **one** preview-decode bound (#345) — and the engine's, since
+/// #346: `zenkey_fleet::OBSERVE_LIMIT` bounds the field-intelligence drains
+/// for the same reason, and one limit answered twice is two answers waiting
+/// to diverge (the #353 lesson). The echo line here, the
 /// Inspector's attachment preview (`view::detail`) and the media viewer's
 /// metadata (`view::media`) all stop at it. Every one of them renders a
 /// summary of bytes nobody asked to see in full, every one of them sits on a
@@ -26,7 +29,7 @@ use zenkey_fleet::SampleView;
 /// be three different answers to one question. Past it the size is reported
 /// and the decode is skipped — which is stated, never silently empty
 /// (RFC 13 §3 O6).
-pub const DECODE_LIMIT: usize = 64 * 1024;
+pub const DECODE_LIMIT: usize = zenkey_fleet::OBSERVE_LIMIT;
 
 /// Maximum characters retained per preview.
 const PREVIEW_CHARS: usize = 512;

@@ -359,7 +359,7 @@ impl Zengui {
                 ),
                 history: self
                     .sub
-                    .follow()
+                    .follow
                     .history
                     .as_ref()
                     .map(|r| (r.ring.len(), r.ring.evicted())),

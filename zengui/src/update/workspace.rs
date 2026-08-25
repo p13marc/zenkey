@@ -81,19 +81,19 @@ pub(crate) fn update(
     match msg {
         WorkspaceMsg::PivotSelected(pivot) => {
             tree.pivot = pivot;
-            tree.tree_scroll.0 = 0.0;
+            tree.tree_scroll = tree.tree_scroll.to_top();
             tree.reflatten(dep, obs);
             Task::none()
         }
         WorkspaceMsg::TreeSearchChanged(q) => {
             tree.tree_search = q;
-            tree.tree_scroll.0 = 0.0;
+            tree.tree_scroll = tree.tree_scroll.to_top();
             tree.reflatten(dep, obs);
             Task::none()
         }
-        WorkspaceMsg::TreeScrolled(y, h) => {
+        WorkspaceMsg::TreeScrolled(vp) => {
             // View-only state: the next frame renders the new window.
-            tree.tree_scroll = (y, h.max(100.0));
+            tree.tree_scroll = vp;
             Task::none()
         }
         WorkspaceMsg::ToggleNode(path) => {
@@ -236,7 +236,7 @@ pub(crate) fn update(
             // itself states which it is, which is where a pin's failure
             // shows: on the surface the ⇱ produced.
             let slot = if role == DockRole::Inspector
-                && sub.follow().current != crate::message::Subject::None
+                && sub.follow.current != crate::message::Subject::None
             {
                 sub.pin_current(dep)
             } else {
@@ -322,7 +322,7 @@ pub(crate) fn update(
                     work.activity.tab = crate::message::ActivityTab::Doctor;
                     if tree.pivot != crate::view::tree::Pivot::Origin {
                         tree.pivot = crate::view::tree::Pivot::Origin;
-                        tree.tree_scroll.0 = 0.0;
+                        tree.tree_scroll = tree.tree_scroll.to_top();
                         tree.reflatten(dep, obs);
                     }
                 }

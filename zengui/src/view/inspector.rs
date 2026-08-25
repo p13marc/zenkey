@@ -76,7 +76,7 @@ pub struct InspectorData<'a> {
     pub series: Option<&'a SeriesData>,
     pub history: Option<&'a HistoryRecorder>,
     /// The timeline's scroll offset and viewport height (#183).
-    pub history_scroll: (f32, f32),
+    pub history_scroll: crate::view::kit::Viewport,
     /// Whether an active watch covers the subject key — the distinction the
     /// History section rests on.
     pub watched: bool,

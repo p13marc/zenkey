@@ -18,7 +18,9 @@
 
 use zenkey_fleet::report::RateReport;
 
-use crate::render::{BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table};
+use crate::render::{
+    BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without,
+};
 
 /// A rate report plus the one thing about it that is a *view*.
 ///
@@ -43,12 +45,7 @@ impl Render for RateView<'_> {
         // — the hand-built trailing envelope wrote it unconditionally and
         // nulled it when `--loss` was not asked, which is the O4 inversion
         // #232's fourth item names.
-        let mut e = match serde_json::to_value(self.report).expect("a report serializes") {
-            serde_json::Value::Object(m) => m,
-            _ => unreachable!("a report is an object"),
-        };
-        e.remove("rows");
-        e
+        envelope_without(self.report, &["rows"])
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {

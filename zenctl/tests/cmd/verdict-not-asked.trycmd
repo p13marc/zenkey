@@ -68,7 +68,8 @@ not a claim about the payload.
 ```console
 $ zenctl check schema --type Health --from '{}' --producer sysinfo --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
-not checked: no session, so sysinfo's served describe is out of reach: failed to open the Zenoh session: Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+check schema: not checked: no session, so sysinfo's served describe is out of reach: failed to open the Zenoh session: Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+check schema: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
@@ -79,7 +80,8 @@ conform".
 ```console
 $ zenctl check schema --type Health --from '{}'
 ? 2
-not checked: give --producer (live describe) or --schema-set FILE — the registry TOMLs carry type names, not shapes (RFC 08 §7)
+check schema: not checked: give --producer (live describe) or --schema-set FILE — the registry TOMLs carry type names, not shapes (RFC 08 §7)
+check schema: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 

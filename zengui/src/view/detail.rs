@@ -110,7 +110,7 @@ pub enum Fetched<'a> {
     /// just not about what is on screen.
     Superseded,
     /// The answer to the question this pane is showing.
-    Landed(&'a Result<std::sync::Arc<FetchOutcome>, String>),
+    Landed(&'a Result<std::sync::Arc<FetchOutcome>, crate::services::ServiceError>),
 }
 
 pub struct DetailData<'a> {
