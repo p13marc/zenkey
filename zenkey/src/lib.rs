@@ -55,6 +55,7 @@
 pub mod alert;
 pub mod common_state;
 pub mod context;
+pub mod encoding;
 pub mod grammar;
 pub mod key;
 pub mod origin;
@@ -69,6 +70,7 @@ pub mod slug;
 
 pub use common_state::{CommonFamily, CommonState};
 pub use context::{BlobProbePrefix, V1Context};
+pub use encoding::WireEncoding;
 pub use grammar::{
     BlobTier, Class, ClassOrPlane, ContentHash, KeyError, Origin, Plane, Producer, StructuralKey,
     VERSION_CHUNK,
@@ -81,4 +83,7 @@ pub use key::{Chunk, Key, Selector};
 pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};
 pub use profile::AppProfile;
 pub use qos::QosProfile;
-pub use slice::{RegistrySlice, SliceFinding, parse_slice, to_toml as slice_to_toml};
+pub use slice::{
+    Declared, Fanout, ProcedureKind, RateClass, RegistrySlice, SliceFinding, SliceToken,
+    parse_slice, to_toml as slice_to_toml,
+};

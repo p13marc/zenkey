@@ -3,7 +3,7 @@
 //! generated surface (RFC 08 §1.2: Chunk fields, slug-at-boundary
 //! constructors, Family, infallible single-pass key builders).
 
-use zenkey::grammar::{self, Class, ClassOrPlane, Plane, Producer};
+use zenkey::grammar::{self, BlobTier, Class, ClassOrPlane, Plane, Producer};
 use zenkey::origin::{HostId, LocalOrigin, RemoteOrigin};
 use zenkey::selector::Scope;
 use zenkey_fixture_tests::registry::{self, netring};
@@ -476,16 +476,20 @@ fn the_introspect_slice_carries_the_blob_tiers() {
     // slice and learns which tiers it holds, without probing the bus for keys
     // nobody may be serving.
     let slice = zenkey::parse_slice(registry::registry_toml("netring").unwrap()).unwrap();
-    assert!(slice.serves_blob_tier("artifact"));
+    assert!(slice.serves_blob_tier(BlobTier::Artifact));
     assert!(
-        slice.serves_blob_tier("tree"),
+        slice.serves_blob_tier(BlobTier::Tree),
         "netring declares the tree tier it also serves"
     );
     assert!(
-        !slice.serves_blob_tier("store"),
+        !slice.serves_blob_tier(BlobTier::Store),
         "netring does not declare store"
     );
-    let decl = slice.blob.iter().find(|b| b.tier == "artifact").unwrap();
+    let decl = slice
+        .blob
+        .iter()
+        .find(|b| b.tier.is(&BlobTier::Artifact))
+        .unwrap();
     assert_eq!(decl.reference.as_deref(), Some("BlobReference"));
     assert!(decl.endpoints.iter().any(|e| e == "have"));
 
@@ -493,9 +497,13 @@ fn the_introspect_slice_carries_the_blob_tiers() {
     // truth, even though every declarer names the same app-level key family
     // (shapes agree by lint, codegen dedups).
     let logs = zenkey::parse_slice(registry::registry_toml("logs").unwrap()).unwrap();
-    assert!(logs.serves_blob_tier("tree") && logs.serves_blob_tier("store"));
+    assert!(logs.serves_blob_tier(BlobTier::Tree) && logs.serves_blob_tier(BlobTier::Store));
     assert_eq!(
-        logs.blob.iter().find(|b| b.tier == "store").unwrap().algo,
+        logs.blob
+            .iter()
+            .find(|b| b.tier.is(&BlobTier::Store))
+            .unwrap()
+            .algo,
         Some("blake3".to_string())
     );
 
@@ -505,16 +513,16 @@ fn the_introspect_slice_carries_the_blob_tiers() {
     let cross = zenkey::slice::diff(&slice, &logs);
     assert!(cross.iter().any(|f| matches!(
         f,
-        zenkey::SliceFinding::UnknownBlobTier { tier } if tier == "artifact"
+        zenkey::SliceFinding::UnknownBlobTier { tier } if tier.is(&BlobTier::Artifact)
     )));
     assert!(cross.iter().any(|f| matches!(
         f,
-        zenkey::SliceFinding::MissingBlobTier { tier } if tier == "store"
+        zenkey::SliceFinding::MissingBlobTier { tier } if tier.is(&BlobTier::Store)
     )));
     assert!(!cross.iter().any(|f| matches!(
         f,
         zenkey::SliceFinding::UnknownBlobTier { tier }
-        | zenkey::SliceFinding::MissingBlobTier { tier } if tier == "tree"
+        | zenkey::SliceFinding::MissingBlobTier { tier } if tier.is(&BlobTier::Tree)
     )));
 
     // A diff against a build that serves no blobs is a finding, not silence.
@@ -523,7 +531,7 @@ fn the_introspect_slice_carries_the_blob_tiers() {
     assert!(
         findings.iter().any(|f| matches!(
             f,
-            zenkey::SliceFinding::UnknownBlobTier { tier } if tier == "artifact"
+            zenkey::SliceFinding::UnknownBlobTier { tier } if tier.is(&BlobTier::Artifact)
         )),
         "a tier the local build does not know must surface: {findings:?}"
     );

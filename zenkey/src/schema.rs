@@ -25,6 +25,8 @@ pub mod decode;
 pub mod validate;
 
 use std::collections::BTreeMap;
+
+pub use crate::encoding::WireEncoding;
 use std::fmt;
 
 use serde_json::Value;
@@ -69,38 +71,6 @@ impl PartialEq<str> for SchemaKind {
 impl PartialEq<&str> for SchemaKind {
     fn eq(&self, other: &&str) -> bool {
         self.0 == *other
-    }
-}
-
-/// The wire framing of a payload — a separate axis from its schema
-/// (RFC 08 §7): one `json-schema` document describes both the JSON and the
-/// CBOR framing of a type.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WireEncoding {
-    Json,
-    Cbor,
-    Protobuf,
-    /// OMG CDR, the DDS / ROS 2 framing (v1.10).
-    Cdr,
-    /// Anything else — carried verbatim, decoded only by sniff.
-    Other(String),
-}
-
-impl WireEncoding {
-    /// Map a middleware/registry encoding string (`application/cbor`, …).
-    ///
-    /// The alias sets are deliberately short. A spelling is listed once it has
-    /// been *seen*, not once it has been imagined: mapping a guessed media
-    /// type to a codec is how a tool ends up confidently decoding the wrong
-    /// bytes, and `Other` already renders honestly.
-    pub fn from_encoding_str(s: &str) -> WireEncoding {
-        match s {
-            "application/json" | "text/json" => WireEncoding::Json,
-            "application/cbor" => WireEncoding::Cbor,
-            "application/protobuf" | "application/x-protobuf" => WireEncoding::Protobuf,
-            "application/cdr" | "application/x-cdr" => WireEncoding::Cdr,
-            other => WireEncoding::Other(other.to_string()),
-        }
     }
 }
 

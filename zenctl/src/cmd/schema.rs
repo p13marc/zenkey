@@ -210,7 +210,7 @@ mod tests {
             description: None,
             subjects: vec![SubjectDecl {
                 path: "p".into(),
-                class: "telemetry".into(),
+                class: zenkey::Class::Telemetry.into(),
                 type_name: subject_type.into(),
                 common: None,
                 since: None,
@@ -226,7 +226,7 @@ mod tests {
                 .map(|r| {
                     vec![ProcedureDecl {
                         path: "proc".into(),
-                        kind: "read".into(),
+                        kind: Some(zenkey::ProcedureKind::Read.into()),
                         reply: Some(r.into()),
                         request: None,
                         encoding: None,
@@ -240,7 +240,7 @@ mod tests {
                 .unwrap_or_default(),
             media: vec![],
             blob: vec![BlobDecl {
-                tier: "artifact".into(),
+                tier: zenkey::BlobTier::Artifact.into(),
                 endpoints: vec![],
                 algo: None,
                 reference: Some("BlobRef".into()),

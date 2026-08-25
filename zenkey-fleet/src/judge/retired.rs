@@ -184,7 +184,7 @@ pub async fn run_retired(
         .iter()
         .map(|(slice, decl)| Matcher {
             identity: match &slice.service_origin {
-                Some(origin) => Identity::Service(origin.clone()),
+                Some(origin) => Identity::Service(origin.token().to_string()),
                 None => Identity::Host(slice.name.clone()),
             },
             old: zenkey::pattern::SubjectPattern::parse(&decl.path).ok(),
@@ -403,7 +403,7 @@ mod tests {
             "[registry]\nversion = \"2.0\"\napp = \"demo\"\nconvention = 1\n\
              [producer]\nname = \"catalog\"\n",
         );
-        svc.service_origin = Some("@catalog".into());
+        svc.service_origin = Some(zenkey::Declared::parse("@catalog"));
         assert_eq!(
             retired_selector(&svc, "entity/{id}"),
             "v1/@catalog/*/entity/*"

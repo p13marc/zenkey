@@ -9,7 +9,7 @@
 //! runs in consumers' build scripts, where the manifest promises the
 //! dependency graph stays light.
 
-use zenkey::RegistrySlice;
+use zenkey::{Declared, RegistrySlice};
 
 /// An AsyncAPI 3.0 document from the slice set — the prior-art direction
 /// RFC 10 records, made concrete.
@@ -24,12 +24,16 @@ pub fn asyncapi(slices: &[&RegistrySlice]) -> serde_json::Value {
     let mut operations = serde_json::Map::new();
 
     for slice in slices {
-        let origin = slice.service_origin.as_deref().unwrap_or("{origin}");
+        let origin = slice
+            .service_origin
+            .as_ref()
+            .map(Declared::token)
+            .unwrap_or("{origin}");
         for d in &slice.subjects {
             let address = match &slice.service_origin {
                 // A service origin has no producer chunk (RFC 06 §5).
-                Some(_) => format!("v1/{origin}/{}/{}", d.class, d.path),
-                None => format!("v1/{origin}/{}/{}/{}", d.class, slice.name, d.path),
+                Some(_) => format!("v1/{origin}/{}/{}", d.class.token(), d.path),
+                None => format!("v1/{origin}/{}/{}/{}", d.class.token(), slice.name, d.path),
             };
             let id = format!("{}.{}", slice.name, d.path.replace('/', "."));
             let mut channel = serde_json::Map::new();
@@ -49,12 +53,20 @@ pub fn asyncapi(slices: &[&RegistrySlice]) -> serde_json::Value {
                 );
             }
             let mut ext = serde_json::Map::new();
-            ext.insert("class".into(), serde_json::Value::String(d.class.clone()));
+            ext.insert(
+                "class".into(),
+                serde_json::Value::String(d.class.token().to_string()),
+            );
+            // Each column renders as the token the slice carried — `Known` by
+            // its canonical spelling, `Other` verbatim.
             for (k, v) in [
-                ("qos", d.qos.clone()),
+                ("qos", d.qos.as_ref().map(|q| q.token().to_string())),
                 ("unit", d.unit.clone()),
-                ("rate", d.rate.clone()),
-                ("encoding", d.encoding.clone()),
+                ("rate", d.rate.as_ref().map(|r| r.token().to_string())),
+                (
+                    "encoding",
+                    d.encoding.as_ref().map(|e| e.as_encoding_str().to_string()),
+                ),
                 ("since", d.since.clone()),
             ] {
                 if let Some(v) = v {
@@ -81,7 +93,7 @@ pub fn asyncapi(slices: &[&RegistrySlice]) -> serde_json::Value {
                 id.clone(),
                 serde_json::json!({
                     "address": address,
-                    "x-zenkey": { "plane": "@rpc", "kind": p.kind },
+                    "x-zenkey": { "plane": "@rpc", "kind": p.kind.as_ref().map(Declared::token) },
                 }),
             );
             let mut op = serde_json::Map::new();
@@ -99,12 +111,15 @@ pub fn asyncapi(slices: &[&RegistrySlice]) -> serde_json::Value {
                 );
             }
             let mut ext = serde_json::Map::new();
-            ext.insert("kind".into(), serde_json::Value::String(p.kind.clone()));
             for (k, v) in [
+                ("kind", p.kind.as_ref().map(|k| k.token().to_string())),
                 ("request", p.request.clone()),
                 ("reply", p.reply.clone()),
-                ("fanout", p.fanout.clone()),
-                ("encoding", p.encoding.clone()),
+                ("fanout", p.fanout.as_ref().map(|f| f.token().to_string())),
+                (
+                    "encoding",
+                    p.encoding.as_ref().map(|e| e.as_encoding_str().to_string()),
+                ),
                 ("since", p.since.clone()),
             ] {
                 if let Some(v) = v {

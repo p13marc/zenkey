@@ -88,14 +88,14 @@ impl PreparedBody {
 /// it is the one thing that cannot be wrong.
 pub fn encode_encoding(
     declared: Option<&str>,
-    registry: Option<&str>,
+    registry: Option<&WireEncoding>,
     schema: Option<&TypeSchema>,
 ) -> Option<String> {
     if let Some(e) = declared {
         return Some(e.to_string());
     }
     if let Some(e) = registry {
-        return Some(e.to_string());
+        return Some(e.as_encoding_str().to_string());
     }
     schema.and_then(|s| match s.kind().as_str() {
         SchemaKind::JSON_SCHEMA => Some("application/json".to_string()),
@@ -142,7 +142,7 @@ pub async fn prepare_request(
     store: &SchemaStore,
     producer: &str,
     type_name: &str,
-    registry_encoding: Option<&str>,
+    registry_encoding: Option<&WireEncoding>,
     spec: PrepareSpec<'_>,
 ) -> Result<PreparedBody> {
     let PrepareSpec {
@@ -268,7 +268,7 @@ pub async fn prepare_publish(
     let Some(producer) = subject_producer(&description) else {
         return Ok(PreparedBody {
             bytes: body.to_vec(),
-            encoding: encode_encoding(declared_encoding, subject.encoding.as_deref(), None),
+            encoding: encode_encoding(declared_encoding, subject.encoding.as_ref(), None),
             source: BodySource::AsTyped,
             note: Some(format!(
                 "{wire_key} refines to a registered subject with no producer chunk to ask for a \
@@ -279,7 +279,7 @@ pub async fn prepare_publish(
     if subject.type_name.is_empty() {
         return Ok(PreparedBody {
             bytes: body.to_vec(),
-            encoding: encode_encoding(declared_encoding, subject.encoding.as_deref(), None),
+            encoding: encode_encoding(declared_encoding, subject.encoding.as_ref(), None),
             source: BodySource::AsTyped,
             note: Some(format!(
                 "{wire_key} is registered but declares no payload type — body sent as typed"
@@ -292,7 +292,7 @@ pub async fn prepare_publish(
         store,
         &producer,
         &subject.type_name,
-        subject.encoding.as_deref(),
+        subject.encoding.as_ref(),
         spec,
     )
     .await
@@ -323,12 +323,12 @@ mod tests {
         );
         // The registry outranks the kind…
         assert_eq!(
-            encode_encoding(None, Some("application/cbor"), Some(&protobuf)).as_deref(),
+            encode_encoding(None, Some(&WireEncoding::Cbor), Some(&protobuf)).as_deref(),
             Some("application/cbor")
         );
         // …and the flag outranks the registry.
         assert_eq!(
-            encode_encoding(Some("application/json"), Some("application/cbor"), None).as_deref(),
+            encode_encoding(Some("application/json"), Some(&WireEncoding::Cbor), None).as_deref(),
             Some("application/json")
         );
         // An unknown kind's framing is unknown, and saying nothing is the

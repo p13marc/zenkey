@@ -836,7 +836,7 @@ pub enum Rendering {
 /// (RFC 08 §7).
 pub fn resolve_encoding(
     sample_encoding: Option<&str>,
-    registry_encoding: Option<&str>,
+    registry_encoding: Option<&WireEncoding>,
     bytes: &[u8],
 ) -> WireEncoding {
     // Zenoh's default when a publisher sets nothing is the opaque
@@ -847,7 +847,7 @@ pub fn resolve_encoding(
         return WireEncoding::from_encoding_str(e);
     }
     if let Some(e) = registry_encoding {
-        return WireEncoding::from_encoding_str(e);
+        return e.clone();
     }
     // The sniff: JSON text starts with a JSON-ish byte; otherwise call it
     // CBOR (the reference profile default) and let the decoder's error path
@@ -1054,7 +1054,7 @@ pub async fn decode_sample(
         // "checked and passed", and not `NoRegistry`'s "nobody looked").
         return DecodedSample::structural(None, NotValidated::NoSchema, bytes);
     };
-    let encoding = resolve_encoding(sample_encoding, registry_encoding.as_deref(), bytes);
+    let encoding = resolve_encoding(sample_encoding, registry_encoding.as_ref(), bytes);
     match store.schema_for(session, &producer, &type_name).await {
         Some(schema) => match store.decode(&schema, &encoding, bytes) {
             Ok(decoded) => {
@@ -1201,12 +1201,12 @@ mod tests {
     fn encoding_resolution_order() {
         // Sample wins…
         assert_eq!(
-            resolve_encoding(Some("application/json"), Some("application/cbor"), b"x"),
+            resolve_encoding(Some("application/json"), Some(&WireEncoding::Cbor), b"x"),
             WireEncoding::Json
         );
         // …but the opaque default is "unsaid", so the registry speaks…
         assert_eq!(
-            resolve_encoding(Some("zenoh/bytes"), Some("application/cbor"), b"{"),
+            resolve_encoding(Some("zenoh/bytes"), Some(&WireEncoding::Cbor), b"{"),
             WireEncoding::Cbor
         );
         // …and with neither, the sniff.
@@ -1385,7 +1385,7 @@ mod tests {
             description: None,
             subjects: vec![SubjectDecl {
                 path: "cpu".into(),
-                class: "telemetry".into(),
+                class: zenkey::Class::Telemetry.into(),
                 type_name: "TelemetryPoint".into(),
                 common: None,
                 since: None,
@@ -1434,7 +1434,7 @@ mod tests {
             description: None,
             subjects: vec![SubjectDecl {
                 path: "raw".into(),
-                class: "telemetry".into(),
+                class: zenkey::Class::Telemetry.into(),
                 type_name: String::new(),
                 common: None,
                 since: None,

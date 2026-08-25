@@ -19,6 +19,7 @@ use zenkey::grammar::with_base;
 use zenkey::pattern::{PatternChunk, SubjectPattern};
 use zenkey::qos::QosProfile;
 use zenkey::schema::SchemaSet;
+use zenkey::{Class, Declared, RateClass};
 
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
@@ -289,7 +290,7 @@ pub async fn build_plan(
                                 synthetic_vars.push(name.clone());
                                 synthetic_var(name)
                             });
-                        if subject.class == "events" {
+                        if subject.class.is(&Class::Events) {
                             // The last variable is the per-send unique id
                             // (events keys are write-once, RFC 04 §1.3).
                             unique_tail_idx = Some(tail.len());
@@ -317,8 +318,11 @@ pub async fn build_plan(
             };
             let unique_chunk = unique_tail_idx.map(|i| base_chunks + 4 + i);
 
-            let (qos, qos_source) = match subject.qos.as_deref().and_then(QosProfile::from_name) {
-                Some(q) => (q, "declared"),
+            // The slice already recognised the token on parse — a declared
+            // profile this build cannot name is not a profile it can honour,
+            // so it falls to the default exactly as an absent one does.
+            let (qos, qos_source) = match subject.qos.as_ref().and_then(Declared::known) {
+                Some(q) => (*q, "declared"),
                 None => (QosProfile::Sampled, "default"),
             };
 
@@ -326,12 +330,12 @@ pub async fn build_plan(
             // capped at their declared budget for the run.
             let mut events_cap = None;
             let mut note: Option<String> = None;
-            let rate_hz = match subject.class.as_str() {
-                "events" => {
+            let rate_hz = match subject.class.known() {
+                Some(Class::Events) => {
                     let cap_h = subject
                         .rate
-                        .as_deref()
-                        .and_then(crate::judge::doctor::rate_cap_per_hour)
+                        .as_ref()
+                        .and_then(RateClass::cap_per_hour)
                         .unwrap_or(1);
                     let cap_run = ((f64::from(u32::try_from(cap_h.min(3600)).unwrap_or(3600))
                         * spec.duration.as_secs_f64())
@@ -342,7 +346,7 @@ pub async fn build_plan(
                     // Spread the budget over the run.
                     (events_cap.unwrap_or(1) as f64 / spec.duration.as_secs_f64()).min(1.0)
                 }
-                "state" => match subject.ttl_s {
+                Some(Class::State) => match subject.ttl_s {
                     // Refresh at ttl/2 (RFC 04 §1.2).
                     Some(ttl) if ttl > 0 => 2.0 / ttl as f64,
                     _ => 0.5,
@@ -382,15 +386,12 @@ pub async fn build_plan(
                     None => format!("synthetic values for {{{vars}}} (override with --var)"),
                 });
             }
-            let encoding = crate::bus::body::encode_encoding(
-                None,
-                subject.encoding.as_deref(),
-                schema.as_ref(),
-            );
+            let encoding =
+                crate::bus::body::encode_encoding(None, subject.encoding.as_ref(), schema.as_ref());
 
             let valid = GenPlanEntry {
                 key,
-                class: subject.class.clone(),
+                class: subject.class.token().to_string(),
                 producer: slice.name.clone(),
                 type_name: subject.type_name.clone(),
                 qos: qos.name().to_string(),

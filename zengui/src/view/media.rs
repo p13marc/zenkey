@@ -153,6 +153,10 @@ pub struct MediaState {
 /// Whether iced can decode this declared encoding today. The honest list,
 /// not an aspiration: everything else is listed as metadata only.
 pub fn decodable(encoding: &str) -> bool {
+    // Still a string match, and deliberately: these are the still-image media
+    // types iced's `image` widget can decode, which is a property of the
+    // decoder, not of the convention's vocabulary. `WireEncoding` has no
+    // variants for them — they arrive as `Other`, which is the honest answer.
     matches!(
         encoding,
         "image/png" | "image/jpeg" | "image/gif" | "image/bmp" | "image/webp"
@@ -205,13 +209,13 @@ pub fn section<'a>(
                         "  {} ({}){}",
                         m.path,
                         m.encoding,
-                        if decodable(&m.encoding) {
+                        if decodable(m.encoding.as_encoding_str()) {
                             ""
                         } else {
                             " — metadata only, no decode story yet"
                         }
                     );
-                    if decodable(&m.encoding) {
+                    if decodable(m.encoding.as_encoding_str()) {
                         col = col.push(
                             kit::action(kit::caption(label))
                                 .on_press(msg(MediaMsg::DeclPicked {

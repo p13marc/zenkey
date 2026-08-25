@@ -162,7 +162,7 @@ mod tests {
     fn subject(path: &str, class: &str, cardinality: Option<i64>) -> zenkey::slice::SubjectDecl {
         zenkey::slice::SubjectDecl {
             path: path.into(),
-            class: class.into(),
+            class: zenkey::Declared::parse(class),
             type_name: "T".into(),
             common: None,
             since: None,

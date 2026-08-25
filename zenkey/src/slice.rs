@@ -16,14 +16,290 @@
 
 use std::fmt;
 
+use crate::common_state::CommonFamily;
+use crate::encoding::WireEncoding;
+use crate::grammar::{BlobTier, Class};
+use crate::origin::ServiceOrigin;
+use crate::qos::QosProfile;
+
+// ─── the closed vocabularies, and the tolerance around them ─────────────────
+//
+// Six columns of a slice draw on vocabularies this crate already defines as
+// closed types — `class`, `qos`, `common`, `tier`, `kind`, `rate`, `fanout`
+// and the service origin. Carrying them as `String` meant the accessors took
+// `&str`, so `serves_blob_tier("artefact")` compiled and answered `false`:
+// a typo and an honest absence were the same answer.
+//
+// The forward-compat posture that argued for `String` is not lost by typing
+// them, because it was never an argument for `String` in the first place —
+// [`WireEncoding`](crate::schema::WireEncoding) has demonstrated the shape
+// since v1.5: known variants plus an `Other` arm, tolerant of a newer fleet
+// and typed for everything this build knows. [`Declared`] is that shape,
+// generic, so each vocabulary keeps its own enum and gains the tolerance
+// once rather than seven times.
+
+/// A closed registry vocabulary, as a slice column spells it.
+///
+/// Implemented by the token enums a slice carries. The two directions are
+/// deliberately not symmetric: [`from_token`](SliceToken::from_token) is
+/// fallible because a *foreign* slice may use a token this build has never
+/// heard of, and [`token`](SliceToken::token) is not because a value that
+/// exists was either recognised or carried verbatim.
+pub trait SliceToken: Sized {
+    /// The token as the registry TOML spells it, or `None` if this build
+    /// does not know it.
+    fn from_token(token: &str) -> Option<Self>;
+
+    /// The canonical spelling — for a value parsed from a slice, byte-equal
+    /// to what the slice carried.
+    fn token(&self) -> &str;
+}
+
+/// One closed-vocabulary column, read from a possibly-foreign slice.
+///
+/// `Known` is the vocabulary this build compiles against; `Other` is a token
+/// a newer (or wrong) fleet member declared, **carried verbatim rather than
+/// dropped**. Carrying it is the point: RFC 08 §6 makes a disagreement
+/// between two slices a *finding*, and a column silently normalised to
+/// "unknown" cannot be diffed into one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Declared<T> {
+    /// A token in this build's vocabulary.
+    Known(T),
+    /// A token this build does not know, kept as the slice spelled it.
+    Other(String),
+}
+
+impl<T: SliceToken> Declared<T> {
+    /// Read a column, recognising what this build knows and keeping the rest.
+    pub fn parse(token: &str) -> Self {
+        match T::from_token(token) {
+            Some(known) => Declared::Known(known),
+            None => Declared::Other(token.to_string()),
+        }
+    }
+
+    /// The token as the slice spells it — round-trips through
+    /// [`to_toml`] byte-for-byte, `Other` included.
+    pub fn token(&self) -> &str {
+        match self {
+            Declared::Known(k) => k.token(),
+            Declared::Other(s) => s,
+        }
+    }
+
+    /// The recognised value, if this build knows the token.
+    pub fn known(&self) -> Option<&T> {
+        match self {
+            Declared::Known(k) => Some(k),
+            Declared::Other(_) => None,
+        }
+    }
+
+    /// Whether this column is exactly the given known token. Prefer this to
+    /// comparing [`token`](Declared::token) against a string literal — that
+    /// is the typo hole this type closed.
+    pub fn is(&self, other: &T) -> bool
+    where
+        T: PartialEq,
+    {
+        matches!(self, Declared::Known(k) if k == other)
+    }
+}
+
+impl<T: SliceToken> From<T> for Declared<T> {
+    fn from(value: T) -> Self {
+        Declared::Known(value)
+    }
+}
+
+impl<T: SliceToken> fmt::Display for Declared<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.token())
+    }
+}
+
+/// Which half of RFC 05 §2's request/response split a procedure is
+/// (`[[procedure]] kind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProcedureKind {
+    /// A side-effect-free query (RFC 05 §2).
+    Read,
+    /// A procedure that changes something (RFC 05 §2; `fanout` defaults to
+    /// [`Fanout::Forbidden`] here, RFC 08 §2 G2).
+    Write,
+}
+
+impl SliceToken for ProcedureKind {
+    fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "read" => Some(ProcedureKind::Read),
+            "write" => Some(ProcedureKind::Write),
+            _ => None,
+        }
+    }
+
+    fn token(&self) -> &str {
+        match self {
+            ProcedureKind::Read => "read",
+            ProcedureKind::Write => "write",
+        }
+    }
+}
+
+/// Whether a `*`-origin fan-out call may target a procedure (RFC 05 §2.1,
+/// RFC 08 §2 G2) — the registry layer of the three-layer refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Fanout {
+    /// A `*`-origin fan-out call may target this procedure.
+    Allowed,
+    /// Fleet spellings are not generated for this procedure.
+    Forbidden,
+}
+
+impl SliceToken for Fanout {
+    fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "allowed" => Some(Fanout::Allowed),
+            "forbidden" => Some(Fanout::Forbidden),
+            _ => None,
+        }
+    }
+
+    fn token(&self) -> &str {
+        match self {
+            Fanout::Allowed => "allowed",
+            Fanout::Forbidden => "forbidden",
+        }
+    }
+}
+
+/// The declared rate class of an `events` subject (RFC 04 §1.3, RFC 08 §5).
+///
+/// Not a [`Declared`] column, and the difference is the point: the vocabulary
+/// is `rare | low | burst(n/h)`, and the third is **parameterized**. Wrapping
+/// it in `Declared` would file every legitimate `burst(240/h)` under
+/// `Other` — the arm that means "a token this build does not know" — and lose
+/// the budget in the process. So this carries its own `Other`, the shape
+/// [`WireEncoding`] has had since v1.5.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RateClass {
+    /// `rare` — at most one an hour; silence is the normal state.
+    Rare,
+    /// `low` — at most sixty an hour.
+    Low,
+    /// `burst(n/h)` — an explicit per-hour budget.
+    Burst(u64),
+    /// A spelling this build does not know, carried verbatim.
+    Other(String),
+}
+
+impl RateClass {
+    /// Read a `rate` token. Unknown spellings are carried, not rejected —
+    /// this reads foreign slices (RFC 08 §6).
+    pub fn parse(token: &str) -> RateClass {
+        match token {
+            "rare" => RateClass::Rare,
+            "low" => RateClass::Low,
+            other => match other
+                .strip_prefix("burst(")
+                .and_then(|r| r.strip_suffix("/h)"))
+                .and_then(|n| n.parse().ok())
+            {
+                Some(n) => RateClass::Burst(n),
+                None => RateClass::Other(other.to_string()),
+            },
+        }
+    }
+
+    /// The declared ceiling in events per hour, where one is declared.
+    ///
+    /// `None` for a spelling this build cannot read — which is *not* the same
+    /// as "no ceiling", and callers must not treat it as unlimited.
+    pub fn cap_per_hour(&self) -> Option<u64> {
+        match self {
+            RateClass::Rare => Some(1),
+            RateClass::Low => Some(60),
+            RateClass::Burst(n) => Some(*n),
+            RateClass::Other(_) => None,
+        }
+    }
+
+    /// The token as a registry TOML spells it.
+    pub fn token(&self) -> String {
+        match self {
+            RateClass::Rare => "rare".to_string(),
+            RateClass::Low => "low".to_string(),
+            RateClass::Burst(n) => format!("burst({n}/h)"),
+            RateClass::Other(s) => s.clone(),
+        }
+    }
+}
+
+impl fmt::Display for RateClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.token())
+    }
+}
+
+impl SliceToken for Class {
+    fn from_token(token: &str) -> Option<Self> {
+        Class::from_chunk(token)
+    }
+
+    fn token(&self) -> &str {
+        self.chunk()
+    }
+}
+
+impl SliceToken for QosProfile {
+    fn from_token(token: &str) -> Option<Self> {
+        QosProfile::from_name(token)
+    }
+
+    fn token(&self) -> &str {
+        self.name()
+    }
+}
+
+impl SliceToken for BlobTier {
+    fn from_token(token: &str) -> Option<Self> {
+        BlobTier::from_chunk(token)
+    }
+
+    fn token(&self) -> &str {
+        self.chunk()
+    }
+}
+
+impl SliceToken for CommonFamily {
+    fn from_token(token: &str) -> Option<Self> {
+        CommonFamily::ALL.into_iter().find(|f| f.token() == token)
+    }
+
+    fn token(&self) -> &str {
+        CommonFamily::token(*self)
+    }
+}
+
+impl SliceToken for ServiceOrigin {
+    fn from_token(token: &str) -> Option<Self> {
+        ServiceOrigin::new(token).ok()
+    }
+
+    fn token(&self) -> &str {
+        self.as_str()
+    }
+}
+
 /// One `[[subject]]` entry of a served registry slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubjectDecl {
     /// The subject pattern, base-relative to `<class>/<producer>` — e.g.
     /// `disk/{mount}/used`.
     pub path: String,
-    /// `telemetry` | `state` | `events`.
-    pub class: String,
+    /// `telemetry` | `state` | `events` (RFC 04 §1).
+    pub class: Declared<Class>,
     /// The payload type name, as the producer declares it.
     pub type_name: String,
     /// `common = "health|errors|sensor|…"` — which of the RFC 08 §5 framework
@@ -35,23 +311,25 @@ pub struct SubjectDecl {
     /// the parse→emit path a round trip somebody might feed back into a build,
     /// where a lost `common` silently changes the generated
     /// `AnySubject::common_state()`.
-    pub common: Option<String>,
+    pub common: Option<Declared<CommonFamily>>,
     /// Registry version this subject first appeared in.
     pub since: Option<String>,
     pub description: Option<String>,
-    /// The declared QoS profile name (RFC 04 §3), when the slice carries one.
-    pub qos: Option<String>,
+    /// The declared QoS profile (RFC 04 §3), when the slice carries one.
+    pub qos: Option<Declared<QosProfile>>,
     /// State-subject freshness bound (RFC 04 §1.2), when declared.
     pub ttl_s: Option<i64>,
     /// The subject's unit (RFC 08 §4), when declared.
     pub unit: Option<String>,
     /// Events rate class (RFC 04 §1.3), when declared.
-    pub rate: Option<String>,
+    pub rate: Option<RateClass>,
     /// The declared key-population bound, when declared.
     pub cardinality: Option<i64>,
     /// The declared payload encoding (`application/cbor`, …), when declared
     /// (RFC 08 §2, v1.5). Resolution: sample `Encoding` > this > sniff.
-    pub encoding: Option<String>,
+    /// `WireEncoding` carries its own `Other` arm, so it needs no
+    /// [`Declared`] wrapper — it has been this shape since v1.5.
+    pub encoding: Option<WireEncoding>,
 }
 
 /// One `[[procedure]]` entry of a served registry slice.
@@ -59,18 +337,18 @@ pub struct SubjectDecl {
 pub struct ProcedureDecl {
     /// The procedure path, base-relative to the producer's `@rpc` root.
     pub path: String,
-    /// `read` | `write`.
-    pub kind: String,
+    /// `read` | `write` (RFC 05 §2).
+    pub kind: Option<Declared<ProcedureKind>>,
     pub reply: Option<String>,
     /// The declared request type name, when declared.
     pub request: Option<String>,
     /// The declared payload encoding (RFC 08 §2, v1.5).
-    pub encoding: Option<String>,
+    pub encoding: Option<WireEncoding>,
     /// `"forbidden"` forbids `*`-origin fan-out calls (RFC 05 §2.1); absent
     /// means unconstrained. Surfaced in the slice since 0.5 so *dynamic*
     /// callers (explorers) can refuse what generated builders make
     /// unspellable — the registry layer of the three-layer refusal.
-    pub fanout: Option<String>,
+    pub fanout: Option<Declared<Fanout>>,
     /// Whether the procedure declares itself idempotent (RFC 08 §2).
     pub idempotent: Option<bool>,
     /// The declared key-population bound of a `{var}`-bearing path, when
@@ -97,7 +375,7 @@ pub struct ProcedureDecl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobDecl {
     /// `artifact` | `tree` | `store` (RFC 07 §2).
-    pub tier: String,
+    pub tier: Declared<BlobTier>,
     /// The RFC 07 §2.2 endpoints served under `artifact/<id>/`; empty for the
     /// Tier-2 tiers, whose key *is* the endpoint.
     pub endpoints: Vec<String>,
@@ -107,7 +385,7 @@ pub struct BlobDecl {
     /// carry the content root (RFC 07 §2.1).
     pub reference: Option<String>,
     /// The blob content's encoding, when declared.
-    pub encoding: Option<String>,
+    pub encoding: Option<WireEncoding>,
     pub since: Option<String>,
     pub description: Option<String>,
 }
@@ -128,7 +406,7 @@ pub struct MediaDecl {
     /// The wire `Encoding` on every frame (`image/jpeg`, `video/*` — may be
     /// a family): the codec is declared here, never in a payload envelope
     /// (RFC 07 §1).
-    pub encoding: String,
+    pub encoding: WireEncoding,
     /// The per-frame sidecar type on the attachment (`FrameMeta`).
     pub attachment: Option<String>,
     /// Key-population bound, when the path carries variables.
@@ -159,7 +437,7 @@ pub struct RegistrySlice {
     pub name: String,
     /// `Some(origin)` for a service (`@catalog`); `None` for a host producer,
     /// whose origin is the host it runs on and therefore not in the slice.
-    pub service_origin: Option<String>,
+    pub service_origin: Option<Declared<ServiceOrigin>>,
     pub description: Option<String>,
     pub subjects: Vec<SubjectDecl>,
     pub procedures: Vec<ProcedureDecl>,
@@ -177,7 +455,17 @@ pub struct RegistrySlice {
 
 impl RegistrySlice {
     /// Subjects of one class.
-    pub fn subjects_in(&self, class: &str) -> impl Iterator<Item = &SubjectDecl> {
+    ///
+    /// Takes the vocabulary, not a `&str`: `subjects_in("telementry")` used
+    /// to compile and answer "no subjects", which is the same answer an
+    /// honestly empty class gives. `Class::State` is the ordinary spelling;
+    /// a [`Declared`] answers the same question about a class token only a
+    /// newer fleet member knows.
+    pub fn subjects_in(
+        &self,
+        class: impl Into<Declared<Class>>,
+    ) -> impl Iterator<Item = &SubjectDecl> {
+        let class = class.into();
         self.subjects.iter().filter(move |s| s.class == class)
     }
 
@@ -192,8 +480,22 @@ impl RegistrySlice {
     }
 
     /// Does this slice serve this `@blob` tier (RFC 07 §2)?
-    pub fn serves_blob_tier(&self, tier: &str) -> bool {
+    ///
+    /// `BlobTier::Artifact` is the ordinary spelling; a [`Declared`] asks the
+    /// same question about a tier token only a newer fleet member knows,
+    /// which is what [`diff`] needs to call skew skew.
+    pub fn serves_blob_tier(&self, tier: impl Into<Declared<BlobTier>>) -> bool {
+        let tier = tier.into();
         self.blob.iter().any(|b| b.tier == tier)
+    }
+
+    /// Every `@blob` tier this slice declares, recognised or not.
+    ///
+    /// The `Other` tokens are the interesting ones: RFC 08 §6 makes a tier
+    /// this build cannot name a *finding* about version skew, which is only
+    /// possible because [`parse_slice`] carries it rather than dropping it.
+    pub fn blob_tiers(&self) -> impl Iterator<Item = &Declared<BlobTier>> {
+        self.blob.iter().map(|b| &b.tier)
     }
 
     /// Does this slice publish a `@media` stream with exactly this pattern
@@ -227,6 +529,16 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
 
     let err = |m: &str| SliceError(m.to_string());
     let s = |v: Option<&toml::Value>| v.and_then(|v| v.as_str()).map(str::to_string);
+    // A closed-vocabulary column: recognised where this build knows the token,
+    // carried verbatim where it does not (RFC 08 §6 — skew is a finding, and a
+    // column normalised to "unknown" cannot be diffed into one).
+    fn tok<T: SliceToken>(v: Option<&toml::Value>) -> Option<Declared<T>> {
+        v.and_then(|v| v.as_str()).map(Declared::parse)
+    }
+    fn enc(v: Option<&toml::Value>) -> Option<WireEncoding> {
+        v.and_then(|v| v.as_str())
+            .map(WireEncoding::from_encoding_str)
+    }
 
     let header = doc
         .get("registry")
@@ -241,7 +553,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
     let (name, service_origin, description) = if let Some(svc) = doc.get("service") {
         (
             s(svc.get("name")).ok_or_else(|| err("[service] missing name"))?,
-            Some(s(svc.get("origin")).ok_or_else(|| err("[service] missing origin"))?),
+            Some(tok(svc.get("origin")).ok_or_else(|| err("[service] missing origin"))?),
             s(svc.get("description")),
         )
     } else if let Some(prod) = doc.get("producer") {
@@ -265,17 +577,17 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
     for e in array("subject") {
         subjects.push(SubjectDecl {
             path: s(e.get("path")).ok_or_else(|| err("[[subject]] missing path"))?,
-            class: s(e.get("class")).ok_or_else(|| err("[[subject]] missing class"))?,
+            class: tok(e.get("class")).ok_or_else(|| err("[[subject]] missing class"))?,
             type_name: s(e.get("type")).unwrap_or_default(),
-            common: s(e.get("common")),
+            common: tok(e.get("common")),
             since: s(e.get("since")),
             description: s(e.get("description")),
-            qos: s(e.get("qos")),
+            qos: tok(e.get("qos")),
             ttl_s: e.get("ttl_s").and_then(|v| v.as_integer()),
             unit: s(e.get("unit")),
-            rate: s(e.get("rate")),
+            rate: e.get("rate").and_then(|v| v.as_str()).map(RateClass::parse),
             cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
-            encoding: s(e.get("encoding")),
+            encoding: enc(e.get("encoding")),
         });
     }
 
@@ -283,13 +595,13 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
     for e in array("procedure") {
         procedures.push(ProcedureDecl {
             path: s(e.get("path")).ok_or_else(|| err("[[procedure]] missing path"))?,
-            kind: s(e.get("kind")).unwrap_or_default(),
+            kind: tok(e.get("kind")),
             reply: s(e.get("reply")),
             request: s(e.get("request")),
-            fanout: s(e.get("fanout")),
+            fanout: tok(e.get("fanout")),
             idempotent: e.get("idempotent").and_then(|v| v.as_bool()),
             cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
-            encoding: s(e.get("encoding")),
+            encoding: enc(e.get("encoding")),
             since: s(e.get("since")),
             description: s(e.get("description")),
         });
@@ -304,7 +616,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
     let mut blob = Vec::new();
     for e in array("blob") {
         blob.push(BlobDecl {
-            tier: s(e.get("tier")).ok_or_else(|| err("[[blob]] missing tier"))?,
+            tier: tok(e.get("tier")).ok_or_else(|| err("[[blob]] missing tier"))?,
             endpoints: e
                 .get("endpoints")
                 .and_then(|v| v.as_array())
@@ -317,7 +629,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
                 .unwrap_or_default(),
             algo: s(e.get("algo")),
             reference: s(e.get("reference")),
-            encoding: s(e.get("encoding")),
+            encoding: enc(e.get("encoding")),
             since: s(e.get("since")),
             description: s(e.get("description")),
         });
@@ -331,7 +643,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
     for e in array("media") {
         media.push(MediaDecl {
             path: s(e.get("path")).ok_or_else(|| err("[[media]] missing path"))?,
-            encoding: s(e.get("encoding")).ok_or_else(|| err("[[media]] missing encoding"))?,
+            encoding: enc(e.get("encoding")).ok_or_else(|| err("[[media]] missing encoding"))?,
             attachment: s(e.get("attachment")),
             cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
             since: s(e.get("since")),
@@ -398,6 +710,19 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
             out.push_str(&format!("{key} = {}\n", s(v)));
         }
     }
+    // A typed column renders as the token the slice carried: `Known` by its
+    // canonical spelling, `Other` verbatim — which is what keeps the export a
+    // round trip for foreign slices too (`Declared::token`).
+    fn opt_tok<T: SliceToken>(out: &mut String, key: &str, value: Option<&Declared<T>>) {
+        if let Some(v) = value {
+            out.push_str(&format!("{key} = {}\n", s(v.token())));
+        }
+    }
+    fn opt_enc(out: &mut String, key: &str, value: Option<&WireEncoding>) {
+        if let Some(v) = value {
+            out.push_str(&format!("{key} = {}\n", s(v.as_encoding_str())));
+        }
+    }
     fn opt_int(out: &mut String, key: &str, value: Option<i64>) {
         if let Some(v) = value {
             out.push_str(&format!("{key} = {v}\n"));
@@ -414,7 +739,7 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         Some(origin) => {
             out.push_str("\n[service]\n");
             out.push_str(&format!("name = {}\n", s(&slice.name)));
-            out.push_str(&format!("origin = {}\n", s(origin)));
+            out.push_str(&format!("origin = {}\n", s(origin.token())));
         }
         None => {
             out.push_str("\n[producer]\n");
@@ -426,17 +751,21 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
     for d in &slice.subjects {
         out.push_str("\n[[subject]]\n");
         out.push_str(&format!("path = {}\n", s(&d.path)));
-        out.push_str(&format!("class = {}\n", s(&d.class)));
+        out.push_str(&format!("class = {}\n", s(d.class.token())));
         if !d.type_name.is_empty() {
             out.push_str(&format!("type = {}\n", s(&d.type_name)));
         }
-        opt(&mut out, "common", d.common.as_deref());
-        opt(&mut out, "qos", d.qos.as_deref());
+        opt_tok(&mut out, "common", d.common.as_ref());
+        opt_tok(&mut out, "qos", d.qos.as_ref());
         opt_int(&mut out, "ttl_s", d.ttl_s);
         opt(&mut out, "unit", d.unit.as_deref());
-        opt(&mut out, "rate", d.rate.as_deref());
+        opt(
+            &mut out,
+            "rate",
+            d.rate.as_ref().map(RateClass::token).as_deref(),
+        );
         opt_int(&mut out, "cardinality", d.cardinality);
-        opt(&mut out, "encoding", d.encoding.as_deref());
+        opt_enc(&mut out, "encoding", d.encoding.as_ref());
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -444,13 +773,11 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
     for d in &slice.procedures {
         out.push_str("\n[[procedure]]\n");
         out.push_str(&format!("path = {}\n", s(&d.path)));
-        if !d.kind.is_empty() {
-            out.push_str(&format!("kind = {}\n", s(&d.kind)));
-        }
+        opt_tok(&mut out, "kind", d.kind.as_ref());
         opt(&mut out, "request", d.request.as_deref());
         opt(&mut out, "reply", d.reply.as_deref());
-        opt(&mut out, "encoding", d.encoding.as_deref());
-        opt(&mut out, "fanout", d.fanout.as_deref());
+        opt_enc(&mut out, "encoding", d.encoding.as_ref());
+        opt_tok(&mut out, "fanout", d.fanout.as_ref());
         if let Some(i) = d.idempotent {
             out.push_str(&format!("idempotent = {i}\n"));
         }
@@ -461,14 +788,14 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
 
     for d in &slice.blob {
         out.push_str("\n[[blob]]\n");
-        out.push_str(&format!("tier = {}\n", s(&d.tier)));
+        out.push_str(&format!("tier = {}\n", s(d.tier.token())));
         if !d.endpoints.is_empty() {
             let items: Vec<String> = d.endpoints.iter().map(|e| s(e)).collect();
             out.push_str(&format!("endpoints = [{}]\n", items.join(", ")));
         }
         opt(&mut out, "algo", d.algo.as_deref());
         opt(&mut out, "reference", d.reference.as_deref());
-        opt(&mut out, "encoding", d.encoding.as_deref());
+        opt_enc(&mut out, "encoding", d.encoding.as_ref());
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -476,7 +803,7 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
     for d in &slice.media {
         out.push_str("\n[[media]]\n");
         out.push_str(&format!("path = {}\n", s(&d.path)));
-        out.push_str(&format!("encoding = {}\n", s(&d.encoding)));
+        out.push_str(&format!("encoding = {}\n", s(d.encoding.as_encoding_str())));
         opt(&mut out, "attachment", d.attachment.as_deref());
         if let Some(c) = d.cardinality {
             out.push_str(&format!("cardinality = {c}\n"));
@@ -509,12 +836,12 @@ pub enum SliceFinding {
     /// The host serves a subject we do not know — it is newer than us.
     UnknownSubject {
         path: String,
-        class: String,
+        class: Declared<Class>,
     },
     /// We know a subject the host does not serve — it is older than us.
     MissingSubject {
         path: String,
-        class: String,
+        class: Declared<Class>,
     },
     /// Likewise for procedures.
     UnknownProcedure {
@@ -525,11 +852,11 @@ pub enum SliceFinding {
     },
     /// The host serves a `@blob` tier we do not know (RFC 08 §2, v1.8).
     UnknownBlobTier {
-        tier: String,
+        tier: Declared<BlobTier>,
     },
     /// We know a `@blob` tier the host does not serve.
     MissingBlobTier {
-        tier: String,
+        tier: Declared<BlobTier>,
     },
     /// The host publishes a `@media` stream we do not know (RFC 08 §6;
     /// `[[media]]` reached the slice in v1.16, and reached this diff in
@@ -614,14 +941,14 @@ pub fn diff(served: &RegistrySlice, local: &RegistrySlice) -> Vec<SliceFinding> 
         }
     }
     for b in &served.blob {
-        if !local.serves_blob_tier(&b.tier) {
+        if !local.serves_blob_tier(b.tier.clone()) {
             out.push(SliceFinding::UnknownBlobTier {
                 tier: b.tier.clone(),
             });
         }
     }
     for b in &local.blob {
-        if !served.serves_blob_tier(&b.tier) {
+        if !served.serves_blob_tier(b.tier.clone()) {
             out.push(SliceFinding::MissingBlobTier {
                 tier: b.tier.clone(),
             });
@@ -801,8 +1128,86 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(slice.service_origin.as_deref(), Some("@catalog"));
+        assert_eq!(
+            slice.service_origin.as_ref().map(Declared::token),
+            Some("@catalog")
+        );
         assert!(slice.serves_procedure("introspect"));
+    }
+
+    /// A closed-vocabulary column recognises what this build knows and keeps
+    /// the rest — and the kept token round-trips through [`to_toml`]
+    /// verbatim, which is what lets [`diff`] call an unknown tier skew rather
+    /// than silently normalising it away.
+    #[test]
+    fn a_declared_column_keeps_what_it_does_not_recognise() {
+        let src = r#"
+            [registry]
+            version = "1.0"
+            app = "acme"
+            convention = 1
+            [producer]
+            name = "netring"
+            [[subject]]
+            path = "a"
+            class = "telemetry"
+            qos = "sampled"
+            [[subject]]
+            path = "b"
+            class = "metrics"
+            qos = "urgent"
+        "#;
+        let slice = parse_slice(src).unwrap();
+
+        assert_eq!(slice.subjects[0].class, Declared::Known(Class::Telemetry));
+        assert_eq!(
+            slice.subjects[0].qos,
+            Some(Declared::Known(QosProfile::Sampled))
+        );
+        // Neither token is in this build's vocabulary; both are carried.
+        assert_eq!(slice.subjects[1].class, Declared::Other("metrics".into()));
+        assert_eq!(
+            slice.subjects[1].qos,
+            Some(Declared::Other("urgent".into()))
+        );
+        assert_eq!(slice.subjects[1].class.token(), "metrics");
+        assert_eq!(slice.subjects[1].class.known(), None);
+
+        // The typed accessor answers about the vocabulary, and a foreign token
+        // is reachable through the same accessor rather than a second one.
+        assert_eq!(slice.subjects_in(Class::Telemetry).count(), 1);
+        assert_eq!(
+            slice
+                .subjects_in(Declared::Other("metrics".to_string()))
+                .count(),
+            1
+        );
+
+        // And the export is a round trip for the carried token too.
+        assert_eq!(parse_slice(&to_toml(&slice)).unwrap(), slice);
+    }
+
+    /// `rate` is the one column that is not a plain closed set: `burst(n/h)`
+    /// carries a budget, so it gets [`WireEncoding`]'s shape (its own `Other`)
+    /// rather than [`Declared`]'s — filing a legitimate `burst(240/h)` under
+    /// "a token this build does not know" would lose the number.
+    #[test]
+    fn a_rate_class_keeps_its_burst_budget() {
+        assert_eq!(RateClass::parse("rare").cap_per_hour(), Some(1));
+        assert_eq!(RateClass::parse("low").cap_per_hour(), Some(60));
+        assert_eq!(RateClass::parse("burst(240/h)"), RateClass::Burst(240));
+        assert_eq!(RateClass::parse("burst(240/h)").cap_per_hour(), Some(240));
+
+        // An unreadable spelling is carried, and its cap is *unknown* — which
+        // is not "unlimited", and callers must not read it as one.
+        let odd = RateClass::parse("whenever");
+        assert_eq!(odd, RateClass::Other("whenever".into()));
+        assert_eq!(odd.cap_per_hour(), None);
+
+        // Every form round-trips through its own token.
+        for token in ["rare", "low", "burst(240/h)", "whenever"] {
+            assert_eq!(RateClass::parse(token).token(), token);
+        }
     }
 
     /// This parser reads *foreign* slices (RFC 08 §6), so its posture is the
@@ -831,13 +1236,17 @@ mod tests {
             "#
         ))
         .unwrap();
-        assert!(slice.serves_blob_tier("artifact"));
-        let decl = slice.blob.iter().find(|b| b.tier == "artifact").unwrap();
+        assert!(slice.serves_blob_tier(BlobTier::Artifact));
+        let decl = slice
+            .blob
+            .iter()
+            .find(|b| b.tier.is(&BlobTier::Artifact))
+            .unwrap();
         assert_eq!(decl.endpoints, ["manifest", "have"]);
         assert_eq!(decl.reference.as_deref(), Some("Delivery"));
         assert_eq!(decl.algo, None);
         // The unknown tier is kept, so a diff can surface it as skew.
-        assert!(slice.serves_blob_tier("flux"));
+        assert!(slice.serves_blob_tier(Declared::Other("flux".into())));
 
         // `tier` itself is the one hard requirement.
         assert!(parse_slice(&format!("{header}\n[[blob]]\nalgo = \"blake3\"\n")).is_err());
@@ -845,7 +1254,7 @@ mod tests {
         // Pre-v1.8 slices simply carry no blob entries.
         let old = parse_slice(header).unwrap();
         assert!(old.blob.is_empty());
-        assert!(!old.serves_blob_tier("artifact"));
+        assert!(!old.serves_blob_tier(BlobTier::Artifact));
     }
 
     /// Blob tier drift is a finding in both directions, straight from
@@ -866,16 +1275,12 @@ mod tests {
         let served = with(&["artifact", "tree"]);
         let local = with(&["tree", "store"]);
         let findings = diff(&served, &local);
-        assert!(
-            findings
-                .iter()
-                .any(|f| matches!(f, SliceFinding::UnknownBlobTier { tier } if tier == "artifact"))
-        );
-        assert!(
-            findings
-                .iter()
-                .any(|f| matches!(f, SliceFinding::MissingBlobTier { tier } if tier == "store"))
-        );
+        assert!(findings.iter().any(
+            |f| matches!(f, SliceFinding::UnknownBlobTier { tier } if tier.is(&BlobTier::Artifact))
+        ));
+        assert!(findings.iter().any(
+            |f| matches!(f, SliceFinding::MissingBlobTier { tier } if tier.is(&BlobTier::Store))
+        ));
         assert!(diff(&served, &served).is_empty());
     }
 

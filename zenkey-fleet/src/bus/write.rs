@@ -21,6 +21,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use zenkey::origin::{HostId, ServiceOrigin};
 use zenkey::qos::QosProfile;
+use zenkey::{Declared, Fanout, ProcedureKind};
 use zenoh::Session;
 
 use crate::model::registry::SliceSet;
@@ -381,10 +382,17 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
         // procedure to forbidden. The default has to be applied here, or a
         // dynamic caller fans out a write the generated builders refuse to
         // spell.
-        let forbidden = match proc_decl.fanout.as_deref() {
-            Some("forbidden") => true,
-            Some(_) => false,
-            None => proc_decl.kind == "write",
+        let forbidden = match proc_decl.fanout.as_ref().and_then(Declared::known) {
+            Some(Fanout::Forbidden) => true,
+            Some(Fanout::Allowed) => false,
+            // An unrecognised token is not a licence: RFC 08 §2 defaults a
+            // `write` to forbidden, and a `fanout` spelling this build cannot
+            // read is exactly the case where guessing "allowed" would fan out
+            // a write the generated builders refuse to spell.
+            None => matches!(
+                proc_decl.kind.as_ref().and_then(Declared::known),
+                Some(ProcedureKind::Write)
+            ),
         };
         if forbidden {
             let declared = if proc_decl.fanout.is_some() {
@@ -487,7 +495,7 @@ mod tests {
             description: None,
             subjects: vec![SubjectDecl {
                 path: "health".into(),
-                class: "state".into(),
+                class: zenkey::Class::State.into(),
                 type_name: "Health".into(),
                 common: None,
                 since: None,
@@ -558,7 +566,7 @@ mod tests {
         assert_eq!(
             check_retire("", key, None, true).unwrap(),
             RetireClass::NonState {
-                class: "telemetry".into()
+                class: "telemetry".to_string()
             }
         );
     }
@@ -603,11 +611,11 @@ mod tests {
             subjects: vec![],
             procedures: vec![ProcedureDecl {
                 path: "capture/trigger".into(),
-                kind: kind.into(),
+                kind: Some(Declared::parse(kind)),
                 reply: Some("Ack".into()),
                 request: None,
                 encoding: None,
-                fanout: fanout.map(str::to_string),
+                fanout: fanout.map(Declared::parse),
                 idempotent: Some(false),
                 cardinality: None,
                 since: None,

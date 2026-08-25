@@ -466,7 +466,7 @@ pub async fn node_info(
                 subjects: slice.map(|s| s.subjects.len()).unwrap_or(0),
                 procedures: slice.map(|s| s.procedures.len()).unwrap_or(0),
                 blob_tiers: slice
-                    .map(|s| s.blob.iter().map(|b| b.tier.clone()).collect())
+                    .map(|s| s.blob.iter().map(|b| b.tier.token().to_string()).collect())
                     .unwrap_or_default(),
                 media: slice
                     .map(|s| {
@@ -474,7 +474,7 @@ pub async fn node_info(
                             .iter()
                             .map(|m| MediaStreamInfo {
                                 path: m.path.clone(),
-                                encoding: m.encoding.clone(),
+                                encoding: m.encoding.as_encoding_str().to_string(),
                             })
                             .collect()
                     })
@@ -495,7 +495,7 @@ pub async fn node_info(
         for slice in &mine {
             for subject in &slice.subjects {
                 let Some(ttl) = subject.ttl_s else { continue };
-                if subject.class != "state" {
+                if !subject.class.is(&zenkey::Class::State) {
                     continue;
                 }
                 // Newest sample whose tail refines to this subject.

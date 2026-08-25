@@ -684,7 +684,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             let _ = writeln!(out, "        pub fn fanout_allowed(self) -> bool {{");
             let _ = writeln!(out, "            match self {{");
             for p in &f.procedures {
-                let v = matches!(p.fanout, crate::Fanout::Allowed);
+                let v = matches!(p.fanout, zenkey::Fanout::Allowed);
                 let _ = writeln!(out, "                Self::{} => {v},", p.variant);
             }
             let _ = writeln!(out, "            }}\n        }}\n");
@@ -728,7 +728,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             let allowed: Vec<&ProcedureEntry> = f
                 .procedures
                 .iter()
-                .filter(|p| matches!(p.fanout, crate::Fanout::Allowed))
+                .filter(|p| matches!(p.fanout, zenkey::Fanout::Allowed))
                 .collect();
             if f.service_origin.is_none() && !allowed.is_empty() {
                 let _ = writeln!(

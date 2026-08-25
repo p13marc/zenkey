@@ -12,7 +12,7 @@ use std::time::Duration;
 use crate::report::SliceDisagreement;
 use crate::report::{ProducerDiff, RegistryDiff};
 use anyhow::{Result, anyhow};
-use zenkey::{RegistrySlice, parse_slice};
+use zenkey::{Declared, RegistrySlice, parse_slice};
 
 /// One slice's subject patterns, parsed once and grouped by class.
 ///
@@ -63,7 +63,7 @@ fn parse_subjects(slice: &RegistrySlice) -> std::collections::BTreeMap<String, P
     let mut out: std::collections::BTreeMap<String, ParsedSubjects> = Default::default();
     for (i, s) in slice.subjects.iter().enumerate() {
         if let Ok(p) = zenkey::pattern::SubjectPattern::parse(&s.path) {
-            let entry = out.entry(s.class.clone()).or_default();
+            let entry = out.entry(s.class.token().to_string()).or_default();
             entry.idx.push(i);
             entry.pats.push(p);
         }
@@ -148,7 +148,7 @@ impl SliceSet {
     pub fn by_service_origin(&self, origin: &str) -> Option<&RegistrySlice> {
         self.slices
             .iter()
-            .find(|s| s.service_origin.as_deref() == Some(origin))
+            .find(|s| s.service_origin.as_ref().map(Declared::token) == Some(origin))
     }
 
     /// Refine a subject tail against one producer's slice: the matching
