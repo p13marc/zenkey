@@ -835,10 +835,8 @@ pub fn device_alive_key(
 pub struct StructuralKey<'k> {
     pub origin: Origin,
     pub class: ClassOrPlane,
-    /// `None` for service origins and for `@blob` (tier token instead).
-    pub producer: Option<Producer>,
-    /// Tier token, only under `@blob`.
-    pub blob_tier: Option<BlobTier>,
+    /// What position 5 holds, which the grammar decides (RFC 03 §1.5).
+    pub position5: Position5,
     /// Everything after the producer/tier position, borrowed from the parsed
     /// key (v1.5 perf: parsing allocates no per-chunk `String`s — the parse
     /// result lives within the key string's scope, which is how every known
@@ -846,7 +844,66 @@ pub struct StructuralKey<'k> {
     pub subject: Vec<&'k str>,
 }
 
+/// What position 5 of a v1 key holds (RFC 03 §1.5).
+///
+/// One field rather than the two `Option`s this replaced, because the two
+/// were never independent: the grammar says position 5 is a producer chunk, a
+/// `@blob` tier token, or nothing at all, and exactly one of those is true of
+/// any key. As a pair of `Option`s, three of the four combinations were
+/// spellable and only prose said which — so an `@blob` key carrying a
+/// producer *and* no tier was constructible, and every consumer that read
+/// `blob_tier` had to trust a comment rather than the type (#316).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Position5 {
+    /// A producer chunk — every host-origin key except `@blob`.
+    Producer(Producer),
+    /// A tier token — `@blob` only, whatever the origin.
+    Tier(BlobTier),
+    /// Nothing: a service origin has no producer chunk (RFC 06 §5), so the
+    /// subject tail begins here.
+    Absent,
+}
+
+impl Position5 {
+    /// The producer, when this key has one.
+    pub fn producer(&self) -> Option<&Producer> {
+        match self {
+            Position5::Producer(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// The `@blob` tier, when this key is on the blob plane.
+    pub fn blob_tier(&self) -> Option<BlobTier> {
+        match self {
+            Position5::Tier(t) => Some(*t),
+            _ => None,
+        }
+    }
+
+    /// The chunk as it appears in the key, or `None` when position 5 is where
+    /// the subject already began.
+    pub fn chunk(&self) -> Option<String> {
+        match self {
+            Position5::Producer(p) => Some(p.chunk()),
+            Position5::Tier(t) => Some(t.chunk().to_string()),
+            Position5::Absent => None,
+        }
+    }
+}
+
 impl StructuralKey<'_> {
+    /// The producer, when this key has one — `None` under a service origin
+    /// and on `@blob`.
+    pub fn producer(&self) -> Option<&Producer> {
+        self.position5.producer()
+    }
+
+    /// The `@blob` tier, when this key is on the blob plane.
+    pub fn blob_tier(&self) -> Option<BlobTier> {
+        self.position5.blob_tier()
+    }
+
     /// The typed remote origin, when this key came from a host (RFC 08
     /// §1.1's parse-side bridge): a parsed wire key is exactly where a
     /// consumer legitimately obtains a [`crate::origin::RemoteOrigin`].
@@ -893,26 +950,26 @@ pub fn parse(key: &str) -> Result<StructuralKey<'_>, KeyError> {
         )));
     };
 
-    let mut producer = None;
-    let mut blob_tier = None;
-    match (&origin, &class) {
+    // The three cases are exhaustive and mutually exclusive, which is exactly
+    // what `Position5` now says in the type (#316).
+    let position5 = match (&origin, &class) {
         (_, ClassOrPlane::Plane(Plane::Blob)) => {
             let tier = chunks
                 .next()
                 .ok_or_else(|| KeyError::Parse("missing blob tier".into()))?;
-            blob_tier = Some(
+            Position5::Tier(
                 BlobTier::from_chunk(tier)
                     .ok_or_else(|| KeyError::InvalidBlobTier(tier.to_string()))?,
-            );
+            )
         }
         (Origin::Host(_), _) => {
             let chunk = chunks
                 .next()
                 .ok_or_else(|| KeyError::Parse("missing producer chunk".into()))?;
-            producer = Some(Producer::parse_chunk(chunk)?);
+            Position5::Producer(Producer::parse_chunk(chunk)?)
         }
-        (Origin::Service(_), _) => {}
-    }
+        (Origin::Service(_), _) => Position5::Absent,
+    };
 
     let subject: Vec<&str> = chunks.collect();
     if subject.is_empty() {
@@ -921,8 +978,7 @@ pub fn parse(key: &str) -> Result<StructuralKey<'_>, KeyError> {
     Ok(StructuralKey {
         origin,
         class,
-        producer,
-        blob_tier,
+        position5,
         subject,
     })
 }
@@ -1055,6 +1111,42 @@ mod tests {
         assert!(Producer::new("artifact").is_err());
     }
 
+    /// Position 5 is one of three things, and the type says so (#316).
+    ///
+    /// As two `Option`s, three of the four combinations were spellable and
+    /// only prose ruled them out — an `@blob` key with a producer and no
+    /// tier constructed fine. `Position5` has no such state to construct.
+    #[test]
+    fn position_five_is_exactly_one_of_three_things() {
+        let producer = parse("v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage").unwrap();
+        assert!(matches!(producer.position5, Position5::Producer(_)));
+        assert_eq!(producer.producer().map(Producer::name), Some("sysinfo"));
+        assert_eq!(producer.blob_tier(), None);
+
+        // `@blob` puts a tier token in the producer's place, whatever the
+        // origin — so there is no producer to read, and no way to set one.
+        let blob = parse("v1/h-3fa9c2d41b7e/@blob/artifact/01jqz3demo0001/manifest").unwrap();
+        assert!(matches!(
+            blob.position5,
+            Position5::Tier(BlobTier::Artifact)
+        ));
+        assert_eq!(blob.blob_tier(), Some(BlobTier::Artifact));
+        assert_eq!(blob.producer(), None);
+
+        // A service origin has no producer chunk (RFC 06 §5): the subject
+        // tail begins at position 5.
+        let service = parse("v1/@catalog/state/entity/h-3fa9c2d41b7e").unwrap();
+        assert_eq!(service.position5, Position5::Absent);
+        assert_eq!(service.producer(), None);
+        assert_eq!(service.blob_tier(), None);
+        assert_eq!(service.subject, ["entity", "h-3fa9c2d41b7e"]);
+
+        // The chunk each case contributes to the key, or none.
+        assert_eq!(producer.position5.chunk().as_deref(), Some("sysinfo"));
+        assert_eq!(blob.position5.chunk().as_deref(), Some("artifact"));
+        assert_eq!(service.position5.chunk(), None);
+    }
+
     #[test]
     fn normative_examples_build_and_roundtrip() {
         // The RFC 03 §5 example set, base-relative.
@@ -1134,16 +1226,16 @@ mod tests {
             let subject = &parsed.subject;
             let rebuilt = match parsed.class {
                 ClassOrPlane::Class(c) => {
-                    data_key(&parsed.origin, c, parsed.producer.as_ref(), subject).unwrap()
+                    data_key(&parsed.origin, c, parsed.producer(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Rpc) => {
-                    rpc_key(&parsed.origin, parsed.producer.as_ref(), subject).unwrap()
+                    rpc_key(&parsed.origin, parsed.producer(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Media) => {
-                    media_key(&parsed.origin, parsed.producer.as_ref().unwrap(), subject).unwrap()
+                    media_key(&parsed.origin, parsed.producer().unwrap(), subject).unwrap()
                 }
                 ClassOrPlane::Plane(Plane::Blob) => {
-                    blob_key(&parsed.origin, parsed.blob_tier.unwrap(), subject).unwrap()
+                    blob_key(&parsed.origin, parsed.blob_tier().unwrap(), subject).unwrap()
                 }
             };
             assert_eq!(&rebuilt, want);

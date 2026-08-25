@@ -30,7 +30,7 @@ fn build_parse_round_trip() {
             panic!("data key parsed as plane: {key}");
         };
         assert_eq!(class, subject.class(), "{key}");
-        let producer = parsed.producer.unwrap();
+        let producer = parsed.producer().unwrap();
         assert_eq!(producer.name(), "netring");
         let tail: &[&str] = &parsed.subject;
         let refined =
@@ -242,7 +242,7 @@ fn instance_suffixed_producer_keys() {
     let key = netring::key_as(&local(), &netring2, &netring::Subject::Health);
     assert_eq!(key, "v1/h-3fa9c2d41b7e/state/netring-2/health");
     let parsed = grammar::parse(&key).unwrap();
-    let producer = parsed.producer.unwrap();
+    let producer = parsed.producer().unwrap();
     assert_eq!((producer.name(), producer.instance()), ("netring", Some(2)));
 }
 
@@ -347,8 +347,8 @@ fn blob_builders_carry_no_producer_chunk() {
     // producer — the structural parse is what pins that.
     let parsed = grammar::parse(&key).unwrap();
     assert_eq!(parsed.class, ClassOrPlane::Plane(Plane::Blob));
-    assert_eq!(parsed.producer, None);
-    assert_eq!(parsed.blob_tier, Some(grammar::BlobTier::Artifact));
+    assert_eq!(parsed.producer(), None);
+    assert_eq!(parsed.blob_tier(), Some(grammar::BlobTier::Artifact));
 
     // Endpoints, and only the declared ones.
     let id = "01jgxqz4yqk8v6txw3m9f2a7cd";

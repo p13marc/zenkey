@@ -243,7 +243,7 @@ pub fn token_identity(base: &str, key: &str) -> Option<(String, String)> {
     let parsed = zenkey::grammar::parse_full(base, key)?;
     let origin = parsed.origin.chunk().to_string();
     let producer = parsed
-        .producer
+        .producer()
         .as_ref()
         .map(|p| p.chunk())
         .unwrap_or_else(|| origin.trim_start_matches('@').to_string());
@@ -411,8 +411,7 @@ pub async fn node_info(
             };
             alive.push(
                 parsed
-                    .producer
-                    .as_ref()
+                    .producer()
                     .map(|p| p.chunk())
                     .unwrap_or_else(|| parsed.origin.chunk().trim_start_matches('@').to_string()),
             );
@@ -505,7 +504,7 @@ pub async fn node_info(
                     .iter()
                     .filter_map(|s| {
                         let parsed = zenkey::grammar::parse_full(base, &s.key)?;
-                        let p = parsed.producer.as_ref()?.name().to_string();
+                        let p = parsed.producer()?.name().to_string();
                         if p != slice.name {
                             return None;
                         }

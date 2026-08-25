@@ -81,7 +81,7 @@ impl NodeRoster {
             // `@catalog`'s token has no producer chunk — the service is the
             // producer (same fallback as the engine's roster()).
             let producer = parsed
-                .producer
+                .producer()
                 .as_ref()
                 .map(|p| p.chunk())
                 .unwrap_or_else(|| origin.trim_start_matches('@').to_string());

@@ -1031,7 +1031,7 @@ pub async fn decode_sample(
         return DecodedSample::structural(None, NotValidated::NoRegistry, bytes);
     };
     let refined = zenkey::grammar::parse_full(base, wire_key).and_then(|parsed| {
-        let producer = match (&parsed.producer, &parsed.origin) {
+        let producer = match (parsed.producer(), &parsed.origin) {
             (Some(p), _) => p.name().to_string(),
             (None, zenkey::grammar::Origin::Service(s)) => {
                 slices.by_service_origin(s.as_str())?.name.clone()

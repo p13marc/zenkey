@@ -72,8 +72,8 @@ pub use common_state::{CommonFamily, CommonState};
 pub use context::{BlobProbePrefix, V1Context};
 pub use encoding::WireEncoding;
 pub use grammar::{
-    BlobTier, Class, ClassOrPlane, ContentHash, KeyError, Origin, Plane, Producer, StructuralKey,
-    VERSION_CHUNK,
+    BlobTier, Class, ClassOrPlane, ContentHash, KeyError, Origin, Plane, Position5, Producer,
+    StructuralKey, VERSION_CHUNK,
 };
 /// Not public API — the reachable path generated registry code names to wrap
 /// its own builder output (issue #312). Nothing here is covered by semver.

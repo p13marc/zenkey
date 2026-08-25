@@ -426,9 +426,9 @@ impl V1Facts {
             origin_kind,
             class,
             class_kind,
-            producer: parsed.producer.as_ref().map(|p| p.name().to_string()),
-            instance: parsed.producer.as_ref().and_then(|p| p.instance()),
-            blob_tier: parsed.blob_tier.map(|t| tier_chunk(t).to_string()),
+            producer: parsed.producer().map(|p| p.name().to_string()),
+            instance: parsed.producer().and_then(|p| p.instance()),
+            blob_tier: parsed.blob_tier().map(|t| tier_chunk(t).to_string()),
             subject: parsed.subject.iter().map(|s| (*s).to_string()).collect(),
         }
     }

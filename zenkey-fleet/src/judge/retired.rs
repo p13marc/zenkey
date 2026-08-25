@@ -132,11 +132,11 @@ impl Matcher {
     fn covers(&self, parsed: &zenkey::grammar::StructuralKey<'_>) -> bool {
         match &self.identity {
             Identity::Host(name) => parsed
-                .producer
+                .producer()
                 .as_ref()
                 .is_some_and(|p| p.name() == name.as_str()),
             Identity::Service(origin) => {
-                parsed.producer.is_none() && parsed.origin.chunk() == origin.as_str()
+                parsed.producer().is_none() && parsed.origin.chunk() == origin.as_str()
             }
         }
     }
