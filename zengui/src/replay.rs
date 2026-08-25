@@ -360,11 +360,11 @@ impl ReplayState {
         let keys = tree.keys;
         let keys_evicted = tree.evicted;
         let keys_unwatched = tree.unwatched;
-        let totals = (
-            tree.root.subtree_count,
-            tree.root.subtree_bytes,
-            tree.root.subtree_rate_hz,
-        );
+        let totals = crate::message::WatchedTotals {
+            samples: tree.root.subtree_count,
+            bytes: tree.root.subtree_bytes,
+            rate_hz: tree.root.subtree_rate_hz,
+        };
         Arc::new(BusTick {
             tree,
             samples,
@@ -435,7 +435,7 @@ mod tests {
         // Same instant again → same fold.
         let again = state.scrub_to(600_000);
         assert_eq!(again.keys, back.keys);
-        assert_eq!(again.totals.0, back.totals.0);
+        assert_eq!(again.totals.samples, back.totals.samples);
 
         // Forward from here replays only the unfed tail.
         let fwd = state.scrub_to(1_500_000);

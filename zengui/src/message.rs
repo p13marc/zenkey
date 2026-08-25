@@ -100,7 +100,7 @@ pub enum BusMsg {
     /// Registry slices arrived, from the bus or from `--registry` dirs.
     SlicesLoaded(Result<Arc<SliceSet>, String>),
     /// The §6.1 union arrived: (set, from_bus, dirs_only, disagreements).
-    SlicesUnionLoaded(Result<(Arc<SliceSet>, usize, usize, usize), String>),
+    SlicesUnionLoaded(Result<(Arc<SliceSet>, crate::view::status::UnionCounts), String>),
     /// One bounded validation batch finished (#164): per checked key, the
     /// payload-conformance verdict of its newest sample. Lands in the
     /// verdict cache; the render paths only look up.
@@ -678,8 +678,18 @@ pub struct BusTick {
     /// Seed boundaries that fired during this tick (issue #92): each seeded
     /// watch's id and what its seed paths contributed.
     pub seeded: Vec<(WatchId, zenkey_fleet::SeedCoverage)>,
-    /// `(samples, bytes, rate_hz)` across everything watched.
-    pub totals: (u64, u64, f64),
+    /// Across everything watched. Named, because two of the three are `u64`
+    /// and the doc comment `(samples, bytes, rate_hz)` was the only thing
+    /// saying which was which (#357).
+    pub totals: WatchedTotals,
+}
+
+/// The tick's rolled-up counters across every watched key.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WatchedTotals {
+    pub samples: u64,
+    pub bytes: u64,
+    pub rate_hz: f64,
 }
 
 #[cfg(test)]

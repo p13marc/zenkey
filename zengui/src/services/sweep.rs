@@ -48,9 +48,11 @@ pub fn slices_union(
                 .map(|out| {
                     (
                         Arc::new(out.set),
-                        out.from_bus.len(),
-                        out.dirs_only.len(),
-                        out.disagreements.len(),
+                        crate::view::status::UnionCounts {
+                            from_bus: out.from_bus.len(),
+                            dirs_only: out.dirs_only.len(),
+                            disagreements: out.disagreements.len(),
+                        },
                     )
                 })
                 .map_err(|e| e.to_string())

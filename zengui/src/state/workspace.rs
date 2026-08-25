@@ -444,7 +444,7 @@ sub_state! {
         pub(crate) recording: Option<RecordingHandle>,
         /// The last finished capture, for the status strip: (samples, dropped,
         /// path) or the failure.
-        pub(crate) recorded: Option<Result<(u64, u64, String), String>>,
+        pub(crate) recorded: Option<Result<crate::view::replay::Recorded, String>>,
     }
 }
 

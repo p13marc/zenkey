@@ -52,8 +52,8 @@ pub enum ReplayMsg {
     Advance,
     /// Start or stop recording the current watches to a `.zrec`.
     RecordToggled,
-    /// A recording finished (or failed): samples, drops, path — or why not.
-    RecordFinished(Result<(u64, u64, String), String>),
+    /// A recording finished (or failed): what it wrote — or why not.
+    RecordFinished(Result<Recorded, String>),
     /// Enter the retained window from live (#217) — or, from inside it,
     /// back to live. The live/retained toggle on the scrubber.
     RetainedToggled,
@@ -61,6 +61,22 @@ pub enum ReplayMsg {
     /// (#217): the file is indistinguishable from a deliberate recording.
     /// Lands on [`ReplayMsg::RecordFinished`], like a capture.
     SaveWindow,
+}
+
+/// What a finished capture wrote (#357).
+///
+/// `samples` and `dropped` are both `u64` and both count samples, and this
+/// travels service → message → `WorkspaceState::recorded` → the Activity
+/// replay tab. Positionally that is four chances to transpose the two and one
+/// renderer that would happily say "recorded 3 sample(s) (17 dropped)".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recorded {
+    /// Samples written to the file.
+    pub samples: u64,
+    /// Samples the capture dropped, per the in-file ledger.
+    pub dropped: u64,
+    /// Where the file landed.
+    pub path: String,
 }
 
 fn msg(m: ReplayMsg) -> Message {

@@ -168,9 +168,17 @@ sub_state! {
     /// The workspace's subjects (#257): the follow slot the tree drives,
     /// plus one slot per pin.
     pub(crate) struct SubjectState {
-        /// The slots. `slots[0]` is always the follow slot — [`SubjectState::follow`]
-        /// leans on that — and the rest are pins in pin order.
-        pub(crate) slots: Vec<SubjectSlot>,
+        /// The slot the tree and the location bar drive.
+        ///
+        /// A **field**, not index 0 of a `Vec` (#358). It was the latter, with
+        /// a doc comment saying `slots[0]` is always the follow slot and three
+        /// methods defending that: two indexing `[0]` and panicking if it were
+        /// ever untrue, and `unpin`/`drop_pins` retaining `!is_pin()` to keep
+        /// it there. The invariant they defended is now the shape.
+        pub(crate) follow: SubjectSlot,
+        /// The pins, in pin order. The follow slot is structurally not among
+        /// them, so "the follow slot refuses to be unpinned" needs no guard.
+        pub(crate) pins: Vec<SubjectSlot>,
         /// The id the next pin gets. Never reused within a session, so a
         /// message routed to a dropped slot misses instead of landing in a
         /// stranger.
@@ -181,28 +189,40 @@ sub_state! {
 impl Default for SubjectState {
     fn default() -> SubjectState {
         SubjectState {
-            slots: vec![SubjectSlot::new(SlotId::FOLLOW)],
+            follow: SubjectSlot::new(SlotId::FOLLOW),
+            pins: Vec::new(),
             next_slot: SlotId::FOLLOW.next(),
         }
     }
 }
 
 impl SubjectState {
-    /// The follow slot — the subject the tree and the location bar drive.
-    pub(crate) fn follow(&self) -> &SubjectSlot {
-        &self.slots[0]
+    /// Every slot: the follow slot first, then the pins in pin order — the
+    /// order `slots` used to hold them in, so every sweep over "all subjects"
+    /// reads the same as before.
+    pub(crate) fn all(&self) -> impl Iterator<Item = &SubjectSlot> {
+        std::iter::once(&self.follow).chain(self.pins.iter())
     }
 
-    pub(crate) fn follow_mut(&mut self) -> &mut SubjectSlot {
-        &mut self.slots[0]
+    pub(crate) fn all_mut(&mut self) -> impl Iterator<Item = &mut SubjectSlot> {
+        std::iter::once(&mut self.follow).chain(self.pins.iter_mut())
+    }
+
+    /// How many slots the workspace holds — the follow slot plus its pins.
+    ///
+    /// Only the tear-off tests count slots; the code paths that need them all
+    /// iterate `all()`.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        1 + self.pins.len()
     }
 
     pub(crate) fn slot(&self, id: SlotId) -> Option<&SubjectSlot> {
-        self.slots.iter().find(|s| s.id == id)
+        self.all().find(|s| s.id == id)
     }
 
     pub(crate) fn slot_mut(&mut self, id: SlotId) -> Option<&mut SubjectSlot> {
-        self.slots.iter_mut().find(|s| s.id == id)
+        self.all_mut().find(|s| s.id == id)
     }
 
     /// Pin the follow slot's subject (#257): mint a new slot carrying the
@@ -219,7 +239,7 @@ impl SubjectState {
     pub(crate) fn pin_current(&mut self, dep: &Deployment) -> SlotId {
         let id = self.next_slot;
         self.next_slot = self.next_slot.next();
-        let follow = self.follow();
+        let follow = &self.follow;
         let fields = view::fields::FieldsState {
             window: follow.fields.window.clone(),
             ..Default::default()
@@ -241,7 +261,7 @@ impl SubjectState {
             why: view::why::WhyState::default(),
         };
         slot.refresh_series(dep);
-        self.slots.push(slot);
+        self.pins.push(slot);
         id
     }
 
@@ -249,18 +269,17 @@ impl SubjectState {
     /// nothing of any other slot's. The follow slot refuses: it is the
     /// workspace's, not any pane's.
     pub(crate) fn unpin(&mut self, id: SlotId) -> bool {
-        if !id.is_pin() {
-            return false;
-        }
-        let before = self.slots.len();
-        self.slots.retain(|s| s.id != id);
-        self.slots.len() != before
+        // No `is_pin` guard: `pins` cannot contain the follow slot, so an id
+        // that is not a pin simply matches nothing (#358).
+        let before = self.pins.len();
+        self.pins.retain(|s| s.id != id);
+        self.pins.len() != before
     }
 
     /// Drop every pin — the layout presets are fully docked, and a pinned
     /// window they close takes its slot with it (#186, #257).
     pub(crate) fn drop_pins(&mut self) {
-        self.slots.retain(|s| !s.id.is_pin());
+        self.pins.clear();
     }
 }
 
@@ -279,8 +298,8 @@ mod tests {
         let dep = dep();
         let mut sub = SubjectState::default();
         let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
-        sub.follow_mut().current = Subject::Key(key.into());
-        sub.follow_mut().history = Some(crate::history::HistoryRecorder::new(key, 10));
+        sub.follow.current = Subject::Key(key.into());
+        sub.follow.history = Some(crate::history::HistoryRecorder::new(key, 10));
 
         let pin = sub.pin_current(&dep);
         assert!(pin.is_pin());
@@ -295,7 +314,7 @@ mod tests {
         assert!(sub.unpin(pin));
         assert!(sub.slot(pin).is_none());
         assert!(
-            sub.follow().history.is_some(),
+            sub.follow.history.is_some(),
             "unpinning must not touch the follow slot's recorder"
         );
         assert!(!sub.unpin(pin), "a dropped slot stays dropped");

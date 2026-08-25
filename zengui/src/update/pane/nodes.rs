@@ -23,7 +23,7 @@ pub(crate) fn update(v: &mut Verdicts, msg: NodesMsg, cx: Ctx) -> Task<Message> 
             // Origin ids are base-independent (#109): re-selecting the
             // same host after a base switch would otherwise admit the old
             // deployment's reply through the selection-only check.
-            if cx.sub.follow().current.origin() == Some(origin.as_str())
+            if cx.sub.follow.current.origin() == Some(origin.as_str())
                 && ran_against == cx.dep.base()
             {
                 v.node_detail = DetailState::Loaded(origin, outcome);

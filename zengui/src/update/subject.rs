@@ -66,7 +66,7 @@ pub(crate) fn update(
             // that shares the follow slot's key gets the same answer — one
             // fetch, one decode, N surfaces — because the evidence is about
             // the key, not about who is showing it.
-            let current = sub.follow().current.key() == Some(key.as_str());
+            let current = sub.follow.current.key() == Some(key.as_str());
             // A fetch lands the Inspector in view. Since #180 that means
             // restoring its dock if the user closed it — spoken as the same
             // `PaneSelected` the palette and the workbench strip send, so the
@@ -83,7 +83,7 @@ pub(crate) fn update(
                 Task::none()
             };
             let mut landed = false;
-            for slot in sub.slots.iter_mut() {
+            for slot in sub.all_mut() {
                 if slot.current.key() == Some(key.as_str()) {
                     slot.decoded = None;
                     slot.fetched = Some((key.clone(), outcome.clone()));
@@ -96,7 +96,7 @@ pub(crate) fn update(
             // No decode for it: it is work for a rendering nothing will
             // show, and `ValueDecoded`'s own guard would drop it anyway.
             if !landed {
-                sub.follow_mut().fetched = Some((key, outcome));
+                sub.follow.fetched = Some((key, outcome));
                 return Task::none();
             }
             // One decode however many slots the answer landed in (#257): the
@@ -134,7 +134,7 @@ pub(crate) fn update(
                 .record(&key, value.sample.verdict.clone());
             // Stale guard, per slot (#257): the decode lands in every slot
             // still showing its key, and in none that moved on.
-            for slot in sub.slots.iter_mut() {
+            for slot in sub.all_mut() {
                 if slot.current.key() == Some(key.as_str()) {
                     slot.decoded = Some(Arc::clone(&value));
                 }
@@ -162,7 +162,7 @@ fn select(
     work: &mut Workspace,
     subject: Subject,
 ) -> Task<Message> {
-    let sub = subs.follow_mut();
+    let sub = &mut subs.follow;
     sub.current = subject;
     // The old key's latency summary is not evidence about the new one —
     // cleared now, refreshed on the next tick (#119).

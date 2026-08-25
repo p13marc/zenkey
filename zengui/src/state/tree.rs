@@ -194,10 +194,47 @@ impl TreeState {
 /// unconditional tick rebuild. Releasing a watch fires `WatchChanged`, which
 /// swaps the `Arc`, which lands here as `false`.
 pub(crate) fn shape_held(
-    prev: (usize, u64, u64),
-    next: (usize, u64, u64),
+    prev: KeyCounts,
+    next: KeyCounts,
     prev_watched: &std::sync::Arc<[String]>,
     next_watched: &std::sync::Arc<[String]>,
 ) -> bool {
     prev == next && std::sync::Arc::ptr_eq(prev_watched, next_watched)
+}
+
+/// The key-set triple of [`shape_held`], named (#357).
+///
+/// `evicted` and `unwatched` are both `u64` and both count keys leaving the
+/// table, which is precisely why they must not be positional: transposing them
+/// compiles, and the tick still reads "shape held" for every tick where the two
+/// deltas happen to cancel. The two `From` impls are the only way to build one,
+/// so the two ends cannot disagree about which slot is which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct KeyCounts {
+    /// Distinct keys currently tracked.
+    pub(crate) keys: usize,
+    /// Keys retired to stay within the table's bound (RFC 09 §5.1 O6).
+    pub(crate) evicted: u64,
+    /// Keys retired because their watch was released.
+    pub(crate) unwatched: u64,
+}
+
+impl From<&crate::state::Observation> for KeyCounts {
+    fn from(obs: &crate::state::Observation) -> Self {
+        KeyCounts {
+            keys: obs.keys,
+            evicted: obs.keys_evicted,
+            unwatched: obs.keys_unwatched,
+        }
+    }
+}
+
+impl From<&crate::message::BusTick> for KeyCounts {
+    fn from(tick: &crate::message::BusTick) -> Self {
+        KeyCounts {
+            keys: tick.keys,
+            evicted: tick.keys_evicted,
+            unwatched: tick.keys_unwatched,
+        }
+    }
 }

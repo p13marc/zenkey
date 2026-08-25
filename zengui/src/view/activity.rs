@@ -148,7 +148,11 @@ fn replay_stream<'a>(
     }
     if let Some(done) = &r.recorded {
         col = col.push(kit::muted(match done {
-            Ok((samples, dropped, path)) => format!(
+            Ok(crate::view::replay::Recorded {
+                samples,
+                dropped,
+                path,
+            }) => format!(
                 "recorded {samples} sample(s) to {path} ({dropped} dropped — in-file ledger)"
             ),
             Err(e) => format!("recording failed: {e}"),

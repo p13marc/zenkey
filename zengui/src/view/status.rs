@@ -14,6 +14,23 @@ use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::colors;
 use crate::view::tokens::space;
 
+/// What a §6.1 union of served and on-disk slices came to.
+///
+/// Its own type because these three `usize`s also ride
+/// `BusMsg::SlicesUnionLoaded`, where they were three bare positional counts
+/// that `update/bus.rs` unpacked into this very variant one line later —
+/// three interchangeable numbers crossing a seam to be named on arrival
+/// (#357).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UnionCounts {
+    /// Slices the bus served.
+    pub from_bus: usize,
+    /// Slices only the `--registry` dirs had.
+    pub dirs_only: usize,
+    /// Producers where the two disagreed.
+    pub disagreements: usize,
+}
+
 /// Where registry slices came from, if anywhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SliceSource {
@@ -26,11 +43,7 @@ pub enum SliceSource {
         count: usize,
     },
     /// The §6.1 union: served wins, dirs fill, disagreement is data.
-    Union {
-        from_bus: usize,
-        dirs_only: usize,
-        disagreements: usize,
-    },
+    Union(UnionCounts),
     Failed(String),
 }
 
@@ -40,11 +53,11 @@ impl SliceSource {
             SliceSource::None => "registry: not loaded".to_string(),
             SliceSource::Bus { count } => format!("registry: bus · {count} slices"),
             SliceSource::Dirs { count } => format!("registry: dirs · {count} slices"),
-            SliceSource::Union {
+            SliceSource::Union(UnionCounts {
                 from_bus,
                 dirs_only,
                 disagreements,
-            } => {
+            }) => {
                 let mut label =
                     format!("registry: union · {from_bus} served + {dirs_only} dirs-only");
                 if *disagreements > 0 {
@@ -85,7 +98,7 @@ pub struct Status<'a> {
     /// Projections retired to stay within the *cache's* bound — a separate
     /// number from `keys_evicted` on purpose, see [`facts_text`].
     pub facts_evicted: u64,
-    pub totals: (u64, u64, f64),
+    pub totals: crate::message::WatchedTotals,
     pub slices: &'a SliceSource,
     /// Watches whose seed phase has not resolved yet (issue #92).
     pub seeding: usize,
@@ -93,7 +106,7 @@ pub struct Status<'a> {
     pub seeded_watches: usize,
     /// Cumulative seed coverage since connect: (cache replies, storage
     /// replies, superseded).
-    pub seed_totals: (usize, usize, u64),
+    pub seed_totals: crate::state::observation::SeedTotals,
     pub unreachable: bool,
     /// Why the persisted preferences are not in force, when a file could not
     /// be read (issue #73). `None` on the ordinary path, including first run.
@@ -136,7 +149,7 @@ impl<'a> Status<'a> {
             facts_evicted: dep.facts.evicted(),
             watched: &obs.watched,
             skeleton: dep.skeleton.as_deref().map(|s| s.coverage),
-            fetched: sub.follow().fetched.as_ref(),
+            fetched: sub.follow.fetched.as_ref(),
             totals: obs.totals,
             slices: &dep.slice_source,
             seeding: obs.seeding.len(),
@@ -234,7 +247,11 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         }),
     });
 
-    let (count, bytes, rate) = s.totals;
+    let crate::message::WatchedTotals {
+        samples: count,
+        bytes,
+        rate_hz: rate,
+    } = s.totals;
 
     let mut r = row![
         link,
@@ -273,7 +290,12 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             kit::plural(s.seeding, "watch")
         )));
     } else if s.seeded_watches > 0 {
-        let (cache, storage, superseded) = s.seed_totals;
+        // `history` is the cache: same fact, the word the user reads.
+        let crate::state::observation::SeedTotals {
+            history: cache,
+            storage,
+            superseded,
+        } = s.seed_totals;
         r = r.push(kit::muted(format!(
             "seeded {}: {cache} cache · {storage} storage · {superseded} superseded",
             kit::plural(s.seeded_watches, "watch")

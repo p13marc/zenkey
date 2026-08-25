@@ -236,7 +236,7 @@ pub(crate) fn update(
             // itself states which it is, which is where a pin's failure
             // shows: on the surface the ⇱ produced.
             let slot = if role == DockRole::Inspector
-                && sub.follow().current != crate::message::Subject::None
+                && sub.follow.current != crate::message::Subject::None
             {
                 sub.pin_current(dep)
             } else {

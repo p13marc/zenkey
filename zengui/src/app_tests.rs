@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use super::{Zengui, test_app};
 use crate::message::{BusTick, Message, Subject, SubjectMsg};
-use crate::state::tree::shape_held;
+use crate::state::tree::{KeyCounts, shape_held};
 use crate::update;
 
 /// Feed one tick through the five sub-states `apply_tick` names.
@@ -63,7 +63,7 @@ fn switching_base_keeps_what_the_user_typed() {
     app.work.bench.send_form.params = "origin=h-3fa9c2d41b7e".into();
     app.work.bench.context_form.connect = "tcp/10.0.0.1:7447".into();
     app.tree.tree_search = "sysinfo".into();
-    app.sub.follow_mut().current = Subject::Key("v1/h-3fa9c2d41b7e/state/sysinfo/health".into());
+    app.sub.follow.current = Subject::Key("v1/h-3fa9c2d41b7e/state/sysinfo/health".into());
     app.chrome.prefs.zoom = 1.25;
 
     update::deployment::forget(&mut app.dep, &mut app.obs, &mut app.tree, &mut app.work);
@@ -73,7 +73,7 @@ fn switching_base_keeps_what_the_user_typed() {
     assert_eq!(app.work.bench.context_form.connect, "tcp/10.0.0.1:7447");
     assert_eq!(app.tree.tree_search, "sysinfo");
     assert_eq!(
-        app.sub.follow().current.key(),
+        app.sub.follow.current.key(),
         Some("v1/h-3fa9c2d41b7e/state/sysinfo/health"),
         "a selection follows the user, not the fleet — the panes then say \
              honestly that they have not asked about it yet"
@@ -126,7 +126,7 @@ fn tick(keys: usize, evicted: u64, unwatched: u64, watched: &Arc<[String]>) -> B
         keys_unwatched: unwatched,
         watched: Arc::clone(watched),
         seeded: Vec::new(),
-        totals: (0, 0, 0.0),
+        totals: Default::default(),
     }
 }
 
@@ -154,15 +154,15 @@ fn steady_state_ticks_reuse_the_tree_shape() {
 #[test]
 fn a_new_key_an_eviction_an_unwatch_or_a_new_watch_set_all_rebuild() {
     let watched: Arc<[String]> = Arc::from(["v1/**".to_string()]);
-    for (label, next) in [
-        ("a new key", (8usize, 0u64, 0u64)),
-        ("an eviction", (7, 1, 0)),
-        ("an unwatch", (7, 0, 1)),
+    for (label, keys, evicted, unwatched) in [
+        ("a new key", 8usize, 0u64, 0u64),
+        ("an eviction", 7, 1, 0),
+        ("an unwatch", 7, 0, 1),
     ] {
         let mut app = test_app();
         tick_into(&mut app, &tick(7, 0, 0, &watched));
         let before = app.tree.shape_rebuilt;
-        tick_into(&mut app, &tick(next.0, next.1, next.2, &watched));
+        tick_into(&mut app, &tick(keys, evicted, unwatched, &watched));
         assert_eq!(
             app.tree.shape_rebuilt,
             before + 1,
@@ -242,18 +242,96 @@ fn a_presentation_change_does_not_re_merge_the_tree() {
 fn the_shape_trigger_reads_every_rung() {
     let a: Arc<[String]> = Arc::from(["x".to_string()]);
     let b: Arc<[String]> = Arc::from(["x".to_string()]);
-    assert!(shape_held((1, 2, 3), (1, 2, 3), &a, &a));
-    assert!(!shape_held((1, 2, 3), (2, 2, 3), &a, &a));
-    assert!(!shape_held((1, 2, 3), (1, 3, 3), &a, &a));
-    assert!(!shape_held((1, 2, 3), (1, 2, 4), &a, &a));
+    assert!(shape_held(
+        KeyCounts {
+            keys: 1,
+            evicted: 2,
+            unwatched: 3
+        },
+        KeyCounts {
+            keys: 1,
+            evicted: 2,
+            unwatched: 3
+        },
+        &a,
+        &a
+    ));
+    assert!(!shape_held(
+        KeyCounts {
+            keys: 1,
+            evicted: 2,
+            unwatched: 3
+        },
+        KeyCounts {
+            keys: 2,
+            evicted: 2,
+            unwatched: 3
+        },
+        &a,
+        &a
+    ));
+    assert!(!shape_held(
+        KeyCounts {
+            keys: 1,
+            evicted: 2,
+            unwatched: 3
+        },
+        KeyCounts {
+            keys: 1,
+            evicted: 3,
+            unwatched: 3
+        },
+        &a,
+        &a
+    ));
+    assert!(!shape_held(
+        KeyCounts {
+            keys: 1,
+            evicted: 2,
+            unwatched: 3
+        },
+        KeyCounts {
+            keys: 1,
+            evicted: 2,
+            unwatched: 4
+        },
+        &a,
+        &a
+    ));
     assert!(
-        !shape_held((1, 2, 3), (1, 2, 3), &a, &b),
+        !shape_held(
+            KeyCounts {
+                keys: 1,
+                evicted: 2,
+                unwatched: 3
+            },
+            KeyCounts {
+                keys: 1,
+                evicted: 2,
+                unwatched: 3
+            },
+            &a,
+            &b
+        ),
         "equal contents, different Arc: the watch set was rebuilt, and \
              only a rebuild reassigns it"
     );
     // A replay seeking backwards moves the counters *down*, which is why
     // the comparison is equality and not a `>`.
-    assert!(!shape_held((9, 9, 9), (1, 2, 3), &a, &a));
+    assert!(!shape_held(
+        KeyCounts {
+            keys: 9,
+            evicted: 9,
+            unwatched: 9
+        },
+        KeyCounts {
+            keys: 1,
+            evicted: 2,
+            unwatched: 3
+        },
+        &a,
+        &a
+    ));
 }
 
 /// The two messages the re-entrancy commit introduced, driven through
@@ -286,9 +364,9 @@ fn revealing_a_subtree_opens_every_prefix_and_selects_without_fetching() {
     let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Prefix(
         path.to_string(),
     ))));
-    assert_eq!(app.sub.follow().current.path(), Some(path));
+    assert_eq!(app.sub.follow.current.path(), Some(path));
     assert!(
-        app.sub.follow().fetched.is_none(),
+        app.sub.follow.fetched.is_none(),
         "a subtree prefix is not a key: selecting one must not leave a fetch \
          behind, because no producer publishes it (#85)"
     );
@@ -309,24 +387,24 @@ fn pointing_at_an_origin_stops_pointing_at_a_key() {
     let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
         key.to_string(),
     ))));
-    assert_eq!(app.sub.follow().current.key(), Some(key));
+    assert_eq!(app.sub.follow.current.key(), Some(key));
     assert!(
-        app.sub.follow().history.is_some(),
+        app.sub.follow.history.is_some(),
         "a key subject records history (#63)"
     );
 
     let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Origin(
         "h-3fa9c2d41b7e".into(),
     ))));
-    assert_eq!(app.sub.follow().current.origin(), Some("h-3fa9c2d41b7e"));
-    assert_eq!(app.sub.follow().current.key(), None);
+    assert_eq!(app.sub.follow.current.origin(), Some("h-3fa9c2d41b7e"));
+    assert_eq!(app.sub.follow.current.key(), None);
     assert!(
-        app.sub.follow().history.is_none(),
+        app.sub.follow.history.is_none(),
         "the recorder followed the key that is no longer the subject — a \
          recorder outliving its subject is what made deselecting cost \
          something"
     );
-    assert!(app.sub.follow().selected_latency.is_none());
+    assert!(app.sub.follow.selected_latency.is_none());
 }
 
 /// A symbolic skeleton path is a key by grammar and not by fact.
@@ -344,12 +422,12 @@ fn a_symbolic_key_is_selected_but_never_fetched_or_recorded() {
         symbolic.to_string(),
     ))));
 
-    assert_eq!(app.sub.follow().current.key(), Some(symbolic));
+    assert_eq!(app.sub.follow.current.key(), Some(symbolic));
     assert!(
-        app.sub.follow().history.is_none(),
+        app.sub.follow.history.is_none(),
         "nothing can be recorded for it"
     );
-    assert!(app.sub.follow().fetched.is_none());
+    assert!(app.sub.follow.fetched.is_none());
 }
 
 /// A superseded fetch says so, instead of pretending nothing was asked
@@ -380,7 +458,7 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
     let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
         current.to_string(),
     ))));
-    app.sub.follow_mut().decoded = None;
+    app.sub.follow.decoded = None;
     app.work.right_pane = RightPane::Nodes;
 
     let late = Arc::new(FetchOutcome::None {
@@ -397,19 +475,19 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
         "a superseded answer must not steal the pane"
     );
     assert!(
-        app.sub.follow().fetched.is_some(),
+        app.sub.follow.fetched.is_some(),
         "the answer is real evidence and is kept — the view decides it is \
          about something else"
     );
     assert_eq!(
-        app.sub.follow().fetched.as_ref().map(|(k, _)| k.as_str()),
+        app.sub.follow.fetched.as_ref().map(|(k, _)| k.as_str()),
         Some(stale)
     );
 
     // And the view says which of the three states it is in.
-    let data = |sub: &crate::state::SubjectState| match sub.follow().fetched.as_ref() {
+    let data = |sub: &crate::state::SubjectState| match sub.follow.fetched.as_ref() {
         None => "not asked",
-        Some((k, _)) if Some(k.as_str()) == sub.follow().current.key() => "landed",
+        Some((k, _)) if Some(k.as_str()) == sub.follow.current.key() => "landed",
         Some(_) => "superseded",
     };
     assert_eq!(data(&app.sub), "superseded");
@@ -521,9 +599,9 @@ fn canonical(app: &Zengui) -> String {
         app.obs.keys,
         app.obs.keys_evicted,
         app.obs.keys_unwatched,
-        app.obs.totals.0,
-        app.obs.totals.1,
-        app.obs.totals.2.to_bits(),
+        app.obs.totals.samples,
+        app.obs.totals.bytes,
+        app.obs.totals.rate_hz.to_bits(),
         app.obs.watched,
     )
     .expect("write to string");
@@ -1512,7 +1590,7 @@ fn two_panes_two_keys_each_with_its_own_recorder_fed_by_one_tick() {
     let _ = app.update(Message::Workspace(WorkspaceMsg::TearOff(
         DockRole::Inspector,
     )));
-    assert_eq!(app.sub.slots.len(), 2, "the tear-off minted a slot");
+    assert_eq!(app.sub.len(), 2, "the tear-off minted a slot");
     let window = app
         .work
         .windows
@@ -1535,7 +1613,7 @@ fn two_panes_two_keys_each_with_its_own_recorder_fed_by_one_tick() {
     let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
         follow_key.to_string(),
     ))));
-    assert_eq!(app.sub.follow().current.key(), Some(follow_key));
+    assert_eq!(app.sub.follow.current.key(), Some(follow_key));
     assert_eq!(
         app.sub.slot(slot).unwrap().current.key(),
         Some(pinned_key),
@@ -1564,7 +1642,7 @@ fn two_panes_two_keys_each_with_its_own_recorder_fed_by_one_tick() {
         pinned.series.is_some(),
         "and its chart is alive — rebuilt by the same tick"
     );
-    let follow = app.sub.follow();
+    let follow = &app.sub.follow;
     assert_eq!(
         follow.history.as_ref().unwrap().ring.len(),
         1,
@@ -1575,9 +1653,9 @@ fn two_panes_two_keys_each_with_its_own_recorder_fed_by_one_tick() {
     // Closing the pinned window unpins: exactly its recorder drops, and the
     // follow slot keeps everything.
     let _ = app.update(Message::Workspace(WorkspaceMsg::WindowClosed(window)));
-    assert_eq!(app.sub.slots.len(), 1, "the slot went with its window");
+    assert_eq!(app.sub.len(), 1, "the slot went with its window");
     assert_eq!(
-        app.sub.follow().history.as_ref().unwrap().ring.len(),
+        app.sub.follow.history.as_ref().unwrap().ring.len(),
         1,
         "nothing of the follow slot's was dropped"
     );
@@ -1705,7 +1783,7 @@ fn a_section_message_routes_to_its_slot_and_misses_a_dropped_one() {
         app.sub.slot(slot).unwrap().series_leaf.as_deref(),
         Some("cpu.pct")
     );
-    assert_eq!(app.sub.follow().series_leaf, None);
+    assert_eq!(app.sub.follow.series_leaf, None);
 
     // And after the slot is dropped, the same message lands nowhere: the
     // only surface that could display the result is gone with the window.
@@ -1715,8 +1793,7 @@ fn a_section_message_routes_to_its_slot_and_misses_a_dropped_one() {
         crate::view::detail::DetailMsg::LeafSelected("mem.used".into()),
     )));
     assert_eq!(
-        app.sub.follow().series_leaf,
-        None,
+        app.sub.follow.series_leaf, None,
         "a dropped slot's message must not land in another slot"
     );
 }

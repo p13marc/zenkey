@@ -65,7 +65,7 @@ pub(crate) fn update(echo: &mut EchoPane, msg: EchoMsg, cx: Ctx) -> Task<Message
             let text = view::echo::export(
                 &echo.echo,
                 &echo.echo_view,
-                cx.sub.follow().current.key(),
+                cx.sub.follow.current.key(),
                 cx.dep.base(),
             );
             iced::clipboard::write(text)

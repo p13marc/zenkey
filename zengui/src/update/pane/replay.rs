@@ -85,7 +85,7 @@ pub(crate) fn update(
                     // recorder was of the live world (#257): the pins' drop
                     // with the follow slot's.
                     work.echo.echo.clear();
-                    for slot in sub.slots.iter_mut() {
+                    for slot in sub.all_mut() {
                         slot.history = None;
                         slot.refresh_series(dep);
                     }
@@ -276,7 +276,7 @@ pub(crate) fn enter_retained(
     // window — nothing live bleeds through, and the scrollback restarts.
     // Every slot's recorder was of the live world (#257).
     work.echo.echo.clear();
-    for slot in sub.slots.iter_mut() {
+    for slot in sub.all_mut() {
         slot.history = None;
         slot.refresh_series(dep);
     }

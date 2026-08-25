@@ -137,7 +137,7 @@ fn update_key(
         Some(Chord::Escape) => {
             if chrome.palette.is_open() {
                 chrome.palette.close();
-            } else if sub.follow().current != Subject::None {
+            } else if sub.follow.current != Subject::None {
                 return Task::done(Message::Subject(SubjectMsg::Select(Subject::None)));
             }
             return Task::none();

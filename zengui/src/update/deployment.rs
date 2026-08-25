@@ -130,7 +130,7 @@ pub(crate) fn update(
                 // Every recorder in flight resizes too — the pins' as much
                 // as the follow slot's (#257); the next selection starts at
                 // the new bound anyway.
-                for slot in sub.slots.iter_mut() {
+                for slot in sub.all_mut() {
                     if let Some(rec) = slot.history.as_mut() {
                         rec.ring.resize(t.history_entries);
                     }
@@ -208,7 +208,7 @@ fn repoint(
     )));
     // Every slot's decode was judged under the departing deployment's
     // schemas (#257) — the pins' as much as the follow slot's.
-    for slot in sub.slots.iter_mut() {
+    for slot in sub.all_mut() {
         slot.decoded = None;
     }
     tree.reflatten(dep, obs);

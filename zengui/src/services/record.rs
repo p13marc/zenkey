@@ -64,7 +64,7 @@ async fn capture(
     path: String,
     base: String,
     stop: tokio::sync::oneshot::Receiver<()>,
-) -> Result<(u64, u64, String), String> {
+) -> Result<crate::view::replay::Recorded, String> {
     let header = zenkey_fleet::ZrecHeader {
         zrec: zenkey_fleet::ZREC_VERSION,
         selectors,
@@ -97,7 +97,11 @@ async fn capture(
         r = recording => r.map_err(|e| e.to_string())?,
     }
     let (samples, dropped) = sink.finish().await.map_err(|e| e.to_string())?;
-    Ok((samples, dropped, path))
+    Ok(crate::view::replay::Recorded {
+        samples,
+        dropped,
+        path,
+    })
 }
 
 /// Load a `.zrec` for replay, off the update thread (#255): the parse is
@@ -166,7 +170,11 @@ pub fn save_window(
             let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
             let samples =
                 write_window(&rows, epoch, selectors, base, std::io::BufWriter::new(file))?;
-            Ok((samples, 0, path))
+            Ok(crate::view::replay::Recorded {
+                samples,
+                dropped: 0,
+                path,
+            })
         },
         |r| Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::RecordFinished(r))),
     )
@@ -210,11 +218,14 @@ mod tests {
         .expect("the capture ignored a stop fired during its setup window (#335)")
         .expect("the capture failed");
 
-        assert_eq!(done.0, 0, "nothing was published, so nothing was captured");
+        assert_eq!(
+            done.samples, 0,
+            "nothing was published, so nothing was captured"
+        );
         // Stopped, not orphaned: the trailer is on disk, so the file is a
         // finished recording rather than a handle nobody holds.
         let state = crate::replay::ReplayState::load(
-            &done.2,
+            &done.path,
             std::io::BufReader::new(std::fs::File::open(&path).unwrap()),
         )
         .unwrap();

@@ -105,7 +105,7 @@ fn body<'a>(
             // A slot that is gone renders as the follow slot rather than a
             // blank window; unreachable in practice, because closing a
             // pinned window is what drops its slot.
-            let bound = sub.slot(slot).unwrap_or_else(|| sub.follow());
+            let bound = sub.slot(slot).unwrap_or(&sub.follow);
             inspector(dep, obs, bound, work, sp)
         }
         DockRole::Activity => activity(dep, obs, sub, work, sp),
@@ -233,7 +233,7 @@ fn locator<'a>(
             mine: &obs.my_watch_paths,
             seeding: &obs.seeding_paths,
         },
-        selected: sub.follow().current.path(),
+        selected: sub.follow.current.path(),
         sp,
     })
 }
@@ -294,7 +294,7 @@ fn activity<'a>(
             .echo
             .echo_view
             .follow_subject
-            .then(|| sub.follow().current.key())
+            .then(|| sub.follow.current.key())
             .flatten(),
         verdicts: &work.verdicts.payloads,
         next_seq: work.echo.echo.next_seq(),
@@ -339,7 +339,7 @@ fn workbench<'a>(
         ),
         RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
             roster: &work.verdicts.roster,
-            selected: sub.follow().current.origin(),
+            selected: sub.follow.current.origin(),
             detail: &work.verdicts.node_detail,
             slices: dep.slices.as_deref(),
             sp,

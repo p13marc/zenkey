@@ -20,6 +20,24 @@ use zenkey_fleet::{KeyTreeSnapshot, Monitor, WatchId};
 
 use crate::message::LinkState;
 
+/// What every seed boundary this session has closed contributed.
+///
+/// Named fields, because as `(usize, usize, u64)` the first two were written
+/// as `history_replies`/`storage_replies` and read as `cache`/`storage` — two
+/// `usize`s whose names already disagreed at the two ends, so a transposition
+/// compiled and misreported coverage (#357).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SeedTotals {
+    /// Replies from the publisher-side cache. Rendered as "cache", which is
+    /// the user-facing word for the same fact: these come from
+    /// `cache_selector`, the advanced publisher's history.
+    pub history: usize,
+    /// Replies from a latest-value storage.
+    pub storage: usize,
+    /// Samples a later value superseded during the merge.
+    pub superseded: u64,
+}
+
 sub_state! {
     pub(crate) struct Observation {
         pub(crate) monitor: Option<Arc<Monitor>>,
@@ -45,13 +63,13 @@ sub_state! {
         pub(crate) seeding_paths: BTreeSet<String>,
         /// Cumulative seed coverage since connect: (cache replies, storage
         /// replies, superseded) — zeros are observations (O4).
-        pub(crate) seed_totals: (usize, usize, u64),
+        pub(crate) seed_totals: SeedTotals,
         /// Seed phases completed since connect.
         pub(crate) seeded_watches: usize,
         pub(crate) keys: usize,
         pub(crate) keys_evicted: u64,
         pub(crate) keys_unwatched: u64,
-        pub(crate) totals: (u64, u64, f64),
+        pub(crate) totals: crate::message::WatchedTotals,
         /// The monitor's retained window, as of the last live tick (#217):
         /// the budget the status strip states, and the ring's own costs —
         /// counted apart from `keys_evicted`, `keys_unwatched` and the
@@ -80,12 +98,12 @@ impl Default for Observation {
             scope_watches: Vec::new(),
             seeding: HashMap::new(),
             seeding_paths: BTreeSet::new(),
-            seed_totals: (0, 0, 0),
+            seed_totals: SeedTotals::default(),
             seeded_watches: 0,
             keys: 0,
             keys_evicted: 0,
             keys_unwatched: 0,
-            totals: (0, 0, 0.0),
+            totals: crate::message::WatchedTotals::default(),
             retention: None,
             budgets: None,
         }
@@ -105,7 +123,7 @@ impl Observation {
         self.scope_watches.clear();
         self.seeding.clear();
         self.seeding_paths.clear();
-        self.seed_totals = (0, 0, 0);
+        self.seed_totals = SeedTotals::default();
         self.seeded_watches = 0;
         // The ring's account rides with the coverage (#217): it describes
         // what the departing monitor retained for the departing watches, and
