@@ -159,6 +159,25 @@ impl RosterWatch {
         .await
     }
 
+    /// The same coalesced changes as a [`Stream`](futures_core::Stream)
+    /// (#343).
+    ///
+    /// **Borrowing, deliberately**: [`stop`](Self::stop) is an acknowledged
+    /// teardown that consumes `self` (#207/#336), and a stream that moved the
+    /// watch in would leave a caller no way to reach it — a half-torn-down
+    /// monitor is exactly what that teardown exists to prevent. Hold the
+    /// watch, take the stream, drop the stream, then `stop`.
+    ///
+    /// Cancel-safety carries over unchanged, because the accumulator lives in
+    /// `self.pending` rather than in a poll's stack frame (#328): a stream
+    /// dropped mid-burst keeps the transitions it had already applied, and the
+    /// next one reports them.
+    pub fn changes(&mut self) -> impl futures_core::Stream<Item = RosterChange> + '_ {
+        futures_util::stream::unfold(self, |watch| async move {
+            watch.next_change().await.map(|change| (change, watch))
+        })
+    }
+
     /// Release the subscriptions, **acknowledged**.
     ///
     /// On every exit path, which the zenctl original managed only on Ctrl-C:

@@ -129,6 +129,15 @@ impl Responder {
         self.queryable.recv_async().await.ok()
     }
 
+    /// The queries as a [`Stream`](futures_core::Stream) (#343).
+    ///
+    /// Borrows, which is the point: `reply` and `reply_err` take `&self`, so
+    /// a query pulled from this stream can still be answered while the stream
+    /// is held — the same receive/answer split [`next`](Self::next) has.
+    pub fn stream(&self) -> impl futures_core::Stream<Item = Query> + '_ {
+        self.queryable.stream()
+    }
+
     /// Reply a value on this responder's **own concrete key** (RFC 05
     /// §2.1). `query.key_expr()` is deliberately never consulted: echoing
     /// the query's selector puts a fleet's replies on one shared wildcard

@@ -172,6 +172,37 @@ impl SeededSubscriber {
     }
 }
 
+/// The subscription **is** a stream (#343) — the seed phase and the live
+/// phase are one sequence, which is the whole point of the type.
+///
+/// A direct impl rather than an adapter, because the channel underneath is an
+/// `mpsc::Receiver` with a real `poll_recv`: no boxing, no self-reference, and
+/// the [`SeedItem::Dropped`] preamble is the same one [`recv`](
+/// SeededSubscriber::recv) applies, so a consumer that switched from `recv`
+/// to `next` sees identical items in an identical order.
+impl futures_core::Stream for SeededSubscriber {
+    type Item = SeedItem;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<SeedItem>> {
+        // Every field is `Unpin`, so the projection needs no unsafe — worth
+        // stating because this type has a `Drop` impl, which is what stops
+        // the derive from being available.
+        let this = self.get_mut();
+        // What the bounded channel refused, before what it kept (O6).
+        let missed = this
+            .rx
+            .dropped
+            .swap(0, std::sync::atomic::Ordering::Relaxed);
+        if missed > 0 {
+            return std::task::Poll::Ready(Some(SeedItem::Dropped(missed)));
+        }
+        this.rx.rx.poll_recv(cx)
+    }
+}
+
 /// The shared LWW merge: one entry per key, latest HLC wins; stamped beats
 /// unstamped; unstamped-vs-unstamped passes through (nothing to compare — a
 /// deployment without timestamping has opted out of LWW, RFC 04 §4, and

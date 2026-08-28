@@ -563,6 +563,28 @@ pub enum StreamItem {
 }
 
 impl EventStream {
+    /// The same items as a [`Stream`](futures_core::Stream) (#343).
+    ///
+    /// Consuming rather than borrowing, because the consumer that wanted this
+    /// is a UI subscription that must own a `'static` stream — a borrowing
+    /// adapter could not be handed to one. Take a second `EventStream` from
+    /// [`Monitor::events`](crate::Monitor::events) if the original is still
+    /// needed for a `recv` loop; each receiver has its own place in the ring.
+    ///
+    /// `unfold` rather than a hand-written `poll_next`: a broadcast receiver
+    /// has no `poll_recv`, so a direct impl would have to store the borrowed
+    /// `recv` future beside the receiver it borrows from — a self-referential
+    /// struct, and unsafe for nothing. Lag still folds into the monitor's
+    /// `dropped` counter and still arrives as [`StreamItem::Dropped`], since
+    /// this drives the same [`recv`](Self::recv) that does both. A generic
+    /// broadcast-to-stream adapter would surface lag as an *error* instead,
+    /// which is the one thing this type exists to prevent.
+    pub fn into_stream(self) -> impl futures_core::Stream<Item = StreamItem> + Send {
+        futures_util::stream::unfold(self, |mut events| async move {
+            events.recv().await.map(|item| (item, events))
+        })
+    }
+
     /// `None` when the monitor stopped.
     pub async fn recv(&mut self) -> Option<StreamItem> {
         match self.rx.recv().await {

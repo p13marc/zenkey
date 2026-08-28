@@ -282,6 +282,15 @@ impl MatchingEvents {
     pub async fn recv(&self) -> Option<bool> {
         self.listener.recv_async().await.ok().map(|s| s.matching())
     }
+
+    /// The same changes as a [`Stream`](futures_core::Stream) (#343).
+    ///
+    /// Borrows, so a caller can keep gating on `recv` elsewhere; the item is
+    /// the same projected `bool` rather than the raw `MatchingStatus`, because
+    /// what a caller acts on is "is anyone there", not the status object.
+    pub fn stream(&self) -> impl futures_core::Stream<Item = bool> + '_ {
+        futures_util::StreamExt::map(self.listener.stream(), |s| s.matching())
+    }
 }
 
 /// Who a call is addressed to. Typed — a fleet call is a deliberate variant,
