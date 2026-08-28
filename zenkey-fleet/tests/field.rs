@@ -46,6 +46,25 @@ fn health_schema() -> SchemaSet {
                     "temperature_c": {"type": "number"},
                     "seq": {"type": "number"},
                     "opt": {"type": "number"},
+                    // An adjacently-tagged enum behind a `$ref` into `$defs`
+                    // — what `schemars` emits, and what #384 misread.
+                    "value": {"$ref": "#/$defs/Reading"},
+                },
+                "$defs": {
+                    "Reading": {
+                        "oneOf": [
+                            {"type": "object",
+                             "required": ["type", "value"],
+                             "properties": {
+                                 "type": {"const": "counter", "type": "string"},
+                                 "value": {"type": "integer"}}},
+                            {"type": "object",
+                             "required": ["type", "value"],
+                             "properties": {
+                                 "type": {"const": "gauge", "type": "string"},
+                                 "value": {"type": "number"}}},
+                        ],
+                    },
                 },
             })),
         )
@@ -288,6 +307,80 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
             .all(|f| !f.subject.ends_with("· seq")),
         "{:?}",
         report.findings
+    );
+}
+
+/// #384, end to end: a producer publishing a tagged enum — through the real
+/// `describe` fetch and the real `SchemaStore`, not a hand-built
+/// `DeclaredPaths` — produces **no** `field-new`.
+///
+/// This is pinned here rather than only as a unit test because the unit
+/// level is not where the defect showed: the walker was self-consistent, and
+/// what was wrong was the surface it handed the judge. A ZenSight baseline
+/// run saw 141 warnings in a 15s window over four producers, every one of
+/// them a field its own served schema requires — enough noise to make
+/// `doctor --fail-on warning` unusable, which is the check defeating itself.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_tagged_enums_fields_are_not_reported_as_drift() {
+    let (a, b) = peer_pair().await;
+    let slices = slices_of();
+    let _describe = serve_describe(&a).await;
+
+    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+        .await
+        .expect("declare");
+    let matching = publication.matching_events().await.expect("events");
+
+    let field = tokio::spawn({
+        let b = b.clone();
+        let slices = slices.clone();
+        async move {
+            let spec = FieldSpec {
+                selector: KEY.to_string(),
+                window: Duration::from_secs(3),
+                max_paths: 64,
+            };
+            run_field(
+                &zenkey_fleet::Fleet::new(&b, ""),
+                Some(&slices),
+                &store_of(),
+                &spec,
+            )
+            .await
+        }
+    });
+    assert!(
+        tokio::time::timeout(util::SETTLE, matching.recv())
+            .await
+            .expect("matching within 5s")
+            .expect("listener alive")
+    );
+    // Conforming traffic: every field here is one the served schema declares,
+    // `value.type`/`value.value` inside the `oneOf` included.
+    let publisher = keep_publishing(
+        publication,
+        |i| serde_json::json!({"seq": i, "value": {"type": "gauge", "value": i as f64 / 10.0}}),
+    );
+
+    let report = field.await.expect("join").expect("run_field");
+    publisher.abort();
+
+    let new: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldNew)
+        .collect();
+    assert!(
+        new.is_empty(),
+        "a tagged enum's own fields are declared by its schema, not drift: {new:?}"
+    );
+    // And the walker did not simply go blind: the paths were observed, and a
+    // genuinely undeclared one would still be caught (the sibling test above
+    // holds that end).
+    let observed: Vec<&str> = report.rows.iter().map(|r| r.path.as_str()).collect();
+    assert!(
+        observed.contains(&"value.type") && observed.contains(&"value.value"),
+        "the fields were seen, and judged clean rather than unseen: {observed:?}"
     );
 }
 
