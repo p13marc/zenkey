@@ -34,6 +34,17 @@
 //!   fleet a question goes through it. This layer returns observations and
 //!   never a verdict about one.
 //!
+//!   Its event sources are **`Stream`s** (#343), not only `recv` loops:
+//!   [`EventStream::into_stream`], [`SeededSubscriber`] (a direct impl),
+//!   [`RosterWatch::changes`], and a `stream()` on
+//!   [`ScoutStream`], [`Responder`], [`MockResponder`] and
+//!   [`MatchingEvents`]. The last four borrow rather than consume, because
+//!   the `&self` receiver is what lets a query be answered while its stream
+//!   is held and a scout be stopped after one; a blanket `impl Stream` would
+//!   have taken `&mut self` and spent that. The `recv`/`next` methods stay —
+//!   a loop is still the clearer shape for a drain that also selects on
+//!   something else, and every consumer in this workspace does.
+//!
 //! * **[`model`]** — everything that can do its job from values already in
 //!   hand. `facts`, `registry`, `project`, `stats`, `tree`, `skeleton`,
 //!   `diff`, `decode`, `retain`, plus the two mechanisms every long-running

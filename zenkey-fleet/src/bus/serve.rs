@@ -109,6 +109,16 @@ impl MockResponder {
         self.queryable.recv_async().await.ok()
     }
 
+    /// The queries as a [`Stream`](futures_core::Stream) (#343).
+    ///
+    /// Borrows, which preserves #333's split exactly as [`next`](Self::next)
+    /// does: [`answer`](Self::answer) takes `&self`, so a query taken from
+    /// this stream is still answerable, and a stream dropped mid-poll has
+    /// consumed nothing it did not hand back.
+    pub fn stream(&self) -> impl futures_core::Stream<Item = zenoh::query::Query> + '_ {
+        self.queryable.stream()
+    }
+
     /// Answer one query and return its view.
     ///
     /// The reply is addressed to the responder's **own declared key** when

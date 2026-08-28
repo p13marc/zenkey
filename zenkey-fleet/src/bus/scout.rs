@@ -49,6 +49,17 @@ impl ScoutStream {
             .map(|h| HelloView::of(&h))
     }
 
+    /// The Hellos as a [`Stream`](futures_core::Stream), for a consumer that
+    /// composes rather than loops (#343).
+    ///
+    /// Borrows rather than consuming, so [`stop`](Self::stop) still works
+    /// afterwards — the explicit teardown is the reason this type is not just
+    /// a stream. The projection to [`HelloView`] is the same one
+    /// [`recv`](Self::recv) makes.
+    pub fn stream(&self) -> impl futures_core::Stream<Item = HelloView> + '_ {
+        futures_util::StreamExt::map(self.inner.stream(), |h| HelloView::of(&h))
+    }
+
     /// Stop scouting, explicitly — a drop would stop it too, but silently.
     pub fn stop(self) {
         self.inner.stop();
