@@ -58,7 +58,7 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         spec.rules.len()
     );
     let mut out = std::io::stdout();
-    // The engine's emit callback cannot fail (#343 wants it to be a stream),
+    // The engine's emit callback cannot fail (#397 wants it to be a stream),
     // so the first write error is kept here and answered for after the run —
     // rather than dropped, which had this verb finish clean having emitted
     // nothing (#360).

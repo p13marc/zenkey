@@ -713,6 +713,15 @@ const DECODE_BUDGET: u8 = 2;
 /// unchanged tick. The subscriber set is declared before the first window
 /// opens (O4); every selector rule is judged per tick over the measured
 /// window, doctor and roster rules by one ask per tick each.
+///
+/// **`emit` cannot fail, and a caller that can must say so itself** (#397).
+/// This is a callback rather than a [`Stream`](futures_core::Stream) — unlike
+/// every source in [`crate::bus`] since #343 — because producing a sequence
+/// here is a control-flow inversion, not an adapter: the tick's `select!`
+/// state cannot survive a `poll_next` return. Until that is done, a caller
+/// whose emission can fail has to keep the error and answer for it after the
+/// run, which is what `zenctl watchdog` does; dropping it instead let that
+/// verb finish clean having emitted nothing (#360).
 pub async fn run_watchdog(
     fleet: &crate::Fleet<'_>,
     slices: Option<&SliceSet>,
