@@ -167,8 +167,9 @@ pub use bus::monitor::{
 pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use bus::query::{
     Answer, DEFAULT_MAX_REPLIES, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts,
-    RepeatingQuery, RepeatingRegistry, StateSample, declare_repeating, declare_repeating_any,
-    fetch_stored, fetch_value, fleet_get, fleet_registry, state_snapshot,
+    RepeatingQuery, RepeatingRegistry, ServedSlice, StateSample, declare_repeating,
+    declare_repeating_any, fetch_stored, fetch_value, fleet_get, fleet_registry,
+    fleet_registry_by_origin, fleet_registry_raw, state_snapshot,
 };
 pub use bus::roster::{
     BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, node_info, node_rows,
@@ -233,7 +234,7 @@ pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
 };
-pub use model::registry::SliceSet;
+pub use model::registry::{CollapsedProducer, SliceSet};
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
