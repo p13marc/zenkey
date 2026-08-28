@@ -25,6 +25,34 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.27 (2026-08-28, the field-evidence batch)** — two amendments, both
+> the same shape: a rule that was right, meeting a measurement or a backend
+> that makes its *reason* say more than the rule did. Neither changes an
+> obligation; both change what a reader can conclude.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **F1** | [07 §1.3](07-bulk-planes.md), [07 §1.4](07-bulk-planes.md) | **Frame age also separates a congested producer from a lossy link, and nothing else does.** v1.26 named the frame-age clock and said how to report the number honestly; it did not say what the number is *for* beyond a deadline. A consumer seeing gaps in `FrameMeta.sequence` cannot tell from the loss count whether the middleware discarded samples under `CongestionControl::Drop` in the producer's transport queue or whether they were lost in flight — and **neither can the producer**, because those discards happen upstream of any counter it could publish and the middleware counts transport drops per *link*, never per publisher. Both present as gaps with every producer-side drop counter at zero, and they call for opposite responses. Measured on a veth lab, the separation is three orders of magnitude and needs no tuned threshold: congestion is a deep queue, so survivors arrive old (83 % missing at a 3.5 s median age; 93 % at 9.1 s), while in-flight loss has no queue, so survivors arrive fresh (20 % missing at 0.77 ms; 57 % at 0.78 ms). Recorded as an informative box in §1.3 with its provenance and its limits stated, the way [04 §3.3](04-planes.md)'s cost box is. The consequence for a consumer: absence of producer-side drop counts is not evidence the wire was at fault. §1.4's "MTU slicing buys nothing here" gains the measurement that agrees with it (20.4 % vs 16.9 %, no mechanism to explain a difference) — confirming the mechanism argument, not replacing it. |
+> | **F2** | [09 §2.1](09-operations.md), [09 §2.2](09-operations.md), [09 §2.3](09-operations.md) | **The capability pair is per storage, not per backend — and the volume table says what it costs to choose wrong.** §2.1 read as though *persistence × history* were a property of the backend; that partitioned cleanly only while no backend offered both modes. It now must partition by **storage mode**: one volume may hold latest-mode storages that replicate and an all-mode one that cannot, so §2.2's "works only on latest-value **backends**" becomes "latest-value **storages**", with the misconfiguration named. A `redb` row joins the table on that basis, carrying the one *positive* caveat in it — retention in the backend — and an explicit status note, because its all-mode and retention work is specified and **not yet shipped** (`zenoh-backend-redb` #10, #11); the note says what a build without it does, so the row is plannable rather than configurable. The InfluxDB rows gain the caveat that actually decides the choice and is not derivable from the capability pair: a payload is stored as **one string field, base64-encoded when binary**, so a CBOR deployment gets a durable time-indexed byte log — genuinely useful for `_time`-ranged GETs — and not a queryable time-series database. §2.3 states plainly that `garbage_collection` is not a retention policy and that Zenoh has no other, which is what made the previous sentence's silence expensive. |
+>
+> **What did *not* change.** No wire-observable change of any kind: no key
+> moved, no payload shape changed, no QoS axis or class default moved, and
+> `FrameMeta` gains no field — F1 is a *reading* of a number the convention
+> already carries, and v1.26's refusal to add a wallclock stands. F1 adds no
+> producer obligation and no consumer MUST; §1.3's existing rule on how frame
+> age is reported (observed skewed latency, negatives shown) is untouched, and
+> the new material is marked informative. F2 changes no storage configuration
+> schema — §2 gains a volume *row*, not a knob — and no existing storage
+> config needs an edit; the `latest`/`catalog`/`events`/`timeseries`/
+> `pdns_history` recipe, its `strip_prefix` rule, the `complete: true` caveat
+> and the `catalog`/`pdns_history` overlap note all stand. §2.3's `lifespan` ≥
+> longest `ttl_s` rule is unchanged; what is added beside it is what the knob
+> is *not*. Chapter numbering is untouched and no section was renumbered —
+> deliberately, because [04 §1.2](04-planes.md), 04 §3 and
+> [06 §4](06-identity.md) cite 09 §2.3 by number.
+>
+> *Amends: 07, 09.*
+
 > **v1.26 (2026-08-25, the media-consumer batch)** — the first amendment
 > since ratification to change a **wire-observable default**, plus the
 > chapter-07 material a consumer outside the reference stack needs. The

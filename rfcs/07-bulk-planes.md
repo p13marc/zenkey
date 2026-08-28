@@ -1,6 +1,6 @@
 # 07 — Bulk Planes: `@media` and `@blob`
 
-**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.7, v1.8, v1.11, v1.16, v1.17, v1.25 and v1.26 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.17 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.7, v1.8, v1.11, v1.16, v1.17, v1.25, v1.26 and v1.27 — see [CHANGELOG.md](CHANGELOG.md)*
 
 Two kinds of traffic must never meet a wildcard: frame-rate opaque bytes
 (video, imagery) and bulk transfers (files, directory trees, chunks). Both
@@ -190,6 +190,46 @@ Negative values are shown, not clamped; a negative age *is* the clock-skew
 evidence, and clamping it to zero destroys the only signal that says the
 number cannot be trusted.
 
+*Informative, added in v1.27 — a second reading of the same number.* Frame
+age is not only a deadline. It is also the **only** thing that tells a
+consumer *why* frames are missing, and that question has two answers calling
+for opposite responses.
+
+> **Congestion versus in-flight loss** (measured on a two-namespace veth lab,
+> netem/tbf on the producer's egress only, one synthetic source, one
+> recording consumer — [recipes and full
+> write-up](https://git.marcpardo.eu/marcpardo/zensight/src/branch/master/docs/plans/adaptive-media/loss-measurement.md)).
+> A consumer seeing gaps in `FrameMeta.sequence` cannot tell from the loss
+> count alone whether the producer's link was congested and the middleware
+> discarded samples under `CongestionControl::Drop` inside the transport
+> queue, or whether the samples rode an unreliable link and were lost in
+> flight. **Neither can the producer**: those discards happen upstream of any
+> counter a producer could publish, and the middleware counts transport drops
+> only per *link*, never per publisher — so a producer with one session and
+> many publishers cannot attribute them either. Both cases therefore present
+> as sequence gaps with every producer-side drop counter reading **zero**.
+>
+> Frame age separates them by three orders of magnitude, so no tuned
+> threshold is needed. Congestion means a **deep queue**, and what survives a
+> queue arrives old: at 300 kbit against ~1.7 Mbps offered, 83 % of frames
+> missing at a median age of **3.5 s**; at 100 kbit, 93 % missing at
+> **9.1 s**. In-flight loss has no queue at all, so what survives arrives
+> fresh: over a `quic/` link with `mixed_rel=1` at 1 % packet loss, 20 %
+> missing at **0.77 ms**; at 5 % loss, 57 % missing at **0.78 ms**.
+>
+> The consequence for a consumer: **the absence of producer-side drop counts
+> is not evidence that the wire was at fault.** Read alongside frame age it
+> is not evidence of anything. This is a reading rule, not a new obligation —
+> no field is added, and §1.3's rule above still governs how the number
+> itself is reported (observed skewed latency, never a verdict).
+
+The reason this is in the convention rather than in each implementation is
+[§1.1](#11-the-control-surface-two-procedures-and-what-a-viewer-may-ask-for-v126)'s
+argument for putting feedback in the contract at all: N consumer
+implementations should not each rediscover the semantics. This one has been
+implemented once already, and every consumer that reads a receiver report or
+judges a `@media` tier meets the same ambiguity.
+
 ### 1.4 Browser consumers (v1.26, informative)
 
 *Added in v1.26. The full §1 consumer story — catalogue from `state`,
@@ -218,7 +258,11 @@ requirement: no producer field is added.
 
 **MTU slicing buys nothing here.** Losing one best-effort fragment loses
 the whole sample, so slicing a frame trades one drop for several chances of
-one — on the plane that already declares a stale frame worthless.
+one — on the plane that already declares a stale frame worthless. The
+argument was from mechanism; the measurement in §1.3's box agrees with it and
+adds nothing to it — 20.4 % against 16.9 % frame loss across one run with and
+without `max_slice_len`, with no mechanism that would explain a difference
+while one sample is one access unit.
 
 ## 2. `@blob` — bulk and content-addressed transfer
 

@@ -28,6 +28,7 @@ pub mod bounded;
 pub mod diff;
 pub mod examples;
 pub mod facts;
+pub mod jsonschema;
 pub mod project;
 pub mod registry;
 pub mod retain;

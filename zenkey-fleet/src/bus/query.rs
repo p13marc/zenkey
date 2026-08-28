@@ -475,6 +475,17 @@ impl RepeatingQuery {
         self.elided.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Forget what earlier fetches through this querier cost — for a caller
+    /// that re-runs a sweep and reports per sweep rather than per querier
+    /// ([`GetOpts::reset_elided`] is the same call on the one-shot path).
+    ///
+    /// Without it a per-sweep figure has to be read as a before/after
+    /// subtraction, which is not safe when two sweeps overlap on one
+    /// declared querier.
+    pub fn reset_elided(&self) {
+        self.elided.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
     fn note_elided(&self, n: u64) {
         if n > 0 {
             self.elided
@@ -573,22 +584,74 @@ pub async fn fleet_registry(
     fleet: &Fleet<'_>,
     timeout: Duration,
 ) -> Result<Vec<(String, RegistrySlice)>> {
-    Ok(fleet_registry_raw(fleet, timeout)
+    Ok(fleet_registry_by_origin(fleet, timeout)
         .await?
         .into_iter()
-        .map(|(slice, _)| (slice.name.clone(), slice))
+        .map(|served| (served.slice.name.clone(), served.slice))
         .collect())
 }
 
 /// As [`fleet_registry`], additionally yielding each reply's raw TOML text
 /// (the artifact the slice cache persists).
+///
+/// Also drops the origin — see [`fleet_registry_by_origin`], which is the
+/// call to reach for when *which host said this* is part of the question.
 pub async fn fleet_registry_raw(
     fleet: &Fleet<'_>,
     timeout: Duration,
 ) -> Result<Vec<(RegistrySlice, String)>> {
+    Ok(fleet_registry_by_origin(fleet, timeout)
+        .await?
+        .into_iter()
+        .map(|served| (served.slice, served.raw))
+        .collect())
+}
+
+/// One producer's served registry slice, attributed to the host that
+/// answered (#385).
+///
+/// The origin cannot come from the slice: a slice is `include_str!` of a
+/// compiled registry file, and [`RegistrySlice::service_origin`] is `Some`
+/// only for a service — a host producer's origin is the host it runs on and
+/// is therefore not in the document. It comes from the reply's own key, the
+/// way RFC 05 §2.1 requires every fan-in answer to be attributed.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ServedSlice {
+    /// The origin that answered — the `h-…` host id, or a verbatim service
+    /// origin. `"?"` when the reply key did not parse under this base, the
+    /// same lossy-but-stated convention [`FleetAnswer::origin`] uses.
+    pub origin: String,
+    /// The parsed slice. Its `name` is the producer, which is a different
+    /// question from `origin` and is why both are here.
+    pub slice: RegistrySlice,
+    /// The reply's raw TOML — the artifact the slice cache persists, since
+    /// slices do not re-serialize.
+    pub raw: String,
+}
+
+/// The fleet sweep, **keeping the origin that answered** (#385).
+///
+/// [`fleet_registry`] and [`fleet_registry_raw`] answer "what does this
+/// fleet serve", collapsing to one entry per producer; this answers "who
+/// served it", which is a different question and the only one that can
+/// express per-host drift. RFC 08 §6 promises exactly that capability of
+/// the introspect sweep — *which hosts still serve a deprecated subject,
+/// which run last month's registry* — and neither can be asked without the
+/// origin.
+///
+/// Nothing is deduplicated here: N hosts running one producer are N entries,
+/// which is the point. Feed it to [`crate::SliceSet::from_slices`] (or
+/// [`crate::SliceSet::from_bus`]) when a decoder needs one slice per
+/// producer instead — for *refining a key*, which host answered is
+/// genuinely irrelevant.
+pub async fn fleet_registry_by_origin(
+    fleet: &Fleet<'_>,
+    timeout: Duration,
+) -> Result<Vec<ServedSlice>> {
     let repeating = RepeatingRegistry::declare(fleet, timeout).await?;
 
-    let slices = repeating.fetch().await?;
+    let slices = repeating.fetch_by_origin().await?;
 
     repeating.undeclare().await?;
 
@@ -626,21 +689,45 @@ impl RepeatingRegistry {
         })
     }
 
-    /// One sweep: every parsed slice with its raw TOML. A reply that does not
-    /// parse is logged and skipped, never fatal — one malformed producer must
-    /// not blind the tool to every other producer's slice.
+    /// One sweep: every parsed slice with its raw TOML.
+    ///
+    /// Drops the answering origin. [`fetch_by_origin`](Self::fetch_by_origin)
+    /// is the same sweep keeping it, and is what a caller asking *which host*
+    /// wants (#385).
     pub async fn fetch(&self) -> Result<Vec<(RegistrySlice, String)>> {
+        Ok(self
+            .fetch_by_origin()
+            .await?
+            .into_iter()
+            .map(|served| (served.slice, served.raw))
+            .collect())
+    }
+
+    /// One sweep, attributed: every parsed slice with the origin that served
+    /// it and its raw TOML (#385).
+    ///
+    /// A reply that does not parse is logged and skipped, never fatal — one
+    /// malformed producer must not blind the tool to every other producer's
+    /// slice. Nothing is deduplicated: a fleet mid-rollout serving three
+    /// versions of one producer yields three entries, and that disagreement
+    /// is the finding.
+    pub async fn fetch_by_origin(&self) -> Result<Vec<ServedSlice>> {
         let mut slices = Vec::new();
         for q in [&self.wildcard, &self.catalog] {
             for answer in q.fetch().await? {
+                let origin = answer.origin;
                 let Answer::Value(bytes) = answer.answer else {
                     continue;
                 };
                 let served_toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
                 match parse_slice(&served_toml) {
-                    Ok(slice) => slices.push((slice, served_toml)),
+                    Ok(slice) => slices.push(ServedSlice {
+                        origin,
+                        slice,
+                        raw: served_toml,
+                    }),
                     Err(e) => tracing::warn!(
-                        origin = %answer.origin,
+                        origin = %origin,
                         "introspect reply did not parse, skipping: {e}"
                     ),
                 }

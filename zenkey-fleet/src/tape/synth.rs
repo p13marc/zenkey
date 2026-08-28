@@ -14,9 +14,17 @@
 use serde_json::{Map, Value, json};
 use zenkey::schema::TypeSchema;
 
+use crate::model::jsonschema::resolve_ref;
+
 /// How deep nested objects/arrays are followed before giving up — a cyclic
 /// or pathological schema degrades to a placeholder, not a stack overflow.
-const DEPTH_CAP: usize = 6;
+///
+/// Raised from 6 with `$ref` following (#384): a resolved reference costs a
+/// level, and `schemars` hoists every nested named type into `$defs`, so the
+/// old cap was spent on indirection rather than on nesting. A cycle still
+/// terminates here — the cap is what stops it, since a `$ref` chain has no
+/// other bottom.
+const DEPTH_CAP: usize = 16;
 
 /// A deterministic instance generator.
 #[derive(Debug, Clone, Copy)]
@@ -57,7 +65,7 @@ impl Synth {
         match schema.kind_str() {
             zenkey::schema::SchemaKind::JSON_SCHEMA => schema
                 .json_document()
-                .map(|doc| self.json_schema_value(doc, "", tick, 0)),
+                .map(|doc| self.json_schema_value(doc, doc, "", tick, 0)),
             zenkey::schema::SchemaKind::CDR => {
                 let fields = schema.cdr_fields()?;
                 let types = schema.cdr_types();
@@ -71,9 +79,19 @@ impl Synth {
 
     /// Walk a draft 2020-12 document conservatively: satisfy `type`,
     /// `required` (by emitting every declared property), `enum`/`const`,
-    /// and numeric bounds. Unknown or empty schemas get a wandering number —
-    /// `{}` accepts anything.
-    fn json_schema_value(&self, doc: &Value, field: &str, tick: u64, depth: usize) -> Value {
+    /// combinators, `$ref`, and numeric bounds. Unknown or empty schemas get
+    /// a wandering number — `{}` accepts anything.
+    ///
+    /// `root` is the whole document, carried so `$ref` can be resolved
+    /// against it; `doc` is the subschema being satisfied.
+    fn json_schema_value(
+        &self,
+        root: &Value,
+        doc: &Value,
+        field: &str,
+        tick: u64,
+        depth: usize,
+    ) -> Value {
         if depth > DEPTH_CAP {
             return Value::Null;
         }
@@ -85,11 +103,37 @@ impl Synth {
         {
             return first.clone();
         }
+        // `$ref` into `$defs` is where `schemars` puts every nested named
+        // type, so a walk that does not follow it synthesizes a wandering
+        // number where a struct belongs (#384). Unresolvable falls through
+        // to the conservative default below, as an unknown schema does.
+        if let Some(pointer) = doc.get("$ref").and_then(Value::as_str)
+            && let Some(target) = resolve_ref(root, pointer)
+        {
+            return self.json_schema_value(root, target, field, tick, depth + 1);
+        }
+        // `allOf` composes one shape out of several, so an instance must
+        // satisfy every member: merge them.
+        if let Some(members) = doc.get("allOf").and_then(Value::as_array) {
+            let mut merged = Map::new();
+            for member in members {
+                if let Value::Object(o) =
+                    self.json_schema_value(root, member, field, tick, depth + 1)
+                {
+                    merged.extend(o);
+                }
+            }
+            return Value::Object(merged);
+        }
+        // `oneOf`/`anyOf` alternate, and one instance satisfies one branch —
+        // so the first is as good a pick as any. Deliberately unlike the
+        // declared-path walk in `judge::field`, which must union every
+        // branch: a *surface* is all the shapes allowed, an *instance* is one.
         for branch in ["oneOf", "anyOf"] {
             if let Some(b) = doc.get(branch).and_then(Value::as_array)
                 && let Some(first) = b.first()
             {
-                return self.json_schema_value(first, field, tick, depth + 1);
+                return self.json_schema_value(root, first, field, tick, depth + 1);
             }
         }
         let ty = doc.get("type").and_then(Value::as_str).unwrap_or("number");
@@ -100,7 +144,7 @@ impl Synth {
                     for (name, sub) in props {
                         out.insert(
                             name.clone(),
-                            self.json_schema_value(sub, name, tick, depth + 1),
+                            self.json_schema_value(root, sub, name, tick, depth + 1),
                         );
                     }
                 }
@@ -115,7 +159,7 @@ impl Synth {
                 let item = doc.get("items").cloned().unwrap_or(json!({}));
                 Value::Array(
                     (0..n)
-                        .map(|i| self.json_schema_value(&item, field, tick + i, depth + 1))
+                        .map(|i| self.json_schema_value(root, &item, field, tick + i, depth + 1))
                         .collect(),
                 )
             }
@@ -334,6 +378,55 @@ mod tests {
                 "tick {tick}"
             );
         }
+    }
+
+    /// A tagged enum behind a `$ref` — the shape `schemars` emits for every
+    /// nested named type, and the one #384 was about. Without following the
+    /// reference the synthesizer produced a wandering *number* for `value`,
+    /// which the validator on this same path then rejected: the round trip
+    /// below is what fails if the resolver goes away.
+    #[test]
+    fn a_ref_into_defs_synthesizes_the_referenced_shape() {
+        let schema = TypeSchema::json_schema(json!({
+            "type": "object",
+            "required": ["name", "value"],
+            "properties": {
+                "name": { "type": "string" },
+                "value": { "$ref": "#/$defs/TelemetryValue" },
+            },
+            "$defs": {
+                "TelemetryValue": {
+                    "oneOf": [
+                        { "type": "object",
+                          "required": ["type", "value"],
+                          "properties": {
+                              "type": { "const": "counter", "type": "string" },
+                              "value": { "type": "integer", "minimum": 0 } } },
+                        { "type": "object",
+                          "required": ["type", "value"],
+                          "properties": {
+                              "type": { "const": "gauge", "type": "string" },
+                              "value": { "type": "number" } } },
+                    ],
+                },
+            },
+        }));
+        let registry = DecoderRegistry::new();
+        let synth = Synth::new(7);
+        let v = synth.instance(&schema, 3).expect("json-schema synthesizes");
+        assert!(
+            v["value"].is_object(),
+            "the reference resolved to the enum, not to a placeholder number: {v}"
+        );
+        assert_eq!(v["value"]["type"], "counter", "the first branch, satisfied");
+
+        let bytes = registry
+            .encode(&schema, &v, &WireEncoding::Json)
+            .unwrap_or_else(|e| panic!("{v} refused: {e}"));
+        let back = registry
+            .decode(&schema, &WireEncoding::Json, &bytes)
+            .unwrap();
+        assert_eq!(back.verdict, zenkey::schema::validate::Verdict::Valid);
     }
 
     /// Same (seed, tick) → same instance; different tick → the numerics move.
