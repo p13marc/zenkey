@@ -3,7 +3,7 @@
 //! Both are windows onto one subject slot, so both take `&mut SubjectSlot`
 //! and nothing else (#257: the routing from a `SlotId` to the slot happens
 //! once, in [`super::update`]). That is the finding, not an economy: nine of
-//! the eleven panes have state to dock when #180 arrives, and these two have
+//! the eleven panes had state to dock when #180 landed, and these two had
 //! nothing.
 //!
 //! `Deployment` is here only for the chart rebuild, which needs the registry's

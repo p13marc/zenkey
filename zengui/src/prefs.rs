@@ -117,8 +117,8 @@ pub enum DockRole {
     /// The session's parallel streams (#183): echo, publish log, doctor,
     /// replay.
     Activity,
-    /// The tools: call, publish, nodes, admin — until #184 merges the first
-    /// two into Send.
+    /// The tools: Send, nodes, admin — #184 merged call and publish into the
+    /// one Send form.
     Workbench,
 }
 
