@@ -6,13 +6,21 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.26** (2026-08-25; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.27** (2026-08-28; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.27** (2026-08-28) — the field-evidence batch: frame age also
+  separates a congested producer from a lossy link, and nothing else can —
+  both present as sequence gaps with every producer-side drop counter at
+  zero (07 §1.3, informative, with the measurement); the storage capability
+  pair is per *storage*, not per backend, so replication partitions by
+  storage mode, a `redb` row joins the volume table with its
+  not-yet-shipped status stated, and the InfluxDB rows gain the
+  one-base64-string-field caveat that decides the choice (09 §2.1–§2.3).
 - **v1.26** (2026-08-25) — the media-consumer batch: `frame` loses
   `express` and `alert` keeps it (04 §3, the first wire-observable
   change since ratification); the stream control surface is the two
@@ -29,10 +37,6 @@ what changed and what deliberately did not — is
   incumbent-channel rows moved to the profile chapter (11), five
   code-enforced strictnesses adopted into text, and the changelog moved
   to [CHANGELOG.md](CHANGELOG.md).
-- **v1.24** (2026-08-23) — observer conformance becomes chapter
-  [13](13-observer-conformance.md) (the judgment shape, O1–O7,
-  `.zrec`, cutover acceptance); [09](09-operations.md) returns to a
-  purely informative cookbook, tombstones keeping old citations alive.
 
 ---
 

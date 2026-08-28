@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21 and v1.24 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24 and v1.27 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.
@@ -173,19 +173,36 @@ Notes:
 ### 2.1 Choosing volumes
 
 A backend advertises a capability pair — *persistence* (volatile/durable)
-× *history* (latest/all) — and the class semantics pick it:
+× *history* (latest/all) — and the class semantics pick it. The pair is not
+always a property of the *backend*: a backend may offer both history modes
+and take the choice **per storage** (v1.27), in which case one volume can
+hold latest-mode and all-mode storages side by side and the rest of this
+section partitions by the storage's mode, not by its volume.
 
 | Volume | Capability | Use for | Caveats |
 |---|---|---|---|
 | `memory` (bundled) | volatile · latest | seed-only deployments, testing | gone on router restart — late joiners lose their seed until state refreshes |
 | `fs` / `rocksdb` | durable · latest | `latest`, `catalog` — the LWW truth stores | out-of-tree plugins, version-matched to the router |
-| `influxdb` | durable · all | `timeseries`, `events`, `pdns_history` — anything whose value is the *sequence* | retention lives in the database (RP), not zenoh config |
+| `influxdb` | durable · all | `timeseries`, `events`, `pdns_history` — anything whose value is the *sequence* | retention lives in the database (RP), not zenoh config. **A sample's payload is stored as one string field, base64-encoded when binary**: a CBOR-serialized deployment gets a durable, time-indexed byte log — useful for `_time`-ranged GETs — and *not* a queryable time-series database. `SELECT mean(…)` over a payload field is not available (v1.27) |
+| `redb` | durable · **per storage** (latest or all) | any of them; all-mode for `timeseries`, latest-mode for `latest`/`catalog`/`events` | out-of-tree, version-matched. **Retention is in the backend** — the one row here that does not need the "retention is the database's, and Zenoh's `garbage_collection` is not it" caveat the other durable rows carry ([§2.3](#23-garbage-collection--tombstone-lifetime)). Specified but **not yet shipped** at v1.27 — see the status note under the table before configuring it |
 
 Storages are read-write by construction (there is no `read_only` field);
 restrict who can write *into* a storage's selector with ACL, not storage
 config. Out-of-order and wildcard writes are safe: the storage applies
 updates by timestamp (an outdated sample is discarded, a wildcard delete
 still masks a slower concrete put).
+
+> **Status of the `redb` row (v1.27).** It is listed because the choice it
+> changes is a *deployment* choice — an embedded, pure-Rust, durable backend
+> that implements retention removes the reason the `events` and `timeseries`
+> storages carry the warnings they do — and a table that omitted it would
+> keep sending readers to InfluxDB for reasons that are about to stop
+> holding. But the all-mode and retention work is **specified and not yet
+> shipped** (`zenoh-backend-redb` issues #10 and #11). Until it is, treat
+> this row as what to plan for, not as what to configure: a storage
+> configured `history: "all"` against a build without it gets latest-mode
+> semantics, which for `timeseries` means one sample per key and a silently
+> empty history.
 
 ### 2.2 Replication (HA for the seed store)
 
@@ -210,9 +227,20 @@ latest: {
 Rules: every replica MUST use the **identical** `key_expr`,
 `strip_prefix`, and replication parameters (divergent parameters cause
 digest storms, not errors); replication requires timestamps and works
-**only on latest-value backends** — the influx history storages do not
-replicate at the Zenoh layer, their availability is the database's
-concern (cluster the database, or accept a history gap on router loss).
+**only on latest-value storages**. Anti-entropy aligns one value per key,
+which is the whole of a latest-mode storage's content and a projection of an
+all-mode one's — so an all-mode storage cannot participate, and configuring
+`replication` on one is a misconfiguration a deployment should be told about
+rather than left to discover. The influx history storages do not replicate
+at the Zenoh layer; their availability is the database's concern (cluster
+the database, or accept a history gap on router loss).
+
+This partitions by **storage mode, not by backend** (v1.27, revised). Until
+one backend offered both modes the two readings agreed, and the rule could
+be stated as "latest-value *backends*". They no longer agree: a `redb`
+volume may hold three latest-mode storages that replicate and one all-mode
+`timeseries` storage that does not, and the mode is the storage's, not the
+volume's ([§2.1](#21-choosing-volumes)).
 
 A **replicated, fully-covering** `latest` storage is also the one place
 `complete: true` is *right*: it lets the router answer any state GET from
@@ -229,6 +257,16 @@ This is the knob that enforces the tombstone-visibility row of the
 staleness contract ([04-planes.md §1.2](04-planes.md)): `lifespan` ≥ the
 longest `ttl_s` in the registry, else a slow replica may resurrect a
 retired key.
+
+**It is not a retention policy, and there is no other one in Zenoh** — worth
+stating because the names invite the opposite reading. `garbage_collection`
+prunes metadata; it never drops a value, so a storage's data grows until
+something outside Zenoh prunes it. For the durable rows of
+[§2.1](#21-choosing-volumes) that "something" is the database's own policy
+(an InfluxDB retention policy) or a schedule of your own against the volume
+directory — size the volume against the write rate either way. A backend that
+implements retention itself is the exception rather than the rule, and says
+so in its row (v1.27).
 
 ## 3. ACL recipes
 
