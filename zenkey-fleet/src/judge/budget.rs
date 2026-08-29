@@ -6,9 +6,9 @@
 //! makes an unbudgeted population-keyed subject a registry-review reject —
 //! and until this module nothing ever compared the declaration to reality.
 //! The join is deliberately engine-side: the doctor's
-//! `cardinality-over-declared` check and `zenctl topic list --budget` both
-//! read it, and a later zengui window gets its tree badge from the same
-//! numbers (deferred there; this chunk ships the engine and zenctl halves).
+//! `cardinality-over-declared` check, `zenctl topic list --budget` and
+//! zengui's tree badge (#221, `zengui/src/budget.rs`) all read the same
+//! numbers (#400).
 //!
 //! The honesty rules are the substance (RFC 09 §5.1):
 //!

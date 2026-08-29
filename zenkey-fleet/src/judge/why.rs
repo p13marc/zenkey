@@ -66,10 +66,11 @@
 //!   verbatim-plane key with no registry surface, no ttl declared, no sample
 //!   in hand to age — do not impair.
 //!
-//! Lives in the engine so both explorers ask one implementation. `zenctl why`
-//! ships in this chunk; the zengui "Why?" action — on a tree node and in the
-//! Inspector, rendering the same ladder — is **deferred to a later zengui
-//! window** and deliberately not sketched here.
+//! Lives in the engine so both explorers ask one implementation, and both
+//! now do: `zenctl why`, and the Inspector's Why section (#214,
+//! `zengui/src/view/why.rs`), which renders the same ladder on demand. The
+//! tree-node action this comment also promised is the one part that did not
+//! land — the entry point is the command palette (#400).
 
 use std::collections::BTreeMap;
 use std::time::Duration;

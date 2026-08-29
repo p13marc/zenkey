@@ -6,13 +6,22 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.27** (2026-08-28; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.28** (2026-08-29; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.28** (2026-08-29) — the shipped-backend batch: the storage history
+  mode is per *volume*, not per storage — the backend v1.27 wrote down ahead
+  of time has shipped, and chose differently, because Zenoh asks the volume
+  for its capability and the storage manager decides replication and
+  outdated-sample dropping from that answer; configuring `replication` on an
+  all-mode volume is a startup refusal rather than advice, and the `redb` row
+  loses its not-yet-shipped caveat and gains the three facts a deployment
+  needs — mandatory retention, kept tombstones, `_time`-ranged reads
+  (09 §2.1–§2.3).
 - **v1.27** (2026-08-28) — the field-evidence batch: frame age also
   separates a congested producer from a lossy link, and nothing else can —
   both present as sequence gaps with every producer-side drop counter at
@@ -31,12 +40,6 @@ what changed and what deliberately did not — is
   latency (07 §1.3); browser consumers and their two consequences
   (07 §1.4); retirement covers procedures (08 §3); the `streams`
   procedure is profile-local (11 §5.1).
-- **v1.25** (2026-08-23) — the reconciliation batch: one seeding story
-  (04 §3), the conditional-subject ledger specified (08 §6.1), the
-  framework state set defined once (04 §1.4), alert-key precision and the
-  incumbent-channel rows moved to the profile chapter (11), five
-  code-enforced strictnesses adopted into text, and the changelog moved
-  to [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
