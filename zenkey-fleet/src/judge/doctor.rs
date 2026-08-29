@@ -233,23 +233,52 @@ pub async fn run_doctor(
             None => std::borrow::Cow::Owned(crate::model::registry::SliceSet::default()),
         },
     };
+    // One per producer, for the consumers whose question *is* the producer:
+    // totality, the listen phase's store, the served count, and the field
+    // table's declared-path join. Where several hosts answered this is the
+    // first of them — arrival order, which is not a fact about the fleet, and
+    // is why the drift check below reads the attributed list instead (#398).
     let mut described: Vec<(String, zenkey::schema::SchemaSet)> = Vec::new();
+    // Every answer, attributed. `describe` is `@rpc/*/describe` — a wildcard
+    // origin — so this fans in across every host running the producer, and
+    // keeping one of them was how a schema disagreement came to name a
+    // producer and never a host (#398).
+    let mut described_by_origin: Vec<crate::model::decode::DescribedSchema> = Vec::new();
     let mut undescribed = 0usize;
+    // One `GetOpts` for the sweep rather than one per producer: the elision
+    // ledger is per-options, so a fresh one per slice could never accumulate
+    // the fan-out's cost.
+    let describe_opts = GetOpts::new(spec.timeout);
     for slice in slice_set.slices() {
         let key = rpc_key(base, slice, "describe")?;
-        let answers = fleet_get(fleet, &key, &GetOpts::new(spec.timeout)).await?;
-        let set = answers.into_iter().find_map(|a| match a.answer {
-            Answer::Value(bytes) => {
-                let cow = bytes.to_bytes();
-                std::str::from_utf8(&cow)
-                    .ok()
-                    .and_then(|t| zenkey::schema::SchemaSet::parse(t).ok())
+        let answers = fleet_get(fleet, &key, &describe_opts).await?;
+        let before = described_by_origin.len();
+        for a in answers {
+            let origin = a.origin;
+            let Answer::Value(bytes) = a.answer else {
+                continue;
+            };
+            let cow = bytes.to_bytes();
+            let Some(set) = std::str::from_utf8(&cow)
+                .ok()
+                .and_then(|t| zenkey::schema::SchemaSet::parse(t).ok())
+            else {
+                continue;
+            };
+            if described_by_origin.len() == before {
+                described.push((slice.name.clone(), set.clone()));
             }
-            Answer::Error { .. } => None,
-        });
-        match set {
-            Some(set) => described.push((slice.name.clone(), set)),
-            None => undescribed += 1,
+            described_by_origin.push(crate::model::decode::DescribedSchema {
+                origin,
+                producer: slice.name.clone(),
+                set,
+            });
+        }
+        // Nobody parseable answered for this producer. A producer where one
+        // host answered and another did not is *described* — the SHOULD is
+        // met — and the gap between them is the drift check's business.
+        if described_by_origin.len() == before {
+            undescribed += 1;
         }
     }
     // Totality through the one engine implementation (`totality_gaps`) —
@@ -266,13 +295,16 @@ pub async fn run_doctor(
             Some("RFC 08 §7"),
         ));
     }
-    for drift in crate::model::decode::schema_drift(&described) {
+    for drift in crate::model::decode::schema_drift(&described_by_origin) {
         let servers: Vec<String> = drift
             .servers
             .iter()
+            // `producer@origin`, because a type with two identities and no
+            // host to go and look at is the finding you can do least with
+            // (#398).
             .map(|s| match s.hash.as_option() {
-                Some(h) => format!("{} ({h})", s.producer),
-                None => format!("{} (no identity served)", s.producer),
+                Some(h) => format!("{}@{} ({h})", s.producer, s.origin),
+                None => format!("{}@{} (no identity served)", s.producer, s.origin),
             })
             .collect();
         // The two verdicts are not the same finding. A disagreement is a

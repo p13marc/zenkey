@@ -754,24 +754,78 @@ pub async fn schemas_for_type(
     out
 }
 
+/// One producer's served describe set, attributed to the host that answered
+/// (#398).
+///
+/// The origin cannot come from the set: a `SchemaSet` names the declaring app
+/// and its types, never the host serving them. It comes from the reply's own
+/// key, the way RFC 05 §2.1 requires every fan-in answer to be attributed —
+/// the same shape [`ServedSlice`](crate::ServedSlice) carries one plane over.
+///
+/// Nothing is deduplicated: N hosts running one producer are N entries, which
+/// is the point.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct DescribedSchema {
+    /// The origin that answered — the `h-…` host id, or a verbatim service
+    /// origin. `"?"` when the reply key did not parse under this base.
+    pub origin: String,
+    /// The producer the describe was addressed to. A different question from
+    /// `origin`, which is why both are here.
+    pub producer: String,
+    /// The set that origin served.
+    pub set: SchemaSet,
+}
+
+impl DescribedSchema {
+    /// One attributed describe answer.
+    ///
+    /// The type is `#[non_exhaustive]` like its sibling
+    /// [`ServedSlice`](crate::ServedSlice), so this is how a caller outside
+    /// the crate builds one — [`schema_drift`] is pure and documented to take
+    /// whatever replies were gathered, which is only true if they can be
+    /// spelled.
+    pub fn new(
+        origin: impl Into<String>,
+        producer: impl Into<String>,
+        set: SchemaSet,
+    ) -> DescribedSchema {
+        DescribedSchema {
+            origin: origin.into(),
+            producer: producer.into(),
+            set,
+        }
+    }
+}
+
 /// Compute drift across a described fleet. Pure — feed it whatever describe
 /// replies were gathered (the store's cache, or a fresh sweep).
 ///
-/// Reports a name **only when more than one producer serves it**, because
-/// with one server there is nothing to compare; a lone producer that served no
-/// identity is degraded caching (RFC 08 §7), not a disagreement.
+/// Reports a name **only when more than one answer serves it**, because with
+/// one there is nothing to compare; a lone answer that served no identity is
+/// degraded caching (RFC 08 §7), not a disagreement.
 ///
-/// Two producers that each served *no* identity used to compare equal — both
+/// **An answer, not a producer** (#398). The input used to be one entry per
+/// producer, so the only drift this could see was *between* producers — and a
+/// half-rolled-out sensor, whose two hosts serve one producer under two
+/// identities, collapsed to a single entry and was filtered out as having
+/// nothing to compare. That is the likeliest disagreement there is: a schema
+/// hash changes on any field addition. Each `(producer, origin)` pair is now
+/// its own claim, so the comparison a mid-rollout fleet actually needs — this
+/// host against that one, for the same producer — is the one this makes.
+///
+/// Two claims that each served *no* identity used to compare equal — both
 /// flattened to `""` — and were reported as agreeing: a "no drift" verdict on
 /// a question nobody answered (#370, RFC 09 §5.1 O4). They are
 /// [`DriftVerdict::Unjudgeable`] now, which is neither agreement nor a defect.
-pub fn schema_drift(described: &[(String, SchemaSet)]) -> Vec<SchemaDrift> {
+pub fn schema_drift(described: &[DescribedSchema]) -> Vec<SchemaDrift> {
     use std::collections::BTreeMap;
     let mut by_name: BTreeMap<&str, Vec<SchemaServer>> = BTreeMap::new();
-    for (producer, set) in described {
-        for (name, schema) in set.iter() {
+    for d in described {
+        for (name, schema) in d.set.iter() {
             by_name.entry(name).or_default().push(SchemaServer {
-                producer: producer.clone(),
+                producer: d.producer.clone(),
+                origin: d.origin.clone(),
                 hash: schema.hash().map(str::to_string).into(),
             });
         }
@@ -1383,9 +1437,9 @@ mod tests {
             )
             .build();
         let described = vec![
-            ("p1".to_string(), a),
-            ("p2".to_string(), b),
-            ("p3".to_string(), c),
+            DescribedSchema::new("h-aaaaaaaaaaaa", "p1", a),
+            DescribedSchema::new("h-aaaaaaaaaaaa", "p2", b),
+            DescribedSchema::new("h-aaaaaaaaaaaa", "p3", c),
         ];
         let drift = schema_drift(&described);
         assert_eq!(drift.len(), 1);
@@ -1406,8 +1460,8 @@ mod tests {
             .unwrap()
         };
         let silent = vec![
-            ("p1".to_string(), unhashed("app")),
-            ("p2".to_string(), unhashed("app")),
+            DescribedSchema::new("h-aaaaaaaaaaaa", "p1", unhashed("app")),
+            DescribedSchema::new("h-aaaaaaaaaaaa", "p2", unhashed("app")),
         ];
         let drift = schema_drift(&silent);
         assert_eq!(drift.len(), 1, "silence is reported, not read as agreement");
@@ -1420,9 +1474,10 @@ mod tests {
         // One that says and one that does not is likewise unjudgeable — the
         // half that answered cannot establish fleet-wide agreement alone.
         let mixed = vec![
-            ("p1".to_string(), unhashed("app")),
-            (
-                "p2".to_string(),
+            DescribedSchema::new("h-aaaaaaaaaaaa", "p1", unhashed("app")),
+            DescribedSchema::new(
+                "h-aaaaaaaaaaaa",
+                "p2",
                 SchemaSet::builder("app")
                     .entry(
                         "T",
@@ -1437,20 +1492,82 @@ mod tests {
 
         // A *lone* producer with no identity is nothing to compare against,
         // so it is not a drift question at all.
-        assert!(schema_drift(&[("p1".to_string(), unhashed("app"))]).is_empty());
+        assert!(
+            schema_drift(&[DescribedSchema::new(
+                "h-aaaaaaaaaaaa",
+                "p1",
+                unhashed("app")
+            )])
+            .is_empty()
+        );
 
         // All agreeing: no finding.
         let described = vec![
-            (
-                "p1".to_string(),
+            DescribedSchema::new(
+                "h-aaaaaaaaaaaa",
+                "p1",
                 set_with("T", serde_json::json!({"type":"object"})),
             ),
-            (
-                "p3".to_string(),
+            DescribedSchema::new(
+                "h-aaaaaaaaaaaa",
+                "p3",
                 set_with("T", serde_json::json!({"type":"object"})),
             ),
         ];
         assert!(schema_drift(&described).is_empty());
+    }
+
+    /// The case the producer-keyed shape could not see at all (#398): **one**
+    /// producer, two hosts, two identities — a half-rolled-out sensor, which
+    /// is the likeliest disagreement there is because a schema hash changes on
+    /// any field addition.
+    ///
+    /// Before this, both hosts collapsed into one entry and the name was
+    /// filtered out as having nothing to compare: a fleet mid-rollout read as
+    /// agreeing.
+    #[test]
+    fn one_producer_on_two_hosts_with_two_identities_is_a_disagreement() {
+        const OLD_HOST: &str = "h-aaaaaaaaaaaa";
+        const NEW_HOST: &str = "h-bbbbbbbbbbbb";
+        let described = vec![
+            DescribedSchema::new(
+                OLD_HOST,
+                "sysinfo",
+                set_with("Health", serde_json::json!({"type":"object"})),
+            ),
+            DescribedSchema::new(
+                NEW_HOST,
+                "sysinfo",
+                set_with("Health", serde_json::json!({"type":"string"})),
+            ),
+        ];
+        let drift = schema_drift(&described);
+        assert_eq!(drift.len(), 1, "{drift:#?}");
+        assert_eq!(drift[0].verdict, DriftVerdict::Disagree);
+        let hosts: Vec<&str> = drift[0].servers.iter().map(|s| s.origin.as_str()).collect();
+        assert_eq!(
+            hosts,
+            [OLD_HOST, NEW_HOST],
+            "both hosts are named — a producer name alone gives nobody to go and look at"
+        );
+        assert!(
+            drift[0].servers.iter().all(|s| s.producer == "sysinfo"),
+            "one producer: the origin is the axis that differs"
+        );
+        assert_ne!(drift[0].servers[0].hash, drift[0].servers[1].hash);
+    }
+
+    /// One host answering for one producer is still nothing to compare.
+    #[test]
+    fn a_lone_host_serving_a_name_is_not_a_disagreement() {
+        assert!(
+            schema_drift(&[DescribedSchema::new(
+                "h-aaaaaaaaaaaa",
+                "sysinfo",
+                set_with("Health", serde_json::json!({"type":"object"})),
+            )])
+            .is_empty()
+        );
     }
 
     /// Totality: a slice-referenced type absent from the served describe is a
