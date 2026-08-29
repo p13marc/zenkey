@@ -186,8 +186,16 @@ pub enum DeploymentMsg {
 /// every `match` handle and no test can reach. They arrive with the pane that
 /// can construct them.
 ///
-/// It also proposed `Key(PathId)`, and `PathId` is #251's path arena, which
-/// #177 deliberately deferred. A `String` until then.
+/// It also proposed `Key(PathId)`. #251's path arena landed — and a `String`
+/// is the answer anyway, for the reason [`crate::expansion`] gives for
+/// keeping strings too: arena ids are minted **per flatten** and mean nothing
+/// across rebuilds, while a `Subject` outlives every flatten by construction,
+/// since it is held until the selection changes and the tree is rebuilt on the
+/// bus tick. A `PathId` here would resolve to a *different key* than the one
+/// the user clicked — the same hazard the expansion set rejected, with a
+/// worse failure mode. [`crate::view::tree`] mints the display string at the
+/// click (`arena.display`), which is where the arena's own doc says it
+/// belongs (#402).
 ///
 /// ## One subject *per slot* since #257
 ///

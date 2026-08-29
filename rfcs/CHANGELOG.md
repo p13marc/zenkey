@@ -25,6 +25,32 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.28 (2026-08-29, the shipped-backend batch)** — one amendment, and it
+> is a correction rather than an addition: v1.27 wrote down a backend that
+> had not shipped yet, and what shipped chose differently. The row stops
+> describing a plan and starts describing something a reader can configure.
+>
+> | | Chapter | What |
+> |---|---|---|
+> | **G1** | [09 §2.1](09-operations.md), [09 §2.2](09-operations.md), [09 §2.3](09-operations.md) | **The history mode is per volume, not per storage — and the two rules that follow from it are refusals, not advice.** v1.27's F2 partitioned by *storage* mode on the strength of a backend still in specification (`zenoh-backend-redb` #10, #11). Both closed 2026-08-28, and the shipped design is per **volume**, for a reason the RFC could not have derived and should now carry: Zenoh asks the volume for its capability, and the storage manager makes two decisions from that answer that no storage can override — a storage declaring `replication` fails to start unless its volume reports latest-history, and in latest mode the manager discards outdated samples *before* the backend sees them while in all mode it forwards every one. A per-storage field over a shared volume would leave one of those silently wrong for half the storages on it, so a deployment wanting both modes runs two volumes on the one plugin. §2.2's "a misconfiguration a deployment should be told about" becomes what it is: a **startup refusal**, so there is no state in which a deployment believes it is replicating an all-mode storage. The `redb` row loses its "not yet shipped" caveat and its status note, and gains what the capability pair does not say — retention is **mandatory** on an all-mode storage and its absence refuses startup (as does a `retention` block that sets no limit, or one on a latest-mode volume, both of which read as protection that is not there); a deletion is kept as a tombstone at its timestamp and is never replied to; and a time-ranged read needs the `_time` selector parameter, without which a key returns only its latest sample. §2.3's retention pointer names `redb` as the exception it describes and says the policy is not optional there. |
+>
+> **What did *not* change.** No wire-observable change of any kind: no key
+> moved, no payload shape changed, no QoS axis or class default moved, and no
+> chapter outside 09 was touched. The volume table's other four rows stand
+> unedited, including v1.27's InfluxDB base64-string-field caveat, which is
+> the one that actually decides that choice. §2.2's replication *rules* — the
+> identical `key_expr`/`strip_prefix`/parameters, the `propagation_delay <
+> interval/2` bound, and `complete: true` on a replicated fully-covering
+> `latest` storage with its `@rpc` caveat — are untouched; what changed is
+> which noun the latest-value restriction attaches to and what happens when
+> you violate it. §2.3's `lifespan` ≥ longest `ttl_s` rule and its "
+> `garbage_collection` is not a retention policy" statement stand exactly as
+> v1.27 left them. The §2 recipe needs no edit: it uses `fs` and `influxdb`,
+> and its `events` comment is still true of the volume it names. Chapter
+> numbering is untouched and no section was renumbered.
+>
+> *Amends: 09.*
+
 > **v1.27 (2026-08-28, the field-evidence batch)** — two amendments, both
 > the same shape: a rule that was right, meeting a measurement or a backend
 > that makes its *reason* say more than the rule did. Neither changes an
