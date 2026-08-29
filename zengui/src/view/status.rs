@@ -29,6 +29,14 @@ pub struct UnionCounts {
     pub dirs_only: usize,
     /// Producers where the two disagreed.
     pub disagreements: usize,
+    /// Producers the fleet does not agree with **itself** about (#399):
+    /// several origins answered and did not say the same thing, and the set
+    /// kept one of the answers.
+    ///
+    /// A different question from `disagreements`, which is the fleet against
+    /// the checkout — and only a bus-derived set can ask it, which is why
+    /// `SliceSource::Dirs` has no such field rather than a zero.
+    pub self_disagreements: usize,
 }
 
 /// Where registry slices came from, if anywhere.
@@ -38,6 +46,8 @@ pub enum SliceSource {
     None,
     Bus {
         count: usize,
+        /// Producers several origins answered for, disagreeing (#399).
+        self_disagreements: usize,
     },
     Dirs {
         count: usize,
@@ -51,22 +61,43 @@ impl SliceSource {
     pub fn label(&self) -> String {
         match self {
             SliceSource::None => "registry: not loaded".to_string(),
-            SliceSource::Bus { count } => format!("registry: bus · {count} slices"),
+            SliceSource::Bus {
+                count,
+                self_disagreements,
+            } => {
+                let mut label = format!("registry: bus · {count} slices");
+                label.push_str(&split_clause(*self_disagreements));
+                label
+            }
+            // Files never asked which host serves what, so there is no clause
+            // here and no zero either (#399, RFC 13 §3 O4).
             SliceSource::Dirs { count } => format!("registry: dirs · {count} slices"),
             SliceSource::Union(UnionCounts {
                 from_bus,
                 dirs_only,
                 disagreements,
+                self_disagreements,
             }) => {
                 let mut label =
                     format!("registry: union · {from_bus} served + {dirs_only} dirs-only");
                 if *disagreements > 0 {
                     label.push_str(&format!(" · {disagreements} DISAGREE"));
                 }
+                label.push_str(&split_clause(*self_disagreements));
                 label
             }
             SliceSource::Failed(e) => format!("registry: failed — {e}"),
         }
+    }
+}
+
+/// The fleet disagreeing with itself, said apart from it disagreeing with the
+/// checkout (#399) — two different claims, so two different words.
+fn split_clause(self_disagreements: usize) -> String {
+    if self_disagreements == 0 {
+        String::new()
+    } else {
+        format!(" · {self_disagreements} FLEET-SPLIT")
     }
 }
 
@@ -392,10 +423,35 @@ mod tests {
     fn slice_source_distinguishes_absent_from_empty() {
         assert_ne!(
             SliceSource::None.label(),
-            SliceSource::Bus { count: 0 }.label()
+            SliceSource::Bus {
+                count: 0,
+                self_disagreements: 0,
+            }
+            .label()
         );
         assert!(SliceSource::None.label().contains("not loaded"));
-        assert!(SliceSource::Bus { count: 3 }.label().contains('3'));
+        assert!(
+            SliceSource::Bus {
+                count: 3,
+                self_disagreements: 0,
+            }
+            .label()
+            .contains('3')
+        );
+        // #399: the fleet disagreeing with itself is said apart from the
+        // fleet disagreeing with the checkout, and a set built from files
+        // never asked, so it says neither.
+        let split = SliceSource::Bus {
+            count: 3,
+            self_disagreements: 2,
+        }
+        .label();
+        assert!(split.contains("2 FLEET-SPLIT"), "{split}");
+        assert!(!split.contains("DISAGREE"), "a different claim: {split}");
+        assert!(
+            !SliceSource::Dirs { count: 3 }.label().contains("FLEET"),
+            "files have no origin to disagree across"
+        );
         assert!(SliceSource::Dirs { count: 7 }.label().contains("dirs"));
         assert!(SliceSource::Failed("boom".into()).label().contains("boom"));
     }

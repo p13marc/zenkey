@@ -1522,7 +1522,10 @@ fn a_tuning_apply_resizes_live_keeps_the_counters_and_forgets_on_registry() {
     // A registry change is a SliceSource change: it takes the same forget
     // path a base change does, so verdicts about the old slices are dropped…
     app.tree.expanded.open("v1/h-0123456789ab/state");
-    app.dep.slice_source = crate::view::status::SliceSource::Bus { count: 3 };
+    app.dep.slice_source = crate::view::status::SliceSource::Bus {
+        count: 3,
+        self_disagreements: 0,
+    };
     tune(
         &mut app,
         Tuning {
