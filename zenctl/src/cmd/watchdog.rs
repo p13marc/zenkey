@@ -14,8 +14,8 @@
 use std::io::Write as _;
 
 use anyhow::Result;
-use zenkey_fleet::judge::condition::{Condition, WatchdogSpec, run_watchdog};
-use zenkey_fleet::report::Transition;
+use zenkey_fleet::Sipper as _;
+use zenkey_fleet::judge::condition::{Condition, WatchdogSpec};
 
 use crate::Bus;
 
@@ -58,42 +58,45 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         spec.rules.len()
     );
     let mut out = std::io::stdout();
-    // The engine's emit callback cannot fail (#397 wants it to be a stream),
-    // so the first write error is kept here and answered for after the run —
-    // rather than dropped, which had this verb finish clean having emitted
-    // nothing (#360).
-    let mut write_failed: Option<std::io::Error> = None;
-    let mut emit = |t: &Transition| {
+    let fleet = args.fleet(&session);
+    // The engine yields transitions and returns the summary (#397), so the
+    // write happens where its error can be answered for. This verb used to
+    // keep the first `io::Error` in a local and answer after the run, because
+    // the engine's callback was infallible — a workaround every next caller
+    // would have rediscovered (#360).
+    let mut run = zenkey_fleet::watchdog(&fleet, slices.as_ref(), &store, &spec).pin();
+    let interrupted = loop {
+        let next = tokio::select! {
+            t = run.sip() => t,
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("watchdog: interrupted");
+                break true;
+            }
+        };
+        let Some(t) = next else { break false };
         // Tagged (`"row":"transition"`) like every non-sample line of an
         // explorer stream, so a consumer can select or skip them by kind.
-        if write_failed.is_some() {
-            return;
-        }
-        let r = writeln!(
+        let written = writeln!(
             out,
             "{}",
-            crate::render::Row::of("transition", t).into_line()
+            crate::render::Row::of("transition", &t).into_line()
         )
         .and_then(|()| out.flush());
-        if let Err(e) = r {
-            write_failed = Some(e);
-        }
-    };
-    let fleet = args.fleet(&session);
-    let summary = tokio::select! {
-        r = run_watchdog(&fleet, slices.as_ref(), &store, &spec, &mut emit) => r?,
-        _ = tokio::signal::ctrl_c() => {
-            eprintln!("watchdog: interrupted");
-            return Ok(());
-        }
-    };
-    if let Some(e) = write_failed {
-        // A closed pipe is the consumer saying "enough"; anything else is
-        // this verb's output not arriving, which is not a clean run.
-        if e.kind() != std::io::ErrorKind::BrokenPipe {
+        if let Err(e) = written {
+            // A closed pipe is the consumer saying "enough"; anything else is
+            // this verb's output not arriving, which is not a clean run.
+            if e.kind() == std::io::ErrorKind::BrokenPipe {
+                return Ok(());
+            }
             return Err(anyhow::Error::new(e).context("failed to write the transition stream"));
         }
+    };
+    if interrupted {
+        return Ok(());
     }
+    // Awaiting the run is what performs the acknowledged monitor teardown and
+    // hands back the summary — the two the callback shape had nowhere to put.
+    let summary = run.await?;
     eprintln!(
         "watchdog: {} tick(s), {} transition(s){}",
         summary.ticks,

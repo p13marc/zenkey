@@ -11,9 +11,10 @@
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
+use zenkey_fleet::Sipper as _;
 use zenkey_fleet::declare_publication;
-use zenkey_fleet::judge::condition::{Condition, WatchdogSpec, run_watchdog};
-use zenkey_fleet::report::{CondState, Transition};
+use zenkey_fleet::judge::condition::{Condition, WatchdogSpec, watchdog};
+use zenkey_fleet::report::{CondState, Transition, WatchdogSummary};
 
 mod util;
 use util::peer_pair;
@@ -22,6 +23,28 @@ const KEY: &str = "v1/h-dddddddddddd/state/demo/health";
 
 fn store_of() -> zenkey_fleet::model::decode::SchemaStore {
     zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(300))
+}
+
+/// Drain a whole run: every transition, then the summary (#397).
+///
+/// The three tests below used to hand `run_watchdog` an `emit` closure over
+/// an `mpsc::Sender` and read the channel after the join. That was the shape
+/// the callback forced — and the shape that had no way to report a failing
+/// emission. Sipping is the same drive without the channel, and the summary
+/// comes out of the `await` that also performs the monitor teardown.
+async fn drain(
+    session: &zenoh::Session,
+    slices: &zenkey_fleet::SliceSet,
+    spec: &WatchdogSpec,
+) -> zenkey_fleet::Result<(Vec<Transition>, WatchdogSummary)> {
+    let fleet = zenkey_fleet::Fleet::new(session, "");
+    let store = store_of();
+    let mut run = watchdog(&fleet, Some(slices), &store, spec).pin();
+    let mut transitions = Vec::new();
+    while let Some(t) = run.sip().await {
+        transitions.push(t);
+    }
+    run.await.map(|summary| (transitions, summary))
 }
 
 /// The staged fixture: a `silent-for` rule over a key that is quiet, then
@@ -43,7 +66,6 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
         .expect("declare");
     let matching = publication.matching_events().await.expect("events");
 
-    let (tx, rx) = std::sync::mpsc::channel::<Transition>();
     let watchdog = tokio::spawn({
         let b = b.clone();
         async move {
@@ -57,17 +79,7 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
                 ticks: Some(6),
                 timeout: Duration::from_millis(300),
             };
-            let mut emit = move |t: &Transition| {
-                let _ = tx.send(t.clone());
-            };
-            run_watchdog(
-                &zenkey_fleet::Fleet::new(&b, ""),
-                Some(&slices),
-                &store_of(),
-                &spec,
-                &mut emit,
-            )
-            .await
+            drain(&b, &slices, &spec).await
         }
     });
 
@@ -83,10 +95,9 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
     tokio::time::sleep(Duration::from_millis(1050)).await;
     publication.send(b"{}".to_vec(), None).await.expect("send");
 
-    let summary = watchdog.await.expect("join").expect("run");
+    let (transitions, summary) = watchdog.await.expect("join").expect("run");
     assert_eq!(summary.ticks, 6);
 
-    let transitions: Vec<Transition> = rx.try_iter().collect();
     let silence: Vec<&Transition> = transitions
         .iter()
         .filter(|t| t.rule.starts_with("silent-for"))
@@ -128,27 +139,14 @@ async fn origin_down_fires_on_an_absent_origin_and_only_once() {
     let (_a, b) = peer_pair().await;
     let slices = zenkey_fleet::SliceSet::default();
 
-    let (tx, rx) = std::sync::mpsc::channel::<Transition>();
     let spec = WatchdogSpec {
         rules: vec![Condition::parse("origin-down h-000000000000").expect("rule")],
         tick: Duration::from_millis(200),
         ticks: Some(3),
         timeout: Duration::from_millis(300),
     };
-    let mut emit = move |t: &Transition| {
-        let _ = tx.send(t.clone());
-    };
-    let summary = run_watchdog(
-        &zenkey_fleet::Fleet::new(&b, ""),
-        Some(&slices),
-        &store_of(),
-        &spec,
-        &mut emit,
-    )
-    .await
-    .expect("run");
+    let (transitions, summary) = drain(&b, &slices, &spec).await.expect("run");
     assert_eq!(summary.ticks, 3);
-    let transitions: Vec<Transition> = rx.try_iter().collect();
     assert_eq!(transitions.len(), 1, "{transitions:#?}");
     assert_eq!(transitions[0].to, CondState::Firing);
     assert!(
@@ -199,7 +197,6 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
         .expect("declare");
     let matching = publication.matching_events().await.expect("events");
 
-    let (tx, rx) = std::sync::mpsc::channel::<Transition>();
     let watchdog = tokio::spawn({
         let b = b.clone();
         async move {
@@ -218,17 +215,7 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
                 ticks: Some(3),
                 timeout: Duration::from_millis(500),
             };
-            let mut emit = move |t: &Transition| {
-                let _ = tx.send(t.clone());
-            };
-            run_watchdog(
-                &zenkey_fleet::Fleet::new(&b, ""),
-                Some(&slices),
-                &store_of(),
-                &spec,
-                &mut emit,
-            )
-            .await
+            drain(&b, &slices, &spec).await
         }
     });
 
@@ -249,11 +236,9 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
         }
     });
 
-    let summary = watchdog.await.expect("join").expect("run");
+    let (transitions, summary) = watchdog.await.expect("join").expect("run");
     flood.abort();
     assert_eq!(summary.ticks, 3);
-
-    let transitions: Vec<Transition> = rx.try_iter().collect();
     let dropped: Vec<&Transition> = transitions.iter().filter(|t| t.rule == "dropped").collect();
     assert_eq!(
         dropped.len(),
@@ -265,5 +250,52 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
         CondState::Ok,
         "baseline clean, and it stayed clean: {}",
         dropped[0].evidence
+    );
+}
+
+/// A consumer that gives up mid-run still gets the summary, and the monitor
+/// is still torn down (#397).
+///
+/// This is the coverage #360 was assumed to have and did not. That bug was a
+/// verb finishing clean having emitted nothing, because the engine's `emit`
+/// could not fail and `zenctl` had to stash the first write error and answer
+/// for it after the run. There was nothing to test, because there was no way
+/// to *stop*: the callback ran to the end whatever the caller thought of it.
+///
+/// Now stopping is just not sipping. Awaiting the run drains and discards
+/// what is left, performs the acknowledged teardown (#207/#336) and yields
+/// the summary — so a caller whose write failed returns its own error from
+/// where it happened and still leaves nothing half torn down.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_consumer_that_stops_sipping_still_gets_the_summary_and_the_teardown() {
+    let (_a, b) = peer_pair().await;
+    let slices = zenkey_fleet::SliceSet::default();
+    let spec = WatchdogSpec {
+        rules: vec![Condition::parse("origin-down h-000000000000").expect("rule")],
+        tick: Duration::from_millis(100),
+        ticks: Some(4),
+        timeout: Duration::from_millis(200),
+    };
+
+    let fleet = zenkey_fleet::Fleet::new(&b, "");
+    let store = store_of();
+    let mut run = watchdog(&fleet, Some(&slices), &store, &spec).pin();
+
+    // One transition, then the consumer decides it has had enough — the
+    // shape of `zenctl watchdog` hitting a write error on its first line.
+    let first = run.sip().await.expect("the baseline is said out loud");
+    assert_eq!(first.to, CondState::Firing);
+
+    let summary = tokio::time::timeout(util::SETTLE, run)
+        .await
+        .expect("the run must finish rather than block on an undrained consumer")
+        .expect("run");
+    assert_eq!(
+        summary.ticks, 4,
+        "the run completes its bound; giving up reading is not stopping it"
+    );
+    assert!(
+        summary.transitions >= 1,
+        "and the summary counts what it produced, read or not: {summary:?}"
     );
 }
