@@ -38,10 +38,21 @@ pub struct SchemaDump {
     pub missing: Asked<Vec<String>>,
 }
 
-/// One producer's identity claim for a type name.
+/// One producer's identity claim for a type name, attributed to the host that
+/// made it (#398).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SchemaServer {
     pub producer: String,
+    /// The origin that served this claim — the `h-…` host id, or a verbatim
+    /// service origin (#398).
+    ///
+    /// `describe` fans in across every host running the producer, so the
+    /// producer alone does not name a claimant. Without this a mid-rollout
+    /// fleet reported that a type had two identities and gave no host to go
+    /// and look at — the finding you can do least with. `"?"` when the reply
+    /// key did not parse under the base, the same lossy-but-stated convention
+    /// [`FleetAnswer::origin`](crate::FleetAnswer::origin) uses.
+    pub origin: String,
     /// The `sha256:` identity this producer served, if it served one.
     ///
     /// `NotAsked` means the describe reply carried **no** hash — which is not
@@ -81,4 +92,55 @@ pub struct SchemaDrift {
 pub struct TotalityGap {
     pub producer: String,
     pub missing: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The serialized `SchemaDrift` is a wire contract, and until #398 it had
+    /// no pin at all — the one report shape in this file with none.
+    ///
+    /// The `origin` added there is the load-bearing half: a script reading a
+    /// drift finding needs a host to act on, and a field that only *sometimes*
+    /// appeared would be worse than one that never did.
+    #[test]
+    fn schema_drift_json_shape_is_pinned() {
+        let drift = SchemaDrift {
+            type_name: "Health".into(),
+            servers: vec![
+                SchemaServer {
+                    producer: "sysinfo".into(),
+                    origin: "h-3fa9c2d41b7e".into(),
+                    hash: Asked::Asked("sha256:abc".into()),
+                },
+                SchemaServer {
+                    producer: "sysinfo".into(),
+                    origin: "h-8b1e07af22c9".into(),
+                    // Served no identity: absent on the wire, never `null` and
+                    // never `""` — the two spellings #370 pulled apart.
+                    hash: Asked::NotAsked,
+                },
+            ],
+            verdict: DriftVerdict::Disagree,
+        };
+        assert_eq!(
+            serde_json::to_value(&drift).expect("serialize"),
+            serde_json::json!({
+                "type_name": "Health",
+                "servers": [
+                    {
+                        "producer": "sysinfo",
+                        "origin": "h-3fa9c2d41b7e",
+                        "hash": "sha256:abc",
+                    },
+                    {
+                        "producer": "sysinfo",
+                        "origin": "h-8b1e07af22c9",
+                    },
+                ],
+                "verdict": "disagree",
+            })
+        );
+    }
 }
