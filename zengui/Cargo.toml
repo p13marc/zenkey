@@ -12,7 +12,7 @@ description = "Graphical bus explorer for Zenoh — key-agnostic, with keyspace-
 readme = "README.md"
 keywords = ["zenoh", "keyspace", "gui", "explorer"]
 categories = ["gui", "network-programming"]
-rust-version = "1.97"
+rust-version.workspace = true
 license = "Apache-2.0"
 
 [[bin]]
