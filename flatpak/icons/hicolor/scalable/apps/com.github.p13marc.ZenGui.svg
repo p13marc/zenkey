@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#62a0ea"/>
+      <stop offset="1" stop-color="#1a5fb4"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#241f31"/>
+      <stop offset="1" stop-color="#3d3846"/>
+    </linearGradient>
+  </defs>
+  <!-- rounded app tile -->
+  <rect x="8" y="8" width="112" height="112" rx="22" fill="url(#bg)"/>
+  <!-- explorer panel -->
+  <rect x="20" y="22" width="88" height="84" rx="10" fill="url(#panel)"/>
+  <!-- the bus: a mesh of keyspace nodes -->
+  <g stroke="#62a0ea" stroke-width="3" fill="none">
+    <path d="M 38 44 L 64 60 L 90 40"/>
+    <path d="M 64 60 L 46 86"/>
+    <path d="M 64 60 L 88 82"/>
+  </g>
+  <circle cx="38" cy="44" r="7" fill="#99c1f1"/>
+  <circle cx="90" cy="40" r="7" fill="#99c1f1"/>
+  <circle cx="46" cy="86" r="7" fill="#99c1f1"/>
+  <!-- the enriched node under the lens -->
+  <circle cx="64" cy="60" r="9" fill="#f6f5f4"/>
+  <!-- magnifier: the explorer looking at the bus -->
+  <g stroke="#f6f5f4" stroke-width="6" fill="none" stroke-linecap="round">
+    <circle cx="76" cy="72" r="20" stroke="#f6f5f4" fill="rgba(153,193,241,0.18)"/>
+    <path d="M 91 87 L 102 98"/>
+  </g>
+</svg>

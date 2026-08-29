@@ -1,0 +1,66 @@
+app-id: com.github.p13marc.ZenGui
+runtime: org.freedesktop.Platform
+runtime-version: "25.08"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: zengui
+
+# CI builds and tests this flatpak with SOFTWARE RENDERING ONLY -- the runner
+# has no GPU, so iced's wgpu renderer falls back to Mesa's llvmpipe from the
+# 25.08 Platform (zengui's own CI runs with WGPU_BACKEND=gl for the same
+# reason). A "no suitable adapter" symptom in a GPU-less environment is
+# expected, not a bug. Do NOT bundle GPU drivers here.
+
+finish-args:
+  # Wayland and X11 display access
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU acceleration for Iced/wgpu (harmless without a GPU: llvmpipe fallback)
+  - --device=dri
+  # zengui is a Zenoh client: it dials routers/peers on the network
+  # (`--connect tcp/...`, contexts, scouting)
+  - --share=network
+  # Shared explorer config (contexts in config.toml, shared with zenctl) and
+  # zengui's own prefs (zengui.toml) live in ~/.config/zenkey-explorer/
+  - --filesystem=xdg-config/zenkey-explorer:create
+  # Read-only fallback to the legacy zenctl config location
+  - --filesystem=xdg-config/zenctl:ro
+  # Completion/slice cache (a convenience cache, safe to delete)
+  - --filesystem=xdg-cache/zenkey-explorer:create
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/zengui/cargo
+    RUST_BACKTRACE: "1"
+    # Cap build parallelism INSIDE the sandbox: flatpak-builder does not
+    # inherit the workflow env, and the CI runner is memory-capped.
+    CARGO_BUILD_JOBS: "2"
+
+modules:
+  - name: zengui
+    buildsystem: simple
+    build-options:
+      # Allow network during build to fetch crates
+      build-args:
+        - --share=network
+    build-commands:
+      - cargo fetch --manifest-path Cargo.toml
+      - cargo build --release -p zengui
+      - install -Dm755 target/release/zengui ${FLATPAK_DEST}/bin/zengui
+      - install -Dm644 flatpak/com.github.p13marc.ZenGui.desktop ${FLATPAK_DEST}/share/applications/com.github.p13marc.ZenGui.desktop
+      - install -Dm644 flatpak/com.github.p13marc.ZenGui.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.github.p13marc.ZenGui.metainfo.xml
+      - install -Dm644 flatpak/icons/hicolor/scalable/apps/com.github.p13marc.ZenGui.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/com.github.p13marc.ZenGui.svg
+      - install -Dm644 flatpak/icons/hicolor/symbolic/apps/com.github.p13marc.ZenGui-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/com.github.p13marc.ZenGui-symbolic.svg
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          # never copy build state into the sandbox (a local target/ can be
+          # tens of GB; CI stages from a fresh checkout so these are empty)
+          - target
+          - builddir
+          - .flatpak-builder
+          - export-repo

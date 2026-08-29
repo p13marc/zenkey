@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ZenGui
+GenericName=Zenoh Bus Explorer
+Comment=Graphical bus explorer for Zenoh, with keyspace-v2 (zenkey) enrichment
+Keywords=zenoh;zenkey;bus;explorer;keyspace;pubsub;
+Icon=com.github.p13marc.ZenGui
+Exec=zengui
+Terminal=false
+Categories=Development;Network;
+StartupNotify=true
+StartupWMClass=zengui

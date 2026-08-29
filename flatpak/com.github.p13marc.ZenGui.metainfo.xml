@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<component type="desktop-application">
+  <id>com.github.p13marc.ZenGui</id>
+  <name>ZenGui</name>
+  <summary>Graphical bus explorer for Zenoh</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <developer id="com.github.p13marc">
+    <name>Marc Pardo</name>
+  </developer>
+  <description>
+    <p>
+      ZenGui is a desktop explorer for a live Zenoh bus, built with the Iced
+      toolkit. It subscribes key-agnostically, so it sees the wire as it
+      really is, and enriches what it finds with keyspace-v2 (zenkey)
+      structure where the deployment provides it.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Live subscription across the whole keyspace, or a chosen base</li>
+      <li>Payload decoding: protobuf (served descriptor sets), CDR and JSON</li>
+      <li>Keyspace-v2 enrichment: producers, slices and schemas</li>
+      <li>Contexts shared with the zenctl command-line explorer</li>
+      <li>Multi-window workspace with tear-off docks</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.github.p13marc.ZenGui.desktop</launchable>
+  <url type="homepage">https://github.com/p13marc/zenkey</url>
+  <url type="bugtracker">https://github.com/p13marc/zenkey/issues</url>
+  <url type="vcs-browser">https://github.com/p13marc/zenkey</url>
+  <content_rating type="oars-1.1" />
+  <branding>
+    <color type="primary" scheme_preference="light">#62a0ea</color>
+    <color type="primary" scheme_preference="dark">#1a5fb4</color>
+  </branding>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <categories>
+    <category>Development</category>
+    <category>Network</category>
+  </categories>
+  <keywords>
+    <keyword>zenoh</keyword>
+    <keyword>zenkey</keyword>
+    <keyword>bus</keyword>
+    <keyword>explorer</keyword>
+    <keyword>keyspace</keyword>
+    <keyword>iced</keyword>
+  </keywords>
+  <releases>
+    <release version="0.7.0" date="2026-08-29">
+      <description>
+        <p>First flatpak packaging of zengui.</p>
+      </description>
+    </release>
+  </releases>
+</component>
