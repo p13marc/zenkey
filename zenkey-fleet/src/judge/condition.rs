@@ -20,7 +20,7 @@
 //! speak the four-pole [`Judgement`] core, and [`CondState`] is this
 //! module's serde-stable **wire projection** of it — see its mapping doc.
 //!
-//! [`run_watchdog`] is the continuous observer over the vocabulary:
+//! [`watchdog`] is the continuous observer over the vocabulary:
 //! **foreground, explicitly launched, single-purpose, one process per
 //! invocation, no shared state** — not the hidden, auto-started,
 //! discovery-caching daemon the redesign ledger rejected
@@ -36,6 +36,7 @@ use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
 use crate::report::{CheckId, DoctorReport};
 use crate::report::{CondState, Judgement, Transition, WatchdogSummary};
+use sipper::{Straw, sipper};
 
 /// The closed condition vocabulary (#227), over the existing observation
 /// surface. Each variant names what *firing* means; the drop rules are in
@@ -709,331 +710,353 @@ pub struct WatchdogSpec {
 /// for the same reason: a watchdog must not become a load test.
 const DECODE_BUDGET: u8 = 2;
 
-/// Watch the rules and emit one [`Transition`] per genuine change, none per
+/// Watch the rules and yield one [`Transition`] per genuine change, none per
 /// unchanged tick. The subscriber set is declared before the first window
 /// opens (O4); every selector rule is judged per tick over the measured
 /// window, doctor and roster rules by one ask per tick each.
 ///
-/// **`emit` cannot fail, and a caller that can must say so itself** (#397).
-/// This is a callback rather than a [`Stream`](futures_core::Stream) — unlike
-/// every source in [`crate::bus`] since #343 — because producing a sequence
-/// here is a control-flow inversion, not an adapter: the tick's `select!`
-/// state cannot survive a `poll_next` return. Until that is done, a caller
-/// whose emission can fail has to keep the error and answer for it after the
-/// run, which is what `zenctl watchdog` does; dropping it instead let that
-/// verb finish clean having emitted nothing (#360).
-pub async fn run_watchdog(
-    fleet: &crate::Fleet<'_>,
-    slices: Option<&SliceSet>,
-    store: &SchemaStore,
-    spec: &WatchdogSpec,
-    emit: &mut (dyn FnMut(&Transition) + Send),
-) -> Result<WatchdogSummary> {
-    use crate::{FleetEvent, StreamItem};
+/// A [`Straw`] rather than a [`Stream`](futures_core::Stream) (#397), because
+/// a watchdog run is a sequence **and** a final value: transitions while it
+/// runs, a [`WatchdogSummary`] when it stops, and the acknowledged monitor
+/// teardown (#207/#336) in between. A bare `Stream` has room for the first
+/// only — which is why this stayed a callback through #343, and why the
+/// callback could not fail: `emit` was infallible by construction, so a
+/// caller whose emission *could* fail had to stash the error and answer for
+/// it after the run. Dropping it instead let `zenctl watchdog` finish clean
+/// having emitted nothing (#360).
+///
+/// Drive it with `sip` for the transitions and `await` for the summary:
+///
+/// ```ignore
+/// let mut run = watchdog(&fleet, slices, &store, &spec).pin();
+/// while let Some(transition) = run.sip().await {
+///     writeln!(out, "{}", serde_json::to_string(&transition)?)?;
+/// }
+/// let summary = run.await?;
+/// ```
+///
+/// The summary is the *output*, not an item, so a consumer that stops sipping
+/// early and awaits still gets the teardown — there is no `finish` to forget.
+pub fn watchdog<'a>(
+    fleet: &'a crate::Fleet<'a>,
+    slices: Option<&'a SliceSet>,
+    store: &'a SchemaStore,
+    spec: &'a WatchdogSpec,
+) -> impl Straw<WatchdogSummary, Transition, Error> + 'a {
+    sipper(async move |mut sender: sipper::Sender<Transition>| {
+        use crate::{FleetEvent, StreamItem};
 
-    let (session, base) = (fleet.session(), fleet.base());
+        let (session, base) = (fleet.session(), fleet.base());
 
-    #[derive(Default, Clone, Copy)]
-    struct TickCounters {
-        samples: u64,
-        invalid: u64,
-        checked: u64,
-        qos_mismatched: u64,
-        qos_judged: u64,
-        synthetic: u64,
-    }
-
-    /// One rule's whole per-run state, together.
-    ///
-    /// This was four `Vec`s held in lockstep by index — `states`,
-    /// `keyexprs`, `counters`, `last_sample` — across a hundred and thirty
-    /// lines, with nothing structurally preventing them from disagreeing in
-    /// length, and a `counters.fill(default())` reset that could silently
-    /// miss one of them (#352).
-    struct RuleRuntime {
-        rule: Condition,
-        /// The rule's selector, compiled once for sample attribution.
-        keyexpr: Option<zenoh::key_expr::KeyExpr<'static>>,
-        counters: TickCounters,
-        last_sample: Option<tokio::time::Instant>,
-        state: RuleState,
-    }
-
-    // Compiled *before* the monitor exists, so the `?` has nothing to tear
-    // down (#336).
-    let mut rules: Vec<RuleRuntime> = spec
-        .rules
-        .iter()
-        .map(|rule| {
-            Ok(RuleRuntime {
-                rule: rule.clone(),
-                keyexpr: rule
-                    .selector()
-                    .map(|sel| {
-                        zenoh::key_expr::KeyExpr::try_from(sel.to_string())
-                            .map_err(|e| Error::unaskable_from(format!("{sel:?}"), e))
-                    })
-                    .transpose()?,
-                counters: TickCounters::default(),
-                last_sample: None,
-                state: RuleState::new(rule.clone()),
-            })
-        })
-        .collect::<Result<_>>()?;
-    let mut watched: Vec<String> = Vec::new();
-    for rule in &spec.rules {
-        if let Some(sel) = rule.selector()
-            && !watched.iter().any(|s| s == sel)
-        {
-            watched.push(sel.to_string());
+        #[derive(Default, Clone, Copy)]
+        struct TickCounters {
+            samples: u64,
+            invalid: u64,
+            checked: u64,
+            qos_mismatched: u64,
+            qos_judged: u64,
+            synthetic: u64,
         }
-    }
 
-    let wants_doctor = spec
-        .rules
-        .iter()
-        .any(|r| matches!(r, Condition::DoctorCheck { .. }));
-    let wants_roster = spec
-        .rules
-        .iter()
-        .any(|r| matches!(r, Condition::OriginDown { .. }));
-    let wants_decode = spec
-        .rules
-        .iter()
-        .any(|r| matches!(r, Condition::InvalidPayload { .. }));
+        /// One rule's whole per-run state, together.
+        ///
+        /// This was four `Vec`s held in lockstep by index — `states`,
+        /// `keyexprs`, `counters`, `last_sample` — across a hundred and thirty
+        /// lines, with nothing structurally preventing them from disagreeing in
+        /// length, and a `counters.fill(default())` reset that could silently
+        /// miss one of them (#352).
+        struct RuleRuntime {
+            rule: Condition,
+            /// The rule's selector, compiled once for sample attribution.
+            keyexpr: Option<zenoh::key_expr::KeyExpr<'static>>,
+            counters: TickCounters,
+            last_sample: Option<tokio::time::Instant>,
+            state: RuleState,
+        }
 
-    // Warmed before the first tick and sealed for the run (#337): a decode
-    // inside the drain loop must never become a `describe` GET, because
-    // nothing attends the broadcast while one is in flight and the tick's
-    // verdict is about the window that lost the samples. zenctl hands this
-    // store over cold. Each tick's sweep re-warms whatever is still
-    // unserved — from beside the drain, where waiting costs nothing.
-    if wants_decode {
-        crate::model::decode::prewarm(fleet, store, slices).await;
-    }
-    let _sealed = store.seal();
+        // Compiled *before* the monitor exists, so the `?` has nothing to tear
+        // down (#336).
+        let mut rules: Vec<RuleRuntime> = spec
+            .rules
+            .iter()
+            .map(|rule| {
+                Ok(RuleRuntime {
+                    rule: rule.clone(),
+                    keyexpr: rule
+                        .selector()
+                        .map(|sel| {
+                            zenoh::key_expr::KeyExpr::try_from(sel.to_string())
+                                .map_err(|e| Error::unaskable_from(format!("{sel:?}"), e))
+                        })
+                        .transpose()?,
+                    counters: TickCounters::default(),
+                    last_sample: None,
+                    state: RuleState::new(rule.clone()),
+                })
+            })
+            .collect::<Result<_>>()?;
+        let mut watched: Vec<String> = Vec::new();
+        for rule in &spec.rules {
+            if let Some(sel) = rule.selector()
+                && !watched.iter().any(|s| s == sel)
+            {
+                watched.push(sel.to_string());
+            }
+        }
 
-    // Declared before the window opens — not-asked must never read as "no".
-    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
-    let mut events = monitor.events();
-    let monitor = monitor.watching(&watched).await?;
+        let wants_doctor = spec
+            .rules
+            .iter()
+            .any(|r| matches!(r, Condition::DoctorCheck { .. }));
+        let wants_roster = spec
+            .rules
+            .iter()
+            .any(|r| matches!(r, Condition::OriginDown { .. }));
+        let wants_decode = spec
+            .rules
+            .iter()
+            .any(|r| matches!(r, Condition::InvalidPayload { .. }));
 
-    let started = tokio::time::Instant::now();
-    let mut last_drop: Option<tokio::time::Instant> = None;
-    let mut dropped_tick: u64 = 0;
-    // Bounded (#107): the watchdog runs until stopped, so an unbounded
-    // per-key map here is a leak on any bus with churning keys. Evictions
-    // ride the summary (O6).
-    let mut facts_cache = crate::model::facts::FactsCache::default();
-    let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
+        // Warmed before the first tick and sealed for the run (#337): a decode
+        // inside the drain loop must never become a `describe` GET, because
+        // nothing attends the broadcast while one is in flight and the tick's
+        // verdict is about the window that lost the samples. zenctl hands this
+        // store over cold. Each tick's sweep re-warms whatever is still
+        // unserved — from beside the drain, where waiting costs nothing.
+        if wants_decode {
+            crate::model::decode::prewarm(fleet, store, slices).await;
+        }
+        let _sealed = store.seal();
 
-    let mut summary = WatchdogSummary {
-        ticks: 0,
-        transitions: 0,
-        facts_evicted: 0,
-    };
-    let mut last_eval = started;
-    let mut closed = false;
-    loop {
-        let deadline = last_eval + spec.tick;
-        // The tick's bus work runs **beside** the drain, not after it (#338).
-        //
-        // A roster GET, a registry sweep, per-producer describes and state
-        // snapshots take seconds, and every one of them used to happen with
-        // the drain loop stopped — so the broadcast overflowed, and because
-        // `dropped_tick` was reset immediately afterwards, the loss was
-        // billed to the *following* window. In the one tool whose entire
-        // product is a per-window verdict.
-        //
-        // Now the sweep is a future the drain selects on: sampling never
-        // stops, and a sweep that outlives the tick period simply widens this
-        // window — `window_s` is measured from `last_eval`, never assumed —
-        // so the drops land in the tick that incurred them.
-        let sweep = async {
-            let doctor = if wants_doctor {
-                Some(
-                    crate::judge::doctor::run_doctor(
-                        fleet,
-                        slices,
-                        &crate::judge::doctor::DoctorSpec {
-                            deep: false,
-                            sample: None,
-                            timeout: spec.timeout,
-                            listen: None,
-                        },
-                    )
-                    .await
-                    .map_err(|e| e.to_string()),
-                )
-            } else {
-                None
-            };
-            let roster = if wants_roster {
-                Some(
-                    crate::bus::roster::roster(fleet, spec.timeout)
+        // Declared before the window opens — not-asked must never read as "no".
+        let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+        let mut events = monitor.events();
+        let monitor = monitor.watching(&watched).await?;
+
+        let started = tokio::time::Instant::now();
+        let mut last_drop: Option<tokio::time::Instant> = None;
+        let mut dropped_tick: u64 = 0;
+        // Bounded (#107): the watchdog runs until stopped, so an unbounded
+        // per-key map here is a leak on any bus with churning keys. Evictions
+        // ride the summary (O6).
+        let mut facts_cache = crate::model::facts::FactsCache::default();
+        let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
+
+        let mut summary = WatchdogSummary {
+            ticks: 0,
+            transitions: 0,
+            facts_evicted: 0,
+        };
+        let mut last_eval = started;
+        let mut closed = false;
+        loop {
+            let deadline = last_eval + spec.tick;
+            // The tick's bus work runs **beside** the drain, not after it (#338).
+            //
+            // A roster GET, a registry sweep, per-producer describes and state
+            // snapshots take seconds, and every one of them used to happen with
+            // the drain loop stopped — so the broadcast overflowed, and because
+            // `dropped_tick` was reset immediately afterwards, the loss was
+            // billed to the *following* window. In the one tool whose entire
+            // product is a per-window verdict.
+            //
+            // Now the sweep is a future the drain selects on: sampling never
+            // stops, and a sweep that outlives the tick period simply widens this
+            // window — `window_s` is measured from `last_eval`, never assumed —
+            // so the drops land in the tick that incurred them.
+            let sweep = async {
+                let doctor = if wants_doctor {
+                    Some(
+                        crate::judge::doctor::run_doctor(
+                            fleet,
+                            slices,
+                            &crate::judge::doctor::DoctorSpec {
+                                deep: false,
+                                sample: None,
+                                timeout: spec.timeout,
+                                listen: None,
+                            },
+                        )
                         .await
                         .map_err(|e| e.to_string()),
-                )
-            } else {
-                None
-            };
-            // The schema warming rides here too (#337): still-unserved
-            // producers are re-asked at the store's own backoff, off the
-            // drain loop.
-            if wants_decode {
-                crate::model::decode::prewarm(fleet, store, slices).await;
-            }
-            (doctor, roster)
-        };
-        let mut sweep = std::pin::pin!(sweep);
-        let mut swept = None;
-        // One timer per tick, not one per drained sample (#346).
-        let tick_over = tokio::time::sleep_until(deadline);
-        tokio::pin!(tick_over);
-        while !closed {
-            let item = tokio::select! {
-                item = events.recv() => item,
-                // The tick cannot close before its own sweep has landed, and
-                // the drain keeps running until it does.
-                outcome = &mut sweep, if swept.is_none() => {
-                    swept = Some(outcome);
-                    continue;
+                    )
+                } else {
+                    None
+                };
+                let roster = if wants_roster {
+                    Some(
+                        crate::bus::roster::roster(fleet, spec.timeout)
+                            .await
+                            .map_err(|e| e.to_string()),
+                    )
+                } else {
+                    None
+                };
+                // The schema warming rides here too (#337): still-unserved
+                // producers are re-asked at the store's own backoff, off the
+                // drain loop.
+                if wants_decode {
+                    crate::model::decode::prewarm(fleet, store, slices).await;
                 }
-                () = &mut tick_over, if swept.is_some() => break,
+                (doctor, roster)
             };
-            match item {
-                Some(StreamItem::Event(FleetEvent::Sample(s))) => {
-                    let Ok(key) = zenoh::key_expr::KeyExpr::try_from(s.key.as_str()) else {
+            let mut sweep = std::pin::pin!(sweep);
+            let mut swept = None;
+            // One timer per tick, not one per drained sample (#346).
+            let tick_over = tokio::time::sleep_until(deadline);
+            tokio::pin!(tick_over);
+            while !closed {
+                let item = tokio::select! {
+                    item = events.recv() => item,
+                    // The tick cannot close before its own sweep has landed, and
+                    // the drain keeps running until it does.
+                    outcome = &mut sweep, if swept.is_none() => {
+                        swept = Some(outcome);
                         continue;
-                    };
-                    let synthetic = s
-                        .attachment
-                        .as_ref()
-                        .is_some_and(|a| crate::judge::common::is_synthetic_marker(&a.to_bytes()));
-                    // Decode once per sample (budgeted per key per tick),
-                    // shared by every invalid-payload rule the key matches.
-                    let mut verdict: Option<crate::Verdict> = None;
-                    for rt in rules.iter_mut() {
-                        let Some(sel) = &rt.keyexpr else { continue };
-                        if !sel.intersects(&key) {
+                    }
+                    () = &mut tick_over, if swept.is_some() => break,
+                };
+                match item {
+                    Some(StreamItem::Event(FleetEvent::Sample(s))) => {
+                        let Ok(key) = zenoh::key_expr::KeyExpr::try_from(s.key.as_str()) else {
                             continue;
-                        }
-                        rt.counters.samples += 1;
-                        if synthetic {
-                            rt.counters.synthetic += 1;
-                        }
-                        rt.last_sample = Some(tokio::time::Instant::now());
-                        match &rt.rule {
-                            Condition::InvalidPayload { .. } => {
-                                if verdict.is_none() {
-                                    let budget = decode_budget.entry(s.key.clone()).or_default();
-                                    if *budget < DECODE_BUDGET {
-                                        *budget += 1;
-                                        // An `invalid-payload` rule counts
-                                        // every not-`Valid` verdict the same
-                                        // way, so with no registry loaded
-                                        // `NoRegistry` (#246) changes no
-                                        // transition — only the reason the
-                                        // sample was not validated.
-                                        let d = crate::model::decode::decode_sample(
-                                            fleet,
-                                            store,
-                                            slices,
-                                            &s.key,
-                                            Some(&s.encoding),
-                                            &s.payload.to_bytes(),
-                                        )
-                                        .await;
-                                        verdict = Some(d.verdict);
-                                    }
-                                }
-                                if let Some(v) = &verdict {
-                                    rt.counters.checked += 1;
-                                    if !matches!(v, crate::Verdict::Valid) {
-                                        rt.counters.invalid += 1;
-                                    }
-                                }
+                        };
+                        let synthetic = s.attachment.as_ref().is_some_and(|a| {
+                            crate::judge::common::is_synthetic_marker(&a.to_bytes())
+                        });
+                        // Decode once per sample (budgeted per key per tick),
+                        // shared by every invalid-payload rule the key matches.
+                        let mut verdict: Option<crate::Verdict> = None;
+                        for rt in rules.iter_mut() {
+                            let Some(sel) = &rt.keyexpr else { continue };
+                            if !sel.intersects(&key) {
+                                continue;
                             }
-                            Condition::QosMismatch { .. } => {
-                                facts_cache.ensure(base, &s.key, slices);
-                                let facts = facts_cache.get(&s.key).expect("just ensured this key");
-                                if let crate::model::facts::Registration::Registered(sf) =
-                                    &facts.registration
-                                    && let Some(profile) = sf.declared_qos()
-                                {
-                                    rt.counters.qos_judged += 1;
-                                    if !s.qos_matches(profile) {
-                                        rt.counters.qos_mismatched += 1;
+                            rt.counters.samples += 1;
+                            if synthetic {
+                                rt.counters.synthetic += 1;
+                            }
+                            rt.last_sample = Some(tokio::time::Instant::now());
+                            match &rt.rule {
+                                Condition::InvalidPayload { .. } => {
+                                    if verdict.is_none() {
+                                        let budget =
+                                            decode_budget.entry(s.key.clone()).or_default();
+                                        if *budget < DECODE_BUDGET {
+                                            *budget += 1;
+                                            // An `invalid-payload` rule counts
+                                            // every not-`Valid` verdict the same
+                                            // way, so with no registry loaded
+                                            // `NoRegistry` (#246) changes no
+                                            // transition — only the reason the
+                                            // sample was not validated.
+                                            let d = crate::model::decode::decode_sample(
+                                                fleet,
+                                                store,
+                                                slices,
+                                                &s.key,
+                                                Some(&s.encoding),
+                                                &s.payload.to_bytes(),
+                                            )
+                                            .await;
+                                            verdict = Some(d.verdict);
+                                        }
+                                    }
+                                    if let Some(v) = &verdict {
+                                        rt.counters.checked += 1;
+                                        if !matches!(v, crate::Verdict::Valid) {
+                                            rt.counters.invalid += 1;
+                                        }
                                     }
                                 }
+                                Condition::QosMismatch { .. } => {
+                                    facts_cache.ensure(base, &s.key, slices);
+                                    let facts =
+                                        facts_cache.get(&s.key).expect("just ensured this key");
+                                    if let crate::model::facts::Registration::Registered(sf) =
+                                        &facts.registration
+                                        && let Some(profile) = sf.declared_qos()
+                                    {
+                                        rt.counters.qos_judged += 1;
+                                        if !s.qos_matches(profile) {
+                                            rt.counters.qos_mismatched += 1;
+                                        }
+                                    }
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
                     }
+                    Some(StreamItem::Dropped(n)) => {
+                        dropped_tick += n;
+                        last_drop = Some(tokio::time::Instant::now());
+                    }
+                    Some(_) => {}
+                    None => closed = true,
                 }
-                Some(StreamItem::Dropped(n)) => {
-                    dropped_tick += n;
-                    last_drop = Some(tokio::time::Instant::now());
-                }
-                Some(_) => {}
-                None => closed = true,
             }
-        }
 
-        // Evaluate the tick over the measured window, then say only what
-        // changed. The sweep has already landed unless the stream closed
-        // under it — in which case there is nothing left to drain, and
-        // awaiting it here costs the tick nothing.
-        let (doctor_outcome, roster_outcome) = match swept {
-            Some(outcome) => outcome,
-            None => sweep.await,
-        };
-        let now = tokio::time::Instant::now();
-        let at = crate::tape::record::rfc3339_now();
-        for rt in rules.iter_mut() {
-            let window = CondWindow {
-                window_s: (now - last_eval).as_secs_f64(),
-                observed_s: (now - started).as_secs_f64(),
-                samples: rt.counters.samples,
-                dropped: dropped_tick,
-                last_sample_ago_s: rt.last_sample.map(|t| (now - t).as_secs_f64()),
-                last_drop_ago_s: last_drop.map(|t| (now - t).as_secs_f64()),
-                invalid: rt.counters.invalid,
-                checked: rt.counters.checked,
-                qos_mismatched: rt.counters.qos_mismatched,
-                qos_judged: rt.counters.qos_judged,
-                synthetic: rt.counters.synthetic,
+            // Evaluate the tick over the measured window, then say only what
+            // changed. The sweep has already landed unless the stream closed
+            // under it — in which case there is nothing left to drain, and
+            // awaiting it here costs the tick nothing.
+            let (doctor_outcome, roster_outcome) = match swept {
+                Some(outcome) => outcome,
+                None => sweep.await,
             };
-            let eval = rt.rule.judge(&TickEvidence {
-                window: &window,
-                doctor: doctor_outcome
-                    .as_ref()
-                    .map(|o| o.as_ref().map_err(String::as_str)),
-                roster: roster_outcome
-                    .as_ref()
-                    .map(|o| o.as_ref().map_err(String::as_str)),
-            });
-            if let Some(transition) = rt.state.observe(eval, &at) {
-                summary.transitions += 1;
-                emit(&transition);
+            let now = tokio::time::Instant::now();
+            let at = crate::tape::record::rfc3339_now();
+            for rt in rules.iter_mut() {
+                let window = CondWindow {
+                    window_s: (now - last_eval).as_secs_f64(),
+                    observed_s: (now - started).as_secs_f64(),
+                    samples: rt.counters.samples,
+                    dropped: dropped_tick,
+                    last_sample_ago_s: rt.last_sample.map(|t| (now - t).as_secs_f64()),
+                    last_drop_ago_s: last_drop.map(|t| (now - t).as_secs_f64()),
+                    invalid: rt.counters.invalid,
+                    checked: rt.counters.checked,
+                    qos_mismatched: rt.counters.qos_mismatched,
+                    qos_judged: rt.counters.qos_judged,
+                    synthetic: rt.counters.synthetic,
+                };
+                let eval = rt.rule.judge(&TickEvidence {
+                    window: &window,
+                    doctor: doctor_outcome
+                        .as_ref()
+                        .map(|o| o.as_ref().map_err(String::as_str)),
+                    roster: roster_outcome
+                        .as_ref()
+                        .map(|o| o.as_ref().map_err(String::as_str)),
+                });
+                if let Some(transition) = rt.state.observe(eval, &at) {
+                    summary.transitions += 1;
+                    // Awaits, where the callback returned: the consumer's write
+                    // now happens *here*, so its error returns from where it
+                    // happened instead of being stashed for after the run (#360).
+                    // The emission point is the tick evaluation — the drain loop
+                    // above has already ended for this tick — so a slow consumer
+                    // widens the next window rather than stalling a drain (#338).
+                    sender.send(transition).await;
+                }
             }
+            // One reset, over one collection — the four-`Vec` version had a
+            // `counters.fill(..)` that could miss a sibling (#352).
+            for rt in rules.iter_mut() {
+                rt.counters = TickCounters::default();
+            }
+            dropped_tick = 0;
+            decode_budget.clear();
+            summary.ticks += 1;
+            if closed || spec.ticks.is_some_and(|n| summary.ticks >= n) {
+                break;
+            }
+            last_eval = now;
         }
-        // One reset, over one collection — the four-`Vec` version had a
-        // `counters.fill(..)` that could miss a sibling (#352).
-        for rt in rules.iter_mut() {
-            rt.counters = TickCounters::default();
-        }
-        dropped_tick = 0;
-        decode_budget.clear();
-        summary.ticks += 1;
-        if closed || spec.ticks.is_some_and(|n| summary.ticks >= n) {
-            break;
-        }
-        last_eval = now;
-    }
-    monitor.shutdown().await?;
-    summary.facts_evicted = facts_cache.evicted();
-    Ok(summary)
+        monitor.shutdown().await?;
+        summary.facts_evicted = facts_cache.evicted();
+        Ok(summary)
+    })
 }
 
 #[cfg(test)]

@@ -45,6 +45,12 @@
 //!   a loop is still the clearer shape for a drain that also selects on
 //!   something else, and every consumer in this workspace does.
 //!
+//!   [`watchdog`] is the one that is not a `Stream` but a
+//!   [`Straw`] (#397): it yields transitions *and* returns a
+//!   [`WatchdogSummary`], with the acknowledged monitor teardown between the
+//!   two. That is a shape `Stream` has no room for, and the only reason this
+//!   crate speaks a second streaming vocabulary at all.
+//!
 //! * **[`model`]** — everything that can do its job from values already in
 //!   hand. `facts`, `registry`, `project`, `stats`, `tree`, `skeleton`,
 //!   `diff`, `decode`, `retain`, plus the two mechanisms every long-running
@@ -129,7 +135,7 @@ pub use bus::body::{
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
-    CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, run_watchdog,
+    CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, watchdog,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -149,6 +155,10 @@ pub use model::decode::{
     StoreBounds, decode_sample, prewarm, schema_drift, schema_dump, schemas_for_type,
     totality_gaps,
 };
+/// The traits [`watchdog`] is driven through (#397), re-exported so a
+/// consumer needs them in scope without taking a direct dependency on
+/// `sipper` — and so the version this engine speaks is the one it hands out.
+pub use sipper::{Sender, Sipper, Straw};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use tape::generate::{

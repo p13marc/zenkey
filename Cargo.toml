@@ -45,6 +45,21 @@ arc-swap = "1"
 # receiver) cannot be a self-referential struct without unsafe.
 futures-core = "0.3"
 futures-util = { version = "0.3", default-features = false }
+
+# The watchdog is a *sequence plus a final value* (#397): transitions while it
+# runs, a `WatchdogSummary` when it stops, and an acknowledged monitor teardown
+# in between. A bare `Stream` has room for the first only, which is why the
+# callback survived #343 — and inverting it by hand meant a state machine
+# holding the tick's `select!` state, a pinned sweep future, a per-tick timer
+# and a boxed `recv`, for a body that reads perfectly well as an `async fn`.
+#
+# `Sipper` is that shape as a type, and it takes an async block, so the body
+# stays a body. This is a second streaming vocabulary beside `futures-core`,
+# which the tree otherwise refuses — it earns the exception by being the one
+# thing `Stream` cannot say. Its own deps (`futures` 0.3, `pin-project-lite`)
+# are already here, and `iced` re-exports it behind an off-by-default feature,
+# so a zengui watchdog surface would drive one with `Task::sip` and no bridge.
+sipper = "0.1"
 dirs = "6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

@@ -46,11 +46,14 @@ zenoh-ext = { workspace = true }
 tokio = { workspace = true }
 # The event sources are `Stream`s (#343). An engine whose consumers all reach
 # for streams should not make each of them rebuild the adapter — zengui carried
-# one purely to bridge, and `run_watchdog`'s callback could not feed a channel
-# and be a stream at once. Same `futures` 0.3 that zenoh and iced already pull,
-# so this is one trait across the tree, not a second.
+# one purely to bridge. Same `futures` 0.3 that zenoh and iced already pull, so
+# this is one trait across the tree for every source that is *only* a sequence.
 futures-core = { workspace = true }
 futures-util = { workspace = true }
+# The watchdog yields transitions *and* returns a summary (#397) — the shape
+# `futures-core` above has no room for. See the workspace manifest for why the
+# second vocabulary earns its place.
+sipper = { workspace = true }
 # The crate's own error surface (#348) — a published library owes its
 # consumers a type to match on, not a sentence to grep. `anyhow` left with
 # it: an engine that classifies its own failures has nothing to erase them
