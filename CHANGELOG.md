@@ -6,13 +6,99 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 |
-|---|---|---|
-| `zenkey` | 0.6.0 | **0.7.0** |
-| `zenkey-build` | 0.6.0 | **0.7.0** |
-| `zenkey-fleet` | 0.9.0 | **0.10.0** |
-| `zenctl` | 0.4.0 | **0.5.0** |
-| `zengui` | 0.2.0 | **0.3.0** |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 |
+|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** |
+
+---
+
+## 0.7.1 — what the fleet does not agree about (2026-08-29)
+
+A small release four days after a large one, and every item in it is a
+correction. Six issues, filed as one audit batch the day after 0.7.0's work
+settled, each recording something the code or the RFC got wrong, promised
+without delivering, or deferred to work that had since shipped.
+
+Two of them are the same defect on two planes, and the pattern is worth
+naming because it will recur: **a fan-in answer that drops the origin that
+gave it**. A fleet GET goes to `*/@rpc/<producer>/…`, so N hosts answer;
+keep one and you have a report that says a producer is wrong and gives
+nobody a host to go and look at — and worse, a producer whose two hosts
+disagree collapses to one claim and stops being a finding at all. The
+mid-rollout fleet, which is the case these checks exist for, read as
+agreeing.
+
+`zenkey-fleet` is breaking. `zenkey` and `zenkey-build` are untouched and
+are not republished; their 0.7.0 remains current.
+
+### The engine
+
+* **The describe sweep keeps the origin that answered** (#398). `describe`
+  fans in across every host running the producer, and the sweep kept the
+  first parseable reply. `SchemaServer` gains `origin`, `schema_drift`
+  compares **answers** rather than producers — so one producer on two hosts
+  at two hashes is a disagreement it can see — and the finding reads
+  `producer@origin (hash)`. `DescribedSchema` is the attributed value, the
+  opposite number of `ServedSlice`. *Breaking: `SchemaServer` has a new
+  field, `schema_drift` takes a new input type.*
+* **The watchdog is a `Sipper`** (#397). `run_watchdog`'s `emit` callback
+  was infallible by construction, so a caller that could fail while emitting
+  had to stash the error and answer for it after the run. It is now
+  `watchdog`, returning a `Straw<WatchdogSummary, Transition, Error>`:
+  transitions while it runs, the summary when it stops, the acknowledged
+  monitor teardown in between. `sip()` for the sequence, `await` for the
+  output — nothing to forget, and a consumer that gives up mid-run still
+  gets the teardown. *Breaking: renamed, no callback, returns a `Straw`. New
+  dependency `sipper` 0.1, re-exported so consumers need no direct one.*
+* **The registry collapse is three-state** (#399). `SliceSet::collapsed()`
+  returns `Asked<&[CollapsedProducer]>`: an empty list could not tell
+  *asked, and every producer had one origin* from *built from files, which
+  have no origin to collapse*. `CollapsedProducer` moves to `report/` —
+  it is rendered now, so it is a wire shape. *Breaking: accessor signature,
+  module, and the loss of `#[non_exhaustive]` on the move.*
+
+### The explorers
+
+* **`zenctl registry diff` stops printing `agree` about a comparison it made
+  against one of several answers** (#399). The diff carries the receipt, the
+  row names both hosts and both versions, and a served side that never came
+  off the bus says the question was never put rather than printing a silence
+  that reads as agreement.
+* **Every registry-aware verb says when its answer came from a pick**
+  (#399), through a fourth `resolve::notes` sentence emitted from both slice
+  loads. Worded to be unmistakable for the existing bus-versus-checkout
+  note: this one is the fleet against *itself*.
+* **zengui's status strip gains `· N FLEET-SPLIT`** beside `· N DISAGREE`
+  (#399). The `Dirs` source gets no such field rather than a zero — files
+  have no origin to disagree across, and never asked.
+* **`zenctl watchdog` returns a write error where it happens** (#397). The
+  stashed `io::Error` and the after-the-run `BrokenPipe` re-check are gone.
+
+### The convention (RFC v1.28)
+
+* **The storage history mode is per volume, not per storage** (#401).
+  v1.27 added a `redb` row to 09 §2.1 ahead of the backend, with a status
+  note promising to remove it on shipping. `zenoh-backend-redb` #10 and #11
+  closed 2026-08-28 — and chose differently, so this is a correction rather
+  than a caveat removal: Zenoh asks the *volume* for its capability, and the
+  storage manager decides replication and outdated-sample dropping from that
+  answer. §2.2's "a misconfiguration a deployment should be told about"
+  becomes the startup refusal it is, and the row gains what the capability
+  pair does not say — mandatory retention, kept tombstones, `_time`-ranged
+  reads.
+
+### Documentation
+
+* **Four forward references that had outlived their issues** (#400, #402).
+  Three engine module docs promised a zengui surface "deferred to a later
+  window"; all three had landed (#214, #223, #221). `Subject::Key`'s
+  deferral to the path arena is answered rather than deferred: arena ids are
+  per-flatten and a `Subject` outlives every flatten, so a `PathId` there
+  would resolve to a different key than the one clicked.
 
 ---
 

@@ -8058,7 +8058,7 @@ dependencies = [
 
 [[package]]
 name = "zenctl"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anstream",
  "anstyle",
@@ -8086,7 +8086,7 @@ dependencies = [
 
 [[package]]
 name = "zengui"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -8161,7 +8161,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fleet"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "arc-swap",
  "base64 0.23.1",

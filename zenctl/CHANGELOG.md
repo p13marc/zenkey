@@ -6,6 +6,48 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## 0.5.1 (2026-08-29) — what the fleet does not agree about
+
+No command moved and no flag changed. Three behaviour changes, all of them
+this tool saying something it used to leave out.
+
+**`registry diff` no longer prints `agree` about a comparison it made
+against one of several answers** (#399). The diff is computed from one slice
+per producer, so against a fleet mid-rollout it was computed from one
+arbitrary host's — and the producer that happened to match your checkout
+read as clean. A split producer now marks `✗` and details both hosts and
+both versions, the envelope carries `self_disagreeing`, and `--format json`
+gains a `collapsed` key.
+
+The key is **absent**, not `[]`, when the served side did not come off the
+bus: a diff computed from `--registry` files never asked how many origins
+serve each producer, and a note says so. Scripts keying on `collapsed`
+should treat absence as "not asked", never as "the fleet agrees".
+
+**Every registry-aware verb says when its answer came from a pick** (#399).
+A new stderr note, beside the existing bus-versus-checkout one and worded to
+be unmistakable for it: that one says the fleet disagrees with your
+checkout, this one says the fleet does not agree with itself. It appears on
+any verb that loads slices from the bus.
+
+**`watchdog` reports a write failure where it happens** (#397). It used to
+keep the first `io::Error` and answer for it after the run, because the
+engine's emit callback could not fail — so the run went on ticking against a
+consumer that had gone, emitting into a local variable. A closed pipe still
+exits 0 (`| head -1` is not a failure of the checks) and any other write
+error still exits non-zero, but both now **stop the run** at the failed
+write instead of at the tick bound, which is what Ctrl-C already did and
+what `doctor --transitions` has always done. The summary line is not printed
+in that case: the run did not finish, and a count of the ticks it happened
+to reach is not the summary of anything.
+
+**`doctor`'s `schema-drift` finding names the host** (#398), as
+`producer@origin (hash)`. And it fires in a case it previously could not see
+at all: one producer served by two hosts at two different schema hashes —
+a half-rolled-out sensor, which is the likeliest schema disagreement there
+is. The `check` id and the finding's `subject` are unchanged; the hosts ride
+in `evidence`.
+
 ## 0.5.0 (2026-08-25) — the command tree, the flags, and the exit contract (#307)
 
 **This is a breaking change with no alias layer and no deprecation shims.**

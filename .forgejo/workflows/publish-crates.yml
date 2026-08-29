@@ -38,11 +38,33 @@ jobs:
         with:
           cache-targets: false
       - run: cargo test --workspace --locked
+      # Publish what moved, in dependency order — a crate already on
+      # crates.io at this tree's version is skipped rather than attempted.
+      #
+      # The loop used to publish all three unconditionally, which was right
+      # only while every release moved every crate. 0.7.1 moves `zenkey-fleet`
+      # alone: `cargo publish -p zenkey` would have failed with "already
+      # uploaded", and because a `run:` block is `bash -e`, the lane would
+      # have died on the first crate and never reached the one that changed.
+      #
+      # A non-200/404 answer is a failure, not a skip and not a publish: an
+      # upload is irreversible, and "crates.io did not say" is not "this
+      # version is new". crates.io rejects a request with no User-Agent.
       - name: Publish in dependency order
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           for crate in zenkey zenkey-build zenkey-fleet; do
+            version=$(cargo metadata --no-deps --format-version 1 \
+              | python3 -c "import sys,json;print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='$crate'))")
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -A 'zenkey-release-lane (https://git.marcpardo.eu/marcpardo/zenkey)' \
+              "https://crates.io/api/v1/crates/$crate/$version")
+            case "$code" in
+              200) echo "$crate $version is already published — skipping"; continue ;;
+              404) echo "$crate $version is new — publishing" ;;
+              *)   echo "crates.io answered $code for $crate $version; refusing to guess"; exit 1 ;;
+            esac
             cargo publish -p "$crate" --locked
             sleep 30   # wait for index propagation before dependents publish
           done
