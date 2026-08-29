@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::report::SliceDisagreement;
-use crate::report::{ProducerDiff, RegistryDiff};
+use crate::report::{Asked, CollapsedProducer, ProducerDiff, RegistryDiff};
 use crate::{Error, Result};
 use zenkey::{Declared, RegistrySlice, parse_slice};
 
@@ -27,34 +27,6 @@ struct ParsedSubjects {
     idx: Vec<usize>,
     /// Contiguous, so `best_match` takes it borrowed.
     pats: Vec<zenkey::pattern::SubjectPattern>,
-}
-
-/// What one producer's fleet-wide answers looked like *before* a
-/// [`SliceSet`] kept one of them (#385).
-///
-/// A set is indexed by producer name, so N hosts running one producer
-/// collapse to one entry. For a decoder that is right — refining a key needs
-/// *a* slice per producer and which host served it is irrelevant. What was
-/// wrong is that the collapse was silent: the resulting set looked complete
-/// and was one arbitrary host's answer, and a `diff` computed from it read
-/// as fleet-wide truth. This is the receipt.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct CollapsedProducer {
-    /// The producer (or service) base name the collapse happened on.
-    pub producer: String,
-    /// Every origin that served a slice for it, in reply order.
-    pub origins: Vec<String>,
-    /// The `[registry] version` each of those served, index-parallel with
-    /// [`origins`](Self::origins).
-    pub versions: Vec<String>,
-    /// Whether every origin served byte-identical TOML.
-    ///
-    /// `false` is the finding: the fleet does not agree about what this
-    /// producer declares — mid-rollout, or a host running last month's build
-    /// — and this set kept one of the answers. Which one is arrival order,
-    /// which is not a fact about the fleet.
-    pub agreed: bool,
 }
 
 /// A set of registry slices, indexed by producer/service base name.
@@ -83,9 +55,10 @@ pub struct SliceSet {
     /// [`slices`](Self::slices) and [`entries`](Self::entries).
     by_name: std::collections::BTreeMap<String, usize>,
     /// Producers more than one origin answered for, and whether they agreed
-    /// (#385). Empty for a set built from files or from bare slices, which
-    /// have no origin to collapse — see [`collapsed`](Self::collapsed).
-    collapsed: Vec<CollapsedProducer>,
+    /// (#385) — `NotAsked` for a set built from files or from bare slices,
+    /// which have no origin to collapse (#399). See
+    /// [`collapsed`](Self::collapsed).
+    collapsed: Asked<Vec<CollapsedProducer>>,
 }
 
 /// Group one slice's subjects by class, parsing each pattern once. A subject
@@ -167,32 +140,42 @@ impl SliceSet {
             }
             set.push(s.slice, s.raw);
         }
-        set.collapsed = answers
-            .into_iter()
-            // One answer is not a collapse.
-            .filter(|(_, (origins, ..))| origins.len() > 1)
-            .map(
-                |(producer, (origins, versions, _, agreed))| CollapsedProducer {
-                    producer,
-                    origins,
-                    versions,
-                    agreed,
-                },
-            )
-            .collect();
+        // `Asked` even when the fold discarded nothing: a bus sweep in which
+        // every producer had one origin *has* asked, and must not read like a
+        // set built from files that never could (#399, RFC 13 §3 O4).
+        set.collapsed = Asked::Asked(
+            answers
+                .into_iter()
+                // One answer is not a collapse.
+                .filter(|(_, (origins, ..))| origins.len() > 1)
+                .map(
+                    |(producer, (origins, versions, _, agreed))| CollapsedProducer {
+                        producer,
+                        origins,
+                        versions,
+                        agreed,
+                    },
+                )
+                .collect(),
+        );
         set
     }
 
     /// Producers this set folded more than one origin's answer into, and
     /// whether those origins agreed (#385).
     ///
-    /// Empty means nothing was collapsed — which for a set built from files
-    /// or from bare slices is true by construction, since neither carries an
-    /// origin. It never means "the fleet agrees"; only a set built by
-    /// [`from_bus`](Self::from_bus) or [`from_served`](Self::from_served) has
-    /// asked (RFC 13 §3 O4).
-    pub fn collapsed(&self) -> &[CollapsedProducer] {
-        &self.collapsed
+    /// Three-state on purpose (#399). `NotAsked` is a set built from files or
+    /// from bare slices: neither carries an origin, so nothing *could* be
+    /// collapsed and no question was put. `Asked(&[])` is a bus sweep in
+    /// which every producer had exactly one origin answer — the fleet agrees,
+    /// and it agrees because it was asked. A bare empty slice conflated the
+    /// two, which is the O4 failure this receipt exists to avoid
+    /// (RFC 13 §3 O4).
+    pub fn collapsed(&self) -> Asked<&[CollapsedProducer]> {
+        match &self.collapsed {
+            Asked::NotAsked => Asked::NotAsked,
+            Asked::Asked(v) => Asked::Asked(v.as_slice()),
+        }
     }
 
     fn push(&mut self, slice: RegistrySlice, raw: String) {
@@ -275,10 +258,11 @@ impl SliceSet {
             raw,
             parsed,
             by_name,
-            // Bare slices carry no origin, so nothing here was collapsed
-            // *across* origins — a duplicated name shadows (first wins), and
-            // that is a different fact from a fleet disagreeing (#385).
-            collapsed: Vec::new(),
+            // Bare slices carry no origin, so nothing here *could* be
+            // collapsed across origins — a duplicated name shadows (first
+            // wins), and that is a different fact from a fleet disagreeing
+            // (#385). Not asked, therefore, and not "asked and agreed" (#399).
+            collapsed: Asked::NotAsked,
         }
     }
 
@@ -453,7 +437,16 @@ impl SliceSet {
                 (None, None) => unreachable!("name came from one of the two sets"),
             });
         }
-        RegistryDiff { producers }
+        RegistryDiff {
+            producers,
+            // The receipt of the fold that produced `served` (#399). Carried
+            // rather than recomputed: the diff above is *already* built from
+            // one slice per producer, so this is the record of what that cost.
+            collapsed: match served.collapsed() {
+                Asked::NotAsked => Asked::NotAsked,
+                Asked::Asked(c) => Asked::Asked(c.to_vec()),
+            },
+        }
     }
 }
 
@@ -531,7 +524,11 @@ mod tests {
         ]);
         assert_eq!(set.slices().len(), 1, "still one slice per producer");
 
-        let collapsed = set.collapsed();
+        let collapsed = set
+            .collapsed()
+            .as_option()
+            .copied()
+            .expect("a bus fold asked");
         assert_eq!(collapsed.len(), 1, "{collapsed:?}");
         assert_eq!(collapsed[0].producer, "alpha");
         assert_eq!(
@@ -548,21 +545,23 @@ mod tests {
             served("h-aaaaaaaaaaaa", A),
             served("h-bbbbbbbbbbbb", A),
         ]);
-        assert!(agreeing.collapsed()[0].agreed);
+        assert!(agreeing.collapsed().as_option().copied().expect("asked")[0].agreed);
 
-        // One answer is not a collapse, and neither is a set with no origins
-        // to collapse — which never means "the fleet agrees", only that
-        // nobody asked (O4).
-        assert!(
-            SliceSet::from_served(vec![served("h-aaaaaaaaaaaa", A)])
-                .collapsed()
-                .is_empty()
+        // One answer is not a collapse — but the sweep *asked*, and the two
+        // zeros are not the same zero (#399, RFC 13 §3 O4).
+        let one_host = SliceSet::from_served(vec![served("h-aaaaaaaaaaaa", A)]);
+        assert_eq!(
+            one_host.collapsed(),
+            Asked::Asked(&[][..]),
+            "asked, and nothing was collapsed"
         );
-        assert!(
-            SliceSet::from_slices(vec![parse_slice(A).unwrap()])
-                .collapsed()
-                .is_empty()
+        // A set with no origins to collapse never could have been asked.
+        assert_eq!(
+            SliceSet::from_slices(vec![parse_slice(A).unwrap()]).collapsed(),
+            Asked::NotAsked,
+            "not asked is not \"the fleet agrees\""
         );
+        assert_eq!(SliceSet::default().collapsed(), Asked::NotAsked);
     }
 
     #[test]

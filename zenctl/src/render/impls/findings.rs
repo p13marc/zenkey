@@ -163,12 +163,25 @@ impl Render for RegistryDiff {
         let mut e = serde_json::Map::new();
         e.insert("producers".into(), self.producers.len().into());
         e.insert("disagreeing".into(), self.disagreeing().into());
+        // Absent when the served side never came off the bus: a `0` there
+        // would be a count of a question nobody put (#399, RFC 13 §3 O4).
+        if self.collapsed.is_asked() {
+            e.insert("self_disagreeing".into(), self.self_disagreeing().into());
+        }
         e
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
         for p in &self.producers {
             out(Row::of("producer", p));
+        }
+        // One row per producer the fleet does not agree with itself about,
+        // tagged apart from the diff rows: it answers a different question
+        // (#399), and a consumer selects or skips it by kind.
+        for c in self.collapsed.as_deref().into_iter().flatten() {
+            if !c.agreed {
+                out(Row::of("collapsed", c));
+            }
         }
     }
 
@@ -184,7 +197,17 @@ impl Render for RegistryDiff {
                 (None, Some(l)) => format!("served — · local {l}"),
                 (None, None) => String::new(),
             };
-            if p.findings.is_empty() {
+            // The fleet disagreeing with *itself* about this producer (#399).
+            // The served version above is one arbitrary host's, so "agree"
+            // would be a claim about a comparison that used one of several
+            // answers — the row says which, rather than saying nothing.
+            let split = self
+                .collapsed
+                .as_deref()
+                .into_iter()
+                .flatten()
+                .find(|c| c.producer == p.producer && !c.agreed);
+            if p.findings.is_empty() && split.is_none() {
                 grid.row([
                     Cell::text(" "),
                     Cell::text(&p.producer),
@@ -197,6 +220,17 @@ impl Render for RegistryDiff {
                     Cell::text(versions),
                 ]);
                 grid.detail(p.findings.iter().map(|f| format!("      {f}")));
+                if let Some(c) = split {
+                    grid.detail(std::iter::once(format!(
+                        "      the fleet does not agree with itself: {}",
+                        c.origins
+                            .iter()
+                            .zip(c.versions.iter())
+                            .map(|(o, v)| format!("{o} serves {v}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )));
+                }
             }
         }
         t.grid(grid);
@@ -212,14 +246,41 @@ impl Render for RegistryDiff {
         }
         // A disagreement is a finding, not a verdict: the count is reported
         // and the exit code is not touched.
-        vec![
+        let mut notes = vec![
             Note::summary(format!(
                 "{} producer(s), {} disagreeing (a disagreement is a finding).",
                 self.producers.len(),
                 self.disagreeing()
             ))
             .cite("RFC 08 §6"),
-        ]
+        ];
+        // #399: the diff above is computed from one slice per producer, so
+        // where several hosts answered it used one of them. Saying which is
+        // the difference between a diff and a claim about the fleet.
+        match self.collapsed.as_deref() {
+            None => notes.push(
+                Note::coverage(
+                    "the served side did not come from the bus, so how many origins \
+                     serve each producer was never asked — this diff cannot \
+                     say whether the fleet agrees with itself",
+                )
+                .cite("RFC 13 §3 O4"),
+            ),
+            Some(collapsed) => {
+                let split = collapsed.iter().filter(|c| !c.agreed).count();
+                if split > 0 {
+                    notes.push(
+                        Note::caveat(format!(
+                            "{split} producer(s) the fleet does not agree with itself \
+                             about — this diff used one origin's answer per \
+                             producer, and which one is arrival order"
+                        ))
+                        .cite("RFC 08 §6"),
+                    );
+                }
+            }
+        }
+        notes
     }
 }
 

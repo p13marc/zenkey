@@ -209,6 +209,29 @@ pub mod notes {
         ))
     }
 
+    /// The fleet does not agree with **itself** about a producer (#399).
+    ///
+    /// A different claim from [`disagreement`], which is the fleet against
+    /// this checkout, and it has to read differently: this one says several
+    /// hosts answered for one producer and did not say the same thing. The
+    /// set kept one of the answers, and which one is arrival order — not a
+    /// fact about the fleet — so every slice-derived answer below it is
+    /// derived from a pick.
+    pub fn collapsed(producer: &str, origins: &[String], versions: &[String]) -> Note {
+        let who: Vec<String> = origins
+            .iter()
+            .zip(versions.iter())
+            .map(|(o, v)| format!("{o} serves v{v}"))
+            .collect();
+        Note::coverage(format!(
+            "the fleet does not agree with itself about {producer}: {} — \
+             this answer used one of them, and which one is arrival order \
+             (`zenctl registry diff --registry <dir>` names them)",
+            who.join(", ")
+        ))
+        .cite("RFC 13 §3 O4")
+    }
+
     /// Nobody answered the introspect sweep.
     ///
     /// An empty set is not "this deployment has no registry"; it is "nothing
@@ -404,5 +427,30 @@ mod tests {
         );
         let without = notes::disagreement("sysinfo", "2", "1", false).to_line();
         assert!(without.contains("dirs carry v1 (served wins"), "{without}");
+    }
+
+    /// #399: the fleet against *itself* is a different sentence from the
+    /// fleet against this checkout, and must not be mistakable for it.
+    #[test]
+    fn a_collapse_names_every_host_and_says_which_answer_was_used() {
+        let line = notes::collapsed(
+            "sysinfo",
+            &["h-3fa9c2d41b7e".to_string(), "h-8b1e07af22c9".to_string()],
+            &["2.0".to_string(), "1.0".to_string()],
+        )
+        .to_line();
+        assert!(
+            line.contains("h-3fa9c2d41b7e serves v2.0")
+                && line.contains("h-8b1e07af22c9 serves v1.0"),
+            "both hosts and both versions: {line}"
+        );
+        assert!(
+            line.contains("arrival order"),
+            "and that the pick is not a fact about the fleet: {line}"
+        );
+        assert!(
+            !line.contains("dirs"),
+            "this one is not about the checkout: {line}"
+        );
     }
 }

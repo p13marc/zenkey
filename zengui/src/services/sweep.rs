@@ -49,14 +49,14 @@ pub fn slices_union(
             SliceSet::from_union(&zenkey_fleet::Fleet::new(&session, &base), &dirs, timeout)
                 .await
                 .map(|out| {
-                    (
-                        Arc::new(out.set),
-                        crate::view::status::UnionCounts {
-                            from_bus: out.from_bus.len(),
-                            dirs_only: out.dirs_only.len(),
-                            disagreements: out.disagreements.len(),
-                        },
-                    )
+                    let counts = crate::view::status::UnionCounts {
+                        from_bus: out.from_bus.len(),
+                        dirs_only: out.dirs_only.len(),
+                        disagreements: out.disagreements.len(),
+                        // Read before the set moves into the `Arc` (#399).
+                        self_disagreements: self_disagreements(&out.set),
+                    };
+                    (Arc::new(out.set), counts)
                 })
                 .map_err(ServiceError::of)
         },
@@ -411,6 +411,21 @@ fn progress(
         p,
         coalesced.load(std::sync::atomic::Ordering::Relaxed),
     )))
+}
+
+/// Producers the fleet does not agree with itself about (#399).
+///
+/// Zero for a set that never asked — files carry no origin — which is why the
+/// status strip's `Dirs` variant has no such field at all rather than a zero
+/// this would hand it (RFC 13 §3 O4).
+pub fn self_disagreements(set: &SliceSet) -> usize {
+    set.collapsed()
+        .as_option()
+        .copied()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|c| !c.agreed)
+        .count()
 }
 
 #[cfg(test)]

@@ -113,7 +113,11 @@ async fn the_sweep_names_which_host_serves_which_registry() {
     let set = SliceSet::from_served(served);
     assert_eq!(set.slices().len(), 1, "one slice per producer, as before");
 
-    let collapsed = set.collapsed();
+    let collapsed = set
+        .collapsed()
+        .as_option()
+        .copied()
+        .expect("a bus-built set has asked");
     assert_eq!(collapsed.len(), 1, "{collapsed:?}");
     assert_eq!(collapsed[0].producer, "sysinfo");
     let mut origins = collapsed[0].origins.clone();
@@ -160,10 +164,83 @@ async fn agreeing_hosts_are_recorded_as_agreeing() {
     .expect("both origins should answer within 5s");
 
     let set = SliceSet::from_served(served);
-    let collapsed = set.collapsed();
+    let collapsed = set
+        .collapsed()
+        .as_option()
+        .copied()
+        .expect("a bus-built set has asked");
     assert_eq!(collapsed.len(), 1, "{collapsed:?}");
     assert!(
         collapsed[0].agreed,
         "two hosts serving identical TOML is a collapse with nothing lost"
     );
+}
+
+/// #399: the receipt reaches the report a user actually reads.
+///
+/// `registry diff` is computed from one slice per producer, so against a
+/// fleet mid-rollout it is computed from one arbitrary host's answer. It used
+/// to print that as fleet-wide truth. The diff now carries what the fold
+/// discarded, and — the half that is not a count — a diff whose served side
+/// never came off the bus says it never asked, rather than saying nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_diff_against_a_split_fleet_carries_what_the_fold_discarded() {
+    let (a, b) = peer_pair().await;
+    let _old = serve_introspect(&a, OLD_HOST, slice_toml("1.0", 30)).await;
+    let _new = serve_introspect(&a, NEW_HOST, slice_toml("2.0", 60)).await;
+
+    let fleet = Fleet::new(&b, "");
+    let served = tokio::time::timeout(util::SETTLE, async {
+        loop {
+            let set = SliceSet::from_bus(&fleet, Duration::from_secs(5))
+                .await
+                .expect("sweep");
+            let split = set
+                .collapsed()
+                .as_option()
+                .copied()
+                .expect("a bus set has asked");
+            if !split.is_empty() {
+                break set;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("both origins should answer within 5s");
+
+    // The local side agrees with whichever host won, so the producer's own
+    // diff row is clean — and that is exactly the case the silence was worst
+    // in: "agree" about a comparison made against one of two answers.
+    let local = SliceSet::from_dirs(&[]).expect("an empty dirs set");
+    let diff = served.diff(&local);
+    let collapsed = diff
+        .collapsed
+        .as_deref()
+        .expect("the served side came off the bus, so it asked");
+    assert_eq!(collapsed.len(), 1, "{collapsed:?}");
+    assert_eq!(collapsed[0].producer, "sysinfo");
+    let mut pairs: Vec<(&str, &str)> = collapsed[0]
+        .origins
+        .iter()
+        .map(String::as_str)
+        .zip(collapsed[0].versions.iter().map(String::as_str))
+        .collect();
+    pairs.sort_unstable();
+    assert_eq!(
+        pairs,
+        vec![(OLD_HOST, "1.0"), (NEW_HOST, "2.0")],
+        "both origins and both versions reach the report"
+    );
+    assert!(!collapsed[0].agreed);
+    assert_eq!(diff.self_disagreeing(), 1);
+
+    // The other half of O4: a diff computed from files never put the
+    // question, and its zero is not the same zero.
+    let offline = local.diff(&local);
+    assert!(
+        offline.collapsed.is_not_asked(),
+        "a dirs-built served side cannot have asked"
+    );
+    assert_eq!(offline.self_disagreeing(), 0);
 }

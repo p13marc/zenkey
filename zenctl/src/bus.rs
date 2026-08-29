@@ -220,6 +220,7 @@ impl Bus {
                 if set.slices().is_empty() {
                     eprintln!("{}", resolve::notes::no_slices(base).to_line());
                 }
+                announce_collapsed(&set);
                 self.cache(&set);
                 return Ok(set);
             }
@@ -264,6 +265,7 @@ impl Bus {
                 .to_line()
             );
         }
+        announce_collapsed(&out.set);
         self.cache(&out.set);
         Ok(out.set)
     }
@@ -346,6 +348,29 @@ fn open_error(f: zenkey_fleet::OpenFailure) -> anyhow::Error {
             crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e))
         }
         other => other.into_error().into(),
+    }
+}
+
+/// Say which producers the fleet does not agree with itself about (#399).
+///
+/// The set kept one origin's answer per producer, so every slice-derived
+/// answer under it — a refine, a `topic info`, a `diff` — is derived from a
+/// pick. That was silent for a library consumer until #385 and for a `zenctl`
+/// user until now.
+///
+/// Silent when the set never asked (files, or bare slices): a set with no
+/// origins to collapse has learned nothing about whether the fleet agrees,
+/// and saying so on every offline invocation would be noise, not honesty.
+/// The verbs that *render* the question — `registry diff` — carry the
+/// not-asked case in their own notes, where a machine consumer can read it.
+fn announce_collapsed(set: &zenkey_fleet::SliceSet) {
+    for c in set.collapsed().as_option().copied().unwrap_or(&[]) {
+        if !c.agreed {
+            eprintln!(
+                "{}",
+                resolve::notes::collapsed(&c.producer, &c.origins, &c.versions).to_line()
+            );
+        }
     }
 }
 

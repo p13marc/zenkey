@@ -578,6 +578,51 @@ fn a_registry_diff_dashes_the_side_that_has_no_version() {
     assert_data_eq!(
         table(&fx::registry_diff()),
         str![[r#"
+✗  catalog   registry 1.1
+      the fleet does not agree with itself: h-3fa9c2d41b7e serves 1.1, h-8b1e07af22c9 serves 1.0
+✗  sysinfo   served 1.1 · local 1.0
+      served declares telemetry disk/{mount}/inodes; local does not
+✗  parallax  served 1.3 · local —
+      no local slice for this producer
+
+"#]]
+    );
+}
+
+/// #399: `catalog` matches the checkout, so it used to read `agree` — while
+/// two hosts served it at different versions and the row was computed from
+/// one of them. The word is the lie, and it is gone where it would be one.
+///
+/// The pair below is the O4 split: a served side that never came off the bus
+/// cannot say whether the fleet agrees with itself, and must not print the
+/// silence as agreement.
+#[test]
+fn a_registry_diff_says_when_the_fleet_disagrees_with_itself() {
+    let asked = notes(&fx::registry_diff());
+    assert!(
+        asked.contains("does not agree with itself"),
+        "the fleet-vs-itself note must name the count: {asked}"
+    );
+    assert!(
+        asked.contains("arrival order"),
+        "and say which answer the diff used: {asked}"
+    );
+
+    let not_asked = notes(&fx::registry_diff_not_asked());
+    assert!(
+        not_asked.contains("never asked"),
+        "not asked is not \"the fleet agrees\": {not_asked}"
+    );
+    assert!(
+        !not_asked.contains("does not agree with itself"),
+        "and it is not a finding either: {not_asked}"
+    );
+    // The unasked side still renders the diff itself, and `catalog` is
+    // `agree` there — against the checkout, which is the only comparison
+    // that side actually made.
+    assert_data_eq!(
+        table(&fx::registry_diff_not_asked()),
+        str![[r#"
    catalog   registry 1.1   agree
 ✗  sysinfo   served 1.1 · local 1.0
       served declares telemetry disk/{mount}/inodes; local does not

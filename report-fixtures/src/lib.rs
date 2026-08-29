@@ -586,6 +586,12 @@ pub fn bench_report() -> BenchReport {
 
 /// One producer agreeing, one disagreeing, and one the bus serves that the
 /// checkout does not have — the `served x · local —` case.
+///
+/// Plus the case #399 exists for: `catalog` agrees with the checkout *and*
+/// two hosts serve it at different versions, so the row that reads "agree"
+/// is computed from one of them. A fixture where the two disagreements are
+/// on the same producer is the one that proves the renderer keeps them
+/// apart — the fleet against the checkout, and the fleet against itself.
 pub fn registry_diff() -> RegistryDiff {
     RegistryDiff {
         producers: vec![
@@ -610,6 +616,23 @@ pub fn registry_diff() -> RegistryDiff {
                 findings: vec!["no local slice for this producer".into()],
             },
         ],
+        collapsed: Asked::Asked(vec![CollapsedProducer {
+            producer: "catalog".into(),
+            origins: vec!["h-3fa9c2d41b7e".into(), "h-8b1e07af22c9".into()],
+            versions: vec!["1.1".into(), "1.0".into()],
+            agreed: false,
+        }]),
+    }
+}
+
+/// The same diff, from a served side that never came off the bus — so the
+/// collapse question was never put. The pair with [`registry_diff`] is what
+/// pins that "not asked" and "asked, and nothing collapsed" render and
+/// serialize differently (RFC 13 §3 O4).
+pub fn registry_diff_not_asked() -> RegistryDiff {
+    RegistryDiff {
+        collapsed: Asked::NotAsked,
+        ..registry_diff()
     }
 }
 

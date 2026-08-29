@@ -231,6 +231,7 @@ pub(crate) fn update(
             dep.slice_source = if dep.settings.registry.is_empty() {
                 SliceSource::Bus {
                     count: slices.slices().len(),
+                    self_disagreements: crate::services::sweep::self_disagreements(&slices),
                 }
             } else {
                 SliceSource::Dirs {
