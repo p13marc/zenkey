@@ -160,7 +160,11 @@ The demo is self-contained (no `zenohd`): `spray` listens and zengui connects
 straight to it (`just --list` for the recipes).
 
 CI gates live in `.forgejo/workflows/ci.yml`; the release and publish lanes in
-`release.yml` (tag push `vX.Y.Z`) and `publish-crates.yml` (manual dispatch).
+`release.yml` (tag push `X.Y.Z` — **bare, no `v`**, from 0.7.1 on; the
+`v`-prefixed tags up to `v0.7.0` are history and were not retagged) and
+`publish-crates.yml` (manual dispatch). Both also take a
+`workflow_dispatch`; publishing skips any crate whose version is already on
+crates.io, so a point release that moves one crate is a normal thing here.
 
 ## Architecture
 

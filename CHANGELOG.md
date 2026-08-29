@@ -18,6 +18,9 @@ Versions per crate, because they move independently:
 
 ## 0.7.1 — what the fleet does not agree about (2026-08-29)
 
+**Tagged `0.7.1`, not `v0.7.1`** — the tag scheme goes bare here (#412); see
+the build section below.
+
 A small release four days after a large one, and every item in it is a
 correction. Six issues, filed as one audit batch the day after 0.7.0's work
 settled, each recording something the code or the RFC got wrong, promised
@@ -90,6 +93,25 @@ are not republished; their 0.7.0 remains current.
   becomes the startup refusal it is, and the row gains what the capability
   pair does not say — mandatory retention, kept tombstones, `_time`-ranged
   reads.
+
+### The build, and how a release is tagged
+
+Not part of the audit batch — the fleet-uniformity rollout (#412, part of
+#407) landed in the same window and ships here.
+
+* **Tags are bare `X.Y.Z` from this release on**, not `vX.Y.Z`. 0.7.1 is the
+  first, and there is no retro-tagging: the `v`-prefixed tags up to and
+  including `v0.7.0` stay exactly as they are. `release.yml` also gains a
+  `workflow_dispatch` that re-releases an existing tag, so a lane that failed
+  on a runner rather than on the code no longer needs the tag deleted and
+  pushed again.
+* **The toolchain is pinned**: `rust-toolchain.toml` at 1.97, `rust-version =
+  "1.97"` in `[workspace.package]`, and all eight members inherit it. The
+  MSRV a consumer reads and the compiler CI uses are now one number.
+* **`cargo deny check` is a CI job**, with `deny.toml` as the single
+  supply-chain lint. Its advisory ignores are transitive through zenoh 1.10
+  and dated, to be re-checked on every zenoh bump.
+* `chacha20` moves 0.10.1 → 0.10.2, off a yanked release.
 
 ### Documentation
 
