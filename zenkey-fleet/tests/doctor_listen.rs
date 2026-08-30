@@ -124,6 +124,87 @@ async fn observed_qos_and_unregistered_traffic_become_findings() {
     assert_eq!(unreg[0].subject, "v1/h-abababababab/state/demo/undeclared");
 }
 
+/// A retirement is not a value: a `Delete` tombstone on a registered subject
+/// carries no payload, and judging its empty body as a document used to
+/// manufacture `payload-undecodable` out of a correct retire
+/// (zensight#830). Only the payload ladders skip tombstones — the QoS axes
+/// still ride the declared publisher and stay judged.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_tombstones_are_not_judged_as_payloads() {
+    let (a, b) = peer_pair().await;
+    let local = zenkey::parse_slice(SLICE).expect("slice");
+
+    // Serve a schema for the subject's type: without one the decode ladder
+    // stops at `NoSchema` and the bug this test pins could never fire.
+    let schema = zenkey::schema::SchemaSet::builder("t")
+        .entry(
+            "Health",
+            zenkey::schema::TypeSchema::json_schema(serde_json::json!({
+                "type": "object",
+            })),
+        )
+        .build()
+        .to_json();
+    let _describe = a
+        .declare_queryable("v1/h-abababababab/@rpc/demo/describe")
+        .callback(move |query| {
+            let payload = schema.clone();
+            tokio::spawn(async move {
+                let key = query.key_expr().clone();
+                query.reply(key, payload).await.expect("reply");
+            });
+        })
+        .await
+        .expect("describe queryable");
+
+    let publication = declare_publication(
+        &a,
+        "v1/h-abababababab/state/demo/health",
+        QosProfile::Transition,
+        None,
+    )
+    .await
+    .expect("declare");
+    // Retire continuously through the window — every sample the doctor sees
+    // on this key is a tombstone.
+    let t = tokio::spawn(async move {
+        for _ in 0..100 {
+            if publication.retire().await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    let report = run_doctor(
+        &Fleet::new(&b, ""),
+        Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
+        &spec(2),
+    )
+    .await
+    .expect("run_doctor");
+    t.abort();
+
+    let obs = report.observation.as_ref().expect("observation ran");
+    assert!(obs.samples > 0, "the window saw the tombstones");
+
+    let payload: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.check,
+                zenkey_fleet::report::CheckId::PayloadUndecodable
+                    | zenkey_fleet::report::CheckId::PayloadInvalid
+            )
+        })
+        .collect();
+    assert!(
+        payload.is_empty(),
+        "tombstones judged as values: {payload:?}"
+    );
+}
+
 const EVENTS_SLICE: &str = r#"
 [registry]
 version = "1.0"
