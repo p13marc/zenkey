@@ -6,13 +6,34 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 |
-|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 |
+|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged |
+
+---
+
+## 0.7.2 — a tombstone is not a value (2026-08-30)
+
+One fix, one crate: `zenkey-fleet` 0.11.1. Nothing else is republished.
+
+* **The doctor no longer judges `Delete` tombstones as payloads**
+  (zensight#830). A retirement rides the bus as a `Delete` sample with an
+  empty payload (RFC 04 §1.2); `observe_traffic` never looked at
+  `SampleView.kind`, so the empty body fell through the encoding sniff to
+  CBOR and ciborium's `UnexpectedEof` surfaced as a `payload-undecodable`
+  **error** against a correct retire. The alert plane is exactly where
+  put-then-retire is routine, so any fleet that clears an alert inside a
+  doctor window drew a manufactured error finding. Deletes now skip the
+  field-intelligence parse and the decode/validate ladder; the wire facts
+  about the publisher — QoS axes, registration, stamping, event rate —
+  stay judged, because a tombstone rides the same declared publisher and
+  can be wrong in all the same ways. The regression test had to *serve a
+  schema* to reproduce the bug: without one the ladder stops at `NoSchema`,
+  which is why no fixture ever hit it.
 
 ---
 

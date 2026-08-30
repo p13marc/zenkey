@@ -590,16 +590,26 @@ async fn observe_traffic(
                 if let Some(crate::StampProvenance::Foreign { stamper }) = s.stamped_by {
                     *foreign_stampers.entry(stamper.to_string()).or_default() += 1;
                 }
+                // A tombstone is a retirement, not a document (RFC 04 §1.2):
+                // a Delete carries no payload to read, decode, or validate,
+                // so the field and payload ladders skip it — judging the
+                // empty body as a value manufactures `payload-undecodable`
+                // out of a correct retirement (zensight#830). Everything
+                // that is a wire fact about the publisher — QoS axes,
+                // registration, stamping — still applies and stays judged.
+                let is_put = s.kind == zenoh::sample::SampleKind::Put;
                 // Same bound as `run_field`'s drain (#346): the parse is
                 // per sample by design, so the payload size is what has to be
                 // bounded, and the skip is counted rather than read as an
                 // absent document.
                 let bytes = s.payload.to_bytes();
-                if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
-                    fields.observe_unread(&s.key);
-                } else {
-                    let doc = crate::model::decode::structural_value(&bytes);
-                    fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
+                if is_put {
+                    if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
+                        fields.observe_unread(&s.key);
+                    } else {
+                        let doc = crate::model::decode::structural_value(&bytes);
+                        fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
+                    }
                 }
                 facts_cache.ensure(base, &s.key, Some(slices));
                 let facts = facts_cache.get(&s.key).expect("just ensured this key");
@@ -639,7 +649,7 @@ async fn observe_traffic(
                                 .seen += 1;
                         }
                         let budget = decode_budget.entry(s.key.clone()).or_default();
-                        if *budget < DECODE_BUDGET {
+                        if is_put && *budget < DECODE_BUDGET {
                             *budget += 1;
                             // `Some`: the doctor's slice set comes from its
                             // own live introspect sweep, so the registry was

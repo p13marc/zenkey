@@ -128,6 +128,6 @@ zblob = "0.3"
 # Internal
 zenkey = { version = "0.7.0", path = "zenkey" }
 zenkey-build = { version = "0.7.0", path = "zenkey-build" }
-zenkey-fleet = { version = "0.11.0", path = "zenkey-fleet" }
+zenkey-fleet = { version = "0.11.1", path = "zenkey-fleet" }
 zenkey-explorer-config = { version = "0.1.0", path = "zenkey-explorer-config" }
 zenkey-report-fixtures = { path = "report-fixtures" }
