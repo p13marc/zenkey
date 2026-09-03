@@ -1,6 +1,6 @@
 # 06 — Identity, Origins, and the Catalog
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25 and v1.29 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar puts a stable identity in every key (the origin chunk,
 [03-grammar.md §1.3](03-grammar.md)). This chapter defines how that identity
@@ -167,9 +167,16 @@ implementation: `zensight-correlator`).
 <base>/v1/@catalog/state/entity/<entity-id>      merged entity document (LWW, tombstoned on retire/merge)
 <base>/v1/@catalog/state/alias/<old-id>          alias record: old-id → entity-id (id upgrades, merges)
 <base>/v1/@catalog/state/pdns/<ip-slug>          accumulated IP↔name record (historical tier via storage)
+<base>/v1/@catalog/state/incident/<incident-id>   firing alerts grouped by entity (LWW, tombstoned when none is firing, §5.5)
+<base>/v1/@catalog/state/ack/<alert-ref>         an operator's acknowledgement of one firing alert (§5.5)
+<base>/v1/@catalog/state/silence/<id>            a suppression window (§5.5)
 <base>/v1/@catalog/state/alive                   liveliness token (declared by the elected owner, §5.3)
 <base>/v1/@catalog/state/claim/<zid>             liveliness claim tokens (ownership protocol, §5.3)
 <base>/v1/@catalog/@rpc/names                    on-demand name resolution (?ip=…)
+<base>/v1/@catalog/@rpc/ack                      acknowledge a firing alert (write, gated, §5.5)
+<base>/v1/@catalog/@rpc/unack                    retire an acknowledgement (write, gated, §5.5)
+<base>/v1/@catalog/@rpc/silence                  open a suppression window (write, gated, §5.5)
+<base>/v1/@catalog/@rpc/unsilence                close one early (write, gated, §5.5)
 ```
 
 Contract:
@@ -287,6 +294,98 @@ the storage's `garbage_collection.lifespan`
 replicated catalog storages SHOULD size that lifespan to their
 partition-heal horizon, because a pruned tombstone is what lets a slow
 replica resurrect a merged-away entity.
+
+### 5.5 Incidents, acknowledgement and silence (v1.29)
+
+The catalog answers *"what is on fire, whose problem is it, and is anyone
+on it"* for the same reason it answers "who is this host": it is the only
+participant that has run the union-find, and therefore the only one that
+can say **this alert and that one are about the same machine**.
+
+Three families, all `state`, all conclusions with one author (§5):
+
+- **`incident/<incident-id>`** — the currently-firing alerts for one
+  entity. `incident-id` is `inc-<entity-id>`, or `inc-<origin>` for an
+  alert whose origin resolves to no entity. Tombstoned when no member is
+  firing. A **timeline is not carried here**: a document that accumulated
+  every transition would grow without bound on a TTL'd LWW key, and
+  history is a storage concern (§5.2).
+- **`ack/<alert-ref>`** — one operator's acknowledgement of one firing
+  alert, `ttl_s = 0` (operator intent does not age out; the catalog
+  tombstones it).
+- **`silence/<id>`** — a suppression window with matchers, bounds and an
+  author.
+
+**`alert-ref`** is the alert's identity as **one key chunk**:
+`<origin>.<producer>.<alert_key>`, defined byte-precisely in
+[11-zensight-profile.md §3.2](11-zensight-profile.md). It has to be a
+single chunk because it is the *last* chunk of `ack/<alert-ref>`, and a
+key cannot nest inside a key.
+
+#### The lifecycle rules are normative
+
+They are normative because a **key-agnostic consumer** — an exporter, a
+notifier, a second UI — must reach the same conclusion as the catalog
+from the documents alone. A rule that lived only in the catalog's code
+would make every other consumer guess.
+
+1. **An ack applies only while a firing alert with
+   `timestamp <= ack.fired_at` exists.** Two consequences, both
+   intended:
+   - an **orphan is inert**. An ack that outlives its alert — a catalog
+     died holding it — reads as nothing, rather than as a silent
+     suppression of the next occurrence. A stale document MUST NOT be
+     able to hide a live problem.
+   - a **re-fire is not acknowledged**. `fired_at` pins the ack to the
+     occurrence someone looked at; when the condition clears and returns,
+     the new alert's `timestamp` is later and the ack stops applying.
+     That is the distinction between an ack and a silence, expressed as a
+     field rather than as prose.
+2. **`ack` MUST be refused when no alert is firing for the ref**
+   (`error/catalog/not-firing`). An acknowledgement names an occurrence
+   someone looked at; one for a problem nobody has would sit on the key,
+   inert by rule 1, and then apply the moment that exact alert next fired
+   within its `fired_at`.
+3. **The catalog tombstones an ack** when its alert resolves or is
+   tombstoned, and when a re-fire carries `timestamp > fired_at`. Rule 1
+   already makes such an ack inert; the tombstone is the difference
+   between *inert* and *gone*, which is what an operator sees when they
+   list what is acknowledged.
+4. **A silence applies while `starts_at <= now < ends_at`** and all its
+   matchers match. It holds **across re-fires** — that is what a
+   maintenance window means. The catalog tombstones it at `ends_at`, and
+   a consumer MUST stop applying it at that instant whether or not the
+   tombstone has arrived, so a partitioned reader cannot keep an expired
+   suppression alive.
+5. **An empty matcher set matches nothing.** The vacuous reading — "all
+   zero conditions hold" — is how one mistake mutes a fleet, and the harm
+   is asymmetric: refusing to suppress costs a page; suppressing
+   everything costs an outage nobody hears about.
+
+#### The four procedures
+
+`ack`, `unack`, `silence`, `unsilence` are `kind = "write"`
+([08-registry.md §4](08-registry.md)) and **gated by the same switch as
+`link`/`unlink`** (§5.4): all six change what the deployment believes
+about itself on an operator's say-so. A gated procedure MUST still be
+*served*, replying `error/gated`, so an operator learns the feature
+exists and is switched off rather than learning nothing from a timeout
+([05-control-rpc.md §3](05-control-rpc.md)).
+
+A silence MUST be validated before it applies — at least one matcher,
+every matcher naming a matchable field, every regular expression
+compiling, `ends_at` after `starts_at` — and its author MUST come from
+the call's actor, never from the body: a silence whose author is
+self-reported is a silence nobody can be asked about, and "who muted
+this" is the first question of any review.
+
+#### What this deliberately is not
+
+Notification routing, escalation, on-call rotations, repeat intervals,
+`for`-grouping. Those are a notifier's concern (the reference
+deployment's is `zenwatch`, which scoped them out deliberately and reaches
+an on-call product by webhook). These families are the **documents such a
+tool reads**; the convention does not compete with one.
 
 ---
 

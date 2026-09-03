@@ -25,6 +25,62 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.29 (2026-09-03, the incident batch)** — one addition, and the useful
+> half of it is the normative lifecycle rather than the three key families.
+>
+> The `@catalog` service gains `incident/{incident_id}`, `ack/{alert_ref}`
+> and `silence/{id}`, plus `ack`/`unack`/`silence`/`unsilence` as
+> `kind = "write"` procedures behind the same gate as `link`/`unlink` — all
+> six change what the deployment believes about itself on an operator's
+> say-so (06 §5, §5.5; the families join 04 §1.4's service list).
+>
+> **Why the rules are normative and not implementation detail.** The whole
+> point of putting an acknowledgement on the bus is that something other than
+> the UI that made it can read it: an exporter mirroring alerts, a notifier
+> deciding whether to page, a second operator's screen. Each of those must
+> reach the same conclusion the catalog does *from the documents alone*, and
+> a rule that lived only in the catalog's code would make every one of them
+> guess. So §5.5 states them:
+>
+> - an ack applies only while a firing alert with `timestamp <= fired_at`
+>   exists — which makes an **orphan inert** (a stale ack left by a dead
+>   catalog must never be able to hide a live problem) and makes a
+>   **re-fire page again** (the ack named an occurrence, and this one is a
+>   different one);
+> - `ack` is refused when nothing is firing, because an ack for a problem
+>   nobody has is a suppression waiting to apply;
+> - a silence holds *across* re-fires, which is the distinction from an ack
+>   and what a maintenance window means, and stops applying at `ends_at`
+>   whether or not its tombstone has arrived;
+> - **an empty matcher set matches nothing.** The vacuous reading is how one
+>   mistake mutes a fleet, and the harm is asymmetric.
+>
+> `alert_ref` is defined byte-precisely in the profile chapter (11 §3.2) as
+> `<origin>.<producer>.<alert_key>` — **one chunk**, because it is the last
+> chunk of `ack/<alert-ref>` and a key cannot nest inside a key. `.` is the
+> one separator already legal inside a chunk and already used there
+> (`in_errors.rate`), so nothing needs escaping and the grammar is untouched;
+> parsing splits on the first two, which is unambiguous because origin and
+> producer cannot contain one while an `alert_key` may.
+>
+> **Rejected: a hash of the triple.** Shorter, equally unique, and opaque in
+> an explorer's output to exactly the operator who needs to know which host's
+> producer is being acknowledged. There is no collision benefit — the triple
+> is already the alert's full identity.
+>
+> **Deliberately not added: routing, escalation, on-call rotations, repeat
+> intervals, `for`-grouping.** Those belong to a notifier (the reference
+> deployment's is `zenwatch`, which scoped them out on the same reasoning and
+> reaches an on-call product by webhook). This amendment writes down the
+> *documents such a tool reads*; the convention does not compete with one.
+>
+> **Deliberately not added: a timeline on the incident document.** A document
+> that accumulated every firing→resolved transition would grow without bound
+> on a TTL'd LWW key. History is a storage concern (06 §5.2), and saying so
+> here is cheaper than discovering it in production.
+>
+> *Amends: 04, 06, 11.*
+
 > **v1.28 (2026-08-29, the shipped-backend batch)** — one amendment, and it
 > is a correction rather than an addition: v1.27 wrote down a backend that
 > had not shipped yet, and what shipped chose differently. The row stops

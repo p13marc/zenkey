@@ -1,6 +1,6 @@
 # 11 — Reference Application Profile: ZenSight
 
-**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25 and v1.26 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26 and v1.29 — see [CHANGELOG.md](CHANGELOG.md)*
 
 > **Registry location note (2026-07).** The registry *data* this profile
 > describes (`registry/*.toml` for the ten producers and `@catalog`, plus
@@ -220,6 +220,52 @@ alert_key  = lowercase_hex(fnv1a_64(utf8(input)))               16 chars, all 64
 (This deliberately differs from the incumbent `alert_key`, which prefixes
 the rule name and hashes the source — the §3 table row above records both
 halves of the change and why.)
+
+### 3.2 The alert ref, byte-precise (v1.29)
+
+[06-identity.md §5.5](06-identity.md) keys an acknowledgement by
+`ack/<alert-ref>`. An **alert ref** names one firing alert as a single key
+chunk:
+
+```
+alert_ref = origin ++ "." ++ producer ++ "." ++ alert_key
+```
+
+- `origin` is the publishing host's origin chunk (`h-<12hex>`, §1 of
+  [06](06-identity.md)); `producer` the producer chunk of the key the
+  alert was published on; `alert_key` the §3.1 hash. All three are read
+  from the **key**, never from the payload — an `Alert`'s `source` is the
+  polled device for a proxy producer, so the document alone cannot say
+  which host published it.
+- **Parsing splits on the first two separators** (`splitn(3, '.')`) and
+  keeps the remainder as `alert_key`. This is unambiguous rather than
+  merely conventional: `origin` and `producer` are grammar chunks whose
+  alphabet excludes `.`, while a `alert_key` may legitimately contain one
+  (an application whose §3.1 binding differs, or a rule slug carrying a
+  dotted metric name).
+- **Why `.`.** It is the one separator already legal *inside* a chunk and
+  already used there (`in_errors.rate`,
+  [03-grammar.md §5](03-grammar.md)), so no component needs escaping and
+  the key grammar is untouched. `/` would make three chunks and defeat
+  the purpose; `:` and `@` are reserved elsewhere in the grammar.
+- **Why not a hash of the triple.** It would be shorter and equally
+  unique, and opaque in an explorer's output, in a storage listing, and
+  in whatever an on-call tool renders — to exactly the operator who needs
+  to know *which host's producer* is being acknowledged. There is no
+  collision benefit: the triple is already the alert's full identity.
+- A ref whose components would not survive as a key chunk MUST be
+  refused rather than truncated or escaped: a ref that needs escaping is
+  a ref that will be wrong somewhere.
+
+**Test vector.** The §3.1 vector's alert, published by `netlink` on origin
+`h-3fa9c2d41b7e`:
+
+```
+h-3fa9c2d41b7e.netlink.a659f813308ad1da
+```
+
+and the acknowledgement lives at
+`…/@catalog/state/ack/h-3fa9c2d41b7e.netlink.a659f813308ad1da`.
 
 ## 4. What ZenSight-specific knowledge remains
 
