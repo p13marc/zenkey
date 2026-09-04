@@ -6,13 +6,23 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.28** (2026-08-29; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.29** (2026-09-03; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.29** (2026-09-03) — the incident batch: the `@catalog` service gains
+  `incident/{incident_id}`, `ack/{alert_ref}` and `silence/{id}` plus four
+  gated write procedures, with the lifecycle rules written **normatively** so
+  a key-agnostic consumer — an exporter, a notifier, a second UI — reaches the
+  same conclusion the catalog does from the documents alone: an ack applies
+  only while a firing alert with `timestamp <= fired_at` exists, so an orphan
+  is inert and a re-fire pages again; an empty matcher set matches nothing
+  (06 §5, §5.5, 04 §1.4); and `alert_ref` is defined byte-precisely as
+  `<origin>.<producer>.<alert_key>`, one chunk, readable rather than hashed
+  (11 §3.2).
 - **v1.28** (2026-08-29) — the shipped-backend batch: the storage history
   mode is per *volume*, not per storage — the backend v1.27 wrote down ahead
   of time has shipped, and chose differently, because Zenoh asks the volume
@@ -30,17 +40,6 @@ what changed and what deliberately did not — is
   storage mode, a `redb` row joins the volume table with its
   not-yet-shipped status stated, and the InfluxDB rows gain the
   one-base64-string-field caveat that decides the choice (09 §2.1–§2.3).
-- **v1.26** (2026-08-25) — the media-consumer batch: `frame` loses
-  `express` and `alert` keeps it (04 §3, the first wire-observable
-  change since ratification); the stream control surface is the two
-  procedures that are actually served, `stream/set` and the newly
-  ratified `stream/report` (07 §1.1, 11 §5); adaptation is receiver-driven
-  and a producer MUST NOT re-tune a shared tier from one report (07 §1.2);
-  the frame-age clock is the sample timestamp, read as observed skewed
-  latency (07 §1.3); browser consumers and their two consequences
-  (07 §1.4); retirement covers procedures (08 §3); the `streams`
-  procedure is profile-local (11 §5.1).
-
 ---
 
 ## The convention on one page
