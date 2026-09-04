@@ -1,6 +1,6 @@
 # 11 — Reference Application Profile: ZenSight
 
-**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26 and v1.29 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29 and v1.30 — see [CHANGELOG.md](CHANGELOG.md)*
 
 > **Registry location note (2026-07).** The registry *data* this profile
 > describes (`registry/*.toml` for the ten producers and `@catalog`, plus
@@ -114,7 +114,11 @@ zensight/v1/h-3fa9c2d41b7e/state/<producer>/evidence/self
 zensight/v1/@catalog/state/entity/h-3fa9c2d41b7e
 zensight/v1/@catalog/state/alias/h-9d02aa17c44f
 zensight/v1/@catalog/state/pdns/93-184-216-34
+zensight/v1/@catalog/state/edge/e-2879d4667f9d946d                   (§3.3)
 zensight/v1/@catalog/@rpc/names?ip=93.184.216.34
+
+# relationship claims (pve, container, probe, netlink — the inputs to the above)
+zensight/v1/h-3fa9c2d41b7e/state/pve/evidence/relation/r-f5f9a2edb9601155
 ```
 
 **The profile's framework extension (v1.25).** The framework block above
@@ -150,6 +154,8 @@ Conceptual correspondence (shipped grammar per
 | `_meta/evidence/host/<sensor>/<source>` | `…/<origin>/state/<proto>/evidence/self` (or `…/evidence/device/<d>`) | observer split by subject, not payload flag |
 | `_meta/evidence/names/<sensor>/<ip>` | `…/<origin>/state/<proto>/evidence/names/<ip>` | |
 | `_meta/entity/host/<id>` | `@catalog/state/entity/<id>` | |
+| *(none — GUI-local `EdgeKind` derived from `@rpc` replies)* | `@catalog/state/edge/<edge-id>` | **new in v1.30**: the topology graph was derived inside one GUI from netring's matrix, netlink's neighbours and gateways, and never left it. Sensors now claim (`evidence/relation/<relation-id>`) and the catalog concludes ([06 §5.6](06-identity.md)); §3.3 below binds both ids |
+| *(none — flow adjacency, GUI-local)* | **`@rpc/netring/matrix`, deliberately not an edge** | per-observed-peer and unbounded; [06 §5.6](06-identity.md) makes the exclusion normative |
 | `_meta/query/{entities,names}` | GET on entity state / `@catalog/@rpc/names` | |
 | `_meta/correlator/@/alive` | `@catalog/state/alive` | |
 | `zensight/@pdns/<ip>` | `@catalog/state/pdns/<ip>` | historical tier = storage choice ([06 §5.2](06-identity.md)) |
@@ -165,8 +171,11 @@ cardinality/charset rules and are redesigned above (the
 qualified accordingly). *Reverse*: a few convention mechanisms have no
 shipped counterpart and are marked as new — `alias/<old-id>` records as
 keys (shipped aliases are a payload field on `HostEntity`), the `events`
-class's budget machinery, and the ownership-claim keys of
-[06 §5.3](06-identity.md). (The one deliberate deletion: protocol-scoped
+class's budget machinery, the ownership-claim keys of
+[06 §5.3](06-identity.md), and since v1.30 the relationship pair
+(`evidence/relation/<relation-id>` + `edge/<edge-id>`), whose shipped
+counterpart was not a key at all but a derivation living in one GUI
+process. (The one deliberate deletion: protocol-scoped
 shared channels have no successor; their two uses — fan-in queries and
 fleet-wide commands — are both expressed by `*`-origin RPC selectors.
 The `@/status` running/offline flag lands in the `health` document's
@@ -266,6 +275,106 @@ h-3fa9c2d41b7e.netlink.a659f813308ad1da
 
 and the acknowledgement lives at
 `…/@catalog/state/ack/h-3fa9c2d41b7e.netlink.a659f813308ad1da`.
+
+### 3.3 The edge id and the relation id, byte-precise (v1.30)
+
+[06-identity.md §5.6](06-identity.md) requires both ids to be a function
+of `(kind, from, to)` and of nothing else, and requires two
+implementations to agree. This is ZenSight's binding, in the manner of
+§3.1.
+
+```
+US         = U+001F                                    (unit separator, 1 byte 0x1f)
+triple     = kind_token ++ US ++ repr(from) ++ US ++ repr(to)
+edge_id    = "e-" ++ lowercase_hex(fnv1a_64(utf8(triple)))    18 chars total
+relation_id= "r-" ++ lowercase_hex(fnv1a_64(utf8(triple)))    18 chars total
+```
+
+Same hash as §3.1 — FNV-1a, 64-bit, offset basis `0xcbf29ce484222325`,
+prime `0x100000001b3`. The two ids differ only in what `repr` produces,
+because one hashes **resolved** ends and the other hashes **claims**:
+
+```
+# edge_id — resolved endpoints (06 §5.6)
+repr(Entity)   = "e:" ++ entity_id
+repr(External) = "x:" ++ ip ++ "|" ++ mac ++ "|" ++ name     absent field = empty
+
+# relation_id — an unresolved claim
+repr(Claim)    = host_id ++ "|" ++ device ++ "|" ++ ips ++ "|" ++ macs ++ "|" ++ name
+                 ips and macs joined with "," in ascending byte order;
+                 absent field = empty
+```
+
+**Kind tokens** (the closed vocabulary of 06 §5.6, as this profile binds
+it). The token is part of the key, so none of them may ever change
+spelling:
+
+| Token | Meaning (`from` → `to`) | Containment |
+|---|---|---|
+| `hosts` | a hypervisor node hosts a guest | yes |
+| `runs` | a host runs a container | yes |
+| `gateway_of` | `from` is the gateway for `to` | yes |
+| `probes` | `from` is a vantage point checking `to` | yes |
+| `l2_adjacent` | the two share a link-layer segment | **no** — symmetric, no causal direction |
+
+Only the containment kinds propagate failure in impact attribution
+(06 §5.6); `l2_adjacent` never does, which is the whole reason the column
+exists rather than being inferred.
+
+- **Why the separators are what they are.** `US` cannot appear in a
+  grammar chunk, an entity id or a slug, so the triple framing is
+  injective without escaping; `|` inside a `repr` is likewise excluded
+  from every field it separates. Neither byte ever reaches a key — only
+  the hex does.
+- **Why sort before hashing.** `ips` and `macs` arrive in whatever order
+  a sensor observed them. Sorting is what makes a claim's id independent
+  of observation order, which is the property 06 §5.6 rule 1 needs from a
+  restart.
+- **Why a hash here and not the readable triple of §3.2.** An
+  `alert_ref` names one alert on one host and stays legible as a chunk;
+  an edge names *two* endpoints, either of which may be an
+  `External` carrying an IP, a MAC and a name. Spelling that out would
+  produce keys hundreds of bytes long, would embed structure a consumer
+  could be tempted to parse ([03-grammar.md §6.2](03-grammar.md)), and
+  would change the key whenever a display name changed. The payload
+  carries both endpoints in full; the key only has to be stable and
+  unique.
+- **Not cryptographic, and does not need to be.** The id names a key, it
+  does not authenticate one. FNV-1a rather than `std`'s default hasher
+  because that one is explicitly not stable across releases, and a key
+  that moved on a toolchain upgrade would tombstone and republish the
+  entire edge set.
+
+**Test vectors** (implementations MUST reproduce these).
+
+An edge: the pve node on origin `h-3fa9c2d41b7e` hosts the guest that
+resolved to entity `h-9d02aa17c44f`.
+
+```
+triple  = "hosts" 1f "e:h-3fa9c2d41b7e" 1f "e:h-9d02aa17c44f"
+edge_id = e-2879d4667f9d946d
+```
+
+Direction and kind both matter, which these pin:
+
+```
+hosts, ends swapped        → e-37f51d33d897f9b3
+runs, same ends            → e-f5a68bdecd893aa2
+```
+
+The claim that produced it — pve self-claims its own `host_id` and names
+the guest by device slug `vm-101` and name `db01`:
+
+```
+repr(from)  = "h-3fa9c2d41b7e||||"
+repr(to)    = "|vm-101|||db01"
+relation_id = r-f5f9a2edb9601155
+```
+
+published at
+`zensight/v1/h-3fa9c2d41b7e/state/pve/evidence/relation/r-f5f9a2edb9601155`,
+and the edge at
+`zensight/v1/@catalog/state/edge/e-2879d4667f9d946d`.
 
 ## 4. What ZenSight-specific knowledge remains
 

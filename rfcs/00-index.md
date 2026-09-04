@@ -6,13 +6,27 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.29** (2026-09-03; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.30** (2026-09-04; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.30** (2026-09-04) — the relationship batch: sensors publish
+  `evidence/relation/{relation_id}` (a claim that two things are connected)
+  and the catalog publishes `edge/{edge_id}`, the resolved conclusion, so the
+  dependency graph stops being a derivation inside one UI and becomes
+  documents anything can read (06 §5.6, 04 §1.4, 11 §3.3 with test vectors).
+  Three bounds carry it: `edge_id` is a function of `(kind, from, to)` after
+  resolution and nothing else, so two sensors confirming one relationship land
+  on one key and a restart republishes byte-identical documents; **traffic is
+  not a relationship** — flow is sized by the internet, not by the fleet, and
+  belongs on an `@rpc` overlay; and impact attribution is a pure function of
+  the graph, propagating only along containment kinds. Also the correction
+  behind it: `entity.origins[]`, named by 06 §5.1 since v1.0 and *required*
+  by 06 §6.4 since v1.2, did not exist — §5.1 now states that it holds
+  self-reported origins only, and what a consumer does without it.
 - **v1.29** (2026-09-03) — the incident batch: the `@catalog` service gains
   `incident/{incident_id}`, `ack/{alert_ref}` and `silence/{id}` plus four
   gated write procedures, with the lifecycle rules written **normatively** so
@@ -32,14 +46,7 @@ what changed and what deliberately did not — is
   loses its not-yet-shipped caveat and gains the three facts a deployment
   needs — mandatory retention, kept tombstones, `_time`-ranged reads
   (09 §2.1–§2.3).
-- **v1.27** (2026-08-28) — the field-evidence batch: frame age also
-  separates a congested producer from a lossy link, and nothing else can —
-  both present as sequence gaps with every producer-side drop counter at
-  zero (07 §1.3, informative, with the measurement); the storage capability
-  pair is per *storage*, not per backend, so replication partitions by
-  storage mode, a `redb` row joins the volume table with its
-  not-yet-shipped status stated, and the InfluxDB rows gain the
-  one-base64-string-field caveat that decides the choice (09 §2.1–§2.3).
+
 ---
 
 ## The convention on one page

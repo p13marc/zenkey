@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26 and v1.29 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29 and v1.30 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -147,12 +147,14 @@ at. This is that place. The **framework state set** is:
 | `evidence/self` | `evidence_self` | the producer's own identity claim ([06 §4](06-identity.md)) |
 | `evidence/device/{device}` | `evidence_device` | an observed device's identity claim ([06 §4](06-identity.md)) |
 | `evidence/names/{ip_slug}` | `evidence_names` | a passive-DNS name observation ([06 §4](06-identity.md)) |
+| `evidence/relation/{relation_id}` | `evidence_relation` | a claim that two things are connected ([06 §4](06-identity.md)) |
 
 plus the `@catalog` **service** subjects — `entity/{entity_id}`,
-`alias/{old_id}`, `pdns/{ip_slug}`, and since v1.29
-`incident/{incident_id}`, `ack/{alert_ref}`, `silence/{id}` (tokens
-`entity`, `alias`, `pdns`, `incident`, `ack`, `silence`;
-[06 §5](06-identity.md), [06 §5.5](06-identity.md)) — which are one
+`alias/{old_id}`, `pdns/{ip_slug}`, since v1.29
+`incident/{incident_id}`, `ack/{alert_ref}`, `silence/{id}`, and since
+v1.30 `edge/{edge_id}` (tokens `entity`, `alias`, `pdns`, `incident`,
+`ack`, `silence`, `edge`; [06 §5](06-identity.md),
+[06 §5.5](06-identity.md), [06 §5.6](06-identity.md)) — which are one
 service's state rather than a family across producers. `alive` is deliberately **not** in the set: it
 is presence, not a state subject (§5, [03-grammar.md §3](03-grammar.md)),
 and has no `common` token.

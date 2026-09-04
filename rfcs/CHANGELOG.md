@@ -25,6 +25,88 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.30 (2026-09-04, the relationship batch)** — one addition and one
+> correction, and the correction is the one to read first.
+>
+> **The correction.** [06 §5.1](06-identity.md) has told consumers since
+> v1.0 to join origin → entity through `entity.origins[]`, and
+> [06 §6.4](06-identity.md) has *required* the field since v1.2. It did
+> not exist in the reference implementation. Two chapters requiring a
+> field is not the same as a field existing: every consumer reconstructed
+> the join instead, each differently, by walking the far larger **evidence**
+> subtree and matching `(sensor, source)` against `members[]` — a
+> heuristic where §5.1 step 2 promises a lookup, and a subscription §5.1
+> step 1 exists to avoid. §5.1 now states what the set contains
+> (self-reported origins only — a hypervisor observing a guest must not
+> bind its own origin to the guest's entity), that it is additive and MAY
+> be absent, and what a consumer does when it is.
+>
+> This is worth a paragraph rather than an errata line because of *how* it
+> was found. It surfaced while implementing the incident engine of v1.29,
+> where the origin → entity join became load-bearing twice over: an
+> incident is keyed by entity, and impact attribution needs the down
+> **entities** while liveliness reports dead **origins**. A gap in a join
+> nobody exercised became a gap two features stood on, three weeks later.
+>
+> **The addition.** [06 §5.6](06-identity.md): sensors publish
+> `evidence/relation/<relation-id>` — a claim that two things are
+> connected — and the catalog publishes `edge/<edge-id>`, the resolved
+> conclusion (04 §1.4 gains both: `evidence_relation` in the framework
+> state set, `edge` in the closed `@catalog` service set). The relationship
+> claim rides **inside** the existing evidence family rather than beside
+> it, which is the whole reason the addition is small: the catalog's input
+> contract stays "evidence only", the one selector it already subscribes
+> matches it, and merge stays a pure function of evidence.
+>
+> **What the split buys.** Relationship facts were already on the bus and
+> unusable — a guest's hypervisor node, a container's host and unit, a
+> probe's vantage and target, an ARP neighbour, a default gateway, each a
+> plain string on some sensor's own document, legible only to a consumer
+> that knew that sensor's payload type. A sensor cannot resolve them
+> (it does not know entity ids), and a catalog that decoded every sensor's
+> document type to try would grow a dependency on each of them. Claims in,
+> edges out, resolution in the one participant that ran the union-find.
+>
+> **Three rules carry the weight**, and each of them is a bound rather than
+> a shape:
+>
+> - **`edge-id` is a function of `(kind, from, to)` after resolution and
+>   nothing else** — not the observer set, not the attrs, not a clock. Two
+>   sensors confirming one relationship land on one key, and a restart with
+>   the same evidence republishes byte-identical documents instead of
+>   churning tombstones. The same determinism §5 already demands of entity
+>   ids, for the same reason.
+> - **Traffic is not a relationship.** Observed flow MUST NOT be published
+>   as an edge: it is per-observed-peer, changes by the second, and is
+>   sized by the internet rather than by the fleet — the same cardinality
+>   argument §4 already makes about per-IP keys, applied before the family
+>   could grow into it. A traffic matrix is an `@rpc` overlay pulled at the
+>   resolution the caller asked for.
+> - **Impact attribution is a pure function of the graph**, so a consumer
+>   answers "cause or symptom" without asking anyone: only containment
+>   kinds propagate (a symmetric link-layer adjacency carries no causal
+>   direction and treating it as one turns "neighbours" into "this one
+>   broke that one"), the walk is depth-capped with a visited set because a
+>   cycle is a reachable input when independent sensors make the claims,
+>   and the output is ordered so two consumers render the same thing.
+>
+> **What deliberately did not happen.** No `@graph` plane: relationships
+> are conclusions from evidence, conclusions have one author, and a plane
+> would be a second identity service with a second claim protocol, a second
+> ownership election and a second storage stanza reaching the same answers
+> from the same inputs. No query language over the graph, no intra-host
+> service dependencies (that is detail inside a machine, not fleet
+> structure), no geographic map. And `edge-id` stays **opaque** — a
+> consumer reads the endpoints from the payload, never out of the key,
+> which is [03 §6.2](03-grammar.md)'s ontology-in-key rejection applied to
+> the one family most tempting to violate it.
+>
+> [11 §3.3](11-zensight-profile.md) binds both ids byte-precisely with test
+> vectors, in the manner of §3.1's alert key, and names the closed kind
+> vocabulary with its containment column.
+>
+> *Amends: 04, 06, 11.*
+
 > **v1.29 (2026-09-03, the incident batch)** — one addition, and the useful
 > half of it is the normative lifecycle rather than the three key families.
 >
