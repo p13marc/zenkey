@@ -45,6 +45,7 @@ Commands:
   field        Field intelligence over a window (#223): per-dotted-path statistics — presence, type stability, change count, numeric range, small-domain values — plus the three findings per-sample validation cannot see
   record       Capture a selector's traffic to a .zrec file (RFC 09 §5.2)
   replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
+  snapshot     Take a fleet snapshot to a .zsnap file (RFC 13 §4.4) — or, with `diff`, compare two
   serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
   gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
   scout        Listen for raw scouting Hellos: zid, whatami, locators
@@ -98,6 +99,7 @@ Commands:
   field        Field intelligence over a window (#223): per-dotted-path statistics — presence, type stability, change count, numeric range, small-domain values — plus the three findings per-sample validation cannot see
   record       Capture a selector's traffic to a .zrec file (RFC 09 §5.2)
   replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
+  snapshot     Take a fleet snapshot to a .zsnap file (RFC 13 §4.4) — or, with `diff`, compare two
   serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
   gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
   scout        Listen for raw scouting Hellos: zid, whatami, locators
