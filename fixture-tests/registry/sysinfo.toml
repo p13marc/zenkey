@@ -30,6 +30,9 @@ convention = 1
 name = "sysinfo"
 description = "host CPU/memory/disk/net metrics"
 
+[budget]
+rss_mb = 32
+
 [[subject]]
 path = "system/uptime"
 class = "telemetry"

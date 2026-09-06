@@ -307,6 +307,31 @@ pub(crate) const BLOB_ENDPOINTS: &[&str] = &["manifest", "slice", "have", "push"
 /// The tier tokens RFC 07 §2 reserves at position 5 under `@blob`.
 pub(crate) const BLOB_TIERS: &[&str] = &["artifact", "tree", "store"];
 
+/// The `[budget]` table (RFC 08 §2, v1.32): what the producer may cost the
+/// machine it runs on, in the units its health document's `self_stats`
+/// reports (RFC 04 §1.2).
+///
+/// Linted here — non-negative bounds, a required and unique `name` per
+/// `[[budget.tables]]` row — and then **not generated**: the block rides the
+/// slice verbatim in `REGISTRY_TOML` and reaches `introspect` unchanged, which
+/// is where an observer reads it (RFC 13 §3). It is the first per-producer
+/// table that is not a subject, procedure, tier or stream, and the first that
+/// yields no key and no builder — so no accessor is emitted for it, and the
+/// lock does not pin it (a budget is a claim about cost, not about shape).
+#[allow(dead_code)] // linted, carried verbatim in REGISTRY_TOML; nothing is generated from it
+pub(crate) struct BudgetEntry {
+    pub rss_mb: Option<u64>,
+    pub tables: Vec<TableBudgetEntry>,
+}
+
+/// One `[[budget.tables]]` row (RFC 08 §2, v1.32).
+#[allow(dead_code)] // see `BudgetEntry`
+pub(crate) struct TableBudgetEntry {
+    pub name: String,
+    pub max_entries: Option<u64>,
+    pub max_bytes: Option<u64>,
+}
+
 pub(crate) struct RegistryFile {
     /// Producer base name, or service name for `[service]` files.
     pub name: String,
@@ -321,6 +346,9 @@ pub(crate) struct RegistryFile {
     /// The file's compatibility level (RFC 08 §3.1): `backward` (default)
     /// pins its entries in `registry.lock`; `none` opts out, loudly.
     pub compat: Compat,
+    /// The producer's declared cost (RFC 08 §2, v1.32), when it declares one.
+    #[allow(dead_code)] // see `BudgetEntry`: linted, never generated from
+    pub budget: Option<BudgetEntry>,
 }
 
 /// One `[[deprecated]]` entry: what was retired, and which kind of thing it
@@ -899,6 +927,47 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 ));
             }
             (name.to_string(), None)
+        };
+
+        // [budget] (RFC 08 §2, v1.32). Every bound is an optional count and
+        // takes the same sign check as `ttl_s` and `cardinality` (#313: a
+        // negative fails here, where the TOML was authored); each table row
+        // must name itself, uniquely, or `self_stats.tables[]` has nothing
+        // to match it against (RFC 04 §1.2). Unknown keys are tolerated, as
+        // everywhere else in this file.
+        let budget = match doc.get("budget") {
+            None => None,
+            Some(b) => {
+                let rss_mb = opt_count(&fname, b, "[budget]", "rss_mb")?;
+                let mut tables = Vec::new();
+                let mut names_seen = std::collections::BTreeSet::new();
+                for row in b
+                    .get("tables")
+                    .and_then(|v| v.as_array())
+                    .into_iter()
+                    .flatten()
+                {
+                    let tname = row.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
+                        lint(&fname, "[[budget.tables]] missing name (RFC 08 §2)")
+                    })?;
+                    if !names_seen.insert(tname) {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "[[budget.tables]] name {tname:?} declared twice — a table \
+                                 name is unique within the file (RFC 08 §2)"
+                            ),
+                        ));
+                    }
+                    let path = format!("[[budget.tables]] {tname}");
+                    tables.push(TableBudgetEntry {
+                        name: tname.to_string(),
+                        max_entries: opt_count(&fname, row, &path, "max_entries")?,
+                        max_bytes: opt_count(&fname, row, &path, "max_bytes")?,
+                    });
+                }
+                Some(BudgetEntry { rss_mb, tables })
+            }
         };
 
         let empty = Vec::new();
@@ -1598,6 +1667,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             blob: blob_entries,
             deprecated,
             compat,
+            budget,
         });
     }
 
@@ -2449,6 +2519,59 @@ mod tests {
         assert!(!out.contains("Some(-"), "{out}");
         assert!(out.contains("=> Some(900),"), "{out}");
         assert!(out.contains("=> Some(64),"), "{out}");
+    }
+
+    /// `[budget]` (RFC 08 §2, v1.32) is linted where the TOML was authored
+    /// and then carried verbatim: a negative bound fails the way `ttl_s`
+    /// does (#313), a nameless or twice-named table row fails naming the
+    /// section, and a well-formed one generates — with no accessor, because
+    /// nothing is emitted from it.
+    #[test]
+    fn a_negative_or_duplicate_budget_fails_the_lint() {
+        let body = "[producer]\nname = \"t\"\n\n[[subject]]\npath = \"health\"\nclass = \"state\"\ntype = \"Health\"\ncommon = \"health\"\nttl_s = 900\nsince = \"1.0\"\ndescription = \"d\"\n";
+        for (toml, wants) in [
+            (
+                format!("{HEADER}{body}\n[budget]\nrss_mb = -64\n"),
+                vec!["[budget]", "rss_mb", "must not be negative"],
+            ),
+            (
+                format!(
+                    "{HEADER}{body}\n[budget]\nrss_mb = 64\n\n[[budget.tables]]\nname = \"flows\"\nmax_entries = -1\n"
+                ),
+                vec!["flows", "max_entries", "must not be negative"],
+            ),
+            (
+                format!(
+                    "{HEADER}{body}\n[budget]\n\n[[budget.tables]]\nname = \"flows\"\nmax_bytes = -1\n"
+                ),
+                vec!["flows", "max_bytes", "must not be negative"],
+            ),
+            (
+                format!("{HEADER}{body}\n[budget]\n\n[[budget.tables]]\nmax_entries = 4\n"),
+                vec!["[[budget.tables]] missing name", "RFC 08 §2"],
+            ),
+            (
+                format!(
+                    "{HEADER}{body}\n[budget]\n\n[[budget.tables]]\nname = \"flows\"\n\n[[budget.tables]]\nname = \"flows\"\n"
+                ),
+                vec!["\"flows\" declared twice", "RFC 08 §2"],
+            ),
+        ] {
+            let err = lint_one(&toml).unwrap_err().to_string();
+            assert!(err.contains("t.toml"), "{err}");
+            for want in wants {
+                assert!(err.contains(want), "{err:?} lacks {want:?}");
+            }
+        }
+
+        let out = lint_one(&format!(
+            "{HEADER}{body}\n[budget]\nrss_mb = 64\n\n[[budget.tables]]\nname = \"flows\"\nmax_entries = 65536\nmax_bytes = 16777216\n\n[[budget.tables]]\nname = \"names\"\n"
+        ))
+        .unwrap();
+        assert!(
+            !out.contains("rss_mb") && !out.contains("fn budget"),
+            "nothing is generated from [budget]; it rides REGISTRY_TOML verbatim:\n{out}"
+        );
     }
 
     #[test]
