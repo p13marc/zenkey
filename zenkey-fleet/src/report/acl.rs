@@ -403,11 +403,11 @@ pub struct AclConfigDoc {
     pub enabled: bool,
     #[serde(default = "deny")]
     pub default_permission: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub rules: Vec<AclRuleDoc>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub subjects: Vec<AclSubjectDoc>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub policies: Vec<AclPolicyDoc>,
 }
 
@@ -415,13 +415,24 @@ fn deny() -> String {
     "deny".to_string()
 }
 
+/// zenoh serializes an absent list as `null` (`rules: Option<Vec<_>>`,
+/// `flows: Option<NEVec<_>>`), and serde's `default` covers a *missing*
+/// field only — a `null` into a `Vec` is an error. Read both as empty.
+fn null_as_empty<'de, D, T>(d: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
 /// `AclConfigRule`, as parsed.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AclRuleDoc {
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub key_exprs: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub messages: Vec<String>,
     #[serde(default)]
     pub flows: Option<Vec<String>>,
@@ -452,9 +463,9 @@ pub struct AclSubjectDoc {
 pub struct AclPolicyDoc {
     #[serde(default)]
     pub id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub rules: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub subjects: Vec<String>,
 }
 
@@ -815,6 +826,14 @@ origin = "@desired"
         .unwrap();
         assert!(doc.enabled);
         assert_eq!(doc.rules[0].flows, None);
+        // What zenoh's loader hands back for an empty block: nulls, not
+        // absences.
+        let empty: AclConfigDoc = serde_json::from_value(json!({
+            "enabled": false, "default_permission": "deny",
+            "rules": null, "subjects": null, "policies": null,
+        }))
+        .unwrap();
+        assert!(empty.rules.is_empty() && empty.subjects.is_empty() && empty.policies.is_empty());
         assert_eq!(doc.policies[0].id, None);
         assert_eq!(
             doc.subjects[0].cert_common_names.as_deref(),

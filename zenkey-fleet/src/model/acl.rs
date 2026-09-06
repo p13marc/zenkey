@@ -434,9 +434,10 @@ pub fn plan_acl(
                 None,
                 "RFC 13 §3 O4",
                 format!(
-                    "no registry asked: no-remote-actions denies the convention's write \
-                     leaf {} rather than the declared write procedures — pass \
-                     --registry <dir> to narrow it to what the fleet actually declares",
+                    "no registry asked: the planes are as the enrollment claims, and \
+                     no-remote-actions denies the convention's write leaf {} rather than \
+                     the declared write procedures — pass --registry <dir> to narrow both \
+                     to what the fleet actually declares",
                     wire(base, UNNARROWED_WRITE_LEAF)
                 ),
             ));
@@ -1352,7 +1353,7 @@ pub fn explain_acl(
     let rule_ids: BTreeSet<&str> = plan
         .policies
         .iter()
-        .filter(|p| p.subjects.iter().any(|s| *s == subject.id))
+        .filter(|p| p.subjects.contains(&subject.id))
         .flat_map(|p| p.rules.iter().map(String::as_str))
         .collect();
     let rules: Vec<&AclRule> = plan

@@ -1,0 +1,25 @@
+# Two principals sharing a CN, a host with neither origin nor machine_id, and
+# a zid-bound subject without the flag: three refusals, one plan around them.
+
+base = "zensight"
+
+[[principal]]
+cn = "h-3fa9c2d41b7e"
+role = "host"
+origin = "h-3fa9c2d41b7e"
+
+[[principal]]
+cn = "h-3fa9c2d41b7e"
+role = "watch"
+
+[[principal]]
+cn = "bare-host"
+role = "host"
+
+[[principal]]
+zid = "38a4829bce9166ee"
+role = "watch"
+
+[[principal]]
+cn = "zensight-console"
+role = "console"

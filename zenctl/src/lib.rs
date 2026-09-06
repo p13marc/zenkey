@@ -42,8 +42,8 @@ use anyhow::Result;
 /// past every way resolution can fail (#209).
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
-    AdminCmd, BaseCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, InterfaceCmd, KeyCmd, NodeCmd,
-    RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
+    AclCmd, AdminCmd, BaseCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, InterfaceCmd, KeyCmd,
+    NodeCmd, RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -130,6 +130,7 @@ pub async fn run() -> Result<()> {
         Command::Registry(RegistryCmd::Lint(a)) => cmd::registry::lint(a),
         Command::Registry(RegistryCmd::Lock(a)) => cmd::registry::lock(a),
         Command::Storage(StorageCmd::List(a)) => cmd::storage::list(a).await,
+        Command::Acl(AclCmd::Gen(a)) => cmd::acl::run(a).await,
         Command::Blob(BlobCmd::List(a)) => cmd::blob::list(a).await,
         Command::Blob(BlobCmd::Locate { target, bus }) => {
             let bus = Bus::resolve(&bus)?;
