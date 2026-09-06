@@ -85,6 +85,7 @@ async fn an_alert_put_is_one_firing_per_sink_a_re_put_is_nothing_and_a_delete_re
                 state_file: None,
                 state_max_entries: 4096,
                 publish: false,
+                doctor: None,
             },
             async move {
                 let _ = stop_rx.await;

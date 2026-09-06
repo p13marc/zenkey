@@ -51,6 +51,11 @@ pub struct Config {
     /// are evicted past it, counted and reported (RFC 13 §3 O6).
     #[serde(default = "default_state_max_entries")]
     pub state_max_entries: usize,
+    /// The scheduled doctor (#390): `run_doctor` over the whole deployment
+    /// every few **hours**, run-over-run deltas to the named sinks, the
+    /// last report published. Absent: not scheduled — nothing runs, nothing
+    /// is published, and the health document says so.
+    pub doctor: Option<DoctorConfig>,
 }
 
 fn default_tick() -> f64 {
@@ -59,6 +64,74 @@ fn default_tick() -> f64 {
 
 fn default_state_max_entries() -> usize {
     4096
+}
+
+/// The `doctor` section (#390): the deployment's conformance checks
+/// (`zenctl doctor`'s stable check ids) asked on a schedule, so that a
+/// fleet which drifts three weeks after deployment — a sensor upgraded on
+/// four hosts and not the fifth, a producer that stopped answering
+/// `introspect` — is noticed without anyone running the doctor by hand.
+///
+/// **Hours, not seconds.** A doctor run is a fan-in sweep — a roster ask,
+/// an introspect per producer, a describe per producer, admin — not a
+/// tick. `every_s` exists for tests and demos, where an interval of hours
+/// is an interval nobody sees, and is documented as exactly that.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DoctorConfig {
+    /// The interval, in hours. Exactly one of `every_h` and `every_s`.
+    pub every_h: Option<f64>,
+    /// The interval, in seconds — **for tests and demos only**: a sweep
+    /// every few seconds is load on the fleet, not observation of it.
+    pub every_s: Option<f64>,
+    /// The deep checks too (per-family state snapshots for freshness,
+    /// storage coverage, budgets) — real query load, opt-in.
+    #[serde(default)]
+    pub deep: bool,
+    /// At most this many state samples per family in the deep checks.
+    pub sample: Option<usize>,
+    /// Per-query timeout for the sweep; the bus timeout when unsaid.
+    pub timeout_s: Option<f64>,
+    /// Names into `sinks`; at least one. Every doctor notification — the
+    /// baseline, each new finding, each fixed one, a run that could not
+    /// happen — goes to these.
+    pub sinks: Vec<String>,
+    /// `info` | `warning` | `error`: findings below it are in the published
+    /// report but are never a notification. `info` (everything) when unsaid.
+    pub severity_floor: Option<String>,
+}
+
+/// The severity floors a doctor block may name — the doctor's own three,
+/// which are the rule severities minus `critical` (a doctor finding is
+/// never one).
+pub const DOCTOR_FLOORS: [&str; 3] = ["info", "warning", "error"];
+
+impl DoctorConfig {
+    /// The interval, when exactly one of the two spellings is given and it
+    /// is a positive number. `None` is what [`check`] refuses.
+    pub fn every(&self) -> Option<std::time::Duration> {
+        let secs = match (self.every_h, self.every_s) {
+            (Some(h), None) => h * 3600.0,
+            (None, Some(s)) => s,
+            _ => return None,
+        };
+        (secs.is_finite() && secs > 0.0).then(|| std::time::Duration::from_secs_f64(secs))
+    }
+
+    /// How the interval was spelled, for a summary line.
+    pub fn every_spelled(&self) -> String {
+        match (self.every_h, self.every_s) {
+            (Some(h), None) => format!("{h}h"),
+            (None, Some(s)) => format!("{s}s"),
+            _ => "?".into(),
+        }
+    }
+
+    /// The floor as a rank on [`crate::discipline::severity_rank`]'s scale;
+    /// `info` when unsaid.
+    pub fn floor_rank(&self) -> u8 {
+        crate::discipline::severity_rank(self.severity_floor.as_deref().unwrap_or("info"))
+    }
 }
 
 /// The `discipline` section (#389): everything between a notice and a
@@ -447,6 +520,7 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
         problem("sinks".into(), "no sinks — nowhere to notify".into());
     }
     check_discipline(&mut problem, cfg);
+    check_doctor(&mut problem, cfg);
 
     // Rules: parse, closed severities, every sink named exists, names and
     // ids unique, and no two rules spelling one engine condition — the
@@ -468,6 +542,15 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
             problem(
                 at("name"),
                 format!("slugs to {id:?}, the same id as rules[{prev}]"),
+            );
+        }
+        if cfg.doctor.is_some() && id == crate::rules::DOCTOR_RULE {
+            problem(
+                at("name"),
+                format!(
+                    "slugs to {id:?}, the id the scheduled doctor publishes and notifies \
+                     under (`doctor` block present) — name the rule something else"
+                ),
             );
         }
         match parse_rule(&r.rule) {
@@ -711,6 +794,79 @@ fn check_discipline(problem: &mut impl FnMut(String, String), cfg: &Config) {
     }
 }
 
+/// The `doctor` block (#390): exactly one interval spelling, positive;
+/// every sink named exists; the floor is one of the three; the bounds are
+/// numbers.
+fn check_doctor(problem: &mut impl FnMut(String, String), cfg: &Config) {
+    let Some(d) = &cfg.doctor else {
+        return;
+    };
+    match (d.every_h, d.every_s) {
+        (None, None) => problem(
+            "doctor.every_h".into(),
+            "an interval — `every_h` (hours; `every_s` is for tests and demos)".into(),
+        ),
+        (Some(_), Some(_)) => problem(
+            "doctor.every_s".into(),
+            "one of `every_h` or `every_s`, not both".into(),
+        ),
+        (Some(h), None) if !(h.is_finite() && h > 0.0) => problem(
+            "doctor.every_h".into(),
+            format!("must be a positive number of hours, got {h}"),
+        ),
+        (None, Some(s)) if !(s.is_finite() && s > 0.0) => problem(
+            "doctor.every_s".into(),
+            format!("must be a positive number of seconds, got {s}"),
+        ),
+        _ => {}
+    }
+    if let Some(t) = d.timeout_s
+        && !(t.is_finite() && t > 0.0)
+    {
+        problem(
+            "doctor.timeout_s".into(),
+            "must be a positive number of seconds".into(),
+        );
+    }
+    if d.sample == Some(0) {
+        problem(
+            "doctor.sample".into(),
+            "must be positive — a sample of zero asks nothing (leave it unset for unbounded)"
+                .into(),
+        );
+    }
+    if let Some(f) = &d.severity_floor
+        && !DOCTOR_FLOORS.contains(&f.as_str())
+    {
+        problem(
+            "doctor.severity_floor".into(),
+            format!(
+                "{f:?} is not a doctor severity — one of {}",
+                DOCTOR_FLOORS.join(", ")
+            ),
+        );
+    }
+    if d.sinks.is_empty() {
+        problem(
+            "doctor.sinks".into(),
+            "at least one sink — a doctor that reports to nobody is `zenctl doctor` \
+             nobody ran"
+                .into(),
+        );
+    }
+    for (j, s) in d.sinks.iter().enumerate() {
+        if !cfg.sinks.contains_key(s) {
+            problem(
+                format!("doctor.sinks[{j}]"),
+                format!(
+                    "{s:?} is not in `sinks` (which has: {})",
+                    cfg.sinks.keys().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            );
+        }
+    }
+}
+
 fn sink_timeout_s(sink: &SinkConfig) -> Option<f64> {
     match sink {
         SinkConfig::Ntfy { timeout_s, .. }
@@ -883,6 +1039,86 @@ mod tests {
         assert_eq!(d.group_by, vec!["origin".to_string()]);
         assert!(d.inhibit.enabled && d.inhibit.depth == 4);
         assert!(d.resolved_notice && d.repeat_s == 0.0 && d.for_s.is_none());
+    }
+
+    /// The doctor block's refusals (#390), each by path: no interval, both
+    /// spellings, a non-positive one, an unknown sink, a floor outside the
+    /// three, a rule that would collide with the doctor's own id — and the
+    /// two honest spellings both parse to an interval.
+    #[test]
+    fn the_doctor_block_is_refused_by_path() {
+        let cfg = parse(
+            r#"{
+              rules: [{ name: "doctor", rule: "doctor slice-sync", sinks: ["hook"] }],
+              sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
+              doctor: { sinks: ["pager"], severity_floor: "critical", timeout_s: 0, sample: 0 },
+            }"#,
+        )
+        .unwrap();
+        let problems = check(&cfg);
+        let paths: Vec<&str> = problems.iter().map(|p| p.path.as_str()).collect();
+        for expected in [
+            "doctor.every_h",
+            "doctor.sinks[0]",
+            "doctor.severity_floor",
+            "doctor.timeout_s",
+            "doctor.sample",
+            "rules[0].name",
+        ] {
+            assert!(paths.contains(&expected), "missing {expected} in {paths:?}");
+        }
+        let both = parse(
+            r#"{
+              rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
+              sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
+              doctor: { every_h: 6, every_s: 5, sinks: ["hook"] },
+            }"#,
+        )
+        .unwrap();
+        assert!(check(&both).iter().any(|p| p.path == "doctor.every_s"));
+        assert_eq!(both.doctor.as_ref().unwrap().every(), None);
+        let zero = parse(
+            r#"{
+              rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
+              sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
+              doctor: { every_h: 0, sinks: ["hook"] },
+            }"#,
+        )
+        .unwrap();
+        assert!(check(&zero).iter().any(|p| p.path == "doctor.every_h"));
+
+        let hours = parse(
+            r#"{
+              rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
+              sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
+              doctor: { every_h: 6, deep: true, sinks: ["hook"], severity_floor: "warning" },
+            }"#,
+        )
+        .unwrap();
+        assert!(check(&hours).is_empty(), "{:?}", check(&hours));
+        let d = hours.doctor.as_ref().unwrap();
+        assert_eq!(d.every(), Some(std::time::Duration::from_secs(6 * 3600)));
+        assert_eq!(d.every_spelled(), "6h");
+        assert_eq!(d.floor_rank(), severity_rank_of("warning"));
+        let seconds = parse(
+            r#"{
+              rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
+              sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
+              doctor: { every_s: 2.5, sinks: ["hook"] },
+            }"#,
+        )
+        .unwrap();
+        assert!(check(&seconds).is_empty());
+        assert_eq!(
+            seconds.doctor.as_ref().unwrap().every(),
+            Some(std::time::Duration::from_secs_f64(2.5))
+        );
+        // Not scheduled: absent, and nothing to refuse.
+        assert!(parse(MINIMAL).unwrap().doctor.is_none());
+    }
+
+    fn severity_rank_of(s: &str) -> u8 {
+        crate::discipline::severity_rank(s)
     }
 
     /// A file secret reads with its newline trimmed; an unreadable one is a

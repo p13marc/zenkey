@@ -32,6 +32,11 @@ pub enum RuleKind {
     /// Alive tokens under `selector` (RFC 04 §5): a token that disappears is
     /// firing, one that comes back is ok — the dead-man's switch.
     LivelinessGone { selector: String },
+    /// The scheduled doctor (#390): not a spelling of the vocabulary at all
+    /// — [`parse_rule`] never produces it — but the `doctor` block as the
+    /// discipline and the router see it, so a doctor finding has a rule to
+    /// be deduplicated, repeated and published under like every notice.
+    ScheduledDoctor,
 }
 
 impl RuleKind {
@@ -50,6 +55,7 @@ impl RuleKind {
             },
             RuleKind::Alerts { .. } => "alerts",
             RuleKind::LivelinessGone { .. } => "liveliness-gone",
+            RuleKind::ScheduledDoctor => "doctor",
         }
     }
 
@@ -57,7 +63,7 @@ impl RuleKind {
     pub fn watched_selector(&self) -> Option<&str> {
         match self {
             RuleKind::Alerts { selector } | RuleKind::LivelinessGone { selector } => Some(selector),
-            RuleKind::Engine(_) => None,
+            RuleKind::Engine(_) | RuleKind::ScheduledDoctor => None,
         }
     }
 }
@@ -69,6 +75,7 @@ impl fmt::Display for RuleKind {
             RuleKind::Engine(c) => write!(f, "{c}"),
             RuleKind::Alerts { selector } => write!(f, "alerts {selector}"),
             RuleKind::LivelinessGone { selector } => write!(f, "liveliness-gone {selector}"),
+            RuleKind::ScheduledDoctor => f.write_str("doctor (scheduled)"),
         }
     }
 }
@@ -153,6 +160,12 @@ pub struct Rule {
 /// The severity a rule gets when it declares none.
 pub const DEFAULT_SEVERITY: &str = "warning";
 
+/// The scheduled doctor's rule name and id (#390): what `firing/doctor`
+/// is keyed on, what `rule` says on its notifications, and the id
+/// [`crate::config::check`] refuses a user rule from slugging to while a
+/// `doctor` block is present.
+pub const DOCTOR_RULE: &str = "doctor";
+
 impl Rule {
     /// From its config entry. The config has been [`crate::config::check`]ed,
     /// so the only failure left is a rule that does not parse — refused
@@ -180,6 +193,23 @@ impl Rule {
             sinks: cfg.sinks.clone(),
             for_s: cfg.for_s,
         })
+    }
+
+    /// The `doctor` block as a rule (#390): `info` severity (a finding
+    /// carries its own), the block's sinks, and a `for` of zero — a doctor
+    /// finding is already a run-over-run delta, held for an interval of
+    /// hours; a `for` on top would only delay it.
+    pub fn scheduled_doctor(cfg: &crate::config::DoctorConfig) -> Rule {
+        Rule {
+            name: DOCTOR_RULE.into(),
+            id: rule_id(DOCTOR_RULE),
+            kind: RuleKind::ScheduledDoctor,
+            keyexpr: None,
+            severity: "info".into(),
+            labels: BTreeMap::new(),
+            sinks: cfg.sinks.clone(),
+            for_s: Some(0.0),
+        }
     }
 
     /// Whether a wire key falls under this rule's selector (the two
@@ -221,6 +251,13 @@ mod tests {
                 !matches!(head, "alerts" | "liveliness-gone")
             );
         }
+        // The scheduled doctor is not a spelling: it is the `doctor` block
+        // as a rule, and it slugs to the id the config check reserves.
+        let scheduled = RuleKind::ScheduledDoctor;
+        assert_eq!(scheduled.head(), "doctor");
+        assert_eq!(scheduled.watched_selector(), None);
+        assert!(parse_rule(&scheduled.to_string()).is_err());
+        assert_eq!(rule_id(DOCTOR_RULE), "doctor");
     }
 
     /// Outside the vocabulary — an expression, a daemon kind with the wrong

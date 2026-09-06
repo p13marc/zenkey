@@ -119,6 +119,7 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
                 state_file: None,
                 state_max_entries: 4096,
                 publish: true,
+                doctor: None,
             },
             async move {
                 let _ = stop_rx.await;

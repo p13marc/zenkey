@@ -72,6 +72,7 @@ async fn start(
                 state_file,
                 state_max_entries: 4096,
                 publish: false,
+                doctor: None,
             },
             async move {
                 let _ = stop_rx.await;
