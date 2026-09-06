@@ -7,7 +7,8 @@
 //! ([`registry`]) and a set of rows ([`project`]), a stream of samples
 //! becomes rates and latencies ([`stats`]) or a tree ([`tree`], [`skeleton`]),
 //! two payloads become a diff ([`diff`]), a payload plus a schema becomes a
-//! rendering ([`decode`]).
+//! rendering ([`decode`]), a sample on the alert plane becomes an alert
+//! transition ([`alert`]).
 //!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
@@ -24,6 +25,7 @@
 //! and says so; it does not call the transport slow. Verdicts are
 //! [`crate::judge`]'s.
 
+pub mod alert;
 pub mod bounded;
 pub mod diff;
 pub mod examples;

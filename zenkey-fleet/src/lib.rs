@@ -255,6 +255,7 @@ pub use judge::retired::scope_note as retired_scope_note;
 pub use judge::why::{StoredLookup, StoredValue, WhyInputs, WhySpec, WireWatch, run_why};
 // `diff` is `value_diff` at the root: a bare `diff` beside `byte_diff` in a
 // crate that also has `schema_drift` and `slice::diff` reads as *the* diff.
+pub use model::alert::alert_transition;
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
@@ -270,12 +271,12 @@ pub use model::tree::KeyTreeSnapshot;
 /// `zenkey_fleet::report::*`: it is the rendering vocabulary, and lifting all
 /// of it here would make this block a second copy of that module.
 pub use report::{
-    BenchReport, CallReport, CollapsedProducer, Coverage, CoverageRow, CutoverReport,
-    DeclaredEntities, DeclaredEntity, DiscoveredBase, DoctorReport, DriftVerdict, EntityKind,
-    ExpectReport, Fault, FieldReport, Freshness, GenPlanEntry, GenReport, HelloView, Judgement,
-    LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment, ProducerInfo,
-    RecordReport, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow,
-    SchemaDrift, SchemaServer, SeedCoverage, StorageInfo, TopologyEdge, TopologyNode,
+    AlertState, AlertTransition, BenchReport, CallReport, CollapsedProducer, Coverage, CoverageRow,
+    CutoverReport, DeclaredEntities, DeclaredEntity, DiscoveredBase, DoctorReport, DriftVerdict,
+    EntityKind, ExpectReport, Fault, FieldReport, Freshness, GenPlanEntry, GenReport, HelloView,
+    Judgement, LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment, ProducerInfo,
+    RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
+    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, StorageInfo, TopologyEdge, TopologyNode,
     TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
     judgement_exit_code,
 };
