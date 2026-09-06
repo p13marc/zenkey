@@ -35,3 +35,5 @@ pub mod write;
 
 #[cfg(feature = "decode")]
 pub mod body;
+#[cfg(feature = "decode")]
+pub mod describe;

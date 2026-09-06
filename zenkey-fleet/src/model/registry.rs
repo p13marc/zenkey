@@ -450,6 +450,38 @@ impl SliceSet {
     }
 }
 
+/// The `@rpc` key a slice's procedure is asked at — a service origin's
+/// verbatim `@` chunk is structurally unmatchable by a fleet selector's `*`
+/// (property D4), so it takes its own key. That is the grammar working, not
+/// an exception to it.
+///
+/// Pure: it reads the slice and spells a key, which is why it lives in the
+/// model and not beside the sweep that sends it (#410) — `bus/` may lean on
+/// `model/`, never the other way round, and `judge/` on both. It used to be
+/// private to the doctor, which meant the describe sweep could not leave the
+/// doctor without dragging the judge layer into the bus.
+pub(crate) fn rpc_key(base: &str, slice: &RegistrySlice, procedure: &str) -> Result<String> {
+    Ok(match &slice.service_origin {
+        Some(origin) => {
+            // The slice already validated it on parse — `Other` here means the
+            // chunk is not a legal verbatim origin, which is the same finding
+            // the hand-rolled `ServiceOrigin::new` used to report.
+            // A *served* slice said this, so it is the peer that is
+            // malformed — not the caller, and not the fabric.
+            let o = origin.known().ok_or_else(|| {
+                Error::malformed(
+                    format!("slice {}", slice.name),
+                    format!("carries {:?} as a service origin", origin.token()),
+                )
+            })?;
+            zenkey::grammar::with_base(base, zenkey::selector::service_rpc(o, &[procedure]))
+        }
+        None => {
+            zenkey::grammar::with_base(base, zenkey::selector::fleet_rpc(&slice.name, &[procedure]))
+        }
+    })
+}
+
 #[cfg(test)]
 impl SliceSet {
     /// Test constructor from one slice TOML (crate-internal).

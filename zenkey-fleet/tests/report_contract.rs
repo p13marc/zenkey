@@ -886,3 +886,64 @@ fn a_why_rung_keeps_not_asked_distinct_on_the_wire() {
         "not_asked has no negative answer to spell"
     );
 }
+
+/// `interface show` carries the engine's drift verdict beside its rows
+/// (#410), and only when there is one: absent on an unasked run (where
+/// `schemas` is absent too) and absent when the carriers agree, so the
+/// pre-#410 document is unchanged for both. When present it is the same
+/// `SchemaDrift` the doctor serialises, origin and all — one shape, two
+/// pages.
+#[test]
+fn an_interface_show_omits_drift_until_something_disagrees() {
+    assert_eq!(
+        serde_json::to_value(fx::interface_show_unasked()).unwrap(),
+        json!({
+            "type_name": "HealthSnapshot",
+            "carriers": [
+                {"producer": "sysinfo", "class": "state", "path": "health"},
+                {"producer": "gnmi", "class": "state", "path": "health"},
+            ],
+        }),
+        "unasked: neither schemas nor drift, and never an empty list of either"
+    );
+    assert_eq!(
+        serde_json::to_value(fx::interface_show()).unwrap(),
+        json!({
+            "type_name": "HealthSnapshot",
+            "carriers": [
+                {"producer": "sysinfo", "class": "state", "path": "health"},
+                {"producer": "gnmi", "class": "state", "path": "health"},
+            ],
+            "schemas": [
+                {
+                    "producer": "sysinfo",
+                    "type_name": "HealthSnapshot",
+                    "kind": "json-schema",
+                    "hash": "sha256:aaaa",
+                },
+                {
+                    "producer": "gnmi",
+                    "type_name": "HealthSnapshot",
+                    "kind": "json-schema",
+                    "hash": "sha256:bbbb",
+                },
+            ],
+            "drift": [{
+                "type_name": "HealthSnapshot",
+                "servers": [
+                    {"producer": "sysinfo", "origin": "h-aaaaaaaaaaaa", "hash": "sha256:aaaa"},
+                    {"producer": "gnmi", "origin": "h-bbbbbbbbbbbb", "hash": "sha256:bbbb"},
+                ],
+                "verdict": "disagree",
+            }],
+        })
+    );
+    // The third state: served, and one host said nothing — its `hash` is
+    // absent, never `""` or `null` (#370).
+    let value = serde_json::to_value(fx::interface_show_unjudgeable()).unwrap();
+    assert_eq!(value["drift"][0]["verdict"], "unjudgeable");
+    assert_eq!(
+        value["drift"][0]["servers"][1],
+        json!({"producer": "sysinfo", "origin": "h-bbbbbbbbbbbb"})
+    );
+}

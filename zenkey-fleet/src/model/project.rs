@@ -311,6 +311,9 @@ impl SliceSet {
             // caller fills them in only when `--schema` asked for them —
             // `NotAsked` says the bus was never asked (O4, R4).
             schemas: crate::report::Asked::NotAsked,
+            // Likewise: drift is a verdict over what the bus served, and
+            // nothing was asked of it here.
+            drift: Vec::new(),
         })
     }
 }
