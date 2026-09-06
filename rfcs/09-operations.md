@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31 and v1.33 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.
@@ -169,6 +169,18 @@ Notes:
 - Media is never stored (recording is a deliberate consumer, not a storage
   rule); blob chunks MAY be stored to make the router a content cache
   ([07-bulk-planes.md §2](07-bulk-planes.md)).
+- **This block is generated, not typed** (v1.33). `zenctl storage gen
+  --deployment <file>` takes a small TOML — the base, the volumes with their
+  plugin (and, for `redb`, the per-volume history mode of §2.1), and per
+  storage a class and a volume — and derives the rest: the selector
+  (`@catalog` explicit), the `strip_prefix` as the literal leftmost run, and
+  `garbage_collection.lifespan` as ⌈max covered `ttl_s` × margin⌉ with the
+  computation shown (§2.3's rule, which nobody computed by hand). It refuses
+  what the router would refuse — replication on an all-mode volume (§2.2), an
+  undeclared volume, a class the registry declares nothing under — and
+  emits the overlap and `complete` caveats of this section as comments
+  beside the storage they concern. `--check` compares the plan with the
+  storages the admin space reports; `--explain <key>` names the taker.
 - The `timeseries` storage is **optional** where a history application
   runs (v1.31): the reference deployment answers charts from
   `@rpc/historian/range` — an ordinary producer that subscribes the
@@ -339,6 +351,37 @@ the convention's own algebra:
    producer that may not `declare_queryable` serves nothing, and queries
    must be allowed **egress** toward the responder's face as well as
    ingress from the caller's.
+5. **Interest is evaluated on egress, against the responding face's
+   subject** (v1.33, from the reference deployment's first live ACL,
+   2026-08-30). A consumer's declares and queries are checked as they leave
+   the router *toward each publisher*, against *that publisher's* policy —
+   so a host whose grants are all own-origin (`…/h-xxx/**`) includes no
+   wildcard-origin selector, a console's `…/v1/**` interest never reaches
+   it, and a peer-mode publisher with no matching interest **publishes to
+   nobody**, silently: no error at the console, nothing in the publisher's
+   log, the liveliness token still up. The fix is one shared, **egress-only**
+   rule allowing declares and queries on the fleet's selectors
+   (`interest-prop` below), attached to every publishing principal — hosts,
+   the catalog, desired-state authors. It is security-neutral: what is
+   *published* (puts, replies, tokens) stays ingress-checked by the rules
+   that were already there; this rule only lets interest through. Its
+   corollary: `**` cannot cross `@catalog` any more than `@adv` (fact 2 and
+   fact 1 together), so a catalog on the advanced tier needs
+   `@catalog/**/@adv/**` spelled out.
+
+Five facts, ~30 rules, 8 subjects and a policy list for a six-host fleet,
+every `key_exprs` entry carrying an `h-<12hex>` no human can proofread —
+which is why the recipe went undeployed for a year. Since v1.33 the
+reference tooling generates it: `zenctl acl gen --enrollment <file>` expands
+this matrix from a small TOML binding certificate CNs to roles and origins
+(given, or computed from a machine-id by [06 §1](06-identity.md)'s
+derivation), narrowed by the registry to the planes each producer declares,
+and `--explain <principal> <key> <message>` answers "which rule decided"
+by keyexpr inclusion. **The running ACL is not observable**: zenoh 1.10's
+admin space serves no GET under `config/**`, so `acl gen --check` compares
+the plan against the router's *config file*, read through zenoh's own
+loader, and an interest-propagation probe from the consumer side is *not
+asked* — a publisher's matching status is the only place it shows.
 
 The grant matrix at a glance — one row per rule id in the sketch below, so
 a wrong or missing grant is visible before reading any JSON5 (`(adv)` =
@@ -359,6 +402,7 @@ only for principals on the advanced tier):
 | console | `ops-recv` | all planes (each named) | out | put, delete, reply, liveliness_token |
 | console | `no-remote-actions` | `*/@rpc/systemd/action` | both | **deny** query |
 | svc-origin | `desired-author` | `@desired/state/**` (its own subtree only) | in | put, delete |
+| every publisher (host, catalog, desired-author) | `interest-prop` (v1.33) | the fleet's selectors, each plane named (`v1/*/state/**`, `…/telemetry/**`, `…/events/**`, `v1/*/@rpc/**`, `v1/@catalog/state/**`, `v1/@catalog/@rpc/**`, `@catalog/**/@adv/**` where the catalog runs the advanced tier) | **out only** | declare_subscriber, declare_liveliness_subscriber, liveliness_query, query — fact 5 |
 
 Sketch (structure verified against the Zenoh 1.9 schema; validate against
 a live `zenohd` before deploying):

@@ -6,13 +6,19 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.32** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.33** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.33** (2026-09-06) — the generators: a fifth ACL fact — interest is
+  evaluated on egress against the responding face's subject, so own-origin
+  grants starve a peer-mode publisher of interest and it publishes to nobody;
+  a shared egress-only `interest-prop` row fixes it — and the two 09 recipes
+  become `zenctl storage gen` and `zenctl acl gen`, with the running ACL
+  recorded as unobservable in zenoh 1.10 (09 §2, §3).
 - **v1.32** (2026-09-06) — the declaration batch: a subject declares its
   `kind` (counter, gauge, text, bool) and a producer declares its `[budget]`
   (resident set, per-table bounds), the health document MAY carry the
@@ -31,20 +37,6 @@ what changed and what deliberately did not — is
   exist under the number the issue cited). Telemetry history is a computed
   answer served by an ordinary host-origin producer, the influx storage
   optional beside it (04 §4, 11 §2, 09 §2).
-- **v1.30** (2026-09-04) — the relationship batch: sensors publish
-  `evidence/relation/{relation_id}` (a claim that two things are connected)
-  and the catalog publishes `edge/{edge_id}`, the resolved conclusion, so the
-  dependency graph stops being a derivation inside one UI and becomes
-  documents anything can read (06 §5.6, 04 §1.4, 11 §3.3 with test vectors).
-  Three bounds carry it: `edge_id` is a function of `(kind, from, to)` after
-  resolution and nothing else, so two sensors confirming one relationship land
-  on one key and a restart republishes byte-identical documents; **traffic is
-  not a relationship** — flow is sized by the internet, not by the fleet, and
-  belongs on an `@rpc` overlay; and impact attribution is a pure function of
-  the graph, propagating only along containment kinds. Also the correction
-  behind it: `entity.origins[]`, named by 06 §5.1 since v1.0 and *required*
-  by 06 §6.4 since v1.2, did not exist — §5.1 now states that it holds
-  self-reported origins only, and what a consumer does without it.
 
 ---
 

@@ -25,6 +25,52 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.33 (2026-09-06, the generators)** — one chapter, one new fact, and
+> two recipes that stop being hand-written.
+>
+> **The fifth ACL fact** ([09 §3](09-operations.md)). The reference
+> deployment deployed the §3 recipe for the first time on 2026-08-30 — a
+> year after the chapter was written, the per-node certificate CNs having
+> been chosen for it from the start — and found a failure the four facts
+> did not predict: zenoh evaluates a consumer's declares and queries **on
+> egress toward the responding face, against that face's subject**. A host
+> whose grants are all own-origin includes no wildcard-origin selector, so
+> a console's fleet-wide interest never reaches it, and a peer-mode
+> publisher with no matching interest publishes to nobody — silently, with
+> its liveliness token up. The fix is one shared egress-only rule on every
+> publishing policy, `interest-prop`, now a matrix row; it is
+> security-neutral because what is published stays ingress-checked. The
+> fact's corollary (`**` crosses neither `@catalog` nor `@adv`, so a catalog
+> on the advanced tier needs `@catalog/**/@adv/**` spelled out) is recorded
+> beside it.
+>
+> **Two recipes become tooling** ([09 §2](09-operations.md),
+> [09 §3](09-operations.md)). Both sections specified an artifact nobody
+> deployed, for the same reason: unwritable by hand and unverifiable once
+> written. `zenctl storage gen` derives the `storage_manager` block from the
+> registry and a small deployment file — the selector, the literal
+> `strip_prefix`, and `garbage_collection.lifespan` as ⌈max covered `ttl_s`
+> × margin⌉ with the computation shown — and refuses what the router would
+> refuse. `zenctl acl gen` expands the §3 matrix from an enrollment file,
+> narrowed by the registry, with `--explain` answering "which rule decided"
+> by inclusion. Each has a `--check`, and the chapter now records the limit
+> of the second: **the running ACL is not observable** — zenoh 1.10's admin
+> space serves no GET under `config/**` — so the check reads the router's
+> config file through zenoh's own loader, and an interest-propagation probe
+> from the consumer side is *not asked*.
+>
+> **What deliberately did not happen.** No change to the matrix's existing
+> rows, to the storage table, or to any normative chapter — 09 is
+> informative and stays so. No claim that a generated block was validated
+> against a live router beyond what the reference deployment did by hand
+> (the generated ACL is fed back through zenoh's config parser in the tool's
+> tests; the storage block's two unverified layouts are named in the tool's
+> own notes). And the tools are the reference tooling's, not the
+> convention's: another adopter may write the same block by hand and be
+> conformant.
+>
+> *Amends: 09.*
+
 > **v1.32 (2026-09-06, the declaration batch)** — two declarations the
 > registry could not make, and the judgement of each. Filed the same day
 > as v1.31 and kept apart from it because these add to the *contract a
