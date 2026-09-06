@@ -34,6 +34,7 @@ pub mod registry;
 pub mod retain;
 pub mod skeleton;
 pub mod stats;
+pub mod storage;
 pub mod tree;
 
 #[cfg(feature = "decode")]
