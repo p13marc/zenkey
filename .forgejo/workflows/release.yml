@@ -40,9 +40,10 @@ jobs:
           name="${GITHUB_REPOSITORY#*/}"
           git archive --format=tar.gz --prefix="${name}-${RELEASE_TAG}/" \
             -o "dist/release/${name}-${RELEASE_TAG}.tar.gz" "${RELEASE_TAG}"
-          cargo build --release -p zenctl -p zengui --locked
+          cargo build --release -p zenctl -p zengui -p zenwatch --locked
           cp target/release/zenctl "dist/release/zenctl-${RELEASE_TAG}-linux-x86_64"
           cp target/release/zengui "dist/release/zengui-${RELEASE_TAG}-linux-x86_64"
+          cp target/release/zenwatch "dist/release/zenwatch-${RELEASE_TAG}-linux-x86_64"
           (cd dist/release && sha256sum * > SHA256SUMS)
       - name: Create release if missing
         # API-driven so a workflow_dispatch re-run of an existing tag is

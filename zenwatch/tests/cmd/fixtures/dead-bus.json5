@@ -1,0 +1,9 @@
+{
+  // Client mode on purpose: zenoh's client defaults are
+  // `connect.timeout_ms: 0` and `connect.exit_on_failure: true`, so an
+  // unreachable endpoint fails at once and without retry. Peer mode retries
+  // forever (-1 / false), which is how a test like this becomes a flake.
+  mode: "client",
+  connect: { endpoints: ["tcp/127.0.0.1:1"] },
+  scouting: { multicast: { enabled: false } },
+}

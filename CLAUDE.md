@@ -136,6 +136,35 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `zenkey_fleet::judgement_exit_code` over the RFC 13 §1.2 `Judgement`, never
   a hand-rolled match. `zenctl/CHANGELOG.md` carries the old→new table.
 
+- `zenwatch/` — the **notifier** (Apache-2.0, **not published**; Forgejo
+  release binaries, like zenctl and zengui; #388, epic #387). The third
+  binary on the same engine: zenctl explores a bus, zengui renders one,
+  zenwatch tells you when something is wrong while you are asleep. One
+  process, one JSON5 config, N rules, M sinks. A rule is one spelling of the
+  **closed** vocabulary — `zenctl watchdog`'s eight (`rate-above`,
+  `rate-below`, `silent-for`, `invalid-payload`, `qos-mismatch`, `doctor`,
+  `origin-down`, `dropped`) plus two of its own: `alerts <SEL>` (the
+  producers' alert documents, RFC 04 §1.2 — a put is firing, a delete is
+  resolved) and `liveliness-gone <SEL>` (the dead-man's switch on alive
+  tokens, RFC 04 §5). Sinks: `ntfy`, `smtp`, `webhook`, `exec` — the one
+  that runs code, deliberately last. **Secrets are env-var names or file
+  paths, never inline**: a bare string in a secret position fails to parse.
+  **The three states are preserved** into every sink payload, and a
+  `Dropped(n)` from the monitor is `unobservable` on every `alerts`/
+  `liveliness-gone` rule, never `ok`. **The layering split**: the alert
+  projection (`AlertTransition`, `alert_transition`, the RFC 11 §3.2
+  `alert_ref`) is the engine's, because a `.zrec` replay and a GUI pane want
+  the same reading; routing — which rule, which sink, whether it is a
+  duplicate — is the daemon's (`engine::route`, over a `Notice` seam the
+  discipline chunk hangs off). `alerts`/`liveliness-gone` are **not**
+  `Condition` variants: a `Condition` is one state per rule, these are one
+  state per key. `check-config` refuses exactly what `run` would (exit 2);
+  `--dry-run` swaps every sink for a printing one. **A real daemon,
+  explicitly launched, publishes its own state like a producer**
+  (`registry/zenwatch.toml`: `health`, `firing/{rule_id}`, `doctor` — the
+  publication itself is chunk CM), and it caches no discovery: it is not
+  the noun `docs/redesign-2026-07.md` §6.1 rejected.
+
 Plus `fixture-tests/` (unpublished): the ZenSight registry snapshot compiled
 through zenkey-build — the codegen regression corpus. **Do not add features
 there**; it exists so a codegen change that breaks generated code fails here,
@@ -224,4 +253,4 @@ never a verdict. Scouting is opt-in.
   drift. Doc comments cite RFC sections (`RFC 03 §2`) and issues; keep that habit.
 - Publishing (crates.io, LIB CRATES ONLY): `zenkey` → `zenkey-build` →
   `zenkey-fleet` (in that order; zenkey-build version-locks to zenkey 0.x).
-  Binaries (zenctl, zengui) ship via the `release.yml` binary lane.
+  Binaries (zenctl, zengui, zenwatch) ship via the `release.yml` binary lane.

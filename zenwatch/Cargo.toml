@@ -1,0 +1,54 @@
+[package]
+name = "zenwatch"
+version = "0.1.0"
+# Publication policy (docs/redesign-2026-07.md §15, as zenctl and zengui):
+# a Forgejo release binary, never a crates.io crate.
+publish = false
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Notifier for a keyspace-v2 Zenoh bus — the closed watchdog vocabulary plus the producers' own alerts and the liveliness dead-man's switch, routed to ntfy, SMTP, a webhook or a command (#388)"
+readme = "README.md"
+license = "Apache-2.0"
+
+[[bin]]
+name = "zenwatch"
+path = "src/main.rs"
+
+[dependencies]
+zenkey = { workspace = true }
+# The same codec matrix the explorers turn on (#97/#98): an alert document a
+# producer serves as protobuf or CDR still has to render into a
+# notification. Not `blob`: a notifier fetches no bulk content.
+zenkey-fleet = { workspace = true, features = ["decode-protobuf", "decode-cdr", "validate-json"] }
+zenkey-explorer-config = { workspace = true }
+zenoh = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+json5 = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+# The sinks. See the workspace manifest for the TLS-provider decision.
+reqwest = { workspace = true }
+rustls = { workspace = true }
+lettre = { workspace = true }
+
+[build-dependencies]
+# The daemon's own registry (RFC 08 §5): `health`, `firing/{rule_id}`,
+# `doctor` and the two procedures every producer serves. Declared now so the
+# lock does not move when the self-publication chunk lands.
+zenkey-build = { workspace = true }
+
+[dev-dependencies]
+trycmd = { workspace = true }
+snapbox = { workspace = true }
+tempfile = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# Crate-local, like zenctl's: the workspace table cannot express a target.
+libc = "0.2"

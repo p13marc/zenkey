@@ -323,6 +323,46 @@ pub async fn run_doctor(
                 unstamped += family_unstamped;
             }
         }
+        // Declared `[budget]` versus the health document's `self_stats`
+        // (#391, RFC 08 §2 v1.32, RFC 04 §1.2). Under `--deep` because a
+        // health fetch costs the data plane, and RFC 13 §3 asks for that
+        // explicitly rather than folded into an ambient run (its frugality
+        // note); a slice without a budget is not asked, and issues no GET.
+        // `state_snapshot` carries no payload, so this is a `fleet_get` with
+        // the reply bytes read structurally — the listen phase's reading.
+        for slice in slice_set.slices().iter().filter(|s| s.budget.is_some()) {
+            let selector = match &slice.service_origin {
+                Some(origin) => with_base(base, format!("v1/{origin}/state/health")),
+                None => with_base(base, format!("v1/*/state/{}/health", slice.name)),
+            };
+            let answers = fleet_get(fleet, &selector, &GetOpts::new(spec.timeout)).await?;
+            let read: Vec<(String, Option<crate::judge::self_stats::SelfStats>)> = answers
+                .iter()
+                .filter_map(|a| match &a.answer {
+                    Answer::Value(bytes) => Some((
+                        a.origin.clone(),
+                        crate::model::decode::structural_value(&bytes.to_bytes())
+                            .as_ref()
+                            .and_then(crate::judge::self_stats::read_self_stats),
+                    )),
+                    Answer::Error { .. } => None,
+                })
+                .collect();
+            let asked = roster
+                .iter()
+                .filter(|(origin, producers)| match &slice.service_origin {
+                    Some(service) => service.token() == origin.as_str(),
+                    None => producers.iter().any(|p| {
+                        zenkey::grammar::Producer::parse_chunk(p)
+                            .map(|p| p.name() == slice.name)
+                            .unwrap_or(p == &slice.name)
+                    }),
+                })
+                .count();
+            findings.extend(crate::judge::self_stats::judge_self_stats(
+                slice, &read, asked,
+            ));
+        }
         if unstamped > 0 {
             findings.push(finding(
                 DoctorSeverity::Warning,

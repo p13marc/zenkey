@@ -460,6 +460,9 @@ impl SliceSet {
 /// `model/`, never the other way round, and `judge/` on both. It used to be
 /// private to the doctor, which meant the describe sweep could not leave the
 /// doctor without dragging the judge layer into the bus.
+// Both callers (the describe sweep and the doctor) are decode-gated, so
+// without the feature the function would be dead code and a warning.
+#[cfg(feature = "decode")]
 pub(crate) fn rpc_key(base: &str, slice: &RegistrySlice, procedure: &str) -> Result<String> {
     Ok(match &slice.service_origin {
         Some(origin) => {

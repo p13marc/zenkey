@@ -1,0 +1,29 @@
+`registry export --as toml` renders a slice back to registry TOML through
+`zenkey::slice_to_toml`, the inverse of `parse_slice` — so what comes out can
+be fed back in (#50). Offline here: `--registry` reads the checkout's own
+files, and no bus is opened.
+
+The per-producer `[budget]` table (RFC 08 §2, v1.32) rides the slice like
+every other carried field and comes back out where the TOML grammar needs a
+plain table to be — right after the header block, before the first
+`[[subject]]`. A slice that declares none emits none.
+
+```console
+$ zenctl registry export --registry ../fixture-tests/registry --producer sysinfo --as toml
+# ── sysinfo.toml ─────────────────────────────
+[registry]
+version = "1.1"
+app = "zensight"
+convention = 1
+
+[producer]
+name = "sysinfo"
+description = "host CPU/memory/disk/net metrics"
+
+[budget]
+rss_mb = 32
+
+[[subject]]
+...
+
+```

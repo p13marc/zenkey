@@ -1,0 +1,7 @@
+{
+  rules: [
+    { name: "quiet-a", rule: "silent-for v1/*/telemetry/** 30", sinks: ["hook"] },
+    { name: "quiet-b", rule: "silent-for v1/*/telemetry/** 30", sinks: ["hook"] },
+  ],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },
+}

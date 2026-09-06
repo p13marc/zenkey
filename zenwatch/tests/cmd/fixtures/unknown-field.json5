@@ -1,0 +1,4 @@
+{
+  rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z", methd: "POST" } },
+}
