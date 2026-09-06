@@ -2050,6 +2050,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cutover",
         "doctor",
         "expect",
+        "export",
         "field",
         "gen",
         "gen-plan",
@@ -2164,6 +2165,12 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::snapshot_report());
     assert_eq!(s.asked, ["acme/v1/**"]);
     assert_eq!(s.window_s, Some(1.25));
+
+    // The exporter's scope is its selector, over the span it has been
+    // watching (taken_at - started_at).
+    let s = scoped(&fx::export_snapshot());
+    assert_eq!(s.asked, ["acme/v1/*/**"]);
+    assert_eq!(s.window_s, Some(120.0));
     // The doctor's scope is its listen phase; the fixture ran one.
     let s = scoped(&fx::doctor_report());
     assert_eq!(s.asked, ["v1/**"]);
@@ -2765,4 +2772,91 @@ fn the_consumer_families_never_speak_of_matching_or_listening() {
             );
         }
     }
+}
+
+// ── The metrics surface (#228) ───────────────────────────────────────────────
+
+/// `export --once`: series grouped by producer, an empty value cell where
+/// the state says the series stopped, and the state beside every row.
+#[test]
+fn an_export_snapshot_groups_series_by_producer_and_blanks_a_stopped_value() {
+    assert_data_eq!(
+        table(&fx::export_snapshot()),
+        str![[r#"
+series                                       labels                                        value  state        last seen   samples
+
+sysinfo  (telemetry)
+zenkey_subject_sysinfo_cpu_usage_percent     origin=h-3fa9c2d41b7e                        12.500  live         1700000119      240
+zenkey_subject_sysinfo_disk_used_bytes       origin=h-0000deadbeef mount=var-log                  origin_down  1700000040       80
+
+netlink  (telemetry)
+zenkey_subject_netlink_iface_rx_bytes_total  origin=h-3fa9c2d41b7e iface=eth0 field=rx            evicted      1700000100        5
+
+sysinfo  (state)
+zenkey_subject_sysinfo_health                origin=h-3fa9c2d41b7e field=uptime_s       4242.000  quiet        1700000060        4
+
+"#]]
+    );
+}
+
+/// The ndjson leads with the envelope — scopes, exclusions, the observer's
+/// counters as separate fields — then one tagged row per series.
+#[test]
+fn an_export_snapshots_ndjson_leads_with_the_envelope_then_tags_every_series() {
+    assert_data_eq!(
+        ndjson(&fx::export_snapshot()),
+        str![[r#"
+{"contract":{"payload_invalid":1,"payload_not_validated":128,"payload_valid":200,"qos_judged":320,"qos_mismatch":2,"qos_mismatch_by_subject":[{"n":2,"producer":"sysinfo","subject":"cpu/usage"}]},"doctor":{"findings":[{"check":"stale-state","severity":"warning","subject":"h-3fa9c2d41b7e/sysinfo"}],"ran_at_unix_s":1700000090},"excluded":["@rpc","@media","@blob","@adv","service origins"],"max_series":10000,"notes":[{"cite":"RFC 03 §4 D2","text":"a wildcard selector never crosses an `@`-chunk: @rpc, @media, @blob, @adv, service origins are excluded from this surface, not empty"},{"cite":"RFC 09 §5.1 O4","text":"3 distinct key(s) the registry does not declare are counted, never exported — the contract is the registry"},{"text":"128 sample(s) not validated (past the decode budget, or no schema) — a third population beside 200 valid and 1 invalid, never folded into a ratio"},{"text":"2 series stopped (evicted, origin_down or retired): each keeps its labels and state and exposes no value, so a scraper sees a named absence rather than a flat line"},{"text":"quiet is judged only for `state` subjects against their declared ttl_s; telemetry declares no period and is never called quiet"},{"cite":"RFC 09 §5.1 O7","text":"last seen is this observer's wall clock at arrival, never the producer's"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — every value is a lower bound while this moves"},{"cite":"RFC 09 §5.1 O6","text":"5 key(s) retired at the stats-table bound; their series read `evicted`"},{"cite":"RFC 09 §5.1 O6","text":"7 retained sample(s) dropped at the byte budget"},{"cite":"RFC 09 §5.1 O6","text":"11 retained sample(s) aged out of the retention window"},{"cite":"RFC 09 §5.1 O6","text":"13 key(s) retired because their watch was released"},{"cite":"RFC 09 §5.1 O6","text":"17 sample(s) coalesced between scrapes — only the newest value per series is exposed"},{"cite":"RFC 09 §5.1 O6","text":"4 sample(s) refused a series past the declared `cardinality` budget"},{"cite":"RFC 09 §5.1 O6","text":"1 field(s) refused a series past the per-subject field cap"}],"observer":{"coalesced":17,"dropped":3,"evicted_bytes":7,"evicted_keys":5,"expired":11,"unstamped":19,"unwatched":13},"registry":{"producers":2},"report":"export","scopes":["acme/v1/*/**"],"started_at_unix_s":1700000000,"suppressed":{"cardinality":4,"fields":1},"taken_at_unix_s":1700000120,"unregistered_keys":3}
+{"class":"telemetry","drop_exposed":2,"key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage","kind":"gauge","last_seen_unix_s":1700000119,"name":"zenkey_subject_sysinfo_cpu_usage_percent","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":240,"state":"live","subject":"cpu/usage","unit":"percent","value":12.5}
+{"class":"telemetry","key":"acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used","labels":{"mount":"var-log"},"last_seen_unix_s":1700000040,"name":"zenkey_subject_sysinfo_disk_used_bytes","origin":"h-0000deadbeef","producer":"sysinfo","row":"series","samples":80,"state":"origin_down","subject":"disk/{mount}/used","unit":"bytes"}
+{"class":"telemetry","field":"rx","key":"acme/v1/h-3fa9c2d41b7e/telemetry/netlink/iface/eth0/rx_bytes","kind":"counter","labels":{"iface":"eth0"},"last_seen_unix_s":1700000100,"name":"zenkey_subject_netlink_iface_rx_bytes_total","origin":"h-3fa9c2d41b7e","producer":"netlink","row":"series","samples":5,"state":"evicted","subject":"iface/{iface}/rx_bytes","unit":"bytes"}
+{"class":"state","field":"uptime_s","key":"acme/v1/h-3fa9c2d41b7e/state/sysinfo/health","last_seen_unix_s":1700000060,"name":"zenkey_subject_sysinfo_health","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":4,"state":"quiet","subject":"health","value":4242.0}
+
+"#]]
+    );
+}
+
+/// The honesty floor for the surface, asserted rather than snapshotted:
+/// every O6 population is its own bound note, never a sum; the three
+/// payload populations stay three; the unasked poles are coverage notes.
+#[test]
+fn an_export_snapshot_states_every_bound_by_kind_and_never_sums_them() {
+    let n = notes(&fx::export_snapshot());
+    for expected in [
+        "3 sample(s) dropped while behind",
+        "5 key(s) retired at the stats-table bound",
+        "7 retained sample(s) dropped at the byte budget",
+        "11 retained sample(s) aged out",
+        "13 key(s) retired because their watch was released",
+        "17 sample(s) coalesced between scrapes",
+        "4 sample(s) refused a series past the declared `cardinality` budget",
+        "1 field(s) refused a series past the per-subject field cap",
+    ] {
+        assert!(n.contains(expected), "missing `{expected}` in:\n{n}");
+    }
+    assert!(
+        !n.contains(" 23 ") && !n.contains(" 36 ") && !n.contains(" 56 "),
+        "no sum of the kinds:\n{n}"
+    );
+    assert!(
+        n.contains("128 sample(s) not validated") && n.contains("200 valid and 1 invalid"),
+        "{n}"
+    );
+    assert!(n.contains("2 series stopped"), "{n}");
+    assert!(
+        n.contains("@rpc, @media, @blob, @adv, service origins are excluded"),
+        "{n}"
+    );
+
+    // The unasked poles, on a snapshot that asked for nothing.
+    let mut bare = fx::export_snapshot();
+    bare.doctor = zenkey_fleet::report::Asked::NotAsked;
+    bare.registry = zenkey_fleet::report::Asked::NotAsked;
+    bare.contract.payload_valid = 0;
+    bare.contract.payload_invalid = 0;
+    let n = notes(&bare);
+    assert!(n.contains("doctor not asked"), "{n}");
+    assert!(n.contains("no registry loaded"), "{n}");
+    assert!(n.contains("payload verdicts not asked"), "{n}");
+    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
 }

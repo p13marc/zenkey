@@ -269,11 +269,16 @@ pub use model::acl::{AclOptions, check_acl, explain_acl, plan_acl, to_json5 as a
 pub use model::alert::alert_transition;
 pub use model::consumers::{SubjectTarget, declaring_sessions, join_consumers, subject_target};
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
+pub use model::export::{
+    DEFAULT_MAX_SERIES, DoctorRun, ExportLedger, FIELD_CAP, FoldInputs, Observed, PayloadVerdict,
+    WILDCARD_EXCLUDES, excluded_by,
+};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
 };
 pub use model::impact::{ImpactInputs, MAX_DEPTH_CAP, attribute, entity_of};
 pub use model::origin_map::{Label, MapError, MapPlan, OriginProfile, origin_profiles, plan_map};
+pub use model::prom::{exposition, metric_name};
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
@@ -297,9 +302,9 @@ pub use report::{
     AdminAnswer, AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
     ConsumerRow, ConsumersReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities,
     DeclaredEntity, DiscoveredBase, DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd,
-    EdgeKind, EntityDoc, EntityKind, ExpectReport, Fault, FieldReport, Freshness, GenPlanEntry,
-    GenReport, HelloView, ImpactReport, Judgement, LatencyReport, LatencySummary, MeshLink,
-    NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
+    EdgeKind, EntityDoc, EntityKind, ExpectReport, ExportSnapshot, Fault, FieldReport, Freshness,
+    GenPlanEntry, GenReport, HelloView, ImpactReport, Judgement, LatencyReport, LatencySummary,
+    MeshLink, NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
     RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
     SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact,
     TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport,
