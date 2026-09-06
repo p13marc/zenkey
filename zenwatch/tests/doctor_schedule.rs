@@ -58,6 +58,8 @@ type = "TelemetryPoint"
 "#;
 
 type Capture = Arc<Mutex<Vec<Outgoing>>>;
+/// What the explorer's subscriber saw on the doctor key: kind and body.
+type Published = Arc<Mutex<Vec<(SampleKind, Vec<u8>)>>>;
 
 /// Until `pred` holds over what the sink captured (or SETTLE).
 async fn until(capture: &Capture, what: &str, pred: impl Fn(&[Outgoing]) -> bool) -> Vec<Outgoing> {
@@ -109,7 +111,7 @@ async fn a_drifted_producer_is_named_by_the_baseline_and_its_upgrade_is_one_reso
     };
 
     // The explorer's side: every doctor document the daemon publishes.
-    let published: Arc<Mutex<Vec<(SampleKind, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+    let published: Published = Arc::new(Mutex::new(Vec::new()));
     let _sub = {
         let published = Arc::clone(&published);
         a.declare_subscriber("v1/*/state/zenwatch/doctor")
@@ -214,7 +216,8 @@ async fn a_drifted_producer_is_named_by_the_baseline_and_its_upgrade_is_one_reso
     );
     assert_eq!(got[0].sinks, vec!["ops".to_string()]);
     assert!(
-        !got.iter().any(|o| o.notification.id.starts_with("doctor:slice-sync")),
+        !got.iter()
+            .any(|o| o.notification.id.starts_with("doctor:slice-sync")),
         "a finding true since deployment is not news: {got:?}"
     );
 
@@ -222,7 +225,8 @@ async fn a_drifted_producer_is_named_by_the_baseline_and_its_upgrade_is_one_reso
     // declares. The next run yields exactly one resolved naming the check.
     *served.lock().unwrap() = LOCAL;
     let got = until(&ops, "the resolve", |s| {
-        s.iter().any(|o| o.notification.kind == NoticeKind::Resolved)
+        s.iter()
+            .any(|o| o.notification.kind == NoticeKind::Resolved)
     })
     .await;
     let resolved: Vec<&Outgoing> = got
@@ -235,14 +239,18 @@ async fn a_drifted_producer_is_named_by_the_baseline_and_its_upgrade_is_one_reso
     assert_eq!(n.title, format!("slice-sync {ORIGIN}/sysinfo"));
     assert_eq!(n.state, CondState::Ok);
     assert_eq!(n.prior, Some(CondState::Firing));
-    assert_eq!(n.labels.get("check").map(String::as_str), Some("slice-sync"));
+    assert_eq!(
+        n.labels.get("check").map(String::as_str),
+        Some("slice-sync")
+    );
     assert!(
         n.message.contains("gone since the run at "),
         "{}",
         n.message
     );
     assert!(
-        !got.iter().any(|o| o.notification.kind == NoticeKind::Unobservable),
+        !got.iter()
+            .any(|o| o.notification.kind == NoticeKind::Unobservable),
         "every run happened: {got:?}"
     );
 
@@ -259,7 +267,10 @@ async fn a_drifted_producer_is_named_by_the_baseline_and_its_upgrade_is_one_reso
         })
         .collect();
     assert!(docs.len() >= 2, "one document per run: {}", docs.len());
-    assert!(docs.iter().all(|d| d.outcome == DoctorOutcome::Ok), "{docs:?}");
+    assert!(
+        docs.iter().all(|d| d.outcome == DoctorOutcome::Ok),
+        "{docs:?}"
+    );
     assert!(docs.iter().all(|d| d.error.is_none()));
     let first = &docs[0];
     assert!(first.findings >= 1);
@@ -284,7 +295,10 @@ async fn a_drifted_producer_is_named_by_the_baseline_and_its_upgrade_is_one_reso
         .iter()
         .find(|d| d.fixed >= 1)
         .expect("the run that saw the upgrade");
-    assert_eq!(fixed.delta.as_ref().unwrap()["fixed"][0]["check"], "slice-sync");
+    assert_eq!(
+        fixed.delta.as_ref().unwrap()["fixed"][0]["check"],
+        "slice-sync"
+    );
     assert!(
         !fixed.report["findings"]
             .as_array()

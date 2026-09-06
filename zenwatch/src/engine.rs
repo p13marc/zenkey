@@ -46,9 +46,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use zenkey_fleet::{
-    AlertState, AlertTransition, CondState, DoctorReport, Fleet, FleetEvent, Monitor,
-    MonitorSpec, RenderSource, SchemaStore, SeedPolicy, Sipper as _, SliceSet, StreamItem,
-    Transition, WatchdogSpec, WatchdogSummary,
+    AlertState, AlertTransition, CondState, DoctorReport, Fleet, FleetEvent, Monitor, MonitorSpec,
+    RenderSource, SchemaStore, SeedPolicy, Sipper as _, SliceSet, StreamItem, Transition,
+    WatchdogSpec, WatchdogSummary,
 };
 use zenoh::key_expr::KeyExpr;
 use zenoh::sample::SampleKind;

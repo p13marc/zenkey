@@ -511,8 +511,18 @@ mod tests {
         // The served describe names the document's fields — the shape an
         // explorer decodes through is the shape that is published.
         let served = schema_set().to_json();
-        for field in ["ran_at", "next_at", "outcome", "report", "report_at", "delta"] {
-            assert!(served.contains(&format!("\"{field}\"")), "{field} described");
+        for field in [
+            "ran_at",
+            "next_at",
+            "outcome",
+            "report",
+            "report_at",
+            "delta",
+        ] {
+            assert!(
+                served.contains(&format!("\"{field}\"")),
+                "{field} described"
+            );
         }
     }
 

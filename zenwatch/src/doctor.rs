@@ -438,7 +438,8 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
             } else {
                 CondState::Ok
             };
-            let summary = format!("doctor baseline: {findings} finding(s) across {checks} check(s)");
+            let summary =
+                format!("doctor baseline: {findings} finding(s) across {checks} check(s)");
             let mut body = vec![
                 format!("state: {} (first observation)", state_word(state)),
                 format!(
@@ -476,7 +477,11 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
                 (_, None, _) => "first observation".to_string(),
             };
             let head = match prior {
-                Some(p) => format!("state: {} (was: {}; {since})", state_word(*state), state_word(*p)),
+                Some(p) => format!(
+                    "state: {} (was: {}; {since})",
+                    state_word(*state),
+                    state_word(*p)
+                ),
                 None => format!("state: {} ({since})", state_word(*state)),
             };
             let check_line = match &finding.citation {
@@ -499,10 +504,16 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
                     coverage.clone(),
                 ],
                 BTreeMap::from([("check".to_string(), finding.check.to_string())]),
-                format!("{} {}: {}", finding.check, finding.subject, finding.evidence),
+                format!(
+                    "{} {}: {}",
+                    finding.check, finding.subject, finding.evidence
+                ),
             )
         }
-        DoctorNotice::Run { at: ran_at, outcome } => match outcome {
+        DoctorNotice::Run {
+            at: ran_at,
+            outcome,
+        } => match outcome {
             Err(error) => (
                 RUN_ID.to_string(),
                 NoticeKind::Unobservable,
@@ -529,8 +540,10 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
                 "the doctor ran again".to_string(),
                 vec![
                     "state: ok (was: unobservable)".to_string(),
-                    format!("the doctor ran at {ran_at}; its findings are judged against the \
-                             last report that succeeded"),
+                    format!(
+                        "the doctor ran at {ran_at}; its findings are judged against the \
+                             last report that succeeded"
+                    ),
                     coverage.clone(),
                 ],
                 BTreeMap::new(),
@@ -676,7 +689,10 @@ mod tests {
         let mut h = Harness::new(None);
         let a = finding(CheckId::SliceSync, "h-1/sysinfo", DoctorSeverity::Error);
         let b = finding(CheckId::DescribeMissing, "fleet", DoctorSeverity::Info);
-        let out = h.run(Ok(report(vec![a.clone(), b.clone()], Asked::Asked(vec![]))), 0.0);
+        let out = h.run(
+            Ok(report(vec![a.clone(), b.clone()], Asked::Asked(vec![]))),
+            0.0,
+        );
         assert_eq!(out.len(), 1, "one baseline, not one per finding: {out:?}");
         let n = &out[0].notification;
         assert_eq!(n.id, BASELINE_ID);
@@ -686,17 +702,17 @@ mod tests {
         assert_eq!(n.prior, None);
         assert_eq!(n.rule, "doctor");
         assert_eq!(n.rule_kind, "doctor");
-        assert_eq!(
-            n.title,
-            "doctor baseline: 2 finding(s) across 2 check(s)"
-        );
+        assert_eq!(n.title, "doctor baseline: 2 finding(s) across 2 check(s)");
         assert!(
             n.message
                 .contains("- error slice-sync h-1/sysinfo: evidence for h-1/sysinfo"),
             "{}",
             n.message
         );
-        assert!(n.message.contains("registry diff: asked, 0 producer(s) in sync"));
+        assert!(
+            n.message
+                .contains("registry diff: asked, 0 producer(s) in sync")
+        );
         assert_eq!(out[0].sinks, vec!["ops".to_string()]);
         // Both findings are remembered firing under the rule, delivered to nobody.
         assert_eq!(
@@ -716,7 +732,10 @@ mod tests {
         assert_eq!(doc.report_at.as_deref(), Some(doc.ran_at.as_str()));
 
         // The same again: nothing.
-        let out = h.run(Ok(report(vec![a.clone(), b.clone()], Asked::Asked(vec![]))), 100.0);
+        let out = h.run(
+            Ok(report(vec![a.clone(), b.clone()], Asked::Asked(vec![]))),
+            100.0,
+        );
         assert!(out.is_empty(), "{out:?}");
         let doc = h.schedule.document().unwrap();
         assert_eq!((doc.findings, doc.new, doc.fixed), (2, 0, 0));
@@ -725,7 +744,11 @@ mod tests {
         // A drifts to a different wording (same finding), B is fixed, C is new.
         let mut a2 = a.clone();
         a2.evidence = "different wording".into();
-        let c = finding(CheckId::SchemaDrift, "TelemetryPoint", DoctorSeverity::Error);
+        let c = finding(
+            CheckId::SchemaDrift,
+            "TelemetryPoint",
+            DoctorSeverity::Error,
+        );
         let out = h.run(Ok(report(vec![a2, c], Asked::Asked(vec![]))), 200.0);
         assert_eq!(
             ids(&out),
@@ -746,17 +769,37 @@ mod tests {
         assert_eq!(new.title, "schema-drift TelemetryPoint");
         assert_eq!(new.severity, "error");
         assert_eq!(new.prior, Some(CondState::Ok));
-        assert_eq!(new.labels.get("check").map(String::as_str), Some("schema-drift"));
-        assert!(new.message.contains("check: schema-drift (RFC 08 §6)"), "{}", new.message);
-        assert!(new.message.contains("new since the run at "), "{}", new.message);
-        assert!(new.message.contains("evidence: evidence for TelemetryPoint"));
+        assert_eq!(
+            new.labels.get("check").map(String::as_str),
+            Some("schema-drift")
+        );
+        assert!(
+            new.message.contains("check: schema-drift (RFC 08 §6)"),
+            "{}",
+            new.message
+        );
+        assert!(
+            new.message.contains("new since the run at "),
+            "{}",
+            new.message
+        );
+        assert!(
+            new.message
+                .contains("evidence: evidence for TelemetryPoint")
+        );
         let fixed = &out[0].notification;
         assert_eq!(fixed.title, "describe-missing fleet");
         assert_eq!(fixed.prior, Some(CondState::Firing));
         let doc = h.schedule.document().unwrap();
         assert_eq!((doc.findings, doc.new, doc.fixed), (2, 1, 1));
-        assert_eq!(doc.delta.as_ref().unwrap()["new"][0]["check"], "schema-drift");
-        assert_eq!(doc.delta.as_ref().unwrap()["fixed"][0]["check"], "describe-missing");
+        assert_eq!(
+            doc.delta.as_ref().unwrap()["new"][0]["check"],
+            "schema-drift"
+        );
+        assert_eq!(
+            doc.delta.as_ref().unwrap()["fixed"][0]["check"],
+            "describe-missing"
+        );
         assert_eq!(h.schedule.runs(), 3);
     }
 
@@ -783,7 +826,11 @@ mod tests {
         );
         let n = &out[0].notification;
         assert_eq!(n.title, "the doctor could not run");
-        assert!(n.message.contains("timed out asking the roster"), "{}", n.message);
+        assert!(
+            n.message.contains("timed out asking the roster"),
+            "{}",
+            n.message
+        );
         assert!(n.message.contains("retained"), "{}", n.message);
         assert_eq!(h.schedule.status(), DoctorStatus::Failed);
         let doc = h.schedule.document().unwrap().clone();
@@ -850,7 +897,8 @@ mod tests {
         let n = &out[0].notification;
         assert_eq!(n.state, CondState::Ok);
         assert!(
-            n.message.contains("registry diff: not asked (no registry loaded)"),
+            n.message
+                .contains("registry diff: not asked (no registry loaded)"),
             "{}",
             n.message
         );
@@ -862,8 +910,14 @@ mod tests {
             "not asked is absence on the wire, as the report contract pins: {}",
             doc.report
         );
-        let asked = report(vec![], Asked::Asked(vec!["h-1/sysinfo (registry 1.0)".into()]));
-        let deep = DoctorReport { deep: true, ..asked };
+        let asked = report(
+            vec![],
+            Asked::Asked(vec!["h-1/sysinfo (registry 1.0)".into()]),
+        );
+        let deep = DoctorReport {
+            deep: true,
+            ..asked
+        };
         assert!(coverage(&deep).contains("asked, 1 producer(s) in sync"));
         assert!(coverage(&deep).contains("deep checks: ran"));
         // A finding's message carries the same line.
@@ -871,13 +925,22 @@ mod tests {
         h.run(Ok(report(vec![], Asked::NotAsked)), 0.0);
         let out = h.run(
             Ok(report(
-                vec![finding(CheckId::StaleState, "v1/h-1/state/p/health", DoctorSeverity::Warning)],
+                vec![finding(
+                    CheckId::StaleState,
+                    "v1/h-1/state/p/health",
+                    DoctorSeverity::Warning,
+                )],
                 Asked::NotAsked,
             )),
             100.0,
         );
         assert_eq!(out.len(), 1);
-        assert!(out[0].notification.message.contains("registry diff: not asked"));
+        assert!(
+            out[0]
+                .notification
+                .message
+                .contains("registry diff: not asked")
+        );
     }
 
     /// The severity floor: an `info` finding below a `warning` floor is in
@@ -888,14 +951,33 @@ mod tests {
         let mut h = Harness::new(Some("warning"));
         let info = finding(CheckId::DescribeMissing, "fleet", DoctorSeverity::Info);
         let out = h.run(Ok(report(vec![info.clone()], Asked::NotAsked)), 0.0);
-        assert!(out[0].notification.title.starts_with("doctor baseline: 1 finding(s)"));
-        assert!(h.discipline.announced_under(DOCTOR_RULE).is_empty(), "not remembered");
-        let warn = finding(CheckId::UnregisteredTraffic, "v1/h-1/x", DoctorSeverity::Warning);
+        assert!(
+            out[0]
+                .notification
+                .title
+                .starts_with("doctor baseline: 1 finding(s)")
+        );
+        assert!(
+            h.discipline.announced_under(DOCTOR_RULE).is_empty(),
+            "not remembered"
+        );
+        let warn = finding(
+            CheckId::UnregisteredTraffic,
+            "v1/h-1/x",
+            DoctorSeverity::Warning,
+        );
         let out = h.run(Ok(report(vec![warn.clone()], Asked::NotAsked)), 100.0);
         assert_eq!(out.len(), 1, "the warning, not the fixed info: {out:?}");
-        assert_eq!(out[0].notification.id, "doctor:unregistered-traffic:v1/h-1/x");
+        assert_eq!(
+            out[0].notification.id,
+            "doctor:unregistered-traffic:v1/h-1/x"
+        );
         let doc = h.schedule.document().unwrap();
-        assert_eq!((doc.findings, doc.new, doc.fixed), (1, 1, 1), "the document counts everything");
+        assert_eq!(
+            (doc.findings, doc.new, doc.fixed),
+            (1, 1, 1),
+            "the document counts everything"
+        );
     }
 
     /// After a restart the state file remembers what was announced: a
@@ -907,7 +989,11 @@ mod tests {
         // Stand in for the restored ledger: two findings announced, and
         // the run itself unobservable.
         let present = finding(CheckId::SliceSync, "h-1/sysinfo", DoctorSeverity::Error);
-        let gone = finding(CheckId::SchemaDrift, "TelemetryPoint", DoctorSeverity::Error);
+        let gone = finding(
+            CheckId::SchemaDrift,
+            "TelemetryPoint",
+            DoctorSeverity::Error,
+        );
         for f in [&present, &gone] {
             let o = outgoing(
                 &DoctorNotice::Finding {
@@ -939,8 +1025,16 @@ mod tests {
         assert_eq!(
             ids(&out),
             vec![
-                (BASELINE_ID.to_string(), NoticeKind::Doctor, CondState::Firing),
-                (RUN_ID.to_string(), NoticeKind::ObservableAgain, CondState::Ok),
+                (
+                    BASELINE_ID.to_string(),
+                    NoticeKind::Doctor,
+                    CondState::Firing
+                ),
+                (
+                    RUN_ID.to_string(),
+                    NoticeKind::ObservableAgain,
+                    CondState::Ok
+                ),
                 (
                     "doctor:schema-drift:TelemetryPoint".to_string(),
                     NoticeKind::Resolved,
