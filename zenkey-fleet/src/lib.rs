@@ -174,6 +174,9 @@ pub use tape::generate::{
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use tape::synth::Synth;
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]
