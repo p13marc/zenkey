@@ -8317,7 +8317,7 @@ dependencies = [
 
 [[package]]
 name = "zenctl"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anstream",
  "anstyle",
@@ -8345,7 +8345,7 @@ dependencies = [
 
 [[package]]
 name = "zengui"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -8368,7 +8368,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64 0.23.1",
  "ciborium",
@@ -8390,7 +8390,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-build"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "serde_json",
  "thiserror 2.0.20",
@@ -8410,7 +8410,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fixture-tests"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "serde_json",
@@ -8420,7 +8420,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fleet"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "arc-swap",
  "base64 0.23.1",
@@ -8446,7 +8446,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-report-fixtures"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "serde_json",
  "zenkey-fleet",

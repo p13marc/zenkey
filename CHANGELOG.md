@@ -6,19 +6,59 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 |
-|---|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 |
+|---|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** |
+| `zenwatch` | — | — | — | — | **0.1.0** (new) |
 
 ---
 
-## Unreleased
+## 0.8.0 — what the adopters found (2026-09-06)
 
-### `zenkey` — breaking
+**Prepared, not yet tagged.** Everything below is on `main`; the bare
+`0.8.0` tag and the crates.io dispatch are the maintainer's act.
+
+The week after 0.7.2, two adopters — tcgui and zensight — filed five
+findings that were all one shape: the contract could not *say* something,
+so no tool could *judge* it, so the application invented a local rule and
+the wire drifted. This release is the text first (RFC v1.31, v1.32, v1.33),
+the code that enforces it, a third binary, and the two RFC 09 recipes that
+had gone undeployed for a year because nobody could write them by hand.
+
+`zenkey` and `zenkey-build` are **breaking** (the slug re-keys; the
+framework enums grow); `zenkey-fleet` is breaking (`CheckId` grows,
+`InterfaceShow` gains a field, `schemas_for_type` is gone); `zenctl` and
+`zengui` gain verbs and rows without moving any. `zenwatch` is new.
+
+### The convention (RFC v1.31 → v1.33)
+
+* **v1.31, the adopters' batch.** [03 §2] the slug is injective — one
+  reserved prefix `x-` on both sides of the passthrough boundary, `_xHH`
+  escapes with no closing underscore, the decoder stated beside the encoder
+  (see the `zenkey` section for the re-keying table). [05 §3.2] a bounded
+  reply is an envelope (`items`, `next_cursor`, `partial`, `scanned`,
+  `covers_from`), with a value cursor and "partial with no cursor" named a
+  contract violation — the issue that asked for it cited a section that did
+  not exist. [04 §4, 11 §2, 09 §2] telemetry history as a computed answer
+  served by an ordinary host-origin producer.
+* **v1.32, the declaration batch.** [08 §2] `kind = counter | gauge | text |
+  bool` on a subject, and a per-producer `[budget]`; [04 §1.2] the health
+  document MAY carry `self_stats`; [13 §3] both judged on the four poles —
+  a producer that publishes no `self_stats` is *unobservable* and says so.
+  Errata: 08 §2's `common` row had stopped at v1.25's vocabulary (#425).
+* **v1.33, the generators.** [09 §3] the fifth ACL fact — interest is
+  evaluated on egress against the responding face's subject, so own-origin
+  grants leave a peer-mode publisher publishing to nobody; the shared
+  egress-only `interest-prop` row — and the two 09 recipes become tooling.
+* **The Docs lane** (#420): `docs.yml` runs the RFC gate when and only when
+  prose changes, and the gate now checks that 00-index, CLAUDE.md and
+  README.md name the newest ledger version (two of them were at v1.28).
+
+### `zenkey` 0.8.0 — breaking
 
 * **The slug is injective** (#418, RFC 03 §2 v1.31). It was not, twice
   over: the v1.4 escape produced chunks that were themselves legal values,
@@ -47,6 +87,84 @@ Versions per crate, because they move independently:
   | `*` | `e_x2a_e` | `x_x2a_x` | `x-_x2a` |
   | `foo@1.service` | `foo_x40_1.service` | `foo_x40_1.service` | `x-foo_x401.service` |
   | `x-foo` | `x-foo` | `x-foo` | `x-x-foo` |
+* **The framework vocabulary reaches v1.30** (#425): `CommonState` gains
+  `EvidenceRelation`, `CatalogIncident`, `CatalogAck`, `CatalogSilence`,
+  `CatalogEdge`; `CommonFamily` gains `EvidenceRelation` (`ALL` is 8). The
+  enums stay exhaustive by design, so a consumer's `match` grows.
+* `SubjectDecl.kind` (`SubjectKind`), `RegistrySlice.budget` (`BudgetDecl`,
+  `TableBudget`) — both round-trip byte for byte when absent.
+* `alert::alert_ref` / `parse_alert_ref` (RFC 11 §3.2).
+
+### `zenkey-build` 0.8.0 — breaking
+
+* The five v1.29/v1.30 `common` tokens lint and generate (#425); a registry
+  declaring `common = "edge"` no longer fails the consumer's build.
+* `kind` is carried into `Subject::kind()`, `AnySubject`, the AsyncAPI
+  export and `registry.lock` as an optional sixth column: adding one is
+  *stale* (regenerate), changing or removing one is *incompatible*.
+  `check_compat_lock` now compares shape columns strictly and metadata
+  separately.
+* `[budget]` is linted (non-negative, unique table names) and rides
+  `REGISTRY_TOML` verbatim — no codegen.
+
+### `zenkey-fleet` 0.12.0 — breaking
+
+* **`CheckId` gains `kind-mismatch` and `budget-exceeded`** (`ALL` is 23).
+  The doctor's listen phase now watches the liveliness selectors, so a
+  counter reset across an `alive` cycle is not a finding; `--deep` fetches
+  each budgeted producer's health documents.
+* **`interface show` reports the engine's drift verdict per origin**
+  (#410): the describe sweep moved into `bus/describe.rs`; `InterfaceShow`
+  gains `drift: Vec<SchemaDrift>`; `schemas_for_type` — which kept the
+  first reply per producer and no origin — is removed.
+* `CallAnswer::page_signal()` reads the RFC 05 §3.2 envelope (#424).
+* For zenwatch, none behind `decode`: `AlertTransition` / `alert_transition`,
+  the catalog documents (`EntityDoc`, `AliasDoc`, `EdgeDoc`, `EdgeKind`),
+  `attribute` / `entity_of` (impact, depth-capped, containment kinds only),
+  `doctor_delta` (moved out of zengui).
+* The storage and ACL planners (`plan_storages`, `plan_acl`, their checks
+  and explains) with pinned plan shapes.
+* `rpc_key` is decode-gated like both of its callers.
+
+### `zenctl` 0.6.0
+
+* **`storage gen`** (#393) and **`acl gen`** (#392): the RFC 09 §2 and §3
+  blocks derived from the registry — `lifespan` computed and shown, the
+  grant matrix expanded per principal with `interest-prop` on every
+  publishing policy — each with `--json5`, `--check` and `--explain`. The
+  running ACL is not readable from the zenoh 1.10 admin space, so
+  `acl gen --check` reads the router's config file. Details in
+  `zenctl/CHANGELOG.md`.
+* `interface show --schema` names both hosts of a disagreement (#410);
+  `call` says *stopped early* on a partial page and flags a null cursor
+  (#424); `topic info` shows `kind`; `doctor` carries the two new checks;
+  `registry export --as toml` keeps `[budget]`.
+
+### `zengui` 0.4.0
+
+* The registry-facts line shows a subject's `kind`; the doctor panel's
+  run-over-run delta now comes from the engine.
+
+### `zenwatch` 0.1.0 — new
+
+The notifier daemon (#387 — #388, #389, #390): one JSON5 config, N rules
+over the engine's closed watchdog vocabulary plus `alerts <SEL>` and
+`liveliness-gone <SEL>`, M sinks (ntfy, webhook, exec, smtp; secrets by env
+name or file path only), the three states preserved into the sink payload,
+`--dry-run`, `check-config`, `test-sink`; `for` duration, dedup, grouping,
+repeat, inhibition over the catalog's containment edges, a bounded
+persisted ledger that survives a restart; self-publication (`health`,
+`firing/{rule_id}`, `doctor`, `introspect`/`describe`, `alive`) so something
+can watch the watcher; and a scheduled doctor routing run-over-run deltas.
+Ships as a Forgejo release binary beside zenctl and zengui. HTTP rides
+reqwest on `rustls-no-provider` with the ring provider zenoh already uses —
+no second crypto provider (`cargo tree -i aws-lc-rs` is empty).
+
+### Housekeeping
+
+* The instance runner did not execute a single job on the day this was
+  built; every merge carries the local gate list in its PR body, and CI
+  runs on `main` when the runner returns.
 
 ---
 

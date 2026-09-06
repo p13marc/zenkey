@@ -6,7 +6,16 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased
+## 0.6.0 (2026-09-06) — the generators, and three rows that name a host
+
+Two new verbs and no moved spelling: a script written against 0.5.1 runs
+unchanged. Besides the two generators below: `interface show --schema`
+names both hosts of a schema disagreement instead of recomputing one over
+producer-keyed rows (#410); `call` and `check probe` print *stopped early*
+under a partial page and a caveat when the cursor is null (RFC 05 §3.2,
+#424); `topic info` gains a `kind` row (RFC 08 §2 v1.32, #422); `doctor`
+carries `kind-mismatch` and, under `--deep`, `budget-exceeded` (#391);
+`registry export --as toml` keeps a producer's `[budget]`.
 
 **`acl gen` — RFC 09 §3's grant matrix, generated** (#392). A new `acl`
 noun with one verb. `zenctl acl gen --enrollment <file.toml>` reads a small
