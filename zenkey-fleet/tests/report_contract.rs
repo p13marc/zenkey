@@ -949,3 +949,117 @@ fn an_interface_show_omits_drift_until_something_disagrees() {
         json!({"producer": "sysinfo", "origin": "h-bbbbbbbbbbbb"})
     );
 }
+
+// ── The consumers join (#224) ─────────────────────────────────────────────
+
+/// The admin discriminator rides flattened at the top of the document, and
+/// its two states never share a spelling: `answered` carries both counts,
+/// `not_available` carries none. Per row, `origins` is absent when empty
+/// (session only, unattributed — not `[]`, not `null`) and `is_self` /
+/// `total_wildcard` are absent when false (O4: news, not non-news).
+#[test]
+fn consumers_report_json_shape_is_pinned() {
+    let v = serde_json::to_value(fx::consumers_report()).unwrap();
+    assert_eq!(
+        v,
+        json!({
+            "target": "acme/v1/*/state/sysinfo/health",
+            "asked": [
+                "@/*/*",
+                "@/*/*/subscriber/**",
+                "@/*/*/publisher/**",
+                "@/*/*/queryable/**",
+                "@/*/*/querier/**",
+                "@/*/*/token/**",
+            ],
+            "self_zid": "ffffffff",
+            "admin": "answered",
+            "answered": 1,
+            "nodes": 2,
+            "rows": [
+                {
+                    "zid": "eeff0011",
+                    "whatami": "peer",
+                    "origins": [fx::ORIGIN],
+                    "attribution": "session",
+                    "kind": "subscriber",
+                    "keyexpr": format!("acme/v1/{}/state/sysinfo/health", fx::ORIGIN),
+                    "relation": "narrower",
+                },
+                {
+                    "zid": "ffffffff",
+                    "whatami": "peer",
+                    "attribution": "session",
+                    "kind": "querier",
+                    "keyexpr": "acme/v1/*/state/sysinfo/health",
+                    "relation": "exact",
+                    "is_self": true,
+                },
+                {
+                    "zid": "aabbccdd",
+                    "whatami": "router",
+                    "attribution": "reported_only",
+                    "kind": "subscriber",
+                    "keyexpr": "**",
+                    "relation": "total",
+                    "total_wildcard": true,
+                },
+            ],
+            "reply_elided": 0,
+        })
+    );
+
+    let v = serde_json::to_value(fx::consumers_not_available()).unwrap();
+    assert_eq!(v["admin"], "not_available");
+    assert!(v.get("answered").is_none(), "{v}");
+    assert!(v.get("nodes").is_none(), "{v}");
+    assert_eq!(v["rows"], json!([]));
+}
+
+/// The blast radius: the consumers document nested whole, coverage and the
+/// two declaration counts present only when the admin space answered,
+/// the ledger entry only when there is one.
+#[test]
+fn subject_impact_json_shape_is_pinned() {
+    let v = serde_json::to_value(fx::subject_impact()).unwrap();
+    assert_eq!(
+        v,
+        json!({
+            "producer": "sysinfo",
+            "path": "health",
+            "class": "state",
+            "selector": "acme/v1/*/state/sysinfo/health",
+            "consumers": serde_json::to_value(fx::consumers_report()).unwrap(),
+            "coverage": [{
+                "producer": "sysinfo",
+                "path": "health",
+                "ttl_s": 120,
+                "coverage": "covered",
+                "storage": "main@aabbccdd",
+            }],
+            "declared_publishers": 2,
+            "declared_queryables": 0,
+            "deprecated": { "since": "2.0", "replaced_by": "status" },
+        })
+    );
+
+    // Not asked: every admin-derived field is absent, never zero or `[]`.
+    let unasked = SubjectImpact {
+        consumers: fx::consumers_not_available(),
+        coverage: None,
+        declared_publishers: None,
+        declared_queryables: None,
+        deprecated: None,
+        ..fx::subject_impact()
+    };
+    let v = serde_json::to_value(unasked).unwrap();
+    for absent in [
+        "coverage",
+        "declared_publishers",
+        "declared_queryables",
+        "deprecated",
+    ] {
+        assert!(v.get(absent).is_none(), "{absent} must be absent: {v}");
+    }
+    assert_eq!(v["consumers"]["admin"], "not_available");
+}

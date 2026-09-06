@@ -8,7 +8,8 @@
 //! becomes rates and latencies ([`stats`]) or a tree ([`tree`], [`skeleton`]),
 //! two payloads become a diff ([`diff`]), a payload plus a schema becomes a
 //! rendering ([`decode`]), a sample on the alert plane becomes an alert
-//! transition ([`alert`]).
+//! transition ([`alert`]), the admin space's declared readers become a
+//! ranked consumer list ([`consumers`]).
 //!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
@@ -28,6 +29,7 @@
 pub mod acl;
 pub mod alert;
 pub mod bounded;
+pub mod consumers;
 pub mod diff;
 pub mod examples;
 pub mod facts;

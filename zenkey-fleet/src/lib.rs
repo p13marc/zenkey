@@ -180,8 +180,9 @@ pub use tape::synth::Synth;
 pub use zenkey::schema::validate::{NotValidated, Verdict};
 
 pub use bus::admin::{
-    AdminEntry, admin_doc_omits_loopback, admin_get, admin_get_within, declared_entities,
-    mesh_links, origin_attachments, render_dot, routers, state_coverage, storages, topology,
+    AdminEntry, admin_doc_omits_loopback, admin_get, admin_get_within, attach_tokens, consumers,
+    declared_entities, declared_entities_within, declared_entity_selectors, mesh_links,
+    origin_attachments, render_dot, routers, state_coverage, storages, subject_impact, topology,
 };
 #[cfg(feature = "blob")]
 #[cfg_attr(docsrs, doc(cfg(feature = "blob")))]
@@ -262,6 +263,7 @@ pub use judge::why::{StoredLookup, StoredValue, WhyInputs, WhySpec, WireWatch, r
 // crate that also has `schema_drift` and `slice::diff` reads as *the* diff.
 pub use model::acl::{AclOptions, check_acl, explain_acl, plan_acl, to_json5 as acl_plan_json5};
 pub use model::alert::alert_transition;
+pub use model::consumers::{SubjectTarget, declaring_sessions, join_consumers, subject_target};
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
@@ -281,15 +283,15 @@ pub use model::tree::KeyTreeSnapshot;
 /// `zenkey_fleet::report::*`: it is the rendering vocabulary, and lifting all
 /// of it here would make this block a second copy of that module.
 pub use report::{
-    AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer, Coverage,
-    CoverageRow, CutoverReport, DeclaredEntities, DeclaredEntity, DiscoveredBase, DoctorDelta,
-    DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind, ExpectReport,
-    Fault, FieldReport, Freshness, GenPlanEntry, GenReport, HelloView, ImpactReport, Judgement,
-    LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment, ProducerInfo,
-    RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
-    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, StorageInfo, TopologyEdge, TopologyNode,
-    TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
-    judgement_exit_code,
+    AdminAnswer, AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
+    ConsumerRow, ConsumersReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities,
+    DeclaredEntity, DiscoveredBase, DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd,
+    EdgeKind, EntityDoc, EntityKind, ExpectReport, Fault, FieldReport, Freshness, GenPlanEntry,
+    GenReport, HelloView, ImpactReport, Judgement, LatencyReport, LatencySummary, MeshLink,
+    NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
+    RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
+    SeedCoverage, StorageInfo, SubjectImpact, TopologyEdge, TopologyNode, TopologyReport,
+    TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader, judgement_exit_code,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
