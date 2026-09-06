@@ -49,9 +49,9 @@ jobs:
       # a message for the result to land on.
       - run: ./scripts/check-fs-seam.sh
       # RFC status lines agree with the CHANGELOG's Amends ledger (v1.25 S6).
-      # Note the workflow's paths-ignore skips '**.md' pushes, so a doc-only
-      # change rides `just ci` and the next code-bearing push; the gate here
-      # keeps the tree from drifting for long.
+      # Doc-only pushes are `paths-ignore`d here and run this same gate on
+      # the Docs lane (docs.yml, #420); it stays here too so a code push that
+      # also touches an RFC runs it in the same status set.
       - run: ./scripts/check-rfc-status.sh
 
   # The type scale, by role (#191): `.size(` outside `kit.rs`/`tokens.rs`

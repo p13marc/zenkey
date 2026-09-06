@@ -130,8 +130,9 @@ ci:
     # the filesystem needs a services:: function and a landing message.
     ./scripts/check-fs-seam.sh
     # RFC chapter headers agree with rfcs/CHANGELOG.md's Amends ledger
-    # (v1.25 S6) — and this is the lane that always runs it, since CI's
-    # triggers skip doc-only pushes.
+    # (v1.25 S6), and the version stated in 00-index.md, CLAUDE.md and
+    # README.md is the newest entry's. CI runs it on both lanes: ci.yml for
+    # code pushes, docs.yml for doc-only ones (#420).
     ./scripts/check-rfc-status.sh
     # The type scale by role (#191), the interactive seam (#193) and the
     # spacing grid (#192) — all run as CI's type-scale job.
