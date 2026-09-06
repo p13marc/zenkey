@@ -57,11 +57,11 @@ fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
     let b = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/b";
     let c = "acme/v1/h-9a1b2c3d4e5f/state/logs/health";
     let items = vec![
-        Arrival::Sample(view(a, at(10), Some(stamp(2_000, 0x33)), false)),
-        Arrival::Sample(view(b, at(20), Some(stamp(1_000, 0x33)), false)),
-        Arrival::Sample(view("plain/key", at(30), None, false)),
+        Arrival::Sample(Box::new(view(a, at(10), Some(stamp(2_000, 0x33)), false))),
+        Arrival::Sample(Box::new(view(b, at(20), Some(stamp(1_000, 0x33)), false))),
+        Arrival::Sample(Box::new(view("plain/key", at(30), None, false))),
         Arrival::Dropped(5),
-        Arrival::Sample(view(c, at(40), Some(stamp(1_500, 0x44)), true)),
+        Arrival::Sample(Box::new(view(c, at(40), Some(stamp(1_500, 0x44)), true))),
     ];
     let header = ZrecHeader {
         zrec: ZREC_VERSION,
@@ -73,7 +73,9 @@ fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
 }
 
 enum Arrival {
-    Sample(SampleView),
+    /// Boxed: a `SampleView` is a few hundred bytes beside a `u64`, and the
+    /// lint is right that the enum should not carry that everywhere.
+    Sample(Box<SampleView>),
     Dropped(u64),
 }
 
