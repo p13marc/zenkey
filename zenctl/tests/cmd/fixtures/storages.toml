@@ -1,0 +1,33 @@
+# The RFC 09 §2 sketch as a deployment file: two volumes, four class-driven
+# storages. Everything else — selectors, strip prefixes, tombstone lifespans —
+# is derived from the class and the registry by `zenctl storage gen`.
+base = "zensight"
+
+[volumes.fs]
+plugin = "fs"
+
+[volumes.influxdb]
+plugin = "influxdb"
+url = "http://localhost:8086"
+
+[storages.latest]
+class = "state"
+volume = "fs"
+replication = true
+complete = true
+params = { dir = "latest" }
+
+[storages.timeseries]
+class = "telemetry"
+volume = "influxdb"
+params = { db = "telemetry" }
+
+[storages.catalog]
+class = "catalog"
+volume = "fs"
+params = { dir = "catalog" }
+
+[storages.pdns_history]
+class = "catalog-pdns"
+volume = "influxdb"
+params = { db = "pdns" }

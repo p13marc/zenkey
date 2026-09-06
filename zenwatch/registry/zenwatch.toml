@@ -1,0 +1,60 @@
+# Subject registry: zenwatch — the notifier as a producer (RFC 08 §2, #388).
+#
+# A real daemon, explicitly launched, publishes its own state the way every
+# producer does: a `health` document, one `firing/{rule_id}` key per rule
+# currently firing (state — a tombstone when it clears), and a `doctor`
+# document for what its last self-check found. The self-publication itself
+# lands in the discipline chunk (#387); the subjects and the two procedures
+# every producer serves are declared here first so the lock does not move
+# when it does.
+
+[registry]
+version = "0.1"
+app = "zenwatch"
+convention = 1
+
+[producer]
+name = "zenwatch"
+description = "bus notifier: rules over the closed watchdog vocabulary, the alert plane and the liveliness roster, routed to sinks"
+
+[[subject]]
+path = "health"
+common = "health"
+class = "state"
+type = "ZenwatchHealth"
+ttl_s = 60
+since = "0.1"
+description = "the notifier's health document (framework)"
+
+[[subject]]
+path = "firing/{rule_id}"
+class = "state"
+type = "FiringRule"
+cardinality = 256
+ttl_s = 300
+since = "0.1"
+description = "one key per rule currently firing or unobservable; tombstoned when it returns to ok"
+
+[[subject]]
+path = "doctor"
+class = "state"
+type = "ZenwatchDoctor"
+ttl_s = 0
+since = "0.1"
+description = "what the notifier's last self-check found: sinks probed, config problems"
+
+[[procedure]]
+path = "introspect"
+kind = "read"
+reply = "RegistrySlice"
+idempotent = true
+since = "0.1"
+description = "the registry slice this build serves (RFC 08 §6)"
+
+[[procedure]]
+path = "describe"
+kind = "read"
+reply = "SchemaSet"
+idempotent = true
+since = "0.1"
+description = "the served schema set for this producer's types (RFC 08 §7)"

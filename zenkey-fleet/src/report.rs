@@ -48,6 +48,7 @@
 
 mod acl;
 mod admin;
+mod alert;
 mod asked;
 mod bench;
 mod blob;
@@ -69,12 +70,14 @@ mod schema;
 mod scout;
 mod seed;
 mod service;
+mod storage;
 mod tape;
 mod topic;
 mod why;
 
 pub use acl::*;
 pub use admin::*;
+pub use alert::*;
 pub use asked::*;
 pub use bench::*;
 pub use blob::*;
@@ -96,6 +99,7 @@ pub use schema::*;
 pub use scout::*;
 pub use seed::*;
 pub use service::*;
+pub use storage::*;
 pub use tape::*;
 pub use topic::*;
 pub use why::*;

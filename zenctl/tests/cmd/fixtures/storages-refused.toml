@@ -1,0 +1,20 @@
+# Three storages, each refused for a different reason: replication on an
+# all-mode volume (RFC 09 §2.2), a volume nobody declared, and a class the
+# fixture registry declares nothing under.
+base = "zensight"
+
+[volumes.influxdb]
+plugin = "influxdb"
+
+[storages.history]
+class = "telemetry"
+volume = "influxdb"
+replication = true
+
+[storages.stray]
+class = "state"
+volume = "rocks"
+
+[storages.events]
+class = "events"
+volume = "influxdb"

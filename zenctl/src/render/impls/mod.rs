@@ -28,4 +28,5 @@ pub use rate::RateView;
 mod listings;
 pub mod local;
 mod services;
+pub mod storage;
 mod why;

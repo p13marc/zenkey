@@ -1377,6 +1377,241 @@ pub fn why_report() -> zenkey_fleet::WhyReport {
     }
 }
 
+/// The RFC 09 §2 sketch as a plan (#393): two volumes, three storages, the
+/// documented `catalog`/`pdns_history` overlap, a refused `complete`, and one
+/// storage refused outright.
+pub fn storage_plan() -> StoragePlan {
+    use std::collections::BTreeMap;
+    let params = |pairs: &[(&str, &str)]| -> BTreeMap<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), serde_json::json!(v)))
+            .collect()
+    };
+    let warn = |kind: WarningKind, text: &str, cite: &str| PlanWarning {
+        kind,
+        text: text.into(),
+        cite: cite.into(),
+    };
+    StoragePlan {
+        base: "acme".into(),
+        registry: Asked::Asked(RegistryFacts {
+            slices: 3,
+            max_ttl_s: Some(900),
+            ttl_source: Some("sysinfo/alert/{alert_key}".into()),
+        }),
+        volumes: vec![
+            PlannedVolume {
+                id: "fs".into(),
+                plugin: "fs".into(),
+                history: HistoryMode::Latest,
+                persistence: Some(Persistence::Durable),
+                params: BTreeMap::new(),
+                warnings: vec![],
+            },
+            PlannedVolume {
+                id: "influxdb".into(),
+                plugin: "influxdb".into(),
+                history: HistoryMode::All,
+                persistence: Some(Persistence::Durable),
+                params: params(&[("url", "http://localhost:8086")]),
+                warnings: vec![],
+            },
+        ],
+        storages: vec![
+            PlannedStorage {
+                name: "catalog".into(),
+                class: Some(StorageClass::Catalog),
+                key_expr: "acme/v1/@catalog/state/**".into(),
+                strip_prefix: "acme/v1/@catalog/state".into(),
+                volume: "fs".into(),
+                history: HistoryMode::Latest,
+                replication: None,
+                complete: false,
+                garbage_collection: GarbageCollection {
+                    period_s: 30,
+                    lifespan_s: 172_800,
+                    derivation: "max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s".into(),
+                },
+                retention: None,
+                params: params(&[("dir", "catalog")]),
+                covers: Asked::Asked(3),
+                warnings: vec![
+                    warn(
+                        WarningKind::CompleteRefused,
+                        "complete = true refused: it is not the fully covering latest storage (class state) — emitted as false",
+                        "RFC 09 §2.2",
+                    ),
+                    warn(
+                        WarningKind::Overlap,
+                        "overlaps pdns_history (acme/v1/@catalog/state/pdns/**): a GET under both selectors is answered by both",
+                        "RFC 09 §2",
+                    ),
+                ],
+            },
+            PlannedStorage {
+                name: "latest".into(),
+                class: Some(StorageClass::State),
+                key_expr: "acme/v1/*/state/**".into(),
+                strip_prefix: "acme/v1".into(),
+                volume: "fs".into(),
+                history: HistoryMode::Latest,
+                replication: Some(
+                    [
+                        ("interval", serde_json::json!(10.0)),
+                        ("propagation_delay", serde_json::json!(250)),
+                    ]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+                ),
+                complete: true,
+                garbage_collection: GarbageCollection {
+                    period_s: 30,
+                    lifespan_s: 1800,
+                    derivation: "max ttl_s 900 (sysinfo/alert/{alert_key}) × 2.0 = 1800 s".into(),
+                },
+                retention: None,
+                params: params(&[("dir", "latest")]),
+                covers: Asked::Asked(12),
+                warnings: vec![],
+            },
+            PlannedStorage {
+                name: "pdns_history".into(),
+                class: Some(StorageClass::CatalogPdns),
+                key_expr: "acme/v1/@catalog/state/pdns/**".into(),
+                strip_prefix: "acme/v1/@catalog/state/pdns".into(),
+                volume: "influxdb".into(),
+                history: HistoryMode::All,
+                replication: None,
+                complete: false,
+                garbage_collection: GarbageCollection {
+                    period_s: 30,
+                    lifespan_s: 172_800,
+                    derivation: "max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s".into(),
+                },
+                retention: None,
+                params: params(&[("db", "pdns")]),
+                covers: Asked::Asked(1),
+                warnings: vec![warn(
+                    WarningKind::RetentionIsTheDatabases,
+                    "retention is the database's policy, not zenoh config",
+                    "RFC 09 §2.3",
+                )],
+            },
+        ],
+        refusals: vec![Refusal {
+            storage: Some("events".into()),
+            volume: None,
+            key_expr: Some("acme/v1/*/events/**".into()),
+            reason: "the registry declares no subject under \"acme/v1/*/events/**\" — empty coverage is a finding, not a plan".into(),
+            cite: "RFC 13 §3".into(),
+        }],
+    }
+}
+
+/// A check with one of each finding kind the diff can draw, and one
+/// comparison the admin document could not carry.
+pub fn storage_check() -> StorageCheck {
+    let finding =
+        |kind, storage: &str, zid: Option<&str>, planned: Option<&str>, observed: Option<&str>| {
+            CheckFinding {
+                kind,
+                storage: storage.into(),
+                zid: zid.map(Into::into),
+                planned: planned.map(Into::into),
+                observed: observed.map(Into::into),
+            }
+        };
+    StorageCheck {
+        base: "acme".into(),
+        asked: "@/*/router/**/storage_manager/storages/**".into(),
+        planned: 3,
+        observed: 3,
+        findings: vec![
+            finding(
+                CheckKind::StripPrefixDiffers,
+                "latest",
+                Some("aabbccdd"),
+                Some("acme/v1"),
+                Some("acme"),
+            ),
+            finding(
+                CheckKind::LifespanBelowMinimum,
+                "latest",
+                Some("aabbccdd"),
+                Some("1800"),
+                Some("600"),
+            ),
+            finding(
+                CheckKind::Missing,
+                "pdns_history",
+                None,
+                Some("acme/v1/@catalog/state/pdns/**"),
+                None,
+            ),
+            finding(
+                CheckKind::Extra,
+                "blobs",
+                Some("aabbccdd"),
+                None,
+                Some("acme/v1/*/@blob/**"),
+            ),
+        ],
+        unjudged: vec![
+            "catalog@aabbccdd: the admin document does not carry garbage_collection.lifespan"
+                .into(),
+        ],
+        judgement: Judgement::Established,
+    }
+}
+
+/// The same check against an admin space that answered nothing.
+pub fn storage_check_unobservable() -> StorageCheck {
+    StorageCheck {
+        base: "acme".into(),
+        asked: "@/*/router/**/storage_manager/storages/**".into(),
+        planned: 3,
+        observed: 0,
+        findings: vec![],
+        unjudged: vec![],
+        judgement: Judgement::Unobservable {
+            reason: "the admin space answered no storages".into(),
+        },
+    }
+}
+
+/// One key, taken by the latest storage.
+pub fn storage_explain() -> StorageExplain {
+    StorageExplain {
+        key: "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health".into(),
+        base: "acme".into(),
+        takers: vec![Taker {
+            storage: "latest".into(),
+            key_expr: "acme/v1/*/state/**".into(),
+            class: Some(StorageClass::State),
+            relation: TakerRelation::Includes,
+            why: "class state under base \"acme\": acme/v1/*/state/** includes every key it names; stored under strip_prefix \"acme/v1\" on volume fs (latest)".into(),
+        }],
+        refused_takers: vec![],
+        none_reason: None,
+    }
+}
+
+/// A key nothing takes, because a refused storage would have.
+pub fn storage_explain_none() -> StorageExplain {
+    StorageExplain {
+        key: "acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J".into(),
+        base: "acme".into(),
+        takers: vec![],
+        refused_takers: vec!["events".into()],
+        none_reason: Some(
+            "no planned storage's selector includes it; refused storage(s) events would have"
+                .into(),
+        ),
+    }
+}
+
 // ── acl gen (#392) ────────────────────────────────────────────────────────
 
 /// The plan of a small fleet — one host on every plane, a catalog on the

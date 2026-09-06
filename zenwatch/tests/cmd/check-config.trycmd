@@ -1,0 +1,92 @@
+`check-config` refuses exactly what `run` would refuse, and exits 2 for it —
+the same code as clap's usage errors, because a config this tool cannot act
+on is your input, not the bus's answer. Every problem is named by its path
+into the document.
+
+A config that checks clean says what it holds:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/valid.json5
+tests/cmd/fixtures/valid.json5: 4 rule(s), 4 sink(s) — ok
+
+```
+
+An unknown field is a rule that silently pages nobody, refused at parse:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/unknown-field.json5
+? 2
+Error: tests/cmd/fixtures/unknown-field.json5: unknown field `methd`, expected one of `url`, `method`, `headers`, `timeout_s`
+
+```
+
+Secrets are never inline. A bare string in a secret position does not parse —
+the point is that a config that can be checked in cannot carry a credential
+by accident:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/inline-secret.json5
+? 2
+Error: tests/cmd/fixtures/inline-secret.json5: secrets are never inline — write { env: "NAME" } or { file: "/path" }
+
+```
+
+A sink a rule names must exist:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/missing-sink.json5
+? 2
+  rules[0].sinks[0]: "pager" is not in `sinks` (which has: hook)
+Error: tests/cmd/fixtures/missing-sink.json5: 1 problem(s) — nothing was run
+
+```
+
+The vocabulary is closed — no expressions, no templating — and the refusal
+spells all ten kinds:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/bad-rule.json5
+? 2
+  rules[0].rule: "if rate(v1/**) > 5 then page": is not a rule — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | origin-down <ORIGIN> | dropped | alerts <SEL> | liveliness-gone <SEL>
+Error: tests/cmd/fixtures/bad-rule.json5: 1 problem(s) — nothing was run
+
+```
+
+Two rules on one engine condition could not be told apart by the transition's
+`rule` string, so the second is refused:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/duplicate-condition.json5
+? 2
+  rules[1].rule: duplicates rules[0]'s condition "silent-for v1/*/telemetry/** 30" — the engine reports one transition per condition; give the second rule a different condition or merge the sinks
+Error: tests/cmd/fixtures/duplicate-condition.json5: 1 problem(s) — nothing was run
+
+```
+
+A secret is resolved at check time: an unset variable is a config problem now,
+not a delivery failure at 3am:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/unset-env.json5
+? 2
+  sinks.ops.token: environment variable ZENWATCH_UNSET_TOKEN is not set
+Error: tests/cmd/fixtures/unset-env.json5: 1 problem(s) — nothing was run
+
+```
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/bad-tick.json5
+? 2
+  tick_s: must be a positive number of seconds, got 0
+Error: tests/cmd/fixtures/bad-tick.json5: 1 problem(s) — nothing was run
+
+```
+
+A file that is not there:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/nope.json5
+? 2
+Error: cannot read tests/cmd/fixtures/nope.json5: No such file or directory (os error 2)
+
+```

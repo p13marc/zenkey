@@ -31,7 +31,7 @@ Commands:
   interface    Payload types declared by the registry slices
   schema       Payload schemas as producers serve them (RFC 08 §7)
   registry     The registry as a document: export it, diff it, lint it, lock it
-  storage      Storages: what the mesh persists, joined against declared state
+  storage      Storages: what the mesh persists, joined against declared state — and the router block that makes it persist (RFC 09 §2)
   acl          Router access control: RFC 09 §3's grant matrix, generated from an enrollment file (#392)
   blob         The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2)
   admin        Zenoh admin space (`@/**`) — the middleware's own introspection
@@ -84,7 +84,7 @@ Commands:
   interface    Payload types declared by the registry slices
   schema       Payload schemas as producers serve them (RFC 08 §7)
   registry     The registry as a document: export it, diff it, lint it, lock it
-  storage      Storages: what the mesh persists, joined against declared state
+  storage      Storages: what the mesh persists, joined against declared state — and the router block that makes it persist (RFC 09 §2)
   acl          Router access control: RFC 09 §3's grant matrix, generated from an enrollment file (#392)
   blob         The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2)
   admin        Zenoh admin space (`@/**`) — the middleware's own introspection

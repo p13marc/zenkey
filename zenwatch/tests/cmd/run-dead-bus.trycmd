@@ -1,0 +1,14 @@
+`run` against a transport that will not come up is the act failing — exit 1 —
+and stays distinct from a config this tool refuses (2). The fixture is the
+same dead client-mode bus zenctl's corpus uses: `connect.timeout_ms: 0`,
+`exit_on_failure: true`, so the failure is immediate and without retry.
+
+```console
+$ zenwatch run --config tests/cmd/fixtures/dead-bus-run.json5 --once --dry-run
+? 1
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```
