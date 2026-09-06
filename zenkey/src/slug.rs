@@ -4,10 +4,14 @@
 //! - **IPs are always slugged**, even charset-legal dotted IPv4 (dotted forms
 //!   are non-canonical chunks). IPv6 is canonicalized per RFC 5952 and IPv4 to
 //!   minimal dotted-quad first, then `.`/`:` → `-`.
-//! - Other values (unit names, filenames, config names) stay literal when
-//!   already legal per the chunk charset; otherwise each excluded character is
-//!   escaped losslessly as `_xNN_` (lowercase hex of the byte). Plain `-`
-//!   substitution is forbidden — it is not injective.
+//! - Other values (unit names, filenames, device names) stay literal when
+//!   already legal per the chunk charset *and* not starting with the reserved
+//!   prefix `x-`; otherwise the chunk is `x-` plus an escaped body in which
+//!   every byte outside `[a-z0-9]` is written `_xHH` (lowercase hex, no
+//!   closing underscore), except that `.` and `-` stay literal unless they
+//!   are the value's last byte. Plain `-` substitution is forbidden — it is
+//!   not injective. [`chunk_unslug`] is the decoder, shipped beside the
+//!   encoder as the RFC requires.
 
 use std::net::IpAddr;
 
@@ -56,45 +60,117 @@ pub fn ulid_slug(id: &str) -> Option<String> {
     (id.len() == 26 && id.bytes().all(crockford)).then(|| id.to_ascii_lowercase())
 }
 
+/// The reserved prefix (RFC 03 §2, v1.31): refused on passthrough,
+/// mandatory on escape.
+const RESERVED_PREFIX: &str = "x-";
+
 /// Slug an arbitrary value (unit name, filename, device name) into a single
-/// legal chunk, losslessly (RFC 03 §2).
+/// legal chunk, losslessly (RFC 03 §2, as amended by the v1.31 erratum).
 ///
-/// Boundary handling follows the v1.4 erratum: a chunk must start and end
-/// alphanumeric, so a charset-legal-but-non-alphanumeric byte (`.`, `_`, `-`)
-/// at either boundary is escaped like any illegal byte, and when the escaped
-/// form still leads (or ends) with the escape's own `_`, the reserved marker
-/// `x` is affixed on that side — `_myns` → `x_x5f_myns`, the RFC's example.
-/// The marker is part of the injective encoding: it appears only next to an
-/// `_xNN_` escape, so it never collides with a value that starts with `x`
-/// literally (the old sentinel-only form did collide: `_myns` and `e_myns`
-/// shared a chunk).
+/// The value passes through literally iff it is already a legal plain chunk
+/// **and** does not start with the reserved prefix `x-`. Otherwise the chunk
+/// is `x-` followed by the escaped body: `[a-z0-9]` literal, `.` and `-`
+/// literal unless they are the value's last byte, every other byte
+/// (`_` included) as `_xHH` — lowercase hex, no closing underscore. The
+/// empty value is spelled `x-_x`.
+///
+/// Injectivity, in two sentences. A passthrough never starts with `x-` and
+/// an escaped chunk always does, so the two classes cannot meet; within the
+/// escaped class `_` is never literal, so every `_` opens exactly one
+/// `_xHH` escape and the body decodes left to right without lookahead.
+/// The v1.4 scheme this replaces failed on both counts — its escaped output
+/// was itself passthrough-legal (`_myns` and the literal `x_x5f_myns`), and
+/// its leading marker `x` was also a legal first byte (`x@b` and `@b`) — see
+/// the erratum for the record. [`chunk_unslug`] is the decoder.
+///
+/// ```
+/// use zenkey::slug::chunk_slug;
+/// assert_eq!(chunk_slug("sshd.service"), "sshd.service");
+/// assert_eq!(chunk_slug("foo@1.service"), "x-foo_x401.service");
+/// assert_eq!(chunk_slug("_myns"), "x-_x5fmyns");
+/// assert_eq!(chunk_slug("x-foo"), "x-x-foo");
+/// assert_eq!(chunk_slug(""), "x-_x");
+/// ```
 pub fn chunk_slug(value: &str) -> String {
-    if is_valid_plain_chunk(value) {
+    if is_valid_plain_chunk(value) && !value.starts_with(RESERVED_PREFIX) {
         return value.to_string();
     }
     let bytes = value.as_bytes();
     let mut out = String::with_capacity(value.len() + 8);
+    out.push_str(RESERVED_PREFIX);
+    if bytes.is_empty() {
+        // `x-` alone would end in `-`; the RFC spells the empty value `x-_x`,
+        // an escape with no digits that is legal only as the entire body.
+        out.push_str("_x");
+        return out;
+    }
+    let last = bytes.len() - 1;
     for (i, &b) in bytes.iter().enumerate() {
-        let c = b as char;
-        let alnum = c.is_ascii_lowercase() || c.is_ascii_digit();
-        let legal_inner = alnum || c == '.' || c == '_' || c == '-';
-        let boundary = i == 0 || i == bytes.len() - 1;
-        if legal_inner && (alnum || !boundary) {
-            out.push(c);
+        let literal =
+            b.is_ascii_lowercase() || b.is_ascii_digit() || ((b == b'.' || b == b'-') && i != last);
+        if literal {
+            out.push(b as char);
         } else {
-            out.push_str(&format!("_x{b:02x}_"));
+            out.push_str(&format!("_x{b:02x}"));
         }
     }
-    // `_xNN_` starts and ends with `_`, which the charset forbids at
-    // boundaries; the erratum's marker makes the boundary alphanumeric in
-    // one pass instead of re-escaping forever.
-    if out.starts_with('_') {
-        out.insert(0, 'x');
-    }
-    if out.ends_with('_') {
-        out.push('x');
-    }
     out
+}
+
+/// Decode a chunk produced by [`chunk_slug`] back to the value (RFC 03 §2).
+///
+/// This is the left inverse on the image of `chunk_slug` and refuses
+/// everything else: `chunk_unslug(&chunk_slug(v)) == Some(v)` for every
+/// `v`, and `chunk_unslug(c)` is `None` for any `c` that `chunk_slug` could
+/// not have produced — a chunk that is neither a passthrough-legal plain
+/// chunk nor `x-` plus a well-formed body (`_` must open `_xHH` with two
+/// lowercase hex digits; `_x` alone is the empty value), a body whose
+/// bytes are not UTF-8, or a non-canonical spelling (`x-abc`, `x-`, an
+/// uppercase hex digit) that decodes to a value which slugs differently.
+/// The canonicality check is what makes the function one-to-one on its
+/// domain rather than merely a parser.
+///
+/// ```
+/// use zenkey::slug::chunk_unslug;
+/// assert_eq!(chunk_unslug("sshd.service").as_deref(), Some("sshd.service"));
+/// assert_eq!(chunk_unslug("x-foo_x401.service").as_deref(), Some("foo@1.service"));
+/// assert_eq!(chunk_unslug("x-_x").as_deref(), Some(""));
+/// assert_eq!(chunk_unslug("x-abc"), None, "abc would pass through");
+/// assert_eq!(chunk_unslug("Foo"), None, "not a chunk at all");
+/// ```
+#[must_use]
+pub fn chunk_unslug(chunk: &str) -> Option<String> {
+    let Some(body) = chunk.strip_prefix(RESERVED_PREFIX) else {
+        return is_valid_plain_chunk(chunk).then(|| chunk.to_string());
+    };
+    let decoded = if body == "_x" {
+        String::new()
+    } else {
+        let bytes = body.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'_' {
+                let hex = bytes.get(i + 1..i + 4)?;
+                if hex[0] != b'x'
+                    || !hex[1..]
+                        .iter()
+                        .all(|h| matches!(h, b'0'..=b'9' | b'a'..=b'f'))
+                {
+                    return None;
+                }
+                let hi = (hex[1] as char).to_digit(16)? as u8;
+                let lo = (hex[2] as char).to_digit(16)? as u8;
+                out.push((hi << 4) | lo);
+                i += 4;
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8(out).ok()?
+    };
+    (chunk_slug(&decoded) == chunk).then_some(decoded)
 }
 
 #[cfg(test)]
@@ -119,52 +195,144 @@ mod tests {
         assert_eq!(a, c);
     }
 
+    /// The corpus every slug property is checked over: the RFC's motivating
+    /// counterexamples, boundary bytes, both v1.31 collision pairs, and the
+    /// shapes that sit on the edge of the reserved prefix.
+    const CORPUS: &[&str] = &[
+        "foo@1.service",
+        "foo-1.service",
+        "getty@tty1.service",
+        "getty-tty1.service",
+        "a b",
+        "a_b",
+        "a-b",
+        "A",
+        "a",
+        "Ab",
+        "a.b",
+        ".ab",
+        "ab.",
+        "café",
+        "unit@.service",
+        "_myns",
+        "e_myns",
+        "x_myns",
+        "myns_",
+        "_",
+        "x-foo",
+        "x_x5f_myns",
+        "x@b",
+        "@b",
+        "a_",
+        "a_x",
+        "",
+        "x-",
+        "x",
+    ];
+
     #[test]
     fn legal_values_stay_literal() {
         assert_eq!(chunk_slug("sshd.service"), "sshd.service");
         assert_eq!(chunk_slug("cam0"), "cam0");
+        // Legal spellings that *look* like escapes are values in their own
+        // right and pass through — the escaped class is `x-`-prefixed, so
+        // nothing escaped can ever land on them.
+        assert_eq!(chunk_slug("x_x5f_myns"), "x_x5f_myns");
+        assert_eq!(chunk_slug("a_x"), "a_x");
+    }
+
+    /// RFC 03 §2 (v1.31): a charset-legal value that starts with `x-` is
+    /// escaped, not passed through — the prefix is reserved on both sides of
+    /// the boundary.
+    #[test]
+    fn the_reserved_prefix_is_escaped_not_passed_through() {
+        assert!(crate::grammar::is_valid_plain_chunk("x-foo"));
+        assert_eq!(chunk_slug("x-foo"), "x-x-foo");
+        assert_eq!(chunk_slug("x-1"), "x-x-1");
+        // `x` alone and `x_…` are not the prefix.
+        assert_eq!(chunk_slug("x"), "x");
+        assert_eq!(chunk_slug("x_1"), "x_1");
+    }
+
+    /// The pinned table (RFC 03 §2 v1.31). **This is the table adopters
+    /// copy**: every row is a spelling the fleet may already carry in a
+    /// key, so a row here changing is a re-keying, and it must fail this
+    /// build before it re-keys a fleet.
+    #[test]
+    fn slug_outputs_are_pinned() {
+        let table = [
+            ("sshd.service", "sshd.service"),
+            ("cam0", "cam0"),
+            ("x_x5f_myns", "x_x5f_myns"),
+            ("a_x", "a_x"),
+            ("x-foo", "x-x-foo"),
+            ("_myns", "x-_x5fmyns"),
+            ("x@b", "x-x_x40b"),
+            ("@b", "x-_x40b"),
+            ("foo@1.service", "x-foo_x401.service"),
+            ("has spaces", "x-has_x20spaces"),
+            ("a_", "x-a_x5f"),
+            ("_", "x-_x5f"),
+            (".ab", "x-.ab"),
+            ("ab.", "x-ab_x2e"),
+            ("A", "x-_x41"),
+            ("ETH0", "x-_x45_x54_x480"),
+            ("café", "x-caf_xc3_xa9"),
+            ("", "x-_x"),
+        ];
+        for (value, chunk) in table {
+            assert_eq!(chunk_slug(value), chunk, "slug of {value:?}");
+        }
     }
 
     #[test]
     fn escape_is_injective() {
         // The RFC's motivating counterexample: these MUST NOT share a chunk.
-        let a = chunk_slug("foo@1.service");
-        let b = chunk_slug("foo-1.service");
-        assert_ne!(a, b);
-        assert_eq!(a, "foo_x40_1.service");
+        assert_ne!(chunk_slug("foo@1.service"), chunk_slug("foo-1.service"));
 
-        // Property check over a corpus of near-collisions.
-        let corpus = [
-            "getty@tty1.service",
-            "getty-tty1.service",
-            "a b",
-            "a_b",
-            "a-b",
-            "A",
-            "a",
-            "Ab",
-            "a.b",
-            ".ab",
-            "ab.",
-            "café",
-            "unit@.service",
-            // The v1.4 erratum's collision pair: the old sentinel-only
-            // boundary fix mapped `_myns` to `e_myns`, colliding with the
-            // literal value `e_myns`.
-            "_myns",
-            "e_myns",
-            "x_myns",
-            "myns_",
-            "_",
-        ];
-        let slugs: Vec<String> = corpus.iter().map(|v| chunk_slug(v)).collect();
+        let slugs: Vec<String> = CORPUS.iter().map(|v| chunk_slug(v)).collect();
         let unique: HashSet<&String> = slugs.iter().collect();
-        assert_eq!(unique.len(), corpus.len(), "collision in {slugs:?}");
+        assert_eq!(unique.len(), CORPUS.len(), "collision in {slugs:?}");
         for s in &slugs {
             assert!(
                 crate::grammar::is_valid_plain_chunk(s),
                 "illegal slug {s:?}"
             );
+        }
+    }
+
+    /// RFC 03 §2: a conforming slugger ships the decoder beside the encoder
+    /// with a round-trip test over both classes.
+    #[test]
+    fn unslug_round_trips_the_corpus() {
+        for v in CORPUS.iter().copied().chain(["日本", "\u{0}", "a\tb"]) {
+            let chunk = chunk_slug(v);
+            assert_eq!(
+                chunk_unslug(&chunk).as_deref(),
+                Some(v),
+                "round trip of {v:?} via {chunk:?}"
+            );
+        }
+    }
+
+    /// The decoder is the left inverse on the image of the encoder and
+    /// refuses everything else: malformed escapes, non-UTF-8 bytes, and
+    /// spellings that decode to a value which slugs differently.
+    #[test]
+    fn unslug_refuses_malformed_and_non_canonical() {
+        for bad in [
+            "x-a_",    // `_` opens an escape; nothing follows
+            "x-a_x4",  // one hex digit
+            "x-a_xzz", // not hex
+            "x-a_X41", // the escape marker is lowercase
+            "x-a_x4A", // uppercase hex digit
+            "x-_xff",  // not UTF-8
+            "x-abc",   // `abc` passes through, so this spelling is not canonical
+            "x-",      // the empty value is spelled `x-_x`
+            "x-_xa",   // `_x` is the empty value only as the entire body
+            "Foo",     // not a chunk at all
+        ] {
+            assert_eq!(chunk_unslug(bad), None, "{bad:?} must be refused");
         }
     }
 
@@ -209,18 +377,20 @@ mod tests {
         );
     }
 
-    /// The v1.4 erratum, by its own example: escaping must converge to an
-    /// alphanumeric first character, and the `x` marker is affixed *with* the
-    /// boundary byte escaped — not instead of escaping it (RFC 03 §2).
+    /// The v1.31 erratum, by its own two witnesses (RFC 03 §2): the pairs
+    /// the v1.4 scheme collapsed stay distinct, and each side decodes back
+    /// to itself.
     #[test]
-    fn erratum_boundary_escape_is_the_rfcs() {
-        assert_eq!(chunk_slug("_myns"), "x_x5f_myns");
-        // The collision the erratum exists to prevent: a `_`-leading value
-        // and the literal spelling of the old sentinel form stay distinct.
-        assert_ne!(chunk_slug("_myns"), chunk_slug("e_myns"));
-        assert_eq!(chunk_slug("e_myns"), "e_myns");
-        // The trailing boundary converges the same way.
-        assert_eq!(chunk_slug("myns_"), "myns_x5f_x");
-        assert_eq!(chunk_slug(".ab"), "x_x2e_ab");
+    fn v131_erratum_examples_are_the_rfcs() {
+        for (a, b) in [("_myns", "x_x5f_myns"), ("x@b", "@b")] {
+            let (sa, sb) = (chunk_slug(a), chunk_slug(b));
+            assert_ne!(sa, sb, "{a:?} and {b:?} must not share a chunk");
+            assert_eq!(chunk_unslug(&sa).as_deref(), Some(a));
+            assert_eq!(chunk_unslug(&sb).as_deref(), Some(b));
+        }
+        assert_eq!(chunk_slug("_myns"), "x-_x5fmyns");
+        assert_eq!(chunk_slug("x_x5f_myns"), "x_x5f_myns");
+        assert_eq!(chunk_slug("x@b"), "x-x_x40b");
+        assert_eq!(chunk_slug("@b"), "x-_x40b");
     }
 }

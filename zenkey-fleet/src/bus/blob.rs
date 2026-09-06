@@ -343,7 +343,7 @@ mod tests {
         // lowercase, *lowercased at build time*: Crockford base32 decodes
         // case-insensitively, so the lowercase key spelling names exactly
         // the id the caller gave us — refusing it (or escaping it into
-        // `_xNN_` chunks, as the generated builders once did) would be
+        // `_xHH` chunks, as the generated builders once did) would be
         // manufacturing a second spelling for one id (G-07a).
         let target = BlobTarget::parse("01JGXQZ4YQK8V6TXW3M9F2A7CD").unwrap();
         assert_eq!(

@@ -907,6 +907,47 @@ pub fn call_report() -> CallReport {
     }
 }
 
+/// Two bounded replies that stopped early (RFC 05 §3.2, #424): one that
+/// offers a cursor to continue from, with the advisory fields present, and
+/// one that offers `next_cursor: null` — the contract violation the RFC
+/// says an observer MAY report.
+pub fn call_report_partial_page() -> CallReport {
+    CallReport {
+        key: "v1/*/@rpc/historian/events/search".to_string(),
+        timeout_s: 5.0,
+        answers: vec![
+            CallAnswer {
+                origin: ORIGIN.into(),
+                outcome: CallOutcome::Ok {
+                    value: Some(serde_json::json!({
+                        "items": [{"id": "e-41"}],
+                        "next_cursor": "e-41",
+                        "partial": true,
+                        "scanned": 4096,
+                        "covers_from": "2026-09-06T10:00:00Z"
+                    })),
+                    text: None,
+                },
+                attachment: None,
+                attachment_bytes: None,
+            },
+            CallAnswer {
+                origin: "h-bbbbbbbbbbbb".into(),
+                outcome: CallOutcome::Ok {
+                    value: Some(serde_json::json!({
+                        "items": [],
+                        "next_cursor": null,
+                        "partial": true
+                    })),
+                    text: None,
+                },
+                attachment: None,
+                attachment_bytes: None,
+            },
+        ],
+    }
+}
+
 /// The same call, reached through a bridge — the resolution provenance is
 /// what `check probe` adds over `service call` (RFC 06 §6.2).
 pub fn probe_report() -> ProbeReport {

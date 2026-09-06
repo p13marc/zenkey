@@ -52,6 +52,83 @@ pub struct CallAnswer {
     pub attachment_bytes: Option<usize>,
 }
 
+/// What a bounded reply says about itself (RFC 05 §3.2, v1.31): the
+/// envelope's `partial` flag and the three fields that qualify it.
+///
+/// **Derived, not serialized.** The wire already carries the envelope
+/// inside [`CallOutcome::Ok`]'s `value`; this is the renderer's reading of
+/// it, so it has no serde derive and no place in the pinned contract — a
+/// script that wants the flag reads the reply it is in.
+///
+/// `Some` only when the reply is a JSON object carrying a boolean `partial`
+/// — which is the envelope's one required marker. A procedure that replies
+/// with a bare list, a scalar, or TOML text (the introspect procedures) is
+/// not paginated and gets no signal at all rather than a synthetic
+/// `partial: false`: an absent envelope and a complete walk are different
+/// facts, and the caller must not be told the second when only the first
+/// is known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageSignal {
+    /// The producer stopped before completing the walk — scan cap, tier
+    /// coverage, time budget — and a short page is not the end.
+    pub partial: bool,
+    /// Non-null means more; `null` means the walk is complete for the
+    /// filter given. Opaque to the caller (a value cursor, never a
+    /// position).
+    pub next_cursor: Option<String>,
+    /// Advisory: what the page cost, so an expensive empty page can be
+    /// told from a cheap one. Omitted by procedures that do not count.
+    pub scanned: Option<u64>,
+    /// The oldest instant the answer *could* have covered, for a computed
+    /// answer narrower than what was asked. Omitted by procedures with no
+    /// notion of coverage.
+    pub covers_from: Option<String>,
+}
+
+impl PageSignal {
+    /// `partial: true` **with** `next_cursor: null`: the producer says it
+    /// stopped early and offers no way on. RFC 05 §3.2 names this a
+    /// contract violation an observer MAY report (RFC 13 §3); `zenctl
+    /// call` says it as a caveat and does not move the exit code, because
+    /// a call is an act, not a judgement (#424).
+    pub fn is_contract_violation(&self) -> bool {
+        self.partial && self.next_cursor.is_none()
+    }
+}
+
+impl CallAnswer {
+    /// The RFC 05 §3.2 envelope fields of this answer, when it is one.
+    ///
+    /// `None` for an error envelope, a text reply, a non-object value, and
+    /// an object with no boolean `partial` — see [`PageSignal`] for why an
+    /// absent envelope is not reported as a complete one. A `next_cursor`
+    /// that is present but not a string is read as null: the RFC makes the
+    /// cursor opaque, and an opaque value the caller cannot pass back is
+    /// no way on.
+    pub fn page_signal(&self) -> Option<PageSignal> {
+        let CallOutcome::Ok {
+            value: Some(serde_json::Value::Object(o)),
+            ..
+        } = &self.outcome
+        else {
+            return None;
+        };
+        let partial = o.get("partial")?.as_bool()?;
+        Some(PageSignal {
+            partial,
+            next_cursor: o
+                .get("next_cursor")
+                .and_then(|c| c.as_str())
+                .map(str::to_string),
+            scanned: o.get("scanned").and_then(|n| n.as_u64()),
+            covers_from: o
+                .get("covers_from")
+                .and_then(|c| c.as_str())
+                .map(str::to_string),
+        })
+    }
+}
+
 /// The wire shape is unchanged by the enum (pinned by
 /// `tests/report_contract.rs`): `origin`, then `ok`, then the outcome's own
 /// fields, then the attachment pair, with `error` last — every optional
@@ -173,5 +250,76 @@ mod tests {
             attachment_bytes: None,
         });
         assert_eq!(r.exit_code(), 1, "any refusal fails the invocation");
+    }
+
+    fn answer(outcome: CallOutcome) -> CallAnswer {
+        CallAnswer {
+            origin: "h-1".into(),
+            outcome,
+            attachment: None,
+            attachment_bytes: None,
+        }
+    }
+
+    fn value(v: serde_json::Value) -> CallAnswer {
+        answer(CallOutcome::Ok {
+            value: Some(v),
+            text: None,
+        })
+    }
+
+    #[test]
+    fn page_signal_reads_only_object_replies_with_partial() {
+        // The envelope, whole (RFC 05 §3.2).
+        let full = value(serde_json::json!({
+            "items": [1, 2],
+            "next_cursor": "k-2",
+            "partial": true,
+            "scanned": 4096,
+            "covers_from": "2026-09-06T10:00:00Z"
+        }));
+        assert_eq!(
+            full.page_signal(),
+            Some(PageSignal {
+                partial: true,
+                next_cursor: Some("k-2".into()),
+                scanned: Some(4096),
+                covers_from: Some("2026-09-06T10:00:00Z".into()),
+            })
+        );
+        assert!(!full.page_signal().unwrap().is_contract_violation());
+
+        // The minimal envelope: the optional fields absent, and a null
+        // cursor after `partial: true` is the violation the RFC names.
+        let stuck = value(serde_json::json!({"items": [], "next_cursor": null, "partial": true}));
+        let p = stuck
+            .page_signal()
+            .expect("an object with a boolean partial");
+        assert!(p.is_contract_violation());
+        assert_eq!((p.scanned, p.covers_from), (None, None));
+
+        // A complete page is a signal too, and not a violation.
+        let done = value(serde_json::json!({"items": [], "next_cursor": null, "partial": false}));
+        assert!(!done.page_signal().unwrap().is_contract_violation());
+
+        // Not envelopes: a bare list, a scalar, an object without the flag,
+        // a non-boolean flag, a text reply, an error. None of these is a
+        // complete walk, so none is told as one.
+        for a in [
+            value(serde_json::json!([1, 2, 3])),
+            value(serde_json::json!(42)),
+            value(serde_json::json!({"count": 214})),
+            value(serde_json::json!({"partial": "yes"})),
+            answer(CallOutcome::Ok {
+                value: None,
+                text: Some("partial = true".into()),
+            }),
+            answer(CallOutcome::Err(CallError {
+                name: "error/busy".into(),
+                message: "later".into(),
+            })),
+        ] {
+            assert_eq!(a.page_signal(), None, "{a:?}");
+        }
     }
 }
