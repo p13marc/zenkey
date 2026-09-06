@@ -2469,3 +2469,132 @@ pub fn snapshot_diff_normalized() -> SnapshotDiff {
 pub fn snapshot_diff_identity() -> SnapshotDiff {
     zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
 }
+
+// ── The metrics surface (#228) ──────────────────────────────────────────────
+
+/// One exporter fold with every honesty pole exercised at once: a live
+/// series, a `{var}` series whose origin went down (no value, labels kept), a
+/// field series the observer evicted, a `state` series past its declared
+/// ttl; every O6 population non-zero; every payload population non-zero; two
+/// suppression reasons; a doctor that ran and found something.
+pub fn export_snapshot() -> ExportSnapshot {
+    use std::collections::BTreeMap;
+    ExportSnapshot {
+        scopes: vec!["acme/v1/*/**".into()],
+        excluded: zenkey_fleet::WILDCARD_EXCLUDES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        registry: Asked::Asked(RegistryInfo { producers: 2 }),
+        max_series: 10_000,
+        started_at_unix_s: 1_700_000_000,
+        taken_at_unix_s: 1_700_000_120,
+        series: vec![
+            SeriesRow {
+                name: "zenkey_subject_sysinfo_cpu_usage_percent".into(),
+                key: format!("acme/v1/{ORIGIN}/telemetry/sysinfo/cpu/usage"),
+                origin: ORIGIN.into(),
+                producer: "sysinfo".into(),
+                class: "telemetry".into(),
+                subject: "cpu/usage".into(),
+                labels: BTreeMap::new(),
+                field: None,
+                kind: Some("gauge".into()),
+                unit: Some("percent".into()),
+                value: Some(12.5),
+                last_seen_unix_s: 1_700_000_119,
+                state: SeriesState::Live,
+                samples: 240,
+                drop_exposed: 2,
+            },
+            SeriesRow {
+                name: "zenkey_subject_sysinfo_disk_used_bytes".into(),
+                key: "acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used".into(),
+                origin: "h-0000deadbeef".into(),
+                producer: "sysinfo".into(),
+                class: "telemetry".into(),
+                subject: "disk/{mount}/used".into(),
+                labels: [("mount".to_string(), "var-log".to_string())]
+                    .into_iter()
+                    .collect(),
+                field: None,
+                kind: None,
+                unit: Some("bytes".into()),
+                value: None,
+                last_seen_unix_s: 1_700_000_040,
+                state: SeriesState::OriginDown,
+                samples: 80,
+                drop_exposed: 0,
+            },
+            SeriesRow {
+                name: "zenkey_subject_netlink_iface_rx_bytes_total".into(),
+                key: format!("acme/v1/{ORIGIN}/telemetry/netlink/iface/eth0/rx_bytes"),
+                origin: ORIGIN.into(),
+                producer: "netlink".into(),
+                class: "telemetry".into(),
+                subject: "iface/{iface}/rx_bytes".into(),
+                labels: [("iface".to_string(), "eth0".to_string())]
+                    .into_iter()
+                    .collect(),
+                field: Some("rx".into()),
+                kind: Some("counter".into()),
+                unit: Some("bytes".into()),
+                value: None,
+                last_seen_unix_s: 1_700_000_100,
+                state: SeriesState::Evicted,
+                samples: 5,
+                drop_exposed: 0,
+            },
+            SeriesRow {
+                name: "zenkey_subject_sysinfo_health".into(),
+                key: format!("acme/v1/{ORIGIN}/state/sysinfo/health"),
+                origin: ORIGIN.into(),
+                producer: "sysinfo".into(),
+                class: "state".into(),
+                subject: "health".into(),
+                labels: BTreeMap::new(),
+                field: Some("uptime_s".into()),
+                kind: None,
+                unit: None,
+                value: Some(4242.0),
+                last_seen_unix_s: 1_700_000_060,
+                state: SeriesState::Quiet,
+                samples: 4,
+                drop_exposed: 0,
+            },
+        ],
+        observer: ObserverCounters {
+            dropped: 3,
+            evicted_keys: 5,
+            evicted_bytes: 7,
+            expired: 11,
+            unwatched: 13,
+            coalesced: 17,
+            unstamped: 19,
+        },
+        contract: ContractCounters {
+            qos_judged: 320,
+            qos_mismatch: 2,
+            qos_mismatch_by_subject: vec![QosMismatchRow {
+                producer: "sysinfo".into(),
+                subject: "cpu/usage".into(),
+                n: 2,
+            }],
+            payload_valid: 200,
+            payload_invalid: 1,
+            payload_not_validated: 128,
+        },
+        suppressed: [("cardinality".to_string(), 4u64), ("fields".to_string(), 1)]
+            .into_iter()
+            .collect(),
+        unregistered_keys: 3,
+        doctor: Asked::Asked(DoctorSummary {
+            ran_at_unix_s: 1_700_000_090,
+            findings: vec![DoctorFindingRef {
+                check: CheckId::StaleState,
+                severity: DoctorSeverity::Warning,
+                subject: format!("{ORIGIN}/sysinfo"),
+            }],
+        }),
+    }
+}

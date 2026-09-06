@@ -940,6 +940,111 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
+$ zenctl export --help
+Serve the bus and its contract as Prometheus metrics (#228): key series named and united by the registry, and the observer's own blind spots as first-class series beside them.
+
+`zenctl export --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a series exists only where the registry declares the subject (names and units from `unit`/`kind`, never sniffed from the leaf; every `{var}` a label; the declared `cardinality` bounds the population and what it refuses is counted). What every other exporter hides is exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`, the four evicted populations (never summed), coalesced and unstamped samples; a series that stopped keeps its labels and state — evicted, origin_down, retired — and loses its value, so absence and silence are different bytes; payload verdicts are three populations, the third `not_validated`; the selectors watched and the planes `**` cannot reach ride `zenkey_scope_info`. Killing a producer turns its series `origin_down`; forcing drops moves the counter and marks the series fed meanwhile; scraping twice with no traffic is byte-identical. A foreground observer, explicitly launched, one process per invocation, sharing nothing, caching no discovery, serving nothing another zenctl reads — the permitted second kind (`docs/redesign-2026-07.md` §6.1). REFUSED up front: OTLP, histograms and summaries, push gateways and remote write — `/metrics` over plain HTTP is the whole surface.
+
+Usage: zenctl export [OPTIONS] [SELECTOR]
+
+Arguments:
+  [SELECTOR]
+          Full wire selector to watch — this session is un-namespaced (RFC 09 §5). Defaults to all v1 data under the base: `<base>/v1/**`, which `**` being unable to cross an `@`-chunk makes media-safe and blind to the verbatim planes (RFC 03 §4 D2)
+
+Options:
+      --origin <ORIGIN>
+          Only this origin (`h-…` or `@service`)
+
+      --class <CLASS>
+          Only this class: telemetry, state, or events
+
+      --producer <PRODUCER>
+          Only this producer
+
+      --bind <ADDR>
+          Address to serve `/metrics` on (`--listen` is the zenoh transport's). Loopback by default; a non-loopback address exposes the bus's shape to the network and needs --i-know
+          
+          [default: 127.0.0.1:9184]
+
+      --i-know
+          Bind a non-loopback --bind address. The refusal you are overriding names its reason
+
+      --validate
+          Validate payloads against their served schemas (RFC 08 §7), budgeted per key per second so the exporter never becomes a load test; the `valid`/`invalid` populations move only with this. Without it every sample is `not_validated`, and the surface says so
+
+      --doctor-every <SECS>
+          Run the doctor every SECS and expose its findings as `zenkey_doctor_finding{check_id,severity}`. Off by default: a doctor run costs the control plane (RFC 13 §3, frugality). Without it `zenkey_doctor_info{state="not_asked"}` is the honest series
+
+      --max-series <N>
+          Bound on distinct series; overflow is counted under `zenkey_series_suppressed_total{reason="max_series"}`
+          
+          [default: 10000]
+
+      --once
+          Observe for --for seconds, fold once, print the snapshot as a report (`--format`) and exit — no listener. For a script that wants one scrape's worth of the surface as JSON
+
+      --for <SECS>
+          With --once: how long to observe before the one fold, seconds
+          
+          [default: 5]
+
+      --prom
+          With --once: print the Prometheus exposition text instead of a report — a foreign schema, so not with --format
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
 $ zenctl serve --help
 Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121).
 

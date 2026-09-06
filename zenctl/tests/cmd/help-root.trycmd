@@ -47,6 +47,7 @@ Commands:
   replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
   timeline     The fleet timeline (#216): one merged ordering of a window's samples, lanes per origin/producer, the clock stated per report and the stamper per lane — and DELIBERATELY NO EDGES
   snapshot     Take a fleet snapshot to a .zsnap file (RFC 13 §4.4) — or, with `diff`, compare two
+  export       Serve the bus and its contract as Prometheus metrics (#228): key series named and united by the registry, and the observer's own blind spots as first-class series beside them
   serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
   gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
   scout        Listen for raw scouting Hellos: zid, whatami, locators
@@ -102,6 +103,7 @@ Commands:
   replay       Replay a .zrec capture onto the bus — replay is PUBLISHING
   timeline     The fleet timeline (#216): one merged ordering of a window's samples, lanes per origin/producer, the clock stated per report and the stamper per lane — and DELIBERATELY NO EDGES
   snapshot     Take a fleet snapshot to a .zsnap file (RFC 13 §4.4) — or, with `diff`, compare two
+  export       Serve the bus and its contract as Prometheus metrics (#228): key series named and united by the registry, and the observer's own blind spots as first-class series beside them
   serve        Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121)
   gen          Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers
   scout        Listen for raw scouting Hellos: zid, whatami, locators
