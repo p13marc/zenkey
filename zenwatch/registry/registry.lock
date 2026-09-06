@@ -1,0 +1,10 @@
+# registry.lock — the RFC 08 §3.1 compatibility snapshot.
+# Regenerate with `zenctl registry lock <dir>` after additive edits;
+# an incompatible edit (changed type/class/kind/shape on an existing
+# path) is refused — retire through [[deprecated]] and add a sibling
+# instead (RFC 08 §3).
+procedure	zenwatch	describe	read	-	SchemaSet
+procedure	zenwatch	introspect	read	-	RegistrySlice
+subject	zenwatch	doctor	state	ZenwatchDoctor
+subject	zenwatch	firing/{rule_id}	state	FiringRule
+subject	zenwatch	health	state	ZenwatchHealth
