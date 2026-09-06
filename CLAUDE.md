@@ -173,9 +173,20 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   producer** (`publish.rs`: `introspect`/`describe` served before the
   `alive` token through the engine's `BringUp`; `health` every 30 s, one
   `firing/{rule_id}` document per rule with something announced,
-  tombstoned when it clears; `doctor` is a placeholder shape until CN),
-  and it caches no discovery: it is not the noun
-  `docs/redesign-2026-07.md` §6.1 rejected.
+  tombstoned when it clears; `doctor` after every scheduled run), and it
+  caches no discovery: it is not the noun `docs/redesign-2026-07.md` §6.1
+  rejected. **The scheduled doctor** (#390, `doctor.rs`): a `doctor` block
+  runs the engine's `run_doctor` every few **hours** — beside the drain,
+  like the schema sweep — and the `doctor` block is a rule of its own
+  (`RuleKind::ScheduledDoctor`, id `doctor`) so its notices ride the same
+  `Notice` → `route` → discipline → sinks path. The first run is a
+  **baseline** (one `info` notification; every finding *assumed* into the
+  ledger — `NoticeMeta::assume`, announced without a delivery — so its
+  fix is a `resolved`); later runs are `doctor_delta` — one notification
+  per new finding, one `resolved` per fixed, keyed `(check, subject)`; a
+  run that could not happen is `unobservable` with the previous report
+  retained. `synced: not asked` and the other unasked poles are stated in
+  every message and ride the published `ZenwatchDoctor.report` verbatim.
 
 Plus `fixture-tests/` (unpublished): the ZenSight registry snapshot compiled
 through zenkey-build — the codegen regression corpus. **Do not add features

@@ -7,7 +7,7 @@ A config that checks clean says what it holds:
 
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/valid.json5
-tests/cmd/fixtures/valid.json5: 4 rule(s), 4 sink(s) — ok
+tests/cmd/fixtures/valid.json5: 4 rule(s), 4 sink(s), doctor every 6h — ok
 
 ```
 

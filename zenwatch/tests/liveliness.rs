@@ -107,6 +107,7 @@ async fn a_retired_alive_token_is_one_firing_and_its_return_is_one_ok() {
                 state_file: None,
                 state_max_entries: 4096,
                 publish: false,
+                doctor: None,
             },
             async move {
                 let _ = stop_rx.await;

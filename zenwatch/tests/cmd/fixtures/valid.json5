@@ -15,4 +15,5 @@
     mail: { kind: "smtp", host: "smtp.example.org", port: 587, tls: "starttls", username: "zenwatch", password: { env: "SMTP_PASSWORD" }, from: "zenwatch@example.org", to: ["oncall@example.org"], subject_prefix: "[zenwatch]" },
   },
   render: { max_message_bytes: 2048, max_structural_bytes: 512 },
+  doctor: { every_h: 6, sinks: ["ops"], severity_floor: "warning" },
 }

@@ -22,14 +22,16 @@
 //! the same reading; routing — which rule, which sink, whether it is a
 //! duplicate — is this daemon's. The split is visible in the module list:
 //! [`engine`] composes the fleet's watchdog with its own monitor and owns
-//! [`engine::route`]; [`sinks`] owns the daemon's wire shapes
-//! ([`sinks::Outgoing`]); [`config`] owns the file and its refusals;
-//! [`exit`] cites the contract.
+//! [`engine::route`]; [`doctor`] turns the engine's scheduled `run_doctor`
+//! into run-over-run notices on that same stream (#390); [`sinks`] owns
+//! the daemon's wire shapes ([`sinks::Outgoing`]); [`config`] owns the file
+//! and its refusals; [`exit`] cites the contract.
 
 pub mod bus;
 pub mod cli;
 pub mod config;
 pub mod discipline;
+pub mod doctor;
 pub mod engine;
 pub mod exit;
 pub mod publish;
@@ -76,10 +78,14 @@ pub async fn run() -> Result<()> {
         Command::CheckConfig(a) => {
             let cfg = load_checked(&a.config)?;
             println!(
-                "{}: {} rule(s), {} sink(s) — ok",
+                "{}: {} rule(s), {} sink(s){} — ok",
                 a.config.display(),
                 cfg.rules.len(),
-                cfg.sinks.len()
+                cfg.sinks.len(),
+                match &cfg.doctor {
+                    Some(d) => format!(", doctor every {}", d.every_spelled()),
+                    None => String::new(),
+                }
             );
             Ok(())
         }

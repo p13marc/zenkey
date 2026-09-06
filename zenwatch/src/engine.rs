@@ -27,6 +27,14 @@
 //! also persists the ledger and refreshes what this daemon publishes about
 //! itself ([`crate::publish`]): a real daemon, explicitly launched, is a
 //! producer like any other.
+//!
+//! **The scheduled doctor runs beside the drain** (#390, [`crate::doctor`]):
+//! an interval of hours starts `run_doctor` as a future the loop selects
+//! on, the way the schema sweep already does, so a sweep that takes seconds
+//! never stops sampling. Its outcome becomes [`Notice::Doctor`]s on the same
+//! stream — routed under the `doctor` block's own rule
+//! ([`RuleKind::ScheduledDoctor`]), disciplined like every notice, and
+//! published on `state/zenwatch/doctor` after every run.
 
 use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
@@ -38,20 +46,21 @@ use std::time::Duration;
 
 use anyhow::Result;
 use zenkey_fleet::{
-    AlertState, AlertTransition, CondState, Fleet, FleetEvent, Monitor, MonitorSpec, RenderSource,
-    SchemaStore, SeedPolicy, Sipper as _, SliceSet, StreamItem, Transition, WatchdogSpec,
-    WatchdogSummary,
+    AlertState, AlertTransition, CondState, DoctorReport, Fleet, FleetEvent, Monitor, MonitorSpec,
+    RenderSource, SchemaStore, SeedPolicy, Sipper as _, SliceSet, StreamItem, Transition,
+    WatchdogSpec, WatchdogSummary,
 };
 use zenoh::key_expr::KeyExpr;
 use zenoh::sample::SampleKind;
 
-use crate::config::{Config, DisciplineConfig};
+use crate::config::{Config, DisciplineConfig, DoctorConfig};
 use crate::discipline::inhibit::{self, Catalog};
 use crate::discipline::{Counters as DisciplineCounters, Discipline, NoticeMeta, state as ledger};
+use crate::doctor::{self, DoctorNotice};
 use crate::exit::unaskable;
-use crate::publish::{self, FiringRule, HealthStatus, SelfProducer, ZenwatchHealth};
+use crate::publish::{self, DoctorStatus, FiringRule, HealthStatus, SelfProducer, ZenwatchHealth};
 use crate::render::{Draft, Payload, RenderConfig};
-use crate::rules::{Rule, RuleKind};
+use crate::rules::{DOCTOR_RULE, Rule, RuleKind};
 use crate::sinks::{NoticeKind, Notification, Outgoing, Sink};
 
 /// One thing the observers saw that might be worth telling someone.
@@ -80,6 +89,11 @@ pub enum Notice {
     },
     /// The monitor's broadcast overflowed: `n` events this daemon never saw.
     Dropped { n: u64, at: String },
+    /// One thing a scheduled doctor run said (#390): the baseline, a
+    /// finding new or fixed since the last run, or the run itself failing
+    /// or recovering. Boxed: a finding carries the engine's whole
+    /// `DoctorFinding` and the coverage line.
+    Doctor(Box<DoctorNotice>),
 }
 
 /// A bounded per-key memory: the last thing seen on each key, oldest
@@ -154,15 +168,25 @@ pub fn meta_of(notice: &Notice) -> NoticeMeta {
         Notice::Alert { transition, .. } => NoticeMeta {
             origin: Some(transition.origin.clone()),
             passthrough: false,
+            assume: false,
         },
         Notice::Liveliness { origin, .. } => NoticeMeta {
             origin: Some(origin.clone()),
             passthrough: false,
+            assume: false,
         },
         Notice::Engine(_) => NoticeMeta::default(),
         Notice::Dropped { .. } => NoticeMeta {
             origin: None,
             passthrough: true,
+            assume: false,
+        },
+        // No origin: a doctor finding has no entity, so inhibition never
+        // holds it (RFC 06 §5.6 is about hosts, not judgements).
+        Notice::Doctor(d) => NoticeMeta {
+            origin: None,
+            passthrough: d.is_passthrough(),
+            assume: d.is_assumed(),
         },
     }
 }
@@ -183,6 +207,12 @@ pub fn route(notice: &Notice, rules: &[Rule], render: &RenderConfig) -> Vec<Outg
     };
     let mut out = Vec::new();
     for r in rules {
+        // The scheduled doctor renders its own notices (#390): a finding is
+        // a judgement over a sweep, not a payload on a key.
+        if let (Notice::Doctor(d), RuleKind::ScheduledDoctor) = (notice, &r.kind) {
+            out.push(doctor::outgoing(d, r, render));
+            continue;
+        }
         let no_payload = |reason: &str| Payload::None {
             reason: reason.to_string(),
         };
@@ -371,6 +401,8 @@ pub struct RunSummary {
     pub discipline: DisciplineCounters,
     /// The origin this daemon published under, when it did.
     pub self_origin: Option<String>,
+    /// Scheduled doctor runs, attempted (#390).
+    pub doctor_runs: u64,
 }
 
 /// Everything a run needs, with the session already open — the shape the
@@ -397,6 +429,9 @@ pub struct Engine<'a> {
     /// Publish `health`, `firing/*` and the token — a real daemon does;
     /// a bus test that is not about self-publication does not.
     pub publish: bool,
+    /// The scheduled doctor (#390); `None` is not scheduled — nothing runs,
+    /// nothing is published, and the health document says so.
+    pub doctor: Option<&'a DoctorConfig>,
 }
 
 /// Delivery counters shared with the spawned deliveries.
@@ -520,10 +555,21 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let mut summary = RunSummary::default();
     let started_at = zenkey_fleet::rfc3339_now();
 
+    // The rules the router and the discipline see: the configured ones,
+    // plus the `doctor` block as a rule of its own (#390), so a doctor
+    // finding is deduplicated, repeated, restored and published under a
+    // rule like every notice.
+    let rules_all: Vec<Rule> = e
+        .rules
+        .iter()
+        .cloned()
+        .chain(e.doctor.map(Rule::scheduled_doctor))
+        .collect();
+
     // The ledger first: a state file this process cannot read is a
     // refusal before anything opens (silently starting fresh is how a
     // resolved alert re-pages).
-    let mut discipline = Discipline::new(e.discipline, e.rules, e.render, e.state_max_entries);
+    let mut discipline = Discipline::new(e.discipline, &rules_all, e.render, e.state_max_entries);
     if let Some(path) = &e.state_file {
         match ledger::load(path) {
             Ok(Some(saved)) => {
@@ -551,7 +597,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         let (list, sel) = match &r.kind {
             RuleKind::Alerts { selector } => (&mut alert_selectors, selector),
             RuleKind::LivelinessGone { selector } => (&mut liveliness_selectors, selector),
-            RuleKind::Engine(_) => continue,
+            RuleKind::Engine(_) | RuleKind::ScheduledDoctor => continue,
         };
         if !list.contains(sel) {
             list.push(sel.clone());
@@ -675,6 +721,26 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     sweep.tick().await; // the first tick is immediate, and the prewarm was
     let mut sweeping: Option<Pin<Box<dyn Future<Output = usize> + Send + '_>>> = None;
+
+    // The scheduled doctor (#390): the first run one interval after start
+    // — the fleet just stood up is the fleet CI already checked — or at
+    // once under `--once`, which is a smoke run. A run in flight is a
+    // future the loop selects on beside the drain; a tick that lands while
+    // one runs waits for it (`Delay`), never stacks a second sweep.
+    let mut doctor_schedule = e.doctor.map(|cfg| doctor::Schedule::new(cfg, e.timeout));
+    let mut doctor_tick = doctor_schedule.as_ref().map(|s| {
+        let start = if e.once {
+            tokio::time::Instant::now()
+        } else {
+            tokio::time::Instant::now() + s.every()
+        };
+        let mut i = tokio::time::interval_at(start, s.every());
+        i.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        i
+    });
+    type DoctorRun<'f> =
+        Pin<Box<dyn Future<Output = std::result::Result<DoctorReport, String>> + Send + 'f>>;
+    let mut doctoring: Option<DoctorRun<'_>> = None;
     let mut disc_tick = tokio::time::interval(e.tick);
     disc_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     disc_tick.tick().await;
@@ -771,6 +837,17 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                         state_evicted: c.evicted,
                         firing_refused: p.refused(),
                         last_persist_error: pulse.last_persist_error.clone(),
+                        doctor: doctor_schedule
+                            .as_ref()
+                            .map_or(DoctorStatus::NotScheduled, |s| s.status()),
+                        doctor_last: doctor_schedule
+                            .as_ref()
+                            .and_then(|s| s.document())
+                            .map(|d| d.ran_at.clone()),
+                        doctor_next: doctor_schedule
+                            .as_ref()
+                            .and_then(|s| s.document())
+                            .map(|d| d.next_at.clone()),
                     };
                     if let Err(err) = p.publish_health(&health).await {
                         tracing::warn!("health publish failed: {err}");
@@ -782,20 +859,67 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         }};
     }
 
+    // One notice into the discipline: routed under every rule it matches.
+    macro_rules! observe_notice {
+        ($n:expr) => {{
+            let n: Notice = $n;
+            summary.notices += 1;
+            let meta = meta_of(&n);
+            let now = now_s();
+            for o in route(&n, &rules_all, e.render) {
+                discipline.observe(o, &meta, now);
+            }
+        }};
+    }
+
     loop {
         let notice: Option<Notice> = tokio::select! {
             biased;
             () = &mut stop => break,
-            () = &mut once_deadline, if e.once => break,
+            // Under `--once` a doctor run in flight is the run this smoke
+            // run exists for: the deadline waits for it.
+            () = &mut once_deadline, if e.once && doctoring.is_none() => break,
             t = async { watchdog.as_mut().expect("guarded").sip().await }, if !watchdog_done => {
                 match t {
                     Some(t) => Some(Notice::Engine(t)),
                     None => {
                         watchdog_done = true;
-                        if e.once { break }
+                        if e.once && doctoring.is_none() { break }
                         None
                     }
                 }
+            }
+            _ = async { doctor_tick.as_mut().expect("guarded").tick().await },
+                if doctor_tick.is_some() && doctoring.is_none() =>
+            {
+                let spec = doctor_schedule.as_ref().expect("guarded").spec();
+                tracing::info!(deep = spec.deep, "doctor: scheduled run starting (#390)");
+                doctoring = Some(Box::pin(async move {
+                    zenkey_fleet::run_doctor(&e.fleet, e.slices, &spec)
+                        .await
+                        .map_err(|err| zenkey_fleet::one_line(&err))
+                }));
+                None
+            }
+            outcome = async { doctoring.as_mut().expect("guarded").await }, if doctoring.is_some() => {
+                doctoring = None;
+                summary.doctor_runs += 1;
+                let schedule = doctor_schedule.as_mut().expect("guarded");
+                match &outcome {
+                    Ok(r) => tracing::info!(findings = r.findings.len(), "doctor: run complete"),
+                    Err(err) => tracing::warn!("doctor: the run could not happen — unobservable, not clean: {err}"),
+                }
+                let announced = discipline.announced_under(DOCTOR_RULE);
+                for n in schedule.observe(outcome, now_s(), &announced) {
+                    observe_notice!(Notice::Doctor(Box::new(n)));
+                }
+                if let (Some(p), Some(doc)) = (publisher.as_ref(), schedule.document())
+                    && let Err(err) = p.publish_doctor(doc).await
+                {
+                    tracing::warn!("doctor publish failed: {err}");
+                }
+                if e.once && watchdog_done { break }
+                None
             }
             _ = disc_tick.tick() => {
                 discipline_tick!(false);
@@ -869,12 +993,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
             },
         };
         if let Some(n) = notice {
-            summary.notices += 1;
-            let meta = meta_of(&n);
-            let now = now_s();
-            for o in route(&n, e.rules, e.render) {
-                discipline.observe(o, &meta, now);
-            }
+            observe_notice!(n);
         }
     }
 
@@ -949,11 +1068,19 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
     let slices = bus.slices(&session).await?;
     let tick = Duration::from_secs_f64(cfg.tick_s);
     eprintln!(
-        "zenwatch: {} rule(s), {} sink(s), tick {}s{}{}{} — three states, ok/firing/unobservable, \
+        "zenwatch: {} rule(s), {} sink(s), tick {}s{}{}{}{} — three states, ok/firing/unobservable, \
          one notification per sink per genuine change (RFC 13 §3)",
         rules.len(),
         sinks.len(),
         cfg.tick_s,
+        match &cfg.doctor {
+            Some(d) => format!(
+                "; doctor every {} → {}",
+                d.every_spelled(),
+                d.sinks.join(", ")
+            ),
+            None => "; doctor not scheduled".to_string(),
+        },
         match &cfg.state_file {
             Some(p) => format!("; state file {}", p.display()),
             None => "; no state file: a restart re-announces what is firing".to_string(),
@@ -985,12 +1112,13 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             state_file: cfg.state_file.clone(),
             state_max_entries: cfg.state_max_entries,
             publish: true,
+            doctor: cfg.doctor.as_ref(),
         },
         stop_signal(),
     )
     .await?;
     eprintln!(
-        "zenwatch: stopped — {} notice(s), {} notification(s): {} delivered, {} failed{}{}",
+        "zenwatch: stopped — {} notice(s), {} notification(s): {} delivered, {} failed{}{}{}",
         summary.notices,
         summary.outgoing,
         summary.delivered,
@@ -1005,6 +1133,11 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
         },
         if summary.evicted > 0 {
             format!(", {} key(s) retired at the ledger bound", summary.evicted)
+        } else {
+            String::new()
+        },
+        if cfg.doctor.is_some() {
+            format!(", {} doctor run(s)", summary.doctor_runs)
         } else {
             String::new()
         },

@@ -42,6 +42,14 @@
 //! **Bounded.** At most `max_entries` identities are remembered; the least
 //! recently changed go first, and the count rides the health document and
 //! the state file.
+//!
+//! **Assumed, not announced** ([`NoticeMeta::assume`], #390): the
+//! scheduled doctor's first run is a baseline — every finding it carries
+//! has been true since deployment and is not news — but each of them must
+//! still be *remembered* as firing, or the run that fixes one could not say
+//! `resolved`. An assumed notice enters the ledger announced, with nothing
+//! queued and nothing to repeat (`last_sent` stays empty), and is counted
+//! as a baseline.
 
 pub mod inhibit;
 pub mod state;
@@ -66,6 +74,10 @@ pub struct NoticeMeta {
     /// An event with no identity to remember — the observer's own
     /// `Dropped(n)` — delivered every time, never deduplicated.
     pub passthrough: bool,
+    /// A fact that predates this daemon's watch (a doctor baseline finding,
+    /// #390): remembered as announced, delivered to nobody, so that its end
+    /// is a `resolved` and its presence rides `firing/*`.
+    pub assume: bool,
 }
 
 /// A firing notice waiting out its `for` window.
@@ -152,6 +164,9 @@ pub struct Flush {
 struct RuleFacts {
     id: String,
     head: &'static str,
+    /// The kind the rule's own firing notice carries — by head word,
+    /// except the scheduled doctor, whose head is the engine rule's too.
+    kind: NoticeKind,
     for_s: f64,
     sinks: Vec<String>,
 }
@@ -209,6 +224,10 @@ impl Discipline {
                         RuleFacts {
                             id: r.id.clone(),
                             head: r.kind.head(),
+                            kind: match r.kind {
+                                crate::rules::RuleKind::ScheduledDoctor => NoticeKind::Doctor,
+                                _ => base_kind(r.kind.head()),
+                            },
                             for_s: r.for_s.or(cfg.for_s).unwrap_or(0.0).max(0.0),
                             sinks: r.sinks.clone(),
                         },
@@ -234,6 +253,17 @@ impl Discipline {
         self.entries
             .values()
             .filter(|e| e.announced && e.state != CondState::Ok)
+    }
+
+    /// The announced identities under one rule, in id order — what the
+    /// scheduled doctor reconciles its baseline against after a restart
+    /// (#390): an entry the state file remembered firing that the first
+    /// run no longer finds was fixed while nobody watched.
+    pub fn announced_under(&self, rule: &str) -> Vec<String> {
+        self.announced()
+            .filter(|e| e.rule == rule)
+            .map(|e| e.id.clone())
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -361,6 +391,23 @@ impl Discipline {
         e.changed = now;
         self.dirty = true;
 
+        if meta.assume {
+            // Remembered, not told: announced in the notice's state with
+            // nothing queued and nothing sent, so it never repeats and its
+            // `ok` is a resolve. Already announced: nothing to do.
+            if !(e.announced && e.state == state) {
+                e.state = state;
+                e.severity = severity;
+                e.since = now;
+                e.last_sent = None;
+                e.repeat = 0;
+                e.pending = None;
+                e.announced = state != CondState::Ok;
+            }
+            self.counters.baseline += 1;
+            return;
+        }
+
         let mut queue: Option<(NoticeKind, CondState)> = None;
         match state {
             CondState::Firing => {
@@ -370,7 +417,7 @@ impl Discipline {
                     } else {
                         // A severity change is news; the timer is not reset.
                         e.severity = severity;
-                        queue = Some((base_kind(facts.head), CondState::Firing));
+                        queue = Some((facts.kind, CondState::Firing));
                     }
                 } else if let Some(p) = &mut e.pending {
                     match p.state {
@@ -393,7 +440,7 @@ impl Discipline {
                     e.since = now;
                 } else {
                     e.severity = severity;
-                    queue = Some((base_kind(facts.head), CondState::Firing));
+                    queue = Some((facts.kind, CondState::Firing));
                 }
             }
             CondState::Ok => {
@@ -494,12 +541,13 @@ impl Discipline {
     fn repeat_of(&self, e: &Entry, now: f64) -> Outgoing {
         let facts = self.rules.get(&e.rule);
         let head = facts.map(|f| f.head).unwrap_or("rule");
+        let kind = facts.map(|f| f.kind).unwrap_or(NoticeKind::Transition);
         let mut o = e.latest.as_deref().cloned().unwrap_or_else(|| Outgoing {
             notification: Notification {
                 id: e.id.clone(),
                 rule: e.rule.clone(),
                 rule_kind: head.to_string(),
-                kind: base_kind(head),
+                kind,
                 state: e.state,
                 prior: None,
                 severity: e.severity.clone(),
@@ -520,7 +568,7 @@ impl Discipline {
             },
             sinks: facts.map(|f| f.sinks.clone()).unwrap_or_default(),
         });
-        o.notification.kind = base_kind(head);
+        o.notification.kind = kind;
         o.notification.state = e.state;
         o.notification.at = rfc3339(now);
         o.notification.repeat = e.repeat;
@@ -550,14 +598,13 @@ impl Discipline {
             .iter()
             .filter_map(|(id, e)| {
                 let p = e.pending?;
-                let for_s = self.rules.get(&e.rule)?.for_s;
-                let head = self.rules.get(&e.rule)?.head;
+                let facts = self.rules.get(&e.rule)?;
                 match p.state {
-                    CondState::Firing if now >= p.started + for_s => {
-                        Some((id.clone(), base_kind(head), CondState::Firing))
+                    CondState::Firing if now >= p.started + facts.for_s => {
+                        Some((id.clone(), facts.kind, CondState::Firing))
                     }
                     CondState::Unobservable
-                        if now >= p.unobservable_since.unwrap_or(p.started) + for_s =>
+                        if now >= p.unobservable_since.unwrap_or(p.started) + facts.for_s =>
                     {
                         Some((
                             id.clone(),
@@ -968,6 +1015,7 @@ mod tests {
         NoticeMeta {
             origin: Some(origin.into()),
             passthrough: false,
+            assume: false,
         }
     }
 
@@ -1316,6 +1364,46 @@ mod tests {
         assert_eq!(d.counters().inhibited, 0);
     }
 
+    /// Assumed (#390): a baseline fact enters the ledger announced with
+    /// nothing delivered, never repeats, is listed under its rule, and its
+    /// `ok` is a `resolved` — while the same fact observed rather than
+    /// assumed is announced.
+    #[test]
+    fn an_assumed_notice_is_remembered_not_told() {
+        let r = rules();
+        let mut d = Discipline::new(&cfg(0.0, 10.0), &r, &RenderConfig::default(), 100);
+        let assumed = NoticeMeta {
+            origin: Some("h-a".into()),
+            passthrough: false,
+            assume: true,
+        };
+        d.observe(
+            outgoing("fleet-alerts", "fleet-alerts:a", CondState::Firing, "error"),
+            &assumed,
+            0.0,
+        );
+        assert!(flush(&mut d, 0.0).is_empty(), "nothing delivered");
+        assert_eq!(d.counters().baseline, 1);
+        assert_eq!(d.announced_under("fleet-alerts"), vec!["fleet-alerts:a"]);
+        assert!(
+            flush(&mut d, 100.0).is_empty(),
+            "never sent, so never repeated"
+        );
+        d.observe(
+            outgoing("fleet-alerts", "fleet-alerts:a", CondState::Firing, "error"),
+            &assumed,
+            101.0,
+        );
+        assert_eq!(d.counters().baseline, 2, "assumed again: still a baseline");
+        d.observe(
+            outgoing("fleet-alerts", "fleet-alerts:a", CondState::Ok, "error"),
+            &meta("h-a"),
+            200.0,
+        );
+        assert_eq!(kinds(&flush(&mut d, 200.0)), vec![NoticeKind::Resolved]);
+        assert!(d.announced_under("fleet-alerts").is_empty());
+    }
+
     /// The state file: a snapshot restores as announced, so the same firing
     /// again is a duplicate; the bound evicts least-recently-changed and
     /// counts it across the round trip; a dropped notice passes through
@@ -1368,6 +1456,7 @@ mod tests {
         let dropped = NoticeMeta {
             origin: None,
             passthrough: true,
+            assume: false,
         };
         let mut o = outgoing(
             "fleet-alerts",

@@ -57,6 +57,12 @@ pub enum NoticeKind {
     LostSight,
     /// `ok → unobservable` — the observer could not tell, and says so.
     Unobservable,
+    /// The scheduled doctor (#390): the baseline, or a finding new since
+    /// the last run. A finding gone since the last run is a
+    /// [`Resolved`](NoticeKind::Resolved); a run that could not happen is
+    /// [`Unobservable`](NoticeKind::Unobservable), and the run after it
+    /// [`ObservableAgain`](NoticeKind::ObservableAgain).
+    Doctor,
 }
 
 impl NoticeKind {
@@ -71,6 +77,7 @@ impl NoticeKind {
             NoticeKind::ObservableAgain => "observable_again",
             NoticeKind::LostSight => "lost_sight",
             NoticeKind::Unobservable => "unobservable",
+            NoticeKind::Doctor => "doctor",
         }
     }
 }
@@ -387,6 +394,7 @@ mod tests {
             NoticeKind::Resolved,
             NoticeKind::ObservableAgain,
             NoticeKind::LostSight,
+            NoticeKind::Doctor,
         ] {
             assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());
         }

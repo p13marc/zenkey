@@ -34,4 +34,18 @@
   // The ledger across restarts: missing is fresh, malformed is a refusal.
   state_file: "/var/lib/zenwatch/state.json",
   state_max_entries: 4096,
+  // The scheduled doctor (#390): `zenctl doctor` over the whole deployment
+  // every few HOURS — a fan-in sweep, not a tick. The first run is a
+  // baseline (one notification, findings true since deployment are not
+  // news); every later run notifies what is new and what was fixed; a run
+  // that could not happen is unobservable, never clean. The last report is
+  // published on state/zenwatch/doctor.
+  doctor: {
+    every_h: 6,                       // or every_s — for tests and demos only; exactly one of the two
+    deep: false,                      // the freshness/storage/budget checks too: real query load
+    // sample: 200,                   // at most this many state samples per family under deep
+    // timeout_s: 10,                 // per-query; the bus timeout when unsaid
+    sinks: ["ops"],
+    severity_floor: "warning",        // info findings stay in the report, never a notification
+  },
 }

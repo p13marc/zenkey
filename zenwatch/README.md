@@ -57,7 +57,7 @@ resolve.
 - `webhook` — the notification as a JSON body (`{ notification, sinks }`,
   the shape pinned in `src/sinks/mod.rs`: `id`, `rule`, `rule_kind`,
   `kind` — `transition | alert | liveliness | group | resolved |
-  observable_again | lost_sight | unobservable` — `state`, `prior`,
+  observable_again | lost_sight | unobservable | doctor` — `state`, `prior`,
   `severity`, `title`, `message`, `labels`, `at`, `evidence`,
   `rendering`, `truncated`, `repeat`, `group`, `inhibited_by`); 2xx is
   delivered.
@@ -130,6 +130,69 @@ resolved alert re-pages. The ledger is bounded to `state_max_entries`
 (4096) identities, least recently changed evicted first, the count carried
 in the file and on the health document.
 
+## The doctor
+
+`zenctl doctor`'s stable check ids are properties of a *deployment*, and
+until now they were asked in exactly one place — CI, against a fleet stood
+up ten seconds earlier. The failures that matter are on the fleet that has
+run for three weeks: a sensor upgraded on four hosts and not the fifth
+(`slice-sync`, `schema-drift`), a producer that stopped answering
+`introspect` (`introspect-coverage`, alive ⇒ callable broken), a subject
+past its cardinality, traffic on keys nothing registered — invisible until
+someone runs the doctor by hand. A `doctor` block runs it on a schedule:
+
+```json5
+doctor: { every_h: 6, deep: false, sinks: ["ops"], severity_floor: "warning" },
+```
+
+- **Hours, not seconds.** A run is a fan-in sweep — a roster ask, an
+  `introspect` and a `describe` per producer, the admin space, and under
+  `deep` a state snapshot per family — not a tick. It runs *beside* the
+  drain (a sweep that takes seconds never stops sampling), the first run
+  one interval after start (the fleet just stood up is the fleet CI already
+  checked; `--once` runs it at once), and a tick that lands while a run is
+  in flight waits for it. `every_s` exists **for tests and demos only** —
+  exactly one of the two is accepted.
+- **Baseline, then deltas.** The first run is the baseline: **one** `info`
+  notification, "doctor baseline: N finding(s) across M check(s)", naming
+  each finding — never one page per finding, because a finding true since
+  deployment is not news. Every finding is entered into the ledger as
+  announced without a delivery, so `firing/doctor` counts it and the run
+  that fixes it can say so. Every later run is judged against the previous
+  one by the engine's `doctor_delta`, keyed on `(check, subject)` —
+  evidence drift is the same finding: **one notification per new finding**
+  (kind `doctor`, the finding's own severity, title `<check-id>
+  <subject>`, the check, subject, evidence, citation and coverage in the
+  message, `check=<id>` as a label) and **one `resolved` per fixed
+  finding** — they group like any notice, so `group_by: ["check"]` folds
+  them per check; by origin (the default) each goes on its own, a doctor
+  finding having none. Nothing at all when both sets are empty. The
+  identity is `doctor:<check>:<subject>`, so dedup, `repeat_s` and the
+  state file apply as to every notice; inhibition never does — a finding
+  has no entity.
+- **The four poles** (RFC 13 §1). A run that could not happen — the
+  transport, a timeout — is **one `unobservable` notification** naming the
+  error, and the previous report is **retained**, never replaced with
+  nothing; the run after it is `observable_again`, and its findings are
+  judged against the last report that succeeded. Inside a report, what
+  was *not asked* is stated, never read as clean: every message ends with
+  a coverage line — producers live, introspect answered, describe served /
+  missing, routers, and `registry diff: not asked (no registry loaded)`
+  versus `asked, N in sync`, `deep checks: ran | not asked`, `listen
+  phase: not asked` — and the published report carries `synced` exactly
+  as `zenctl doctor --format json` does (absent when the diff never ran).
+- **`severity_floor`** keeps `info` (or `warning`) findings out of the
+  notifications; they stay in the published report and its counts.
+- **Restart.** The state file remembers what was announced; the first run
+  after a restart assumes what it still finds silently, resolves what it
+  no longer finds, and says `observable_again` for a run that was failing
+  when the daemon stopped.
+
+`check-config` refuses a non-positive interval, both spellings at once, a
+sink not in `sinks`, a floor outside `info | warning | error`, and a rule
+whose name slugs to `doctor` — the id the schedule notifies and publishes
+under.
+
 ## What it publishes
 
 A real daemon, explicitly launched, publishes its own state like every
@@ -145,15 +208,23 @@ notifier without SSH and something else can watch the watcher:
   `started_at`, `rules`, `sinks`, `firing`, `unobservable`,
   `notifications_sent`, `deliveries_failed`, `inhibited`,
   `dropped_total`, `state_entries`, `state_evicted`, `firing_refused`,
-  `last_persist_error`.
+  `last_persist_error`, and the doctor's schedule: `doctor` (`not
+  scheduled` | `pending` | `ok` | `failed`), `doctor_last`, `doctor_next`.
 - **`…/state/zenwatch/firing/{rule_id}`** — one document per rule with
   something announced: `rule`, the most severe (then oldest) notice's
   `id`, `state`, `severity`, `since`, `labels`, and `count` of identities
   under the rule. Tombstoned when the rule goes quiet; never more than the
   registry's cardinality (256), refusals counted.
-- **`…/state/zenwatch/doctor`** is declared and described (a placeholder
-  shape) and not yet published: the self-check that fills it is the next
-  chunk.
+- **`…/state/zenwatch/doctor`** after every scheduled run (`ttl_s = 0`:
+  retained, last writer wins; never tombstoned — the last report stays the
+  last report): `ran_at`, `next_at` (in the past: the schedule lapsed),
+  `every_s`, `outcome` (`ok` | `failed`), `error`, `findings`, `new`,
+  `fixed`, `report` — the `DoctorReport` exactly as `zenctl doctor
+  --format json` prints it; after a failed run the last one that
+  succeeded, `report_at` saying from when — and `delta` (`new`, `fixed`,
+  `unchanged`; absent on the baseline). So the last report is inspectable
+  without SSH, and the *absence* of a recent one is itself detectable.
+  Without a `doctor` block nothing is published here.
 
 The origin is minted from the machine id with the profile's salt
 (`zenwatch-host-id-v1`), like every producer's.
@@ -192,6 +263,9 @@ Unknown fields are refused. The whole example is
   },
   state_file: "/var/lib/zenwatch/state.json",
   state_max_entries: 4096,
+  doctor: {                           // hours, not seconds: a fan-in sweep, not a tick
+    every_h: 6, deep: false, sinks: ["ops"], severity_floor: "warning",
+  },
   sinks: {
     ops:  { kind: "ntfy", url: "https://ntfy.example.org", topic: "fleet", token: { env: "NTFY_TOKEN" }, priority: { error: 5, warning: 4, info: 2, resolved: 1 }, tags: ["zenoh"] },
     hook: { kind: "webhook", url: "https://hooks.example.org/zenwatch", method: "POST", headers: { "X-Api-Key": { env: "HOOK_KEY" } }, timeout_s: 10 },
