@@ -1,7 +1,7 @@
 # 13 — Observer Conformance
 
 **Status: v1.24 (ratified)** · normative chapter · *created in v1.24 and
-amended in v1.32 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
+amended in v1.32 and v1.34 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
 §6; the moved material entered the set in v1.2, v1.9, v1.13 and v1.19
 and was amended there in v1.18 and v1.21
 
@@ -407,6 +407,34 @@ ids being the reference engine's:
   documents costs the data plane, so it is asked for explicitly (the
   frugality note below), never folded into an ambient render.
 
+**Exporter obligations (v1.34).** A tool that re-publishes its
+observations as a metrics surface — a Prometheus exposition, a status page
+— is an observer whose reader is another machine, and the rules above bind
+it unchanged; three follow from O4–O6 in that medium, where the natural
+encodings are all dishonest.
+
+- **A series is never a verdict about the wire.** For every observer
+  bound the surface exposes the same kinds O6 names as separate series —
+  samples missed, keys or bytes retired, samples coalesced between
+  scrapes — never a sum; and while the missed kind moves, every value
+  exposed is a lower bound and the surface says so.
+- **A series that stopped is not a series that went quiet.** A key the
+  observer chose to forget (its bound), a producer whose liveliness ended,
+  and a key that simply has not spoken are three states, each exposed by
+  name. An exporter MUST NOT let a series silently disappear: to a scraper,
+  absence and silence are the same byte.
+- **Scope and provenance ride the surface.** The selectors watched and the
+  planes a wildcard cannot reach (O5) are exposed as data on the same
+  surface, and any derived value states what it derives from: names and
+  units come from the registry's declarations, never from the leaf's
+  spelling, and a payload verdict is exposed as three counted populations
+  — valid, invalid, *not validated* — never as a ratio that hides the
+  third.
+
+Histograms, remote write and push are neither obligations nor forbidden;
+the reference exporter refuses them, a tool decision this chapter records
+rather than makes.
+
 *Informative — frugality (added at ratification, v1.18).* The obligations
 above are about honesty, not thrift, but one habit keeps both cheap: an
 observer SHOULD retrieve only what its user asked to see. Rendering what is
@@ -500,6 +528,30 @@ freezing it.
   construction since rows carry concrete keys — and MUST refuse a base
   other than the header's without an explicit operator override (§4.3).
 
+**Version 2 (v1.34).** A capture that begins mid-story needs the story's
+start: a thirty-second pre-roll of `state` keys is deltas with no base,
+because the value that explains them was published an hour ago. Version 2
+lets a file carry that base and the moment it was taken for.
+
+- The header carries `zrec: 2` and MAY carry `preamble` — `{count,
+  collected_over_s, selectors, semantics, incomplete, failed}`, the bounded
+  fetch that produced the preamble rows and what it could not fetch — and
+  `pre_roll` — `{asked_s, covered_s, watched, evicted, expired}`, what the
+  retained window was asked for and what it could give, with the ring's two
+  eviction kinds kept apart (O6).
+- A **preamble row** is a sample row with `"preamble": true` and `t: 0`,
+  emitted before the first observed row. Its `timestamp` is the HLC the
+  fetched value carried — provenance, not pacing. A reader MUST count
+  preamble rows apart from observed rows: O6's "kinds never folded",
+  applied to rows.
+- A **trigger record** is `{"trigger": {rule, from, to, at, evidence}}` — no
+  `key`, like a drop record — placed where the transition was observed, so
+  a reader can say what fired and where in the file it did.
+- A version-2 reader MUST read version 1; a version-1 reader MUST refuse
+  version 2 — the unknown-version rule above, doing its job.
+- A replayer MUST NOT publish preamble rows unless the operator opts in,
+  and MUST report how many it skipped and why (§4.2).
+
 ### 4.2 Timestamps are re-stamped on replay, deliberately
 
 Replayed samples go through declared publishers and receive the
@@ -513,7 +565,11 @@ anything live, which turns "replay onto a quiet base" into a no-op that
 published now is newest now. The cost is the inverse hazard, and it is the
 whole reason this section exists: **re-stamped old data wins LWW against a
 live fleet** ([04 §1.2](04-planes.md)) — a replayed capture can overwrite
-current state with last Tuesday.
+current state with last Tuesday. The hazard is sharpest on a version-2
+preamble (§4.1): those rows are *state at capture start*, and re-stamping
+them republishes a whole snapshot over the live fleet with no pacing
+between the rows. The reference replayer skips them unless told
+`--seed-state`, and says how many it skipped.
 
 ### 4.3 The etiquette
 
@@ -539,6 +595,51 @@ current state with last Tuesday.
   observer's arrival offsets (`t`) and the publishers' HLCs — and a
   consumer plotting a time axis says which one it plotted (O7 names the
   HLC's owner, or says it cannot). The reference scrubber plots `t`.
+- **A pre-roll covers only what was watched.** A capture taken from a
+  retained window (`--pre`) holds only the keys the observer was watching
+  when the trigger fired (O5); the header names the watch set, and the
+  ring's two eviction kinds ride beside it (O6). The preamble states its
+  `semantics` — what it is a snapshot *of* — because the values at the
+  moment the ring began are not recoverable, and the honest substitute
+  ("the current state of what the ring cannot show", or the full current
+  state) has to be named rather than implied.
+
+### 4.4 Snapshots — `.zsnap` (v1.34)
+
+A snapshot is an observer's fan-in GET kept on disk: one row per key,
+with what the observer could establish about each. It is the sibling of
+a capture, and it carries the same obligations, with one that captures do
+not need: **a fan-in GET is collected *over* a span, never *at* an
+instant**, and every rendering of a snapshot states the span.
+
+- **Line 1 is the header**: `{zsnap: 1, selectors, base, collected_at,
+  collection_span_s, asked, answered}`, optionally `elided` (replies not
+  kept past the observer's bound), `errors` and `superseded` (answers that
+  lost last-writer-wins to a newer reply on the same key), and `roster`
+  — how many origins the liveliness roster reported, or absent when it
+  was not asked.
+- **A row** carries `key`, `delete`, `bytes`, `encoding`, `timestamp`,
+  `stamper` (O7's classification of the HLC), `source_zid` where a reply
+  named its replier, `registration` (O2's rung — including "registry not
+  loaded", which is not "unregistered"), `verdict` (the three-valued
+  payload verdict, never a boolean), and `holder`.
+- **`holder` is evidence, not inference.** `live {origin, answered_by}`
+  means the key's origin held an `alive` token during the collection —
+  and `answered_by` says whether the replier was the stamping entity,
+  another party, or unknown; `storage_only {origin}` means a value
+  answered and no token was held — a storage remembers it, nobody is
+  saying it now; `unattributed {reason}` means the roster was not asked,
+  or the key names no origin (O1). `live` says alive at collection, not
+  that the value is fresh — freshness stays [04 §4](04-planes.md)'s.
+- **A diff of two snapshots** MUST state both spans, MUST keep the three
+  facets (value, verdict, registration, holder) apart, and — when it
+  aligns origins across deployments — MUST list, never drop, an origin it
+  could not pair.
+
+What deliberately does not exist: a *replay* of a snapshot. A snapshot is
+read, never published; seeding a fleet's state from a file is
+`--seed-state` over a version-2 preamble, the same act under the same
+guard as §4.2.
 
 ## 5. Synthetic traffic — the generator's etiquette (moved from 09 §5.3; added v1.19)
 

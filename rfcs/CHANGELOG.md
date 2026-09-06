@@ -25,6 +25,59 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.34 (2026-09-06, the state artifacts)** — one chapter mostly, two
+> artifacts that carry *state* rather than traffic, and the two obligations
+> that keep an artifact as honest as a window.
+>
+> **The `.zrec` preamble** ([13 §4.1](13-observer-conformance.md), version
+> 2). A capture that starts thirty seconds before something fired is
+> uninterpretable on the `state` class: last-writer-wins keys arrive as
+> deltas with no base, and the value that explains the incident was
+> published an hour before the window. Version 2 lets a file carry the
+> base — preamble rows, marked, at `t: 0`, keeping their original HLCs as
+> provenance — and a trigger record where the transition was observed. The
+> replay rule follows from §4.2 sharpened rather than restated: a preamble
+> re-stamped is a snapshot republished over the live fleet with no pacing,
+> so the reference replayer skips those rows unless told to seed state, and
+> counts what it skipped. A version-1 reader refuses version 2 by the rule
+> it already had; a version-2 reader reads both.
+>
+> **The `.zsnap` snapshot** (new [13 §4.4](13-observer-conformance.md)).
+> `state_snapshot` has existed since the engine did, and its output was a
+> printout. As an artifact it can carry what no other system's dump can —
+> per key the HLC and its stamper, O2's registration rung, the
+> three-valued verdict, and whether a live producer or only a storage holds
+> the value — provided it never pretends to be atomic: a fan-in GET is
+> collected *over* a span, and the header and every rendering say so.
+> `holder` is evidence, never inference: an origin held an `alive` token
+> during collection, or a value answered and nobody held one, or the
+> roster was not asked. A diff keeps the facets apart and lists, never
+> drops, an origin it could not pair across deployments.
+>
+> **Exporter obligations** ([13 §3](13-observer-conformance.md)). Every
+> exporter in the field lies by omission: when its buffer drops, its
+> series flatten and the dashboard shows calm. The three rules are O4–O6
+> spoken in a medium whose natural encodings are all dishonest — the
+> observer's bounds as separate series never summed, a stopped series
+> named rather than vanished, scope and provenance as data on the same
+> surface with names and units from the registry rather than the leaf.
+>
+> **Observation-derived drafts** ([08 §6.1](08-registry.md)). A registry
+> inferred from the wire is the inverse of the lie §6.1 forbids, and it is
+> sanctioned on one condition: a marker the build refuses unless told to
+> admit it, so a draft cannot become `introspect` truth by being copied
+> into place.
+>
+> **What deliberately did not happen.** No replay of a snapshot (seeding
+> state is `--seed-state` over a preamble, one act under one guard). No
+> change to §4.1's version-1 floor. No claim that `holder: live` means
+> fresh. No histogram, push or remote-write obligation on an exporter. And
+> the preamble's `semantics` field exists because the values at the moment
+> a ring began are not recoverable — the file names its substitute instead
+> of implying the impossible.
+>
+> *Amends: 08, 13.*
+
 > **v1.33 (2026-09-06, the generators)** — one chapter, one new fact, and
 > two recipes that stop being hand-written.
 >
