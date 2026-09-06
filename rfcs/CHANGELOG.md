@@ -25,6 +25,67 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.32 (2026-09-06, the declaration batch)** — two declarations the
+> registry could not make, and the judgement of each. Filed the same day
+> as v1.31 and kept apart from it because these add to the *contract a
+> producer makes* where v1.31 fixed how the contract is *spelled*.
+>
+> **A subject's kind** ([08 §2](08-registry.md) `kind`, with the lock rule
+> in §3.1; [11 §4](11-zensight-profile.md) binds it to the profile's value
+> tag). The registry declared a subject's path, class, type and cardinality
+> and nothing about whether the number was a counter or a gauge — so the
+> reference application's guard could assert that a subject was
+> *registered* and nothing about what it *meant*, and a container sensor
+> shipped `oom_kills_total` and three siblings as gauges that nothing could
+> `rate()`. Both exporters derived the wire type from the variant, so the
+> mistake was faithfully exported. `kind` is four words and optional; what
+> makes it a contract is the judgement: a *counter* is a number that never
+> decreases within one origin's series except across an `alive` cycle —
+> the restart is the one sanctioned reset and it is already on the wire —
+> and a self-describing payload's tag MUST agree with it. Absent means
+> unchecked, and unchecked is *not asked*, not *passed*.
+>
+> **A producer's budget** ([08 §2](08-registry.md) `[budget]`;
+> [04 §1.2](04-planes.md) `self_stats`). Both directions of "what a
+> producer may publish" were enforced — published ⊆ registered, registered
+> ⊆ served — and nothing covered what a producer *costs*. On the reference
+> deployment a monitoring agent tripled its resident set over two days on a
+> 1 GB host, was OOM-killed, reported `Healthy` throughout, and was found
+> by a human eleven days later; eleven days after that two of three hosts
+> still ran above their memory limit. Every part of that is a
+> declaration-versus-reality gap the family already knew how to catch. It
+> was simply never declared. `[budget]` declares it (`rss_mb`, and a table
+> per bounded structure); `self_stats` is the one neutral field set the
+> convention now names inside the health document, in the same units; and
+> the judgement is per origin with the honest fourth pole: a producer that
+> publishes no `self_stats` is **unobservable** on this question, and the
+> reason says so — "this producer does not say how big it is" is itself
+> what an operator wants to hear, and it is a different finding from "this
+> producer is too big".
+>
+> **Where the judgements live** ([13 §3](13-observer-conformance.md)). A new
+> paragraph names both by obligation and maps each onto the four poles;
+> the stable check ids stay the reference engine's, as every other check's
+> do. The frugality note gains one sentence reconciling it with the budget:
+> cost is a design budget for the *observer*; a budget the *producer*
+> declared is a truth condition of the declaration.
+>
+> **What deliberately did not happen.** No units (a larger question, and
+> `unit` already exists for the leaf); no histograms (the reference
+> application has no histogram value type); no `kind` on procedures or
+> events; no budget *enforcement* on the producer side — shedding, eviction
+> ladders and cgroup limits are the application's, and the convention only
+> asks that the numbers be published and the bound declared. And the
+> health document stays the application's beyond the one object: naming
+> `self_stats` does not make `HealthSnapshot` normative.
+>
+> *Errata.* 08 §2's `common` row restated v1.25's token list while 04 §1.4
+> had grown by five; the enforcement crate's lint read the same stale list,
+> so a registry declaring `common = "edge"` failed to build (zenkey#425).
+> The row now defers to 04 §1.4's table and names all twelve tokens.
+>
+> *Amends: 04, 08, 11, 13.*
+
 > **v1.31 (2026-09-06, the adopters' batch)** — three amendments, each
 > filed by an application adopting the convention in the week after the
 > 0.7.2 tooling release, and each the same shape: the text could not *say*
