@@ -1599,13 +1599,15 @@ pub(crate) struct SnapshotDiffArgs {
     pub(crate) a: String,
     /// The later snapshot.
     pub(crate) b: String,
-    /// Align origins across deployments by the labels their state
-    /// documents carry (chunk DD; not implemented in this build).
+    /// Align origins across deployments — by the `source` label their
+    /// health/sensor documents carry, then by producer set — and roll the
+    /// diff up per subject. Refuses (exit 2) over any origin it cannot
+    /// pair, and lists them.
     #[arg(long)]
     pub(crate) normalize_origins: bool,
-    /// An explicit origin pairing, `A=B`, repeatable (chunk DD; not
-    /// implemented in this build).
-    #[arg(long = "map", value_name = "A=B")]
+    /// An explicit origin pairing, `A=B` (a's origin = b's), repeatable;
+    /// decided before any automatic pairing. Requires --normalize-origins.
+    #[arg(long = "map", value_name = "A=B", requires = "normalize_origins")]
     pub(crate) maps: Vec<String>,
     /// Field-level changes listed per key before the rest are counted.
     #[arg(long, value_name = "N", default_value_t = 20)]

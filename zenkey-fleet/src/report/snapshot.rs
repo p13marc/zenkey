@@ -260,20 +260,31 @@ pub struct SnapshotDiff {
     /// Absent at zero.
     #[serde(default, skip_serializing_if = "u64_is_zero")]
     pub truncated: u64,
-    /// The origin alignment across deployments, when one was asked for.
-    /// Absent when not (chunk DD fills it; the shape is settled now).
+    /// The origin alignment across deployments, when one was asked for
+    /// (#220). Absent when not.
     #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
     pub origin_map: Asked<Vec<OriginPair>>,
     /// Origins the alignment could not pair — listed, never dropped
     /// (RFC 13 §4.4). Absent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unmapped: Vec<Unmapped>,
-    /// The per-subject roll-up, when asked for. Absent when not.
+    /// The per-subject roll-up, when asked for. Absent when not — and
+    /// absent on a [`refused`](Self::refused) diff, where the alignment was
+    /// asked and the comparison declined.
     #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
     pub by_subject: Asked<Vec<SubjectDelta>>,
 }
 
 impl SnapshotDiff {
+    /// The alignment was asked and left origins unpaired, so the
+    /// comparison was **not made** (#220): the pairs and the unpaired ride
+    /// the report, nothing is listed as added, removed or changed, and the
+    /// judgement is the reserved non-verdict — a diff that compared around
+    /// an origin it could not place would be confident nonsense.
+    pub fn refused(&self) -> bool {
+        self.origin_map.is_asked() && !self.unmapped.is_empty()
+    }
+
     /// Whether anything at all differs — added, removed, changed, or
     /// differences past the bound.
     pub fn differs(&self) -> bool {
@@ -284,11 +295,19 @@ impl SnapshotDiff {
     }
 
     /// The RFC 13 §1.2 projection: a difference is the finding
-    /// (`Established`, exit 1), identity the clean answer. A diff is always
-    /// asked — both files parsed to get here — so neither unestablished pole
-    /// applies.
+    /// (`Established`, exit 1), identity the clean answer. A diff over two
+    /// parsed files is always asked; the one unestablished pole is a
+    /// [`refused`](Self::refused) alignment, where the observation cannot
+    /// carry the claim (`Unobservable`, exit 2).
     pub fn to_judgement(&self) -> Judgement {
-        if self.differs() {
+        if self.refused() {
+            Judgement::Unobservable {
+                reason: format!(
+                    "{} origin(s) could not be paired; the comparison was not made",
+                    self.unmapped.len()
+                ),
+            }
+        } else if self.differs() {
             Judgement::Established
         } else {
             Judgement::NotEstablished {
@@ -337,7 +356,10 @@ pub struct OriginPair {
 pub enum MapEvidence {
     /// The operator said so (`--map a=b`).
     Explicit,
-    /// A label both sides publish agreed — `source` names which document.
+    /// The `source` label both sides' identity-bridge documents carry
+    /// (RFC 06 §6.2: `state/<producer>/health` or `…/sensor`, `host_id`
+    /// beside `source`) agreed, verified on both sides and claimed by no
+    /// other origin on either. `source` is the label itself.
     Label { source: String },
     /// The two origins serve the same producer set and nothing else does.
     ProducerSet,
@@ -479,10 +501,10 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(MapEvidence::Label {
-                source: "health.host_id".into()
+                source: "pve".into()
             })
             .unwrap(),
-            json!({"kind": "label", "source": "health.host_id"})
+            json!({"kind": "label", "source": "pve"})
         );
         assert_eq!(serde_json::to_value(Side::A).unwrap(), json!("a"));
     }
