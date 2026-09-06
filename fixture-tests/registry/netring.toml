@@ -12,6 +12,21 @@ convention = 1
 name = "netring"
 description = "wire-level flow/L7/NDR sensor"
 
+# What this producer may cost the host (RFC 08 §2, v1.32): judged against
+# the `self_stats` object on its health document (RFC 04 §1.2) by
+# `zenctl doctor --deep`. Generates nothing; rides the slice verbatim.
+[budget]
+rss_mb = 64
+
+[[budget.tables]]
+name = "flows"
+max_entries = 65536
+max_bytes = 16777216
+
+[[budget.tables]]
+name = "names"
+max_entries = 16384
+
 [[subject]]
 path = "flow/started_total"
 class = "telemetry"
