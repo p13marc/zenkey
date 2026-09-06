@@ -1,13 +1,15 @@
-Declared state families against storage coverage (RFC 04 §3.5).
+Declared state families against storage coverage (RFC 04 §3.5), and the
+router block that makes the coverage happen (`storage gen`, #393).
 
 ```console
 $ zenctl storage --help
-Storages: what the mesh persists, joined against declared state
+Storages: what the mesh persists, joined against declared state — and the router block that makes it persist (RFC 09 §2)
 
 Usage: zenctl storage <COMMAND>
 
 Commands:
   list  List configured storages and judge declared state families against them (covered / partial / uncovered — RFC 04 §4, issue #14)
+  gen   Plan the router's storages from the registry and a small deployment file, and emit the `plugins.storage_manager` block with `garbage_collection.lifespan` DERIVED (RFC 09 §2, #393)
   help  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -26,6 +28,135 @@ Options:
           With --watch: seconds between re-renders
           
           [default: 2]
+
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+`storage gen`'s long help carries the deployment file's whole shape — the
+one place it is documented, on purpose: the RFC's §2 sketch is the *output*,
+and this file is the smaller thing a deployment actually has to write.
+
+```console
+$ zenctl storage gen --help
+Plan the router's storages from the registry and a small deployment file, and emit the `plugins.storage_manager` block with `garbage_collection.lifespan` DERIVED (RFC 09 §2, #393)
+
+RFC 09 §2 specifies class-driven storages, each with a selector, a
+literal `strip_prefix` and a `garbage_collection.lifespan` that must be
+≥ the longest `ttl_s` in the registry (§2.3) — and the registry knows
+that number. The deployment file names only what the registry cannot:
+the base, the volumes (RFC 09 §2.1's capability pair is per volume —
+one volume per history mode from the same plugin) and, per storage,
+its class and volume. Everything else is derived: the selector from
+the class (`@catalog` explicit, because `*` never matches it), the
+`strip_prefix` as the literal leftmost run, and the lifespan as
+ceil(max covered ttl_s × gc_margin), with the computation shown.
+
+The plan refuses what the router would refuse — replication on an
+all-mode volume (§2.2), a volume nobody declared, a class the registry
+declares nothing under — and warns where a caveat applies: overlapping
+selectors (§2), `complete = true` off the replicated latest storage
+(§2.2), retention that is the database's and not zenoh's (§2.3),
+redb's mandatory retention in all mode (§2.1), a seed on a volatile
+volume (§2.1). Without a registry the lifespans fall back to the
+default and say so; they are not invented.
+
+Four ways out. The plan report (`--format` as everywhere); `--json5`,
+the zenohd block with every derivation and warning as a comment beside
+the storage it concerns; `--check`, an exit-coded comparison with what
+a live router runs (0 as planned, 1 a difference, 2 no verdict); and
+`--explain <key>`, which planned storage takes a key and why. `gen`
+alone is an act: exit 0, or 2 when every storage was refused.
+
+The deployment file, in full:
+
+  base = "zensight"              # optional; default = --base / context / ""
+
+  [volumes.fs]                   # id; `backend` is emitted when it differs
+  plugin = "fs"                  # memory | fs | rocksdb | influxdb | redb | other
+  # history = "latest"           # fixed by the plugin; per volume for redb
+  dir = "/var/lib/zenoh/fs"      # any other key passes through verbatim
+
+  [storages.latest]
+  class = "state"                # state | telemetry | events | catalog | catalog-pdns
+  # selector = "v1/*/state/sysinfo/**"   # instead of class: a base-relative override
+  volume = "fs"
+  replication = true             # or { interval = 10.0, … } (RFC 09 §2.2)
+  complete = true                # honoured only where §2.2 allows it
+  params = { dir = "latest" }    # merged into `volume: { id: "fs", … }`
+  # retention = { … }            # the backend's own block (redb), verbatim
+  # gc_period_s = 30             # garbage_collection.period
+  # gc_margin = 2.0              # lifespan = ceil(max ttl_s × margin)
+  # gc_lifespan_s = 86400        # an explicit lifespan; warned about when below max ttl_s
+
+Usage: zenctl storage gen [OPTIONS] --deployment <FILE>
+
+Options:
+      --deployment <FILE>
+          The deployment file (TOML) — see the long help for its shape
+
+      --json5
+          Emit the zenohd `plugins.storage_manager` block (JSON5, with every derivation and warning as a comment beside the storage it concerns) instead of the plan report.
+          
+          A foreign schema, so `--format` has no say over it: passing both is a usage error, not a silent preference.
+
+      --check
+          Compare the plan against the storages a live router runs (the admin space): missing, extra, a differing key_expr / strip_prefix / volume, a gc.lifespan below the computed minimum. Exit 0 = as planned, 1 = a difference, 2 = no verdict (the admin space answered nothing, or the question could not be put)
+
+      --explain <KEY>
+          Which planned storage(s) would take this key, and why — pure over the plan, exit 0
 
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.

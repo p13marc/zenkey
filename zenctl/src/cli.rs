@@ -467,7 +467,8 @@ pub(crate) enum Command {
     /// The registry as a document: export it, diff it, lint it, lock it.
     #[command(subcommand)]
     Registry(RegistryCmd),
-    /// Storages: what the mesh persists, joined against declared state.
+    /// Storages: what the mesh persists, joined against declared state —
+    /// and the router block that makes it persist (RFC 09 §2).
     #[command(subcommand)]
     Storage(StorageCmd),
     /// The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2).
@@ -829,6 +830,57 @@ pub(crate) enum StorageCmd {
     /// List configured storages and judge declared state families against
     /// them (covered / partial / uncovered — RFC 04 §4, issue #14).
     List(StorageListArgs),
+    /// Plan the router's storages from the registry and a small deployment file, and emit the `plugins.storage_manager` block with `garbage_collection.lifespan` DERIVED (RFC 09 §2, #393)
+    ///
+    /// RFC 09 §2 specifies class-driven storages, each with a selector, a
+    /// literal `strip_prefix` and a `garbage_collection.lifespan` that must be
+    /// ≥ the longest `ttl_s` in the registry (§2.3) — and the registry knows
+    /// that number. The deployment file names only what the registry cannot:
+    /// the base, the volumes (RFC 09 §2.1's capability pair is per volume —
+    /// one volume per history mode from the same plugin) and, per storage,
+    /// its class and volume. Everything else is derived: the selector from
+    /// the class (`@catalog` explicit, because `*` never matches it), the
+    /// `strip_prefix` as the literal leftmost run, and the lifespan as
+    /// ceil(max covered ttl_s × gc_margin), with the computation shown.
+    ///
+    /// The plan refuses what the router would refuse — replication on an
+    /// all-mode volume (§2.2), a volume nobody declared, a class the registry
+    /// declares nothing under — and warns where a caveat applies: overlapping
+    /// selectors (§2), `complete = true` off the replicated latest storage
+    /// (§2.2), retention that is the database's and not zenoh's (§2.3),
+    /// redb's mandatory retention in all mode (§2.1), a seed on a volatile
+    /// volume (§2.1). Without a registry the lifespans fall back to the
+    /// default and say so; they are not invented.
+    ///
+    /// Four ways out. The plan report (`--format` as everywhere); `--json5`,
+    /// the zenohd block with every derivation and warning as a comment beside
+    /// the storage it concerns; `--check`, an exit-coded comparison with what
+    /// a live router runs (0 as planned, 1 a difference, 2 no verdict); and
+    /// `--explain <key>`, which planned storage takes a key and why. `gen`
+    /// alone is an act: exit 0, or 2 when every storage was refused.
+    ///
+    /// The deployment file, in full:
+    ///
+    ///   base = "zensight"              # optional; default = --base / context / ""
+    ///
+    ///   [volumes.fs]                   # id; `backend` is emitted when it differs
+    ///   plugin = "fs"                  # memory | fs | rocksdb | influxdb | redb | other
+    ///   # history = "latest"           # fixed by the plugin; per volume for redb
+    ///   dir = "/var/lib/zenoh/fs"      # any other key passes through verbatim
+    ///
+    ///   [storages.latest]
+    ///   class = "state"                # state | telemetry | events | catalog | catalog-pdns
+    ///   # selector = "v1/*/state/sysinfo/**"   # instead of class: a base-relative override
+    ///   volume = "fs"
+    ///   replication = true             # or { interval = 10.0, … } (RFC 09 §2.2)
+    ///   complete = true                # honoured only where §2.2 allows it
+    ///   params = { dir = "latest" }    # merged into `volume: { id: "fs", … }`
+    ///   # retention = { … }            # the backend's own block (redb), verbatim
+    ///   # gc_period_s = 30             # garbage_collection.period
+    ///   # gc_margin = 2.0              # lifespan = ceil(max ttl_s × margin)
+    ///   # gc_lifespan_s = 86400        # an explicit lifespan; warned about when below max ttl_s
+    #[command(verbatim_doc_comment)]
+    Gen(StorageGenArgs),
 }
 
 #[derive(Subcommand)]
@@ -1059,8 +1111,9 @@ pub(crate) struct BusArgs {
 }
 
 /// `--format` selects among **zenkey's own three renderings** of a report. A
-/// foreign document format — `--as toml|jsonschema|asyncapi`, `--dot` — is
-/// somebody else's schema, so the two are mutually exclusive (#243).
+/// foreign document format — `--as toml|jsonschema|asyncapi`, `--dot`,
+/// `--json5` — is somebody else's schema, so the two are mutually exclusive
+/// (#243).
 ///
 /// ## Why this is not `conflicts_with`
 ///
@@ -1092,7 +1145,7 @@ pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
     if !typed("format") {
         return;
     }
-    for (id, flag) in [("target", "--as"), ("dot", "--dot")] {
+    for (id, flag) in [("target", "--as"), ("dot", "--dot"), ("json5", "--json5")] {
         if typed(id) {
             // A clap error, not an `anyhow` one: this is a usage error, and
             // usage errors in this tool exit 2 and print a usage line. The
@@ -1634,6 +1687,37 @@ pub(crate) struct StorageListArgs {
     /// With --watch: seconds between re-renders.
     #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
     pub(crate) every: f64,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `storage gen` verb's flags (#393) — one struct the dispatcher hands
+/// over whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct StorageGenArgs {
+    /// The deployment file (TOML) — see the long help for its shape.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) deployment: PathBuf,
+    /// Emit the zenohd `plugins.storage_manager` block (JSON5, with every
+    /// derivation and warning as a comment beside the storage it concerns)
+    /// instead of the plan report.
+    ///
+    /// A foreign schema, so `--format` has no say over it: passing both is
+    /// a usage error, not a silent preference.
+    // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
+    #[arg(long, conflicts_with_all = ["check", "explain"])]
+    pub(crate) json5: bool,
+    /// Compare the plan against the storages a live router runs (the admin
+    /// space): missing, extra, a differing key_expr / strip_prefix / volume,
+    /// a gc.lifespan below the computed minimum. Exit 0 = as planned, 1 = a
+    /// difference, 2 = no verdict (the admin space answered nothing, or the
+    /// question could not be put).
+    #[arg(long, conflicts_with = "explain")]
+    pub(crate) check: bool,
+    /// Which planned storage(s) would take this key, and why — pure over the
+    /// plan, exit 0.
+    #[arg(long, value_name = "KEY")]
+    pub(crate) explain: Option<String>,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }

@@ -268,6 +268,9 @@ pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
+pub use model::storage::{
+    check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
+};
 pub use model::tree::KeyTreeSnapshot;
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
