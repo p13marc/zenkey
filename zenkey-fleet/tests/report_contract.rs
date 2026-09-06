@@ -949,3 +949,137 @@ fn an_interface_show_omits_drift_until_something_disagrees() {
         json!({"producer": "sysinfo", "origin": "h-bbbbbbbbbbbb"})
     );
 }
+
+// ── The fleet timeline (#216) ─────────────────────────────────────────────
+
+/// The arrival axis: every row carries `order_by`, the break sits at its
+/// position with no lane, the unstamped lane exists, and the
+/// sequence-number lane is *unavailable* with its fixed reason — never an
+/// empty list. `unstamped_excluded` is absent at zero.
+#[test]
+fn a_timeline_on_the_arrival_axis_is_pinned() {
+    assert_eq!(
+        serde_json::to_value(fx::timeline_report_arrival()).unwrap(),
+        json!({
+            "order_by": "arrival",
+            "axis": "arrival",
+            "clock": "observer monotonic, µs since window start",
+            "scopes": ["acme/v1/**"],
+            "window_s": 10.0,
+            "source": {"kind": "live"},
+            "lanes": [
+                {
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "samples": 2,
+                    "first_t_us": 1000,
+                    "last_t_us": 2000,
+                    "stampers": ["33"],
+                    "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 2}
+                },
+                {
+                    "lane": {"kind": "unstamped"},
+                    "samples": 1,
+                    "first_t_us": 3000,
+                    "last_t_us": 3000,
+                    "stampers": [],
+                    "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 0}
+                }
+            ],
+            "sn_lane": {
+                "state": "unavailable",
+                "reason": "zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"
+            },
+            "dropped": 3,
+            "keys_evicted": 0,
+            "rows": [
+                {
+                    "row": "sample", "order_by": "arrival", "pos": 0,
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+                    "t_us": 1000, "hlc": "200/33", "stamped_by": "33",
+                    "provenance": "unattributable", "kind": "put"
+                },
+                {
+                    "row": "sample", "order_by": "arrival", "pos": 1,
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
+                    "t_us": 2000, "hlc": "100/33", "stamped_by": "33",
+                    "provenance": "unattributable", "kind": "put"
+                },
+                {"row": "break", "order_by": "arrival", "pos": 2, "kind": "dropped", "n": 3},
+                {
+                    "row": "sample", "order_by": "arrival", "pos": 3,
+                    "lane": {"kind": "unstamped"},
+                    "key": "plain/key", "t_us": 3000, "kind": "put"
+                }
+            ]
+        })
+    );
+}
+
+/// The HLC axis: the claim is flattened into the envelope beside
+/// `order_by`, the unstamped sample is a count rather than a row, and the
+/// drop is a total with no row — a break has no position on this clock.
+#[test]
+fn a_timeline_on_the_hlc_axis_is_pinned() {
+    assert_eq!(
+        serde_json::to_value(fx::timeline_report_hlc()).unwrap(),
+        json!({
+            "order_by": "hlc",
+            "axis": "hlc",
+            "claim": "happens_before",
+            "stamper": "33",
+            "scopes": ["acme/v1/**"],
+            "window_s": 10.0,
+            "source": {"kind": "live"},
+            "lanes": [{
+                "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                "samples": 2,
+                "first_t_us": 1000,
+                "last_t_us": 2000,
+                "stampers": ["33"],
+                "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 2}
+            }],
+            "sn_lane": {
+                "state": "unavailable",
+                "reason": "zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"
+            },
+            "unstamped_excluded": 1,
+            "dropped": 3,
+            "keys_evicted": 0,
+            "rows": [
+                {
+                    "row": "sample", "order_by": "hlc", "pos": 0,
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
+                    "t_us": 2000, "hlc": "100/33", "stamped_by": "33",
+                    "provenance": "unattributable", "kind": "put"
+                },
+                {
+                    "row": "sample", "order_by": "hlc", "pos": 1,
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+                    "t_us": 1000, "hlc": "200/33", "stamped_by": "33",
+                    "provenance": "unattributable", "kind": "put"
+                }
+            ]
+        })
+    );
+    // The other two claims, so a rename of either is a diff here too.
+    assert_eq!(
+        serde_json::to_value(AxisLabel::Hlc {
+            claim: HlcClaim::SkewedWallClock {
+                stampers: ["33".to_string(), "44".to_string()].into_iter().collect()
+            }
+        })
+        .unwrap(),
+        json!({"axis": "hlc", "claim": "skewed_wall_clock", "stampers": ["33", "44"]})
+    );
+    assert_eq!(
+        serde_json::to_value(AxisLabel::Hlc {
+            claim: HlcClaim::NoStampedSamples
+        })
+        .unwrap(),
+        json!({"axis": "hlc", "claim": "no_stamped_samples"})
+    );
+}

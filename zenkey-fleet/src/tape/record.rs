@@ -465,6 +465,12 @@ pub enum ZrecItem {
         row: IngestRow,
         t_us: Option<u64>,
         timestamp: Option<String>,
+        /// The publishing entity as the row spelled it (`zid:eid#sn`),
+        /// when `SourceInfo` rode the captured sample. Lifted for the
+        /// timeline (#216) so a replayed window classifies its stampers
+        /// exactly as the live one did; usually absent, RFC 09 §5.1 O7's
+        /// practical note.
+        source: Option<String>,
     },
     /// Samples the capture itself missed at this position (O6).
     Dropped(u64),
@@ -546,6 +552,10 @@ impl<R: BufRead> ZrecReader<R> {
                         t_us: v.get("t").and_then(serde_json::Value::as_u64),
                         timestamp: v
                             .get("timestamp")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string),
+                        source: v
+                            .get("source")
                             .and_then(serde_json::Value::as_str)
                             .map(str::to_string),
                     })

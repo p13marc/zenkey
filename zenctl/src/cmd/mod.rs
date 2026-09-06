@@ -44,6 +44,7 @@ pub mod scout;
 pub mod serve;
 pub mod service;
 pub mod storage;
+pub mod timeline;
 pub mod topic;
 pub mod watch;
 pub mod watchdog;
