@@ -292,6 +292,79 @@ impl SliceToken for ServiceOrigin {
     }
 }
 
+/// What a subject's leaf value *is* (`[[subject]] kind`, RFC 08 §2, v1.32),
+/// so a judge can say when it is not (RFC 13 §3 "Declared versus observed").
+///
+/// Absent from a declaration means *unchecked*: the judge answers *not
+/// asked*, never *yes*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SubjectKind {
+    /// A non-negative number that never decreases within one origin's
+    /// series, except across a producer restart — visible on the wire as the
+    /// origin's `alive` token cycling (RFC 04 §5).
+    Counter,
+    /// Any number.
+    Gauge,
+    /// A string.
+    Text,
+    /// A boolean. A self-describing payload spells the tag `boolean`
+    /// (RFC 11 §4).
+    Bool,
+}
+
+impl SubjectKind {
+    /// Every kind, in declaration order — the closed vocabulary a lint
+    /// names when it refuses a token.
+    pub const ALL: [SubjectKind; 4] = [
+        SubjectKind::Counter,
+        SubjectKind::Gauge,
+        SubjectKind::Text,
+        SubjectKind::Bool,
+    ];
+
+    /// The tag a self-describing `{"type": …, "value": …}` payload carries
+    /// for this kind (RFC 08 §2): the registry token, except `boolean` for
+    /// [`SubjectKind::Bool`].
+    #[must_use]
+    pub fn payload_tag(self) -> &'static str {
+        match self {
+            SubjectKind::Bool => "boolean",
+            other => other.token_str(),
+        }
+    }
+
+    /// The kind a payload tag names, if any — the inverse of
+    /// [`payload_tag`](Self::payload_tag). A tag that is not one of the four
+    /// is `None`: an unknown tag is not a disagreement.
+    #[must_use]
+    pub fn from_payload_tag(tag: &str) -> Option<Self> {
+        SubjectKind::ALL
+            .into_iter()
+            .find(|k| k.payload_tag() == tag)
+    }
+
+    const fn token_str(self) -> &'static str {
+        match self {
+            SubjectKind::Counter => "counter",
+            SubjectKind::Gauge => "gauge",
+            SubjectKind::Text => "text",
+            SubjectKind::Bool => "bool",
+        }
+    }
+}
+
+impl SliceToken for SubjectKind {
+    fn from_token(token: &str) -> Option<Self> {
+        SubjectKind::ALL
+            .into_iter()
+            .find(|k| k.token_str() == token)
+    }
+
+    fn token(&self) -> &str {
+        self.token_str()
+    }
+}
+
 /// One `[[subject]]` entry of a served registry slice.
 /// `#[non_exhaustive]`: every version of this type so far has been the
 /// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
@@ -309,6 +382,10 @@ pub struct SubjectDecl {
     pub class: Declared<Class>,
     /// The payload type name, as the producer declares it.
     pub type_name: String,
+    /// What the leaf value *is* — `counter | gauge | text | bool` (RFC 08 §2,
+    /// v1.32), when declared. Absent means unchecked: a judge answers *not
+    /// asked* (RFC 13 §3).
+    pub kind: Option<Declared<SubjectKind>>,
     /// `common = "health|errors|sensor|…"` — which of the RFC 08 §5 framework
     /// state roles this subject declares itself as, when it declares one.
     ///
@@ -547,6 +624,7 @@ impl SubjectDecl {
             path: path.into(),
             class: class.into(),
             type_name: String::new(),
+            kind: None,
             common: None,
             since: None,
             description: None,
@@ -789,6 +867,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             path: s(e.get("path")).ok_or_else(|| err("[[subject]] missing path"))?,
             class: tok(e.get("class")).ok_or_else(|| err("[[subject]] missing class"))?,
             type_name: s(e.get("type")).unwrap_or_default(),
+            kind: tok(e.get("kind")),
             common: tok(e.get("common")),
             since: s(e.get("since")),
             description: s(e.get("description")),
@@ -976,6 +1055,9 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         if !d.type_name.is_empty() {
             out.push_str(&format!("type = {}\n", s(&d.type_name)));
         }
+        // Emitted only when carried, so a pre-v1.32 slice round-trips byte
+        // for byte.
+        opt_tok(&mut out, "kind", d.kind.as_ref());
         opt_tok(&mut out, "common", d.common.as_ref());
         opt_tok(&mut out, "qos", d.qos.as_ref());
         opt_int(&mut out, "ttl_s", d.ttl_s);
@@ -1236,6 +1318,7 @@ mod tests {
             path = "flows/{proto}/count"
             class = "telemetry"
             type = "TelemetryPoint"
+            kind = "counter"
             qos = "sampled"
             unit = "packets"
             cardinality = 512

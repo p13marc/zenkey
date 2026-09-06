@@ -62,6 +62,7 @@ pub fn asyncapi(slices: &[&RegistrySlice]) -> serde_json::Value {
             for (k, v) in [
                 ("qos", d.qos.as_ref().map(|q| q.token().to_string())),
                 ("unit", d.unit.clone()),
+                ("kind", d.kind.as_ref().map(|k| k.token().to_string())),
                 ("rate", d.rate.as_ref().map(|r| r.token().to_string())),
                 (
                     "encoding",

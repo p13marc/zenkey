@@ -220,6 +220,34 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         }
         let _ = writeln!(out, "            }}\n        }}\n");
 
+        // kind() — what the leaf value *is* (RFC 08 §2, v1.32), when the
+        // registry declares it; `None` is "unchecked", never "gauge".
+        let _ = writeln!(
+            out,
+            "        /// What the leaf value *is* — counter, gauge, text or bool — when\n        /// the registry declares it (RFC 08 §2, v1.32). `None` means unchecked."
+        );
+        let _ = writeln!(
+            out,
+            "        pub fn kind(&self) -> Option<{zk}::slice::SubjectKind> {{"
+        );
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let kind = match s.kind.as_deref() {
+                Some("counter") => format!("Some({zk}::slice::SubjectKind::Counter)"),
+                Some("gauge") => format!("Some({zk}::slice::SubjectKind::Gauge)"),
+                Some("text") => format!("Some({zk}::slice::SubjectKind::Text)"),
+                Some("bool") => format!("Some({zk}::slice::SubjectKind::Bool)"),
+                // The lint admits only the four tokens above.
+                _ => "None".to_string(),
+            };
+            let _ = writeln!(
+                out,
+                "                Self::{} {{ .. }} => {kind},",
+                s.variant
+            );
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
+
         // encoding() — the declared payload framing (RFC 08 §2, v1.5).
         let _ = writeln!(
             out,
@@ -1062,6 +1090,11 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             "s.payload_type()",
         ),
         ("unit", "Option<&'static str>".to_string(), "s.unit()"),
+        (
+            "kind",
+            format!("Option<{zk}::slice::SubjectKind>"),
+            "s.kind()",
+        ),
         ("cardinality", "Option<u64>".to_string(), "s.cardinality()"),
         ("qos", format!("{zk}::qos::QosProfile"), "s.qos()"),
         ("ttl_s", "Option<u64>".to_string(), "s.ttl_s()"),

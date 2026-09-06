@@ -47,11 +47,16 @@ pub enum CheckId {
     FieldVanished,
     FieldStuck,
     FieldNew,
+    /// Declared versus observed (#422, RFC 08 §2 v1.32, RFC 13 §3): a
+    /// self-describing payload's tag disagrees with the subject's declared
+    /// `kind`, or a `counter` decreased within one origin's series with no
+    /// `alive` cycle in between.
+    KindMismatch,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 21] = [
+    pub const ALL: [CheckId; 22] = [
         CheckId::SliceParse,
         CheckId::SliceSync,
         CheckId::IntrospectCoverage,
@@ -73,6 +78,7 @@ impl CheckId {
         CheckId::FieldVanished,
         CheckId::FieldStuck,
         CheckId::FieldNew,
+        CheckId::KindMismatch,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -99,6 +105,7 @@ impl CheckId {
             CheckId::FieldVanished => "field-vanished",
             CheckId::FieldStuck => "field-stuck",
             CheckId::FieldNew => "field-new",
+            CheckId::KindMismatch => "kind-mismatch",
         }
     }
 
@@ -399,6 +406,7 @@ mod check_id_tests {
                 "field-vanished",
                 "field-stuck",
                 "field-new",
+                "kind-mismatch",
             ]
         );
     }

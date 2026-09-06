@@ -153,6 +153,9 @@ pub use judge::field::{
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use judge::kind::{KeyKind, KindObservation, judge_kind};
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{
     DEFAULT_MAX_PRODUCERS, DecodedSample, DescribedSchema, Rendering, SchemaStore, Sealed,
     StoreBounds, decode_sample, prewarm, schema_drift, schema_dump, schema_rows_for_type,
