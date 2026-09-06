@@ -1,0 +1,4 @@
+{
+  rules: [{ name: "drops", rule: "dropped", sinks: ["ops"] }],
+  sinks: { ops: { kind: "ntfy", url: "https://ntfy.example.org", topic: "fleet", token: { env: "ZENWATCH_UNSET_TOKEN" } } },
+}

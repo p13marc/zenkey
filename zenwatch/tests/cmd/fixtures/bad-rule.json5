@@ -1,0 +1,4 @@
+{
+  rules: [{ name: "clever", rule: "if rate(v1/**) > 5 then page", sinks: ["hook"] }],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },
+}

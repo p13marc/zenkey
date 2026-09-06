@@ -20,6 +20,12 @@
 //! The origin never enters the input — origin and producer are already in
 //! the key (`…/state/<producer>/alert/<alert_key>`), which is what makes
 //! the same alert on two hosts the same key under two origins.
+//!
+//! The **alert ref** (RFC 11 §3.2, v1.29) is the other half: one chunk that
+//! names one firing alert across the fleet, `origin.producer.alert_key`,
+//! read from the *key* an alert was published on — never from the payload,
+//! whose `source` is the polled device for a proxy producer. [`alert_ref`]
+//! mints one and [`parse_alert_ref`] splits it back, on the first two `.`s.
 
 /// Why [`alert_key`] refused its input — each variant is one of RFC 11
 /// §3.1's injectivity conditions, without which two different alerts could
@@ -111,6 +117,81 @@ pub fn alert_key(rule: &str, labels: &[(&str, &str)]) -> Result<String, AlertKey
     Ok(format!("{:016x}", fnv1a_64(input.as_bytes())))
 }
 
+/// Why [`alert_ref`] refused a component — a ref that would need escaping
+/// is a ref that will be wrong somewhere (RFC 11 §3.2), so nothing here
+/// truncates or escapes.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AlertRefError {
+    /// Not a host origin (`h-<12hex>`) and not a verbatim service origin
+    /// (`@catalog`).
+    #[error("alert ref origin {0:?} is not an origin chunk (RFC 11 §3.2)")]
+    BadOrigin(String),
+    /// Not a plain chunk, or one containing the `.` separator — a producer
+    /// chunk's alphabet excludes it, which is what makes the split
+    /// unambiguous.
+    #[error("alert ref producer {0:?} is not a dot-free plain chunk (RFC 11 §3.2)")]
+    BadProducer(String),
+    /// Not a plain chunk — the ref is used as one (`ack/<alert_ref>`).
+    #[error("alert ref alert_key {0:?} is not a plain chunk (RFC 11 §3.2)")]
+    BadAlertKey(String),
+}
+
+/// Mint an alert ref (RFC 11 §3.2): `origin ++ "." ++ producer ++ "." ++
+/// alert_key`, every component read from the key the alert rode on.
+///
+/// Refused rather than escaped when a component would not survive as a key
+/// chunk: the origin must be a host origin or a verbatim service origin,
+/// the producer a plain chunk with no `.` in it (the separator), the alert
+/// key a plain chunk.
+///
+/// ```
+/// // The RFC 11 §3.2 test vector: the §3.1 alert, published by `netlink`
+/// // on origin `h-3fa9c2d41b7e`.
+/// let r = zenkey::alert::alert_ref("h-3fa9c2d41b7e", "netlink", "a659f813308ad1da").unwrap();
+/// assert_eq!(r, "h-3fa9c2d41b7e.netlink.a659f813308ad1da");
+/// ```
+pub fn alert_ref(origin: &str, producer: &str, alert_key: &str) -> Result<String, AlertRefError> {
+    use crate::grammar::{is_valid_host_origin, is_valid_plain_chunk, is_valid_verbatim_chunk};
+    if !(is_valid_host_origin(origin) || is_valid_verbatim_chunk(origin)) {
+        return Err(AlertRefError::BadOrigin(origin.to_string()));
+    }
+    if !is_valid_plain_chunk(producer) || producer.contains('.') {
+        return Err(AlertRefError::BadProducer(producer.to_string()));
+    }
+    if !is_valid_plain_chunk(alert_key) {
+        return Err(AlertRefError::BadAlertKey(alert_key.to_string()));
+    }
+    Ok(format!("{origin}.{producer}.{alert_key}"))
+}
+
+/// Split an alert ref back into `(origin, producer, alert_key)` — on the
+/// **first two** separators, keeping the remainder as the alert key
+/// (RFC 11 §3.2: an application whose alert-key binding differs may
+/// legitimately carry a `.` there). `None` when the ref does not have three
+/// non-empty parts or its origin and producer would not pass [`alert_ref`].
+///
+/// ```
+/// let (o, p, k) = zenkey::alert::parse_alert_ref("h-3fa9c2d41b7e.netlink.a659f813308ad1da").unwrap();
+/// assert_eq!((o, p, k), ("h-3fa9c2d41b7e", "netlink", "a659f813308ad1da"));
+/// // The remainder is the key, dots included.
+/// let (_, _, k) = zenkey::alert::parse_alert_ref("h-3fa9c2d41b7e.sysinfo.cpu.usage").unwrap();
+/// assert_eq!(k, "cpu.usage");
+/// ```
+pub fn parse_alert_ref(r: &str) -> Option<(&str, &str, &str)> {
+    use crate::grammar::{is_valid_host_origin, is_valid_plain_chunk, is_valid_verbatim_chunk};
+    let mut parts = r.splitn(3, '.');
+    let origin = parts.next()?;
+    let producer = parts.next()?;
+    let alert_key = parts.next()?;
+    if !(is_valid_host_origin(origin) || is_valid_verbatim_chunk(origin)) {
+        return None;
+    }
+    if !is_valid_plain_chunk(producer) || alert_key.is_empty() {
+        return None;
+    }
+    Some((origin, producer, alert_key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +279,42 @@ mod tests {
         let key = alert_key("link_down", &[("peer", "r2")]).unwrap();
         assert_eq!(key.len(), 16);
         assert!(crate::grammar::is_valid_plain_chunk(&key));
+    }
+
+    /// The RFC 11 §3.2 test vector, and the parse that splits on the first
+    /// two separators only.
+    #[test]
+    fn the_alert_ref_vector_round_trips() {
+        let r = alert_ref("h-3fa9c2d41b7e", "netlink", "a659f813308ad1da").unwrap();
+        assert_eq!(r, "h-3fa9c2d41b7e.netlink.a659f813308ad1da");
+        assert!(crate::grammar::is_valid_plain_chunk(&r), "a ref is a chunk");
+        assert_eq!(
+            parse_alert_ref(&r),
+            Some(("h-3fa9c2d41b7e", "netlink", "a659f813308ad1da"))
+        );
+        // A service origin refs the same way; the remainder keeps its dots.
+        let r = alert_ref("@catalog", "catalog", "x.y").unwrap();
+        assert_eq!(parse_alert_ref(&r), Some(("@catalog", "catalog", "x.y")));
+    }
+
+    /// Refusals, never escapes (RFC 11 §3.2): a bad origin, a producer that
+    /// carries the separator, an alert key that is not a chunk.
+    #[test]
+    fn a_ref_that_would_need_escaping_is_refused() {
+        assert!(matches!(
+            alert_ref("host", "netlink", "a659f813308ad1da"),
+            Err(AlertRefError::BadOrigin(_))
+        ));
+        assert!(matches!(
+            alert_ref("h-3fa9c2d41b7e", "net.link", "a659f813308ad1da"),
+            Err(AlertRefError::BadProducer(_))
+        ));
+        assert!(matches!(
+            alert_ref("h-3fa9c2d41b7e", "netlink", "A659"),
+            Err(AlertRefError::BadAlertKey(_))
+        ));
+        assert_eq!(parse_alert_ref("h-3fa9c2d41b7e.netlink"), None);
+        assert_eq!(parse_alert_ref("nope.netlink.k"), None);
+        assert_eq!(parse_alert_ref("h-3fa9c2d41b7e.netlink."), None);
     }
 }

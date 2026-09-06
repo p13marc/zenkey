@@ -47,6 +47,7 @@
 //! files are organisation; the module is the interface.
 
 mod admin;
+mod alert;
 mod asked;
 mod bench;
 mod blob;
@@ -73,6 +74,7 @@ mod topic;
 mod why;
 
 pub use admin::*;
+pub use alert::*;
 pub use asked::*;
 pub use bench::*;
 pub use blob::*;

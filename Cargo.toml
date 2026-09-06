@@ -9,6 +9,7 @@ members = [
     "report-fixtures",
     "zenctl",
     "zengui",
+    "zenwatch",
 ]
 
 [workspace.package]
@@ -124,6 +125,25 @@ async-stream = "0.3"
 # anchor. Not a zenkey dependency in either direction otherwise — zblob knows
 # nothing about this convention, and the keys are spelled on our side.
 zblob = "0.3"
+
+# The notifier's sinks (zenwatch, #388). `reqwest` carries the HTTP sinks
+# (ntfy, webhook) and `lettre` the SMTP one; both speak TLS through rustls.
+#
+# **The crypto-provider decision.** rustls 0.23 needs exactly one process-wide
+# `CryptoProvider`, and the tree already runs rustls on `ring` through
+# zenoh-link-tls. reqwest's `rustls-tls` feature would pull `aws-lc-rs` — a
+# second provider (and a cmake build) — and two providers linked at once is
+# a panic at first use unless one is installed explicitly. So reqwest takes
+# `rustls-no-provider`, lettre takes `rustls-tls` with `ring` named on the
+# `rustls` line below, and zenwatch's `main` installs the ring provider once
+# at startup. `cargo tree -p zenwatch -i aws-lc-rs` prints nothing, and the
+# deny check keeps it that way.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls", "rustls-tls"] }
+# zenwatch's config dialect (#388): comments and trailing commas in a file an
+# operator edits by hand. Already in the lock — zenoh's own config is JSON5.
+json5 = "0.4"
 
 # Internal
 zenkey = { version = "0.7.0", path = "zenkey" }

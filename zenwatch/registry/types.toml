@@ -1,0 +1,17 @@
+# The RFC 08 §5 type table for the zenwatch registry: every type and reply
+# name in zenwatch.toml resolves here, or the build fails.
+
+[types.ZenwatchHealth]
+kind = "json-schema"
+
+[types.FiringRule]
+kind = "json-schema"
+
+[types.ZenwatchDoctor]
+kind = "json-schema"
+
+[types.RegistrySlice]
+kind = "json-schema"
+
+[types.SchemaSet]
+kind = "json-schema"
