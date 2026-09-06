@@ -100,7 +100,24 @@ for f in rfcs/[0-9][0-9]-*.md; do
     fi
 done
 
+# The set's version is stated in three places outside the ledger, and each
+# has drifted at least once (CLAUDE.md and README.md sat at v1.28 through two
+# amendments, #420). The newest entry is the truth; the three must name it.
+newest=$(grep -oE '^> \*\*v1\.[0-9]+ ' "$chlog" | head -1 | grep -oE 'v1\.[0-9]+')
+for spec in 'rfcs/00-index.md|\*\*Status: v1\.[0-9]+\*\*' 'CLAUDE.md|normative RFC set\*\* \(v1\.[0-9]+;' 'README.md|convention is at \*\*v1\.[0-9]+ '; do
+    file=${spec%%|*}
+    pattern=${spec#*|}
+    stated=$(grep -oE "$pattern" "$file" | head -1 | grep -oE 'v1\.[0-9]+' || true)
+    if [ -z "$stated" ]; then
+        echo "rfc-status: $file no longer states the set's version where this gate looks ($pattern)." >&2
+        fail=1
+    elif [ "$stated" != "$newest" ]; then
+        echo "rfc-status: $file says the set is at $stated; $chlog's newest entry is $newest." >&2
+        fail=1
+    fi
+done
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
-echo "rfc-status: every chapter header agrees with the CHANGELOG's Amends record."
+echo "rfc-status: every chapter header agrees with the CHANGELOG's Amends record, and the set's version is stated as $newest throughout."

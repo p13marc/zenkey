@@ -1,0 +1,29 @@
+# The prose lane (#420). `ci.yml` ignores '**.md' and 'docs/**' on purpose —
+# a prose change must not rebuild the workspace — but the one gate written
+# for RFC amendments reads nothing *but* markdown, so under that filter it
+# ran on every push except the ones it exists for. PR #419 (five files, all
+# under rfcs/) merged with zero CI statuses. This workflow is the inverse
+# trigger: it runs when and only when prose changes, and it runs the gates
+# whose inputs are prose. The expensive jobs stay where they are.
+name: Docs
+on:
+  push:
+    branches: [main]
+    paths: ['**.md', 'docs/**', 'rfcs/**', 'scripts/check-rfc-status.sh']
+  pull_request:
+    paths: ['**.md', 'docs/**', 'rfcs/**', 'scripts/check-rfc-status.sh']
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rfc-status:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v7
+      # RFC chapter headers agree with rfcs/CHANGELOG.md's Amends ledger
+      # (v1.25 S6), and the three places that state the set's version
+      # (00-index.md, CLAUDE.md, README.md) name the newest entry.
+      - run: ./scripts/check-rfc-status.sh
