@@ -215,6 +215,7 @@ pub use bus::write::{
 };
 pub use judge::budget::{BudgetObservation, join_budget};
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
+pub use judge::self_stats::{SelfStats, TableStats, judge_self_stats, read_self_stats};
 // Types reachable *through* root-exported ones — a caller that matches on
 // `KeyShape::V1` or walks a `Skeleton` needs these, and had to spell a module
 // path to name them (#350).

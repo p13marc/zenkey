@@ -52,11 +52,16 @@ pub enum CheckId {
     /// `kind`, or a `counter` decreased within one origin's series with no
     /// `alive` cycle in between.
     KindMismatch,
+    /// A producer's declared `[budget]` (#391, RFC 08 §2 v1.32, RFC 13 §3)
+    /// against the `self_stats` on its health document (RFC 04 §1.2): the
+    /// resident set over `rss_mb`, or a named table over its bound. Asked
+    /// under `--deep`, because a health fetch costs the data plane.
+    BudgetExceeded,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 22] = [
+    pub const ALL: [CheckId; 23] = [
         CheckId::SliceParse,
         CheckId::SliceSync,
         CheckId::IntrospectCoverage,
@@ -79,6 +84,7 @@ impl CheckId {
         CheckId::FieldStuck,
         CheckId::FieldNew,
         CheckId::KindMismatch,
+        CheckId::BudgetExceeded,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -106,6 +112,7 @@ impl CheckId {
             CheckId::FieldStuck => "field-stuck",
             CheckId::FieldNew => "field-new",
             CheckId::KindMismatch => "kind-mismatch",
+            CheckId::BudgetExceeded => "budget-exceeded",
         }
     }
 
@@ -407,6 +414,7 @@ mod check_id_tests {
                 "field-stuck",
                 "field-new",
                 "kind-mismatch",
+                "budget-exceeded",
             ]
         );
     }

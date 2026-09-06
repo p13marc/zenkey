@@ -16,7 +16,8 @@
   through it.
 - `slice` — `RegistrySlice`, the `introspect` reply type + diff (RFC 08 §6),
   including per-producer `[[blob]]` tier declarations (v1.8) and `[[media]]`
-  stream declarations (v1.16). Optional metadata fields
+  stream declarations (v1.16) and the per-producer `[budget]` cost table
+  (v1.32, carried verbatim — no key, no builder). Optional metadata fields
   (qos/ttl/unit/rate/cardinality) must stay **optional** — forward-compat is
   pinned by zenctl's foreign-slice tests (blob and media both).
 - `tests/guard.rs` — RFC 03 §4 design properties D1–D6 pinned as executable

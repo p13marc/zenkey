@@ -520,6 +520,52 @@ pub struct MediaDecl {
     pub description: Option<String>,
 }
 
+/// The `[budget]` table of a served registry slice (RFC 08 §2, v1.32):
+/// what this producer may **cost** the machine it runs on, in the units its
+/// health document's `self_stats` reports (RFC 04 §1.2).
+///
+/// The first per-producer table on the slice that is not a subject,
+/// procedure, tier or stream: it generates no key and no builder, and rides
+/// the slice verbatim into `introspect` (RFC 08 §6) so an observer that can
+/// read `self_stats` can say whether the claim holds (RFC 13 §3). Every
+/// bound is optional here for the same reason every other optional column
+/// is — this type reads *foreign* slices, and the strict lint belongs to
+/// that build's own zenkey-build.
+/// `#[non_exhaustive]`: every version of this type so far has been the
+/// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
+/// v1.16), and each of those was a breaking change for anyone
+/// constructing one. It is a *parse result*, not a thing callers build
+/// — [`parse_slice`] is the constructor — so the attribute costs the
+/// intended use nothing and stops the next field being a break (#325).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BudgetDecl {
+    /// The whole process's resident set, in MiB (`rss_mb`).
+    pub rss_mb: Option<i64>,
+    /// Each bounded structure the producer keeps (`[[budget.tables]]`).
+    pub tables: Vec<TableBudget>,
+}
+
+/// One `[[budget.tables]]` row (RFC 08 §2, v1.32): a named table and the
+/// bounds it must stay within.
+/// `#[non_exhaustive]`: every version of this type so far has been the
+/// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
+/// v1.16), and each of those was a breaking change for anyone
+/// constructing one. It is a *parse result*, not a thing callers build
+/// — [`parse_slice`] is the constructor — so the attribute costs the
+/// intended use nothing and stops the next field being a break (#325).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TableBudget {
+    /// The table's name — what `self_stats.tables[].name` is matched on;
+    /// required, and unique within the file.
+    pub name: String,
+    /// Upper bound on the table's occupancy, when declared.
+    pub max_entries: Option<i64>,
+    /// Upper bound on the table's size in bytes, when declared.
+    pub max_bytes: Option<i64>,
+}
+
 /// One `[[deprecated]]` entry — RFC 08 §3's append-only retirement ledger.
 /// `#[non_exhaustive]`: every version of this type so far has been the
 /// previous one plus a field (`encoding` v1.5, `blob` v1.8, `media`
@@ -612,6 +658,10 @@ pub struct RegistrySlice {
     /// empty for non-media producers and for every slice written earlier.
     pub media: Vec<MediaDecl>,
     pub deprecated: Vec<DeprecationDecl>,
+    /// The producer's declared cost (RFC 08 §2, v1.32). `None` for every
+    /// slice that declares none, and for every slice written earlier —
+    /// which is what "not asked" reads from (RFC 13 §3).
+    pub budget: Option<BudgetDecl>,
 }
 
 impl SubjectDecl {
@@ -688,6 +738,36 @@ impl MediaDecl {
     }
 }
 
+impl BudgetDecl {
+    /// An empty budget — no resident-set bound, no tables; both assignable.
+    #[must_use]
+    pub fn new() -> Self {
+        BudgetDecl {
+            rss_mb: None,
+            tables: Vec::new(),
+        }
+    }
+}
+
+impl Default for BudgetDecl {
+    fn default() -> Self {
+        BudgetDecl::new()
+    }
+}
+
+impl TableBudget {
+    /// A table budget with its one required column; the bounds are `None`
+    /// and assignable.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        TableBudget {
+            name: name.into(),
+            max_entries: None,
+            max_bytes: None,
+        }
+    }
+}
+
 impl DeprecationDecl {
     /// A retirement-ledger entry with its one required column, retiring a
     /// subject. [`DeprecationDecl::of`] retires a procedure.
@@ -733,6 +813,7 @@ impl RegistrySlice {
             blob: Vec::new(),
             media: Vec::new(),
             deprecated: Vec::new(),
+            budget: None,
         }
     }
 
@@ -854,6 +935,34 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         return Err(err("missing [producer] or [service]"));
     };
 
+    // `[budget]` (RFC 08 §2, v1.32): the same foreign-slice tolerance as
+    // the arrays below — a row without a `name` cannot be matched against
+    // `self_stats.tables[]` and is the one refusal; every bound is carried
+    // when present. The strict lint (non-negative, unique names) is
+    // zenkey-build's, on the build that authored the file.
+    let budget = match doc.get("budget") {
+        None => None,
+        Some(b) => {
+            let mut tables = Vec::new();
+            for e in b
+                .get("tables")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+            {
+                tables.push(TableBudget {
+                    name: s(e.get("name")).ok_or_else(|| err("[[budget.tables]] missing name"))?,
+                    max_entries: e.get("max_entries").and_then(|v| v.as_integer()),
+                    max_bytes: e.get("max_bytes").and_then(|v| v.as_integer()),
+                });
+            }
+            Some(BudgetDecl {
+                rss_mb: b.get("rss_mb").and_then(|v| v.as_integer()),
+                tables,
+            })
+        }
+    };
+
     let array = |key: &str| -> Vec<&toml::Value> {
         doc.get(key)
             .and_then(|v| v.as_array())
@@ -972,6 +1081,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         blob,
         media,
         deprecated,
+        budget,
     })
 }
 
@@ -1047,6 +1157,21 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         }
     }
     opt(&mut out, "description", slice.description.as_deref());
+
+    // `[budget]` sits right after the header block, where the TOML grammar
+    // needs a plain table to be — before the first `[[array]]` — and is
+    // written only when carried, so a pre-v1.32 slice round-trips byte for
+    // byte.
+    if let Some(b) = &slice.budget {
+        out.push_str("\n[budget]\n");
+        opt_int(&mut out, "rss_mb", b.rss_mb);
+        for t in &b.tables {
+            out.push_str("\n[[budget.tables]]\n");
+            out.push_str(&format!("name = {}\n", s(&t.name)));
+            opt_int(&mut out, "max_entries", t.max_entries);
+            opt_int(&mut out, "max_bytes", t.max_bytes);
+        }
+    }
 
     for d in &slice.subjects {
         out.push_str("\n[[subject]]\n");
@@ -1314,6 +1439,15 @@ mod tests {
             [producer]
             name = "netring"
             description = "flow capture"
+            [budget]
+            rss_mb = 64
+            [[budget.tables]]
+            name = "flows"
+            max_entries = 65536
+            max_bytes = 16777216
+            [[budget.tables]]
+            name = "names"
+            max_entries = 16384
             [[subject]]
             path = "flows/{proto}/count"
             class = "telemetry"
@@ -1381,6 +1515,61 @@ mod tests {
         let back = parse_slice(&emitted)
             .unwrap_or_else(|e| panic!("exported TOML must re-parse: {e}\n---\n{emitted}"));
         assert_eq!(back, parsed, "exported TOML:\n{emitted}");
+    }
+
+    /// `[budget]` (RFC 08 §2, v1.32) is carried whole — the resident-set
+    /// bound and every table row with its bounds — and a slice that declares
+    /// none carries `None`, which is what "not asked" reads from (RFC 13
+    /// §3); such a slice also exports byte for byte as it did before the
+    /// amendment.
+    #[test]
+    fn a_budget_is_carried_and_its_absence_stays_unwritten() {
+        let source = "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\n\
+                      [producer]\nname = \"netring\"\n\n[budget]\nrss_mb = 64\n\n\
+                      [[budget.tables]]\nname = \"flows\"\nmax_entries = 65536\n\
+                      max_bytes = 16777216\n\n[[budget.tables]]\nname = \"names\"\n\
+                      max_entries = 16384\n";
+        let parsed = parse_slice(source).unwrap();
+        let budget = parsed.budget.as_ref().expect("[budget] carried");
+        assert_eq!(budget.rss_mb, Some(64));
+        assert_eq!(budget.tables.len(), 2);
+        assert_eq!(budget.tables[0].name, "flows");
+        assert_eq!(budget.tables[0].max_entries, Some(65536));
+        assert_eq!(budget.tables[0].max_bytes, Some(16_777_216));
+        assert_eq!(budget.tables[1].name, "names");
+        assert_eq!(budget.tables[1].max_bytes, None);
+        assert_eq!(
+            to_toml(&parsed),
+            source,
+            "the emitter is the parser's inverse"
+        );
+
+        let bare = "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\n\
+                    [producer]\nname = \"netring\"\n";
+        let parsed = parse_slice(bare).unwrap();
+        assert_eq!(parsed.budget, None, "no [budget] is not an empty one");
+        assert_eq!(to_toml(&parsed), bare);
+    }
+
+    /// A table row without a `name` cannot be matched against anything the
+    /// health document says (RFC 04 §1.2), so it is the one refusal here;
+    /// every bound is optional, as every foreign-slice column is.
+    #[test]
+    fn a_budget_table_without_a_name_is_refused() {
+        let header = "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\
+                      [producer]\nname = \"netring\"\n";
+        let e = parse_slice(&format!("{header}[[budget.tables]]\nmax_entries = 4\n"))
+            .expect_err("a nameless row");
+        assert!(
+            e.to_string().contains("[[budget.tables]] missing name"),
+            "{e}"
+        );
+        let ok = parse_slice(&format!("{header}[budget]\n")).unwrap();
+        assert_eq!(
+            ok.budget,
+            Some(BudgetDecl::new()),
+            "an empty table is carried"
+        );
     }
 
     /// Retirement names its kind (RFC 08 §3, v1.26), and the default is the
