@@ -22,8 +22,9 @@ use zenoh::Session;
 
 use crate::bus::query::GetOpts;
 use crate::report::{
-    Coverage, CoverageRow, DeclaredEntities, DeclaredEntity, EntityKind, MeshLink,
-    OriginAttachment, RouterInfo, StorageInfo, TopologyEdge, TopologyNode, TopologyReport,
+    AdminAnswer, ConsumersReport, Coverage, CoverageRow, DeclaredEntities, DeclaredEntity,
+    EntityKind, MeshLink, OriginAttachment, RouterInfo, StorageInfo, SubjectImpact, TopologyEdge,
+    TopologyNode, TopologyReport,
 };
 
 /// One admin-space entry.
@@ -271,6 +272,15 @@ pub fn state_coverage(
 }
 
 impl EntityKind {
+    /// Every kind the admin space declares, in sweep order.
+    pub const ALL: [EntityKind; 5] = [
+        EntityKind::Subscriber,
+        EntityKind::Publisher,
+        EntityKind::Queryable,
+        EntityKind::Querier,
+        EntityKind::Token,
+    ];
+
     fn from_chunk(chunk: &str) -> Option<EntityKind> {
         Some(match chunk {
             "subscriber" => EntityKind::Subscriber,
@@ -329,19 +339,30 @@ pub async fn declared_entities(
     session: &Session,
     timeout: Duration,
 ) -> Result<Option<DeclaredEntities>> {
+    declared_entities_within(session, &GetOpts::new(timeout)).await
+}
+
+/// The admin selectors [`declared_entities`] sweeps, in sweep order — the
+/// coverage claim a report built on the sweep states (RFC 13 §3 O5).
+pub fn declared_entity_selectors() -> Vec<String> {
+    EntityKind::ALL
+        .iter()
+        .map(|k| format!("@/*/*/{}/**", k.chunk()))
+        .collect()
+}
+
+/// [`declared_entities`] under the caller's own options — the reply bound
+/// and, after the call, what it cost ([`GetOpts::elided`], RFC 13 §3 O6).
+pub async fn declared_entities_within(
+    session: &Session,
+    opts: &GetOpts,
+) -> Result<Option<DeclaredEntities>> {
     let mut entities = Vec::new();
 
     let mut any_reply = false;
 
-    for kind in [
-        EntityKind::Subscriber,
-        EntityKind::Publisher,
-        EntityKind::Queryable,
-        EntityKind::Querier,
-        EntityKind::Token,
-    ] {
-        let selector = format!("@/*/*/{}/**", kind.chunk());
-        let entries = admin_get(session, &selector, timeout).await?;
+    for selector in declared_entity_selectors() {
+        let entries = admin_get_within(session, &selector, opts).await?;
         any_reply |= !entries.is_empty();
         entities.extend(
             entries
@@ -464,7 +485,7 @@ pub fn render_dot(report: &TopologyReport, attachments: &[OriginAttachment]) -> 
 /// Collect every zid string under the zenoh 1.9 `Sources` shape
 /// (`{ routers: [...], peers: [...], clients: [...] }`) — tolerant of the
 /// layout varying by version: unknown shapes yield nothing, never an error.
-fn source_zids(sources: &serde_json::Value) -> Vec<String> {
+pub(crate) fn source_zids(sources: &serde_json::Value) -> Vec<String> {
     let mut out = Vec::new();
     for kind in ["routers", "peers", "clients"] {
         if let Some(list) = sources.get(kind).and_then(|v| v.as_array()) {
@@ -489,16 +510,22 @@ pub async fn origin_attachments(
     fleet: &crate::Fleet<'_>,
     timeout: Duration,
 ) -> Result<Vec<OriginAttachment>> {
-    let base = fleet.base();
-
     let entries = admin_get(fleet.session(), "@/*/*/token/**", timeout).await?;
+    let tokens: Vec<DeclaredEntity> = entries
+        .iter()
+        .filter_map(|e| declared_from_admin_entry(&e.key, &e.value))
+        .collect();
+    Ok(attach_tokens(fleet.base(), &tokens))
+}
 
+/// The join itself, pure: every token-kind entity whose keyexpr parses
+/// under `base` as an `alive` leaf becomes an attachment (#224 split it out
+/// of [`origin_attachments`] so a sweep that already holds the declared
+/// entities need not ask the token selector twice).
+pub fn attach_tokens(base: &str, entities: &[DeclaredEntity]) -> Vec<OriginAttachment> {
     let mut out: Vec<OriginAttachment> = Vec::new();
 
-    for e in &entries {
-        let Some(decl) = declared_from_admin_entry(&e.key, &e.value) else {
-            continue;
-        };
+    for decl in entities {
         if decl.kind != EntityKind::Token {
             continue;
         }
@@ -533,7 +560,7 @@ pub async fn origin_attachments(
             out.push(attachment);
         }
     }
-    Ok(out)
+    out
 }
 
 /// Whether a node's admin root doc filters loopback endpoints out of its
@@ -689,6 +716,168 @@ pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyRe
         asked: ASKED.to_string(),
         answered,
         self_zid: session.zid().to_string(),
+    })
+}
+
+/// One pass over the admin space for the consumer joins (#224): the
+/// topology, every declared entity, and the attachments the token entities
+/// yield — each selector asked once, the elided count kept.
+struct AdminSweep {
+    topology: TopologyReport,
+    declared: Option<DeclaredEntities>,
+    attachments: Vec<OriginAttachment>,
+    asked: Vec<String>,
+    elided: u64,
+}
+
+async fn admin_sweep(fleet: &crate::Fleet<'_>, timeout: Duration) -> Result<AdminSweep> {
+    let session = fleet.session();
+    let opts = GetOpts::new(timeout);
+    // The topology's own GET keeps its bound ledger to itself; what it may
+    // have elided is a root doc, which is a node, not a declaration.
+    let topology = topology(session, timeout).await?;
+    let declared = declared_entities_within(session, &opts).await?;
+    let attachments = declared
+        .as_ref()
+        .map(|d| attach_tokens(fleet.base(), &d.entities))
+        .unwrap_or_default();
+    let mut asked = vec![topology.asked.clone()];
+    asked.extend(declared_entity_selectors());
+    Ok(AdminSweep {
+        topology,
+        declared,
+        attachments,
+        asked,
+        elided: opts.elided(),
+    })
+}
+
+impl AdminSweep {
+    fn consumers(&self, target: &str) -> ConsumersReport {
+        let self_zid = self.topology.self_zid.clone();
+        let (admin, rows) = match &self.declared {
+            Some(declared) => (
+                AdminAnswer::Answered {
+                    answered: self.topology.answered,
+                    nodes: self.topology.nodes.len(),
+                },
+                crate::model::consumers::join_consumers(
+                    target,
+                    declared,
+                    &self.attachments,
+                    Some(&self.topology),
+                    &self_zid,
+                ),
+            ),
+            // Not asked is not an empty answer: no rows, and the
+            // discriminator says why (RFC 13 §3 O4).
+            None => (AdminAnswer::NotAvailable, Vec::new()),
+        };
+        ConsumersReport {
+            target: target.to_string(),
+            asked: self.asked.clone(),
+            self_zid,
+            admin,
+            rows,
+            reply_elided: self.elided,
+        }
+    }
+}
+
+/// The target as a key expression, or the refusal: an ask that could not
+/// be put is exit 2's business, never an empty consumer set.
+fn consumers_target(target: &str) -> Result<()> {
+    zenoh::key_expr::keyexpr::new(target)
+        .map(|_| ())
+        .map_err(|e| Error::unaskable_from(format!("consumers target {target:?}"), e))
+}
+
+/// Who declares a reader of `target` (#224): every declared subscriber and
+/// querier the admin space serves, related to the selector by key algebra,
+/// one row per declaring session, joined to the origins their tokens
+/// attach (#131) and the topology's `whatami`.
+///
+/// Three facts the report keeps straight rather than smoothing over: no
+/// admin space answering is [`AdminAnswer::NotAvailable`] with no rows —
+/// *not asked*, never an empty set (O4); a declaration is evidence a
+/// session asked for the key, not proof anything reads it (RFC 12 §9 —
+/// foreign matching status is deferred permanently); and a `**`
+/// declaration intersects everything, so it is flagged as total rather
+/// than presented as a consumer of this subject in particular. The tool's
+/// own session appears in its own results and is named.
+pub async fn consumers(
+    fleet: &crate::Fleet<'_>,
+    target: &str,
+    timeout: Duration,
+) -> Result<ConsumersReport> {
+    consumers_target(target)?;
+    let sweep = admin_sweep(fleet, timeout).await?;
+    Ok(sweep.consumers(target))
+}
+
+/// The blast radius of one declared subject (#224): its consumers, its
+/// storage coverage, what else declares on its family, and its ledger
+/// entry — the facts a schema change wants in one place.
+///
+/// The storage sweep is made only when an admin space answered: under
+/// [`AdminAnswer::NotAvailable`] an empty storage list would render as
+/// "uncovered", which is a verdict nobody obtained, so `coverage` stays
+/// `None` (not asked). `Err` when the slices do not name the subject — the
+/// caller named it, so nothing was asked of the bus.
+pub async fn subject_impact(
+    fleet: &crate::Fleet<'_>,
+    slices: &crate::SliceSet,
+    producer: &str,
+    path: &str,
+    timeout: Duration,
+) -> Result<SubjectImpact> {
+    let base = fleet.base();
+    let Some(target) = crate::model::consumers::subject_target(slices, base, producer, path) else {
+        return Err(Error::unaskable(
+            format!("subject {producer}/{path}"),
+            match slices.get(producer) {
+                Some(_) => "the producer's slice declares no such subject, and its \
+                            [[deprecated]] ledger does not retire one"
+                    .to_string(),
+                None => "no loaded slice names that producer".to_string(),
+            },
+        ));
+    };
+    let sweep = admin_sweep(fleet, timeout).await?;
+    let consumers = sweep.consumers(&target.selector);
+    let (coverage, declared_publishers, declared_queryables) = match &sweep.declared {
+        Some(declared) => {
+            let storages = storages(fleet.session(), timeout).await?;
+            let rows: Vec<CoverageRow> = state_coverage(slices, base, &storages)
+                .into_iter()
+                .filter(|r| r.producer == producer && r.path == path)
+                .collect();
+            (
+                Some(rows),
+                Some(crate::model::consumers::declaring_sessions(
+                    &target.selector,
+                    declared,
+                    EntityKind::Publisher,
+                )),
+                Some(crate::model::consumers::declaring_sessions(
+                    &target.selector,
+                    declared,
+                    EntityKind::Queryable,
+                )),
+            )
+        }
+        None => (None, None, None),
+    };
+    Ok(SubjectImpact {
+        producer: producer.to_string(),
+        path: path.to_string(),
+        class: target.class,
+        selector: target.selector,
+        consumers,
+        coverage,
+        declared_publishers,
+        declared_queryables,
+        deprecated: target.deprecated,
     })
 }
 

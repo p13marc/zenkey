@@ -83,6 +83,9 @@ sub_state! {
         /// The why ladder's state for the slot key (#214): run on demand
         /// at the frugal default, dropped with the subject.
         pub(crate) why: view::why::WhyState,
+        /// The declared readers of the slot's subject (#224): one admin
+        /// sweep per click, never ambient, dropped with the subject.
+        pub(crate) consumers: view::consumers::ConsumersState,
     }
 }
 
@@ -101,6 +104,7 @@ impl SubjectSlot {
             series: None,
             fields: view::fields::FieldsState::default(),
             why: view::why::WhyState::default(),
+            consumers: view::consumers::ConsumersState::default(),
         }
     }
 
@@ -259,6 +263,7 @@ impl SubjectState {
             series: None,
             fields,
             why: view::why::WhyState::default(),
+            consumers: view::consumers::ConsumersState::default(),
         };
         slot.refresh_series(dep);
         self.pins.push(slot);
