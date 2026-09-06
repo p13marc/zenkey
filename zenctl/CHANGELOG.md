@@ -6,6 +6,30 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased
+
+**`timeline` — the fleet timeline, and deliberately no edges** (#216).
+A new wire verb at the root. `zenctl timeline <SEL>… --for <SECS>
+[--order arrival|hlc]` watches the selectors for the window and emits one
+merged ordering of everything seen, partitioned into lanes per
+origin/producer, with the clock stated per report and the stamper(s) per
+lane. Every ndjson row carries `order_by`, so a line cut out of the
+stream still says which axis its `pos` is on. Under `--order hlc` the
+envelope carries the claim the axis can make (RFC 09 §5.1 O7): one
+stamper is that node's happened-before; several are skewed wall clocks;
+an empty axis claims nothing. Unstamped samples get their own lane on
+the arrival axis and **cannot be placed on the HLC axis at all** — the
+engine's `Placed<HlcAxis>` refuses them, and the report counts the
+exclusion. Drops render as breaks at their arrival position and as a
+total with no position on the HLC axis. The per-publisher
+sequence-number lane is reported *unavailable* on this zenoh (no
+`SourceInfo` reaches a subscriber), never empty. `--from <FILE>` reads a
+`.zrec` through the same projection under the capture's stated base, and
+the engine's identity test is what makes "the same window from the
+file" a claim. No line is ever drawn between lanes: a merged ordering
+shows when things were seen on which clock, never that one caused
+another.
+
 ## 0.6.0 (2026-09-06) — the generators, and three rows that name a host
 
 Two new verbs and no moved spelling: a script written against 0.5.1 runs

@@ -19,7 +19,9 @@
 //! this crate cannot see; their fixtures live beside their tests.
 
 use zenkey_fleet::report::*;
-use zenkey_fleet::{Coverage, CoverageRow, RecordReport, ReplayReport, StorageInfo};
+use zenkey_fleet::{
+    Coverage, CoverageRow, RecordReport, ReplayReport, StorageInfo, TimelineReport,
+};
 
 pub const ORIGIN: &str = "h-3fa9c2d41b7e";
 
@@ -1728,4 +1730,165 @@ pub fn acl_explain() -> AclExplain {
         AclMessage::Query,
     )
     .expect("an enrolled principal and a valid key")
+}
+
+// ── The fleet timeline (#216) ─────────────────────────────────────────────
+
+fn timeline_lane() -> LaneId {
+    LaneId::Origin {
+        origin: ORIGIN.into(),
+        producer: Some("sysinfo".into()),
+    }
+}
+
+fn timeline_sample(
+    order_by: OrderLabel,
+    pos: usize,
+    lane: LaneId,
+    key: &str,
+    t_us: u64,
+    hlc: Option<(u64, &str)>,
+) -> TimelineEntry {
+    TimelineEntry::Sample {
+        order_by,
+        pos,
+        lane,
+        key: key.into(),
+        t_us,
+        hlc: hlc.map(|(n, s)| format!("{n}/{s}")),
+        stamped_by: hlc.map(|(_, s)| s.to_string()),
+        provenance: hlc.map(|_| Provenance::Unattributable),
+        kind: RowKind::Put,
+    }
+}
+
+const TL_A: &str = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu";
+const TL_B: &str = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem";
+const TL_PLAIN: &str = "plain/key";
+
+/// A ten-second window on the arrival axis: two stamped samples from one
+/// producer that arrived in the *opposite* order to their HLCs, an
+/// unstamped sample in its own lane, and a drop of 3 between the second
+/// and third — the reorder is visible against [`timeline_report_hlc`].
+pub fn timeline_report_arrival() -> TimelineReport {
+    let lane = timeline_lane();
+    TimelineReport {
+        order_by: OrderLabel::Arrival,
+        axis: AxisLabel::Arrival {
+            clock: ARRIVAL_CLOCK,
+        },
+        scopes: vec!["acme/v1/**".into()],
+        window_s: Some(10.0),
+        source: TimelineSource::Live,
+        lanes: vec![
+            LaneSummary {
+                lane: lane.clone(),
+                samples: 2,
+                first_t_us: 1_000,
+                last_t_us: 2_000,
+                stampers: ["33".to_string()].into_iter().collect(),
+                provenance: ProvenanceCounts {
+                    self_stamped: 0,
+                    foreign: 0,
+                    unattributable: 2,
+                },
+            },
+            LaneSummary {
+                lane: LaneId::Unstamped,
+                samples: 1,
+                first_t_us: 3_000,
+                last_t_us: 3_000,
+                stampers: Default::default(),
+                provenance: ProvenanceCounts::default(),
+            },
+        ],
+        sn_lane: SnLaneReport::Unavailable {
+            reason: SN_UNAVAILABLE_REASON,
+        },
+        unstamped_excluded: 0,
+        dropped: 3,
+        coalesced: 0,
+        keys_evicted: 0,
+        rows: vec![
+            timeline_sample(
+                OrderLabel::Arrival,
+                0,
+                lane.clone(),
+                TL_A,
+                1_000,
+                Some((200, "33")),
+            ),
+            timeline_sample(
+                OrderLabel::Arrival,
+                1,
+                lane.clone(),
+                TL_B,
+                2_000,
+                Some((100, "33")),
+            ),
+            TimelineEntry::Break {
+                order_by: OrderLabel::Arrival,
+                pos: 2,
+                lane: None,
+                kind: BreakKind::Dropped,
+                n: 3,
+            },
+            timeline_sample(
+                OrderLabel::Arrival,
+                3,
+                LaneId::Unstamped,
+                TL_PLAIN,
+                3_000,
+                None,
+            ),
+        ],
+    }
+}
+
+/// The same window on the HLC axis: one stamper, so the order is that
+/// node's happened-before; the unstamped sample is *excluded*, not placed;
+/// the drop is a total with no position on this clock.
+pub fn timeline_report_hlc() -> TimelineReport {
+    let lane = timeline_lane();
+    TimelineReport {
+        order_by: OrderLabel::Hlc,
+        axis: AxisLabel::Hlc {
+            claim: HlcClaim::HappensBefore {
+                stamper: "33".into(),
+            },
+        },
+        scopes: vec!["acme/v1/**".into()],
+        window_s: Some(10.0),
+        source: TimelineSource::Live,
+        lanes: vec![LaneSummary {
+            lane: lane.clone(),
+            samples: 2,
+            first_t_us: 1_000,
+            last_t_us: 2_000,
+            stampers: ["33".to_string()].into_iter().collect(),
+            provenance: ProvenanceCounts {
+                self_stamped: 0,
+                foreign: 0,
+                unattributable: 2,
+            },
+        }],
+        sn_lane: SnLaneReport::Unavailable {
+            reason: SN_UNAVAILABLE_REASON,
+        },
+        unstamped_excluded: 1,
+        dropped: 3,
+        coalesced: 0,
+        keys_evicted: 0,
+        rows: vec![
+            timeline_sample(
+                OrderLabel::Hlc,
+                0,
+                lane.clone(),
+                TL_B,
+                2_000,
+                Some((100, "33")),
+            ),
+            timeline_sample(OrderLabel::Hlc, 1, lane, TL_A, 1_000, Some((200, "33"))),
+        ],
+    }
 }

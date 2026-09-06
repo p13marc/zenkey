@@ -1065,6 +1065,103 @@ IMPAIRED — the observation cannot carry the claim:
     assert!(notes(&fx::expect_report()).contains("not a verdict either way"));
 }
 
+/// The fleet timeline (#216), arrival axis: lanes per origin/producer with
+/// the stamper in the heading, the unstamped lane beside them, `pos` from
+/// the merged ordering, and the drop as a break at its arrival position.
+#[test]
+fn a_timeline_on_arrival_groups_lanes_and_places_the_break() {
+    assert_data_eq!(
+        table(&fx::timeline_report_arrival()),
+        str![[r#"
+h-3fa9c2d41b7e/sysinfo · arrival · stamper 33 (2 unattributable)
+0  +1.000ms  200/33      acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu
+1  +2.000ms  100/33      acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem
+
+unstamped (arrival axis only) · arrival · no stamper
+3  +3.000ms              plain/key
+
+breaks · arrival positions
+2            dropped ×3
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::timeline_report_arrival()),
+        str![[r#"
+{"axis":"arrival","clock":"observer monotonic, µs since window start","dropped":3,"keys_evicted":0,"lanes":[{"first_t_us":1000,"lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"last_t_us":2000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":2},"samples":2,"stampers":["33"]},{"first_t_us":3000,"lane":{"kind":"unstamped"},"last_t_us":3000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":0},"samples":1,"stampers":[]}],"notes":[{"cite":"RFC 09 §5.1 O7","text":"ordered by arrival — observer monotonic, µs since window start; a position says when this observer saw a sample, never when it was produced"},{"cite":"RFC 09 §5.1 O4","text":"the per-publisher sequence-number lane is unavailable: zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"},{"cite":"RFC 03 §4 D2","text":"a `**` selector never crosses an `@`-chunk: the verbatim planes (`@rpc`, `@media`, `@blob`, `@catalog`) are excluded from this window, not empty"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — the ordering covers only what was seen"}],"order_by":"arrival","report":"timeline","scopes":["acme/v1/**"],"sn_lane":{"reason":"zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it","state":"unavailable"},"source":{"kind":"live"},"window_s":10.0}
+{"hlc":"200/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"arrival","pos":0,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":1000}
+{"hlc":"100/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"arrival","pos":1,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":2000}
+{"kind":"dropped","n":3,"order_by":"arrival","pos":2,"row":"break"}
+{"key":"plain/key","kind":"put","lane":{"kind":"unstamped"},"order_by":"arrival","pos":3,"row":"sample","t_us":3000}
+
+"#]]
+    );
+    let n = notes(&fx::timeline_report_arrival());
+    assert!(n.contains("ordered by arrival"), "{n}");
+    assert!(n.contains("sequence-number lane is unavailable"), "{n}");
+    assert!(n.contains("never crosses an `@`-chunk"), "{n}");
+    assert!(n.contains("deliberately no edges"), "{n}");
+}
+
+/// The same window on the HLC axis: the reorder shows as a non-monotonic
+/// `t` column, the claim names the one stamper, the unstamped sample is a
+/// count and a note rather than a row, and the drop is a total with no
+/// break row (it has no position on this clock).
+#[test]
+fn a_timeline_on_hlc_states_its_claim_and_excludes_the_unstamped() {
+    assert_data_eq!(
+        table(&fx::timeline_report_hlc()),
+        str![[r#"
+h-3fa9c2d41b7e/sysinfo · hlc · stamper 33 (2 unattributable)
+0  +2.000ms  100/33  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem
+1  +1.000ms  200/33  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::timeline_report_hlc()),
+        str![[r#"
+{"axis":"hlc","claim":"happens_before","dropped":3,"keys_evicted":0,"lanes":[{"first_t_us":1000,"lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"last_t_us":2000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":2},"samples":2,"stampers":["33"]}],"notes":[{"cite":"RFC 09 §5.1 O7","text":"ordered by HLC — every stamped sample was stamped by 33, so the order is that node's happened-before (its HLC is monotonic and updated by what it forwarded)"},{"text":"1 unstamped sample(s) are not on this axis — an unstamped sample has no HLC position and is never defaulted to its arrival time; see `--order arrival`"},{"text":"3 dropped sample(s) have no position on the HLC axis (a drop is something this observer suffered, on its own clock); see `--order arrival` for where they fell"},{"cite":"RFC 09 §5.1 O4","text":"the per-publisher sequence-number lane is unavailable: zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"},{"cite":"RFC 03 §4 D2","text":"a `**` selector never crosses an `@`-chunk: the verbatim planes (`@rpc`, `@media`, `@blob`, `@catalog`) are excluded from this window, not empty"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — the ordering covers only what was seen"}],"order_by":"hlc","report":"timeline","scopes":["acme/v1/**"],"sn_lane":{"reason":"zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it","state":"unavailable"},"source":{"kind":"live"},"stamper":"33","unstamped_excluded":1,"window_s":10.0}
+{"hlc":"100/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"hlc","pos":0,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":2000}
+{"hlc":"200/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"hlc","pos":1,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":1000}
+
+"#]]
+    );
+    let n = notes(&fx::timeline_report_hlc());
+    assert!(n.contains("happened-before"), "{n}");
+    assert!(
+        n.contains("1 unstamped sample(s) are not on this axis"),
+        "{n}"
+    );
+    assert!(n.contains("have no position on the HLC axis"), "{n}");
+}
+
+/// The claim, not the layout: an HLC table never draws an unstamped row.
+/// The report has none to give it (`Placed<HlcAxis>` refused them in the
+/// engine), and this pins that the renderer does not invent one from the
+/// lane summaries or the exclusion count.
+#[test]
+fn an_hlc_timeline_never_draws_an_unstamped_row() {
+    let report = fx::timeline_report_hlc();
+    assert!(report.rows.iter().all(|r| !matches!(
+        r,
+        zenkey_fleet::report::TimelineEntry::Sample { hlc: None, .. }
+    )));
+    let drawn = table(&report);
+    assert!(!drawn.contains("plain/key"), "{drawn}");
+    assert!(!drawn.contains("unstamped ("), "{drawn}");
+    // Every emitted row says which axis its position is on.
+    for line in ndjson(&report).lines().filter(|l| l.contains("\"row\"")) {
+        assert!(line.contains("\"order_by\":\"hlc\""), "{line}");
+    }
+    for line in ndjson(&fx::timeline_report_arrival())
+        .lines()
+        .filter(|l| l.contains("\"row\""))
+    {
+        assert!(line.contains("\"order_by\":\"arrival\""), "{line}");
+    }
+}
+
 #[test]
 fn a_record_and_a_replay_carry_their_drop_ledgers() {
     assert_data_eq!(
@@ -1651,6 +1748,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-explain",
         "storage-list",
         "storage-plan",
+        "timeline",
         "topic-info",
         "topic-list",
         "why",
@@ -1721,6 +1819,11 @@ fn every_observing_family_states_its_scope() {
     });
     assert_eq!(s.window_s, Some(10.0));
     scoped(&fx::record_report());
+    // The timeline's scope is every selector it watched, over the window;
+    // a `.zrec` window has no `window_s` (nothing was asked, O4).
+    let s = scoped(&fx::timeline_report_arrival());
+    assert_eq!(s.asked, ["acme/v1/**"]);
+    assert_eq!(s.window_s, Some(10.0));
     // The doctor's scope is its listen phase; the fixture ran one.
     let s = scoped(&fx::doctor_report());
     assert_eq!(s.asked, ["v1/**"]);
