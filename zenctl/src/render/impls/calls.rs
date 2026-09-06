@@ -12,7 +12,7 @@
 //! `Format::Table` — which is what `table(&self, t: &mut Table)` taking a sink
 //! is for.
 
-use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport, ProbeReport};
+use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport, PageSignal, ProbeReport};
 
 use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
@@ -40,7 +40,30 @@ pub fn answer_text(a: &CallAnswer) -> String {
     if let (Some(att), Some(n)) = (&a.attachment, a.attachment_bytes) {
         out.push_str(&format!("\n  attachment ({n} B): {att}"));
     }
+    // A bounded reply that stopped early says so on the line (#424): the
+    // caller MUST NOT read a short page as the end, and a `partial: true`
+    // buried in a pretty-printed object is exactly how it would.
+    if let Some(p) = a.page_signal().filter(|p| p.partial) {
+        out.push_str(&format!("\n  {}", stopped_early(&p)));
+    }
     out
+}
+
+/// The RFC 05 §3.2 fields of a partial page, one line, the optional ones
+/// only when the wire carried them.
+fn stopped_early(p: &PageSignal) -> String {
+    let mut line = format!(
+        "stopped early (partial=true, next_cursor={}",
+        p.next_cursor.as_deref().unwrap_or("null")
+    );
+    if let Some(n) = p.scanned {
+        line.push_str(&format!(", scanned={n}"));
+    }
+    if let Some(c) = &p.covers_from {
+        line.push_str(&format!(", covers_from={c}"));
+    }
+    line.push_str(") — RFC 05 §3.2");
+    line
 }
 
 impl Render for CallReport {
@@ -85,7 +108,7 @@ impl Render for CallReport {
     }
 
     fn notes(&self) -> Vec<Note> {
-        match self.answers.len() {
+        let mut notes = match self.answers.len() {
             // R5: the note used to say "the timeout" without stating it —
             // now it names the wait the report itself carries.
             0 => vec![Note::silence(format!(
@@ -98,7 +121,25 @@ impl Render for CallReport {
                 "{n} repl{}",
                 if n == 1 { "y" } else { "ies" }
             ))],
-        }
+        };
+        // `partial: true` with `next_cursor: null` is the contract violation
+        // RFC 05 §3.2 says an observer MAY report. A caveat, not an exit
+        // code: `call` is an act, and the reply *did* arrive (#424).
+        notes.extend(
+            self.answers
+                .iter()
+                .filter(|a| a.page_signal().is_some_and(|p| p.is_contract_violation()))
+                .map(|a| {
+                    Note::caveat(format!(
+                        "{}: partial=true with next_cursor=null — the reply says it \
+                         stopped early and offers no way to continue (a contract \
+                         violation)",
+                        a.origin
+                    ))
+                    .cite("RFC 05 §3.2")
+                }),
+        );
+        notes
     }
 
     /// The GET's coverage claim: the one key asked, and the wait the report

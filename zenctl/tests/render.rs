@@ -830,6 +830,53 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
     assert_eq!(envelope["timeout_s"], 5.0);
 }
 
+/// RFC 05 §3.2 (#424): a bounded reply that stopped early says so on the
+/// line — a caller MUST NOT read a short page as the end — and `partial:
+/// true` with `next_cursor: null` is the contract violation the RFC says an
+/// observer MAY report. A caveat, never an exit code: `call` is an act, and
+/// both replies arrived.
+#[test]
+fn a_partial_page_says_stopped_early_and_a_null_cursor_is_a_caveat() {
+    let report = fx::call_report_partial_page();
+    let t = table(&report);
+    assert!(
+        t.contains(
+            "stopped early (partial=true, next_cursor=e-41, scanned=4096, \
+             covers_from=2026-09-06T10:00:00Z) — RFC 05 §3.2"
+        ),
+        "{t}"
+    );
+    assert!(
+        t.contains("stopped early (partial=true, next_cursor=null) — RFC 05 §3.2"),
+        "the optional fields are omitted when the wire omitted them:\n{t}"
+    );
+    assert_eq!(t.matches("stopped early").count(), 2, "{t}");
+
+    let n = notes(&report);
+    assert!(
+        n.contains(
+            "h-bbbbbbbbbbbb: partial=true with next_cursor=null — the reply says it \
+             stopped early and offers no way to continue (a contract violation) \
+             (RFC 05 §3.2)"
+        ),
+        "{n}"
+    );
+    assert!(
+        !n.contains("h-3fa9c2d41b7e: partial=true"),
+        "a cursor is a way on — no caveat for the first answer:\n{n}"
+    );
+    assert_eq!(report.exit_code(), 0, "a call is an act, not a judgement");
+
+    // `check probe` delegates, so it inherits both the line and the caveat.
+    let probe = zenkey_fleet::report::ProbeReport {
+        call: report,
+        ..fx::probe_report()
+    };
+    assert!(table(&probe).contains("stopped early (partial=true, next_cursor=null)"));
+    assert!(notes(&probe).contains("a contract violation) (RFC 05 §3.2)"));
+    assert_eq!(probe.call.exit_code(), 0);
+}
+
 #[test]
 fn a_cutover_puts_the_verdict_word_beside_its_evidence() {
     assert_data_eq!(
