@@ -134,6 +134,9 @@ pub use bus::body::{
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use bus::describe::{DescribeSweep, describe_sweep};
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
     CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, watchdog,
 };
@@ -152,8 +155,8 @@ pub use judge::field::{
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{
     DEFAULT_MAX_PRODUCERS, DecodedSample, DescribedSchema, Rendering, SchemaStore, Sealed,
-    StoreBounds, decode_sample, prewarm, schema_drift, schema_dump, schemas_for_type,
-    totality_gaps,
+    StoreBounds, decode_sample, prewarm, schema_drift, schema_dump, schema_rows_for_type,
+    schemas_for_type, totality_gaps,
 };
 /// The traits [`watchdog`] is driven through (#397), re-exported so a
 /// consumer needs them in scope without taking a direct dependency on
