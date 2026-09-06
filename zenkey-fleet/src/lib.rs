@@ -138,7 +138,8 @@ pub use bus::describe::{DescribeSweep, describe_sweep};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
-    CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, watchdog,
+    CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome, WatchdogSpec,
+    watchdog,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
