@@ -2033,6 +2033,26 @@ pub(crate) struct ServiceCallArgs {
     /// Send the request body verbatim: no schema lookup, no encoding.
     #[arg(long)]
     pub(crate) raw: bool,
+    /// After the reply, keep a window open on the called origin and list
+    /// what was observed there (RFC 05 §3's long-running idiom: request →
+    /// status state → events). The window is subscribed **before** the call
+    /// leaves, so nothing published between the reply and the subscription
+    /// can be missed; each sample carries Δ on the arrival clock and, where
+    /// stamped, on the HLC against the reply's, and is tagged by how the
+    /// registry relates it to the procedure — an observation, never a cause.
+    /// One act, one spelling: there is no separate `trace` verb, because the
+    /// trace is this call's own observation. Not with `*`: a trace attributes
+    /// to one origin.
+    #[arg(long)]
+    pub(crate) trace: bool,
+    /// The passive window held after the reply, seconds (with --trace).
+    #[arg(
+        long = "for",
+        value_name = "SECS",
+        default_value_t = 10.0,
+        requires = "trace"
+    )]
+    pub(crate) for_secs: f64,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }

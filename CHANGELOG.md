@@ -35,9 +35,31 @@ Versions per crate, because they move independently:
   replayed window classifies its stampers exactly as the live one did.
   Deliberately no edges.
 
+- **The RPC trace window** (#215): `call_traced` in `bus/write.rs` —
+  subscribe first (the origin's subtree and the fleet's, on two monitors so
+  a busy fleet's lag lands on the concurrent lane's own `dropped` and never
+  as a break in the origin's lanes), take `t0`, call exactly as `call`
+  does, hold the window. `model/trace.rs` relates each sample to the
+  procedure from values in hand (`TraceTarget::relation_of`, a first-chunk
+  naming heuristic stated as one); the rows take their clocks and
+  provenance from `TimelineRow`, not a second vocabulary. `report/trace.rs`
+  pins `TraceReport` — `subscribed_before_call` always `true` and pinned so
+  an inverted order changes the document — and the exit code is the
+  call's. Additive: `FleetAnswer` carries the reply sample's HLC, and
+  `Responder::reply_stamped` lets a producer stamp its reply, which is what
+  gives a trace its HLC reference (zenoh's timestamping stamps
+  publications, not replies).
+
+### `zenkey`
+
+- `selector::all_under(scope)` — `v1/<scope>/**`, the data-class firehose
+  of one origin or the fleet, typed (#215).
+
 ### `zenctl`
 
 - `timeline`, a new wire verb at the root — see `zenctl/CHANGELOG.md`.
+- `service call --trace [--for SECS]`, the RPC trace window — see
+  `zenctl/CHANGELOG.md`.
 
 ## 0.8.0 — what the adopters found (2026-09-06)
 

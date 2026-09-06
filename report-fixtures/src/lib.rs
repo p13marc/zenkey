@@ -20,7 +20,7 @@
 
 use zenkey_fleet::report::*;
 use zenkey_fleet::{
-    Coverage, CoverageRow, RecordReport, ReplayReport, StorageInfo, TimelineReport,
+    Coverage, CoverageRow, RecordReport, ReplayReport, StorageInfo, TimelineReport, TraceReport,
 };
 
 pub const ORIGIN: &str = "h-3fa9c2d41b7e";
@@ -947,6 +947,112 @@ pub fn call_report_partial_page() -> CallReport {
                 attachment_bytes: None,
             },
         ],
+    }
+}
+
+/// A traced long-running call (#215): the reply, then the idiom's two
+/// declared-chain effects with both clocks, one same-origin sample that is
+/// not in the chain, a break before the second attributed row, and a
+/// concurrent lane with a count and two examples.
+pub fn trace_report() -> TraceReport {
+    let row =
+        |key: &str, relation, arrival_delta_ms, hlc: Option<(u64, i64)>, break_before| TraceRow {
+            key: key.into(),
+            relation,
+            arrival_delta_ms,
+            hlc: hlc.map(|(ntp, _)| format!("{ntp}/33")),
+            hlc_delta_ms: hlc.map(|(_, d)| d),
+            stamped_by: hlc.map(|_| "foreign:33".to_string()),
+            kind: RowKind::Put,
+            payload_bytes: 40,
+            break_before,
+        };
+    TraceReport {
+        call: CallReport {
+            key: format!("acme/v1/{ORIGIN}/@rpc/demo/artifact/request"),
+            timeout_s: 5.0,
+            answers: vec![CallAnswer {
+                origin: ORIGIN.into(),
+                outcome: CallOutcome::Ok {
+                    value: Some(serde_json::json!({"id": "01HZY"})),
+                    text: None,
+                },
+                attachment: None,
+                attachment_bytes: None,
+            }],
+        },
+        scopes: vec![format!("acme/v1/{ORIGIN}/**"), "acme/v1/*/**".into()],
+        excluded: TRACE_EXCLUDED,
+        window_s: 10.0,
+        subscribed_before_call: true,
+        t0_unix_s: 1_788_000_000.5,
+        call_returned_ms: 4.2,
+        hlc_reference: HlcReference::Reply,
+        reply_hlc: Some("7680000000000000000/33".into()),
+        chain_rule: TRACE_CHAIN_RULE,
+        registry_loaded: true,
+        idiom: "long-running".into(),
+        attributed: vec![
+            row(
+                &format!("acme/v1/{ORIGIN}/state/demo/artifact/pcap"),
+                TraceRelation::DeclaredChain,
+                12.5,
+                Some((7680000000034359738, 8)),
+                None,
+            ),
+            row(
+                &format!("acme/v1/{ORIGIN}/events/demo/artifact/01HZY"),
+                TraceRelation::DeclaredChain,
+                250.0,
+                Some((7680000001056964608, 246)),
+                Some(3),
+            ),
+        ],
+        same_origin: vec![row(
+            &format!("acme/v1/{ORIGIN}/telemetry/other/noise"),
+            TraceRelation::SameOriginUndeclared,
+            1.0,
+            None,
+            None,
+        )],
+        concurrent: ConcurrentLane {
+            samples: 40,
+            keys: 2,
+            examples: vec![
+                "acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu".into(),
+                "acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem".into(),
+            ],
+            dropped: 0,
+        },
+        dropped: 3,
+        keys_evicted: 0,
+    }
+}
+
+/// The same call with no registry loaded: the chain is unjudgeable, so the
+/// attributed lane is empty and every same-origin row says why (O4) — and
+/// the reply carried no HLC, so no ΔHLC exists to show.
+pub fn trace_report_no_registry() -> TraceReport {
+    let base = trace_report();
+    TraceReport {
+        hlc_reference: HlcReference::None,
+        reply_hlc: None,
+        registry_loaded: false,
+        idiom: "undeclared".into(),
+        attributed: vec![],
+        same_origin: base
+            .attributed
+            .iter()
+            .chain(&base.same_origin)
+            .map(|r| TraceRow {
+                relation: TraceRelation::SameOriginRegistryNotLoaded,
+                hlc_delta_ms: None,
+                break_before: None,
+                ..r.clone()
+            })
+            .collect(),
+        dropped: 0,
+        ..base
     }
 }
 

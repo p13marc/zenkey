@@ -178,6 +178,14 @@ Options:
       --raw
           Send the request body verbatim: no schema lookup, no encoding
 
+      --trace
+          After the reply, keep a window open on the called origin and list what was observed there (RFC 05 §3's long-running idiom: request → status state → events). The window is subscribed **before** the call leaves, so nothing published between the reply and the subscription can be missed; each sample carries Δ on the arrival clock and, where stamped, on the HLC against the reply's, and is tagged by how the registry relates it to the procedure — an observation, never a cause. One act, one spelling: there is no separate `trace` verb, because the trace is this call's own observation. Not with `*`: a trace attributes to one origin
+
+      --for <SECS>
+          The passive window held after the reply, seconds (with --trace)
+          
+          [default: 10]
+
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.
           

@@ -67,9 +67,12 @@ pub enum HlcReference {
     /// The reply sample carried an HLC; every stamped effect's `hlc_delta_ms`
     /// is measured from it.
     Reply,
-    /// The reply carried none — the caller's own session mints no HLC (see
-    /// [`crate::model::timeline`]) — so no `hlc_delta_ms` is computed at all,
-    /// and the column is absent rather than defaulted to arrival.
+    /// The reply carried none — a deployment's timestamping stamps
+    /// publications, not replies, and the caller's own session mints no HLC
+    /// (see [`crate::model::timeline`]) — so no `hlc_delta_ms` is computed
+    /// at all, and the column is absent rather than defaulted to arrival. A
+    /// responder that stamps its reply ([`crate::Responder::reply_stamped`])
+    /// is what makes the reference exist.
     None,
 }
 
@@ -146,6 +149,10 @@ pub struct TraceReport {
     pub reply_hlc: Option<String>,
     /// [`TRACE_CHAIN_RULE`].
     pub chain_rule: &'static str,
+    /// Whether a registry was loaded. `false` means every same-origin row is
+    /// [`TraceRelation::SameOriginRegistryNotLoaded`] — and, when the window
+    /// was empty, that the chain could not have been judged at all.
+    pub registry_loaded: bool,
     /// The procedure's declared `kind` token — `long-running`, `write`,
     /// `read` — or `undeclared` when no loaded slice declares it.
     pub idiom: String,
@@ -194,6 +201,7 @@ mod tests {
             hlc_reference: HlcReference::None,
             reply_hlc: None,
             chain_rule: TRACE_CHAIN_RULE,
+            registry_loaded: false,
             idiom: "undeclared".into(),
             attributed: vec![],
             same_origin: vec![],

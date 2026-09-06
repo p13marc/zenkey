@@ -749,6 +749,7 @@ pub async fn call_traced(
         },
         reply_hlc: reply_hlc.map(|t| t.to_string()),
         chain_rule: TRACE_CHAIN_RULE,
+        registry_loaded: slices.is_some(),
         idiom,
         attributed,
         same_origin,
