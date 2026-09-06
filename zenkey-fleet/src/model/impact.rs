@@ -3,7 +3,7 @@
 //! needs (RFC 06 §5.1). No session, no clock, no private state: a
 //! notifier runs it on its tick, a `.zrec` replay runs it on a recording.
 //!
-//! - **Only containment kinds propagate** ([`EdgeKind::propagates`]);
+//! - **Only containment kinds propagate** ([`EdgeKind::propagates`](crate::report::EdgeKind::propagates));
 //!   `l2_adjacent` and any unknown kind are inert.
 //! - **A root is a down entity with no down containment ancestor**; every
 //!   other affected site the walk reaches is a symptom carrying its

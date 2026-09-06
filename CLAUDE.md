@@ -159,11 +159,23 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   discipline chunk hangs off). `alerts`/`liveliness-gone` are **not**
   `Condition` variants: a `Condition` is one state per rule, these are one
   state per key. `check-config` refuses exactly what `run` would (exit 2);
-  `--dry-run` swaps every sink for a printing one. **A real daemon,
-  explicitly launched, publishes its own state like a producer**
-  (`registry/zenwatch.toml`: `health`, `firing/{rule_id}`, `doctor` — the
-  publication itself is chunk CM), and it caches no discovery: it is not
-  the noun `docs/redesign-2026-07.md` §6.1 rejected.
+  `--dry-run` swaps every sink for a printing one. **The discipline**
+  (#389, `discipline/`) sits between `route` and delivery and takes the
+  clock as an argument: `for`, dedup, grouping by a label set, repeat, the
+  four resolved kinds, and inhibition — the engine's impact attribution
+  (`zenkey_fleet::attribute`, RFC 06 §5.6) over the catalog's `edge/*`,
+  `entity/*`, `alias/*` documents (`zenkey_fleet::report::{EdgeDoc,
+  EntityDoc, AliasDoc}`) with *down* decided from the daemon's own token
+  ledger; a symptom is delivered `inhibited_by` its root or held and
+  counted, never dropped silently. The ledger is bounded and survives a
+  restart in `state_file` (missing is fresh, malformed is exit 2). **A
+  real daemon, explicitly launched, publishes its own state like a
+  producer** (`publish.rs`: `introspect`/`describe` served before the
+  `alive` token through the engine's `BringUp`; `health` every 30 s, one
+  `firing/{rule_id}` document per rule with something announced,
+  tombstoned when it clears; `doctor` is a placeholder shape until CN),
+  and it caches no discovery: it is not the noun
+  `docs/redesign-2026-07.md` §6.1 rejected.
 
 Plus `fixture-tests/` (unpublished): the ZenSight registry snapshot compiled
 through zenkey-build — the codegen regression corpus. **Do not add features
