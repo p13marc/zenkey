@@ -115,12 +115,7 @@ fn structural(row: &SnapshotRow) -> Option<serde_json::Value> {
 }
 
 fn payload(row: &SnapshotRow) -> Option<Vec<u8>> {
-    use base64::Engine as _;
-    if row.delete {
-        return None;
-    }
-    let b64 = row.bytes.as_deref()?;
-    base64::engine::general_purpose::STANDARD.decode(b64).ok()
+    row.payload()
 }
 
 /// What moved between two rows of one key — `None` when nothing did.

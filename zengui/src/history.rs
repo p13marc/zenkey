@@ -104,6 +104,39 @@ impl HistoryEntry {
         }
     }
 
+    /// A synthetic entry from a `.zsnap` row (#219): the snapshot's value
+    /// for this key, shaped so the diff panel can compare it against a live
+    /// sample through the same code. `seq` is 0 and `received` is *now* —
+    /// neither is a fact about the snapshot, and the caption the panel
+    /// draws over this entry names the snapshot's moment and span instead.
+    pub fn from_snapshot_row(row: &zenkey_fleet::SnapshotRow) -> HistoryEntry {
+        let bytes = row.payload().unwrap_or_default();
+        let view = SampleView {
+            key: row.key.clone(),
+            payload: zenoh::bytes::ZBytes::from(bytes),
+            encoding: row.encoding.clone().unwrap_or_default(),
+            kind: if row.delete {
+                zenoh::sample::SampleKind::Delete
+            } else {
+                zenoh::sample::SampleKind::Put
+            },
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: Instant::now(),
+        };
+        let mut entry = HistoryEntry::render(0, &view);
+        // The HLC rides as the string the file carries; the view above
+        // could not carry it typed, and the panel only ever prints it.
+        entry.timestamp = row.timestamp.clone();
+        entry
+    }
+
     /// What this entry costs the ring's byte budget.
     ///
     /// The payload is charged its wire size and the decoded document is
@@ -427,5 +460,43 @@ mod tests {
         assert_eq!(rec.focus(), Some(0), "focus follows the newest by default");
         rec.selected = Some(0);
         assert_eq!(rec.focus(), Some(0));
+    }
+
+    /// A `.zsnap` row becomes a diffable entry (#219): the payload is the
+    /// file's bytes, the structural form is there for a JSON body, the
+    /// stamp rides as the file's string, and a delete row is a tombstone.
+    #[test]
+    fn a_snapshot_row_becomes_a_diffable_entry() {
+        let row = zenkey_fleet::SnapshotRow {
+            key: "v1/h-0123456789ab/state/p/a".into(),
+            delete: false,
+            bytes: Some("eyJ2YWx1ZSI6NDEuMH0=".into()),
+            encoding: Some("application/json".into()),
+            timestamp: Some("7f3b/ab12".into()),
+            stamper: None,
+            source: None,
+            source_zid: None,
+            registration: zenkey_fleet::report::RegistrationWire::RegistryNotLoaded,
+            verdict: zenkey_fleet::report::VerdictWire::NotValidated {
+                reason: "no_registry".into(),
+            },
+            holder: zenkey_fleet::report::Holder::Unattributed {
+                reason: "roster not asked".into(),
+            },
+        };
+        let e = HistoryEntry::from_snapshot_row(&row);
+        assert_eq!(e.value, Some(serde_json::json!({"value": 41.0})));
+        assert_eq!(e.timestamp.as_deref(), Some("7f3b/ab12"));
+        assert_eq!(e.len, 14);
+        assert!(!e.is_delete);
+
+        let gone = zenkey_fleet::SnapshotRow {
+            delete: true,
+            bytes: None,
+            ..row
+        };
+        let e = HistoryEntry::from_snapshot_row(&gone);
+        assert!(e.is_delete);
+        assert_eq!(e.preview, "<delete>");
     }
 }

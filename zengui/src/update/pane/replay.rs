@@ -71,6 +71,66 @@ pub(crate) fn update(
             work.replay.replay_loading = Some(path.clone());
             services::record::load(path)
         }
+        ReplayMsg::SnapshotOpenToggled => {
+            work.replay.snapshot_open = match work.replay.snapshot_open {
+                Some(_) => None,
+                None => Some(String::new()),
+            };
+            work.replay.snapshot_note = None;
+            Task::none()
+        }
+        ReplayMsg::SnapshotPathChanged(s) => {
+            if let Some(p) = &mut work.replay.snapshot_open {
+                *p = s;
+            }
+            Task::none()
+        }
+        ReplayMsg::SnapshotOpen => {
+            if work.replay.snapshot_loading.is_some() {
+                return Task::none();
+            }
+            let Some(path) = work
+                .replay
+                .snapshot_open
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+            else {
+                return Task::none();
+            };
+            // The `.zrec` open's shape (#255): the parse runs as a task, and
+            // the loading claim is what the tab shows meanwhile (O4).
+            work.replay.snapshot_open = None;
+            work.replay.snapshot_note = None;
+            work.replay.snapshot_loading = Some(path.clone());
+            services::record::load_snapshot(path)
+        }
+        ReplayMsg::SnapshotLoaded(path, result) => {
+            work.replay.snapshot_loading = None;
+            match result {
+                // No mode is entered and no pane is fed (#219): a snapshot
+                // is a moment to compare against, held beside the live
+                // world rather than replacing it.
+                Ok(snapshot) => {
+                    work.replay.snapshot = Some(snapshot);
+                    work.replay.snapshot_open = None;
+                    work.replay.snapshot_note = None;
+                }
+                Err(e) => {
+                    work.replay.snapshot_open = Some(path);
+                    work.replay.snapshot_note = Some(e);
+                }
+            }
+            Task::none()
+        }
+        ReplayMsg::SnapshotClosed => {
+            work.replay.snapshot = None;
+            for slot in sub.all_mut() {
+                slot.compare_snapshot = false;
+            }
+            Task::none()
+        }
         ReplayMsg::Loaded(path, result) => {
             work.replay.replay_loading = None;
             match result {

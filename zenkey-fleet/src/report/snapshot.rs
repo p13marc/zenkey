@@ -107,6 +107,21 @@ pub struct SnapshotRow {
     pub holder: Holder,
 }
 
+impl SnapshotRow {
+    /// The exact wire payload, decoded from `bytes`. `None` on a delete row
+    /// (the tombstone is the whole fact), on a row that carries no `bytes`,
+    /// or on base64 that does not decode — a file a hand edited.
+    pub fn payload(&self) -> Option<Vec<u8>> {
+        use base64::Engine as _;
+        if self.delete {
+            return None;
+        }
+        base64::engine::general_purpose::STANDARD
+            .decode(self.bytes.as_deref()?)
+            .ok()
+    }
+}
+
 /// Who stamped a value's HLC (RFC 09 §5.1 O7), on the wire — the
 /// [`StampProvenance`](crate::StampProvenance) vocabulary, tagged `kind`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
