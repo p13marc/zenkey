@@ -756,30 +756,6 @@ pub fn schema_rows_for_type(
         .collect()
 }
 
-/// Every producer's schema for one type name, through a [`SchemaStore`].
-///
-/// The store keeps the first parseable reply per producer and no origin, so
-/// this cannot see two hosts of one producer disagree — `interface show
-/// --schema` reads a [`describe_sweep`](crate::bus::describe::describe_sweep)
-/// and [`schema_rows_for_type`] instead (#410). This stays for a caller that
-/// already holds a warm store and wants the rows alone.
-pub async fn schemas_for_type(
-    store: &SchemaStore,
-    session: &Session,
-    producers: &[String],
-    type_name: &str,
-    full: bool,
-) -> Vec<crate::report::SchemaRow> {
-    let mut out = Vec::new();
-
-    for producer in producers {
-        if let Some(schema) = store.schema_for(session, producer, type_name).await {
-            out.push(row(producer, type_name, &schema, full));
-        }
-    }
-    out
-}
-
 /// One producer's served describe set, attributed to the host that answered
 /// (#398).
 ///

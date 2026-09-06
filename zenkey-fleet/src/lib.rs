@@ -156,7 +156,7 @@ pub use judge::field::{
 pub use model::decode::{
     DEFAULT_MAX_PRODUCERS, DecodedSample, DescribedSchema, Rendering, SchemaStore, Sealed,
     StoreBounds, decode_sample, prewarm, schema_drift, schema_dump, schema_rows_for_type,
-    schemas_for_type, totality_gaps,
+    totality_gaps,
 };
 /// The traits [`watchdog`] is driven through (#397), re-exported so a
 /// consumer needs them in scope without taking a direct dependency on
