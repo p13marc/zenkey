@@ -271,6 +271,7 @@ fn inspector<'a>(
         node_detail: &work.verdicts.node_detail,
         fields: &slot.fields,
         why: &slot.why,
+        consumers: &slot.consumers,
         base: dep.base(),
         observed: &obs.observed,
         sp,
