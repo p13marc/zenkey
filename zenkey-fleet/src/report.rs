@@ -46,6 +46,7 @@
 //! never differed can be merged — without a single call site moving. The
 //! files are organisation; the module is the interface.
 
+mod acl;
 mod admin;
 mod alert;
 mod asked;
@@ -74,6 +75,7 @@ mod tape;
 mod topic;
 mod why;
 
+pub use acl::*;
 pub use admin::*;
 pub use alert::*;
 pub use asked::*;

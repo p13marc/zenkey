@@ -1211,6 +1211,187 @@ eeff0011  peer    —      (heard of, not queryable)
     );
 }
 
+/// The ACL plan draws its three lists as two tables — principals with their
+/// rules, rules with their key expressions — and tags five row kinds on the
+/// stream. The one warning here is the not-asked registry, which is a
+/// coverage note and therefore rides the machine formats too.
+#[test]
+fn an_acl_plan_draws_principals_then_rules_and_tags_five_row_kinds() {
+    let plan = fx::acl_plan();
+    let out = ndjson(&plan);
+    let mut kinds: Vec<String> = out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| v.get("row").and_then(|r| r.as_str()).map(str::to_string))
+        .collect();
+    kinds.dedup();
+    assert_eq!(kinds, ["rule", "subject", "policy", "warning"]);
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["report"], "acl-plan");
+    assert_eq!(envelope["default_permission"], "deny");
+    assert!(envelope.get("registry").is_none(), "not asked is absent");
+    assert!(envelope.get("rules").is_none(), "the lists are rows");
+    assert_data_eq!(
+        table(&plan),
+        str![[r#"
+principals under base "zensight" (default deny):
+
+  subject           role     bound by             rules
+  h-3fa9c2d41b7e    host     cn h-3fa9c2d41b7e    host-data-h-3fa9c2d41b7e, host-serve-h-3fa9c2d41b7e, host-media-h-3fa9c2d41b7e, host-blob-seed-h-3fa9c2d41b7e, host-adv-h-3fa9c2d41b7e, interest-prop
+  zensight-catalog  catalog  cn zensight-catalog  catalog-own-catalog, catalog-intake-declare-catalog, catalog-intake-recv-catalog, interest-prop
+  zensight-console  console  cn zensight-console  ops-sub, ops-recv, ops-own-token, no-remote-actions
+  zensight-watch    watch    cn zensight-watch    watch-sub, watch-recv, no-remote-actions
+
+rules:
+
+  rule                            permission  flows    messages
+  host-data-h-3fa9c2d41b7e        allow       ingress  put, delete, liveliness_token
+      zensight/v1/h-3fa9c2d41b7e/**
+  host-serve-h-3fa9c2d41b7e       allow       both     declare_queryable, reply, query
+      zensight/v1/h-3fa9c2d41b7e/@rpc/**
+      zensight/v1/h-3fa9c2d41b7e/@blob/**
+  host-media-h-3fa9c2d41b7e       allow       ingress  put
+      zensight/v1/h-3fa9c2d41b7e/@media/**
+  host-blob-seed-h-3fa9c2d41b7e   allow       ingress  put
+      zensight/v1/h-3fa9c2d41b7e/@blob/store/**
+      zensight/v1/h-3fa9c2d41b7e/@blob/tree/**
+  host-adv-h-3fa9c2d41b7e         allow       both     put, liveliness_token, declare_queryable, reply, query
+      zensight/v1/h-3fa9c2d41b7e/**/@adv/**
+  interest-prop                   allow       egress   declare_subscriber, declare_liveliness_subscriber, liveliness_query, query
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/*/@blob/**
+      zensight/v1/*/@media/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+  catalog-own-catalog             allow       both     put, delete, liveliness_token, declare_queryable, reply, query
+      zensight/v1/@catalog/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/@catalog/**/@adv/**
+  catalog-intake-declare-catalog  allow       ingress  declare_subscriber, declare_liveliness_subscriber, liveliness_query, query
+      zensight/v1/**
+      zensight/v1/**/@adv/**
+  catalog-intake-recv-catalog     allow       egress   put, delete, reply, liveliness_token
+      zensight/v1/**
+      zensight/v1/**/@adv/**
+  ops-sub                         allow       ingress  declare_subscriber, declare_liveliness_subscriber, liveliness_query, query
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/*/@blob/**
+      zensight/v1/*/@media/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+  ops-recv                        allow       egress   put, delete, reply, liveliness_token
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/*/@blob/**
+      zensight/v1/*/@media/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+  ops-own-token                   allow       ingress  liveliness_token
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+✗ no-remote-actions               deny        both     query
+      zensight/v1/*/@rpc/*/**/set
+  watch-sub                       allow       ingress  declare_subscriber, declare_liveliness_subscriber, liveliness_query, query
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+  watch-recv                      allow       egress   put, delete, reply, liveliness_token
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&plan),
+        str![[r#"
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+15 rule(s), 4 subject(s), 4 polic(y/ies)
+write the block: `zenctl acl gen --enrollment … --json5 > router-acl.json5`, merge it at the router config's top level, restart the router — ACL config is not runtime-reloadable (RFC 03 §4 D6)
+
+"#]]
+    );
+    // A refusal is a note in every format, and a row in the machine ones.
+    let refused = fx::acl_plan_refused();
+    assert!(notes(&refused).contains("REFUSED bare-host"));
+    assert!(ndjson(&refused).contains(r#""row":"refusal""#));
+}
+
+/// The check puts the verdict word beside its findings, and states twice
+/// what it could not see: the running block, and interest propagation.
+#[test]
+fn an_acl_check_names_its_findings_and_what_it_could_not_observe() {
+    assert_data_eq!(
+        table(&fx::acl_check()),
+        str![[r#"
+router.json5: 10 rule(s) and 5 subject(s) configured; 15 and 4 planned
+  ✗ rule_missing  interest-prop     planned allow egress declare_liveliness_subscriber,declare_subscriber,liveliness_query,query zensight/v1/**
+  ✗ unknown_cn    stranger.example  configured bound by subject "stranger"
+FAIL
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&fx::acl_check_clean()),
+        str![[r#"
+router.json5: 15 rule(s) and 4 subject(s) configured; 15 and 4 planned
+PASS
+
+"#]]
+    );
+    let n = notes(&fx::acl_check());
+    assert!(n.contains("serves no GET"));
+    assert!(n.contains("interest propagation not asked"));
+    let out = ndjson(&fx::acl_check());
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["interest_probe"]["answer"], "not_asked");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert_eq!(out.lines().count(), 3, "envelope + two findings");
+}
+
+/// The explanation answers per direction with the rules that decided, deny
+/// first — and its ndjson is one row per direction, tagged with the flow.
+#[test]
+fn an_acl_explain_answers_per_direction_deny_first() {
+    assert_data_eq!(
+        table(&fx::acl_explain()),
+        str![[r#"
+zensight-console  query  zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action/set
+  ingress  DENIED  no-remote-actions denies query on ingress — deny wins over ops-sub
+      ✗ no-remote-actions  deny  zensight/v1/*/@rpc/*/**/set
+      ✓ ops-sub  allow  zensight/v1/*/@rpc/**
+  egress   DENIED  no-remote-actions denies query on egress — deny wins
+      ✗ no-remote-actions  deny  zensight/v1/*/@rpc/*/**/set
+
+"#]]
+    );
+    let out = ndjson(&fx::acl_explain());
+    let rows: Vec<serde_json::Value> = out
+        .lines()
+        .skip(1)
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["flow"], "ingress");
+    assert_eq!(rows[0]["decision"], "denied");
+    assert_eq!(rows[0]["via"][0]["permission"], "deny");
+    assert_eq!(rows[1]["flow"], "egress");
+}
+
 // ── The zenctl-local families ─────────────────────────────────────────────
 //
 // Their fixtures are here rather than in `zenkey-report-fixtures`: that crate
@@ -1423,6 +1604,9 @@ sent 240 sample(s) over 5.0s across 12 subject(s); 2 refused by schema
 #[test]
 fn every_render_impl_is_drawn_somewhere_in_this_file() {
     const COVERED: &[&str] = &[
+        "acl-check",
+        "acl-explain",
+        "acl-plan",
         "admin-graph",
         "admin-routers",
         "base-list",

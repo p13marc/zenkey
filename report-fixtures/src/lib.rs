@@ -1611,3 +1611,121 @@ pub fn storage_explain_none() -> StorageExplain {
         ),
     }
 }
+
+// ── acl gen (#392) ────────────────────────────────────────────────────────
+
+/// The plan of a small fleet — one host on every plane, a catalog on the
+/// advanced tier, a console, a watch — with no registry asked, so the
+/// write set is the convention's unnarrowed `set` leaf and the plan says so.
+/// Built through the planner itself rather than by hand: what the corpora
+/// pin is what the verb draws.
+pub fn acl_plan() -> AclPlan {
+    let enrollment: Enrollment = Enrollment {
+        base: Some("zensight".into()),
+        fleet: FleetSpec {
+            catalog_adv: true,
+            salt: None,
+        },
+        principal: vec![
+            PrincipalSpec {
+                cn: Some(ORIGIN.into()),
+                role: Role::Host,
+                origin: Some(ORIGIN.into()),
+                adv: true,
+                blob_seed: true,
+                media: true,
+                ..Default::default()
+            },
+            PrincipalSpec {
+                cn: Some("zensight-catalog".into()),
+                role: Role::Catalog,
+                ..Default::default()
+            },
+            PrincipalSpec {
+                cn: Some("zensight-console".into()),
+                role: Role::Console,
+                adv: true,
+                ..Default::default()
+            },
+            PrincipalSpec {
+                cn: Some("zensight-watch".into()),
+                role: Role::Watch,
+                ..Default::default()
+            },
+        ],
+    };
+    zenkey_fleet::plan_acl(
+        &enrollment,
+        "zensight",
+        None,
+        zenkey_fleet::AclOptions::default(),
+    )
+}
+
+/// The same plan with one principal refused: a host enrolled with neither
+/// origin nor machine-id.
+pub fn acl_plan_refused() -> AclPlan {
+    let mut plan = acl_plan();
+    plan.refusals.push(AclRefusal {
+        principal: "bare-host".into(),
+        reason: "a host needs `origin` or `machine_id`".into(),
+        cite: "RFC 03 §4 D6".into(),
+    });
+    plan
+}
+
+/// A check with two findings: the shared `interest-prop` rule missing (the
+/// fifth fact's failure, exactly) and a CN the enrollment never enrolled.
+pub fn acl_check() -> AclCheck {
+    AclCheck {
+        base: "zensight".into(),
+        against: "router.json5".into(),
+        planned_rules: 15,
+        observed_rules: 10,
+        planned_subjects: 4,
+        observed_subjects: 5,
+        findings: vec![
+            AclFinding {
+                kind: AclFindingKind::RuleMissing,
+                id: "interest-prop".into(),
+                planned: Some(
+                    "allow egress declare_liveliness_subscriber,declare_subscriber,liveliness_query,query zensight/v1/**".into(),
+                ),
+                observed: None,
+            },
+            AclFinding {
+                kind: AclFindingKind::UnknownCn,
+                id: "stranger.example".into(),
+                planned: None,
+                observed: Some("bound by subject \"stranger\"".into()),
+            },
+        ],
+        interest_probe: Judgement::NotAsked,
+        judgement: Judgement::Established,
+    }
+}
+
+/// A clean check.
+pub fn acl_check_clean() -> AclCheck {
+    AclCheck {
+        findings: vec![],
+        observed_rules: 15,
+        observed_subjects: 4,
+        judgement: Judgement::NotEstablished {
+            reason: "router.json5 carries the plan whole: 15 rule(s), 4 subject(s), 4 polic(y/ies), enabled, default deny".into(),
+        },
+        ..acl_check()
+    }
+}
+
+/// The console asking a write procedure: denied on ingress by the deny that
+/// beat `ops-sub`, and nothing at all on egress.
+pub fn acl_explain() -> AclExplain {
+    zenkey_fleet::explain_acl(
+        &acl_plan(),
+        "zensight-console",
+        "zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action/set",
+        AclMessage::Query,
+    )
+    .expect("an enrolled principal and a valid key")
+}

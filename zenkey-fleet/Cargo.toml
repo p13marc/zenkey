@@ -69,6 +69,9 @@ arc-swap = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# The enrollment file's parse test only (`report::acl`); the library never
+# reads a TOML — that is the frontend's job, as it is for every other file.
+toml = { workspace = true }
 # The report values `tests/report_contract.rs` is written against, shared with
 # zenctl's render tests so the two corpora cannot drift about what a report
 # *is* (#201). A dev-dependency cycle — this crate depends on that one — which

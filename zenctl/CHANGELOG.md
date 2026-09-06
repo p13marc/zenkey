@@ -8,6 +8,34 @@ sitting.
 
 ## Unreleased
 
+**`acl gen` — RFC 09 §3's grant matrix, generated** (#392). A new `acl`
+noun with one verb. `zenctl acl gen --enrollment <file.toml>` reads a small
+TOML binding certificate CNs to roles (`host`, `catalog`, `console`,
+`desired-author`, `watch`) and origins — given, or *computed* from a
+machine-id with the RFC 06 §1 derivation, and refused when the two disagree
+— and plans the router's `access_control` block: one rule per plane per
+host because `**` never crosses `@rpc`/`@media`/`@blob` in inclusion
+(fact 1), the catalog spelled on its own because `*` never covers it
+(fact 2), rules *and* subjects *and* policies (fact 3), every consumer's
+declarations allowed by name (fact 4), and — the fifth fact, from the
+reference deployment — a shared egress-only `interest-prop` rule on every
+publishing policy, without which a peer-mode publisher publishes to
+nobody. With `--registry`, the planes narrow to what host producers declare
+and `no-remote-actions` denies exactly the declared write procedures;
+without one, the plan says so. `--json5` writes zenohd's block (field for
+field zenoh 1.10, a comment per rule naming its row and its fact), a foreign
+schema that conflicts with `--format` the way `--dot` does. A refused
+principal exits 1.
+
+`--check --against <router.json5>` diffs the plan against the block a
+router's config file carries, read through zenoh's own loader — the running
+block is not observable, because zenoh 1.10's admin space serves no GET
+under `config/**` — and exits 0/1/2 through the one judgement projection;
+the interest-propagation probe is *not asked*, and the report says why.
+`--explain <principal> <key> <message>` answers per direction with the rules
+that decided, inclusion by zenoh-keyexpr, exit 0. Zid-bound subjects need
+`--allow-zid-subjects`, because zenoh's own config says a ZID is not
+authenticated.
 **`storage gen` plans the router's storages from the registry** (#393) — a
 new verb under the `storage` noun, no flag or spelling elsewhere moved.
 RFC 09 §2 specifies class-driven storages whose `garbage_collection.lifespan`

@@ -1,0 +1,42 @@
+# A six-principal fleet for `zenctl acl gen` (RFC 09 §3, #392): three hosts,
+# a catalog, a console and a watch. The second host gives its machine-id
+# rather than its origin — RFC 06 §1's test vector, so the computed origin is
+# h-20609002f7b6 — and the salt it needs sits under [fleet].
+
+base = "zensight"
+
+[fleet]
+catalog_adv = true
+salt = "example-salt-v1"
+
+[[principal]]
+cn = "h-3fa9c2d41b7e"
+role = "host"
+origin = "h-3fa9c2d41b7e"
+adv = true
+blob_seed = true
+media = true
+
+[[principal]]
+cn = "edge-02.example"
+role = "host"
+machine_id = "b642b4217b34b1e8d3bd915fc65c4452"
+
+[[principal]]
+cn = "h-0123456789ab"
+role = "host"
+origin = "h-0123456789ab"
+adv = true
+
+[[principal]]
+cn = "zensight-catalog"
+role = "catalog"
+
+[[principal]]
+cn = "zensight-console"
+role = "console"
+adv = true
+
+[[principal]]
+cn = "zensight-watch"
+role = "watch"

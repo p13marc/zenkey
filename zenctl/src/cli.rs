@@ -471,6 +471,10 @@ pub(crate) enum Command {
     /// and the router block that makes it persist (RFC 09 §2).
     #[command(subcommand)]
     Storage(StorageCmd),
+    /// Router access control: RFC 09 §3's grant matrix, generated from an
+    /// enrollment file (#392).
+    #[command(subcommand)]
+    Acl(AclCmd),
     /// The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2).
     #[command(subcommand)]
     Blob(BlobCmd),
@@ -823,6 +827,49 @@ pub(crate) enum AdminCmd {
     /// and liveliness backs each element. Nodes whose admin space is off
     /// render "heard of, not queryable" — never omitted.
     Graph(AdminGraphArgs),
+}
+
+#[derive(Subcommand)]
+pub(crate) enum AclCmd {
+    /// Generate the router's `access_control` block from an enrollment
+    /// file — CN ↔ role ↔ origin, one `[[principal]]` each (RFC 09 §3).
+    ///
+    /// Four facts of zenoh ACL shape every rule, and each is a way a
+    /// hand-written block fails silently: matching is keyexpr INCLUSION and
+    /// `**` never crosses `@rpc`/`@media`/`@blob` (one rule per plane); `*`
+    /// never covers `@catalog` (its own rule); rules alone are refused —
+    /// subjects and policies are required; under default deny every
+    /// DECLARATION needs allowing too. A fifth, from the reference
+    /// deployment: a consumer's declares are checked on egress toward the
+    /// publisher's face, so every publishing policy carries a shared
+    /// egress-only `interest-prop` rule. With `--registry`, the planes are
+    /// narrowed to what host producers declare and `no-remote-actions`
+    /// denies exactly the declared write procedures; without one the plan
+    /// says what it could not narrow. Field names are zenoh 1.10's
+    /// (zenoh-config-1.10.0/src/lib.rs). Exit 1 when a principal was
+    /// refused.
+    ///
+    /// The enrollment file:
+    ///
+    ///   base = "zensight"                 # optional; default --base
+    ///   [fleet]
+    ///   catalog_adv = true                # spell @catalog/**/@adv/**
+    ///   salt = "zensight-host-id-v1"      # for machine_id → origin (RFC 06 §1)
+    ///   [[principal]]
+    ///   cn = "h-3fa9c2d41b7e"             # the certificate CN
+    ///   role = "host"                     # host | catalog | console | desired-author | watch
+    ///   origin = "h-3fa9c2d41b7e"         # or machine_id = "<32 hex>"; both must agree
+    ///   adv = true                        # @adv sidecars
+    ///   blob_seed = true                  # seeds the router @blob store
+    ///   media = true                      # publishes @media
+    ///   [[principal]]
+    ///   cn = "zensight-console"
+    ///   role = "console"
+    ///   remote_actions = false            # true drops the no-remote-actions deny
+    // Verbatim, so the enrollment example above keeps its lines: clap would
+    // otherwise fold it into one.
+    #[command(verbatim_doc_comment)]
+    Gen(AclGenArgs),
 }
 
 #[derive(Subcommand)]
@@ -1673,6 +1720,45 @@ pub(crate) struct AdminGraphArgs {
     /// they are shown as merely reported, never guessed.
     #[arg(long)]
     pub(crate) origins: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `acl gen` verb's flags — one struct the dispatcher hands over whole,
+/// destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct AclGenArgs {
+    /// The enrollment file (TOML): CN ↔ role ↔ origin, one [[principal]]
+    /// each. See `zenctl acl gen --help` for the shape.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) enrollment: PathBuf,
+    /// Emit the router's `access_control` JSON5 block on stdout, a comment
+    /// per rule naming its matrix row and its fact — pipe it into the
+    /// router config. A foreign schema, so `--format` has no say over it.
+    // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
+    #[arg(long, conflicts_with_all = ["check", "explain"])]
+    pub(crate) json5: bool,
+    /// Compare the plan against a router config file (`--against`): missing,
+    /// extra and changed rules, subjects and policies, a CN the enrollment
+    /// does not know. Exit 0 identical / 1 findings / 2 not asked.
+    ///
+    /// A file, not the admin space: zenoh 1.10 serves no GET on
+    /// `@/<zid>/router/config/**` (it only subscribes to it for runtime
+    /// edits), so the running block is not observable from the bus.
+    #[arg(long, requires = "against", conflicts_with = "explain")]
+    pub(crate) check: bool,
+    /// With --check: the router's JSON5 config file, read through zenoh's
+    /// own loader so what is compared is what zenohd would run.
+    #[arg(long, value_name = "FILE", requires = "check")]
+    pub(crate) against: Option<PathBuf>,
+    /// Does PRINCIPAL (a subject id or CN) hold MESSAGE on KEY, via which
+    /// rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0.
+    #[arg(long, num_args = 3, value_names = ["PRINCIPAL", "KEY", "MESSAGE"])]
+    pub(crate) explain: Option<Vec<String>>,
+    /// Admit `zid = "…"` subjects. Prototyping only: a ZID is not backed by
+    /// authentication, and zenoh's own config says so.
+    #[arg(long)]
+    pub(crate) allow_zid_subjects: bool,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }
