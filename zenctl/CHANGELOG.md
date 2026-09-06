@@ -6,6 +6,77 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased
+
+**`acl gen` — RFC 09 §3's grant matrix, generated** (#392). A new `acl`
+noun with one verb. `zenctl acl gen --enrollment <file.toml>` reads a small
+TOML binding certificate CNs to roles (`host`, `catalog`, `console`,
+`desired-author`, `watch`) and origins — given, or *computed* from a
+machine-id with the RFC 06 §1 derivation, and refused when the two disagree
+— and plans the router's `access_control` block: one rule per plane per
+host because `**` never crosses `@rpc`/`@media`/`@blob` in inclusion
+(fact 1), the catalog spelled on its own because `*` never covers it
+(fact 2), rules *and* subjects *and* policies (fact 3), every consumer's
+declarations allowed by name (fact 4), and — the fifth fact, from the
+reference deployment — a shared egress-only `interest-prop` rule on every
+publishing policy, without which a peer-mode publisher publishes to
+nobody. With `--registry`, the planes narrow to what host producers declare
+and `no-remote-actions` denies exactly the declared write procedures;
+without one, the plan says so. `--json5` writes zenohd's block (field for
+field zenoh 1.10, a comment per rule naming its row and its fact), a foreign
+schema that conflicts with `--format` the way `--dot` does. A refused
+principal exits 1.
+
+`--check --against <router.json5>` diffs the plan against the block a
+router's config file carries, read through zenoh's own loader — the running
+block is not observable, because zenoh 1.10's admin space serves no GET
+under `config/**` — and exits 0/1/2 through the one judgement projection;
+the interest-propagation probe is *not asked*, and the report says why.
+`--explain <principal> <key> <message>` answers per direction with the rules
+that decided, inclusion by zenoh-keyexpr, exit 0. Zid-bound subjects need
+`--allow-zid-subjects`, because zenoh's own config says a ZID is not
+authenticated.
+**`storage gen` plans the router's storages from the registry** (#393) — a
+new verb under the `storage` noun, no flag or spelling elsewhere moved.
+RFC 09 §2 specifies class-driven storages whose `garbage_collection.lifespan`
+must be ≥ the longest `ttl_s` in the registry, and the registry knows that
+number; nobody computed it. `zenctl storage gen --deployment <file.toml>`
+takes a small TOML — the base, the volumes with their plugin (and, for
+`redb`, the per-volume history mode of §2.1 v1.28), and per storage a class
+(`state | telemetry | events | catalog | catalog-pdns`, or a base-relative
+`selector`) and a volume — and derives the rest: the selector (`@catalog`
+explicit, because `*` never matches it), the `strip_prefix` as the literal
+leftmost run, and the lifespan as ceil(max covered `ttl_s` × `gc_margin`),
+with the computation shown.
+
+It refuses what the router would refuse — replication on an all-mode volume
+(§2.2), a volume nobody declared, a class the registry declares nothing
+under — and emits the rest of the plan around the refusal, naming it. It
+warns, citing the clause, where a caveat applies: overlapping selectors
+(§2), `complete = true` off the replicated latest storage (§2.2, emitted as
+`false`), retention that is the database's and not zenoh's (§2.3, influx),
+`redb`'s mandatory retention in all mode (§2.1), a seed on a volatile volume
+(§2.1). Without a registry every lifespan is §2.3's default and says so
+(`slices_optional`, #210) — not asked is not empty.
+
+Four ways out. The plan report in the usual three renderings (families
+`storage-plan`, rows `volume` / `storage` / `refusal`); `--json5`, the zenohd
+`plugins.storage_manager` block with every derivation and warning as a
+comment beside the storage it concerns — a foreign schema, so it is a flag
+of its own and conflicts with a typed `--format`, like `--dot` and `--as`
+(#243); `--check`, a verdict verb comparing the plan with the storages the
+admin space reports (family `storage-check`: missing, extra, a differing
+`key_expr` / `strip_prefix` / `volume`, a `gc.lifespan` below the computed
+minimum; exit 0 as planned, 1 a difference, 2 no verdict — an empty admin
+sweep included, since a peer-only mesh is not a router running the plan);
+and `--explain <key>`, which planned storage takes a key and why (family
+`storage-explain`). `gen` alone is an act: 0, or 2 when every storage was
+refused.
+
+Deliberately **not** in the RFC yet: 09 §2's notes will say that this verb
+emits the block with `lifespan` derived, and that sentence needs a changelog
+entry and a header bump of its own. The verb's `--help` carries it meanwhile.
+
 ## 0.5.1 (2026-08-29) — what the fleet does not agree about
 
 No command moved and no flag changed. Three behaviour changes, all of them

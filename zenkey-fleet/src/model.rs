@@ -25,6 +25,7 @@
 //! and says so; it does not call the transport slow. Verdicts are
 //! [`crate::judge`]'s.
 
+pub mod acl;
 pub mod alert;
 pub mod bounded;
 pub mod diff;
@@ -37,6 +38,7 @@ pub mod registry;
 pub mod retain;
 pub mod skeleton;
 pub mod stats;
+pub mod storage;
 pub mod tree;
 
 #[cfg(feature = "decode")]

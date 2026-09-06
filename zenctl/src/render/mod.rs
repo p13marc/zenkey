@@ -54,6 +54,7 @@ pub use impls::local::{
     SchemaCheckVerdict,
 };
 pub use impls::observations::TopologyView;
+pub use impls::storage::refusal_notes;
 pub mod style;
 pub mod table;
 

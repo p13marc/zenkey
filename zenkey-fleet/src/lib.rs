@@ -260,6 +260,7 @@ pub use judge::retired::scope_note as retired_scope_note;
 pub use judge::why::{StoredLookup, StoredValue, WhyInputs, WhySpec, WireWatch, run_why};
 // `diff` is `value_diff` at the root: a bare `diff` beside `byte_diff` in a
 // crate that also has `schema_drift` and `slice::diff` reads as *the* diff.
+pub use model::acl::{AclOptions, check_acl, explain_acl, plan_acl, to_json5 as acl_plan_json5};
 pub use model::alert::alert_transition;
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
 pub use model::facts::{
@@ -270,6 +271,9 @@ pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
+pub use model::storage::{
+    check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
+};
 pub use model::tree::KeyTreeSnapshot;
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands

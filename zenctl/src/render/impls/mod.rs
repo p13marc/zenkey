@@ -14,6 +14,7 @@
 //! * a heterogeneous row stream gets a discriminator, because a consumer
 //!   should not have to identify a line by guessing at its fields.
 
+mod acl;
 mod bench;
 mod blobs;
 mod calls;
@@ -27,4 +28,5 @@ pub use rate::RateView;
 mod listings;
 pub mod local;
 mod services;
+pub mod storage;
 mod why;

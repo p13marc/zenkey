@@ -14,6 +14,7 @@
 //! answer to give (#242). Their `--format` still chooses how the *notes* are
 //! spelled, and `--format json` on them is an empty stdout by design.
 
+pub mod acl;
 pub mod admin;
 pub mod base;
 pub mod bench;

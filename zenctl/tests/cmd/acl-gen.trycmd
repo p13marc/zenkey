@@ -1,0 +1,580 @@
+`acl gen` turns an enrollment file — CN ↔ role ↔ origin, one `[[principal]]`
+each — into the router's `access_control` block, expanding RFC 09 §3's grant
+matrix per principal under its four facts and the fifth. The fixture is a
+six-principal fleet: three hosts (one giving its machine-id, from which the
+origin is *computed* — RFC 06 §1's test vector, `h-20609002f7b6`), a catalog
+on the advanced tier, a console, a watch. No registry is named, so the plan
+says what it could not narrow (RFC 13 §3 O4).
+
+The table is the plan as a person reads it: who, as what, with which rules;
+then every rule with its key expressions. Fact 1 is visible in the shape —
+`host-data`'s one `**` and beside it a rule per plane — and the fifth fact
+is the shared, egress-only `interest-prop` on every publishing policy.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format table
+principals under base "zensight" (default deny):
+
+  subject           role     bound by             rules
+  h-3fa9c2d41b7e    host     cn h-3fa9c2d41b7e    host-data-h-3fa9c2d41b7e, host-serve-h-3fa9c2d41b7e, host-media-h-3fa9c2d41b7e, host-blob-seed-h-3fa9c2d41b7e, host-adv-h-3fa9c2d41b7e, interest-prop
+  edge-02.example   host     cn edge-02.example   host-data-h-20609002f7b6, host-serve-h-20609002f7b6, interest-prop
+  h-0123456789ab    host     cn h-0123456789ab    host-data-h-0123456789ab, host-serve-h-0123456789ab, host-adv-h-0123456789ab, interest-prop
+  zensight-catalog  catalog  cn zensight-catalog  catalog-own-catalog, catalog-intake-declare-catalog, catalog-intake-recv-catalog, interest-prop
+  zensight-console  console  cn zensight-console  ops-sub, ops-recv, ops-own-token, no-remote-actions
+  zensight-watch    watch    cn zensight-watch    watch-sub, watch-recv, no-remote-actions
+
+rules:
+
+  rule                            permission  flows    messages
+  host-data-h-3fa9c2d41b7e        allow       ingress  put, delete, liveliness_token
+      zensight/v1/h-3fa9c2d41b7e/**
+  host-serve-h-3fa9c2d41b7e       allow       both     declare_queryable, reply, query
+      zensight/v1/h-3fa9c2d41b7e/@rpc/**
+      zensight/v1/h-3fa9c2d41b7e/@blob/**
+  host-media-h-3fa9c2d41b7e       allow       ingress  put
+      zensight/v1/h-3fa9c2d41b7e/@media/**
+  host-blob-seed-h-3fa9c2d41b7e   allow       ingress  put
+      zensight/v1/h-3fa9c2d41b7e/@blob/store/**
+      zensight/v1/h-3fa9c2d41b7e/@blob/tree/**
+  host-adv-h-3fa9c2d41b7e         allow       both     put, liveliness_token, declare_queryable, reply, query
+      zensight/v1/h-3fa9c2d41b7e/**/@adv/**
+  interest-prop                   allow       egress   declare_subscriber, declare_liveliness_subscriber, liveliness_query, query
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/*/@blob/**
+      zensight/v1/*/@media/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+  host-data-h-20609002f7b6        allow       ingress  put, delete, liveliness_token
+      zensight/v1/h-20609002f7b6/**
+  host-serve-h-20609002f7b6       allow       both     declare_queryable, reply, query
+      zensight/v1/h-20609002f7b6/@rpc/**
+      zensight/v1/h-20609002f7b6/@blob/**
+  host-data-h-0123456789ab        allow       ingress  put, delete, liveliness_token
+      zensight/v1/h-0123456789ab/**
+  host-serve-h-0123456789ab       allow       both     declare_queryable, reply, query
+      zensight/v1/h-0123456789ab/@rpc/**
+      zensight/v1/h-0123456789ab/@blob/**
+  host-adv-h-0123456789ab         allow       both     put, liveliness_token, declare_queryable, reply, query
+      zensight/v1/h-0123456789ab/**/@adv/**
+  catalog-own-catalog             allow       both     put, delete, liveliness_token, declare_queryable, reply, query
+      zensight/v1/@catalog/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/@catalog/**/@adv/**
+  catalog-intake-declare-catalog  allow       ingress  declare_subscriber, declare_liveliness_subscriber, liveliness_query, query
+      zensight/v1/**
+      zensight/v1/**/@adv/**
+  catalog-intake-recv-catalog     allow       egress   put, delete, reply, liveliness_token
+      zensight/v1/**
+      zensight/v1/**/@adv/**
+  ops-sub                         allow       ingress  declare_subscriber, declare_liveliness_subscriber, liveliness_query, query
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/*/@blob/**
+      zensight/v1/*/@media/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+  ops-recv                        allow       egress   put, delete, reply, liveliness_token
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/*/@blob/**
+      zensight/v1/*/@media/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+  ops-own-token                   allow       ingress  liveliness_token
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+✗ no-remote-actions               deny        both     query
+      zensight/v1/*/@rpc/*/**/set
+  watch-sub                       allow       ingress  declare_subscriber, declare_liveliness_subscriber, liveliness_query, query
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+  watch-recv                      allow       egress   put, delete, reply, liveliness_token
+      zensight/v1/**
+      zensight/v1/@catalog/**
+      zensight/v1/*/@rpc/**
+      zensight/v1/@catalog/@rpc/**
+      zensight/v1/**/@adv/**
+      zensight/v1/@catalog/**/@adv/**
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+20 rule(s), 6 subject(s), 6 polic(y/ies)
+write the block: `zenctl acl gen --enrollment … --json5 > router-acl.json5`, merge it at the router config's top level, restart the router — ACL config is not runtime-reloadable (RFC 03 §4 D6)
+
+```
+
+The pinned shape, for a script: the envelope first, then one tagged row per
+rule, subject, policy and warning — `jq -c 'select(.row == "rule")'` reads
+the grant matrix back out.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format ndjson
+{"base":"zensight","default_permission":"deny","notes":[{"text":"no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)"}],"report":"acl-plan"}
+{"cite":"RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches","flows":["ingress"],"id":"host-data-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/**"],"messages":["put","delete","liveliness_token"],"permission":"allow","purpose":"host-data","row":"rule"}
+{"cite":"RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it","id":"host-serve-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/@rpc/**","zensight/v1/h-3fa9c2d41b7e/@blob/**"],"messages":["declare_queryable","reply","query"],"permission":"allow","purpose":"host-serve","row":"rule"}
+{"cite":"RFC 09 §3 fact 1: the plane needs its own rule","flows":["ingress"],"id":"host-media-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/@media/**"],"messages":["put"],"permission":"allow","purpose":"host-media","row":"rule"}
+{"cite":"RFC 09 §3, RFC 07 §2: the sanctioned one-shot PUT path into the router content store — omit in deployments without one","flows":["ingress"],"id":"host-blob-seed-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/@blob/store/**","zensight/v1/h-3fa9c2d41b7e/@blob/tree/**"],"messages":["put"],"permission":"allow","purpose":"host-blob-seed","row":"rule"}
+{"cite":"RFC 09 §3, RFC 04 §3.3: the sidecars live under a verbatim @adv suffix host-data's `**` cannot reach — omitting this when the tier is in use fails silently: empty seeds, dead recovery","id":"host-adv-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/**/@adv/**"],"messages":["put","liveliness_token","declare_queryable","reply","query"],"permission":"allow","purpose":"host-adv","row":"rule"}
+{"cite":"the fifth fact (reference deployment 2026-08-30): zenoh checks a consumer's declares and queries on egress toward the responding face against that face's subject, and own-origin grants include no wildcard-origin selector — without this a peer-mode publisher publishes to nobody. Egress-only, declares and queries only: puts and replies stay ingress-checked","flows":["egress"],"id":"interest-prop","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/*/@media/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"interest-prop","row":"rule"}
+{"cite":"RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches","flows":["ingress"],"id":"host-data-h-20609002f7b6","key_exprs":["zensight/v1/h-20609002f7b6/**"],"messages":["put","delete","liveliness_token"],"permission":"allow","purpose":"host-data","row":"rule"}
+{"cite":"RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it","id":"host-serve-h-20609002f7b6","key_exprs":["zensight/v1/h-20609002f7b6/@rpc/**","zensight/v1/h-20609002f7b6/@blob/**"],"messages":["declare_queryable","reply","query"],"permission":"allow","purpose":"host-serve","row":"rule"}
+{"cite":"RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches","flows":["ingress"],"id":"host-data-h-0123456789ab","key_exprs":["zensight/v1/h-0123456789ab/**"],"messages":["put","delete","liveliness_token"],"permission":"allow","purpose":"host-data","row":"rule"}
+{"cite":"RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it","id":"host-serve-h-0123456789ab","key_exprs":["zensight/v1/h-0123456789ab/@rpc/**","zensight/v1/h-0123456789ab/@blob/**"],"messages":["declare_queryable","reply","query"],"permission":"allow","purpose":"host-serve","row":"rule"}
+{"cite":"RFC 09 §3, RFC 04 §3.3: the sidecars live under a verbatim @adv suffix host-data's `**` cannot reach — omitting this when the tier is in use fails silently: empty seeds, dead recovery","id":"host-adv-h-0123456789ab","key_exprs":["zensight/v1/h-0123456789ab/**/@adv/**"],"messages":["put","liveliness_token","declare_queryable","reply","query"],"permission":"allow","purpose":"host-adv","row":"rule"}
+{"cite":"RFC 09 §3 fact 2: `*` never covers a verbatim origin, so the catalog's own keys are their own rule — @rpc and, on the advanced tier, @adv spelled beside them (fact 1)","id":"catalog-own-catalog","key_exprs":["zensight/v1/@catalog/**","zensight/v1/@catalog/@rpc/**","zensight/v1/@catalog/**/@adv/**"],"messages":["put","delete","liveliness_token","declare_queryable","reply","query"],"permission":"allow","purpose":"catalog-own","row":"rule"}
+{"cite":"RFC 09 §3 fact 4: the catalog DECLARES interest on ingress; split by flow from the receive half so it cannot ingress-publish any host's keys","flows":["ingress"],"id":"catalog-intake-declare-catalog","key_exprs":["zensight/v1/**","zensight/v1/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"catalog-intake-declare","row":"rule"}
+{"cite":"RFC 09 §3: the catalog RECEIVES data and tokens on egress — a flowless rule here would let it tombstone any host's keys, defeating the per-host enrollment","flows":["egress"],"id":"catalog-intake-recv-catalog","key_exprs":["zensight/v1/**","zensight/v1/**/@adv/**"],"messages":["put","delete","reply","liveliness_token"],"permission":"allow","purpose":"catalog-intake-recv","row":"rule"}
+{"cite":"RFC 09 §3 fact 4: every plane named, because a declare that is not allowed receives nothing and `**` reaches no verbatim plane (fact 1)","flows":["ingress"],"id":"ops-sub","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/*/@media/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"ops-sub","row":"rule"}
+{"cite":"RFC 09 §3: what the console receives, on egress, over the same planes","flows":["egress"],"id":"ops-recv","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/*/@media/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["put","delete","reply","liveliness_token"],"permission":"allow","purpose":"ops-recv","row":"rule"}
+{"cite":"RFC 09 §3: the console's own subscriber-detection token, confined to @adv — a broad ingress liveliness_token allow would let it forge any host's state/*/alive roster entry","flows":["ingress"],"id":"ops-own-token","key_exprs":["zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["liveliness_token"],"permission":"allow","purpose":"ops-own-token","row":"rule"}
+{"cite":"RFC 09 §3: the write procedures are deniable per key because the key IS the target; deny wins, and is sound under default-deny","id":"no-remote-actions","key_exprs":["zensight/v1/*/@rpc/*/**/set"],"messages":["query"],"permission":"deny","purpose":"no-remote-actions","row":"rule"}
+{"cite":"RFC 09 §3 fact 4, for a read-only observer: the data classes, the catalog and RPC reads — never @media, never @blob","flows":["ingress"],"id":"watch-sub","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"watch-sub","row":"rule"}
+{"cite":"RFC 09 §3: what a read-only observer receives, on egress","flows":["egress"],"id":"watch-recv","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["put","delete","reply","liveliness_token"],"permission":"allow","purpose":"watch-recv","row":"rule"}
+{"cert_common_names":["h-3fa9c2d41b7e"],"id":"h-3fa9c2d41b7e","role":"host","row":"subject"}
+{"cert_common_names":["edge-02.example"],"id":"edge-02.example","role":"host","row":"subject"}
+{"cert_common_names":["h-0123456789ab"],"id":"h-0123456789ab","role":"host","row":"subject"}
+{"cert_common_names":["zensight-catalog"],"id":"zensight-catalog","role":"catalog","row":"subject"}
+{"cert_common_names":["zensight-console"],"id":"zensight-console","role":"console","row":"subject"}
+{"cert_common_names":["zensight-watch"],"id":"zensight-watch","role":"watch","row":"subject"}
+{"id":"h-3fa9c2d41b7e","row":"policy","rules":["host-data-h-3fa9c2d41b7e","host-serve-h-3fa9c2d41b7e","host-media-h-3fa9c2d41b7e","host-blob-seed-h-3fa9c2d41b7e","host-adv-h-3fa9c2d41b7e","interest-prop"],"subjects":["h-3fa9c2d41b7e"]}
+{"id":"edge-02.example","row":"policy","rules":["host-data-h-20609002f7b6","host-serve-h-20609002f7b6","interest-prop"],"subjects":["edge-02.example"]}
+{"id":"h-0123456789ab","row":"policy","rules":["host-data-h-0123456789ab","host-serve-h-0123456789ab","host-adv-h-0123456789ab","interest-prop"],"subjects":["h-0123456789ab"]}
+{"id":"zensight-catalog","row":"policy","rules":["catalog-own-catalog","catalog-intake-declare-catalog","catalog-intake-recv-catalog","interest-prop"],"subjects":["zensight-catalog"]}
+{"id":"zensight-console","row":"policy","rules":["ops-sub","ops-recv","ops-own-token","no-remote-actions"],"subjects":["zensight-console"]}
+{"id":"zensight-watch","row":"policy","rules":["watch-sub","watch-recv","no-remote-actions"],"subjects":["zensight-watch"]}
+{"cite":"RFC 13 §3 O4","kind":"write_set_not_narrowed","row":"warning","text":"no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares"}
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+
+```
+
+`--json5` is the deliverable — zenohd's block, field for field zenoh 1.10
+(`zenoh-config-1.10.0/src/lib.rs`), with a comment per rule naming the
+matrix row it instantiates and the fact it exists for. A foreign schema, so
+`--format` has no say over it.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --json5
+// zenohd access_control block — generated by `zenctl acl gen` (RFC 09 §3).
+// base "zensight"; 6 subject(s), 20 rule(s), 6 polic(y/ies); registry: not asked — planes are as the enrollment claims and the write set is the convention's `set` leaf, unnarrowed.
+// Field names: zenoh 1.10 (zenoh-config-1.10.0/src/lib.rs — AclConfig, AclConfigRule,
+// AclMessage, InterceptorFlow, AclConfigSubjects, AclConfigPolicyEntry). A rule with no
+// `flows` applies in both directions. Merge at the router config's top level; the
+// three lists are all required — rules alone are refused at startup (fact 3). ACL
+// config is not runtime-reloadable: enrolling a host is a router restart (RFC 03 §4 D6).
+// ! write_set_not_narrowed: no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+access_control: {
+  enabled: true,
+  default_permission: "deny",  // fact 4: deny, and every declaration allowed by name
+  rules: [
+    // host-data: RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches
+    { id: "host-data-h-3fa9c2d41b7e", permission: "allow", flows: ["ingress"],
+      messages: ["put", "delete", "liveliness_token"],
+      key_exprs: ["zensight/v1/h-3fa9c2d41b7e/**"] },
+    // host-serve: RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it
+    { id: "host-serve-h-3fa9c2d41b7e", permission: "allow",
+      messages: ["declare_queryable", "reply", "query"],
+      key_exprs: ["zensight/v1/h-3fa9c2d41b7e/@rpc/**", "zensight/v1/h-3fa9c2d41b7e/@blob/**"] },
+    // host-media: RFC 09 §3 fact 1: the plane needs its own rule
+    { id: "host-media-h-3fa9c2d41b7e", permission: "allow", flows: ["ingress"],
+      messages: ["put"],
+      key_exprs: ["zensight/v1/h-3fa9c2d41b7e/@media/**"] },
+    // host-blob-seed: RFC 09 §3, RFC 07 §2: the sanctioned one-shot PUT path into the router content store — omit in deployments without one
+    { id: "host-blob-seed-h-3fa9c2d41b7e", permission: "allow", flows: ["ingress"],
+      messages: ["put"],
+      key_exprs: ["zensight/v1/h-3fa9c2d41b7e/@blob/store/**", "zensight/v1/h-3fa9c2d41b7e/@blob/tree/**"] },
+    // host-adv: RFC 09 §3, RFC 04 §3.3: the sidecars live under a verbatim @adv suffix host-data's `**` cannot reach — omitting this when the tier is in use fails silently: empty seeds, dead recovery
+    { id: "host-adv-h-3fa9c2d41b7e", permission: "allow",
+      messages: ["put", "liveliness_token", "declare_queryable", "reply", "query"],
+      key_exprs: ["zensight/v1/h-3fa9c2d41b7e/**/@adv/**"] },
+    // interest-prop: the fifth fact (reference deployment 2026-08-30): zenoh checks a consumer's declares and queries on egress toward the responding face against that face's subject, and own-origin grants include no wildcard-origin selector — without this a peer-mode publisher publishes to nobody. Egress-only, declares and queries only: puts and replies stay ingress-checked
+    { id: "interest-prop", permission: "allow", flows: ["egress"],
+      messages: ["declare_subscriber", "declare_liveliness_subscriber", "liveliness_query", "query"],
+      key_exprs: ["zensight/v1/**", "zensight/v1/@catalog/**", "zensight/v1/*/@rpc/**", "zensight/v1/@catalog/@rpc/**", "zensight/v1/*/@blob/**", "zensight/v1/*/@media/**", "zensight/v1/**/@adv/**", "zensight/v1/@catalog/**/@adv/**"] },
+    // host-data: RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches
+    { id: "host-data-h-20609002f7b6", permission: "allow", flows: ["ingress"],
+      messages: ["put", "delete", "liveliness_token"],
+      key_exprs: ["zensight/v1/h-20609002f7b6/**"] },
+    // host-serve: RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it
+    { id: "host-serve-h-20609002f7b6", permission: "allow",
+      messages: ["declare_queryable", "reply", "query"],
+      key_exprs: ["zensight/v1/h-20609002f7b6/@rpc/**", "zensight/v1/h-20609002f7b6/@blob/**"] },
+    // host-data: RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches
+    { id: "host-data-h-0123456789ab", permission: "allow", flows: ["ingress"],
+      messages: ["put", "delete", "liveliness_token"],
+      key_exprs: ["zensight/v1/h-0123456789ab/**"] },
+    // host-serve: RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it
+    { id: "host-serve-h-0123456789ab", permission: "allow",
+      messages: ["declare_queryable", "reply", "query"],
+      key_exprs: ["zensight/v1/h-0123456789ab/@rpc/**", "zensight/v1/h-0123456789ab/@blob/**"] },
+    // host-adv: RFC 09 §3, RFC 04 §3.3: the sidecars live under a verbatim @adv suffix host-data's `**` cannot reach — omitting this when the tier is in use fails silently: empty seeds, dead recovery
+    { id: "host-adv-h-0123456789ab", permission: "allow",
+      messages: ["put", "liveliness_token", "declare_queryable", "reply", "query"],
+      key_exprs: ["zensight/v1/h-0123456789ab/**/@adv/**"] },
+    // catalog-own: RFC 09 §3 fact 2: `*` never covers a verbatim origin, so the catalog's own keys are their own rule — @rpc and, on the advanced tier, @adv spelled beside them (fact 1)
+    { id: "catalog-own-catalog", permission: "allow",
+      messages: ["put", "delete", "liveliness_token", "declare_queryable", "reply", "query"],
+      key_exprs: ["zensight/v1/@catalog/**", "zensight/v1/@catalog/@rpc/**", "zensight/v1/@catalog/**/@adv/**"] },
+    // catalog-intake-declare: RFC 09 §3 fact 4: the catalog DECLARES interest on ingress; split by flow from the receive half so it cannot ingress-publish any host's keys
+    { id: "catalog-intake-declare-catalog", permission: "allow", flows: ["ingress"],
+      messages: ["declare_subscriber", "declare_liveliness_subscriber", "liveliness_query", "query"],
+      key_exprs: ["zensight/v1/**", "zensight/v1/**/@adv/**"] },
+    // catalog-intake-recv: RFC 09 §3: the catalog RECEIVES data and tokens on egress — a flowless rule here would let it tombstone any host's keys, defeating the per-host enrollment
+    { id: "catalog-intake-recv-catalog", permission: "allow", flows: ["egress"],
+      messages: ["put", "delete", "reply", "liveliness_token"],
+      key_exprs: ["zensight/v1/**", "zensight/v1/**/@adv/**"] },
+    // ops-sub: RFC 09 §3 fact 4: every plane named, because a declare that is not allowed receives nothing and `**` reaches no verbatim plane (fact 1)
+    { id: "ops-sub", permission: "allow", flows: ["ingress"],
+      messages: ["declare_subscriber", "declare_liveliness_subscriber", "liveliness_query", "query"],
+      key_exprs: ["zensight/v1/**", "zensight/v1/@catalog/**", "zensight/v1/*/@rpc/**", "zensight/v1/@catalog/@rpc/**", "zensight/v1/*/@blob/**", "zensight/v1/*/@media/**", "zensight/v1/**/@adv/**", "zensight/v1/@catalog/**/@adv/**"] },
+    // ops-recv: RFC 09 §3: what the console receives, on egress, over the same planes
+    { id: "ops-recv", permission: "allow", flows: ["egress"],
+      messages: ["put", "delete", "reply", "liveliness_token"],
+      key_exprs: ["zensight/v1/**", "zensight/v1/@catalog/**", "zensight/v1/*/@rpc/**", "zensight/v1/@catalog/@rpc/**", "zensight/v1/*/@blob/**", "zensight/v1/*/@media/**", "zensight/v1/**/@adv/**", "zensight/v1/@catalog/**/@adv/**"] },
+    // ops-own-token: RFC 09 §3: the console's own subscriber-detection token, confined to @adv — a broad ingress liveliness_token allow would let it forge any host's state/*/alive roster entry
+    { id: "ops-own-token", permission: "allow", flows: ["ingress"],
+      messages: ["liveliness_token"],
+      key_exprs: ["zensight/v1/**/@adv/**", "zensight/v1/@catalog/**/@adv/**"] },
+    // no-remote-actions: RFC 09 §3: the write procedures are deniable per key because the key IS the target; deny wins, and is sound under default-deny
+    { id: "no-remote-actions", permission: "deny",
+      messages: ["query"],
+      key_exprs: ["zensight/v1/*/@rpc/*/**/set"] },
+    // watch-sub: RFC 09 §3 fact 4, for a read-only observer: the data classes, the catalog and RPC reads — never @media, never @blob
+    { id: "watch-sub", permission: "allow", flows: ["ingress"],
+      messages: ["declare_subscriber", "declare_liveliness_subscriber", "liveliness_query", "query"],
+      key_exprs: ["zensight/v1/**", "zensight/v1/@catalog/**", "zensight/v1/*/@rpc/**", "zensight/v1/@catalog/@rpc/**", "zensight/v1/**/@adv/**", "zensight/v1/@catalog/**/@adv/**"] },
+    // watch-recv: RFC 09 §3: what a read-only observer receives, on egress
+    { id: "watch-recv", permission: "allow", flows: ["egress"],
+      messages: ["put", "delete", "reply", "liveliness_token"],
+      key_exprs: ["zensight/v1/**", "zensight/v1/@catalog/**", "zensight/v1/*/@rpc/**", "zensight/v1/@catalog/@rpc/**", "zensight/v1/**/@adv/**", "zensight/v1/@catalog/**/@adv/**"] },
+  ],
+  subjects: [  // the enrollment: transport identity ↔ origin (RFC 03 §4 D6)
+    { id: "h-3fa9c2d41b7e", cert_common_names: ["h-3fa9c2d41b7e"] },  // host
+    { id: "edge-02.example", cert_common_names: ["edge-02.example"] },  // host
+    { id: "h-0123456789ab", cert_common_names: ["h-0123456789ab"] },  // host
+    { id: "zensight-catalog", cert_common_names: ["zensight-catalog"] },  // catalog
+    { id: "zensight-console", cert_common_names: ["zensight-console"] },  // console
+    { id: "zensight-watch", cert_common_names: ["zensight-watch"] },  // watch
+  ],
+  policies: [
+    { id: "h-3fa9c2d41b7e", rules: ["host-data-h-3fa9c2d41b7e", "host-serve-h-3fa9c2d41b7e", "host-media-h-3fa9c2d41b7e", "host-blob-seed-h-3fa9c2d41b7e", "host-adv-h-3fa9c2d41b7e", "interest-prop"],
+      subjects: ["h-3fa9c2d41b7e"] },
+    { id: "edge-02.example", rules: ["host-data-h-20609002f7b6", "host-serve-h-20609002f7b6", "interest-prop"],
+      subjects: ["edge-02.example"] },
+    { id: "h-0123456789ab", rules: ["host-data-h-0123456789ab", "host-serve-h-0123456789ab", "host-adv-h-0123456789ab", "interest-prop"],
+      subjects: ["h-0123456789ab"] },
+    { id: "zensight-catalog", rules: ["catalog-own-catalog", "catalog-intake-declare-catalog", "catalog-intake-recv-catalog", "interest-prop"],
+      subjects: ["zensight-catalog"] },
+    { id: "zensight-console", rules: ["ops-sub", "ops-recv", "ops-own-token", "no-remote-actions"],
+      subjects: ["zensight-console"] },
+    { id: "zensight-watch", rules: ["watch-sub", "watch-recv", "no-remote-actions"],
+      subjects: ["zensight-watch"] },
+  ],
+}
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+
+```
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --json5 --format json
+? 2
+error: the argument '--json5' cannot be used with '--format <FORMAT>'
+
+--json5 emits a foreign document format — somebody else's schema — while --format chooses among zenctl's own three renderings of a report. Drop one.
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
+
+```
+
+## Narrowed by a registry
+
+With `--registry`, the planes are what host producers actually declare and
+`no-remote-actions` denies exactly the `kind = "write"` procedures — the
+fixture registry's `systemd/action/set`, the blob `artifact/request`
+requests, the catalog's `link`/`unlink` — rather than the convention's
+`set` leaf. The dead bus keeps the case offline; the dirs answer alone.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format ndjson --registry ../fixture-tests/registry --zenoh-config tests/cmd/fixtures/dead-bus.json5
+no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
+That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
+{"base":"zensight","default_permission":"deny","registry":{"blob_producers":["logs","netring"],"media_producers":["parallax"],"slices":11,"write_procedures":["catalog/link","catalog/unlink","gnmi/artifact/cancel","gnmi/artifact/request","logs/artifact/cancel","logs/artifact/request","logs/filter/set","modbus/artifact/cancel","modbus/artifact/request","netflow/artifact/cancel","netflow/artifact/request","netlink/artifact/cancel","netlink/artifact/request","netlink/collection/set","netlink/expectations/set","netring/artifact/cancel","netring/artifact/request","netring/capture_disk/set","netring/capture_filter/set","netring/detectors/set","netring/threat_intel/set","parallax/artifact/cancel","parallax/artifact/request","parallax/stream/set","snmp/artifact/cancel","snmp/artifact/request","sysinfo/artifact/cancel","sysinfo/artifact/request","systemd/action/set","systemd/artifact/cancel","systemd/artifact/request","systemd/expectations/set"]},"report":"acl-plan"}
+{"cite":"RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches","flows":["ingress"],"id":"host-data-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/**"],"messages":["put","delete","liveliness_token"],"permission":"allow","purpose":"host-data","row":"rule"}
+{"cite":"RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it","id":"host-serve-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/@rpc/**","zensight/v1/h-3fa9c2d41b7e/@blob/**"],"messages":["declare_queryable","reply","query"],"permission":"allow","purpose":"host-serve","row":"rule"}
+{"cite":"RFC 09 §3 fact 1: the plane needs its own rule","flows":["ingress"],"id":"host-media-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/@media/**"],"messages":["put"],"permission":"allow","purpose":"host-media","row":"rule"}
+{"cite":"RFC 09 §3, RFC 07 §2: the sanctioned one-shot PUT path into the router content store — omit in deployments without one","flows":["ingress"],"id":"host-blob-seed-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/@blob/store/**","zensight/v1/h-3fa9c2d41b7e/@blob/tree/**"],"messages":["put"],"permission":"allow","purpose":"host-blob-seed","row":"rule"}
+{"cite":"RFC 09 §3, RFC 04 §3.3: the sidecars live under a verbatim @adv suffix host-data's `**` cannot reach — omitting this when the tier is in use fails silently: empty seeds, dead recovery","id":"host-adv-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/**/@adv/**"],"messages":["put","liveliness_token","declare_queryable","reply","query"],"permission":"allow","purpose":"host-adv","row":"rule"}
+{"cite":"the fifth fact (reference deployment 2026-08-30): zenoh checks a consumer's declares and queries on egress toward the responding face against that face's subject, and own-origin grants include no wildcard-origin selector — without this a peer-mode publisher publishes to nobody. Egress-only, declares and queries only: puts and replies stay ingress-checked","flows":["egress"],"id":"interest-prop","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/*/@media/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"interest-prop","row":"rule"}
+{"cite":"RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches","flows":["ingress"],"id":"host-data-h-20609002f7b6","key_exprs":["zensight/v1/h-20609002f7b6/**"],"messages":["put","delete","liveliness_token"],"permission":"allow","purpose":"host-data","row":"rule"}
+{"cite":"RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it","id":"host-serve-h-20609002f7b6","key_exprs":["zensight/v1/h-20609002f7b6/@rpc/**","zensight/v1/h-20609002f7b6/@blob/**"],"messages":["declare_queryable","reply","query"],"permission":"allow","purpose":"host-serve","row":"rule"}
+{"cite":"RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches","flows":["ingress"],"id":"host-data-h-0123456789ab","key_exprs":["zensight/v1/h-0123456789ab/**"],"messages":["put","delete","liveliness_token"],"permission":"allow","purpose":"host-data","row":"rule"}
+{"cite":"RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it","id":"host-serve-h-0123456789ab","key_exprs":["zensight/v1/h-0123456789ab/@rpc/**","zensight/v1/h-0123456789ab/@blob/**"],"messages":["declare_queryable","reply","query"],"permission":"allow","purpose":"host-serve","row":"rule"}
+{"cite":"RFC 09 §3, RFC 04 §3.3: the sidecars live under a verbatim @adv suffix host-data's `**` cannot reach — omitting this when the tier is in use fails silently: empty seeds, dead recovery","id":"host-adv-h-0123456789ab","key_exprs":["zensight/v1/h-0123456789ab/**/@adv/**"],"messages":["put","liveliness_token","declare_queryable","reply","query"],"permission":"allow","purpose":"host-adv","row":"rule"}
+{"cite":"RFC 09 §3 fact 2: `*` never covers a verbatim origin, so the catalog's own keys are their own rule — @rpc and, on the advanced tier, @adv spelled beside them (fact 1)","id":"catalog-own-catalog","key_exprs":["zensight/v1/@catalog/**","zensight/v1/@catalog/@rpc/**","zensight/v1/@catalog/**/@adv/**"],"messages":["put","delete","liveliness_token","declare_queryable","reply","query"],"permission":"allow","purpose":"catalog-own","row":"rule"}
+{"cite":"RFC 09 §3 fact 4: the catalog DECLARES interest on ingress; split by flow from the receive half so it cannot ingress-publish any host's keys","flows":["ingress"],"id":"catalog-intake-declare-catalog","key_exprs":["zensight/v1/**","zensight/v1/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"catalog-intake-declare","row":"rule"}
+{"cite":"RFC 09 §3: the catalog RECEIVES data and tokens on egress — a flowless rule here would let it tombstone any host's keys, defeating the per-host enrollment","flows":["egress"],"id":"catalog-intake-recv-catalog","key_exprs":["zensight/v1/**","zensight/v1/**/@adv/**"],"messages":["put","delete","reply","liveliness_token"],"permission":"allow","purpose":"catalog-intake-recv","row":"rule"}
+{"cite":"RFC 09 §3 fact 4: every plane named, because a declare that is not allowed receives nothing and `**` reaches no verbatim plane (fact 1)","flows":["ingress"],"id":"ops-sub","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/*/@media/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"ops-sub","row":"rule"}
+{"cite":"RFC 09 §3: what the console receives, on egress, over the same planes","flows":["egress"],"id":"ops-recv","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/*/@media/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["put","delete","reply","liveliness_token"],"permission":"allow","purpose":"ops-recv","row":"rule"}
+{"cite":"RFC 09 §3: the console's own subscriber-detection token, confined to @adv — a broad ingress liveliness_token allow would let it forge any host's state/*/alive roster entry","flows":["ingress"],"id":"ops-own-token","key_exprs":["zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["liveliness_token"],"permission":"allow","purpose":"ops-own-token","row":"rule"}
+{"cite":"RFC 09 §3: the write procedures are deniable per key because the key IS the target; deny wins, and is sound under default-deny","id":"no-remote-actions","key_exprs":["zensight/v1/*/@rpc/gnmi/artifact/cancel","zensight/v1/*/@rpc/gnmi/artifact/request","zensight/v1/*/@rpc/logs/artifact/cancel","zensight/v1/*/@rpc/logs/artifact/request","zensight/v1/*/@rpc/logs/filter/set","zensight/v1/*/@rpc/modbus/artifact/cancel","zensight/v1/*/@rpc/modbus/artifact/request","zensight/v1/*/@rpc/netflow/artifact/cancel","zensight/v1/*/@rpc/netflow/artifact/request","zensight/v1/*/@rpc/netlink/artifact/cancel","zensight/v1/*/@rpc/netlink/artifact/request","zensight/v1/*/@rpc/netlink/collection/set","zensight/v1/*/@rpc/netlink/expectations/set","zensight/v1/*/@rpc/netring/artifact/cancel","zensight/v1/*/@rpc/netring/artifact/request","zensight/v1/*/@rpc/netring/capture_disk/set","zensight/v1/*/@rpc/netring/capture_filter/set","zensight/v1/*/@rpc/netring/detectors/set","zensight/v1/*/@rpc/netring/threat_intel/set","zensight/v1/*/@rpc/parallax/artifact/cancel","zensight/v1/*/@rpc/parallax/artifact/request","zensight/v1/*/@rpc/parallax/stream/set","zensight/v1/*/@rpc/snmp/artifact/cancel","zensight/v1/*/@rpc/snmp/artifact/request","zensight/v1/*/@rpc/sysinfo/artifact/cancel","zensight/v1/*/@rpc/sysinfo/artifact/request","zensight/v1/*/@rpc/systemd/action/set","zensight/v1/*/@rpc/systemd/artifact/cancel","zensight/v1/*/@rpc/systemd/artifact/request","zensight/v1/*/@rpc/systemd/expectations/set","zensight/v1/@catalog/@rpc/catalog/link","zensight/v1/@catalog/@rpc/catalog/unlink"],"messages":["query"],"permission":"deny","purpose":"no-remote-actions","row":"rule"}
+{"cite":"RFC 09 §3 fact 4, for a read-only observer: the data classes, the catalog and RPC reads — never @media, never @blob","flows":["ingress"],"id":"watch-sub","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"watch-sub","row":"rule"}
+{"cite":"RFC 09 §3: what a read-only observer receives, on egress","flows":["egress"],"id":"watch-recv","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/**/@adv/**","zensight/v1/@catalog/**/@adv/**"],"messages":["put","delete","reply","liveliness_token"],"permission":"allow","purpose":"watch-recv","row":"rule"}
+{"cert_common_names":["h-3fa9c2d41b7e"],"id":"h-3fa9c2d41b7e","role":"host","row":"subject"}
+{"cert_common_names":["edge-02.example"],"id":"edge-02.example","role":"host","row":"subject"}
+{"cert_common_names":["h-0123456789ab"],"id":"h-0123456789ab","role":"host","row":"subject"}
+{"cert_common_names":["zensight-catalog"],"id":"zensight-catalog","role":"catalog","row":"subject"}
+{"cert_common_names":["zensight-console"],"id":"zensight-console","role":"console","row":"subject"}
+{"cert_common_names":["zensight-watch"],"id":"zensight-watch","role":"watch","row":"subject"}
+{"id":"h-3fa9c2d41b7e","row":"policy","rules":["host-data-h-3fa9c2d41b7e","host-serve-h-3fa9c2d41b7e","host-media-h-3fa9c2d41b7e","host-blob-seed-h-3fa9c2d41b7e","host-adv-h-3fa9c2d41b7e","interest-prop"],"subjects":["h-3fa9c2d41b7e"]}
+{"id":"edge-02.example","row":"policy","rules":["host-data-h-20609002f7b6","host-serve-h-20609002f7b6","interest-prop"],"subjects":["edge-02.example"]}
+{"id":"h-0123456789ab","row":"policy","rules":["host-data-h-0123456789ab","host-serve-h-0123456789ab","host-adv-h-0123456789ab","interest-prop"],"subjects":["h-0123456789ab"]}
+{"id":"zensight-catalog","row":"policy","rules":["catalog-own-catalog","catalog-intake-declare-catalog","catalog-intake-recv-catalog","interest-prop"],"subjects":["zensight-catalog"]}
+{"id":"zensight-console","row":"policy","rules":["ops-sub","ops-recv","ops-own-token","no-remote-actions"],"subjects":["zensight-console"]}
+{"id":"zensight-watch","row":"policy","rules":["watch-sub","watch-recv","no-remote-actions"],"subjects":["zensight-watch"]}
+
+```
+
+## `--explain`: a grant, a denial, and the direction
+
+Inclusion by zenoh-keyexpr, per direction, with the rules that decided. The
+console asking a write procedure: `no-remote-actions` beats `ops-sub`.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format table --explain zensight-console 'zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action/set' query
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+zensight-console  query  zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action/set
+  ingress  DENIED  no-remote-actions denies query on ingress — deny wins over ops-sub
+      ✗ no-remote-actions  deny  zensight/v1/*/@rpc/*/**/set
+      ✓ ops-sub  allow  zensight/v1/*/@rpc/**
+  egress   DENIED  no-remote-actions denies query on egress — deny wins
+      ✗ no-remote-actions  deny  zensight/v1/*/@rpc/*/**/set
+
+```
+
+A host publishing its own state: allowed on ingress, and nothing on egress
+— which is right, a put never leaves the router toward its own author.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format table --explain h-3fa9c2d41b7e 'zensight/v1/h-3fa9c2d41b7e/state/sysinfo/health' put
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+h-3fa9c2d41b7e  put  zensight/v1/h-3fa9c2d41b7e/state/sysinfo/health
+  ingress  ALLOWED            host-data-h-3fa9c2d41b7e includes it for put on ingress
+      ✓ host-data-h-3fa9c2d41b7e  allow  zensight/v1/h-3fa9c2d41b7e/**
+  egress   denied by default  no rule of h-3fa9c2d41b7e's policies includes zensight/v1/h-3fa9c2d41b7e/state/sysinfo/health for put on egress: default_permission deny
+
+```
+
+The same host on another host's origin — denied by default, no rule
+includes it — and its own `@rpc` reply, which `host-data`'s `**` does not
+reach and `host-serve` does (fact 1).
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format table --explain h-3fa9c2d41b7e 'zensight/v1/h-0123456789ab/state/sysinfo/health' put
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+h-3fa9c2d41b7e  put  zensight/v1/h-0123456789ab/state/sysinfo/health
+  ingress  denied by default  no rule of h-3fa9c2d41b7e's policies includes zensight/v1/h-0123456789ab/state/sysinfo/health for put on ingress: default_permission deny
+  egress   denied by default  no rule of h-3fa9c2d41b7e's policies includes zensight/v1/h-0123456789ab/state/sysinfo/health for put on egress: default_permission deny
+
+```
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format json --explain h-3fa9c2d41b7e 'zensight/v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect' reply
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+{
+  "base": "zensight",
+  "key": "zensight/v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect",
+  "message": "reply",
+  "principal": "h-3fa9c2d41b7e",
+  "report": "acl-explain",
+  "rows": [
+    {
+      "decision": "allowed",
+      "flow": "ingress",
+      "reason": "host-serve-h-3fa9c2d41b7e includes it for reply on ingress",
+      "row": "direction",
+      "via": [
+        {
+          "key_expr": "zensight/v1/h-3fa9c2d41b7e/@rpc/**",
+          "permission": "allow",
+          "purpose": "host-serve",
+          "rule": "host-serve-h-3fa9c2d41b7e"
+        }
+      ]
+    },
+    {
+      "decision": "allowed",
+      "flow": "egress",
+      "reason": "host-serve-h-3fa9c2d41b7e includes it for reply on egress",
+      "row": "direction",
+      "via": [
+        {
+          "key_expr": "zensight/v1/h-3fa9c2d41b7e/@rpc/**",
+          "permission": "allow",
+          "purpose": "host-serve",
+          "rule": "host-serve-h-3fa9c2d41b7e"
+        }
+      ]
+    }
+  ]
+}
+
+```
+
+A principal the plan does not carry has no policy to explain: exit 2.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --explain nobody 'zensight/v1/**' put
+? 2
+Error: explain: principal "nobody" is not enrolled; the plan knows ["h-3fa9c2d41b7e", "edge-02.example", "h-0123456789ab", "zensight-catalog", "zensight-console", "zensight-watch"]
+
+```
+
+## Refusals
+
+Two principals sharing a CN, a host with neither origin nor machine-id, a
+zid-bound subject without `--allow-zid-subjects`: each is refused by name,
+left out of `subjects` and `policies`, and the plan is emitted around them —
+with exit 1, because rows were refused.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment-refused.toml --format ndjson
+? 1
+{"base":"zensight","default_permission":"deny","notes":[{"text":"no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)"},{"text":"REFUSED h-3fa9c2d41b7e: cn /"h-3fa9c2d41b7e/" is already enrolled — one transport identity, one principal (RFC 03 §4 D6) — left out of subjects and policies"},{"text":"REFUSED bare-host: a host needs `origin` or `machine_id` — nothing in the grammar binds a transport identity to an origin, so the enrollment has to (RFC 03 §4 D6) — left out of subjects and policies"},{"text":"REFUSED 38a4829bce9166ee: zid /"38a4829bce9166ee/" as a subject is refused: a ZID is not backed by an authentication mechanism and can only be trusted for ACL when a dedicated zenoh mechanism manages it (zenoh's own config says so); pass --allow-zid-subjects for a prototype, never a deployment (zenoh-1.10.0/DEFAULT_CONFIG.json5) — left out of subjects and policies"}],"report":"acl-plan"}
+{"cite":"RFC 09 §3 fact 1: the data classes and the alive tokens — and nothing under @rpc, @media or @blob, which `**` never reaches","flows":["ingress"],"id":"host-data-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/**"],"messages":["put","delete","liveliness_token"],"permission":"allow","purpose":"host-data","row":"rule"}
+{"cite":"RFC 09 §3 facts 1 and 4: @rpc spelled explicitly because `**` will not cross it; declare_queryable allowed or the host serves nothing; query egress is the router forwarding calls to it","id":"host-serve-h-3fa9c2d41b7e","key_exprs":["zensight/v1/h-3fa9c2d41b7e/@rpc/**","zensight/v1/h-3fa9c2d41b7e/@blob/**"],"messages":["declare_queryable","reply","query"],"permission":"allow","purpose":"host-serve","row":"rule"}
+{"cite":"the fifth fact (reference deployment 2026-08-30): zenoh checks a consumer's declares and queries on egress toward the responding face against that face's subject, and own-origin grants include no wildcard-origin selector — without this a peer-mode publisher publishes to nobody. Egress-only, declares and queries only: puts and replies stay ingress-checked","flows":["egress"],"id":"interest-prop","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"interest-prop","row":"rule"}
+{"cite":"RFC 09 §3 fact 4: every plane named, because a declare that is not allowed receives nothing and `**` reaches no verbatim plane (fact 1)","flows":["ingress"],"id":"ops-sub","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/**/@adv/**"],"messages":["declare_subscriber","declare_liveliness_subscriber","liveliness_query","query"],"permission":"allow","purpose":"ops-sub","row":"rule"}
+{"cite":"RFC 09 §3: what the console receives, on egress, over the same planes","flows":["egress"],"id":"ops-recv","key_exprs":["zensight/v1/**","zensight/v1/@catalog/**","zensight/v1/*/@rpc/**","zensight/v1/@catalog/@rpc/**","zensight/v1/*/@blob/**","zensight/v1/**/@adv/**"],"messages":["put","delete","reply","liveliness_token"],"permission":"allow","purpose":"ops-recv","row":"rule"}
+{"cite":"RFC 09 §3: the write procedures are deniable per key because the key IS the target; deny wins, and is sound under default-deny","id":"no-remote-actions","key_exprs":["zensight/v1/*/@rpc/*/**/set"],"messages":["query"],"permission":"deny","purpose":"no-remote-actions","row":"rule"}
+{"cert_common_names":["h-3fa9c2d41b7e"],"id":"h-3fa9c2d41b7e","role":"host","row":"subject"}
+{"cert_common_names":["zensight-console"],"id":"zensight-console","role":"console","row":"subject"}
+{"id":"h-3fa9c2d41b7e","row":"policy","rules":["host-data-h-3fa9c2d41b7e","host-serve-h-3fa9c2d41b7e","interest-prop"],"subjects":["h-3fa9c2d41b7e"]}
+{"id":"zensight-console","row":"policy","rules":["ops-sub","ops-recv","no-remote-actions"],"subjects":["zensight-console"]}
+{"cite":"RFC 13 §3 O4","kind":"write_set_not_narrowed","row":"warning","text":"no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares"}
+{"cite":"RFC 03 §4 D6","principal":"h-3fa9c2d41b7e","reason":"cn /"h-3fa9c2d41b7e/" is already enrolled — one transport identity, one principal","row":"refusal"}
+{"cite":"RFC 03 §4 D6","principal":"bare-host","reason":"a host needs `origin` or `machine_id` — nothing in the grammar binds a transport identity to an origin, so the enrollment has to","row":"refusal"}
+{"cite":"zenoh-1.10.0/DEFAULT_CONFIG.json5","principal":"38a4829bce9166ee","reason":"zid /"38a4829bce9166ee/" as a subject is refused: a ZID is not backed by an authentication mechanism and can only be trusted for ACL when a dedicated zenoh mechanism manages it (zenoh's own config says so); pass --allow-zid-subjects for a prototype, never a deployment","row":"refusal"}
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+REFUSED h-3fa9c2d41b7e: cn "h-3fa9c2d41b7e" is already enrolled — one transport identity, one principal (RFC 03 §4 D6) — left out of subjects and policies
+REFUSED bare-host: a host needs `origin` or `machine_id` — nothing in the grammar binds a transport identity to an origin, so the enrollment has to (RFC 03 §4 D6) — left out of subjects and policies
+REFUSED 38a4829bce9166ee: zid "38a4829bce9166ee" as a subject is refused: a ZID is not backed by an authentication mechanism and can only be trusted for ACL when a dedicated zenoh mechanism manages it (zenoh's own config says so); pass --allow-zid-subjects for a prototype, never a deployment (zenoh-1.10.0/DEFAULT_CONFIG.json5) — left out of subjects and policies
+
+```
+
+## `--check --against`: the plan against a router's config file
+
+The running block is not observable: zenoh 1.10's admin space serves no GET
+under `config/**` (it subscribes to that subtree for runtime edits). So the
+observed side is the config *file*, read through zenoh's own loader — the
+same parse `zenohd` does, so a block that would be refused at startup is
+refused here. The clean fixture is the plan's own block, wrapped.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format table --check --against tests/cmd/fixtures/router-acl.json5
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+tests/cmd/fixtures/router-acl.json5: 20 rule(s) and 6 subject(s) configured; 20 and 6 planned
+PASS
+compared against the config file tests/cmd/fixtures/router-acl.json5 through zenoh's own loader — zenoh 1.10 serves no GET on `@/<zid>/router/config/**`, so the running block is not observable from the bus and a file that differs from what the router was started with is invisible here (RFC 13 §3 O5)
+interest propagation not asked: whether a consumer's declared interest reaches the publishers' faces is observable only from a publisher's matching listener, which a config-file check has no way to hold (RFC 13 §3 O4)
+
+```
+
+The drifted one: disabled, the shared `interest-prop` dropped (the fifth
+fact's failure), one host's serve rule made ingress-only (a host that
+answers no query — fact 4), and a CN the enrollment never enrolled.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --format json --check --against tests/cmd/fixtures/router-acl-drifted.json5
+? 1
+no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
+{
+  "against": "tests/cmd/fixtures/router-acl-drifted.json5",
+  "base": "zensight",
+  "interest_probe": {
+    "answer": "not_asked"
+  },
+  "judgement": {
+    "answer": "established"
+  },
+  "notes": [
+    {
+      "cite": "RFC 13 §3 O5",
+      "text": "compared against the config file tests/cmd/fixtures/router-acl-drifted.json5 through zenoh's own loader — zenoh 1.10 serves no GET on `@/<zid>/router/config/**`, so the running block is not observable from the bus and a file that differs from what the router was started with is invisible here"
+    },
+    {
+      "cite": "RFC 13 §3 O4",
+      "text": "interest propagation not asked: whether a consumer's declared interest reaches the publishers' faces is observable only from a publisher's matching listener, which a config-file check has no way to hold"
+    }
+  ],
+  "observed_rules": 19,
+  "observed_subjects": 7,
+  "planned_rules": 20,
+  "planned_subjects": 6,
+  "report": "acl-check",
+  "rows": [
+    {
+      "id": "access_control",
+      "kind": "disabled",
+      "observed": "enabled: false",
+      "planned": "enabled: true",
+      "row": "finding"
+    },
+    {
+      "id": "interest-prop",
+      "kind": "rule_missing",
+      "planned": "allow egress declare_liveliness_subscriber,declare_subscriber,liveliness_query,query zensight/v1/** zensight/v1/**/@adv/** zensight/v1/*/@blob/** zensight/v1/*/@media/** zensight/v1/*/@rpc/** zensight/v1/@catalog/** zensight/v1/@catalog/**/@adv/** zensight/v1/@catalog/@rpc/**",
+      "row": "finding"
+    },
+    {
+      "id": "host-serve-h-20609002f7b6",
+      "kind": "rule_differs",
+      "observed": "allow ingress declare_queryable,query,reply zensight/v1/h-20609002f7b6/@blob/** zensight/v1/h-20609002f7b6/@rpc/**",
+      "planned": "allow egress+ingress declare_queryable,query,reply zensight/v1/h-20609002f7b6/@blob/** zensight/v1/h-20609002f7b6/@rpc/**",
+      "row": "finding"
+    },
+    {
+      "id": "stranger",
+      "kind": "subject_extra",
+      "observed": "cns [/"stranger.example/"] zids []",
+      "row": "finding"
+    },
+    {
+      "id": "stranger",
+      "kind": "subject_unplanned_property",
+      "observed": "interfaces: [/"eth0/"]",
+      "row": "finding"
+    },
+    {
+      "id": "stranger.example",
+      "kind": "unknown_cn",
+      "observed": "bound by subject /"stranger/"",
+      "row": "finding"
+    }
+  ]
+}
+compared against the config file tests/cmd/fixtures/router-acl-drifted.json5 through zenoh's own loader — zenoh 1.10 serves no GET on `@/<zid>/router/config/**`, so the running block is not observable from the bus and a file that differs from what the router was started with is invisible here (RFC 13 §3 O5)
+interest propagation not asked: whether a consumer's declared interest reaches the publishers' faces is observable only from a publisher's matching listener, which a config-file check has no way to hold (RFC 13 §3 O4)
+
+```
+
+A file that is not there is a question that could not be asked: exit 2,
+through the verdict verbs' pre-run guard, never a 1 claiming the block
+differs.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/enrollment.toml --check --against tests/cmd/fixtures/no-such-router.json5
+? 2
+Error: tests/cmd/fixtures/no-such-router.json5: zenoh refused the config: No such file or directory (os error 2)
+acl gen --check: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
