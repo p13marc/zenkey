@@ -12,11 +12,13 @@ The registry as a document: export it, diff it, lint it, lock it
 Usage: zenctl registry <COMMAND>
 
 Commands:
-  export  Export the loaded slice set as a document
-  diff    Diff local `--registry` files against what the fleet serves
-  lint    Run the RFC 08 §5 registry lints on a directory, as a build would
-  lock    Write or update the RFC 08 §3.1 compatibility lock (registry.lock)
-  help    Print this message or the help of the given subcommand(s)
+  export     Export the loaded slice set as a document
+  diff       Diff local `--registry` files against what the fleet serves
+  lint       Run the RFC 08 §5 registry lints on a directory, as a build would
+  lock       Write or update the RFC 08 §3.1 compatibility lock (registry.lock)
+  consumers  Who declares a reader of a subject (#224): every declared subscriber and querier the admin space serves, related to the target by key algebra and ranked, one row per session, joined to the origin its alive token attaches
+  impact     The blast radius of changing one declared subject (#224): its consumers, its storage coverage, what else declares on its family, and its `[[deprecated]]` entry — in one document
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help
@@ -244,5 +246,145 @@ error: the argument '--as' cannot be used with '--format <FORMAT>'
 Usage: zenctl <COMMAND>
 
 For more information, try '--help'.
+
+```
+
+## `consumers` and `impact` join the registry to the admin space (#224)
+
+Who declares a reader of a subject, and what changing it would reach. Both
+are joins over the admin space, and neither is matching status: a declared
+subscriber is a declaration, not proof of use, and an admin space that does
+not answer is *not asked*.
+
+```console
+$ zenctl registry consumers --help
+Who declares a reader of a subject (#224): every declared subscriber and querier the admin space serves, related to the target by key algebra and ranked, one row per session, joined to the origin its alive token attaches.
+
+A declaration is not proof of use, a `**` declaration intersects everything and is shown as such, and an admin space that does not answer is *not asked* — never an empty consumer set (RFC 13 §3 O4).
+
+Usage: zenctl registry consumers [OPTIONS] <TARGET>
+
+Arguments:
+  <TARGET>
+          `<producer>/<subject-path>` as the registry spells it (resolved to the family's wire selector under the base), or a raw key or selector — anything carrying `*` or `@`, or starting at the base or `v1/`
+
+Options:
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl registry impact --help
+The blast radius of changing one declared subject (#224): its consumers, its storage coverage, what else declares on its family, and its `[[deprecated]]` entry — in one document
+
+Usage: zenctl registry impact [OPTIONS] <TARGET>
+
+Arguments:
+  <TARGET>
+          `<producer>/<subject-path>` as the registry spells it. A path that survives only in the `[[deprecated]]` ledger still resolves — who still reads a retired subject is the ledger's own question
+
+Options:
+      --base <BASE>
+          The deployment base — the first chunk(s) of every key on the wire.
+          
+          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          
+          [env: ZENCTL_BASE=]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+      --registry <DIR>
+          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable
+
+      --scouting
+          Enable multicast scouting.
+          
+          OFF by default, and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5)
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 ```

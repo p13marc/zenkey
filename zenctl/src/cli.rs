@@ -807,6 +807,19 @@ pub(crate) enum RegistryCmd {
     /// overrides, and prints every broken pin: the escape hatch is legal,
     /// silent it is not.
     Lock(RegistryLockArgs),
+    /// Who declares a reader of a subject (#224): every declared subscriber
+    /// and querier the admin space serves, related to the target by key
+    /// algebra and ranked, one row per session, joined to the origin its
+    /// alive token attaches.
+    ///
+    /// A declaration is not proof of use, a `**` declaration intersects
+    /// everything and is shown as such, and an admin space that does not
+    /// answer is *not asked* — never an empty consumer set (RFC 13 §3 O4).
+    Consumers(RegistryConsumersArgs),
+    /// The blast radius of changing one declared subject (#224): its
+    /// consumers, its storage coverage, what else declares on its family,
+    /// and its `[[deprecated]]` entry — in one document.
+    Impact(RegistryImpactArgs),
 }
 
 #[derive(Subcommand)]
@@ -1702,6 +1715,31 @@ pub(crate) struct RegistryLockArgs {
     pub(crate) force: bool,
     #[command(flatten)]
     pub(crate) out: OutputArgs,
+}
+
+/// The `registry consumers` verb's flags — one struct the dispatcher hands
+/// over whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RegistryConsumersArgs {
+    /// `<producer>/<subject-path>` as the registry spells it (resolved to the
+    /// family's wire selector under the base), or a raw key or selector —
+    /// anything carrying `*` or `@`, or starting at the base or `v1/`.
+    #[arg(add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) target: String,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `registry impact` verb's flags — one struct the dispatcher hands over
+/// whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RegistryImpactArgs {
+    /// `<producer>/<subject-path>` as the registry spells it. A path that
+    /// survives only in the `[[deprecated]]` ledger still resolves — who
+    /// still reads a retired subject is the ledger's own question.
+    pub(crate) target: String,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
 }
 
 /// The `admin graph` verb's flags — one struct the dispatcher hands over whole,

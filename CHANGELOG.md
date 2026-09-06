@@ -17,6 +17,24 @@ Versions per crate, because they move independently:
 
 ---
 
+## Unreleased
+
+**Consumers and blast radius — the admin space answers who reads this**
+(#224). `zenkey-fleet` gains the consumers join: `consumers` and
+`subject_impact` under `bus/admin.rs` (one pass over the admin space —
+topology, the five declared-entity sweeps, attachments from the token
+entities already in hand) and the pure `model::consumers::join_consumers`
+that relates every declared subscriber and querier to a target by
+`zenoh-keyexpr` and attributes it to a session on the admin `sources`;
+wire shapes `ConsumersReport`, `ConsumerRow`, `AdminAnswer`, `Relation`,
+`Attribution`, `SubjectImpact`, `DeprecationFact` under `report/`, pinned.
+`AdminAnswer::NotAvailable` is *not asked*, never an empty set (RFC 13 §3
+O4); nothing here is matching status (RFC 12 §9). `zenctl registry
+consumers|impact` render it (see `zenctl/CHANGELOG.md`); zengui's
+Inspector gains a Consumers section — one admin sweep per click, never
+ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
+`declared_entities_within` keeps the elided count, `EntityKind::ALL`.
+
 ## 0.8.0 — what the adopters found (2026-09-06)
 
 **Tagged `0.8.0`** (bare, per the scheme since 0.7.1) on 2026-09-06; the three

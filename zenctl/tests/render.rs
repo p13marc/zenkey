@@ -1637,7 +1637,9 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "probe",
         "rate",
         "record",
+        "registry-consumers",
         "registry-diff",
+        "registry-impact",
         "registry-lint",
         "registry-lock",
         "registry-retired",
@@ -1758,6 +1760,19 @@ fn every_observing_family_states_its_scope() {
         report: &report,
         attachments: &attachments,
     });
+    // The consumers join: the six admin selectors, no window; the impact
+    // adds the storage sweep when it was made.
+    let s = scoped(&fx::consumers_report());
+    assert_eq!(s.asked.len(), 6, "{:?}", s.asked);
+    assert_eq!(s.window_s, None);
+    let s = scoped(&fx::subject_impact());
+    assert_eq!(s.asked.len(), 7, "{:?}", s.asked);
+    let s = scoped(&zenkey_fleet::report::SubjectImpact {
+        consumers: fx::consumers_not_available(),
+        coverage: None,
+        ..fx::subject_impact()
+    });
+    assert_eq!(s.asked.len(), 6, "an unmade storage sweep is not claimed");
     let s = scoped(&fx::blob_probe());
     assert_eq!(
         s.asked.len(),
@@ -2112,4 +2127,194 @@ acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J
     let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
     assert_eq!(envelope["refused_takers"], serde_json::json!(["events"]));
     assert_eq!(out.lines().count(), 1, "no takers, no rows");
+}
+
+// ── The consumers join (#224) ─────────────────────────────────────────────
+
+#[test]
+fn consumers_rank_by_relation_and_name_the_tool_itself() {
+    assert_data_eq!(
+        table(&fx::consumers_report()),
+        str![[r#"
+declared readers of acme/v1/*/state/sysinfo/health
+
+zid                              whatami  origin                            declared                                                relation
+eeff0011                         peer     h-3fa9c2d41b7e                    subscriber acme/v1/h-3fa9c2d41b7e/state/sysinfo/health  narrower — declared on a subset of the target
+ffffffff  (this zenctl session)  peer     session only, unattributed        querier acme/v1/*/state/sysinfo/health                  exact — declared on the target itself
+aabbccdd                         router   reported only — no session named  subscriber **                                           total — a whole-base declaration, intersects everything
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&fx::consumers_report()),
+        str![[r#"
+1 admin space(s) answered (2 node(s) heard of): a declared subscriber or querier is a declaration, not proof of use, and sessions behind an admin space that did not answer are not shown (RFC 13 §3 O5)
+a whole-base declaration (`**`) intersects every key under the base and says nothing about this subject in particular; it still never crosses an `@`-chunk, so `@rpc`/`@media`/`@blob` sidecars and service origins are outside it (RFC 03 §4 D2)
+
+"#]]
+    );
+}
+
+#[test]
+fn consumers_ndjson_flattens_the_admin_answer_and_tags_every_row() {
+    assert_data_eq!(
+        ndjson(&fx::consumers_report()),
+        str![[r#"
+{"admin":"answered","answered":1,"asked":["@/*/*","@/*/*/subscriber/**","@/*/*/publisher/**","@/*/*/queryable/**","@/*/*/querier/**","@/*/*/token/**"],"nodes":2,"notes":[{"cite":"RFC 13 §3 O5","text":"1 admin space(s) answered (2 node(s) heard of): a declared subscriber or querier is a declaration, not proof of use, and sessions behind an admin space that did not answer are not shown"},{"cite":"RFC 03 §4 D2","text":"a whole-base declaration (`**`) intersects every key under the base and says nothing about this subject in particular; it still never crosses an `@`-chunk, so `@rpc`/`@media`/`@blob` sidecars and service origins are outside it"}],"reply_elided":0,"report":"registry-consumers","self_zid":"ffffffff","target":"acme/v1/*/state/sysinfo/health"}
+{"attribution":"session","keyexpr":"acme/v1/h-3fa9c2d41b7e/state/sysinfo/health","kind":"subscriber","origins":["h-3fa9c2d41b7e"],"relation":"narrower","row":"consumer","whatami":"peer","zid":"eeff0011"}
+{"attribution":"session","is_self":true,"keyexpr":"acme/v1/*/state/sysinfo/health","kind":"querier","relation":"exact","row":"consumer","whatami":"peer","zid":"ffffffff"}
+{"attribution":"reported_only","keyexpr":"**","kind":"subscriber","relation":"total","row":"consumer","total_wildcard":true,"whatami":"router","zid":"aabbccdd"}
+
+"#]]
+    );
+}
+
+/// No admin space answering draws no rows and says *not asked* — in every
+/// format, since the sentence is a note.
+#[test]
+fn consumers_without_an_admin_space_are_not_asked() {
+    assert_data_eq!(
+        table(&fx::consumers_not_available()),
+        str![[r#"
+declared readers of acme/v1/*/state/sysinfo/health
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&fx::consumers_not_available()),
+        str![[r#"
+no admin space answered @/*/*, @/*/*/subscriber/**, @/*/*/publisher/**, @/*/*/queryable/**, @/*/*/querier/**, @/*/*/token/** — zenoh's `adminspace.enabled` is off by default (routers ship with it on); the declared readers of acme/v1/*/state/sysinfo/health are *not asked*, never none (RFC 13 §3 O4)
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::consumers_not_available()),
+        str![[r#"
+{"admin":"not_available","asked":["@/*/*","@/*/*/subscriber/**","@/*/*/publisher/**","@/*/*/queryable/**","@/*/*/querier/**","@/*/*/token/**"],"notes":[{"cite":"RFC 13 §3 O4","text":"no admin space answered @/*/*, @/*/*/subscriber/**, @/*/*/publisher/**, @/*/*/queryable/**, @/*/*/querier/**, @/*/*/token/** — zenoh's `adminspace.enabled` is off by default (routers ship with it on); the declared readers of acme/v1/*/state/sysinfo/health are *not asked*, never none"}],"reply_elided":0,"report":"registry-consumers","self_zid":"ffffffff","target":"acme/v1/*/state/sysinfo/health"}
+
+"#]]
+    );
+}
+
+#[test]
+fn an_impact_nests_the_readers_the_coverage_and_the_ledger() {
+    assert_data_eq!(
+        table(&fx::subject_impact()),
+        str![[r#"
+impact of sysinfo state health  (selector acme/v1/*/state/sysinfo/health)
+  DEPRECATED since 2.0 → replaced by status
+
+declared readers:
+
+zid                              whatami  origin                            declared                                                relation
+eeff0011                         peer     h-3fa9c2d41b7e                    subscriber acme/v1/h-3fa9c2d41b7e/state/sysinfo/health  narrower — declared on a subset of the target
+ffffffff  (this zenctl session)  peer     session only, unattributed        querier acme/v1/*/state/sysinfo/health                  exact — declared on the target itself
+aabbccdd                         router   reported only — no session named  subscriber **                                           total — a whole-base declaration, intersects everything
+
+also declared on the family:
+  publishers  2 session(s)
+  queryables  0 session(s)
+
+storage coverage:
+  ✓ health  covered by main@aabbccdd  (ttl_s 120)
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&fx::subject_impact()),
+        str![[r#"
+1 admin space(s) answered (2 node(s) heard of): a declared subscriber or querier is a declaration, not proof of use, and sessions behind an admin space that did not answer are not shown (RFC 13 §3 O5)
+a whole-base declaration (`**`) intersects every key under the base and says nothing about this subject in particular; it still never crosses an `@`-chunk, so `@rpc`/`@media`/`@blob` sidecars and service origins are outside it (RFC 03 §4 D2)
+the subject is retired in the registry ledger; a declared reader of it is the burn-down `zenctl check retired` counts (RFC 08 §3)
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::subject_impact()),
+        str![[r#"
+{"admin":"answered","answered":1,"asked":["@/*/*","@/*/*/subscriber/**","@/*/*/publisher/**","@/*/*/queryable/**","@/*/*/querier/**","@/*/*/token/**"],"class":"state","declared_publishers":2,"declared_queryables":0,"deprecated":{"replaced_by":"status","since":"2.0"},"nodes":2,"notes":[{"cite":"RFC 13 §3 O5","text":"1 admin space(s) answered (2 node(s) heard of): a declared subscriber or querier is a declaration, not proof of use, and sessions behind an admin space that did not answer are not shown"},{"cite":"RFC 03 §4 D2","text":"a whole-base declaration (`**`) intersects every key under the base and says nothing about this subject in particular; it still never crosses an `@`-chunk, so `@rpc`/`@media`/`@blob` sidecars and service origins are outside it"},{"cite":"RFC 08 §3","text":"the subject is retired in the registry ledger; a declared reader of it is the burn-down `zenctl check retired` counts"}],"path":"health","producer":"sysinfo","reply_elided":0,"report":"registry-impact","selector":"acme/v1/*/state/sysinfo/health","self_zid":"ffffffff"}
+{"attribution":"session","keyexpr":"acme/v1/h-3fa9c2d41b7e/state/sysinfo/health","kind":"subscriber","origins":["h-3fa9c2d41b7e"],"relation":"narrower","row":"consumer","whatami":"peer","zid":"eeff0011"}
+{"attribution":"session","is_self":true,"keyexpr":"acme/v1/*/state/sysinfo/health","kind":"querier","relation":"exact","row":"consumer","whatami":"peer","zid":"ffffffff"}
+{"attribution":"reported_only","keyexpr":"**","kind":"subscriber","relation":"total","row":"consumer","total_wildcard":true,"whatami":"router","zid":"aabbccdd"}
+{"coverage":"covered","path":"health","producer":"sysinfo","row":"coverage","storage":"main@aabbccdd","ttl_s":120}
+
+"#]]
+    );
+}
+
+/// An impact whose admin space did not answer draws `—` for every admin
+/// fact and states the unmade storage sweep.
+#[test]
+fn an_impact_without_an_admin_space_draws_not_asked_everywhere() {
+    let unasked = zenkey_fleet::report::SubjectImpact {
+        consumers: fx::consumers_not_available(),
+        coverage: None,
+        declared_publishers: None,
+        declared_queryables: None,
+        deprecated: None,
+        ..fx::subject_impact()
+    };
+    assert_data_eq!(
+        table(&unasked),
+        str![[r#"
+impact of sysinfo state health  (selector acme/v1/*/state/sysinfo/health)
+
+declared readers:
+
+also declared on the family:
+  publishers  —
+  queryables  —
+
+storage coverage:
+  —  (not asked: no admin space answered)
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&unasked),
+        str![[r#"
+no admin space answered @/*/*, @/*/*/subscriber/**, @/*/*/publisher/**, @/*/*/queryable/**, @/*/*/querier/**, @/*/*/token/** — zenoh's `adminspace.enabled` is off by default (routers ship with it on); the declared readers of acme/v1/*/state/sysinfo/health are *not asked*, never none (RFC 13 §3 O4)
+the storage sweep was not made because no admin space answered: an empty storage list would read as "uncovered", which nobody established (RFC 13 §3 O4)
+
+"#]]
+    );
+}
+
+/// The wording rule (RFC 12 §9): foreign matching status is deferred
+/// permanently, and "nobody is listening" is the standing false verdict.
+/// Nothing either family draws — table, notes or ndjson, answered or not —
+/// may say "matching", "listening", "unmatched" or "no consumers".
+#[test]
+fn the_consumer_families_never_speak_of_matching_or_listening() {
+    const FORBIDDEN: &[&str] = &["matching", "listening", "unmatched", "no consumers"];
+    let unasked = zenkey_fleet::report::SubjectImpact {
+        consumers: fx::consumers_not_available(),
+        coverage: None,
+        declared_publishers: None,
+        declared_queryables: None,
+        ..fx::subject_impact()
+    };
+    let drawings = [
+        table(&fx::consumers_report()),
+        notes(&fx::consumers_report()),
+        ndjson(&fx::consumers_report()),
+        table(&fx::consumers_not_available()),
+        notes(&fx::consumers_not_available()),
+        ndjson(&fx::consumers_not_available()),
+        table(&fx::subject_impact()),
+        notes(&fx::subject_impact()),
+        ndjson(&fx::subject_impact()),
+        table(&unasked),
+        notes(&unasked),
+        ndjson(&unasked),
+    ];
+    for drawing in &drawings {
+        let lower = drawing.to_lowercase();
+        for word in FORBIDDEN {
+            assert!(
+                !lower.contains(word),
+                "{word:?} is matching-status vocabulary (RFC 12 §9) in:\n{drawing}"
+            );
+        }
+    }
 }
