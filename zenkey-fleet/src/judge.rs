@@ -51,3 +51,5 @@ pub mod doctor;
 pub mod expect;
 #[cfg(feature = "decode")]
 pub mod field;
+#[cfg(feature = "decode")]
+pub mod kind;

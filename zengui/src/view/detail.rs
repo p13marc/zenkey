@@ -513,6 +513,9 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
             if let Some(u) = &s.unit {
                 meta.push_str(&format!(" · unit {u}"));
             }
+            if let Some(k) = &s.kind {
+                meta.push_str(&format!(" · kind {k}"));
+            }
             if let Some(q) = &s.qos {
                 meta.push_str(&format!(" · qos {q}"));
             }
