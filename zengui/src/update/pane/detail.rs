@@ -36,6 +36,11 @@ pub(crate) fn history(slot: &mut SubjectSlot, msg: HistoryMsg) -> Task<Message> 
         slot.history_scroll = vp;
         return Task::none();
     }
+    // View-only too (#219): which pair the panel shows, on this slot.
+    if let HistoryMsg::CompareSnapshotToggled = msg {
+        slot.compare_snapshot = !slot.compare_snapshot;
+        return Task::none();
+    }
     if let Some(rec) = slot.history.as_mut() {
         match msg {
             HistoryMsg::Select(seq) => rec.selected = Some(seq),
@@ -43,7 +48,9 @@ pub(crate) fn history(slot: &mut SubjectSlot, msg: HistoryMsg) -> Task<Message> 
                 rec.ring.clear();
                 rec.selected = None;
             }
-            HistoryMsg::Scrolled(..) => unreachable!("handled above"),
+            HistoryMsg::Scrolled(..) | HistoryMsg::CompareSnapshotToggled => {
+                unreachable!("handled above")
+            }
         }
     }
     Task::none()

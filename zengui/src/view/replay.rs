@@ -64,6 +64,21 @@ pub enum ReplayMsg {
     /// (#217): the file is indistinguishable from a deliberate recording.
     /// Lands on [`ReplayMsg::RecordFinished`], like a capture.
     SaveWindow,
+    /// Show or hide the snapshot open row (#219).
+    SnapshotOpenToggled,
+    /// The snapshot path input changed.
+    SnapshotPathChanged(String),
+    /// Load the typed `.zsnap` path (off the update thread — lands on
+    /// [`ReplayMsg::SnapshotLoaded`]).
+    SnapshotOpen,
+    /// The `.zsnap` parse finished: the path it ran against, and the
+    /// snapshot or why not. Clears the loading claim either way.
+    SnapshotLoaded(
+        String,
+        Result<std::sync::Arc<zenkey_fleet::Snapshot>, crate::services::ServiceError>,
+    ),
+    /// Forget the loaded snapshot.
+    SnapshotClosed,
 }
 
 /// What a finished capture wrote (#357).
@@ -296,6 +311,46 @@ pub fn open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
     .spacing(sp.sm)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+/// The snapshot open row (#219): a path box, shown on demand from the
+/// Replay tab. The same shape as [`open_row`], because a `.zsnap` is the
+/// `.zrec`'s sibling and is opened the same way.
+pub fn snapshot_open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
+    row![
+        kit::caption("snapshot file"),
+        kit::input(".zsnap path", path)
+            .on_input(|s| msg(ReplayMsg::SnapshotPathChanged(s)))
+            .on_submit(msg(ReplayMsg::SnapshotOpen))
+            .size(font::CAPTION)
+            .width(Length::Fill),
+        kit::action(kit::caption("open"))
+            .on_press(msg(ReplayMsg::SnapshotOpen))
+            .padding(sp.xs),
+        kit::action(kit::caption("cancel"))
+            .on_press(msg(ReplayMsg::SnapshotOpenToggled))
+            .padding(sp.xs),
+    ]
+    .spacing(sp.sm)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// What the Replay tab says about a loaded snapshot (#219): its moment
+/// **and its span** — RFC 13 §4.4's one non-negotiable — and what it holds.
+pub fn snapshot_label(s: &zenkey_fleet::Snapshot) -> String {
+    format!(
+        "snapshot {} (over {:.2}s) — {} key(s) from {}{}",
+        s.header.collected_at,
+        s.header.collection_span_s,
+        s.rows.len(),
+        s.header.selectors.join(" + "),
+        if s.header.roster.is_not_asked() {
+            " · roster not asked: every holder unattributed"
+        } else {
+            ""
+        },
+    )
 }
 
 /// Everything replay mode puts between the location bar and the panes (#74).

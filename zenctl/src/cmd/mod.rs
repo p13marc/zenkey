@@ -43,6 +43,7 @@ pub mod schema;
 pub mod scout;
 pub mod serve;
 pub mod service;
+pub mod snapshot;
 pub mod storage;
 pub mod timeline;
 pub mod topic;

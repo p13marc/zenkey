@@ -10,7 +10,7 @@
 //! that lets a counter be added to a shipped document without changing it
 //! for consumers who never see the counter fire.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// "Was the question even put?" — the RFC 09 §5.1 O4 split (#246 / P1),
 /// made nominal (RFC 13, v1.24).
@@ -106,6 +106,17 @@ impl<T: Serialize> Serialize for Asked<T> {
             Asked::NotAsked => s.serialize_none(),
             Asked::Asked(v) => v.serialize(s),
         }
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Asked<T> {
+    /// The mirror of the `Serialize`: a present value is `Asked`. Absence
+    /// never reaches here — a field of this type carries `#[serde(default)]`
+    /// beside its `skip_serializing_if`, and the default is `NotAsked` — so
+    /// a file written by this crate reads back to the value that wrote it
+    /// (`.zsnap`'s `roster`, RFC 13 §4.4).
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        T::deserialize(d).map(Asked::Asked)
     }
 }
 

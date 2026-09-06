@@ -1983,3 +1983,216 @@ pub fn timeline_report_hlc() -> TimelineReport {
         ],
     }
 }
+
+// ─── snapshots (RFC 13 §4.4, #219) ───────────────────────────────────────
+
+/// The second origin the two-origin snapshots below carry.
+pub const ORIGIN_B: &str = "h-9b2e4c7a1d05";
+
+fn zsnap_header(collected_at: &str, span: f64, answered: u64, superseded: u64) -> ZsnapHeader {
+    ZsnapHeader {
+        zsnap: 1,
+        selectors: vec!["acme/v1/**".into()],
+        base: "acme".into(),
+        collected_at: collected_at.into(),
+        collection_span_s: span,
+        asked: 1,
+        answered,
+        elided: 0,
+        errors: 0,
+        superseded,
+        roster: Asked::Asked(2),
+    }
+}
+
+fn snapshot_row(key: &str, bytes: &str, holder: Holder) -> SnapshotRow {
+    SnapshotRow {
+        key: key.into(),
+        delete: false,
+        bytes: Some(bytes.into()),
+        encoding: Some("application/json".into()),
+        timestamp: Some("7f3b2a1c00000001/ab12".into()),
+        stamper: Some(StamperWire::Unattributable { id: "ab12".into() }),
+        source: None,
+        source_zid: Some("ab12".into()),
+        registration: RegistrationWire::Registered,
+        verdict: VerdictWire::Valid,
+        holder,
+    }
+}
+
+/// Two origins under `acme`, five rows: a live host answering its own
+/// health, a live host's telemetry answered by a storage, a second host
+/// remembered only by a storage, a tombstone, and a leaked non-v1 key
+/// (O1). The `state/sysinfo/health` bodies carry `source` and `host_id` —
+/// the labels an origin alignment can read (chunk DD).
+pub fn snapshot() -> Snapshot {
+    Snapshot {
+        header: zsnap_header("2026-09-06T00:00:00Z", 1.25, 6, 1),
+        rows: vec![
+            snapshot_row(
+                "acme/plain/leak",
+                "bGVha2Vk",
+                Holder::Unattributed {
+                    reason: "the key names no origin: not a v1 key".into(),
+                },
+            )
+            .into_leak(),
+            snapshot_row(
+                "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health",
+                "eyJzb3VyY2UiOiJub2RlLWEiLCJob3N0X2lkIjoiaC0zZmE5YzJkNDFiN2UiLCJzdGF0dXMiOiJvayJ9",
+                Holder::Live {
+                    origin: ORIGIN.into(),
+                    answered_by: AnsweredBy::Stamper,
+                },
+            ),
+            snapshot_row(
+                "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used",
+                "eyJ2YWx1ZSI6NDEuMCwidW5pdCI6InBlcmNlbnQifQ==",
+                Holder::Live {
+                    origin: ORIGIN.into(),
+                    answered_by: AnsweredBy::Other,
+                },
+            ),
+            SnapshotRow {
+                delete: true,
+                bytes: None,
+                encoding: None,
+                verdict: VerdictWire::NotValidated {
+                    reason: "tombstone".into(),
+                },
+                ..snapshot_row(
+                    "acme/v1/h-9b2e4c7a1d05/state/logs/rotated",
+                    "",
+                    Holder::StorageOnly {
+                        origin: ORIGIN_B.into(),
+                    },
+                )
+            },
+            snapshot_row(
+                "acme/v1/h-9b2e4c7a1d05/state/sysinfo/health",
+                "eyJzb3VyY2UiOiJub2RlLWIiLCJob3N0X2lkIjoiaC05YjJlNGM3YTFkMDUiLCJzdGF0dXMiOiJkZWdyYWRlZCJ9",
+                Holder::StorageOnly {
+                    origin: ORIGIN_B.into(),
+                },
+            ),
+        ],
+    }
+}
+
+/// The leaked row's non-v1 facets, applied after the shared constructor.
+trait IntoLeak {
+    fn into_leak(self) -> SnapshotRow;
+}
+
+impl IntoLeak for SnapshotRow {
+    fn into_leak(mut self) -> SnapshotRow {
+        self.encoding = Some("text/plain".into());
+        self.timestamp = None;
+        self.stamper = None;
+        self.registration = RegistrationWire::NotV1;
+        self.verdict = VerdictWire::NotValidated {
+            reason: "no_schema".into(),
+        };
+        self
+    }
+}
+
+/// The same fleet five minutes on: the disk value moved, the second host
+/// came up and recovered, the tombstoned key is gone, and the second host
+/// grew a telemetry key. The leaked key is untouched.
+pub fn snapshot_b() -> Snapshot {
+    let mut b = snapshot();
+    b.header = zsnap_header("2026-09-06T00:05:00Z", 0.8, 5, 0);
+    b.rows.retain(|r| !r.delete);
+    for row in &mut b.rows {
+        match row.key.as_str() {
+            "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used" => {
+                row.bytes = Some("eyJ2YWx1ZSI6NDIuMCwidW5pdCI6InBlcmNlbnQifQ==".into());
+                row.timestamp = Some("7f3b2a1c00000002/ab12".into());
+            }
+            "acme/v1/h-9b2e4c7a1d05/state/sysinfo/health" => {
+                row.bytes = Some(
+                    "eyJzb3VyY2UiOiJub2RlLWIiLCJob3N0X2lkIjoiaC05YjJlNGM3YTFkMDUiLCJzdGF0dXMiOiJvayJ9"
+                        .into(),
+                );
+                row.timestamp = Some("7f3b2a1c00000002/cd34".into());
+                row.holder = Holder::Live {
+                    origin: ORIGIN_B.into(),
+                    answered_by: AnsweredBy::Unknown,
+                };
+            }
+            _ => {}
+        }
+    }
+    b.rows.push(snapshot_row(
+        "acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used",
+        "eyJ2YWx1ZSI6Ny41LCJ1bml0IjoicGVyY2VudCJ9",
+        Holder::Live {
+            origin: ORIGIN_B.into(),
+            answered_by: AnsweredBy::Unknown,
+        },
+    ));
+    b.rows.sort_by(|x, y| x.key.cmp(&y.key));
+    b
+}
+
+/// What taking [`snapshot`] reported: written to a file, every holder
+/// counted.
+pub fn snapshot_report() -> SnapshotReport {
+    SnapshotReport {
+        header: snapshot().header,
+        out: Some("fleet.zsnap".into()),
+        live: 2,
+        storage_only: 2,
+        unattributed: 1,
+        incomplete: Vec::new(),
+    }
+}
+
+/// [`snapshot`] against [`snapshot_b`], through the engine's own comparison
+/// at its default bounds — no origin alignment asked.
+pub fn snapshot_diff() -> SnapshotDiff {
+    zenkey_fleet::diff_snapshots(
+        &snapshot(),
+        &snapshot_b(),
+        zenkey_fleet::DiffOpts::default(),
+    )
+}
+
+/// The same diff with an origin alignment asked for (chunk DD's shape,
+/// settled now): one pair on a label, one origin that could not be paired
+/// — listed, never dropped (RFC 13 §4.4) — and the per-subject roll-up.
+pub fn snapshot_diff_unmapped() -> SnapshotDiff {
+    let mut d = snapshot_diff();
+    d.origin_map = Asked::Asked(vec![OriginPair {
+        a: ORIGIN.into(),
+        b: ORIGIN.into(),
+        evidence: MapEvidence::Label {
+            source: "state/sysinfo/health.host_id".into(),
+        },
+    }]);
+    d.unmapped = vec![Unmapped {
+        origin: ORIGIN_B.into(),
+        side: Side::B,
+        reason: "no origin in a publishes the same host_id".into(),
+    }];
+    d.by_subject = Asked::Asked(vec![SubjectDelta {
+        subject: "telemetry/sysinfo/disk/var-log/used".into(),
+        compared: 1,
+        differing: 1,
+        only_in_a: 0,
+        only_in_b: 1,
+        example: d
+            .changed
+            .iter()
+            .find(|c| c.key.ends_with("disk/var-log/used"))
+            .cloned(),
+    }]);
+    d
+}
+
+/// [`snapshot`] against itself: the clean answer, exit 0.
+pub fn snapshot_diff_identity() -> SnapshotDiff {
+    zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
+}
