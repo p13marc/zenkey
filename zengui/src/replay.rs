@@ -118,6 +118,15 @@ pub struct ReplayState {
     pub capture_dropped: u64,
     /// Rows that did not parse — counted, never skipped.
     pub malformed: u64,
+    /// Version-2 preamble rows (RFC 13 §4.1; #218): state at capture
+    /// start, fed to the fold first and counted apart from observed rows.
+    /// A pane replay has no session, so seeding its own fold from them is
+    /// exactly right — nothing is republished (§4.3's two replays).
+    pub preamble_rows: u64,
+    /// Version-2 trigger records, at their capture-clock position (the
+    /// `t` of the last observed row before each): what fired, so the
+    /// scrubber can mark where.
+    pub triggers: Vec<(u64, zenkey_fleet::Transition)>,
     /// The playhead, on the capture clock, µs.
     pub position_us: u64,
     /// The capture's span (the last row's `t`).
@@ -182,45 +191,61 @@ impl ReplayState {
         let mut rows = Vec::new();
         let mut capture_dropped = 0u64;
         let mut malformed = 0u64;
+        let mut preamble_rows = 0u64;
+        let mut triggers = Vec::new();
         let loaded_at = std::time::Instant::now();
         while let Some(item) = reader.next() {
-            match item {
-                Ok(ZrecItem::Sample { row, t_us, .. }) => {
-                    let (priority, congestion_control, reliability, express) =
-                        axes(row.qos.as_deref());
-                    // A row without `t` (hand-piped ndjson) sits at the
-                    // previous row's instant: no pacing claim invented.
-                    let t_prev = rows.last().map_or(0, |r: &ReplayRow| r.t_us);
-                    rows.push(ReplayRow {
-                        t_us: t_us.unwrap_or(t_prev),
-                        view: Arc::new(SampleView {
-                            key: row.key,
-                            payload: zenoh::bytes::ZBytes::from(row.payload),
-                            encoding: row.encoding.unwrap_or_default(),
-                            kind: if row.delete {
-                                zenoh::sample::SampleKind::Delete
-                            } else {
-                                zenoh::sample::SampleKind::Put
-                            },
-                            // The capture-time HLC is informative text in the
-                            // file; it is deliberately NOT resurrected as a
-                            // live timestamp — the scrubber's axis is `t`. No
-                            // timestamp, therefore no stamper (#213).
-                            timestamp: None,
-                            stamped_by: None,
-                            attachment: row.attachment.map(zenoh::bytes::ZBytes::from),
-                            priority,
-                            congestion_control,
-                            reliability,
-                            express,
-                            source: None,
-                            received: loaded_at,
-                        }),
-                    });
+            // A preamble row is a sample at `t: 0` to the fold — it is the
+            // base the pre-roll's deltas are deltas *of* — and counted apart.
+            let (row, t_us, preamble) = match item {
+                Ok(ZrecItem::Sample { row, t_us, .. }) => (row, t_us, false),
+                Ok(ZrecItem::Preamble { row, .. }) => (row, Some(0), true),
+                Ok(ZrecItem::Dropped(n)) => {
+                    capture_dropped += n;
+                    continue;
                 }
-                Ok(ZrecItem::Dropped(n)) => capture_dropped += n,
-                Err(_) => malformed += 1,
+                Ok(ZrecItem::Trigger(t)) => {
+                    triggers.push((rows.last().map_or(0, |r: &ReplayRow| r.t_us), *t));
+                    continue;
+                }
+                Err(_) => {
+                    malformed += 1;
+                    continue;
+                }
+            };
+            if preamble {
+                preamble_rows += 1;
             }
+            let (priority, congestion_control, reliability, express) = axes(row.qos.as_deref());
+            // A row without `t` (hand-piped ndjson) sits at the
+            // previous row's instant: no pacing claim invented.
+            let t_prev = rows.last().map_or(0, |r: &ReplayRow| r.t_us);
+            rows.push(ReplayRow {
+                t_us: t_us.unwrap_or(t_prev),
+                view: Arc::new(SampleView {
+                    key: row.key,
+                    payload: zenoh::bytes::ZBytes::from(row.payload),
+                    encoding: row.encoding.unwrap_or_default(),
+                    kind: if row.delete {
+                        zenoh::sample::SampleKind::Delete
+                    } else {
+                        zenoh::sample::SampleKind::Put
+                    },
+                    // The capture-time HLC is informative text in the
+                    // file; it is deliberately NOT resurrected as a
+                    // live timestamp — the scrubber's axis is `t`. No
+                    // timestamp, therefore no stamper (#213).
+                    timestamp: None,
+                    stamped_by: None,
+                    attachment: row.attachment.map(zenoh::bytes::ZBytes::from),
+                    priority,
+                    congestion_control,
+                    reliability,
+                    express,
+                    source: None,
+                    received: loaded_at,
+                }),
+            });
         }
         let span_us = rows.last().map_or(0, |r| r.t_us);
         Ok(ReplayState {
@@ -232,6 +257,8 @@ impl ReplayState {
             rows,
             capture_dropped,
             malformed,
+            preamble_rows,
+            triggers,
             position_us: 0,
             span_us,
             playing: false,
@@ -291,6 +318,8 @@ impl ReplayState {
             rows,
             capture_dropped: 0,
             malformed: 0,
+            preamble_rows: 0,
+            triggers: Vec::new(),
             position_us: 0,
             span_us,
             playing: false,

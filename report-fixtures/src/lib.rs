@@ -1061,6 +1061,8 @@ fn header() -> zenkey_fleet::ZrecHeader {
         selectors: vec!["acme/v1/**".into()],
         base: "acme".into(),
         captured_at: "2026-08-21T00:00:00Z".into(),
+        preamble: None,
+        pre_roll: None,
     }
 }
 
@@ -1073,6 +1075,10 @@ pub fn record_report() -> RecordReport {
         samples: 4_820,
         dropped: 31,
         duration_ms: 10_000,
+        trigger: None,
+        preamble: None,
+        pre_roll: None,
+        preamble_rows: 0,
     }
 }
 
@@ -1091,6 +1097,9 @@ pub fn replay_report() -> ReplayReport {
             "line 41: unknown QoS profile \"data/drop/reliable\"".into(),
             "line 88: refused delete on a telemetry key".into(),
         ],
+        preamble_skipped: 0,
+        preamble_seeded: 0,
+        triggers: 0,
     }
 }
 

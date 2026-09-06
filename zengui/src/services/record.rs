@@ -71,6 +71,8 @@ async fn capture(
         selectors,
         base,
         captured_at: zenkey_fleet::rfc3339_now(),
+        preamble: None,
+        pre_roll: None,
     };
     // Off the runtime, both halves (#332): iced drives this task on the same
     // runtime the monitor's drain runs on, so a blocking write per sample
@@ -97,7 +99,8 @@ async fn capture(
         _ = stop => {}
         r = recording => r.map_err(ServiceError::of)?,
     }
-    let (samples, dropped) = sink.finish().await.map_err(ServiceError::of)?;
+    let counts = sink.finish().await.map_err(ServiceError::of)?;
+    let (samples, dropped) = (counts.samples, counts.dropped);
     Ok(crate::view::replay::Recorded {
         samples,
         dropped,
@@ -164,13 +167,15 @@ pub(crate) fn write_window(
         selectors,
         base,
         captured_at: zenkey_fleet::rfc3339_now(),
+        preamble: None,
+        pre_roll: None,
     };
     let mut writer =
         zenkey_fleet::ZrecWriter::new_at(out, &header, epoch).map_err(ServiceError::of)?;
     for view in rows {
         writer.write_sample(view).map_err(ServiceError::of)?;
     }
-    let (samples, _) = writer.counts();
+    let samples = writer.counts().samples;
     writer.finish().map_err(ServiceError::of)?;
     Ok(samples)
 }

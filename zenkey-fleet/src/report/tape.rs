@@ -1,10 +1,12 @@
 //! The tape plane (RFC 09 §5.2): the `.zrec` header, the row dialect a
 //! capture is made of, and what a capture or a replay reports afterwards.
 //!
-//! [`ZrecHeader`] is the one shape in this module that is read as well as
-//! written — a `.zrec` on disk outlives the process that wrote it, so the
-//! header is a contract in both directions and is the only report shape
-//! deriving `Deserialize`.
+//! [`ZrecHeader`] — with the two version-2 blocks it may carry,
+//! [`PreambleInfo`] and [`PreRollInfo`] — is read as well as written: a
+//! `.zrec` on disk outlives the process that wrote it, so the header is a
+//! contract in both directions and derives `Deserialize`. (The trigger
+//! record a version-2 file interleaves is [`super::Transition`], the
+//! watchdog's own shape, which reads back for the same reason.)
 
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +14,10 @@ use serde::{Deserialize, Serialize};
 /// when (RFC 09 §5.1 O4 — a capture names its question). The `base` is the
 /// operator's *stated* deployment base at capture time; recorded keys are
 /// full wire keys and are never re-derived from it (O3).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `PartialEq` only, since v1.34: the version-2 blocks carry measured
+/// spans as `f64`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ZrecHeader {
     /// Format version ([`ZREC_VERSION`](crate::tape::record::ZREC_VERSION)).
     pub zrec: u32,
@@ -27,6 +32,83 @@ pub struct ZrecHeader {
     /// Capture start, RFC 3339 wall clock — provenance, not a pacing clock
     /// (pacing rides each row's `t`).
     pub captured_at: String,
+    /// Version 2 (RFC 13 §4.1, v1.34; #218): the state preamble this
+    /// capture carries — the bounded fetch that produced the `preamble`
+    /// rows and what it could not fetch. Absent on a version-1 file and on
+    /// a capture that asked for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preamble: Option<PreambleInfo>,
+    /// Version 2: the retained window this capture's pre-roll came from —
+    /// what was asked, what the ring could give, and the ring's two
+    /// eviction kinds kept apart (O6). Absent on a live capture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_roll: Option<PreRollInfo>,
+}
+
+/// What a version-2 preamble is a snapshot *of* (RFC 13 §4.3's pre-roll
+/// bullet): the values at the moment the ring began are not recoverable,
+/// so the honest substitute has to be named rather than implied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreambleSemantics {
+    /// The current state of what the ring cannot show: only keys **absent**
+    /// from the retained window were fetched at trigger time. A key the
+    /// ring holds already has its story in the pre-roll rows.
+    AbsentFromWindow,
+    /// The full current state under the watched selectors at trigger time,
+    /// ring or no ring — every fetched key, so a reader that seeds from the
+    /// preamble alone has the whole base.
+    Full,
+}
+
+/// The state preamble's account of itself (RFC 13 §4.1, version 2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PreambleInfo {
+    /// Preamble rows written — counted apart from observed rows (O6).
+    pub count: u64,
+    /// How long the fan-in GET took: a preamble is collected *over* a span,
+    /// never at an instant (RFC 13 §4.4's obligation, inherited).
+    pub collected_over_s: f64,
+    /// The selectors actually fetched — the state-class projection of the
+    /// watched set, so a watch that reaches no `state` key fetched nothing.
+    pub selectors: Vec<String>,
+    pub semantics: PreambleSemantics,
+    /// Replies the bounded fetch could not keep or could not read: error
+    /// envelopes plus replies elided past the reply bound (O6).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incomplete: u64,
+    /// Watched selectors whose state could not be fetched at all — a GET
+    /// that could not be issued, or a selector that reaches no `state`
+    /// key — named rather than folded into a count (O5).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<String>,
+}
+
+/// The retained window's account of itself at trigger time (RFC 13 §4.3's
+/// pre-roll bullet): what `--pre` asked for and what the ring could give.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PreRollInfo {
+    /// The pre-roll the operator asked for, seconds.
+    pub asked_s: f64,
+    /// The span the ring actually held when the trigger fired — shorter
+    /// than `asked_s` while the ring was still filling, or when the byte
+    /// budget bit (`evicted`).
+    pub covered_s: f64,
+    /// The selectors the ring was fed under: the pre-roll covers these and
+    /// nothing wider (O5).
+    pub watched: Vec<String>,
+    /// Samples the ring dropped because its **byte** budget bit — the
+    /// window is then narrower than `asked_s` claims (O6).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub evicted: u64,
+    /// Samples that aged past the pre-roll — the window sliding as
+    /// declared, counted apart from `evicted` (v1.18 R1 forbids the fold).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub expired: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// What a capture did — the shared report shape both frontends render.
@@ -44,6 +126,21 @@ pub struct RecordReport {
     pub dropped: u64,
     /// Wall-clock capture length.
     pub duration_ms: u64,
+    /// The transition that fired a triggered capture (#218) — absent on a
+    /// plain capture, and on a triggered run that never fired.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<super::Transition>,
+    /// The state preamble written ahead of the pre-roll, as the header
+    /// states it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preamble: Option<PreambleInfo>,
+    /// The retained window the pre-roll came from, as the header states it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pre_roll: Option<PreRollInfo>,
+    /// Preamble rows written — never added to `samples` (O6, applied to
+    /// rows: the kinds are counted apart).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub preamble_rows: u64,
 }
 
 /// What a replay did — the shared report shape both frontends render.
@@ -67,6 +164,20 @@ pub struct ReplayReport {
     /// The first few malformed/refused reasons, for the human render.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub first_errors: Vec<String>,
+    /// Version-2 preamble rows **not** published — the default: re-stamping
+    /// state-at-capture-start republishes a snapshot over the live fleet
+    /// (RFC 13 §4.2), so the replayer skips them unless told `--seed-state`
+    /// and says how many.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub preamble_skipped: u64,
+    /// Preamble rows published (dry run: would have been) under
+    /// `--seed-state`, through the same retire gate as any row.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub preamble_seeded: u64,
+    /// Trigger records met in the file — never published; a marker, not a
+    /// row.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub triggers: u64,
 }
 
 /// One sample, as the explorers write it (#235).
@@ -181,6 +292,13 @@ pub struct SampleRow {
     /// Why a decode that was asked for did not happen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decode_error: Option<String>,
+    /// A version-2 preamble row (RFC 13 §4.1, #218): state fetched at
+    /// trigger time and written ahead of the first observed row, at
+    /// `t: 0`. Only ever written as `true`; an observed row omits it
+    /// rather than saying `false`, on the same terms as every other
+    /// optional field here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preamble: Option<bool>,
 }
 
 /// The wire's QoS axes as one stable token: `priority/congestion/reliability`,
