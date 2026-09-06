@@ -120,7 +120,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `storage`, `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
   verb** is an act or observation on live traffic and hangs off the root
   (`get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`, `replay`,
-  `serve`, `gen`, `scout`); a **judgement** is exit-coded (`check
+  `timeline`, `serve`, `gen`, `scout`); a **judgement** is exit-coded (`check
   expect|cutover|retired|probe|schema`, `doctor`, `why`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`

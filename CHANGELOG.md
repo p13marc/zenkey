@@ -34,6 +34,25 @@ consumers|impact` render it (see `zenctl/CHANGELOG.md`); zengui's
 Inspector gains a Consumers section — one admin sweep per click, never
 ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
 `declared_entities_within` keeps the elided count, `EntityKind::ALL`.
+### `zenkey-fleet`
+
+- **The fleet timeline** (#216): `model/timeline.rs`, a pure projection
+  from a window of samples — live `SampleView`s or `.zrec` lines — to one
+  merged ordering on a stated clock, lanes per origin/producer, and the
+  three provenances of a position kept apart. `Placed<HlcAxis>::new` is the
+  only way onto the HLC axis and refuses an unstamped row (a compile-fail
+  doctest pins that it cannot be promised for an arbitrary row);
+  `HlcClaim` rests on the zenoh 1.10 fact the module doc cites (an HLC is
+  updated on receive only where the node has one — routers by default,
+  peers and clients not). `report/timeline.rs` pins the wire; every row
+  carries `order_by`; the sequence-number lane is structurally
+  unavailable with a fixed reason. `ZrecItem::Sample` gains `source`, so a
+  replayed window classifies its stampers exactly as the live one did.
+  Deliberately no edges.
+
+### `zenctl`
+
+- `timeline`, a new wire verb at the root — see `zenctl/CHANGELOG.md`.
 
 ## 0.8.0 — what the adopters found (2026-09-06)
 

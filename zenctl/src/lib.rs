@@ -159,6 +159,7 @@ pub async fn run() -> Result<()> {
         Command::Field(a) => cmd::field::run(a).await,
         Command::Record(a) => cmd::record::run(a).await,
         Command::Replay(a) => cmd::replay::run(a).await,
+        Command::Timeline(a) => cmd::timeline::run(a).await,
         Command::Serve(a) => cmd::serve::run(a).await,
         Command::Gen(a) => cmd::generate::run(a, gen_target_typed).await,
         Command::Scout(a) => cmd::scout::run(a).await,

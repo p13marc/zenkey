@@ -19,7 +19,7 @@
 //!   `schema`, `registry`, `storage`, `blob`, `admin`, `key`;
 //! * a **wire verb** is an act or an observation on live traffic, and hangs
 //!   off the root — `get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`,
-//!   `replay`, `serve`, `gen`, `scout`;
+//!   `replay`, `timeline`, `serve`, `gen`, `scout`;
 //! * a **judgement** is exit-coded under the one contract in [`crate::exit`],
 //!   and the exit-coded assertions live together under `check`.
 //!
@@ -97,6 +97,19 @@ pub(crate) enum ExportAs {
     /// An AsyncAPI 3.0 document: channels from subjects, operations from
     /// procedures.
     Asyncapi,
+}
+
+/// Which clock `timeline` orders on (#216).
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum OrderArg {
+    /// The observer's monotonic clock, µs since the window epoch. Every
+    /// sample has one; breaks sit where they fell.
+    Arrival,
+    /// The sample's HLC. Only stamped samples have one — the rest are
+    /// counted as excluded, never defaulted to their arrival time — and
+    /// the report states whether one stamper (happened-before) or several
+    /// (skewed wall clocks) produced the axis.
+    Hlc,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -554,6 +567,21 @@ pub(crate) enum Command {
     /// the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the
     /// capture header's base is a contract (`--force-base` to override).
     Replay(ReplayArgs),
+    /// The fleet timeline (#216): one merged ordering of a window's samples,
+    /// lanes per origin/producer, the clock stated per report and the
+    /// stamper per lane — and DELIBERATELY NO EDGES.
+    ///
+    /// A line between two lanes would claim a causality no observer on this
+    /// bus can establish. What it can say: on the arrival axis, when each
+    /// sample was seen here; on the HLC axis (`--order hlc`), the
+    /// happened-before of ONE stamping node, or a comparison of skewed wall
+    /// clocks when several stamped (RFC 09 §5.1 O7). Unstamped samples get
+    /// their own lane on arrival and cannot be placed on the HLC axis at
+    /// all; drops and coalescing render as breaks where they fell (O6). The
+    /// per-publisher sequence-number lane is reported UNAVAILABLE on this
+    /// zenoh, not empty. `--from <FILE>` reads a .zrec through the same
+    /// projection, so live and replay render identically.
+    Timeline(TimelineArgs),
     /// Stand up a mock queryable: answer every query on a keyexpr with one
     /// static body, and log every ask (#121).
     ///
@@ -1404,6 +1432,33 @@ pub(crate) struct RecordArgs {
     /// Stop after this many samples (0 = until ctrl-c or --for).
     #[arg(long, value_name = "N", default_value_t = 0)]
     pub(crate) count: u64,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `timeline` verb's flags (#216) — one struct, the `GenArgs` pattern.
+#[derive(clap::Args)]
+pub(crate) struct TimelineArgs {
+    /// Full wire selectors to watch, one lane set per window — this session
+    /// is un-namespaced (RFC 09 §5). `**` never crosses an `@`-chunk, so a
+    /// `v1/**` window excludes the verbatim planes by construction and the
+    /// report says so (RFC 03 §4 D2). Not with --from.
+    #[arg(value_name = "SELECTOR", required_unless_present = "from",
+          add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) selectors: Vec<String>,
+    /// The passive window, seconds. Not with --from: a capture's span is in
+    /// its rows.
+    #[arg(long = "for", value_name = "SECS", required_unless_present = "from")]
+    pub(crate) for_secs: Option<f64>,
+    /// Which clock to order on. Every emitted row carries `order_by`, so a
+    /// line cut out of the stream still says which axis its `pos` is on.
+    #[arg(long, value_enum, default_value = "arrival")]
+    pub(crate) order: OrderArg,
+    /// Read the window from a .zrec capture instead of the bus — the same
+    /// projection, so the same window rendered live and from its file is
+    /// identical. Keys are read under the capture's stated base.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["selectors", "for_secs"])]
+    pub(crate) from: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }

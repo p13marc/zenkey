@@ -75,6 +75,7 @@ mod seed;
 mod service;
 mod storage;
 mod tape;
+mod timeline;
 mod topic;
 mod why;
 
@@ -107,5 +108,6 @@ pub use seed::*;
 pub use service::*;
 pub use storage::*;
 pub use tape::*;
+pub use timeline::*;
 pub use topic::*;
 pub use why::*;

@@ -276,6 +276,10 @@ pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::storage::{
     check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
 };
+pub use model::timeline::{
+    ArrivalAxis, ArrivalOrdering, Break, HlcAxis, HlcOrdering, HlcStamp, Ingested, Order, Placed,
+    PlacedBreak, SnLane, TimelineRow, Unstamped, Window, timeline,
+};
 pub use model::tree::KeyTreeSnapshot;
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
@@ -290,8 +294,9 @@ pub use report::{
     GenReport, HelloView, ImpactReport, Judgement, LatencyReport, LatencySummary, MeshLink,
     NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
     RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
-    SeedCoverage, StorageInfo, SubjectImpact, TopologyEdge, TopologyNode, TopologyReport,
-    TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader, judgement_exit_code,
+    SeedCoverage, StorageInfo, SubjectImpact, TimelineReport, TopologyEdge, TopologyNode,
+    TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
+    judgement_exit_code,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]

@@ -9,7 +9,8 @@
 //! two payloads become a diff ([`diff`]), a payload plus a schema becomes a
 //! rendering ([`decode`]), a sample on the alert plane becomes an alert
 //! transition ([`alert`]), the admin space's declared readers become a
-//! ranked consumer list ([`consumers`]).
+//! ranked consumer list ([`consumers`]), a window of samples becomes a
+//! lane-partitioned ordering on a stated clock ([`timeline`]).
 //!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
@@ -41,6 +42,7 @@ pub mod retain;
 pub mod skeleton;
 pub mod stats;
 pub mod storage;
+pub mod timeline;
 pub mod tree;
 
 #[cfg(feature = "decode")]
