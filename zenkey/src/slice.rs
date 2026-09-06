@@ -1094,26 +1094,34 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
 /// therefore round-trips what this build can read, which is the honest bound
 /// and is stated here rather than discovered later. Everything this build does
 /// carry round-trips exactly — pinned as a test.
-pub fn to_toml(slice: &RegistrySlice) -> String {
-    // TOML basic-string escaping: the values here are registry vocabulary
-    // (chunk-legal paths, type names) plus free-text descriptions, and a
-    // description with a quote in it must not produce a file that no longer
-    // parses.
-    fn s(value: &str) -> String {
-        let mut out = String::with_capacity(value.len() + 2);
-        out.push('"');
-        for c in value.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c => out.push(c),
-            }
+/// A TOML basic string, quoted and escaped, for a registry emitter.
+///
+/// The values a registry file carries are vocabulary (chunk-legal paths,
+/// type names) plus free text (descriptions), and a description with a
+/// quote or a newline in it must not produce a file that no longer parses.
+/// Public since v1.34 so the observation-derived draft emitter
+/// (`zenkey_fleet::model::infer`, RFC 08 §6.1) escapes exactly as
+/// [`to_toml`] does — one quoting rule, spelled once.
+pub fn toml_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for c in value.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
         }
-        out.push('"');
-        out
+    }
+    out.push('"');
+    out
+}
+
+pub fn to_toml(slice: &RegistrySlice) -> String {
+    fn s(value: &str) -> String {
+        toml_quote(value)
     }
     fn opt(out: &mut String, key: &str, value: Option<&str>) {
         if let Some(v) = value {

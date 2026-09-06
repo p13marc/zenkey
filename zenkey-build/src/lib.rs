@@ -119,6 +119,13 @@ pub enum LintKind {
     /// an illegal field. **Never** forceable: forcing past one of these would
     /// write a lock for a registry that does not lint.
     Invalid,
+    /// A file declares `draft = true` — an observation-derived, unreviewed
+    /// registry (RFC 08 §6.1, v1.34) — and the build was not told to admit
+    /// one. **Never** forceable and never resolved by writing a lock: the
+    /// marker exists so a draft cannot become a fleet's `introspect` truth
+    /// by being copied into place, and the only way past it is a review
+    /// that removes it (or [`Config::allow_drafts`], for prototyping).
+    Draft,
 }
 
 impl Error {
@@ -349,6 +356,10 @@ pub(crate) struct RegistryFile {
     /// The producer's declared cost (RFC 08 §2, v1.32), when it declares one.
     #[allow(dead_code)] // see `BudgetEntry`: linted, never generated from
     pub budget: Option<BudgetEntry>,
+    /// `draft = true` in the header (RFC 08 §6.1, v1.34): observation-derived
+    /// and unreviewed. Refused by [`Config::checked`] unless
+    /// [`Config::allow_drafts`] admits it; its subjects may omit `since`.
+    pub draft: bool,
 }
 
 /// One `[[deprecated]]` entry: what was retired, and which kind of thing it
@@ -478,6 +489,9 @@ pub struct Config {
     /// (default `<registry_dir>/conditional.lock`).
     conditional: Option<PathBuf>,
     emit_rerun_if_changed: bool,
+    /// Admit `draft = true` files (RFC 08 §6.1, v1.34) instead of refusing
+    /// them — prototyping against an inferred registry. Off by default.
+    allow_drafts: bool,
 }
 
 impl Default for Config {
@@ -497,6 +511,7 @@ impl Config {
             compat_lock: None,
             conditional: None,
             emit_rerun_if_changed: true,
+            allow_drafts: false,
         }
     }
 
@@ -563,6 +578,24 @@ impl Config {
         self
     }
 
+    /// Admit registry files that declare `draft = true` (RFC 08 §6.1,
+    /// v1.34) — the observation-derived, unreviewed drafts
+    /// `zenctl registry infer` writes.
+    ///
+    /// Off by default, and the default is the point: a draft describes
+    /// surfaces that *were* served by an author who cannot vouch that they
+    /// *will* be, so a build MUST refuse it unless explicitly told to admit
+    /// one ([`LintKind::Draft`], never forceable). With `allow_drafts(true)`
+    /// a draft is admitted for prototyping — its subjects may omit `since`
+    /// (a draft has no version stream) and every draft file comes back as a
+    /// [`RegistryWarning`], so a build that admits one says so every time.
+    /// Promotion is a review: drop the marker, assign `since`.
+    #[must_use]
+    pub fn allow_drafts(mut self, allow: bool) -> Self {
+        self.allow_drafts = allow;
+        self
+    }
+
     /// Lint the registry (RFC 08 §5), check the deprecation ledger
     /// (RFC 08 §3), and write the generated module.
     pub fn generate(self) -> Result<(), Error> {
@@ -626,6 +659,22 @@ impl Config {
             }
         }
         let files = load_registry(&self.registry_dir)?;
+        // A draft (RFC 08 §6.1, v1.34) is refused before any other check
+        // runs: the marker is what keeps an observation-derived file from
+        // becoming `introspect` truth by being copied into place, and it is
+        // a refusal a human has to answer, not a comment a human is trusted
+        // to notice.
+        if !self.allow_drafts
+            && let Some(f) = files.iter().find(|f| f.draft)
+        {
+            return Err(lint_kind(
+                &f.name,
+                "declares draft = true — an observation-derived, unreviewed registry \
+                 (RFC 08 §6.1). Review it, drop the marker and add `since` to promote \
+                 it; or build with Config::allow_drafts() to prototype against it",
+                LintKind::Draft,
+            ));
+        }
         let ledger = self
             .ledger
             .clone()
@@ -635,14 +684,22 @@ impl Config {
         check_type_table(&self.registry_dir, &files)?;
         // The compatibility lock (RFC 08 §3.1): opting out is legal and loud.
         // "Loud" is the caller's to arrange — this collects, it does not print.
+        // An admitted draft is louder still, and its warning subsumes the
+        // opt-out one (a draft is `compat = "none"` by construction).
         let warnings: Vec<RegistryWarning> = files
             .iter()
             .filter(|f| f.compat == Compat::None)
             .map(|f| RegistryWarning {
                 file: f.name.clone(),
-                message: "declares compat = \"none\" — its entries are unpinned and \
-                          incompatible edits pass unchecked (RFC 08 §3.1)"
-                    .to_string(),
+                message: if f.draft {
+                    "draft — observation-derived and unreviewed (RFC 08 §6.1): admitted \
+                     by allow_drafts, unpinned, every field a guess; promote it by review"
+                        .to_string()
+                } else {
+                    "declares compat = \"none\" — its entries are unpinned and \
+                     incompatible edits pass unchecked (RFC 08 §3.1)"
+                        .to_string()
+                },
             })
             .collect();
         check_compat_lock(&self.compat_lock_path(), &files)?;
@@ -881,6 +938,23 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 ));
             }
         };
+        // `draft = true` (RFC 08 §6.1, v1.34): read here so the `since`
+        // waiver below can see it; whether a draft is *admitted* is
+        // `Config::checked`'s question. A draft MUST be `compat = "none"` —
+        // pinning entries nobody has reviewed would lock guesses in.
+        let draft = match header.get("draft") {
+            None => false,
+            Some(v) => v.as_bool().ok_or_else(|| {
+                lint(&fname, "[registry] draft must be a boolean (RFC 08 §6.1)")
+            })?,
+        };
+        if draft && compat != Compat::None {
+            return Err(lint(
+                &fname,
+                "declares draft = true with compat pinned — a draft cannot be pinned; \
+                 it MUST carry compat = \"none\" (RFC 08 §6.1)",
+            ));
+        }
 
         let (name, service_origin) = if let Some(svc) = doc.get("service") {
             let name = svc
@@ -1072,12 +1146,26 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     }
                 }
             }
+            // A draft has no version stream, so `since` is waived for it —
+            // and MUST be absent: a draft carrying one would be claiming a
+            // lifecycle it does not have (RFC 08 §6.1). `description` is
+            // still required; the draft emitter writes one that says
+            // "inferred".
             if entry.get("description").and_then(|v| v.as_str()).is_none()
-                || entry.get("since").and_then(|v| v.as_str()).is_none()
+                || (!draft && entry.get("since").and_then(|v| v.as_str()).is_none())
             {
                 return Err(lint(
                     &fname,
                     format!("{spath:?}: missing description/since"),
+                ));
+            }
+            if draft && entry.get("since").is_some() {
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "{spath:?}: a draft entry carries `since` — a draft has no version \
+                         stream (RFC 08 §6.1); promote the file instead"
+                    ),
                 ));
             }
             // `common = "..."` (RFC 04/06): declares this entry as one of the
@@ -1668,6 +1756,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             deprecated,
             compat,
             budget,
+            draft,
         });
     }
 
@@ -3319,6 +3408,96 @@ mod tests {
             "this is not a lock line\n"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A draft (RFC 08 §6.1, v1.34) is refused by default with its own
+    /// kind, which nothing can force and no lock write resolves: the marker
+    /// is the mechanism, so it must not be a warning a build prints and
+    /// proceeds past.
+    #[test]
+    fn a_draft_is_refused_unless_admitted() {
+        let dir = lock_dir("draft");
+        let draft_header = "[registry]\nversion = \"0.1\"\napp = \"t\"\nconvention = 1\ncompat = \"none\"\ndraft = true\n";
+        // No `since` — a draft has no version stream.
+        let subject = "[[subject]]\npath = \"health\"\nclass = \"state\"\ntype = \"Health\"\nttl_s = 900\ndescription = \"inferred; unreviewed\"\n";
+        std::fs::write(
+            dir.join("t.toml"),
+            format!("{draft_header}[producer]\nname = \"t\"\n\n{subject}"),
+        )
+        .unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .unwrap_err();
+        match &err {
+            Error::Lint { kind, message, .. } => {
+                assert_eq!(*kind, LintKind::Draft);
+                assert!(message.contains("draft = true"), "{message}");
+                assert!(message.contains("allow_drafts"), "{message}");
+            }
+            other => panic!("expected a draft lint, got {other:?}"),
+        }
+        assert!(!LintKind::Draft.is_forceable());
+        assert!(!LintKind::Draft.is_resolved_by_writing());
+        // A lint failure is an answer, not a refusal to ask (#348).
+        assert!(!err.is_unaskable());
+
+        // Admitted: the missing `since` is waived, and the draft is a
+        // warning every build sees.
+        let warnings = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .allow_drafts(true)
+            .lint()
+            .expect("an admitted draft lints");
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].file, "t");
+        assert!(warnings[0].message.starts_with("draft"), "{warnings:?}");
+        // …and it generates, so a consumer can prototype against it.
+        let (code, _) = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .allow_drafts(true)
+            .generate_string_checked()
+            .expect("an admitted draft generates");
+        assert!(code.contains("Health"), "the draft's subject is generated");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A draft cannot be pinned, and cannot claim a lifecycle: `draft = true`
+    /// with `compat = "backward"` or with a `since` is malformed
+    /// (`Invalid`), admitted or not.
+    #[test]
+    fn a_draft_cannot_be_pinned_or_carry_since() {
+        let pinned = lint_one(
+            "[registry]\nversion = \"0.1\"\napp = \"t\"\nconvention = 1\ndraft = true\n[producer]\nname = \"t\"\n",
+        )
+        .unwrap_err();
+        match pinned {
+            Error::Lint { kind, message, .. } => {
+                assert_eq!(kind, LintKind::Invalid);
+                assert!(message.contains("cannot be pinned"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        let with_since = lint_one(
+            "[registry]\nversion = \"0.1\"\napp = \"t\"\nconvention = 1\ncompat = \"none\"\ndraft = true\n[producer]\nname = \"t\"\n\n[[subject]]\npath = \"health\"\nclass = \"state\"\ntype = \"Health\"\nttl_s = 900\nsince = \"1.0\"\ndescription = \"d\"\n",
+        )
+        .unwrap_err();
+        match with_since {
+            Error::Lint { kind, message, .. } => {
+                assert_eq!(kind, LintKind::Invalid);
+                assert!(message.contains("since"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        let not_bool = lint_one(
+            "[registry]\nversion = \"0.1\"\napp = \"t\"\nconvention = 1\ncompat = \"none\"\ndraft = \"yes\"\n[producer]\nname = \"t\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(not_bool.contains("boolean"), "{not_bool}");
     }
 
     /// `compat = "none"` unpins the file — the loud escape hatch: the same
