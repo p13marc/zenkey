@@ -21,8 +21,8 @@
 //!    must be allowed *egress* toward the responder as well as ingress from
 //!    the caller.
 //!
-//! And a fifth, from the reference deployment (2026-08-30), not yet in the
-//! RFC text: zenoh evaluates a consumer's declares and queries **on egress
+//! And a fifth, from the reference deployment (2026-08-30), RFC 09 §3
+//! fact 5 since v1.33: zenoh evaluates a consumer's declares and queries **on egress
 //! toward the responding face, against that face's subject**. A host whose
 //! grants are all own-origin (`…/h-xxx/**`) includes no wildcard-origin
 //! selector, so a console's `…/v1/**` interest never reaches it, and a
