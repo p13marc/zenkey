@@ -1552,6 +1552,13 @@ pub(crate) struct ReplayArgs {
     /// same operator price as `retire` (RFC 04 §1.2, v1.12).
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
+    /// Publish a version-2 capture's preamble rows too — state at capture
+    /// start, re-stamped now (RFC 13 §4.1). Off by default: re-stamped
+    /// state wins last-writer-wins, so the preamble republishes a whole
+    /// snapshot over the live fleet with no pacing between the rows
+    /// (§4.2); the rows are skipped and counted instead.
+    #[arg(long)]
+    pub(crate) seed_state: bool,
     /// QoS profile for rows that recorded none.
     #[arg(long, default_value = "refreshed",
           add = ArgValueCandidates::new(completion::qos_profiles))]

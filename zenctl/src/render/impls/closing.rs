@@ -85,6 +85,27 @@ impl Render for ReplayReport {
             }
             t.grid(g);
         }
+        // The version-2 kinds, counted apart (RFC 13 §4.1): what the replay
+        // did not publish and why, what it seeded, and what merely fired.
+        if self.preamble_skipped > 0 {
+            t.line(format!(
+                "preamble rows skipped: {} (--seed-state to publish them)",
+                self.preamble_skipped
+            ));
+        }
+        if self.preamble_seeded > 0 {
+            t.line(format!(
+                "preamble rows {}seeded: {}",
+                if self.dry_run { "would be " } else { "" },
+                self.preamble_seeded
+            ));
+        }
+        if self.triggers > 0 {
+            t.line(format!(
+                "trigger record(s) met: {} — markers, never published",
+                self.triggers
+            ));
+        }
     }
 
     fn bounds(&self) -> Vec<BoundCost> {
@@ -106,6 +127,18 @@ impl Render for ReplayReport {
                  skipped",
                 self.malformed, self.refused
             )));
+        }
+        if self.preamble_skipped > 0 {
+            // Skipped is not lost: the row is in the file, and the reason it
+            // stayed there is the section's whole argument.
+            notes.push(
+                Note::coverage(format!(
+                    "{} preamble row(s) not published — state at capture start, \
+                     re-stamped, would overwrite live state; --seed-state to mean it",
+                    self.preamble_skipped
+                ))
+                .cite("RFC 13 §4.2"),
+            );
         }
         notes
     }

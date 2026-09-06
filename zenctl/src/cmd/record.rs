@@ -43,6 +43,8 @@ async fn run_inner(
         selectors: vec![selector.clone()],
         base: args.base().to_string(),
         captured_at: zenkey_fleet::rfc3339_now(),
+        preamble: None,
+        pre_roll: None,
     };
     // Both halves off the runtime (#332): the create through `tokio::fs`,
     // and every row after it on the blocking pool behind the sink's queue.
@@ -98,13 +100,17 @@ async fn run_inner(
 
     // `finish` drains the queue before it flushes and reports what actually
     // reached the file — not what the capture handed the queue.
-    let (samples, dropped) = sink.finish().await?;
+    let counts = sink.finish().await?;
     let report = RecordReport {
         header,
         out: Some(out.to_string()),
-        samples,
-        dropped,
+        samples: counts.samples,
+        dropped: counts.dropped,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        trigger: None,
+        preamble: None,
+        pre_roll: None,
+        preamble_rows: 0,
     };
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
     Ok(())
