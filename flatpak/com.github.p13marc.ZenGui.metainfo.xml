@@ -53,6 +53,11 @@
     <keyword>iced</keyword>
   </keywords>
   <releases>
+    <release version="0.8.0" date="2026-09-06">
+      <description>
+        <p>zengui 0.4.0: the registry facts line shows a subject's declared kind, and the doctor panel's run-over-run delta comes from the engine.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-08-29">
       <description>
         <p>First flatpak packaging of zengui.</p>

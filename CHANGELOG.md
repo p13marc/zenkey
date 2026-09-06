@@ -19,8 +19,8 @@ Versions per crate, because they move independently:
 
 ## 0.8.0 — what the adopters found (2026-09-06)
 
-**Prepared, not yet tagged.** Everything below is on `main`; the bare
-`0.8.0` tag and the crates.io dispatch are the maintainer's act.
+**Tagged `0.8.0`** (bare, per the scheme since 0.7.1) on 2026-09-06; the three
+library crates published to crates.io the same day.
 
 The week after 0.7.2, two adopters — tcgui and zensight — filed five
 findings that were all one shape: the contract could not *say* something,
