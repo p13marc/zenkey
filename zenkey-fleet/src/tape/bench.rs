@@ -348,6 +348,7 @@ mod tests {
                     key: "v1/h-3fa9c2d41b7e/@rpc/netring/capture/trigger".into(),
                     encoding: None,
                     attachment: None,
+                    timestamp: None,
                     answer: Answer::Value(zenoh::bytes::ZBytes::from(b"{}".to_vec())),
                 },
                 Duration::from_millis(3),

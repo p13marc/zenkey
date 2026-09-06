@@ -1198,6 +1198,112 @@ fn a_timeline_on_the_hlc_axis_is_pinned() {
     );
 }
 
+/// The RPC trace window (#215): the call's own document nested whole, the
+/// window's header beside it — `subscribed_before_call` pinned `true`, the
+/// chain rule and the exclusion as fixed sentences — and three lanes: two
+/// of rows, one of counts. On a row every clock-derived field is absent when
+/// the sample carried no HLC, and `break_before` rides only the row that
+/// follows a drop.
+#[test]
+fn a_trace_report_is_pinned_with_its_call_nested_whole() {
+    assert_eq!(
+        serde_json::to_value(fx::trace_report()).unwrap(),
+        json!({
+            "call": {
+                "key": "acme/v1/h-3fa9c2d41b7e/@rpc/demo/artifact/request",
+                "timeout_s": 5.0,
+                "answers": [{"origin": "h-3fa9c2d41b7e", "ok": true, "value": {"id": "01HZY"}}]
+            },
+            "scopes": ["acme/v1/h-3fa9c2d41b7e/**", "acme/v1/*/**"],
+            "excluded": "the verbatim planes (`@rpc`, `@blob`, `@media`, `@adv`, `@catalog`): `**` never crosses an `@`-chunk (RFC 03 §4 D2), so the artifact bytes on `@blob` are outside this window — excluded, not empty",
+            "window_s": 10.0,
+            "subscribed_before_call": true,
+            "t0_unix_s": 1788000000.5,
+            "call_returned_ms": 4.2,
+            "hlc_reference": "reply",
+            "reply_hlc": "7680000000000000000/33",
+            "chain_rule": "first-chunk naming heuristic (RFC 05 §3 idiom); a naming coincidence is tagged the same way",
+            "registry_loaded": true,
+            "idiom": "long-running",
+            "attributed": [
+                {
+                    "key": "acme/v1/h-3fa9c2d41b7e/state/demo/artifact/pcap",
+                    "relation": "declared_chain",
+                    "arrival_delta_ms": 12.5,
+                    "hlc": "7680000000034359738/33",
+                    "hlc_delta_ms": 8,
+                    "stamped_by": "foreign:33",
+                    "kind": "put",
+                    "payload_bytes": 40
+                },
+                {
+                    "key": "acme/v1/h-3fa9c2d41b7e/events/demo/artifact/01HZY",
+                    "relation": "declared_chain",
+                    "arrival_delta_ms": 250.0,
+                    "hlc": "7680000001056964608/33",
+                    "hlc_delta_ms": 246,
+                    "stamped_by": "foreign:33",
+                    "kind": "put",
+                    "payload_bytes": 40,
+                    "break_before": 3
+                }
+            ],
+            "same_origin": [{
+                "key": "acme/v1/h-3fa9c2d41b7e/telemetry/other/noise",
+                "relation": "same_origin_undeclared",
+                "arrival_delta_ms": 1.0,
+                "kind": "put",
+                "payload_bytes": 40
+            }],
+            "concurrent": {
+                "samples": 40,
+                "keys": 2,
+                "examples": [
+                    "acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu",
+                    "acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem"
+                ],
+                "dropped": 0
+            },
+            "dropped": 3,
+            "keys_evicted": 0
+        })
+    );
+
+    // No registry, no reply HLC: the attributed lane is empty and the header
+    // says why in two fields — the reference is `none` and `reply_hlc` is
+    // absent, `registry_loaded` is false — rather than by a `null` anywhere.
+    let v = serde_json::to_value(fx::trace_report_no_registry()).unwrap();
+    assert_eq!(v["hlc_reference"], "none");
+    assert!(v.get("reply_hlc").is_none(), "{v}");
+    assert_eq!(v["registry_loaded"], false);
+    assert_eq!(v["idiom"], "undeclared");
+    assert_eq!(v["attributed"], json!([]));
+    for row in v["same_origin"].as_array().unwrap() {
+        assert_eq!(row["relation"], "same_origin_registry_not_loaded");
+        assert!(row.get("hlc_delta_ms").is_none(), "{row}");
+    }
+    // The exit code is the call's.
+    assert_eq!(fx::trace_report().exit_code(), 0);
+
+    // The two trace vocabularies, snake_case like the verdicts.
+    for (v, wire) in [
+        (TraceRelation::DeclaredChain, "declared_chain"),
+        (
+            TraceRelation::SameOriginUndeclared,
+            "same_origin_undeclared",
+        ),
+        (
+            TraceRelation::SameOriginRegistryNotLoaded,
+            "same_origin_registry_not_loaded",
+        ),
+    ] {
+        assert_eq!(serde_json::to_value(v).unwrap(), wire);
+    }
+    for (v, wire) in [(HlcReference::Reply, "reply"), (HlcReference::None, "none")] {
+        assert_eq!(serde_json::to_value(v).unwrap(), wire);
+    }
+}
+
 // ─── snapshots (RFC 13 §4.4, #219) ───────────────────────────────────────
 
 /// The `.zsnap` header: the span is the fact a capture header does not

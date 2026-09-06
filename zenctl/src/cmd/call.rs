@@ -1,8 +1,16 @@
-//! `service call` — a GET on the `@rpc` plane (RFC 05).
+//! `service call` — a GET on the `@rpc` plane (RFC 05), and with `--trace`
+//! the window held on the called origin after it (#215).
+//!
+//! The trace is not a verb of its own: the call is the act that owns the
+//! request instant, and the trace is that act's observation, so it is a
+//! flag on the one spelling. The engine's `call_traced` does the ordering
+//! that matters — subscribe, then call, then hold — and the exit code stays
+//! the call's, because nothing seen in the window is a verdict.
 
 use anyhow::Result;
 
 use crate::Bus;
+use crate::exit::unaskable;
 use crate::input::Source;
 
 pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
@@ -17,6 +25,8 @@ pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
         attachment,
         no_validate,
         raw,
+        trace,
+        for_secs,
         bus: _,
     } = cli;
     let (origin, producer, procedure, params, body, attachment) = (
@@ -32,6 +42,20 @@ pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
     // through the typed builders and applies the fan-in discipline plus the
     // registry-layer fanout guard (issue #36).
     let target = zenkey_fleet::CallTarget::parse(origin)?;
+    // A trace attributes to one origin, so a fan-out has nothing to trace.
+    // Refused here, before a session opens (the engine refuses it too, for
+    // library callers), and as this tool's own refusal of the input: exit 2.
+    let window = if trace {
+        if matches!(target, zenkey_fleet::CallTarget::Fleet) {
+            return Err(unaskable!(
+                "--trace attributes what it observes to one origin; a fleet (`*`) call has \
+                 none to attribute to — name one origin"
+            ));
+        }
+        Some(super::positive_secs("--for", for_secs)?)
+    } else {
+        None
+    };
 
     let typed = body.map(Source::read).transpose()?;
     // The attachment rides the query verbatim — never schema-encoded, same
@@ -81,25 +105,38 @@ pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
         payload = Some(prepared.bytes);
     }
 
-    let report = zenkey_fleet::call(
-        &args.fleet(&session),
-        zenkey_fleet::CallSpec {
-            target: &target,
-            producer,
-            procedure,
-            params,
-            body: payload,
-            attachment,
-            timeout: args.timeout(),
-            slices: slices.as_ref(),
-        },
-    )
-    .await?;
-
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
-    // Exit-code discipline preserved: 1 = an error reply, 2 = zero replies
-    // (silence stays a distinct non-verdict — RFC 05 §3.1).
-    let code = report.exit_code();
+    let spec = zenkey_fleet::CallSpec {
+        target: &target,
+        producer,
+        procedure,
+        params,
+        body: payload,
+        attachment,
+        timeout: args.timeout(),
+        slices: slices.as_ref(),
+    };
+    let fleet = args.fleet(&session);
+    // Exit-code discipline preserved either way: 1 = an error reply, 2 =
+    // zero replies (silence stays a distinct non-verdict — RFC 05 §3.1). A
+    // trace exits as its call does — what the window saw is an observation,
+    // not a judgement.
+    let code = match window {
+        Some(window) => {
+            eprintln!(
+                "tracing {origin} for {}s after the reply (subscribed before the call)…",
+                window.as_secs_f64()
+            );
+            let report =
+                zenkey_fleet::call_traced(&fleet, spec, zenkey_fleet::TraceSpec { window }).await?;
+            crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
+            report.exit_code()
+        }
+        None => {
+            let report = zenkey_fleet::call(&fleet, spec).await?;
+            crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
+            report.exit_code()
+        }
+    };
     if code != 0 {
         std::process::exit(code);
     }

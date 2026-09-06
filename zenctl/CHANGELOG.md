@@ -37,6 +37,33 @@ that survives only in the ledger still resolves, class wildcarded.
 Families `registry-consumers` and `registry-impact`; rows tagged
 `consumer` and `coverage`; the admin discriminator rides flat in the
 envelope (`admin`, `answered`, `nodes`).
+**`service call --trace [--for SECS]` — call → effect, the RPC trace
+window** (#215). RFC 05 §3's long-running idiom is a declared causal chain
+— `GET @rpc/<p>/artifact/request` → `state/<p>/artifact/<kind>` →
+`events/<p>/artifact/<ulid>` → `@blob` — and nothing followed it: you
+called a write procedure and then hunted three panes for what it did. With
+`--trace` the call keeps a window open on the called origin (default 10 s)
+and lists, after the reply, every sample observed there: Δ on the arrival
+clock always, Δ on the HLC against the reply's where both are stamped (the
+stamper named — `self`, `foreign:<id>`, `unattributable:<id>`), each
+tagged `declared-chain` (the registry refines it under the called producer
+and it shares the procedure's first chunk — a **naming heuristic**, and the
+report says so in a fixed `chain_rule` field), `same-origin, not declared`,
+or `same-origin, registry not loaded` (unjudgeable is not undeclared, O4).
+Other origins are a count and a few keys in a *concurrent, not attributed*
+lane, never rows. **Subscribe, then call, then hold** is the order and the
+report pins it (`subscribed_before_call`): a window opened after the call
+would turn "not asked" into "no". The wording is *observed after the call*
+throughout — never *caused*; no edge, no arrow, no trace-id attachment.
+`**` never crosses an `@`-chunk, so the `@blob` bytes are outside the
+window and the report says so rather than widening. Not a verb of its own:
+one act, one spelling. `--trace` with `*` exits 2 (a trace attributes to
+one origin). The exit code stays the call's — what the window saw is an
+observation, not a judgement. A zenctl-level smoke against `gen
+--serve-describe` shows naming attribution only: the generator never
+publishes *after* a reply, so the ordered chain is pinned by the engine's
+bus test (`zenkey-fleet/tests/trace.rs`). Not in this cut: the zengui hook
+(`SendForm.trace`, an Effects section) is named and left for the GUI.
 
 **`timeline` — the fleet timeline, and deliberately no edges** (#216).
 A new wire verb at the root. `zenctl timeline <SEL>… --for <SECS>
