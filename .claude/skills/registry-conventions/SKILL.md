@@ -28,9 +28,12 @@ application repos.)
 - `deprecated.lock` is an **append-only ledger**: one `<producer>\t<path>` line
   per retired subject, never removed; codegen fails if ledger and
   `[[deprecated]]` entries disagree.
-- `common = "health|errors|sensor|alert|evidence_self|evidence_device|evidence_names|entity|alias|pdns"`
-  marks a state subject as one of the RFC framework set; the lint checks the
-  pattern's variable names against the CommonState variant fields.
+- `common = "health|errors|sensor|alert|evidence_self|evidence_device|evidence_names|evidence_relation|entity|alias|pdns|incident|ack|silence|edge"`
+  marks a state subject as one of the RFC framework set (RFC 04 §1.4); the
+  lint checks the path against the token's canonical spelling, variable names
+  included, and the `@catalog` tokens (`entity` onward) only lint under a
+  `[service]` file. The table itself is `COMMON_STATE` in
+  `zenkey-build/src/lib.rs`, pinned against `zenkey::CommonFamily::ALL`.
 - **`registry.lock` is the RFC 08 §3.1 compatibility snapshot** (default
   `compat = "backward"` per file): an existing subject's class/type or a
   procedure's kind/request/reply may never change in place — retire through

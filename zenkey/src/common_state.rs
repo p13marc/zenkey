@@ -10,8 +10,8 @@
 //! producer — health, errors, the registration doc, alerts, evidence.
 //! [`CommonState`] is that set — the **framework state set**, defined once in
 //! RFC 04 §1.4 (v1.25; before that, named piecemeal across 04 §1.2/§5 and
-//! 06 §4/§5): the neutral per-producer core plus the `@catalog` service trio
-//! (RFC 06 §5). `errors` is the one non-neutral member — it is ZenSight's
+//! 06 §4/§5): the neutral per-producer core plus the `@catalog` service set
+//! (RFC 06 §5, §5.5, §5.6). `errors` is the one non-neutral member — it is ZenSight's
 //! token, defined in RFC 11 §2 under 04 §1.4's profile-extension rule, and
 //! appears in no neutral chapter. `alive` is deliberately absent: presence,
 //! not a state subject (RFC 04 §5). The registry codegen (`zenkey-build`)
@@ -50,12 +50,31 @@ pub enum CommonState<'a> {
     EvidenceDevice { device: &'a str },
     /// `evidence/names/{ip_slug}` — a passive-DNS name observation.
     EvidenceNames { ip_slug: &'a str },
+    /// `evidence/relation/{relation_id}` — a claim that two things are
+    /// connected, this way (RFC 04 §1.4, 06 §4/§5.6, v1.30). The ends are
+    /// observable attributes, never entity ids; the catalog resolves them
+    /// into an [`CommonState::CatalogEdge`].
+    EvidenceRelation { relation_id: &'a str },
     /// `@catalog` `entity/{entity_id}` — the merged entity document (RFC 06 §5).
     CatalogEntity { entity_id: &'a str },
     /// `@catalog` `alias/{old_id}` — old-id → entity-id re-pointing (RFC 06 §5).
     CatalogAlias { old_id: &'a str },
     /// `@catalog` `pdns/{ip_slug}` — the accumulated IP↔name record (RFC 06 §5).
     CatalogPdns { ip_slug: &'a str },
+    /// `@catalog` `incident/{incident_id}` — the currently-firing alerts for
+    /// one entity; tombstoned when no member is firing (RFC 06 §5.5, v1.29).
+    CatalogIncident { incident_id: &'a str },
+    /// `@catalog` `ack/{alert_ref}` — one operator's acknowledgement of one
+    /// firing alert, keyed by the alert's identity as one chunk (RFC 06
+    /// §5.5, v1.29; inert once the alert it names has resolved or re-fired).
+    CatalogAck { alert_ref: &'a str },
+    /// `@catalog` `silence/{id}` — a suppression window with matchers,
+    /// bounds and an author; holds across re-fires (RFC 06 §5.5, v1.29).
+    CatalogSilence { id: &'a str },
+    /// `@catalog` `edge/{edge_id}` — a resolved relationship between two
+    /// entities (or an honest external), concluded from the sensors'
+    /// [`CommonState::EvidenceRelation`] claims (RFC 06 §5.6, v1.30).
+    CatalogEdge { edge_id: &'a str },
 }
 
 /// A cross-producer framework state family — the fieldless sibling of
@@ -92,11 +111,14 @@ pub enum CommonFamily {
     EvidenceDevice,
     /// `evidence/names/{ip_slug}` — passive-DNS name observations (RFC 06 §4).
     EvidenceNames,
+    /// `evidence/relation/{relation_id}` — relationship claims (RFC 06
+    /// §4/§5.6, v1.30: sensors claim, the catalog concludes).
+    EvidenceRelation,
 }
 
 impl CommonFamily {
     /// Every cross-producer family, for iteration (views, lints).
-    pub const ALL: [CommonFamily; 7] = [
+    pub const ALL: [CommonFamily; 8] = [
         CommonFamily::Health,
         CommonFamily::Errors,
         CommonFamily::Sensor,
@@ -104,6 +126,7 @@ impl CommonFamily {
         CommonFamily::EvidenceSelf,
         CommonFamily::EvidenceDevice,
         CommonFamily::EvidenceNames,
+        CommonFamily::EvidenceRelation,
     ];
 
     /// The `common = "…"` registry token that declares a subject as this
@@ -117,6 +140,7 @@ impl CommonFamily {
             CommonFamily::EvidenceSelf => "evidence_self",
             CommonFamily::EvidenceDevice => "evidence_device",
             CommonFamily::EvidenceNames => "evidence_names",
+            CommonFamily::EvidenceRelation => "evidence_relation",
         }
     }
 
@@ -131,6 +155,7 @@ impl CommonFamily {
             CommonFamily::EvidenceSelf => &["evidence", "self"],
             CommonFamily::EvidenceDevice => &["evidence", "device"],
             CommonFamily::EvidenceNames => &["evidence", "names"],
+            CommonFamily::EvidenceRelation => &["evidence", "relation"],
         }
     }
 
@@ -143,6 +168,7 @@ impl CommonFamily {
             CommonFamily::Alert => Some("alert_key"),
             CommonFamily::EvidenceDevice => Some("device"),
             CommonFamily::EvidenceNames => Some("ip_slug"),
+            CommonFamily::EvidenceRelation => Some("relation_id"),
             CommonFamily::Health
             | CommonFamily::Errors
             | CommonFamily::Sensor
@@ -172,5 +198,18 @@ mod tests {
         tokens.sort_unstable();
         tokens.dedup();
         assert_eq!(tokens.len(), CommonFamily::ALL.len());
+    }
+
+    /// The v1.30 family is a real member of `ALL` — the sized array is the
+    /// public contract (#425), so a variant is added here or not at all.
+    #[test]
+    fn evidence_relation_is_a_population_keyed_family() {
+        assert!(CommonFamily::ALL.contains(&CommonFamily::EvidenceRelation));
+        assert_eq!(CommonFamily::EvidenceRelation.token(), "evidence_relation");
+        assert_eq!(
+            CommonFamily::EvidenceRelation.prefix(),
+            &["evidence", "relation"]
+        );
+        assert_eq!(CommonFamily::EvidenceRelation.var(), Some("relation_id"));
     }
 }

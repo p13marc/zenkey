@@ -300,6 +300,12 @@ mod tests {
             common_family(Scope::fleet(), CommonFamily::EvidenceNames),
             "v1/*/state/*/evidence/names/*"
         );
+        // v1.30: the relationship claims, the one selector the catalog's
+        // `evidence/**` subscription already covers (RFC 06 §4).
+        assert_eq!(
+            common_family(Scope::fleet(), CommonFamily::EvidenceRelation),
+            "v1/*/state/*/evidence/relation/*"
+        );
         // One origin's family — the narrowed form.
         let o = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
         assert_eq!(
