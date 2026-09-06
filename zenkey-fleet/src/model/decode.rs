@@ -733,25 +733,27 @@ pub async fn schema_dump(
     }
 }
 
-/// Every producer's schema for one type name (issue #51's `interface show
-/// --schema`). Asking all of them is the point: same name, different hash is
-/// RFC 08 §7's drift finding, and the type's own page is where it is worth
-/// seeing.
-pub async fn schemas_for_type(
-    store: &SchemaStore,
-    session: &Session,
-    producers: &[String],
+/// One row per producer for one type name, over sets already in hand — the
+/// rows `interface show --schema` tables (issue #51), fed from a
+/// [`DescribeSweep`](crate::bus::describe::DescribeSweep)'s
+/// `first_per_producer` (#410).
+///
+/// Rows, not a verdict: a [`SchemaRow`](crate::report::SchemaRow) carries a
+/// producer and no origin, and its `hash` is flattened to `""` when none was
+/// served, so nothing about agreement can be read off two of them — that is
+/// [`schema_drift`]'s job, over the sweep's attributed answers. This function
+/// exists so the table and the verdict come from one sweep rather than the
+/// table recomputing a second, worse verdict of its own.
+pub fn schema_rows_for_type(
+    described: &[(String, SchemaSet)],
     type_name: &str,
     full: bool,
 ) -> Vec<crate::report::SchemaRow> {
-    let mut out = Vec::new();
-
-    for producer in producers {
-        if let Some(schema) = store.schema_for(session, producer, type_name).await {
-            out.push(row(producer, type_name, &schema, full));
-        }
-    }
-    out
+    described
+        .iter()
+        .filter_map(|(producer, set)| set.get(type_name).map(|s| (producer, s)))
+        .map(|(producer, schema)| row(producer, type_name, schema, full))
+        .collect()
 }
 
 /// One producer's served describe set, attributed to the host that answered

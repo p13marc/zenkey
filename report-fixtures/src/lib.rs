@@ -472,7 +472,8 @@ pub fn interface_list() -> InterfaceList {
 
 /// Two producers serving the same type name with **different hashes** — the
 /// RFC 08 §7 drift finding, on the type's own page rather than only in
-/// `doctor`.
+/// `doctor`. The verdict rides in `drift`, attributed per origin (#410): the
+/// rows alone name a producer and never a host.
 pub fn interface_show() -> InterfaceShow {
     InterfaceShow {
         type_name: "HealthSnapshot".into(),
@@ -505,15 +506,72 @@ pub fn interface_show() -> InterfaceShow {
                 document: None,
             },
         ]),
+        drift: vec![SchemaDrift {
+            type_name: "HealthSnapshot".into(),
+            servers: vec![
+                SchemaServer {
+                    producer: "sysinfo".into(),
+                    origin: "h-aaaaaaaaaaaa".into(),
+                    hash: Asked::Asked("sha256:aaaa".into()),
+                },
+                SchemaServer {
+                    producer: "gnmi".into(),
+                    origin: "h-bbbbbbbbbbbb".into(),
+                    hash: Asked::Asked("sha256:bbbb".into()),
+                },
+            ],
+            verdict: DriftVerdict::Disagree,
+        }],
     }
 }
 
 /// The same type without `--schema` — the bus was never asked, and the report
-/// says so instead of an empty list that reads as "none served" (R4).
+/// says so instead of an empty list that reads as "none served" (R4). No
+/// drift either: a verdict on an unasked question is the thing O4 forbids.
 pub fn interface_show_unasked() -> InterfaceShow {
     InterfaceShow {
         schemas: Asked::NotAsked,
+        drift: Vec::new(),
         ..interface_show()
+    }
+}
+
+/// One producer on two hosts, and the second host served **no identity**:
+/// agreement is not established, and it is not a disagreement either — the
+/// third state #370 pulled apart. The rows show one host's hash (the fold
+/// keeps the first answer per producer), which is exactly why the rows could
+/// never carry this verdict (#410).
+pub fn interface_show_unjudgeable() -> InterfaceShow {
+    InterfaceShow {
+        type_name: "HealthSnapshot".into(),
+        carriers: vec![CarrierRow {
+            producer: "sysinfo".into(),
+            class: "state".into(),
+            path: "health".into(),
+        }],
+        schemas: Asked::Asked(vec![SchemaRow {
+            producer: "sysinfo".into(),
+            type_name: "HealthSnapshot".into(),
+            kind: "json-schema".into(),
+            hash: "sha256:aaaa".into(),
+            document: None,
+        }]),
+        drift: vec![SchemaDrift {
+            type_name: "HealthSnapshot".into(),
+            servers: vec![
+                SchemaServer {
+                    producer: "sysinfo".into(),
+                    origin: "h-aaaaaaaaaaaa".into(),
+                    hash: Asked::Asked("sha256:aaaa".into()),
+                },
+                SchemaServer {
+                    producer: "sysinfo".into(),
+                    origin: "h-bbbbbbbbbbbb".into(),
+                    hash: Asked::NotAsked,
+                },
+            ],
+            verdict: DriftVerdict::Unjudgeable,
+        }],
     }
 }
 

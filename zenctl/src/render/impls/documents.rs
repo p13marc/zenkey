@@ -9,7 +9,7 @@
 //! has one plus the envelope it already argued for in a comment.
 
 use zenkey_fleet::report::{
-    BlobFetchReport, BlobProbeReport, BlobTreeIndexReport, InterfaceShow, TopicInfo,
+    BlobFetchReport, BlobProbeReport, BlobTreeIndexReport, DriftVerdict, InterfaceShow, TopicInfo,
 };
 
 use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_of};
@@ -123,6 +123,9 @@ impl Render for InterfaceShow {
         // none served" on a run that never asked (RFC 09 §5.1 O4).
         if let Some(schemas) = self.schemas.as_option() {
             e.insert("schemas".into(), schemas.len().into());
+            // Same guard: a drift count of 0 is a real clean bill only on a
+            // run that asked (#410).
+            e.insert("drift".into(), self.drift.len().into());
         }
         e
     }
@@ -136,6 +139,13 @@ impl Render for InterfaceShow {
         }
         for s in self.schemas.as_deref().into_iter().flatten() {
             out(Row::of("schema", s));
+        }
+        // A third kind (#410): the engine's verdict on whether the carriers
+        // agree, per origin — what a script acting on a disagreement needs,
+        // and what the schema rows above cannot say (no origin, and an
+        // unserved hash flattened to `""`).
+        for d in &self.drift {
+            out(Row::of("drift", d));
         }
     }
 
@@ -201,19 +211,59 @@ impl Render for InterfaceShow {
                 "schemas asked and no carrier served one — describe is a SHOULD \
                  (RFC 08 §7), so undescribed is not shapeless",
             )),
-            // Same name, different hash across producers: §7 says this is a
-            // finding, and the type's own page is where it is worth seeing.
-            Some(schemas) => {
-                if let Some(first) = schemas.first()
-                    && schemas.iter().any(|s| s.hash != first.hash)
-                {
+            // Whether the carriers *agree* is `self.drift`'s business, below
+            // — the rows cannot say (#410).
+            Some(_) => {}
+        }
+        // The engine's verdict, per origin, not a recompute over the rows
+        // (#410). The recompute this replaced compared `hash` strings across
+        // producers: it could not see two hosts of one producer disagree
+        // (`SchemaRow` has no origin), and two producers that served no
+        // identity compared equal as `""` and read as agreement — the O4 bug
+        // #370 fixed in `schema_drift`, which is now the one implementation.
+        for drift in &self.drift {
+            match drift.verdict {
+                DriftVerdict::Disagree => {
+                    let identities: std::collections::BTreeSet<&String> = drift
+                        .servers
+                        .iter()
+                        .filter_map(|s| s.hash.as_option())
+                        .collect();
+                    let servers: Vec<String> = drift
+                        .servers
+                        .iter()
+                        .map(|s| match s.hash.as_option() {
+                            Some(h) => format!("{}@{} ({h})", s.producer, s.origin),
+                            None => format!("{}@{} (no identity served)", s.producer, s.origin),
+                        })
+                        .collect();
                     notes.push(
                         Note::coverage(format!(
-                            "⚠ producers disagree about {}'s shape — a schema-drift \
+                            "⚠ {} is served under {} identities — {} — a schema-drift \
                              finding; `zenctl doctor` carries it as one",
-                            self.type_name
+                            drift.type_name,
+                            identities.len(),
+                            servers.join(", ")
                         ))
                         .cite("RFC 08 §7"),
+                    );
+                }
+                // Not a disagreement: a question nobody's evidence answers,
+                // and saying "agree" here was the bug.
+                DriftVerdict::Unjudgeable => {
+                    let silent: Vec<String> = drift
+                        .servers
+                        .iter()
+                        .filter(|s| s.hash.is_not_asked())
+                        .map(|s| format!("{}@{}", s.producer, s.origin))
+                        .collect();
+                    notes.push(
+                        Note::coverage(format!(
+                            "agreement on {} cannot be established: {} served no identity",
+                            drift.type_name,
+                            silent.join(", ")
+                        ))
+                        .cite("RFC 09 §5.1 O4"),
                     );
                 }
             }

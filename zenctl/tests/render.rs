@@ -490,7 +490,9 @@ declared payload types:
 }
 
 /// Two producers, same type name, different hashes — the RFC 08 §7 drift
-/// finding on the type's own page.
+/// finding on the type's own page, naming **which host** serves which
+/// identity (#410): the note reads the engine's verdict, never a recompute
+/// over the rows, which have no host to name.
 #[test]
 fn an_interface_show_names_a_schema_disagreement() {
     assert_data_eq!(
@@ -508,7 +510,22 @@ served schema (RFC 08 §7):
 
 "#]]
     );
-    assert!(notes(&fx::interface_show()).contains("disagree about"));
+    let n = notes(&fx::interface_show());
+    assert!(
+        n.contains("HealthSnapshot is served under 2 identities"),
+        "{n}"
+    );
+    assert!(n.contains("sysinfo@h-aaaaaaaaaaaa (sha256:aaaa)"), "{n}");
+    assert!(n.contains("gnmi@h-bbbbbbbbbbbb (sha256:bbbb)"), "{n}");
+    assert!(n.contains("RFC 08 §7"), "{n}");
+    // …and the verdict reaches a script as its own row kind, per origin.
+    let drift_row = ndjson(&fx::interface_show())
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .find(|v| v["row"] == "drift")
+        .expect("a drift row");
+    assert_eq!(drift_row["verdict"], "disagree");
+    assert_eq!(drift_row["servers"][1]["origin"], "h-bbbbbbbbbbbb");
 
     // R4: without --schema the bus was never asked, and the document must not
     // carry the old unconditional `"schemas": 0` — an unasked bus is not one
@@ -519,6 +536,10 @@ served schema (RFC 08 §7):
     assert!(
         !envelope.as_object().unwrap().contains_key("schemas"),
         "not asked: the count is absent, never 0 — {envelope}"
+    );
+    assert!(
+        !envelope.as_object().unwrap().contains_key("drift"),
+        "not asked: no drift count either, for the same reason — {envelope}"
     );
     let n = notes(&unasked);
     assert!(n.contains("not asked"), "{n}");
@@ -531,7 +552,44 @@ served schema (RFC 08 §7):
     let envelope: serde_json::Value =
         serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
     assert_eq!(envelope["schemas"], 0, "asked, none served: a real zero");
+    assert_eq!(
+        envelope["drift"], 0,
+        "asked, nothing to compare: a real zero"
+    );
     assert!(notes(&silent).contains("no carrier served one"));
+}
+
+/// One producer on two hosts, one of which served no identity: the page says
+/// agreement **cannot be established** and cites O4, rather than reading the
+/// one row it has as agreement — the recompute over rows this replaced could
+/// only ever see one hash here, and called it clean (#410, #370).
+#[test]
+fn an_interface_show_says_when_agreement_cannot_be_judged() {
+    let show = fx::interface_show_unjudgeable();
+    let n = notes(&show);
+    assert!(
+        n.contains("agreement on HealthSnapshot cannot be established"),
+        "{n}"
+    );
+    assert!(
+        n.contains("sysinfo@h-bbbbbbbbbbbb served no identity"),
+        "{n}"
+    );
+    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
+    assert!(
+        !n.contains("identities"),
+        "unjudgeable is not a disagreement: {n}"
+    );
+    let drift_row = ndjson(&show)
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .find(|v| v["row"] == "drift")
+        .expect("a drift row");
+    assert_eq!(drift_row["verdict"], "unjudgeable");
+    assert!(
+        drift_row["servers"][1].get("hash").is_none(),
+        "no identity is absent on the wire, never \"\" — {drift_row}"
+    );
 }
 
 /// The empty base is a real deployment, not a missing value, so it renders

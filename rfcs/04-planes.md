@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29, v1.30 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29, v1.30, v1.31 and v1.32 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -82,6 +82,29 @@ rules for deciding where a given piece of information belongs.
   [06-identity.md §5](06-identity.md)), the writer MUST order writes so
   every intermediate is safe, and consumers MUST tolerate the torn window.
   Anything needing true snapshot semantics must be one document on one key.
+- **Self-stats (v1.32).** The health document (`state/<producer>/health`,
+  §1.4) MAY carry one neutral, optional object, `self_stats` — what the
+  producer says about its own size, in the units the registry's `[budget]`
+  table declares ([08-registry.md §2](08-registry.md)):
+
+  ```json
+  "self_stats": {
+    "rss_bytes":    123456789,
+    "budget_bytes": 67108864,
+    "tables": [ { "name": "flows", "entries": 4096, "bytes": 1048576 } ]
+  }
+  ```
+
+  `rss_bytes` is the resident set; `budget_bytes` echoes the budget the
+  producer believes it runs under (absent when none is configured);
+  `tables[]` names each bounded structure with its occupancy. Every field
+  is optional and the object may be absent — an older producer publishes
+  nothing here and is not wrong, it is *unobservable* on this question,
+  which an observer states rather than folds into "within budget"
+  ([13 §3](13-observer-conformance.md)). This is the one field set the
+  convention names inside `health`; the rest of the document stays the
+  application's (the reference application's `HealthSnapshot` already
+  carries this object under this name).
 - **Oversized values.** State values SHOULD stay small (they ride
   firehoses and seeds). A subject whose value can grow large MAY register
   `delivery = "invalidate"` ([08-registry.md §2](08-registry.md)): the
@@ -141,7 +164,7 @@ at. This is that place. The **framework state set** is:
 
 | Subject (under `state/<producer>/`) | `common` token | Defined |
 |---|---|---|
-| `health` | `health` | the producer health document (§1.2; the identity bridge rides it, [06 §6.2](06-identity.md)) |
+| `health` | `health` | the producer health document (§1.2; the identity bridge rides it, [06 §6.2](06-identity.md); MAY carry `self_stats`, §1.2) |
 | `sensor` | `sensor` | the registration document (§5) |
 | `alert/{alert_key}` | `alert` | the alert family (§1.2) |
 | `evidence/self` | `evidence_self` | the producer's own identity claim ([06 §4](06-identity.md)) |

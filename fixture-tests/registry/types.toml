@@ -12,6 +12,9 @@ kind = "json-schema"
 [types.Alert]
 kind = "json-schema"
 
+[types.AlertAck]
+kind = "json-schema"
+
 [types.AliasRecord]
 kind = "json-schema"
 
@@ -45,6 +48,9 @@ kind = "json-schema"
 [types.DetectorConfig]
 kind = "json-schema"
 
+[types.Edge]
+kind = "json-schema"
+
 [types.ErrorReport]
 kind = "json-schema"
 
@@ -69,6 +75,9 @@ kind = "json-schema"
 [types.HostEvidence]
 kind = "json-schema"
 
+[types.Incident]
+kind = "json-schema"
+
 [types.LatencyReport]
 kind = "json-schema"
 
@@ -84,10 +93,16 @@ kind = "json-schema"
 [types.RegistrySlice]
 kind = "json-schema"
 
+[types.RelationClaim]
+kind = "json-schema"
+
 [types.SensorInfo]
 kind = "json-schema"
 
 [types.ServiceAction]
+kind = "json-schema"
+
+[types.Silence]
 kind = "json-schema"
 
 [types.StreamStatus]

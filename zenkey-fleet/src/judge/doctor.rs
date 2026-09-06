@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use crate::{Error, Result};
+use crate::Result;
 use zenkey::grammar::with_base;
 use zenkey::{Declared, RegistrySlice};
 
@@ -55,29 +55,6 @@ fn finding(
     }
 }
 
-/// The introspect key for a slice — a service origin's verbatim `@` chunk is
-/// structurally unmatchable by a fleet selector's `*` (property D4), so it
-/// takes its own key. That is the grammar working, not an exception to it.
-fn rpc_key(base: &str, slice: &RegistrySlice, procedure: &str) -> Result<String> {
-    Ok(match &slice.service_origin {
-        Some(origin) => {
-            // The slice already validated it on parse — `Other` here means the
-            // chunk is not a legal verbatim origin, which is the same finding
-            // the hand-rolled `ServiceOrigin::new` used to report.
-            // A *served* slice said this, so it is the peer that is
-            // malformed — not the caller, and not the fabric.
-            let o = origin.known().ok_or_else(|| {
-                Error::malformed(
-                    format!("slice {}", slice.name),
-                    format!("carries {:?} as a service origin", origin.token()),
-                )
-            })?;
-            with_base(base, zenkey::selector::service_rpc(o, &[procedure]))
-        }
-        None => with_base(base, zenkey::selector::fleet_rpc(&slice.name, &[procedure])),
-    })
-}
-
 /// Run every check against the live fleet and report typed findings.
 ///
 /// `locals` is the caller's registry (loaded from `--registry` dirs or GUI
@@ -109,7 +86,7 @@ pub async fn run_doctor(
 
     // --- served-vs-declared diff (RFC 08 §6) --------------------------
     for local in locals.iter().flat_map(|set| set.slices()) {
-        let key = rpc_key(base, local, "introspect")?;
+        let key = crate::model::registry::rpc_key(base, local, "introspect")?;
         let answers = fleet_get(fleet, &key, &GetOpts::new(spec.timeout)).await?;
         for answer in &answers {
             let Answer::Value(bytes) = &answer.answer else {
@@ -233,54 +210,20 @@ pub async fn run_doctor(
             None => std::borrow::Cow::Owned(crate::model::registry::SliceSet::default()),
         },
     };
+    // One sweep, kept whole (#410): every answer attributed to the host that
+    // gave it, because `describe` fans in across every host running a
+    // producer and keeping one of them was how a schema disagreement came
+    // to name a producer and never a host (#398). The same helper serves
+    // `interface show --schema`, so the two no longer each hold a copy of
+    // "do these carriers agree".
+    let describes = crate::bus::describe::describe_sweep(fleet, &slice_set, spec.timeout).await?;
     // One per producer, for the consumers whose question *is* the producer:
     // totality, the listen phase's store, the served count, and the field
     // table's declared-path join. Where several hosts answered this is the
     // first of them — arrival order, which is not a fact about the fleet, and
     // is why the drift check below reads the attributed list instead (#398).
-    let mut described: Vec<(String, zenkey::schema::SchemaSet)> = Vec::new();
-    // Every answer, attributed. `describe` is `@rpc/*/describe` — a wildcard
-    // origin — so this fans in across every host running the producer, and
-    // keeping one of them was how a schema disagreement came to name a
-    // producer and never a host (#398).
-    let mut described_by_origin: Vec<crate::model::decode::DescribedSchema> = Vec::new();
-    let mut undescribed = 0usize;
-    // One `GetOpts` for the sweep rather than one per producer: the elision
-    // ledger is per-options, so a fresh one per slice could never accumulate
-    // the fan-out's cost.
-    let describe_opts = GetOpts::new(spec.timeout);
-    for slice in slice_set.slices() {
-        let key = rpc_key(base, slice, "describe")?;
-        let answers = fleet_get(fleet, &key, &describe_opts).await?;
-        let before = described_by_origin.len();
-        for a in answers {
-            let origin = a.origin;
-            let Answer::Value(bytes) = a.answer else {
-                continue;
-            };
-            let cow = bytes.to_bytes();
-            let Some(set) = std::str::from_utf8(&cow)
-                .ok()
-                .and_then(|t| zenkey::schema::SchemaSet::parse(t).ok())
-            else {
-                continue;
-            };
-            if described_by_origin.len() == before {
-                described.push((slice.name.clone(), set.clone()));
-            }
-            described_by_origin.push(crate::model::decode::DescribedSchema {
-                origin,
-                producer: slice.name.clone(),
-                set,
-            });
-        }
-        // Nobody parseable answered for this producer. A producer where one
-        // host answered and another did not is *described* — the SHOULD is
-        // met — and the gap between them is the drift check's business.
-        if described_by_origin.len() == before {
-            undescribed += 1;
-        }
-    }
+    let described: Vec<(String, zenkey::schema::SchemaSet)> = describes.first_per_producer();
+    let undescribed = describes.undescribed.len();
     // Totality through the one engine implementation (`totality_gaps`) —
     // doctor used to carry a parallel referenced-names path.
     for gap in crate::model::decode::totality_gaps(&described, &slice_set) {
@@ -295,7 +238,7 @@ pub async fn run_doctor(
             Some("RFC 08 §7"),
         ));
     }
-    for drift in crate::model::decode::schema_drift(&described_by_origin) {
+    for drift in crate::model::decode::schema_drift(&describes.answers) {
         let servers: Vec<String> = drift
             .servers
             .iter()

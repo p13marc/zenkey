@@ -183,3 +183,70 @@ async fn a_single_host_serving_a_schema_is_no_finding() {
         report.findings
     );
 }
+
+/// The sweep helper itself (#410), which `interface show --schema` now reads
+/// instead of a `SchemaStore`: two hosts serving one producer at two hashes
+/// come back as two attributed answers with distinct origins, the
+/// per-producer fold keeps exactly one, and `schema_drift` over the answers
+/// is the disagreement — the same verdict `doctor` reports above, from the
+/// same evidence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_sweep_helper_keeps_one_answer_per_origin() {
+    let (a, b) = peer_pair().await;
+    let _old = serve_describe(&a, OLD_HOST, schema_json(false)).await;
+    let _new = serve_describe(&a, NEW_HOST, schema_json(true)).await;
+
+    let local = zenkey::parse_slice(SLICE).expect("local slice");
+    let locals = zenkey_fleet::SliceSet::from_slices(vec![local]);
+    let fleet = zenkey_fleet::Fleet::new(&b, "");
+
+    // Routing propagation is async; retry bounded until both hosts answer.
+    let sweep = tokio::time::timeout(util::SETTLE, async {
+        loop {
+            let sweep = zenkey_fleet::describe_sweep(&fleet, &locals, Duration::from_secs(2))
+                .await
+                .expect("sweep");
+            if sweep.answers.len() >= 2 {
+                break sweep;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("both hosts should answer within the settle window");
+
+    assert_eq!(sweep.answers.len(), 2, "{:#?}", sweep.answers);
+    let origins: std::collections::BTreeSet<&str> =
+        sweep.answers.iter().map(|d| d.origin.as_str()).collect();
+    assert_eq!(
+        origins,
+        [OLD_HOST, NEW_HOST].into_iter().collect(),
+        "one answer per origin, attributed by the reply's own key"
+    );
+    assert!(
+        sweep.answers.iter().all(|d| d.producer == "sysinfo"),
+        "both answers are for the one producer asked"
+    );
+    assert!(
+        sweep.undescribed.is_empty(),
+        "a producer two hosts answered for is described: {:?}",
+        sweep.undescribed
+    );
+    let first = sweep.first_per_producer();
+    assert_eq!(first.len(), 1, "the fold keeps one set per producer");
+    assert_eq!(first[0].0, "sysinfo");
+
+    let drift = zenkey_fleet::schema_drift(&sweep.answers);
+    assert_eq!(drift.len(), 1, "{drift:#?}");
+    assert_eq!(drift[0].type_name, "Health");
+    assert_eq!(
+        drift[0].verdict,
+        zenkey_fleet::report::DriftVerdict::Disagree
+    );
+    let named: std::collections::BTreeSet<&str> =
+        drift[0].servers.iter().map(|s| s.origin.as_str()).collect();
+    assert_eq!(
+        named, origins,
+        "the verdict names the same hosts the sweep heard"
+    );
+}

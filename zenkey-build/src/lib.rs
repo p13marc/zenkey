@@ -373,8 +373,9 @@ pub(crate) enum Compat {
 }
 
 /// The framework state subjects a `common = "..."` field may name — the
-/// RFC 04 §1.4 table (v1.25; the `@catalog` trio per RFC 06 §5, `errors`
-/// per RFC 11 §2's profile-extension rule) — with the `zenkey::CommonState`
+/// RFC 04 §1.4 table (v1.25, extended in v1.29/v1.30; the `@catalog` set
+/// per RFC 06 §5/§5.5/§5.6, `errors` per RFC 11 §2's profile-extension
+/// rule) — with the `zenkey::CommonState`
 /// constructor and the **canonical subject pattern** the entry's `path`
 /// MUST spell exactly (04 §1.4: "the spelling is the table's" — the token
 /// is a claim that this entry *is* that framework subject).
@@ -382,9 +383,9 @@ pub(crate) enum Compat {
 /// The cross-producer subset of this vocabulary also lives in
 /// `zenkey::CommonFamily` (#168), which drives `selector::common_family`.
 /// The tables are kept separate — the constructor expressions are
-/// codegen-specific, and the three `@catalog` rows are one service's
-/// subjects, not families across producers — but must agree where they
-/// overlap; a test below pins that.
+/// codegen-specific, and the `@catalog` rows are one service's subjects,
+/// not families across producers — but must agree where they overlap; a
+/// test below pins that in both directions.
 pub(crate) const COMMON_STATE: &[(&str, &str, &str)] = &[
     ("health", "Health", "health"),
     ("errors", "Errors", "errors"),
@@ -402,18 +403,34 @@ pub(crate) const COMMON_STATE: &[(&str, &str, &str)] = &[
         "evidence/names/{ip_slug}",
     ),
     (
+        "evidence_relation",
+        "EvidenceRelation { relation_id }",
+        "evidence/relation/{relation_id}",
+    ),
+    (
         "entity",
         "CatalogEntity { entity_id }",
         "entity/{entity_id}",
     ),
     ("alias", "CatalogAlias { old_id }", "alias/{old_id}"),
     ("pdns", "CatalogPdns { ip_slug }", "pdns/{ip_slug}"),
+    (
+        "incident",
+        "CatalogIncident { incident_id }",
+        "incident/{incident_id}",
+    ),
+    ("ack", "CatalogAck { alert_ref }", "ack/{alert_ref}"),
+    ("silence", "CatalogSilence { id }", "silence/{id}"),
+    ("edge", "CatalogEdge { edge_id }", "edge/{edge_id}"),
 ];
 
 /// The rows of [`COMMON_STATE`] that are one *service's* subjects — the
-/// `@catalog` trio (RFC 04 §1.4, RFC 06 §5) — claimable only by a
-/// `[service]` registry file, never by an ordinary producer.
-pub(crate) const COMMON_SERVICE_TOKENS: &[&str] = &["entity", "alias", "pdns"];
+/// `@catalog` set (RFC 04 §1.4; RFC 06 §5, §5.5 since v1.29, §5.6 since
+/// v1.30) — claimable only by a `[service]` registry file, never by an
+/// ordinary producer.
+pub(crate) const COMMON_SERVICE_TOKENS: &[&str] = &[
+    "entity", "alias", "pdns", "incident", "ack", "silence", "edge",
+];
 
 /// Builder for one codegen run. See the crate docs for the two-line consumer
 /// integration.
@@ -2085,13 +2102,21 @@ mod tests {
             );
         }
         // And the rows zenkey does *not* know are exactly the `@catalog`
-        // three — one service's subjects, not families across producers.
+        // service set — one service's subjects, not families across
+        // producers — which is also, by construction, the service-only list
+        // the lint enforces.
         let extra: Vec<&str> = COMMON_STATE
             .iter()
             .map(|(n, _, _)| *n)
             .filter(|n| CommonFamily::ALL.iter().all(|f| f.token() != *n))
             .collect();
-        assert_eq!(extra, ["entity", "alias", "pdns"]);
+        assert_eq!(
+            extra,
+            [
+                "entity", "alias", "pdns", "incident", "ack", "silence", "edge"
+            ]
+        );
+        assert_eq!(extra, COMMON_SERVICE_TOKENS);
     }
 
     #[test]
@@ -2171,7 +2196,8 @@ mod tests {
 
     /// RFC 04 §1.4 (v1.25): `entity`/`alias`/`pdns` are the `@catalog`
     /// service's state (RFC 06 §5) — an ordinary producer file cannot claim
-    /// them; a `[service]` file can.
+    /// them; a `[service]` file can. v1.29/v1.30 (#425) widened the set to
+    /// `incident`/`ack`/`silence`/`edge`, under the same rule.
     #[test]
     fn service_tokens_are_service_only() {
         let err = lint_one(&format!(
@@ -2184,6 +2210,35 @@ mod tests {
         // The passing form: the same entry under a [service] registry.
         lint_one(&format!(
             "{HEADER}[service]\nname = \"catalog\"\norigin = \"@catalog\"\ndescription = \"d\"\n\n[[subject]]\npath = \"pdns/{{ip_slug}}\"\nclass = \"state\"\ntype = \"T\"\ncommon = \"pdns\"\nttl_s = 900\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+        ))
+        .unwrap();
+
+        // Every service token, both ways: refused on a producer, accepted
+        // on the service at its canonical spelling.
+        for (token, path) in [
+            ("incident", "incident/{incident_id}"),
+            ("ack", "ack/{alert_ref}"),
+            ("silence", "silence/{id}"),
+            ("edge", "edge/{edge_id}"),
+        ] {
+            let entry = format!(
+                "[[subject]]\npath = \"{path}\"\nclass = \"state\"\ntype = \"T\"\ncommon = \"{token}\"\nttl_s = 900\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
+            );
+            let err =
+                lint_one(&format!("{HEADER}[producer]\nname = \"t\"\n\n{entry}")).unwrap_err();
+            assert!(
+                err.to_string().contains("service subject"),
+                "{token}: {err}"
+            );
+            lint_one(&format!(
+                "{HEADER}[service]\nname = \"catalog\"\norigin = \"@catalog\"\ndescription = \"d\"\n\n{entry}"
+            ))
+            .unwrap_or_else(|e| panic!("{token}: {e}"));
+        }
+
+        // …and the v1.30 producer-side family lints on an ordinary producer.
+        lint_one(&format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n[[subject]]\npath = \"evidence/relation/{{relation_id}}\"\nclass = \"state\"\ntype = \"T\"\ncommon = \"evidence_relation\"\nttl_s = 900\ncardinality = 64\nsince = \"1.0\"\ndescription = \"d\"\n"
         ))
         .unwrap();
     }

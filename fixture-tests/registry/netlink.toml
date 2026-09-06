@@ -4,7 +4,7 @@
 # src/map.rs (every metric name), src/events.rs, src/route_history.rs.
 
 [registry]
-version = "1.1"
+version = "1.2"
 app = "zensight"
 convention = 1
 
@@ -850,6 +850,16 @@ cardinality = 256
 ttl_s = 900
 since = "1.0"
 description = "neighbor-table identity claim about an observed host (RFC 06 §4)"
+
+[[subject]]
+path = "evidence/relation/{relation_id}"
+common = "evidence_relation"
+class = "state"
+type = "RelationClaim"
+cardinality = 512
+ttl_s = 900
+since = "1.2"
+description = "a claim that two things are connected — neighbours and gateways as observed, ends by attribute never by entity id; relation_id = f(kind, from, to) per RFC 11 §3.3 (RFC 06 §4/§5.6)"
 
 [[subject]]
 path = "evidence/self"
