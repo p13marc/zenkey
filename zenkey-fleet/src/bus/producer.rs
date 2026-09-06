@@ -148,9 +148,32 @@ impl Responder {
         payload: Vec<u8>,
         encoding: Option<&str>,
     ) -> Result<()> {
+        self.reply_stamped(query, payload, encoding, None).await
+    }
+
+    /// [`reply`](Self::reply), with an explicit HLC when the producer mints
+    /// one (`session.new_timestamp()`) — the reply-side twin of
+    /// [`crate::Publication::send_stamped`].
+    ///
+    /// A deployment's `timestamping.enabled` stamps *publications* on the
+    /// way past; a query reply is stamped only when the responder stamps
+    /// it. That stamp is what gives a traced call (#215) its HLC reference:
+    /// without it every effect's `hlc_delta_ms` is absent, because the
+    /// caller's own session mints no HLC to measure from.
+    pub async fn reply_stamped(
+        &self,
+        query: &Query,
+        payload: Vec<u8>,
+        encoding: Option<&str>,
+        timestamp: Option<zenoh::time::Timestamp>,
+    ) -> Result<()> {
         let reply = query.reply(self.key.clone(), payload);
         let reply = match encoding {
             Some(e) => reply.encoding(e),
+            None => reply,
+        };
+        let reply = match timestamp {
+            Some(ts) => reply.timestamp(ts),
             None => reply,
         };
         reply.await.map_err(|e| Error::bus("reply", &self.key, e))

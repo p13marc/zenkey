@@ -12,8 +12,9 @@
 //! ranked consumer list ([`consumers`]), a window of samples becomes a
 //! lane-partitioned ordering on a stated clock ([`timeline`]), a fan-in's
 //! replies become snapshot rows ([`snapshot`]), two snapshots become one
-//! comparison ([`snapshot_diff`]) and two deployments' hosts become one
-//! alignment ([`origin_map`]).
+//! comparison ([`snapshot_diff`]), two deployments' hosts become one
+//! alignment ([`origin_map`]), a sample seen after a call becomes a
+//! *relation* to that call's procedure ([`trace`]).
 //!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
@@ -49,6 +50,7 @@ pub mod snapshot_diff;
 pub mod stats;
 pub mod storage;
 pub mod timeline;
+pub mod trace;
 pub mod tree;
 
 #[cfg(feature = "decode")]

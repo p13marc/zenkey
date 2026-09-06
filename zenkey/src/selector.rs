@@ -95,6 +95,17 @@ pub fn all_of_class(scope: Scope, class: Class) -> Selector {
     class_selector(scope, class.chunk())
 }
 
+/// Everything in scope across the data classes: `v1/<scope>/**`.
+///
+/// `**` never crosses an `@`-chunk (RFC 03 §4 D2), so this is the data
+/// classes — telemetry, state, events — and **not** `@rpc`, `@media`,
+/// `@blob` or `@adv`: a media-safe firehose, and one that cannot see a
+/// verbatim plane. An observer that needs those asks for them by name.
+#[must_use]
+pub fn all_under(scope: Scope) -> Selector {
+    Selector::from_canonical(format!("{VERSION_CHUNK}/{}/**", scope.chunk()))
+}
+
 /// Producer liveliness tokens in scope (RFC 04 §5):
 /// `v1/<scope>/state/*/alive`. Zero payload — the token key is the record.
 /// Service tokens are not in this set (D4); ask via [`service_alive`].
@@ -274,6 +285,8 @@ mod tests {
         assert_eq!(all_liveliness(Scope::fleet()), "v1/*/state/*/alive");
         let o = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
         assert_eq!(all_state(Scope::origin(&o)), "v1/h-3fa9c2d41b7e/state/**");
+        assert_eq!(all_under(Scope::origin(&o)), "v1/h-3fa9c2d41b7e/**");
+        assert_eq!(all_under(Scope::fleet()), "v1/*/**");
         assert_eq!(
             producer_state(Scope::origin(&o), "tc", &["config"]),
             "v1/h-3fa9c2d41b7e/state/tc/config/**"
