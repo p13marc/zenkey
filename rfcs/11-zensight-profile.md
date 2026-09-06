@@ -1,6 +1,6 @@
 # 11 — Reference Application Profile: ZenSight
 
-**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29, v1.30 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29, v1.30, v1.31 and v1.32 — see [CHANGELOG.md](CHANGELOG.md)*
 
 > **Registry location note (2026-07).** The registry *data* this profile
 > describes (`registry/*.toml` for the ten producers and `@catalog`, plus
@@ -432,6 +432,16 @@ implementation behind `@catalog`; and the application salt constant of the
 origin derivation (ZenSight's is `"zensight-host-id-v1"`, compiled-in and
 non-configurable — [06-identity.md §1](06-identity.md)). Everything else
 in chapters 02–10 transfers unchanged.
+
+One binding worth stating (v1.32): `TelemetryPoint.value` is the
+internally tagged `TelemetryValue` — `{"type": "counter" | "gauge" |
+"text" | "boolean", "value": …}` — and that tag is the registry's `kind`
+([08-registry.md §2](08-registry.md)) spelled on the wire (`boolean` for
+`bool`). The profile's `checked_point` guard therefore asserts the variant
+against the declared kind at build time, and the exporters derive
+Prometheus `TYPE` and the OTLP instrument from `kind`, not from the
+variant — which is what turns "a sensor published `oom_kills_total` as a
+gauge and nothing could have caught it" into a build failure.
 
 ## 5. Mapping the incumbent control channels (moved from 05 §5 in v1.25)
 

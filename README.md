@@ -51,7 +51,7 @@ See the [zenkey crate README](zenkey/README.md) for the full adoption story.
 
 ## Status
 
-The convention is at **v1.31 (ratified at v1.18, 2026-08-15)**; see the
+The convention is at **v1.32 (ratified at v1.18, 2026-08-15)**; see the
 [RFC index](rfcs/00-index.md) for the amendment ledger. Deployed by
 [ZenSight](https://github.com/p13marc/zensight) (reference profile, ch. 11)
 and [tcgui](https://github.com/p13marc/tcgui). The registry is fully

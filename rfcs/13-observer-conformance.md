@@ -1,7 +1,7 @@
 # 13 — Observer Conformance
 
-**Status: v1.24 (ratified)** · normative chapter · *created in v1.24 —
-see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
+**Status: v1.24 (ratified)** · normative chapter · *created in v1.24 and
+amended in v1.32 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
 §6; the moved material entered the set in v1.2, v1.9, v1.13 and v1.19
 and was amended there in v1.18 and v1.21
 
@@ -383,6 +383,30 @@ publisher's HLC" has not, whatever the deployment happens to be doing. The rule
 is written against what the wire carries, not against what one release
 propagates, so it needs no revision if that changes.
 
+**Declared versus observed (v1.32).** Two registry declarations exist so
+that a judge can compare them with the wire, and the four poles of §1 do
+the work in both; they are named here by obligation, their stable check
+ids being the reference engine's:
+
+- **A subject's `kind`** ([08 §2](08-registry.md)). *Not asked* when the
+  entry declares none. *Established(no)* when a self-describing payload's
+  tag disagrees with the declared kind, or when a `counter` decreased
+  between two samples of one origin with no `alive` cycle of that origin in
+  between — the restart is the one sanctioned reset, and it is on the wire.
+  *Unobservable* when the payload could not be decoded, said with the
+  reason. Per origin, never pooled across hosts, with the window stated
+  (O5, O6) — a window in which a counter did not decrease has not
+  established that it is one.
+- **A producer's `[budget]`** ([08 §2](08-registry.md)). *Not asked* when
+  the file declares none. *Unobservable* when no health document carrying
+  `self_stats` ([04 §1.2](04-planes.md)) was seen — and the reason reads
+  "this producer does not say how big it is", because that is itself the
+  finding an operator wants. *Established(no)*, per origin, when
+  `rss_bytes` exceeds `rss_mb` or a named table exceeds its bound;
+  *Established(yes)* otherwise, for the sample read. A fetch of health
+  documents costs the data plane, so it is asked for explicitly (the
+  frugality note below), never folded into an ambient render.
+
 *Informative — frugality (added at ratification, v1.18).* The obligations
 above are about honesty, not thrift, but one habit keeps both cheap: an
 observer SHOULD retrieve only what its user asked to see. Rendering what is
@@ -393,7 +417,10 @@ cost is a design budget rather than a truth condition — recorded because the
 reference explorers hold to it (data movement costs exactly one deliberate
 action; zenkey #84/#85), and because a tool that ignores it tends to violate
 O5 by accident: a pane that quietly fans out to keep itself fresh is
-claiming coverage nobody asked it to have.
+claiming coverage nobody asked it to have. Cost stays a design budget for the
+*observer*; a budget the *producer* declared in its own registry file
+([08 §2](08-registry.md) `[budget]`, v1.32) is a truth condition of that
+declaration, and judging it is the paragraph above, not this note.
 
 > **Where this came from.** Every rule above is a mistake that was made and
 > caught while building `zengui` against this convention, not a hypothetical.

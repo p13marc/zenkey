@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25 and v1.26 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26 and v1.32 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -226,9 +226,10 @@ Normative field table (`[[subject]]`; `[[procedure]]`/`[[media]]` analogous):
 | `type` | type-table name | yes | the one payload type of every expansion |
 | `qos` | enum, profiles of [04-planes.md §3](04-planes.md) | no (class default); **alert-family `state`** (`common = "alert"`, or a leading `alert` chunk) MUST declare it, `= "alert"` or stronger (v1.23) | named QoS profile |
 | `unit` | string | primitive numerics only | unit of the leaf value |
+| `kind` | enum `counter\|gauge\|text\|bool` | no (v1.32) | what the leaf value *is*, so a judge can say when it is not: **counter** — a non-negative number that never decreases within one origin's series except across a producer restart (visible as the origin's `alive` token cycling, [04-planes.md §5](04-planes.md)); **gauge** — any number; **text** — a string; **bool** — a boolean. Absent = unchecked, and a judge treats it as *not asked* ([13 §3](13-observer-conformance.md)). A payload MAY self-describe as an internally tagged value object `{"type": "<kind>", "value": …}` (tag `boolean` for `bool`; the reference application's `TelemetryValue` has that shape, [11 §4](11-zensight-profile.md)) — when it does, the tag MUST agree with `kind`, and the application's typed builders SHOULD refuse the disagreeing variant at build time |
 | `cardinality` | integer | yes if `path` has any `{var}` | expected key-population bound (order of magnitude); the budget review enforces |
 | `ttl_s` | integer | every `state` subject (v1.25; was "live `state` only") | staleness TTL; publishers refresh ≤ ttl/2, consumers age out at ttl. The old qualifier misread [04 §1.2](04-planes.md): "live" there is a per-*key* condition (not yet retired), not a per-subject property a TOML could carry — every state subject's keys age, and the reference lint has always required the field on all of them. Adopted as written |
-| `common` | framework token | no (`state` only, v1.25) | declares this entry as a framework state subject ([04-planes.md §1.4](04-planes.md)) and drives the generated framework grouping (the enforcement crate's `AnySubject::common_state()`). Closed vocabulary: the neutral per-producer tokens `health`, `sensor`, `alert`, `evidence_self`, `evidence_device`, `evidence_names`; the `@catalog` service tokens `entity`, `alias`, `pdns`; plus any token the application's profile chapter declares (ZenSight: `errors`, [11 §2](11-zensight-profile.md)). The entry's `path` MUST be the token's canonical spelling (04 §1.4's table) with its variables |
+| `common` | framework token | no (`state` only, v1.25) | declares this entry as a framework state subject ([04-planes.md §1.4](04-planes.md)) and drives the generated framework grouping (the enforcement crate's `AnySubject::common_state()`). Closed vocabulary: the neutral per-producer tokens `health`, `sensor`, `alert`, `evidence_self`, `evidence_device`, `evidence_names`, `evidence_relation` (v1.30); the `@catalog` service tokens `entity`, `alias`, `pdns`, `incident`, `ack`, `silence` (v1.29), `edge` (v1.30) — 04 §1.4's table is the one list, and this row restates it (an errata touch in v1.32: it had stopped at v1.25's vocabulary while the enforcement crate's lint read the same stale list, zenkey#425); plus any token the application's profile chapter declares (ZenSight: `errors`, [11 §2](11-zensight-profile.md)). The entry's `path` MUST be the token's canonical spelling (04 §1.4's table) with its variables |
 | `rate` | `rare` \| `low` \| `burst(n/h)` | `events` only | rate class (CI-checked, [04-planes.md §1.3](04-planes.md)) |
 | `seed` | `none` \| `latest` \| `tail(n)` | no (class default: `state` → `latest`, `telemetry` → `none`) | late-joiner entitlement ([04-planes.md §3.1](04-planes.md)); *how* it is met (storage vs cache) is deployment config |
 | `detect_s` | integer | no (`state` only; default = `ttl_s`) | max latency to detect a missed transition; values ≪ `ttl_s` require the advanced tier ([04-planes.md §3.3](04-planes.md)) |
@@ -435,6 +436,39 @@ origin = "@catalog"
 description = "identity/ontology service (zensight-correlator)"
 ```
 
+- **The budget table (v1.32).** A producer or service file MAY carry one
+  `[budget]` table: what this producer may **cost** the machine it runs on,
+  in the same units its health document reports
+  ([04-planes.md §1.2](04-planes.md), `self_stats`):
+
+  ```toml
+  [budget]
+  rss_mb = 64                    # whole process, resident set
+
+  [[budget.tables]]              # each bounded structure the producer keeps
+  name = "flows"
+  max_entries = 65536
+  max_bytes = 16777216
+  ```
+
+  `rss_mb` is an integer; each `[[budget.tables]]` row names a table
+  (`name`, required, unique within the file) and bounds it by `max_entries`
+  and/or `max_bytes`, each optional. The registry already governs what a
+  producer may *publish*, and both directions are enforced — published ⊆
+  registered at run time, registered ⊆ served at `introspect` (§6.1). What
+  no declaration covered was what a producer costs: on the reference
+  deployment an agent grew from 110 MB to 355 MB over two days on a 1 GB
+  host, was OOM-killed, and reported `status: Healthy` throughout — found
+  eleven days later by a human running `systemctl status`. A declared
+  budget puts that gap in the same machinery as every other
+  declaration-versus-reality gap: it is a claim about the producer, an
+  observer that can read `self_stats` can say whether it holds, and
+  "this producer does not say how big it is" becomes a stated
+  unobservability rather than silence ([13 §3](13-observer-conformance.md)).
+  The block rides the slice verbatim into `introspect` (§6); it generates
+  no key and no builder, and is the first per-producer table on the slice
+  that is not a subject, procedure, tier or stream.
+
 ## 3. Versioning policy
 
 Two independent version axes, deliberately decoupled:
@@ -515,6 +549,11 @@ disagree because they run the same check.
   a suffixed sibling, §3).
 - An **additive** edit fails only as *stale*, with a different message:
   regenerate the snapshot (`zenctl registry lock <dir>`) and commit it.
+  Since v1.32 a subject line carries `kind` (§2) as an optional trailing
+  column: adding a `kind` to a pinned path is additive — the line is stale,
+  regenerate — while changing or removing one is incompatible, because a
+  consumer that learned to `rate()` a counter is wrong the moment the same
+  path is a gauge.
   Regeneration refuses to paper over an incompatible edit; `--force`
   overrides and prints every broken pin — the escape is legal, silent it
   is not.

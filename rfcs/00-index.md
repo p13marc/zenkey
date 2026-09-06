@@ -6,13 +6,20 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.31** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.32** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.32** (2026-09-06) — the declaration batch: a subject declares its
+  `kind` (counter, gauge, text, bool) and a producer declares its `[budget]`
+  (resident set, per-table bounds), the health document MAY carry the
+  matching `self_stats`, and 13 §3 says how each is judged on the four poles
+  — a counter that decreased without an `alive` cycle is a finding, a
+  producer that publishes no `self_stats` is *unobservable* and says so, an
+  entry with no `kind` is *not asked* (08 §2, 04 §1.2, 11 §4, 13 §3).
 - **v1.31** (2026-09-06) — the adopters' batch: three gaps filed by adopters
   in one week, each "the text cannot say it, so no tool can judge it". The
   slug is made injective by a reserved prefix on both sides of the
@@ -38,16 +45,6 @@ what changed and what deliberately did not — is
   behind it: `entity.origins[]`, named by 06 §5.1 since v1.0 and *required*
   by 06 §6.4 since v1.2, did not exist — §5.1 now states that it holds
   self-reported origins only, and what a consumer does without it.
-- **v1.29** (2026-09-03) — the incident batch: the `@catalog` service gains
-  `incident/{incident_id}`, `ack/{alert_ref}` and `silence/{id}` plus four
-  gated write procedures, with the lifecycle rules written **normatively** so
-  a key-agnostic consumer — an exporter, a notifier, a second UI — reaches the
-  same conclusion the catalog does from the documents alone: an ack applies
-  only while a firing alert with `timestamp <= fired_at` exists, so an orphan
-  is inert and a re-fire pages again; an empty matcher set matches nothing
-  (06 §5, §5.5, 04 §1.4); and `alert_ref` is defined byte-precisely as
-  `<origin>.<producer>.<alert_key>`, one chunk, readable rather than hashed
-  (11 §3.2).
 
 ---
 
