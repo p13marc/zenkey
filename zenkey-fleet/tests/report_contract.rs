@@ -1197,3 +1197,121 @@ fn a_timeline_on_the_hlc_axis_is_pinned() {
         json!({"axis": "hlc", "claim": "no_stamped_samples"})
     );
 }
+
+// ── The metrics surface (#228) ───────────────────────────────────────────────
+
+/// The exporter fold, whole: a stopped series has no `value`, a zero
+/// `drop_exposed` is absent, every observer counter is present, the doctor
+/// and registry poles are present because they were asked.
+#[test]
+fn an_export_snapshot_is_pinned() {
+    assert_eq!(
+        serde_json::to_value(fx::export_snapshot()).unwrap(),
+        json!({
+            "scopes": ["acme/v1/*/**"],
+            "excluded": ["@rpc", "@media", "@blob", "@adv", "service origins"],
+            "registry": {"producers": 2},
+            "max_series": 10000,
+            "started_at_unix_s": 1_700_000_000,
+            "taken_at_unix_s": 1_700_000_120,
+            "series": [
+                {
+                    "name": "zenkey_subject_sysinfo_cpu_usage_percent",
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage",
+                    "origin": "h-3fa9c2d41b7e",
+                    "producer": "sysinfo",
+                    "class": "telemetry",
+                    "subject": "cpu/usage",
+                    "kind": "gauge",
+                    "unit": "percent",
+                    "value": 12.5,
+                    "last_seen_unix_s": 1_700_000_119,
+                    "state": "live",
+                    "samples": 240,
+                    "drop_exposed": 2,
+                },
+                {
+                    "name": "zenkey_subject_sysinfo_disk_used_bytes",
+                    "key": "acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used",
+                    "origin": "h-0000deadbeef",
+                    "producer": "sysinfo",
+                    "class": "telemetry",
+                    "subject": "disk/{mount}/used",
+                    "labels": {"mount": "var-log"},
+                    "unit": "bytes",
+                    "last_seen_unix_s": 1_700_000_040,
+                    "state": "origin_down",
+                    "samples": 80,
+                },
+                {
+                    "name": "zenkey_subject_netlink_iface_rx_bytes_total",
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/netlink/iface/eth0/rx_bytes",
+                    "origin": "h-3fa9c2d41b7e",
+                    "producer": "netlink",
+                    "class": "telemetry",
+                    "subject": "iface/{iface}/rx_bytes",
+                    "labels": {"iface": "eth0"},
+                    "field": "rx",
+                    "kind": "counter",
+                    "unit": "bytes",
+                    "last_seen_unix_s": 1_700_000_100,
+                    "state": "evicted",
+                    "samples": 5,
+                },
+                {
+                    "name": "zenkey_subject_sysinfo_health",
+                    "key": "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health",
+                    "origin": "h-3fa9c2d41b7e",
+                    "producer": "sysinfo",
+                    "class": "state",
+                    "subject": "health",
+                    "field": "uptime_s",
+                    "value": 4242.0,
+                    "last_seen_unix_s": 1_700_000_060,
+                    "state": "quiet",
+                    "samples": 4,
+                },
+            ],
+            "observer": {
+                "dropped": 3,
+                "evicted_keys": 5,
+                "evicted_bytes": 7,
+                "expired": 11,
+                "unwatched": 13,
+                "coalesced": 17,
+                "unstamped": 19,
+            },
+            "contract": {
+                "qos_judged": 320,
+                "qos_mismatch": 2,
+                "qos_mismatch_by_subject": [{"producer": "sysinfo", "subject": "cpu/usage", "n": 2}],
+                "payload_valid": 200,
+                "payload_invalid": 1,
+                "payload_not_validated": 128,
+            },
+            "suppressed": {"cardinality": 4, "fields": 1},
+            "unregistered_keys": 3,
+            "doctor": {
+                "ran_at_unix_s": 1_700_000_090,
+                "findings": [
+                    {"check": "stale-state", "severity": "warning", "subject": "h-3fa9c2d41b7e/sysinfo"}
+                ],
+            },
+        })
+    );
+}
+
+/// The exposition is a pure function of the snapshot, pinned whole: the
+/// four evicted populations are four lines, the three verdicts three, a
+/// stopped series keeps its state line and has no value line, and nothing
+/// in it moves without traffic (no scrape time).
+#[test]
+fn the_exposition_of_the_fixture_is_pinned() {
+    let text = zenkey_fleet::exposition(&fx::export_snapshot());
+    let expected = include_str!("fixtures/export.prom");
+    assert_eq!(text, expected, "--- got ---\n{text}");
+    assert!(
+        !text.contains("1700000120"),
+        "the scrape time is the scraper's"
+    );
+}

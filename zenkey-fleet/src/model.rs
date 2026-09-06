@@ -10,7 +10,9 @@
 //! rendering ([`decode`]), a sample on the alert plane becomes an alert
 //! transition ([`alert`]), the admin space's declared readers become a
 //! ranked consumer list ([`consumers`]), a window of samples becomes a
-//! lane-partitioned ordering on a stated clock ([`timeline`]).
+//! lane-partitioned ordering on a stated clock ([`timeline`]), a stream of
+//! described samples becomes a metrics surface whose blind spots are series
+//! of their own ([`export`], [`prom`]).
 //!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
@@ -33,10 +35,12 @@ pub mod bounded;
 pub mod consumers;
 pub mod diff;
 pub mod examples;
+pub mod export;
 pub mod facts;
 pub mod impact;
 pub mod jsonschema;
 pub mod project;
+pub mod prom;
 pub mod registry;
 pub mod retain;
 pub mod skeleton;

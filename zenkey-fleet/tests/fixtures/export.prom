@@ -1,0 +1,83 @@
+# HELP zenkey_observer_dropped_total samples this observer missed while behind; while this moves every value below is a lower bound (RFC 13 §3 O6)
+# TYPE zenkey_observer_dropped_total counter
+zenkey_observer_dropped_total 3
+# HELP zenkey_observer_evicted_total what the observer chose to forget at its bounds, by population — keys at the stats-table bound, retained samples at the byte budget, retained samples aged out, keys unwatched (never sum these; RFC 13 §3 O6)
+# TYPE zenkey_observer_evicted_total counter
+zenkey_observer_evicted_total{population="keys"} 5
+zenkey_observer_evicted_total{population="retained_bytes"} 7
+zenkey_observer_evicted_total{population="retained_age"} 11
+zenkey_observer_evicted_total{population="unwatched"} 13
+# HELP zenkey_observer_coalesced_total samples folded into a newer one between two scrapes — only the newest value per series is exposed (RFC 13 §3 O6)
+# TYPE zenkey_observer_coalesced_total counter
+zenkey_observer_coalesced_total 17
+# HELP zenkey_observer_unstamped_total samples that carried no HLC timestamp — counted, never defaulted to arrival
+# TYPE zenkey_observer_unstamped_total counter
+zenkey_observer_unstamped_total 19
+# HELP zenkey_qos_judged_total samples whose subject declares a QoS profile this build knows
+# TYPE zenkey_qos_judged_total counter
+zenkey_qos_judged_total 320
+# HELP zenkey_qos_mismatch_total samples that did not ride their declared QoS profile, by declared subject (RFC 04 §3)
+# TYPE zenkey_qos_mismatch_total counter
+zenkey_qos_mismatch_total{producer="sysinfo",subject="cpu/usage"} 2
+# HELP zenkey_payload_verdict_total payload verdicts as three counted populations — valid, invalid, not_validated — never a ratio (RFC 13 §3); without --validate everything is not_validated
+# TYPE zenkey_payload_verdict_total counter
+zenkey_payload_verdict_total{verdict="valid"} 200
+zenkey_payload_verdict_total{verdict="invalid"} 1
+zenkey_payload_verdict_total{verdict="not_validated"} 128
+# HELP zenkey_doctor_info whether the doctor was asked to run (--doctor-every): not_asked or ran
+# TYPE zenkey_doctor_info gauge
+zenkey_doctor_info{state="ran"} 1
+# HELP zenkey_doctor_last_run_timestamp_seconds when the last doctor run finished, unix seconds
+# TYPE zenkey_doctor_last_run_timestamp_seconds gauge
+zenkey_doctor_last_run_timestamp_seconds 1700000090
+# HELP zenkey_doctor_finding one series per finding of the last doctor run, by check id and severity
+# TYPE zenkey_doctor_finding gauge
+zenkey_doctor_finding{check_id="stale-state",severity="warning",subject="h-3fa9c2d41b7e/sysinfo"} 1
+# HELP zenkey_scope_info one series per selector watched; `excluded` names the planes a wildcard cannot reach (RFC 13 §3 O5, RFC 03 §4 D2)
+# TYPE zenkey_scope_info gauge
+zenkey_scope_info{selector="acme/v1/*/**",excluded="@rpc,@media,@blob,@adv,service origins"} 1
+# HELP zenkey_observer_started_timestamp_seconds when this observer started watching, unix seconds — a claim about anything earlier is unobservable
+# TYPE zenkey_observer_started_timestamp_seconds gauge
+zenkey_observer_started_timestamp_seconds 1700000000
+# HELP zenkey_registry_info the contract every subject series derives from: loaded (with the producer count) or not_loaded, in which case no key refines and every key is unregistered
+# TYPE zenkey_registry_info gauge
+zenkey_registry_info{state="loaded",producers="2"} 1
+# HELP zenkey_series_suppressed_total samples that produced no series, by reason: cardinality (over the declared budget), max_series, fields (per-subject field cap), text, non_numeric, undecodable, unparsed
+# TYPE zenkey_series_suppressed_total counter
+zenkey_series_suppressed_total{reason="cardinality"} 4
+zenkey_series_suppressed_total{reason="max_series"} 0
+zenkey_series_suppressed_total{reason="fields"} 1
+zenkey_series_suppressed_total{reason="text"} 0
+zenkey_series_suppressed_total{reason="non_numeric"} 0
+zenkey_series_suppressed_total{reason="undecodable"} 0
+zenkey_series_suppressed_total{reason="unparsed"} 0
+# HELP zenkey_unregistered_keys distinct keys the registry does not declare — counted, never exported (RFC 13 §3 O4)
+# TYPE zenkey_unregistered_keys gauge
+zenkey_unregistered_keys 3
+# HELP zenkey_series_count series the ledger holds, against its --max-series bound
+# TYPE zenkey_series_count gauge
+zenkey_series_count 4
+# HELP zenkey_subject_sysinfo_cpu_usage_percent registry subject `sysinfo` `cpu/usage`, unit percent, kind gauge — name and unit from the declaration, not the leaf; may lag while zenkey_observer_dropped_total moves
+# TYPE zenkey_subject_sysinfo_cpu_usage_percent gauge
+zenkey_subject_sysinfo_cpu_usage_percent{origin="h-3fa9c2d41b7e",producer="sysinfo",class="telemetry",subject="cpu/usage"} 12.5
+# HELP zenkey_subject_sysinfo_health registry subject `sysinfo` `health`, kind undeclared — name and unit from the declaration, not the leaf; may lag while zenkey_observer_dropped_total moves
+# TYPE zenkey_subject_sysinfo_health untyped
+zenkey_subject_sysinfo_health{origin="h-3fa9c2d41b7e",producer="sysinfo",class="state",subject="health",field="uptime_s"} 4242
+# HELP zenkey_key_last_seen_timestamp_seconds when the newest sample of a series arrived, unix seconds on the observer's clock — constant between scrapes
+# TYPE zenkey_key_last_seen_timestamp_seconds gauge
+zenkey_key_last_seen_timestamp_seconds{origin="h-3fa9c2d41b7e",producer="sysinfo",class="telemetry",subject="cpu/usage"} 1700000119
+zenkey_key_last_seen_timestamp_seconds{origin="h-0000deadbeef",producer="sysinfo",class="telemetry",subject="disk/{mount}/used",mount="var-log"} 1700000040
+zenkey_key_last_seen_timestamp_seconds{origin="h-3fa9c2d41b7e",producer="netlink",class="telemetry",subject="iface/{iface}/rx_bytes",iface="eth0",field="rx"} 1700000100
+zenkey_key_last_seen_timestamp_seconds{origin="h-3fa9c2d41b7e",producer="sysinfo",class="state",subject="health",field="uptime_s"} 1700000060
+# HELP zenkey_series_state why a series is or is not current: live, quiet (a state subject past its declared ttl_s), evicted (forgotten at the observer's bound), origin_down (the producer's alive token went), retired (a tombstone) — a stopped series keeps this line and loses its value (RFC 13 §3)
+# TYPE zenkey_series_state gauge
+zenkey_series_state{origin="h-3fa9c2d41b7e",producer="sysinfo",class="telemetry",subject="cpu/usage",state="live"} 1
+zenkey_series_state{origin="h-0000deadbeef",producer="sysinfo",class="telemetry",subject="disk/{mount}/used",mount="var-log",state="origin_down"} 1
+zenkey_series_state{origin="h-3fa9c2d41b7e",producer="netlink",class="telemetry",subject="iface/{iface}/rx_bytes",iface="eth0",field="rx",state="evicted"} 1
+zenkey_series_state{origin="h-3fa9c2d41b7e",producer="sysinfo",class="state",subject="health",field="uptime_s",state="quiet"} 1
+# HELP zenkey_series_drop_exposed_total scrape intervals in which this series was fed while zenkey_observer_dropped_total moved — its value may not have been the newest
+# TYPE zenkey_series_drop_exposed_total counter
+zenkey_series_drop_exposed_total{origin="h-3fa9c2d41b7e",producer="sysinfo",class="telemetry",subject="cpu/usage"} 2
+zenkey_series_drop_exposed_total{origin="h-0000deadbeef",producer="sysinfo",class="telemetry",subject="disk/{mount}/used",mount="var-log"} 0
+zenkey_series_drop_exposed_total{origin="h-3fa9c2d41b7e",producer="netlink",class="telemetry",subject="iface/{iface}/rx_bytes",iface="eth0",field="rx"} 0
+zenkey_series_drop_exposed_total{origin="h-3fa9c2d41b7e",producer="sysinfo",class="state",subject="health",field="uptime_s"} 0
