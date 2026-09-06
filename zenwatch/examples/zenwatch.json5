@@ -21,4 +21,17 @@
     mail: { kind: "smtp", host: "smtp.example.org", port: 587, tls: "starttls", username: "zenwatch", password: { file: "/run/secrets/smtp-password" }, from: "zenwatch@example.org", to: ["oncall@example.org"], subject_prefix: "[zenwatch]" },
   },
   render: { max_message_bytes: 2048, max_structural_bytes: 512 },
+  // The discipline (#389): `for`, dedup, grouping, repeat, inhibition, the
+  // resolved family — what makes a notifier one you keep enabled.
+  discipline: {
+    for_s: 30,                        // announce a firing only if still firing 30 s later; a rule's for_s overrides
+    group_window_s: 5,                // notices sharing a group key within 5 s are one notification
+    group_by: ["origin"],             // the group key: labels, or `origin` for the key's origin chunk
+    repeat_s: 14400,                  // still firing after 4 h: re-send once per interval; 0 = never
+    inhibit: { enabled: true, depth: 4 },  // symptoms of a down host ride with the host (RFC 06 §5.6)
+    resolved_notice: true,            // send `resolved` / `observable_again` at all
+  },
+  // The ledger across restarts: missing is fresh, malformed is a refusal.
+  state_file: "/var/lib/zenwatch/state.json",
+  state_max_entries: 4096,
 }

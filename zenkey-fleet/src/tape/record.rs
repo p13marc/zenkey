@@ -68,7 +68,9 @@ pub fn rfc3339_now() -> String {
     )
 }
 
-fn rfc3339_from_unix(secs: u64) -> String {
+/// RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`) of a Unix second count — the one
+/// formatter every timestamp this engine writes goes through.
+pub fn rfc3339_from_unix(secs: u64) -> String {
     let (days, rem) = (secs / 86_400, secs % 86_400);
     let (h, m, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
     // Civil from days since 1970-01-01 (era-based, valid far past 2100).

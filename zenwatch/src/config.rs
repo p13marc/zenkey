@@ -40,10 +40,103 @@ pub struct Config {
     pub sinks: BTreeMap<String, SinkConfig>,
     #[serde(default)]
     pub render: RenderConfig,
+    /// The notification discipline (#389): `for`, dedup, grouping, repeat,
+    /// inhibition, resolved notices.
+    #[serde(default)]
+    pub discipline: DisciplineConfig,
+    /// Where the discipline's ledger survives a restart (JSON). Unset: the
+    /// ledger is in memory only, and a restart re-announces the world.
+    pub state_file: Option<PathBuf>,
+    /// How many notice entries the ledger keeps; the least recently changed
+    /// are evicted past it, counted and reported (RFC 13 §3 O6).
+    #[serde(default = "default_state_max_entries")]
+    pub state_max_entries: usize,
 }
 
 fn default_tick() -> f64 {
     5.0
+}
+
+fn default_state_max_entries() -> usize {
+    4096
+}
+
+/// The `discipline` section (#389): everything between a notice and a
+/// delivery that makes a notifier one someone keeps enabled.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DisciplineConfig {
+    /// Default `for` window, seconds: a firing notice is announced only if
+    /// it is still firing this long after it started. A rule's own `for_s`
+    /// overrides it. `0` (or unset) announces at the next tick.
+    pub for_s: Option<f64>,
+    /// How long notices sharing a group key wait for company before one
+    /// notification is sent for all of them. At most 60.
+    #[serde(default = "default_group_window")]
+    pub group_window_s: f64,
+    /// The label set a group key is built from; `origin` is the origin
+    /// chunk of the key the notice came from. Default: by origin.
+    #[serde(default = "default_group_by")]
+    pub group_by: Vec<String>,
+    /// Re-send a notice still firing after this many seconds, once per
+    /// interval. `0`: never.
+    #[serde(default)]
+    pub repeat_s: f64,
+    #[serde(default)]
+    pub inhibit: InhibitConfig,
+    /// Send the resolved family (`resolved`, `observable_again`) at all.
+    #[serde(default = "default_true")]
+    pub resolved_notice: bool,
+}
+
+fn default_group_window() -> f64 {
+    2.0
+}
+fn default_group_by() -> Vec<String> {
+    vec!["origin".into()]
+}
+fn default_true() -> bool {
+    true
+}
+
+impl Default for DisciplineConfig {
+    fn default() -> Self {
+        DisciplineConfig {
+            for_s: None,
+            group_window_s: default_group_window(),
+            group_by: default_group_by(),
+            repeat_s: 0.0,
+            inhibit: InhibitConfig::default(),
+            resolved_notice: true,
+        }
+    }
+}
+
+/// Inhibition (#389, RFC 06 §5.6): do not page for a service on a host
+/// that is itself down. Reads the catalog's edges, entities and aliases;
+/// needs no application knowledge.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct InhibitConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// How many containment edges the walk follows from a down entity; at
+    /// most [`zenkey_fleet::MAX_DEPTH_CAP`].
+    #[serde(default = "default_inhibit_depth")]
+    pub depth: usize,
+}
+
+fn default_inhibit_depth() -> usize {
+    zenkey_fleet::MAX_DEPTH_CAP
+}
+
+impl Default for InhibitConfig {
+    fn default() -> Self {
+        InhibitConfig {
+            enabled: true,
+            depth: default_inhibit_depth(),
+        }
+    }
 }
 
 /// The `bus` section — the same knobs as a zenctl context, and resolved
@@ -80,6 +173,8 @@ pub struct RuleConfig {
     pub labels: BTreeMap<String, String>,
     /// Names into `sinks`; at least one.
     pub sinks: Vec<String>,
+    /// This rule's `for` window, seconds — overrides `discipline.for_s`.
+    pub for_s: Option<f64>,
 }
 
 /// The severity vocabulary a rule may declare — closed, like the rules.
@@ -351,6 +446,7 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
     if cfg.sinks.is_empty() {
         problem("sinks".into(), "no sinks — nowhere to notify".into());
     }
+    check_discipline(&mut problem, cfg);
 
     // Rules: parse, closed severities, every sink named exists, names and
     // ids unique, and no two rules spelling one engine condition — the
@@ -404,6 +500,23 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
         }
         if r.sinks.is_empty() {
             problem(at("sinks"), "a rule needs at least one sink".into());
+        }
+        if let Some(f) = r.for_s {
+            if !(f.is_finite() && f >= 0.0) {
+                problem(
+                    at("for_s"),
+                    "must be a non-negative number of seconds".into(),
+                );
+            } else if cfg.discipline.repeat_s > 0.0 && f >= cfg.discipline.repeat_s {
+                problem(
+                    at("for_s"),
+                    format!(
+                        "{f}s is not below discipline.repeat_s ({}s) — a repeat that fires \
+                         before the first announcement is not a repeat",
+                        cfg.discipline.repeat_s
+                    ),
+                );
+            }
         }
         for (j, s) in r.sinks.iter().enumerate() {
             if !cfg.sinks.contains_key(s) {
@@ -529,6 +642,73 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
         }
     }
     out
+}
+
+/// The `discipline` bounds, and the state file's directory writable now
+/// rather than at the first persist (#389).
+fn check_discipline(problem: &mut impl FnMut(String, String), cfg: &Config) {
+    let d = &cfg.discipline;
+    let non_negative = |v: f64| v.is_finite() && v >= 0.0;
+    if let Some(f) = d.for_s {
+        if !non_negative(f) {
+            problem(
+                "discipline.for_s".into(),
+                "must be a non-negative number of seconds".into(),
+            );
+        } else if d.repeat_s > 0.0 && f >= d.repeat_s {
+            problem(
+                "discipline.for_s".into(),
+                format!(
+                    "{f}s is not below repeat_s ({}s) — a repeat that fires before the first \
+                     announcement is not a repeat",
+                    d.repeat_s
+                ),
+            );
+        }
+    }
+    if !non_negative(d.repeat_s) {
+        problem(
+            "discipline.repeat_s".into(),
+            "must be a non-negative number of seconds (0 = never)".into(),
+        );
+    }
+    if !non_negative(d.group_window_s) || d.group_window_s > 60.0 {
+        problem(
+            "discipline.group_window_s".into(),
+            format!(
+                "must be 0–60 seconds, got {} — a group that waits longer than a minute is a \
+                 notification that arrives late, not a quieter one",
+                d.group_window_s
+            ),
+        );
+    }
+    if d.group_by.is_empty() {
+        problem(
+            "discipline.group_by".into(),
+            "at least one label to group by (`origin` is the default)".into(),
+        );
+    }
+    if d.inhibit.depth == 0 || d.inhibit.depth > zenkey_fleet::MAX_DEPTH_CAP {
+        problem(
+            "discipline.inhibit.depth".into(),
+            format!(
+                "must be 1–{} containment edges, got {} (RFC 06 §5.6: the walk is bounded)",
+                zenkey_fleet::MAX_DEPTH_CAP,
+                d.inhibit.depth
+            ),
+        );
+    }
+    if cfg.state_max_entries == 0 {
+        problem(
+            "state_max_entries".into(),
+            "must be positive — a ledger of zero entries re-pages the world every tick".into(),
+        );
+    }
+    if let Some(path) = &cfg.state_file
+        && let Err(e) = crate::discipline::state::check_writable(path)
+    {
+        problem("state_file".into(), e);
+    }
 }
 
 fn sink_timeout_s(sink: &SinkConfig) -> Option<f64> {
@@ -664,6 +844,45 @@ mod tests {
             .find(|p| p.path == "sinks.hook.headers.X-Tok")
             .unwrap();
         assert!(unset.message.contains("not set"), "{unset}");
+    }
+
+    /// The discipline's own refusals (#389), each by path: a `for` at or
+    /// past the repeat, a walk deeper than the RFC allows, a group window
+    /// past a minute, a state file whose directory does not exist.
+    #[test]
+    fn the_discipline_bounds_are_refused_by_path() {
+        let cfg = parse(
+            r#"{
+              rules: [{ name: "drops", rule: "dropped", sinks: ["hook"], for_s: 30 }],
+              sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
+              discipline: { for_s: 60, repeat_s: 30, group_window_s: 61, inhibit: { depth: 5 } },
+              state_file: "/nonexistent-zenwatch-dir/state.json",
+              state_max_entries: 0,
+            }"#,
+        )
+        .unwrap();
+        let problems = check(&cfg);
+        let paths: Vec<&str> = problems.iter().map(|p| p.path.as_str()).collect();
+        for expected in [
+            "rules[0].for_s",
+            "discipline.for_s",
+            "discipline.group_window_s",
+            "discipline.inhibit.depth",
+            "state_file",
+            "state_max_entries",
+        ] {
+            assert!(paths.contains(&expected), "missing {expected} in {paths:?}");
+        }
+        let state = problems.iter().find(|p| p.path == "state_file").unwrap();
+        assert!(
+            state.message.contains("/nonexistent-zenwatch-dir"),
+            "names the directory: {state}"
+        );
+        // The defaults check clean and are what the README says.
+        let d = DisciplineConfig::default();
+        assert_eq!(d.group_by, vec!["origin".to_string()]);
+        assert!(d.inhibit.enabled && d.inhibit.depth == 4);
+        assert!(d.resolved_notice && d.repeat_s == 0.0 && d.for_s.is_none());
     }
 
     /// A file secret reads with its newline trimmed; an unreadable one is a

@@ -146,6 +146,8 @@ pub struct Rule {
     pub severity: String,
     pub labels: BTreeMap<String, String>,
     pub sinks: Vec<String>,
+    /// The rule's own `for` window (#389); `None` takes the discipline's.
+    pub for_s: Option<f64>,
 }
 
 /// The severity a rule gets when it declares none.
@@ -176,6 +178,7 @@ impl Rule {
                 .unwrap_or_else(|| DEFAULT_SEVERITY.to_string()),
             labels: cfg.labels.clone(),
             sinks: cfg.sinks.clone(),
+            for_s: cfg.for_s,
         })
     }
 

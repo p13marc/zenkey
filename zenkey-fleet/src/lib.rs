@@ -215,6 +215,7 @@ pub use bus::write::{
 };
 pub use judge::budget::{BudgetObservation, join_budget};
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
+pub use judge::doctor_delta::doctor_delta;
 pub use judge::self_stats::{SelfStats, TableStats, judge_self_stats, read_self_stats};
 // Types reachable *through* root-exported ones — a caller that matches on
 // `KeyShape::V1` or walks a `Skeleton` needs these, and had to spell a module
@@ -230,7 +231,7 @@ pub use model::tree::{TreeNode, TreeRow, TreeRows};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{OBSERVE_LIMIT, structural, structural_value};
-pub use tape::record::rfc3339_now;
+pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
 #[cfg(feature = "decode")]
@@ -265,6 +266,7 @@ pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
 };
+pub use model::impact::{ImpactInputs, MAX_DEPTH_CAP, attribute, entity_of};
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
@@ -279,10 +281,11 @@ pub use model::tree::KeyTreeSnapshot;
 /// `zenkey_fleet::report::*`: it is the rendering vocabulary, and lifting all
 /// of it here would make this block a second copy of that module.
 pub use report::{
-    AlertState, AlertTransition, BenchReport, CallReport, CollapsedProducer, Coverage, CoverageRow,
-    CutoverReport, DeclaredEntities, DeclaredEntity, DiscoveredBase, DoctorReport, DriftVerdict,
-    EntityKind, ExpectReport, Fault, FieldReport, Freshness, GenPlanEntry, GenReport, HelloView,
-    Judgement, LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment, ProducerInfo,
+    AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer, Coverage,
+    CoverageRow, CutoverReport, DeclaredEntities, DeclaredEntity, DiscoveredBase, DoctorDelta,
+    DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind, ExpectReport,
+    Fault, FieldReport, Freshness, GenPlanEntry, GenReport, HelloView, ImpactReport, Judgement,
+    LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment, ProducerInfo,
     RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
     SampleRow, SchemaDrift, SchemaServer, SeedCoverage, StorageInfo, TopologyEdge, TopologyNode,
     TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,

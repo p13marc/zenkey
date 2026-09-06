@@ -233,10 +233,7 @@ fn finding_row<'a>(
     base: &str,
     sp: Spacing,
 ) -> Element<'a, Message> {
-    let is_new = state
-        .delta
-        .as_ref()
-        .is_some_and(|d| d.new.contains(&(f.check, f.subject.clone())));
+    let is_new = state.delta.as_ref().is_some_and(|d| d.is_new(f));
     let mut header = row![
         kit::badge_severity(tone(f.severity), f.check.as_str()),
         kit::mono(f.subject.clone()),

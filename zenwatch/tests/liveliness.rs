@@ -9,10 +9,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use zenkey_fleet::{BringUp, CondState, Fleet};
+use zenwatch::config::DisciplineConfig;
 use zenwatch::engine::{Engine, run_on};
 use zenwatch::render::RenderConfig;
 use zenwatch::rules::Rule;
-use zenwatch::sinks::{Outgoing, Sink};
+use zenwatch::sinks::{NoticeKind, Outgoing, Sink};
 
 const ALIVE: &str = "v1/h-3fa9c2d41b7e/state/netlink/alive";
 
@@ -80,10 +81,17 @@ async fn a_retired_alive_token_is_one_firing_and_its_return_is_one_ok() {
                 severity: Some("error".into()),
                 labels: Default::default(),
                 sinks: vec!["ops".into()],
+                for_s: None,
             })
             .unwrap(),
         ];
         let render = RenderConfig::default();
+        // No group window, no self-publication: this test is about the
+        // rule, and every notification should leave on the next tick.
+        let discipline = DisciplineConfig {
+            group_window_s: 0.0,
+            ..DisciplineConfig::default()
+        };
         run_on(
             Engine {
                 fleet: Fleet::new(&observer, ""),
@@ -95,6 +103,10 @@ async fn a_retired_alive_token_is_one_firing_and_its_return_is_one_ok() {
                 render: &render,
                 once: false,
                 ready: Some(ready_tx),
+                discipline: &discipline,
+                state_file: None,
+                state_max_entries: 4096,
+                publish: false,
             },
             async move {
                 let _ = stop_rx.await;
@@ -122,7 +134,9 @@ async fn a_retired_alive_token_is_one_firing_and_its_return_is_one_ok() {
     let n = &got[0].notification;
     assert_eq!(n.state, CondState::Firing);
     assert_eq!(n.prior, Some(CondState::Ok), "the baseline was recorded");
-    assert_eq!(n.kind, "liveliness-gone");
+    assert_eq!(n.kind, NoticeKind::Liveliness);
+    assert_eq!(n.rule_kind, "liveliness-gone");
+    assert_eq!(n.id, "hosts-gone:h-3fa9c2d41b7e/netlink");
     assert_eq!(n.severity, "error");
     assert!(
         n.evidence.contains("h-3fa9c2d41b7e/netlink"),
@@ -142,6 +156,7 @@ async fn a_retired_alive_token_is_one_firing_and_its_return_is_one_ok() {
     let n = &got[1].notification;
     assert_eq!(n.state, CondState::Ok);
     assert_eq!(n.prior, Some(CondState::Firing));
+    assert_eq!(n.kind, NoticeKind::Resolved);
     assert!(n.evidence.contains("is back"), "{}", n.evidence);
 
     let _ = stop_tx.send(());
