@@ -15,6 +15,7 @@ use crate::update::Ctx;
 
 pub(crate) mod admin;
 pub(crate) mod blob;
+pub(crate) mod consumers;
 pub(crate) mod context;
 pub(crate) mod detail;
 pub(crate) mod doctor;
@@ -68,6 +69,10 @@ pub(crate) fn update(
         },
         PaneMsg::Why(id, msg) => match sub.slot_mut(id) {
             Some(slot) => why::update(slot, dep, msg),
+            None => Task::none(),
+        },
+        PaneMsg::Consumers(id, msg) => match sub.slot_mut(id) {
+            Some(slot) => consumers::update(slot, dep, msg),
             None => Task::none(),
         },
         PaneMsg::Echo(msg) => echo::update(&mut work.echo, msg, cx),

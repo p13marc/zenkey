@@ -83,6 +83,9 @@ sub_state! {
         /// The why ladder's state for the slot key (#214): run on demand
         /// at the frugal default, dropped with the subject.
         pub(crate) why: view::why::WhyState,
+        /// The declared readers of the slot's subject (#224): one admin
+        /// sweep per click, never ambient, dropped with the subject.
+        pub(crate) consumers: view::consumers::ConsumersState,
         /// Compare the key's newest sample against the loaded `.zsnap`'s
         /// row for it (#219), when one is loaded and carries the key.
         pub(crate) compare_snapshot: bool,
@@ -104,6 +107,7 @@ impl SubjectSlot {
             series: None,
             fields: view::fields::FieldsState::default(),
             why: view::why::WhyState::default(),
+            consumers: view::consumers::ConsumersState::default(),
             compare_snapshot: false,
         }
     }
@@ -263,6 +267,7 @@ impl SubjectState {
             series: None,
             fields,
             why: view::why::WhyState::default(),
+            consumers: view::consumers::ConsumersState::default(),
             // A view toggle carries over like the scroll offset: the pin
             // keeps showing what the follow slot was showing.
             compare_snapshot: follow.compare_snapshot,

@@ -950,6 +950,254 @@ fn an_interface_show_omits_drift_until_something_disagrees() {
     );
 }
 
+// ── The consumers join (#224) ─────────────────────────────────────────────
+
+/// The admin discriminator rides flattened at the top of the document, and
+/// its two states never share a spelling: `answered` carries both counts,
+/// `not_available` carries none. Per row, `origins` is absent when empty
+/// (session only, unattributed — not `[]`, not `null`) and `is_self` /
+/// `total_wildcard` are absent when false (O4: news, not non-news).
+#[test]
+fn consumers_report_json_shape_is_pinned() {
+    let v = serde_json::to_value(fx::consumers_report()).unwrap();
+    assert_eq!(
+        v,
+        json!({
+            "target": "acme/v1/*/state/sysinfo/health",
+            "asked": [
+                "@/*/*",
+                "@/*/*/subscriber/**",
+                "@/*/*/publisher/**",
+                "@/*/*/queryable/**",
+                "@/*/*/querier/**",
+                "@/*/*/token/**",
+            ],
+            "self_zid": "ffffffff",
+            "admin": "answered",
+            "answered": 1,
+            "nodes": 2,
+            "rows": [
+                {
+                    "zid": "eeff0011",
+                    "whatami": "peer",
+                    "origins": [fx::ORIGIN],
+                    "attribution": "session",
+                    "kind": "subscriber",
+                    "keyexpr": format!("acme/v1/{}/state/sysinfo/health", fx::ORIGIN),
+                    "relation": "narrower",
+                },
+                {
+                    "zid": "ffffffff",
+                    "whatami": "peer",
+                    "attribution": "session",
+                    "kind": "querier",
+                    "keyexpr": "acme/v1/*/state/sysinfo/health",
+                    "relation": "exact",
+                    "is_self": true,
+                },
+                {
+                    "zid": "aabbccdd",
+                    "whatami": "router",
+                    "attribution": "reported_only",
+                    "kind": "subscriber",
+                    "keyexpr": "**",
+                    "relation": "total",
+                    "total_wildcard": true,
+                },
+            ],
+            "reply_elided": 0,
+        })
+    );
+
+    let v = serde_json::to_value(fx::consumers_not_available()).unwrap();
+    assert_eq!(v["admin"], "not_available");
+    assert!(v.get("answered").is_none(), "{v}");
+    assert!(v.get("nodes").is_none(), "{v}");
+    assert_eq!(v["rows"], json!([]));
+}
+
+/// The blast radius: the consumers document nested whole, coverage and the
+/// two declaration counts present only when the admin space answered,
+/// the ledger entry only when there is one.
+#[test]
+fn subject_impact_json_shape_is_pinned() {
+    let v = serde_json::to_value(fx::subject_impact()).unwrap();
+    assert_eq!(
+        v,
+        json!({
+            "producer": "sysinfo",
+            "path": "health",
+            "class": "state",
+            "selector": "acme/v1/*/state/sysinfo/health",
+            "consumers": serde_json::to_value(fx::consumers_report()).unwrap(),
+            "coverage": [{
+                "producer": "sysinfo",
+                "path": "health",
+                "ttl_s": 120,
+                "coverage": "covered",
+                "storage": "main@aabbccdd",
+            }],
+            "declared_publishers": 2,
+            "declared_queryables": 0,
+            "deprecated": { "since": "2.0", "replaced_by": "status" },
+        })
+    );
+
+    // Not asked: every admin-derived field is absent, never zero or `[]`.
+    let unasked = SubjectImpact {
+        consumers: fx::consumers_not_available(),
+        coverage: None,
+        declared_publishers: None,
+        declared_queryables: None,
+        deprecated: None,
+        ..fx::subject_impact()
+    };
+    let v = serde_json::to_value(unasked).unwrap();
+    for absent in [
+        "coverage",
+        "declared_publishers",
+        "declared_queryables",
+        "deprecated",
+    ] {
+        assert!(v.get(absent).is_none(), "{absent} must be absent: {v}");
+    }
+    assert_eq!(v["consumers"]["admin"], "not_available");
+}
+
+// ── The fleet timeline (#216) ─────────────────────────────────────────────
+
+/// The arrival axis: every row carries `order_by`, the break sits at its
+/// position with no lane, the unstamped lane exists, and the
+/// sequence-number lane is *unavailable* with its fixed reason — never an
+/// empty list. `unstamped_excluded` is absent at zero.
+#[test]
+fn a_timeline_on_the_arrival_axis_is_pinned() {
+    assert_eq!(
+        serde_json::to_value(fx::timeline_report_arrival()).unwrap(),
+        json!({
+            "order_by": "arrival",
+            "axis": "arrival",
+            "clock": "observer monotonic, µs since window start",
+            "scopes": ["acme/v1/**"],
+            "window_s": 10.0,
+            "source": {"kind": "live"},
+            "lanes": [
+                {
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "samples": 2,
+                    "first_t_us": 1000,
+                    "last_t_us": 2000,
+                    "stampers": ["33"],
+                    "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 2}
+                },
+                {
+                    "lane": {"kind": "unstamped"},
+                    "samples": 1,
+                    "first_t_us": 3000,
+                    "last_t_us": 3000,
+                    "stampers": [],
+                    "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 0}
+                }
+            ],
+            "sn_lane": {
+                "state": "unavailable",
+                "reason": "zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"
+            },
+            "dropped": 3,
+            "keys_evicted": 0,
+            "rows": [
+                {
+                    "row": "sample", "order_by": "arrival", "pos": 0,
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+                    "t_us": 1000, "hlc": "200/33", "stamped_by": "33",
+                    "provenance": "unattributable", "kind": "put"
+                },
+                {
+                    "row": "sample", "order_by": "arrival", "pos": 1,
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
+                    "t_us": 2000, "hlc": "100/33", "stamped_by": "33",
+                    "provenance": "unattributable", "kind": "put"
+                },
+                {"row": "break", "order_by": "arrival", "pos": 2, "kind": "dropped", "n": 3},
+                {
+                    "row": "sample", "order_by": "arrival", "pos": 3,
+                    "lane": {"kind": "unstamped"},
+                    "key": "plain/key", "t_us": 3000, "kind": "put"
+                }
+            ]
+        })
+    );
+}
+
+/// The HLC axis: the claim is flattened into the envelope beside
+/// `order_by`, the unstamped sample is a count rather than a row, and the
+/// drop is a total with no row — a break has no position on this clock.
+#[test]
+fn a_timeline_on_the_hlc_axis_is_pinned() {
+    assert_eq!(
+        serde_json::to_value(fx::timeline_report_hlc()).unwrap(),
+        json!({
+            "order_by": "hlc",
+            "axis": "hlc",
+            "claim": "happens_before",
+            "stamper": "33",
+            "scopes": ["acme/v1/**"],
+            "window_s": 10.0,
+            "source": {"kind": "live"},
+            "lanes": [{
+                "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                "samples": 2,
+                "first_t_us": 1000,
+                "last_t_us": 2000,
+                "stampers": ["33"],
+                "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 2}
+            }],
+            "sn_lane": {
+                "state": "unavailable",
+                "reason": "zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"
+            },
+            "unstamped_excluded": 1,
+            "dropped": 3,
+            "keys_evicted": 0,
+            "rows": [
+                {
+                    "row": "sample", "order_by": "hlc", "pos": 0,
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
+                    "t_us": 2000, "hlc": "100/33", "stamped_by": "33",
+                    "provenance": "unattributable", "kind": "put"
+                },
+                {
+                    "row": "sample", "order_by": "hlc", "pos": 1,
+                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+                    "t_us": 1000, "hlc": "200/33", "stamped_by": "33",
+                    "provenance": "unattributable", "kind": "put"
+                }
+            ]
+        })
+    );
+    // The other two claims, so a rename of either is a diff here too.
+    assert_eq!(
+        serde_json::to_value(AxisLabel::Hlc {
+            claim: HlcClaim::SkewedWallClock {
+                stampers: ["33".to_string(), "44".to_string()].into_iter().collect()
+            }
+        })
+        .unwrap(),
+        json!({"axis": "hlc", "claim": "skewed_wall_clock", "stampers": ["33", "44"]})
+    );
+    assert_eq!(
+        serde_json::to_value(AxisLabel::Hlc {
+            claim: HlcClaim::NoStampedSamples
+        })
+        .unwrap(),
+        json!({"axis": "hlc", "claim": "no_stamped_samples"})
+    );
+}
+
 // ─── snapshots (RFC 13 §4.4, #219) ───────────────────────────────────────
 
 /// The `.zsnap` header: the span is the fact a capture header does not

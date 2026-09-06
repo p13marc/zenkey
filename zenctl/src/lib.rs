@@ -129,6 +129,8 @@ pub async fn run() -> Result<()> {
         }
         Command::Registry(RegistryCmd::Lint(a)) => cmd::registry::lint(a),
         Command::Registry(RegistryCmd::Lock(a)) => cmd::registry::lock(a),
+        Command::Registry(RegistryCmd::Consumers(a)) => cmd::registry::consumers(a).await,
+        Command::Registry(RegistryCmd::Impact(a)) => cmd::registry::impact(a).await,
         Command::Storage(StorageCmd::List(a)) => cmd::storage::list(a).await,
         Command::Storage(StorageCmd::Gen(a)) => cmd::storage::plan(a).await,
         Command::Acl(AclCmd::Gen(a)) => cmd::acl::run(a).await,
@@ -157,6 +159,7 @@ pub async fn run() -> Result<()> {
         Command::Field(a) => cmd::field::run(a).await,
         Command::Record(a) => cmd::record::run(a).await,
         Command::Replay(a) => cmd::replay::run(a).await,
+        Command::Timeline(a) => cmd::timeline::run(a).await,
         Command::Snapshot(a) => match a.cmd {
             Some(SnapshotSub::Diff(d)) => cmd::snapshot::diff(d),
             None => cmd::snapshot::take(a).await,

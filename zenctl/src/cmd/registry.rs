@@ -1,7 +1,9 @@
 //! `zenctl registry export|diff|lint|lock` (issue #50) — the registry as a
 //! document, as a comparison, and as a checkable artifact. Plus
 //! [`retired`](retired), which answers under `check` (#307) but reads the
-//! same ledger and so lives with it.
+//! same ledger and so lives with it, and [`consumers`](consumers) /
+//! [`impact`](impact) (#224), which answer the question the registry
+//! cannot on its own — *who reads this* — by joining it to the admin space.
 //!
 //! The four sit together because they answer the questions an operator has
 //! about a registry they did not write: *what does it say* (export), *does
@@ -242,4 +244,144 @@ pub fn lock(cli: crate::cli::RegistryLockArgs) -> Result<()> {
         out.format,
         out.color,
     )
+}
+
+/// Whether a `registry consumers` target is already a wire key or selector
+/// rather than a `<producer>/<path>` registry spelling: anything carrying a
+/// wildcard or a verbatim chunk, or starting at the base or at `v1/`.
+///
+/// A registry path never contains `*` or `@` (`{var}` is its wildcard) and
+/// never starts with `v1` — `v1` is not a producer name — so the two
+/// spellings cannot collide.
+fn is_raw_target(target: &str, base: &str) -> bool {
+    target.contains('*')
+        || target.contains('@')
+        || target.starts_with("v1/")
+        || (!base.is_empty() && target.starts_with(&format!("{base}/")))
+}
+
+/// Split `<producer>/<subject-path>`, or the refusal.
+fn registry_form(target: &str) -> Result<(&str, &str)> {
+    match target.split_once('/') {
+        Some((producer, path)) if !producer.is_empty() && !path.is_empty() => Ok((producer, path)),
+        _ => Err(crate::exit::unaskable!(
+            "expected `<producer>/<subject-path>` (or a wire key/selector): {target:?}"
+        )),
+    }
+}
+
+/// `registry consumers <target>` (#224) — who declares a reader of it.
+///
+/// The target resolves one of two ways: a wire key or selector passes the
+/// raw seam (`$*` refusal, RFC 03 §2) and is asked as spelled; a
+/// `<producer>/<path>` is resolved through the slices to its family's
+/// selector under the base. The slices *determine* the target here, so a
+/// slice failure is exit 2 — nothing was asked of the admin space.
+pub async fn consumers(cli: crate::cli::RegistryConsumersArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::RegistryConsumersArgs { target, bus: _ } = cli;
+    let selector = if is_raw_target(&target, args.base()) {
+        super::raw_selector(&target)?.to_string()
+    } else {
+        let (producer, path) = registry_form(&target)?;
+        let slices = args.slice_set().await?;
+        subject_selector(&slices, args.base(), producer, path)?.selector
+    };
+    let session = args.session().await?;
+    let report = zenkey_fleet::consumers(&args.fleet(&session), &selector, args.timeout()).await?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
+}
+
+/// `registry impact <producer>/<path>` (#224) — the blast radius of a
+/// change to one declared subject. Always the registry form: the storage
+/// coverage and the ledger entry are facts about a *declared* subject.
+pub async fn impact(cli: crate::cli::RegistryImpactArgs) -> Result<()> {
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::RegistryImpactArgs { target, bus: _ } = cli;
+    let (producer, path) = registry_form(&target)?;
+    let slices = args.slice_set().await?;
+    // Resolved before the session opens: an unknown subject is refused
+    // without a bus round-trip, with the same sentence `consumers` uses.
+    subject_selector(&slices, args.base(), producer, path)?;
+    let session = args.session().await?;
+    let report = zenkey_fleet::subject_impact(
+        &args.fleet(&session),
+        &slices,
+        producer,
+        path,
+        args.timeout(),
+    )
+    .await?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
+}
+
+/// The engine's resolution, with the refusal this tool's exit contract
+/// wants: the caller named a subject nothing declares, so exit 2.
+fn subject_selector(
+    slices: &zenkey_fleet::SliceSet,
+    base: &str,
+    producer: &str,
+    path: &str,
+) -> Result<zenkey_fleet::SubjectTarget> {
+    zenkey_fleet::subject_target(slices, base, producer, path).ok_or_else(|| {
+        let mut known: Vec<&str> = slices.slices().iter().map(|s| s.name.as_str()).collect();
+        known.sort_unstable();
+        match slices.get(producer) {
+            Some(_) => crate::exit::unaskable!(
+                "producer {producer:?} declares no subject {path:?}, and its [[deprecated]] \
+                 ledger does not retire one — `zenctl topic list --producer {producer}` \
+                 lists what it declares"
+            ),
+            None => crate::exit::unaskable!(
+                "no loaded slice names producer {producer:?} (known: {})",
+                if known.is_empty() {
+                    "none".to_string()
+                } else {
+                    known.join(", ")
+                }
+            ),
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two target spellings cannot collide: a registry path carries no
+    /// `*`/`@` and never starts at `v1`, a wire key always does one or the
+    /// other.
+    #[test]
+    fn raw_targets_are_told_from_registry_paths() {
+        assert!(is_raw_target("v1/*/state/sysinfo/health", ""));
+        assert!(is_raw_target(
+            "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health",
+            "acme"
+        ));
+        assert!(is_raw_target("v1/@catalog/state/entity/**", "acme"));
+        assert!(is_raw_target("**", ""));
+        assert!(!is_raw_target("sysinfo/health", ""));
+        assert!(!is_raw_target("sysinfo/disk/{mount}/used", "acme"));
+        // A base-less bus: a key starting at `v1/` is still raw.
+        assert!(is_raw_target("v1/h-3fa9c2d41b7e/state/sysinfo/health", ""));
+        // Not the base: `acme-dev/...` is a producer named `acme-dev`.
+        assert!(!is_raw_target("acme-dev/health", "acme"));
+    }
+
+    #[test]
+    fn the_registry_form_needs_both_halves() {
+        assert_eq!(
+            registry_form("sysinfo/health").unwrap(),
+            ("sysinfo", "health")
+        );
+        assert_eq!(
+            registry_form("sysinfo/disk/{mount}/used").unwrap(),
+            ("sysinfo", "disk/{mount}/used")
+        );
+        assert!(registry_form("sysinfo").is_err());
+        assert!(registry_form("sysinfo/").is_err());
+        assert!(registry_form("/health").is_err());
+    }
 }

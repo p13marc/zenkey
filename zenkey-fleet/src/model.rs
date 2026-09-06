@@ -8,9 +8,11 @@
 //! becomes rates and latencies ([`stats`]) or a tree ([`tree`], [`skeleton`]),
 //! two payloads become a diff ([`diff`]), a payload plus a schema becomes a
 //! rendering ([`decode`]), a sample on the alert plane becomes an alert
-//! transition ([`alert`]), a fan-in's replies become snapshot rows
-//! ([`snapshot`]) and two snapshots become one comparison
-//! ([`snapshot_diff`]).
+//! transition ([`alert`]), the admin space's declared readers become a
+//! ranked consumer list ([`consumers`]), a window of samples becomes a
+//! lane-partitioned ordering on a stated clock ([`timeline`]), a fan-in's
+//! replies become snapshot rows ([`snapshot`]) and two snapshots become one
+//! comparison ([`snapshot_diff`]).
 //!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
@@ -30,6 +32,7 @@
 pub mod acl;
 pub mod alert;
 pub mod bounded;
+pub mod consumers;
 pub mod diff;
 pub mod examples;
 pub mod facts;
@@ -43,6 +46,7 @@ pub mod snapshot;
 pub mod snapshot_diff;
 pub mod stats;
 pub mod storage;
+pub mod timeline;
 pub mod tree;
 
 #[cfg(feature = "decode")]

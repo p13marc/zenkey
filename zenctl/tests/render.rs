@@ -1065,6 +1065,103 @@ IMPAIRED — the observation cannot carry the claim:
     assert!(notes(&fx::expect_report()).contains("not a verdict either way"));
 }
 
+/// The fleet timeline (#216), arrival axis: lanes per origin/producer with
+/// the stamper in the heading, the unstamped lane beside them, `pos` from
+/// the merged ordering, and the drop as a break at its arrival position.
+#[test]
+fn a_timeline_on_arrival_groups_lanes_and_places_the_break() {
+    assert_data_eq!(
+        table(&fx::timeline_report_arrival()),
+        str![[r#"
+h-3fa9c2d41b7e/sysinfo · arrival · stamper 33 (2 unattributable)
+0  +1.000ms  200/33      acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu
+1  +2.000ms  100/33      acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem
+
+unstamped (arrival axis only) · arrival · no stamper
+3  +3.000ms              plain/key
+
+breaks · arrival positions
+2            dropped ×3
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::timeline_report_arrival()),
+        str![[r#"
+{"axis":"arrival","clock":"observer monotonic, µs since window start","dropped":3,"keys_evicted":0,"lanes":[{"first_t_us":1000,"lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"last_t_us":2000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":2},"samples":2,"stampers":["33"]},{"first_t_us":3000,"lane":{"kind":"unstamped"},"last_t_us":3000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":0},"samples":1,"stampers":[]}],"notes":[{"cite":"RFC 09 §5.1 O7","text":"ordered by arrival — observer monotonic, µs since window start; a position says when this observer saw a sample, never when it was produced"},{"cite":"RFC 09 §5.1 O4","text":"the per-publisher sequence-number lane is unavailable: zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"},{"cite":"RFC 03 §4 D2","text":"a `**` selector never crosses an `@`-chunk: the verbatim planes (`@rpc`, `@media`, `@blob`, `@catalog`) are excluded from this window, not empty"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — the ordering covers only what was seen"}],"order_by":"arrival","report":"timeline","scopes":["acme/v1/**"],"sn_lane":{"reason":"zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it","state":"unavailable"},"source":{"kind":"live"},"window_s":10.0}
+{"hlc":"200/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"arrival","pos":0,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":1000}
+{"hlc":"100/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"arrival","pos":1,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":2000}
+{"kind":"dropped","n":3,"order_by":"arrival","pos":2,"row":"break"}
+{"key":"plain/key","kind":"put","lane":{"kind":"unstamped"},"order_by":"arrival","pos":3,"row":"sample","t_us":3000}
+
+"#]]
+    );
+    let n = notes(&fx::timeline_report_arrival());
+    assert!(n.contains("ordered by arrival"), "{n}");
+    assert!(n.contains("sequence-number lane is unavailable"), "{n}");
+    assert!(n.contains("never crosses an `@`-chunk"), "{n}");
+    assert!(n.contains("deliberately no edges"), "{n}");
+}
+
+/// The same window on the HLC axis: the reorder shows as a non-monotonic
+/// `t` column, the claim names the one stamper, the unstamped sample is a
+/// count and a note rather than a row, and the drop is a total with no
+/// break row (it has no position on this clock).
+#[test]
+fn a_timeline_on_hlc_states_its_claim_and_excludes_the_unstamped() {
+    assert_data_eq!(
+        table(&fx::timeline_report_hlc()),
+        str![[r#"
+h-3fa9c2d41b7e/sysinfo · hlc · stamper 33 (2 unattributable)
+0  +2.000ms  100/33  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem
+1  +1.000ms  200/33  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::timeline_report_hlc()),
+        str![[r#"
+{"axis":"hlc","claim":"happens_before","dropped":3,"keys_evicted":0,"lanes":[{"first_t_us":1000,"lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"last_t_us":2000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":2},"samples":2,"stampers":["33"]}],"notes":[{"cite":"RFC 09 §5.1 O7","text":"ordered by HLC — every stamped sample was stamped by 33, so the order is that node's happened-before (its HLC is monotonic and updated by what it forwarded)"},{"text":"1 unstamped sample(s) are not on this axis — an unstamped sample has no HLC position and is never defaulted to its arrival time; see `--order arrival`"},{"text":"3 dropped sample(s) have no position on the HLC axis (a drop is something this observer suffered, on its own clock); see `--order arrival` for where they fell"},{"cite":"RFC 09 §5.1 O4","text":"the per-publisher sequence-number lane is unavailable: zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"},{"cite":"RFC 03 §4 D2","text":"a `**` selector never crosses an `@`-chunk: the verbatim planes (`@rpc`, `@media`, `@blob`, `@catalog`) are excluded from this window, not empty"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — the ordering covers only what was seen"}],"order_by":"hlc","report":"timeline","scopes":["acme/v1/**"],"sn_lane":{"reason":"zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it","state":"unavailable"},"source":{"kind":"live"},"stamper":"33","unstamped_excluded":1,"window_s":10.0}
+{"hlc":"100/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"hlc","pos":0,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":2000}
+{"hlc":"200/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"hlc","pos":1,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":1000}
+
+"#]]
+    );
+    let n = notes(&fx::timeline_report_hlc());
+    assert!(n.contains("happened-before"), "{n}");
+    assert!(
+        n.contains("1 unstamped sample(s) are not on this axis"),
+        "{n}"
+    );
+    assert!(n.contains("have no position on the HLC axis"), "{n}");
+}
+
+/// The claim, not the layout: an HLC table never draws an unstamped row.
+/// The report has none to give it (`Placed<HlcAxis>` refused them in the
+/// engine), and this pins that the renderer does not invent one from the
+/// lane summaries or the exclusion count.
+#[test]
+fn an_hlc_timeline_never_draws_an_unstamped_row() {
+    let report = fx::timeline_report_hlc();
+    assert!(report.rows.iter().all(|r| !matches!(
+        r,
+        zenkey_fleet::report::TimelineEntry::Sample { hlc: None, .. }
+    )));
+    let drawn = table(&report);
+    assert!(!drawn.contains("plain/key"), "{drawn}");
+    assert!(!drawn.contains("unstamped ("), "{drawn}");
+    // Every emitted row says which axis its position is on.
+    for line in ndjson(&report).lines().filter(|l| l.contains("\"row\"")) {
+        assert!(line.contains("\"order_by\":\"hlc\""), "{line}");
+    }
+    for line in ndjson(&fx::timeline_report_arrival())
+        .lines()
+        .filter(|l| l.contains("\"row\""))
+    {
+        assert!(line.contains("\"order_by\":\"arrival\""), "{line}");
+    }
+}
+
 #[test]
 fn a_record_and_a_replay_carry_their_drop_ledgers() {
     assert_data_eq!(
@@ -1773,7 +1870,9 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "probe",
         "rate",
         "record",
+        "registry-consumers",
         "registry-diff",
+        "registry-impact",
         "registry-lint",
         "registry-lock",
         "registry-retired",
@@ -1789,6 +1888,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-explain",
         "storage-list",
         "storage-plan",
+        "timeline",
         "topic-info",
         "topic-list",
         "why",
@@ -1859,6 +1959,12 @@ fn every_observing_family_states_its_scope() {
     });
     assert_eq!(s.window_s, Some(10.0));
     scoped(&fx::record_report());
+    // The timeline's scope is every selector it watched, over the window;
+    // a `.zrec` window has no `window_s` (nothing was asked, O4).
+    let s = scoped(&fx::timeline_report_arrival());
+    assert_eq!(s.asked, ["acme/v1/**"]);
+    assert_eq!(s.window_s, Some(10.0));
+
     // A snapshot's window is its collection span — the RFC 13 §4.4 fact
     // every rendering states (#219).
     let s = scoped(&fx::snapshot_report());
@@ -1901,6 +2007,19 @@ fn every_observing_family_states_its_scope() {
         report: &report,
         attachments: &attachments,
     });
+    // The consumers join: the six admin selectors, no window; the impact
+    // adds the storage sweep when it was made.
+    let s = scoped(&fx::consumers_report());
+    assert_eq!(s.asked.len(), 6, "{:?}", s.asked);
+    assert_eq!(s.window_s, None);
+    let s = scoped(&fx::subject_impact());
+    assert_eq!(s.asked.len(), 7, "{:?}", s.asked);
+    let s = scoped(&zenkey_fleet::report::SubjectImpact {
+        consumers: fx::consumers_not_available(),
+        coverage: None,
+        ..fx::subject_impact()
+    });
+    assert_eq!(s.asked.len(), 6, "an unmade storage sweep is not claimed");
     let s = scoped(&fx::blob_probe());
     assert_eq!(
         s.asked.len(),
@@ -2257,4 +2376,194 @@ acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J
     let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
     assert_eq!(envelope["refused_takers"], serde_json::json!(["events"]));
     assert_eq!(out.lines().count(), 1, "no takers, no rows");
+}
+
+// ── The consumers join (#224) ─────────────────────────────────────────────
+
+#[test]
+fn consumers_rank_by_relation_and_name_the_tool_itself() {
+    assert_data_eq!(
+        table(&fx::consumers_report()),
+        str![[r#"
+declared readers of acme/v1/*/state/sysinfo/health
+
+zid                              whatami  origin                            declared                                                relation
+eeff0011                         peer     h-3fa9c2d41b7e                    subscriber acme/v1/h-3fa9c2d41b7e/state/sysinfo/health  narrower — declared on a subset of the target
+ffffffff  (this zenctl session)  peer     session only, unattributed        querier acme/v1/*/state/sysinfo/health                  exact — declared on the target itself
+aabbccdd                         router   reported only — no session named  subscriber **                                           total — a whole-base declaration, intersects everything
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&fx::consumers_report()),
+        str![[r#"
+1 admin space(s) answered (2 node(s) heard of): a declared subscriber or querier is a declaration, not proof of use, and sessions behind an admin space that did not answer are not shown (RFC 13 §3 O5)
+a whole-base declaration (`**`) intersects every key under the base and says nothing about this subject in particular; it still never crosses an `@`-chunk, so `@rpc`/`@media`/`@blob` sidecars and service origins are outside it (RFC 03 §4 D2)
+
+"#]]
+    );
+}
+
+#[test]
+fn consumers_ndjson_flattens_the_admin_answer_and_tags_every_row() {
+    assert_data_eq!(
+        ndjson(&fx::consumers_report()),
+        str![[r#"
+{"admin":"answered","answered":1,"asked":["@/*/*","@/*/*/subscriber/**","@/*/*/publisher/**","@/*/*/queryable/**","@/*/*/querier/**","@/*/*/token/**"],"nodes":2,"notes":[{"cite":"RFC 13 §3 O5","text":"1 admin space(s) answered (2 node(s) heard of): a declared subscriber or querier is a declaration, not proof of use, and sessions behind an admin space that did not answer are not shown"},{"cite":"RFC 03 §4 D2","text":"a whole-base declaration (`**`) intersects every key under the base and says nothing about this subject in particular; it still never crosses an `@`-chunk, so `@rpc`/`@media`/`@blob` sidecars and service origins are outside it"}],"reply_elided":0,"report":"registry-consumers","self_zid":"ffffffff","target":"acme/v1/*/state/sysinfo/health"}
+{"attribution":"session","keyexpr":"acme/v1/h-3fa9c2d41b7e/state/sysinfo/health","kind":"subscriber","origins":["h-3fa9c2d41b7e"],"relation":"narrower","row":"consumer","whatami":"peer","zid":"eeff0011"}
+{"attribution":"session","is_self":true,"keyexpr":"acme/v1/*/state/sysinfo/health","kind":"querier","relation":"exact","row":"consumer","whatami":"peer","zid":"ffffffff"}
+{"attribution":"reported_only","keyexpr":"**","kind":"subscriber","relation":"total","row":"consumer","total_wildcard":true,"whatami":"router","zid":"aabbccdd"}
+
+"#]]
+    );
+}
+
+/// No admin space answering draws no rows and says *not asked* — in every
+/// format, since the sentence is a note.
+#[test]
+fn consumers_without_an_admin_space_are_not_asked() {
+    assert_data_eq!(
+        table(&fx::consumers_not_available()),
+        str![[r#"
+declared readers of acme/v1/*/state/sysinfo/health
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&fx::consumers_not_available()),
+        str![[r#"
+no admin space answered @/*/*, @/*/*/subscriber/**, @/*/*/publisher/**, @/*/*/queryable/**, @/*/*/querier/**, @/*/*/token/** — zenoh's `adminspace.enabled` is off by default (routers ship with it on); the declared readers of acme/v1/*/state/sysinfo/health are *not asked*, never none (RFC 13 §3 O4)
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::consumers_not_available()),
+        str![[r#"
+{"admin":"not_available","asked":["@/*/*","@/*/*/subscriber/**","@/*/*/publisher/**","@/*/*/queryable/**","@/*/*/querier/**","@/*/*/token/**"],"notes":[{"cite":"RFC 13 §3 O4","text":"no admin space answered @/*/*, @/*/*/subscriber/**, @/*/*/publisher/**, @/*/*/queryable/**, @/*/*/querier/**, @/*/*/token/** — zenoh's `adminspace.enabled` is off by default (routers ship with it on); the declared readers of acme/v1/*/state/sysinfo/health are *not asked*, never none"}],"reply_elided":0,"report":"registry-consumers","self_zid":"ffffffff","target":"acme/v1/*/state/sysinfo/health"}
+
+"#]]
+    );
+}
+
+#[test]
+fn an_impact_nests_the_readers_the_coverage_and_the_ledger() {
+    assert_data_eq!(
+        table(&fx::subject_impact()),
+        str![[r#"
+impact of sysinfo state health  (selector acme/v1/*/state/sysinfo/health)
+  DEPRECATED since 2.0 → replaced by status
+
+declared readers:
+
+zid                              whatami  origin                            declared                                                relation
+eeff0011                         peer     h-3fa9c2d41b7e                    subscriber acme/v1/h-3fa9c2d41b7e/state/sysinfo/health  narrower — declared on a subset of the target
+ffffffff  (this zenctl session)  peer     session only, unattributed        querier acme/v1/*/state/sysinfo/health                  exact — declared on the target itself
+aabbccdd                         router   reported only — no session named  subscriber **                                           total — a whole-base declaration, intersects everything
+
+also declared on the family:
+  publishers  2 session(s)
+  queryables  0 session(s)
+
+storage coverage:
+  ✓ health  covered by main@aabbccdd  (ttl_s 120)
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&fx::subject_impact()),
+        str![[r#"
+1 admin space(s) answered (2 node(s) heard of): a declared subscriber or querier is a declaration, not proof of use, and sessions behind an admin space that did not answer are not shown (RFC 13 §3 O5)
+a whole-base declaration (`**`) intersects every key under the base and says nothing about this subject in particular; it still never crosses an `@`-chunk, so `@rpc`/`@media`/`@blob` sidecars and service origins are outside it (RFC 03 §4 D2)
+the subject is retired in the registry ledger; a declared reader of it is the burn-down `zenctl check retired` counts (RFC 08 §3)
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::subject_impact()),
+        str![[r#"
+{"admin":"answered","answered":1,"asked":["@/*/*","@/*/*/subscriber/**","@/*/*/publisher/**","@/*/*/queryable/**","@/*/*/querier/**","@/*/*/token/**"],"class":"state","declared_publishers":2,"declared_queryables":0,"deprecated":{"replaced_by":"status","since":"2.0"},"nodes":2,"notes":[{"cite":"RFC 13 §3 O5","text":"1 admin space(s) answered (2 node(s) heard of): a declared subscriber or querier is a declaration, not proof of use, and sessions behind an admin space that did not answer are not shown"},{"cite":"RFC 03 §4 D2","text":"a whole-base declaration (`**`) intersects every key under the base and says nothing about this subject in particular; it still never crosses an `@`-chunk, so `@rpc`/`@media`/`@blob` sidecars and service origins are outside it"},{"cite":"RFC 08 §3","text":"the subject is retired in the registry ledger; a declared reader of it is the burn-down `zenctl check retired` counts"}],"path":"health","producer":"sysinfo","reply_elided":0,"report":"registry-impact","selector":"acme/v1/*/state/sysinfo/health","self_zid":"ffffffff"}
+{"attribution":"session","keyexpr":"acme/v1/h-3fa9c2d41b7e/state/sysinfo/health","kind":"subscriber","origins":["h-3fa9c2d41b7e"],"relation":"narrower","row":"consumer","whatami":"peer","zid":"eeff0011"}
+{"attribution":"session","is_self":true,"keyexpr":"acme/v1/*/state/sysinfo/health","kind":"querier","relation":"exact","row":"consumer","whatami":"peer","zid":"ffffffff"}
+{"attribution":"reported_only","keyexpr":"**","kind":"subscriber","relation":"total","row":"consumer","total_wildcard":true,"whatami":"router","zid":"aabbccdd"}
+{"coverage":"covered","path":"health","producer":"sysinfo","row":"coverage","storage":"main@aabbccdd","ttl_s":120}
+
+"#]]
+    );
+}
+
+/// An impact whose admin space did not answer draws `—` for every admin
+/// fact and states the unmade storage sweep.
+#[test]
+fn an_impact_without_an_admin_space_draws_not_asked_everywhere() {
+    let unasked = zenkey_fleet::report::SubjectImpact {
+        consumers: fx::consumers_not_available(),
+        coverage: None,
+        declared_publishers: None,
+        declared_queryables: None,
+        deprecated: None,
+        ..fx::subject_impact()
+    };
+    assert_data_eq!(
+        table(&unasked),
+        str![[r#"
+impact of sysinfo state health  (selector acme/v1/*/state/sysinfo/health)
+
+declared readers:
+
+also declared on the family:
+  publishers  —
+  queryables  —
+
+storage coverage:
+  —  (not asked: no admin space answered)
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&unasked),
+        str![[r#"
+no admin space answered @/*/*, @/*/*/subscriber/**, @/*/*/publisher/**, @/*/*/queryable/**, @/*/*/querier/**, @/*/*/token/** — zenoh's `adminspace.enabled` is off by default (routers ship with it on); the declared readers of acme/v1/*/state/sysinfo/health are *not asked*, never none (RFC 13 §3 O4)
+the storage sweep was not made because no admin space answered: an empty storage list would read as "uncovered", which nobody established (RFC 13 §3 O4)
+
+"#]]
+    );
+}
+
+/// The wording rule (RFC 12 §9): foreign matching status is deferred
+/// permanently, and "nobody is listening" is the standing false verdict.
+/// Nothing either family draws — table, notes or ndjson, answered or not —
+/// may say "matching", "listening", "unmatched" or "no consumers".
+#[test]
+fn the_consumer_families_never_speak_of_matching_or_listening() {
+    const FORBIDDEN: &[&str] = &["matching", "listening", "unmatched", "no consumers"];
+    let unasked = zenkey_fleet::report::SubjectImpact {
+        consumers: fx::consumers_not_available(),
+        coverage: None,
+        declared_publishers: None,
+        declared_queryables: None,
+        ..fx::subject_impact()
+    };
+    let drawings = [
+        table(&fx::consumers_report()),
+        notes(&fx::consumers_report()),
+        ndjson(&fx::consumers_report()),
+        table(&fx::consumers_not_available()),
+        notes(&fx::consumers_not_available()),
+        ndjson(&fx::consumers_not_available()),
+        table(&fx::subject_impact()),
+        notes(&fx::subject_impact()),
+        ndjson(&fx::subject_impact()),
+        table(&unasked),
+        notes(&unasked),
+        ndjson(&unasked),
+    ];
+    for drawing in &drawings {
+        let lower = drawing.to_lowercase();
+        for word in FORBIDDEN {
+            assert!(
+                !lower.contains(word),
+                "{word:?} is matching-status vocabulary (RFC 12 §9) in:\n{drawing}"
+            );
+        }
+    }
 }

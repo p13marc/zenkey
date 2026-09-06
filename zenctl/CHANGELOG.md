@@ -8,6 +8,58 @@ sitting.
 
 ## Unreleased
 
+Two new verbs under the `registry` noun and no moved spelling (#224).
+
+**`registry consumers <target>` — who declares a reader of a subject.** A
+join over the admin space: every declared subscriber and querier with its
+verbatim keyexpr, related to the target by key algebra (`exact` <
+`narrower` < `wider` < `intersects` < `total`), one row per declaring
+session on the admin `sources` (reported-only when they name none), joined
+to the origin its alive token attaches (#131) and the topology's `whatami`.
+`<target>` is `<producer>/<subject-path>` resolved through the slices to
+the family's wire selector, or a raw key/selector (anything with `*`/`@`,
+or starting at the base or `v1/`). The honesty is the product: an admin
+space that does not answer is `admin: not_available` with no rows — *not
+asked*, never an empty set (RFC 13 §3 O4); a declaration is not proof of
+use; a `**` declaration is `total` and flagged `total_wildcard` rather than
+read as a consumer of this subject; the tool's own session appears and is
+named `(this zenctl session)`; the answering admin spaces are counted. It
+is not matching status (RFC 12 §9), and the render corpus greps the
+family for "matching", "listening", "unmatched" and "no consumers".
+
+**`registry impact <producer>/<path>` — the blast radius of changing one
+declared subject.** The consumers above, plus the RFC 04 §2 storage
+coverage row (made only when an admin space answered — an empty storage
+list would read "uncovered"), the distinct sessions declaring a publisher
+or queryable on the family, and the `[[deprecated]]` ledger entry. A path
+that survives only in the ledger still resolves, class wildcarded.
+
+Families `registry-consumers` and `registry-impact`; rows tagged
+`consumer` and `coverage`; the admin discriminator rides flat in the
+envelope (`admin`, `answered`, `nodes`).
+
+**`timeline` — the fleet timeline, and deliberately no edges** (#216).
+A new wire verb at the root. `zenctl timeline <SEL>… --for <SECS>
+[--order arrival|hlc]` watches the selectors for the window and emits one
+merged ordering of everything seen, partitioned into lanes per
+origin/producer, with the clock stated per report and the stamper(s) per
+lane. Every ndjson row carries `order_by`, so a line cut out of the
+stream still says which axis its `pos` is on. Under `--order hlc` the
+envelope carries the claim the axis can make (RFC 09 §5.1 O7): one
+stamper is that node's happened-before; several are skewed wall clocks;
+an empty axis claims nothing. Unstamped samples get their own lane on
+the arrival axis and **cannot be placed on the HLC axis at all** — the
+engine's `Placed<HlcAxis>` refuses them, and the report counts the
+exclusion. Drops render as breaks at their arrival position and as a
+total with no position on the HLC axis. The per-publisher
+sequence-number lane is reported *unavailable* on this zenoh (no
+`SourceInfo` reaches a subscriber), never empty. `--from <FILE>` reads a
+`.zrec` through the same projection under the capture's stated base, and
+the engine's identity test is what makes "the same window from the
+file" a claim. No line is ever drawn between lanes: a merged ordering
+shows when things were seen on which clock, never that one caused
+another.
+
 **`snapshot` — a fleet moment you can keep, verify and diff** (#219,
 RFC 13 §4.4). A new wire verb off the root, no spelling moved. `zenctl
 snapshot [SELECTOR] --out fleet.zsnap` runs one fan-in GET per selector

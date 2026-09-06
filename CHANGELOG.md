@@ -19,8 +19,37 @@ Versions per crate, because they move independently:
 
 ## Unreleased
 
-### zenkey-fleet
+**Consumers and blast radius — the admin space answers who reads this**
+(#224). `zenkey-fleet` gains the consumers join: `consumers` and
+`subject_impact` under `bus/admin.rs` (one pass over the admin space —
+topology, the five declared-entity sweeps, attachments from the token
+entities already in hand) and the pure `model::consumers::join_consumers`
+that relates every declared subscriber and querier to a target by
+`zenoh-keyexpr` and attributes it to a session on the admin `sources`;
+wire shapes `ConsumersReport`, `ConsumerRow`, `AdminAnswer`, `Relation`,
+`Attribution`, `SubjectImpact`, `DeprecationFact` under `report/`, pinned.
+`AdminAnswer::NotAvailable` is *not asked*, never an empty set (RFC 13 §3
+O4); nothing here is matching status (RFC 12 §9). `zenctl registry
+consumers|impact` render it (see `zenctl/CHANGELOG.md`); zengui's
+Inspector gains a Consumers section — one admin sweep per click, never
+ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
+`declared_entities_within` keeps the elided count, `EntityKind::ALL`.
 
+### `zenkey-fleet`
+
+* **The fleet timeline** (#216): `model/timeline.rs`, a pure projection
+  from a window of samples — live `SampleView`s or `.zrec` lines — to one
+  merged ordering on a stated clock, lanes per origin/producer, and the
+  three provenances of a position kept apart. `Placed<HlcAxis>::new` is the
+  only way onto the HLC axis and refuses an unstamped row (a compile-fail
+  doctest pins that it cannot be promised for an arbitrary row);
+  `HlcClaim` rests on the zenoh 1.10 fact the module doc cites (an HLC is
+  updated on receive only where the node has one — routers by default,
+  peers and clients not). `report/timeline.rs` pins the wire; every row
+  carries `order_by`; the sequence-number lane is structurally
+  unavailable with a fixed reason. `ZrecItem::Sample` gains `source`, so a
+  replayed window classifies its stampers exactly as the live one did.
+  Deliberately no edges.
 * **The `.zsnap` snapshot** (#219, RFC 13 §4.4). `report::{ZsnapHeader,
   SnapshotRow, Snapshot, SnapshotReport, SnapshotDiff, KeyChange}` and
   the row's four facet vocabularies — `StamperWire` (O7), `RegistrationWire`
@@ -47,11 +76,12 @@ Versions per crate, because they move independently:
   through `#[serde(default)]`).
 * `SnapshotRow::payload()` decodes a row's `bytes` in one place.
 
-### zenctl
+### `zenctl`
 
+* `timeline`, a new wire verb at the root — see `zenctl/CHANGELOG.md`.
 * **`snapshot`** and **`snapshot diff`** — see `zenctl/CHANGELOG.md`.
 
-### zengui
+### `zengui`
 
 * A `.zsnap` opens from the Replay tab and sits beside the live world
   (no mode entered); the Inspector's History section compares the key's

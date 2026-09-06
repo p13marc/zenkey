@@ -187,6 +187,9 @@ mod tests {
                     // dropped when the slot's subject moves.
                     "fields",
                     "why",
+                    // The declared readers (#224): evidence about one
+                    // subject, dropped when the slot's subject moves.
+                    "consumers",
                     // Whether the history section compares the key against
                     // the loaded snapshot (#219): a view toggle on one
                     // slot, dropped with the slot.
@@ -328,8 +331,9 @@ mod tests {
         // (#221) and the subject's fields and why sections (#223, #214).
         // Then #257: the 11 subject fields moved into `sub.slot` and gained
         // the slot's `id`; the container keeps the id mint — 72 became 74.
-        // Then #219: the loaded snapshot and its open row (four under
-        // `work.replay`) and the slot's compare toggle — 74 became 79.
-        assert_eq!(leaves, 79, "the split must place every field exactly once");
+        // Then #224: the Consumers section, 75. Then #219: the loaded
+        // snapshot and its open row (four under `work.replay`) and the
+        // slot's compare toggle — 75 became 80.
+        assert_eq!(leaves, 80, "the split must place every field exactly once");
     }
 }

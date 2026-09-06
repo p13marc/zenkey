@@ -95,6 +95,8 @@ pub struct InspectorData<'a> {
     pub fields: &'a super::fields::FieldsState,
     /// The why ladder's state for the subject key (#214).
     pub why: &'a super::why::WhyState,
+    /// The declared readers of the subject (#224).
+    pub consumers: &'a super::consumers::ConsumersState,
     /// The deployment base, for building the wire chunks the observed-tree
     /// lookups below need.
     pub base: &'a str,
@@ -124,7 +126,7 @@ pub fn pane<'a>(d: InspectorData<'a>) -> Element<'a, Message> {
     let body = match d.subject {
         Subject::None => nothing_selected(),
         Subject::Key(key) => key_sections(key, &d),
-        Subject::Prefix(prefix) => prefix_sections(prefix),
+        Subject::Prefix(prefix) => prefix_sections(prefix, &d),
         Subject::Origin(origin) => origin_sections(origin, &d),
     };
     scrollable(body.spacing(d.sp.md).padding(d.sp.sm))
@@ -149,7 +151,7 @@ fn nothing_selected<'a>() -> Column<'a, Message> {
 ///
 /// Saying so is the point: this is the state that used to render as a Detail
 /// pane full of "no value fetched" for a key that was never a key (#85).
-fn prefix_sections<'a>(prefix: &'a str) -> Column<'a, Message> {
+fn prefix_sections<'a>(prefix: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
     column![
         kit::section_header("Inspector", None),
         // The subject, restated in the pane. The one TITLE lives in the
@@ -160,6 +162,9 @@ fn prefix_sections<'a>(prefix: &'a str) -> Column<'a, Message> {
             "Nothing was fetched, because a prefix names no value any producer \
              publishes. Expand it and select a leaf.",
         ),
+        // A subtree has readers even though it has no value (#224): the
+        // sweep relates declarations to `<prefix>/**`.
+        super::consumers::section(d.consumers, d.slot, d.sp),
     ]
 }
 
@@ -200,6 +205,9 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     // both spend the dock's resolved grid (#192).
     col = col.push(super::fields::section(d.fields, d.slot, d.sp));
     col = col.push(super::why::section(d.why, d.slot, d.sp));
+    // The declared readers (#224): one admin sweep per click, never
+    // ambient — and never worded as matching status (RFC 12 §9).
+    col = col.push(super::consumers::section(d.consumers, d.slot, d.sp));
 
     col.push(history::section(HistoryData {
         slot: d.slot,
