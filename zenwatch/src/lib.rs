@@ -29,15 +29,17 @@
 pub mod bus;
 pub mod cli;
 pub mod config;
+pub mod discipline;
 pub mod engine;
 pub mod exit;
+pub mod publish;
 pub mod render;
 pub mod rules;
 pub mod sinks;
 
 /// The daemon's own registry (RFC 08 §5), compiled through `zenkey-build`
 /// like every producer's: `health`, `firing/{rule_id}`, `doctor`, and the
-/// two procedures. Published by the discipline chunk (#387).
+/// two procedures. Served and published by [`publish`] (#389).
 pub mod registry {
     include!(concat!(env!("OUT_DIR"), "/zenkey_registry.rs"));
 }

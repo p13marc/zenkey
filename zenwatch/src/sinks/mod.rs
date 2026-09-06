@@ -23,10 +23,57 @@ pub mod webhook;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use zenkey_fleet::{CondState, RenderSource};
 
 use crate::config::{Config, SinkConfig};
+
+/// What a notification *is* (#389) — the discipline's verdict on a
+/// notice, and the first thing a sink consumer switches on.
+///
+/// The three base kinds are what a rule saw; the rest are what the
+/// discipline made of it. A resolve is one of three, kept apart because a
+/// phone must be able to tell "it is fixed" from "I can see it again":
+/// `firing → ok` is [`Resolved`](NoticeKind::Resolved), `unobservable →
+/// ok` is [`ObservableAgain`](NoticeKind::ObservableAgain), `firing →
+/// unobservable` is [`LostSight`](NoticeKind::LostSight) and `ok →
+/// unobservable` is [`Unobservable`](NoticeKind::Unobservable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoticeKind {
+    /// An engine condition changed state.
+    Transition,
+    /// A producer's alert document fired.
+    Alert,
+    /// An alive token went.
+    Liveliness,
+    /// Several notices in one window from one group key, folded into one.
+    Group,
+    /// `firing → ok`.
+    Resolved,
+    /// `unobservable → ok`.
+    ObservableAgain,
+    /// `firing → unobservable`.
+    LostSight,
+    /// `ok → unobservable` — the observer could not tell, and says so.
+    Unobservable,
+}
+
+impl NoticeKind {
+    /// The wire word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NoticeKind::Transition => "transition",
+            NoticeKind::Alert => "alert",
+            NoticeKind::Liveliness => "liveliness",
+            NoticeKind::Group => "group",
+            NoticeKind::Resolved => "resolved",
+            NoticeKind::ObservableAgain => "observable_again",
+            NoticeKind::LostSight => "lost_sight",
+            NoticeKind::Unobservable => "unobservable",
+        }
+    }
+}
 
 /// One notification — the unit a sink delivers.
 ///
@@ -35,12 +82,17 @@ use crate::config::{Config, SinkConfig};
 /// consumer that folds them has turned "I could not tell" into "fine".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Notification {
-    /// `<rule_id>-<n>`, unique within one process run.
+    /// The notice's **identity** (#389), stable across runs and restarts:
+    /// `<rule_id>:<what>` — the RFC 11 §3.2 `alert_ref` for an `alerts`
+    /// rule, `origin/producer` for `liveliness-gone`, the sorted labels for
+    /// an engine condition. Dedup, repeat and the state file key on it.
     pub id: String,
     /// The rule's name, as configured.
     pub rule: String,
     /// The rule's head word (`silent-for`, `alerts`, `liveliness-gone`, …).
-    pub kind: String,
+    pub rule_kind: String,
+    /// What this notification is (#389).
+    pub kind: NoticeKind,
     pub state: CondState,
     /// `null` on the first observation — the baseline stated, not invented (O4).
     pub prior: Option<CondState>,
@@ -55,6 +107,15 @@ pub struct Notification {
     pub evidence: String,
     pub rendering: RenderSource,
     pub truncated: bool,
+    /// How many times this still-firing notice has been re-sent on the
+    /// repeat interval; `0` on the first announcement.
+    pub repeat: u32,
+    /// For a [`NoticeKind::Group`]: the member notice ids, in order.
+    pub group: Option<Vec<String>>,
+    /// Set when impact attribution (RFC 06 §5.6) judged this a **symptom**
+    /// of a down entity: the root's entity id. Carried, never dropped
+    /// silently.
+    pub inhibited_by: Option<String>,
 }
 
 /// A notification and the sinks it is routed to. Every named sink gets the
@@ -227,9 +288,10 @@ pub fn build_all(cfg: &Config, dry_run: bool) -> Result<Vec<Sink>, BuildError> {
 pub fn test_outgoing(sink: &str) -> Outgoing {
     Outgoing {
         notification: Notification {
-            id: "test-sink-0".into(),
+            id: "test-sink:synthetic".into(),
             rule: "test-sink".into(),
-            kind: "test".into(),
+            rule_kind: "test".into(),
+            kind: NoticeKind::Transition,
             state: CondState::Ok,
             prior: None,
             severity: "info".into(),
@@ -243,6 +305,9 @@ pub fn test_outgoing(sink: &str) -> Outgoing {
             evidence: "zenwatch test-sink — a synthetic notification".into(),
             rendering: RenderSource::KeyOnly,
             truncated: false,
+            repeat: 0,
+            group: None,
+            inhibited_by: None,
         },
         sinks: vec![sink.to_string()],
     }
@@ -258,9 +323,10 @@ mod tests {
     fn outgoing_json_shape_is_pinned() {
         let o = Outgoing {
             notification: Notification {
-                id: "hosts-gone-1".into(),
+                id: "hosts-gone:h-3fa9c2d41b7e/netlink".into(),
                 rule: "hosts-gone".into(),
-                kind: "liveliness-gone".into(),
+                rule_kind: "liveliness-gone".into(),
+                kind: NoticeKind::Unobservable,
                 state: CondState::Unobservable,
                 prior: None,
                 severity: "error".into(),
@@ -271,6 +337,9 @@ mod tests {
                 evidence: "the observer dropped 3".into(),
                 rendering: RenderSource::KeyOnly,
                 truncated: false,
+                repeat: 0,
+                group: None,
+                inhibited_by: None,
             },
             sinks: vec!["ops".into(), "mail".into()],
         };
@@ -278,9 +347,10 @@ mod tests {
             serde_json::to_value(&o).unwrap(),
             serde_json::json!({
                 "notification": {
-                    "id": "hosts-gone-1",
+                    "id": "hosts-gone:h-3fa9c2d41b7e/netlink",
                     "rule": "hosts-gone",
-                    "kind": "liveliness-gone",
+                    "rule_kind": "liveliness-gone",
+                    "kind": "unobservable",
                     "state": "unobservable",
                     "prior": null,
                     "severity": "error",
@@ -291,6 +361,9 @@ mod tests {
                     "evidence": "the observer dropped 3",
                     "rendering": "key_only",
                     "truncated": false,
+                    "repeat": 0,
+                    "group": null,
+                    "inhibited_by": null,
                 },
                 "sinks": ["ops", "mail"],
             })
@@ -298,8 +371,24 @@ mod tests {
         let mut firing = o.clone();
         firing.notification.state = CondState::Firing;
         firing.notification.prior = Some(CondState::Ok);
+        firing.notification.kind = NoticeKind::Liveliness;
+        firing.notification.repeat = 2;
+        firing.notification.inhibited_by = Some("ent-pve".into());
         let j = serde_json::to_value(&firing).unwrap();
         assert_eq!(j["notification"]["state"], "firing");
         assert_eq!(j["notification"]["prior"], "ok");
+        assert_eq!(j["notification"]["kind"], "liveliness");
+        assert_eq!(j["notification"]["repeat"], 2);
+        assert_eq!(j["notification"]["inhibited_by"], "ent-pve");
+        // Every kind spells itself in snake_case, the way a consumer
+        // switches on it.
+        for k in [
+            NoticeKind::Group,
+            NoticeKind::Resolved,
+            NoticeKind::ObservableAgain,
+            NoticeKind::LostSight,
+        ] {
+            assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());
+        }
     }
 }

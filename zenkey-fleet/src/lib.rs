@@ -231,7 +231,7 @@ pub use model::tree::{TreeNode, TreeRow, TreeRows};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{OBSERVE_LIMIT, structural, structural_value};
-pub use tape::record::rfc3339_now;
+pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
 #[cfg(feature = "decode")]

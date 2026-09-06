@@ -17,7 +17,9 @@ name = "zenwatch"
 path = "src/main.rs"
 
 [dependencies]
-zenkey = { workspace = true }
+# `schemars`: the served `describe` derives the three registered types'
+# schemas from the structs that publish them (RFC 08 §7).
+zenkey = { workspace = true, features = ["schemars"] }
 # The same codec matrix the explorers turn on (#97/#98): an alert document a
 # producer serves as protobuf or CDR still has to render into a
 # notification. Not `blob`: a notifier fetches no bulk content.
@@ -28,6 +30,7 @@ tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 json5 = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

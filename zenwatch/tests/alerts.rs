@@ -12,10 +12,11 @@ use std::time::Duration;
 
 use zenkey::qos::QosProfile;
 use zenkey_fleet::{CondState, Fleet, RenderSource, declare_publication};
+use zenwatch::config::DisciplineConfig;
 use zenwatch::engine::{Engine, run_on};
 use zenwatch::render::RenderConfig;
 use zenwatch::rules::Rule;
-use zenwatch::sinks::{Outgoing, Sink};
+use zenwatch::sinks::{NoticeKind, Outgoing, Sink};
 
 const KEY: &str = "v1/h-3fa9c2d41b7e/state/netlink/alert/a659f813308ad1da";
 
@@ -58,10 +59,17 @@ async fn an_alert_put_is_one_firing_per_sink_a_re_put_is_nothing_and_a_delete_re
                 severity: None,
                 labels: [("team".to_string(), "infra".to_string())].into(),
                 sinks: vec!["ops".into(), "mail".into()],
+                for_s: None,
             })
             .unwrap(),
         ];
         let render = RenderConfig::default();
+        // No group window, no self-publication: this test is about the
+        // rule, and every notification should leave on the next tick.
+        let discipline = DisciplineConfig {
+            group_window_s: 0.0,
+            ..DisciplineConfig::default()
+        };
         run_on(
             Engine {
                 fleet: Fleet::new(&b, ""),
@@ -73,6 +81,10 @@ async fn an_alert_put_is_one_firing_per_sink_a_re_put_is_nothing_and_a_delete_re
                 render: &render,
                 once: false,
                 ready: Some(ready_tx),
+                discipline: &discipline,
+                state_file: None,
+                state_max_entries: 4096,
+                publish: false,
             },
             async move {
                 let _ = stop_rx.await;
@@ -111,7 +123,12 @@ async fn an_alert_put_is_one_firing_per_sink_a_re_put_is_nothing_and_a_delete_re
             n.prior, None,
             "first sight: the baseline is stated, not invented"
         );
-        assert_eq!(n.kind, "alerts");
+        assert_eq!(n.kind, NoticeKind::Alert);
+        assert_eq!(n.rule_kind, "alerts");
+        assert_eq!(
+            n.id, "fleet-alerts:h-3fa9c2d41b7e.netlink.a659f813308ad1da",
+            "the identity: rule id and alert_ref"
+        );
         assert_eq!(n.rule, "fleet-alerts");
         assert_eq!(
             n.severity, "warning",
@@ -159,6 +176,7 @@ async fn an_alert_put_is_one_firing_per_sink_a_re_put_is_nothing_and_a_delete_re
             "resolved is the established-clean pole"
         );
         assert_eq!(n.prior, Some(CondState::Firing));
+        assert_eq!(n.kind, NoticeKind::Resolved, "firing → ok, said as such");
         assert_eq!(
             n.severity, "warning",
             "the rule's default: a tombstone says nothing"
