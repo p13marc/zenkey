@@ -87,6 +87,35 @@ file" a claim. No line is ever drawn between lanes: a merged ordering
 shows when things were seen on which clock, never that one caused
 another.
 
+**`snapshot` — a fleet moment you can keep, verify and diff** (#219,
+RFC 13 §4.4). A new wire verb off the root, no spelling moved. `zenctl
+snapshot [SELECTOR] --out fleet.zsnap` runs one fan-in GET per selector
+(the `--origin/--class/--producer` composition every watcher has), folds
+the replies per key last-writer-wins, and writes one row per key: the
+exact payload as base64 `bytes`, whose clock stamped it (`stamper`, O7),
+the registry rung (`registration`, the `topic info` vocabulary — including
+`registry_not_loaded`, which is not `unregistered`), the three-valued
+`verdict`, and who **holds** it — `live {origin, answered_by}` (its origin
+held an `alive` token during the collection, and whether the replier was
+the stamping entity), `storage_only {origin}` (a value answered, nobody is
+saying it now) or `unattributed {reason}` (`--no-roster`, or a key that
+names no origin). The header states the **collection span**: a fan-in GET
+is collected *over* a span, never at an instant, and every rendering of a
+snapshot says so. `--max-replies` bounds what is kept; what the bound cost
+rides the header as `elided`, beside `superseded` (LWW losers) and
+`errors`. **Exit 0** wrote the file; **exit 2** nobody answered — silence
+is not a snapshot, and no file is written for it (`exit.rs`).
+
+`zenctl snapshot diff a.zsnap b.zsnap` opens no session. Rows tagged
+`added | removed | changed`, a `changed` row carrying only the facets that
+moved (`value` or `bytes`, `verdict`, `registration`, `holder`) with both
+stamps; the envelope carries both headers whole. **Exit 0** identical,
+**1** they differ (a difference *is* the finding), **2** a file could not
+be read — through the one judgement projection, never a hand-rolled
+match. `--normalize-origins` and `--map A=B` parse today and refuse (exit
+2) until chunk DD lands the alignment; when it does, an origin that could
+not be paired is listed as an `unmapped` row, never dropped.
+
 ## 0.6.0 (2026-09-06) — the generators, and three rows that name a host
 
 Two new verbs and no moved spelling: a script written against 0.5.1 runs

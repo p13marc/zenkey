@@ -42,6 +42,9 @@ pub enum HistoryMsg {
     /// The timeline scrolled: (absolute y offset, viewport height) — what the
     /// virtualized window renders against (#183).
     Scrolled(crate::view::kit::Viewport),
+    /// Compare the newest sample against the loaded snapshot's row for this
+    /// key (#219), or stop.
+    CompareSnapshotToggled,
 }
 
 fn msg(slot: SlotId, m: HistoryMsg) -> Message {
@@ -62,6 +65,12 @@ pub struct HistoryData<'a> {
     pub watched: bool,
     /// Scroll position + viewport height, driving the virtual window (#183).
     pub scroll: crate::view::kit::Viewport,
+    /// The loaded `.zsnap`'s row for this key and the file's header (#219),
+    /// when a snapshot is loaded and carries the key.
+    pub snapshot: Option<(&'a zenkey_fleet::SnapshotRow, &'a zenkey_fleet::ZsnapHeader)>,
+    /// Whether the panel compares against that row rather than the
+    /// previous sample.
+    pub compare_snapshot: bool,
     /// The dock's resolved spacing grid (#192).
     pub sp: Spacing,
 }
@@ -190,8 +199,57 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
             .on_scroll(move |viewport| msg(slot, HistoryMsg::Scrolled(viewport.into()))),
     );
 
+    // The snapshot comparison (#219): offered only when the loaded file
+    // carries this key; the caption names the snapshot's moment *and span*,
+    // because a snapshot is collected over one (RFC 13 §4.4).
+    if let Some((row, header)) = data.snapshot {
+        col = col.push(
+            kit::action(kit::caption(if data.compare_snapshot {
+                "compare with previous sample"
+            } else {
+                "compare with snapshot"
+            }))
+            .on_press(msg(slot, HistoryMsg::CompareSnapshotToggled))
+            .padding(sp.xs),
+        );
+        if data.compare_snapshot {
+            col = col.push(snapshot_section(rec, row, header, sp));
+            return col;
+        }
+    }
     col = col.push(diff_section(rec, focus, sp));
     col
+}
+
+/// The newest sample against the snapshot's row for the key (#219): the
+/// same pair renderer as the timeline diff, with the left column captioned
+/// by the snapshot's moment and span.
+fn snapshot_section<'a>(
+    rec: &HistoryRecorder,
+    row: &zenkey_fleet::SnapshotRow,
+    header: &zenkey_fleet::ZsnapHeader,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::muted(format!(
+        "snapshot {} (over {:.2}s) → newest sample",
+        header.collected_at, header.collection_span_s
+    )));
+    let Some(newest) = rec.ring.newest() else {
+        return col
+            .push(kit::muted(
+                "no live sample yet — nothing to compare the snapshot against",
+            ))
+            .into();
+    };
+    let snapshot_entry = HistoryEntry::from_snapshot_row(row);
+    col.push(pair_view(
+        Some(&snapshot_entry),
+        newest,
+        rec.ring.evicted(),
+        sp,
+    ))
+    .into()
 }
 
 /// One timeline row.
@@ -271,7 +329,21 @@ fn diff_section<'a>(
         "changes at t-{}",
         newest.saturating_sub(entry.seq)
     )));
+    col.push(pair_view(prev, entry, rec.ring.evicted(), sp))
+        .into()
+}
 
+/// One pair, rendered: `entry` against `prev` — the row before it in the
+/// ring, or a snapshot's row (#219). A tombstone is retirement, the put
+/// after one is a new value, and a pair with no structural form on one
+/// side degrades to bytes and says so.
+fn pair_view<'a>(
+    prev: Option<&HistoryEntry>,
+    entry: &HistoryEntry,
+    evicted: u64,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    let col = Column::new().spacing(sp.xs);
     // A tombstone is not a value, so nothing about it is a field change.
     if entry.is_delete {
         return col
@@ -282,7 +354,7 @@ fn diff_section<'a>(
     }
     let Some(prev) = prev else {
         return col
-            .push(kit::muted(if rec.ring.evicted() > 0 {
+            .push(kit::muted(if evicted > 0 {
                 "the sample before this one was evicted — nothing to compare against"
             } else {
                 "the first sample recorded — nothing to compare against"

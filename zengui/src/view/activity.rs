@@ -140,6 +140,46 @@ fn replay_stream<'a>(
             .align_y(iced::Alignment::Center),
         );
     }
+    // The loaded snapshot (#219): opened here because a `.zsnap` is the
+    // `.zrec`'s sibling, and shown with its span because RFC 13 §4.4 makes
+    // stating the span every rendering's obligation.
+    if let Some(path) = &r.snapshot_open {
+        col = col.push(replay::snapshot_open_row(path, sp));
+        if let Some(note) = &r.snapshot_note {
+            col = col.push(kit::muted(format!("could not open: {note}")));
+        }
+    }
+    if let Some(path) = &r.snapshot_loading {
+        col = col.push(kit::muted(format!(
+            "loading {path}\u{2026} — parsing the snapshot"
+        )));
+    }
+    match &r.snapshot {
+        Some(s) => {
+            col = col.push(
+                row![
+                    kit::muted(replay::snapshot_label(s)),
+                    kit::action(kit::caption("close"))
+                        .on_press(Message::Workspace(WorkspaceMsg::Replay(
+                            replay::ReplayMsg::SnapshotClosed,
+                        )))
+                        .padding(sp.xs),
+                ]
+                .spacing(sp.sm)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+        None if r.snapshot_open.is_none() && r.snapshot_loading.is_none() => {
+            col = col.push(
+                kit::action(kit::caption("open a .zsnap to compare against\u{2026}"))
+                    .on_press(Message::Workspace(WorkspaceMsg::Replay(
+                        replay::ReplayMsg::SnapshotOpenToggled,
+                    )))
+                    .padding(sp.xs),
+            );
+        }
+        None => {}
+    }
     if let Some(rec) = &r.recording {
         col = col.push(kit::muted(format!(
             "● recording current watches to {} — the location bar's 'stop recording' finishes the file",

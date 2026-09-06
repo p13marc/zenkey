@@ -9,6 +9,7 @@ use zenoh::Session;
 use zenoh::qos::Priority;
 use zenoh::query::{ConsolidationMode, QueryTarget};
 
+use crate::bus::monitor::SampleView;
 use crate::bus::session::Fleet;
 use crate::report::ValueSource;
 
@@ -802,6 +803,60 @@ pub async fn state_snapshot(
             payload_len: sample.payload().len(),
         });
     }
+    Ok(out)
+}
+
+/// What one snapshot GET brought back (#219).
+#[derive(Debug, Default)]
+pub struct SnapshotReplies {
+    /// Every value reply as a [`SampleView`], with the replier's zenoh id
+    /// where the reply named one (`Reply::replier_id`, zenoh's unstable
+    /// surface). Not yet folded per key — that is [`crate::model::snapshot::fold_latest`]'s job,
+    /// and keeping the two apart is what lets the fold count what it
+    /// superseded.
+    pub values: Vec<(SampleView, Option<zenoh::config::ZenohId>)>,
+    /// Error replies (RFC 05 §3 envelopes): a refusal is not a value and not
+    /// silence, so it is counted rather than folded into either.
+    pub errors: u64,
+}
+
+/// GET a selector's current values with the fan-in discipline, keeping
+/// **everything a snapshot row needs** — the third sibling of [`fleet_get`]
+/// (which keeps the payload but not the timestamp) and [`state_snapshot`]
+/// (which keeps the timestamp but not the payload). RFC 13 §4.4's `.zsnap`
+/// wants both, plus the stamper and the replier, so this drains the channel
+/// into the same [`SampleView`] the seed path builds
+/// ([`SampleView::of`], the one conversion) and reads the replier id beside
+/// it.
+///
+/// Bounded by [`GetOpts::reply_bound`]; what the bound cost rides
+/// [`GetOpts::elided`], summed across every selector run under one `opts`
+/// (#339). Silence is not interpreted here (RFC 05 §3.1): an empty
+/// `values` is "nobody answered", and the caller decides what that means.
+pub async fn snapshot_get(
+    session: &Session,
+    selector: &str,
+    opts: &GetOpts,
+) -> Result<SnapshotReplies> {
+    let replies = disciplined_get(session, selector, opts)
+        .await
+        .map_err(|e| Error::bus("snapshot", selector, e))?;
+    let mut out = SnapshotReplies::default();
+    let mut elided = 0u64;
+    while let Ok(reply) = replies.recv_async().await {
+        let replier = reply.replier_id().map(|e| e.zid());
+        match reply.result() {
+            Ok(sample) => {
+                if out.values.len() >= opts.max_replies {
+                    elided += 1;
+                    continue;
+                }
+                out.values.push((SampleView::of(sample), replier));
+            }
+            Err(_) => out.errors += 1,
+        }
+    }
+    opts.note_elided(elided);
     Ok(out)
 }
 

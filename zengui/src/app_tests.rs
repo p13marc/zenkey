@@ -759,6 +759,77 @@ fn a_failed_zrec_open_restores_the_row_with_its_note() {
     assert!(app.work.replay.replay.is_none(), "no mode was entered");
 }
 
+/// A loaded `.zsnap` (#219) enters no mode and feeds no pane: it sits
+/// beside the live world for the history section to compare against, its
+/// open row behaves like the `.zrec` one — loading claim, failure note — and
+/// closing it drops every slot's compare toggle with it.
+#[test]
+fn a_loaded_snapshot_is_held_beside_the_live_world_not_instead_of_it() {
+    use crate::view::replay::ReplayMsg;
+
+    let mut app = test_app();
+    let open = |app: &mut Zengui, m: ReplayMsg| {
+        let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(m)));
+    };
+    open(&mut app, ReplayMsg::SnapshotOpenToggled);
+    open(
+        &mut app,
+        ReplayMsg::SnapshotPathChanged("a.zsnap".to_string()),
+    );
+    open(&mut app, ReplayMsg::SnapshotOpen);
+    assert_eq!(app.work.replay.snapshot_loading.as_deref(), Some("a.zsnap"));
+    assert!(app.work.replay.snapshot_open.is_none());
+
+    open(
+        &mut app,
+        ReplayMsg::SnapshotLoaded("a.zsnap".to_string(), Err("no such file".into())),
+    );
+    assert!(app.work.replay.snapshot_loading.is_none());
+    assert_eq!(
+        app.work.replay.snapshot_open.as_deref(),
+        Some("a.zsnap"),
+        "the row comes back with the path that failed"
+    );
+    assert!(app.work.replay.snapshot_note.is_some());
+
+    let snapshot = std::sync::Arc::new(zenkey_fleet::Snapshot {
+        header: zenkey_fleet::ZsnapHeader {
+            zsnap: zenkey_fleet::ZSNAP_VERSION,
+            selectors: vec!["v1/**".into()],
+            base: String::new(),
+            collected_at: "2026-09-06T00:00:00Z".into(),
+            collection_span_s: 0.4,
+            asked: 1,
+            answered: 0,
+            elided: 0,
+            errors: 0,
+            superseded: 0,
+            roster: zenkey_fleet::report::Asked::NotAsked,
+        },
+        rows: Vec::new(),
+    });
+    open(
+        &mut app,
+        ReplayMsg::SnapshotLoaded("a.zsnap".to_string(), Ok(snapshot.clone())),
+    );
+    assert_eq!(app.work.replay.snapshot.as_ref(), Some(&snapshot));
+    assert!(app.work.replay.snapshot_note.is_none());
+    assert!(
+        app.work.replay.replay.is_none(),
+        "a snapshot is read beside the live world — no mode was entered"
+    );
+
+    // The compare toggle is per slot, and closing the file drops it.
+    let _ = app.update(Message::Pane(crate::message::PaneMsg::History(
+        crate::message::SlotId::FOLLOW,
+        crate::view::history::HistoryMsg::CompareSnapshotToggled,
+    )));
+    assert!(app.sub.follow.compare_snapshot);
+    open(&mut app, ReplayMsg::SnapshotClosed);
+    assert!(app.work.replay.snapshot.is_none());
+    assert!(!app.sub.follow.compare_snapshot);
+}
+
 /// The retained window keeps replay mode's whole posture (#217): while it
 /// feeds the panes the live pump is not built, a capture cannot start —
 /// there is nothing live to capture — and the toggle is the way back.
