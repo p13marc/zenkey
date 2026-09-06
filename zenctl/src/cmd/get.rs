@@ -326,6 +326,7 @@ mod tests {
             key: format!("v1/{origin}/state/x/y"),
             encoding: None,
             attachment: None,
+            timestamp: None,
             answer: Answer::Value(zenoh::bytes::ZBytes::from("1")),
         }
     }
@@ -336,6 +337,7 @@ mod tests {
             key: String::new(),
             encoding: None,
             attachment: None,
+            timestamp: None,
             answer: Answer::Error {
                 name: "error/unavailable".into(),
                 message: "busy".into(),

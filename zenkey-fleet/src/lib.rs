@@ -210,8 +210,8 @@ pub use bus::session::{
     Fleet, OPEN_TIMEOUT, OpenFailure, open, open_reporting, open_reporting_within, open_with_config,
 };
 pub use bus::write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
-    declare_publication,
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, call, call_traced,
+    check_retire, declare_publication,
 };
 pub use judge::budget::{BudgetObservation, join_budget};
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
@@ -292,8 +292,8 @@ pub use report::{
     LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment, ProducerInfo,
     RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
     SampleRow, SchemaDrift, SchemaServer, SeedCoverage, StorageInfo, TimelineReport, TopologyEdge,
-    TopologyNode, TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
-    judgement_exit_code,
+    TopologyNode, TopologyReport, TotalityGap, TraceReport, ValueSource, WhyReport, WhyVerdict,
+    ZrecHeader, judgement_exit_code,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
