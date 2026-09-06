@@ -195,9 +195,9 @@ pub use bus::monitor::{
 pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use bus::query::{
     Answer, DEFAULT_MAX_REPLIES, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts,
-    RepeatingQuery, RepeatingRegistry, ServedSlice, StateSample, declare_repeating,
-    declare_repeating_any, fetch_stored, fetch_value, fleet_get, fleet_registry,
-    fleet_registry_by_origin, fleet_registry_raw, state_snapshot,
+    RepeatingQuery, RepeatingRegistry, ServedSlice, SnapshotReplies, StateSample,
+    declare_repeating, declare_repeating_any, fetch_stored, fetch_value, fleet_get, fleet_registry,
+    fleet_registry_by_origin, fleet_registry_raw, snapshot_get, state_snapshot,
 };
 pub use bus::roster::{
     BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, node_info, node_rows,
@@ -270,6 +270,8 @@ pub use model::impact::{ImpactInputs, MAX_DEPTH_CAP, attribute, entity_of};
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
+pub use model::snapshot::{fold_latest, holder_of, registration_of, stamper_of};
+pub use model::snapshot_diff::{DiffOpts, diff_snapshots};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::storage::{
     check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
@@ -287,9 +289,9 @@ pub use report::{
     Fault, FieldReport, Freshness, GenPlanEntry, GenReport, HelloView, ImpactReport, Judgement,
     LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment, ProducerInfo,
     RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
-    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, StorageInfo, TopologyEdge, TopologyNode,
-    TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
-    judgement_exit_code,
+    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport,
+    SnapshotRow, StorageInfo, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, ValueSource,
+    WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -300,6 +302,10 @@ pub use tape::record::{
     RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, ZREC_VERSION, ZrecItem, ZrecReader,
     ZrecSink, ZrecSource, ZrecWriter, record, replay,
 };
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use tape::snapshot::{SnapshotSpec, Taken, take_snapshot};
+pub use tape::snapshot::{ZSNAP_VERSION, ZsnapReader, ZsnapWriter, report_of as snapshot_report};
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.
 #[cfg(feature = "blob")]
