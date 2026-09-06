@@ -266,6 +266,48 @@ fn common_state_refines_from_the_common_field() {
     );
     let flow = registry::AnySubject::Netring(netring::Subject::flow_red("p95_ms"));
     assert_eq!(flow.common_state(), None);
+
+    // The v1.29/v1.30 tokens (#425): the producer-side relationship claim…
+    use zenkey_fixture_tests::registry::{catalog, netlink};
+    let relation =
+        registry::AnySubject::Netlink(netlink::Subject::evidence_relation("r-f5f9a2edb9601155"));
+    assert_eq!(
+        relation.common_state(),
+        Some(C::EvidenceRelation {
+            relation_id: "r-f5f9a2edb9601155"
+        })
+    );
+    // …and the four `@catalog` service subjects.
+    let incident = registry::AnySubject::Catalog(catalog::Subject::incident("inc-h-3fa9c2d41b7e"));
+    assert_eq!(
+        incident.common_state(),
+        Some(C::CatalogIncident {
+            incident_id: "inc-h-3fa9c2d41b7e"
+        })
+    );
+    let ack = registry::AnySubject::Catalog(catalog::Subject::ack(
+        "h-3fa9c2d41b7e.netlink.a659f813308ad1da",
+    ));
+    assert_eq!(
+        ack.common_state(),
+        Some(C::CatalogAck {
+            alert_ref: "h-3fa9c2d41b7e.netlink.a659f813308ad1da"
+        })
+    );
+    let silence = registry::AnySubject::Catalog(catalog::Subject::silence("maint-2026-09"));
+    assert_eq!(
+        silence.common_state(),
+        Some(C::CatalogSilence {
+            id: "maint-2026-09"
+        })
+    );
+    let edge = registry::AnySubject::Catalog(catalog::Subject::edge("e-2879d4667f9d946d"));
+    assert_eq!(
+        edge.common_state(),
+        Some(C::CatalogEdge {
+            edge_id: "e-2879d4667f9d946d"
+        })
+    );
 }
 
 #[test]

@@ -10,7 +10,7 @@
 # nothing serves — the mirror image of the advertised-but-unserved finding in #467.
 
 [registry]
-version = "1.1"
+version = "1.2"
 app = "zensight"
 convention = 1
 
@@ -48,6 +48,46 @@ cardinality = 100000
 ttl_s = 86400
 since = "1.0"
 description = "accumulated IP<->name record; history = storage capture (RFC 06 §5.2; population-budgeted)"
+
+[[subject]]
+path = "incident/{incident_id}"
+common = "incident"
+class = "state"
+type = "Incident"
+cardinality = 10000
+ttl_s = 900
+since = "1.2"
+description = "the currently-firing alerts for one entity (inc-<entity-id>, or inc-<origin> when unresolved); tombstoned when no member fires (RFC 06 §5.5)"
+
+[[subject]]
+path = "ack/{alert_ref}"
+common = "ack"
+class = "state"
+type = "AlertAck"
+cardinality = 1000
+ttl_s = 0
+since = "1.2"
+description = "one operator's acknowledgement of one firing alert, keyed by the RFC 11 §3.2 alert-ref; operator intent never ages out, the catalog tombstones it (RFC 06 §5.5)"
+
+[[subject]]
+path = "silence/{id}"
+common = "silence"
+class = "state"
+type = "Silence"
+cardinality = 1000
+ttl_s = 0
+since = "1.2"
+description = "a suppression window with matchers, bounds and an author; holds across re-fires, tombstoned at ends_at (RFC 06 §5.5)"
+
+[[subject]]
+path = "edge/{edge_id}"
+common = "edge"
+class = "state"
+type = "Edge"
+cardinality = 50000
+ttl_s = 900
+since = "1.2"
+description = "a resolved relationship between two entities (or an External end), concluded from evidence/relation claims; tombstoned when the last observer stops claiming it (RFC 06 §5.6)"
 
 [[subject]]
 path = "assertion/{id}"

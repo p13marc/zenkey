@@ -104,10 +104,14 @@ procedure	systemd	introspect	read	-	RegistrySlice
 procedure	systemd	timers	read	-	Vec<TimerRecord>
 procedure	systemd	unit	read	-	UnitDetail
 procedure	systemd	units	read	-	Vec<UnitRecord>
+subject	catalog	ack/{alert_ref}	state	AlertAck
 subject	catalog	alias/{old_id}	state	AliasRecord
 subject	catalog	assertion/{id}	state	OperatorAssertion
+subject	catalog	edge/{edge_id}	state	Edge
 subject	catalog	entity/{entity_id}	state	HostEntity
+subject	catalog	incident/{incident_id}	state	Incident
 subject	catalog	pdns/{ip_slug}	state	PdnsRecord
+subject	catalog	silence/{id}	state	Silence
 subject	gnmi	artifact/{kind}	state	ArtifactStatus
 subject	gnmi	errors	state	ErrorReport
 subject	gnmi	evidence/self	state	HostEvidence
@@ -185,6 +189,7 @@ subject	netlink	ethtool/{iface}/rings/tx_max	telemetry	TelemetryPoint
 subject	netlink	ethtool/{iface}/speed_mbps	telemetry	TelemetryPoint
 subject	netlink	events/{family}/{action}	telemetry	TelemetryPoint
 subject	netlink	evidence/device/{device}	state	HostEvidence
+subject	netlink	evidence/relation/{relation_id}	state	RelationClaim
 subject	netlink	evidence/self	state	HostEvidence
 subject	netlink	health	state	HealthSnapshot
 subject	netlink	iface/{iface}/carrier	telemetry	TelemetryPoint
