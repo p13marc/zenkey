@@ -13,10 +13,20 @@
 //! the diff's own judgement — a difference *is* the finding (1), identity
 //! is clean (0) — and a file that could not be read is the reserved 2,
 //! never a claim that the two agree.
+//!
+//! `--normalize-origins` (#220) is two deployments, one diff: the engine
+//! profiles every host on both sides, plans the alignment (explicit
+//! `--map`s, then verified unique labels, then unique producer sets —
+//! `zenkey_fleet::plan_map`), and compares `b` read through it. An origin
+//! the plan cannot place is the third exit path: the report goes out with
+//! every unpaired origin listed, no comparison is made over them, and the
+//! judgement is the reserved 2 — "I cannot map these" is the finding a
+//! script can act on, and a diff that compared around them would not be.
 
 use std::io::{BufReader, BufWriter};
 
 use anyhow::{Context, Result};
+use zenkey::origin::HostId;
 use zenkey_fleet::{DiffOpts, SnapshotSpec, ZsnapReader, ZsnapWriter, take_snapshot};
 
 use crate::Bus;
@@ -112,15 +122,12 @@ pub fn diff(cli: SnapshotDiffArgs) -> Result<()> {
         max_changes,
         out,
     } = cli;
-    if normalize_origins || !maps.is_empty() {
-        // The flags parse today so the CLI shape is stable; the alignment
-        // itself is chunk DD's. Refusing is the honest answer — a diff that
-        // silently ignored `--map` would compare the wrong keys.
-        return Err(exit::unaskable!(
-            "--normalize-origins / --map: origin alignment is not implemented in this \
-             build (chunk DD)"
-        ));
-    }
+    // Parsed at the edge, before either file is opened: a `--map` this tool
+    // cannot read is an input it refuses (exit 2), not a pre-run failure.
+    let maps = maps
+        .iter()
+        .map(|m| parse_map(m))
+        .collect::<Result<Vec<_>>>()?;
     let read = |path: &str| -> Result<zenkey_fleet::Snapshot> {
         let file = std::fs::File::open(path).with_context(|| format!("open {path}"))?;
         let snapshot = ZsnapReader::new(BufReader::new(file))
@@ -132,14 +139,42 @@ pub fn diff(cli: SnapshotDiffArgs) -> Result<()> {
     // not a 1 claiming the two differ.
     let a = DIFFING.ask(read(&a));
     let b = DIFFING.ask(read(&b));
-    let diff = zenkey_fleet::diff_snapshots(
-        &a,
-        &b,
-        DiffOpts {
-            max_changes,
-            ..DiffOpts::default()
-        },
-    );
+    let opts = DiffOpts {
+        max_changes,
+        ..DiffOpts::default()
+    };
+    let diff = if normalize_origins {
+        let plan = zenkey_fleet::plan_map(
+            &zenkey_fleet::origin_profiles(&a),
+            &zenkey_fleet::origin_profiles(&b),
+            &maps,
+        )
+        // An explicit pair naming an origin neither file holds is the
+        // operator's input, refused whole (exit 2) — a plan that quietly
+        // dropped it would compare the wrong keys.
+        .map_err(|e| exit::unaskable!("{e}"))?;
+        zenkey_fleet::diff_normalized(&a, &b, &plan, opts)
+    } else {
+        zenkey_fleet::diff_snapshots(&a, &b, opts)
+    };
     crate::render::emit_with(&mut std::io::stdout(), &diff, out.format, out.color)?;
+    // Refused alignments exit 2 here too: `SnapshotDiff::to_judgement` is
+    // `Unobservable` over an unpaired origin, and the projection is the one
+    // seam (`exit.rs`).
     exit::verdict(&diff.to_judgement())
+}
+
+/// `A=B`, both sides `h-<12hex>` (RFC 03 §1.3) — anything else is refused
+/// at the edge.
+fn parse_map(spec: &str) -> Result<(HostId, HostId)> {
+    let Some((x, y)) = spec.split_once('=') else {
+        return Err(exit::unaskable!(
+            "--map {spec:?}: expected A=B, a's origin = b's origin"
+        ));
+    };
+    let parse = |side: &str, s: &str| {
+        HostId::parse(s)
+            .map_err(|e| exit::unaskable!("--map {spec:?}: {side} is not a host origin ({e})"))
+    };
+    Ok((parse("a", x)?, parse("b", y)?))
 }

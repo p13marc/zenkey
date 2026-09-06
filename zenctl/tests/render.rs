@@ -1252,42 +1252,134 @@ DIFFERENT
     assert!(!same.contains("  ~"), "{same}");
 }
 
-/// An alignment that was asked shows its pairs and — the RFC 13 §4.4 MUST —
-/// lists the origin it could not pair, in the table and as its own row.
+/// An alignment that was asked and could not place every origin is
+/// **refused** (#220): the pairs it had and — the RFC 13 §4.4 MUST — every
+/// origin it could not pair, each with its reason, under NOT COMPARED
+/// rather than a count line that would read as a comparison; and as rows.
 #[test]
-fn a_snapshot_diff_lists_an_unpaired_origin_rather_than_dropping_it() {
+fn a_refused_snapshot_diff_lists_every_unpaired_origin_and_compares_nothing() {
     assert_data_eq!(
         table(&fx::snapshot_diff_unmapped()),
         str![[r#"
-a: 5 key(s), span 1.25s at 2026-09-06T00:00:00Z (acme/v1/**)
-b: 5 key(s), span 0.80s at 2026-09-06T00:05:00Z (acme/v1/**)
-1 added, 1 removed, 2 changed, 2 unchanged
-  +  acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used
-  -  acme/v1/h-9b2e4c7a1d05/state/logs/rotated
-  ~  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used  value: 1 change(s) (value: 41.0 → 42.0)
-  ~  acme/v1/h-9b2e4c7a1d05/state/sysinfo/health                 value: 1 change(s) (status: "degraded" → "ok"); holder: storage_only → live(unknown)
+a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
+b: 4 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
 origins aligned: 1
-  =  h-3fa9c2d41b7e ↔ h-3fa9c2d41b7e  label
-origins not paired: 1
-  ?  h-9b2e4c7a1d05 (in b)  no origin in a publishes the same host_id
-subject                              compared  differing  only in a  only in b
-telemetry/sysinfo/disk/var-log/used         1          1          0          1
-DIFFERENT
+  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  explicit
+origins not paired: 2
+  ?  h-9b2e4c7a1d05 (in a)  label `db` claimed by no origin in b; producer set {logs, sysinfo} matches no origin in b
+  ?  h-0badcafe1234 (in b)  label `node` claimed by no origin in a; producer set {sysinfo} matches no origin in a
+NOT COMPARED
 
 "#]]
     );
     let n = notes(&fx::snapshot_diff_unmapped());
     assert!(n.contains("could not be paired"), "{n}");
+    assert!(n.contains("--map A=B"), "{n}");
     let rows: Vec<serde_json::Value> = ndjson(&fx::snapshot_diff_unmapped())
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
+    assert_eq!(
+        rows.iter().filter(|r| r["row"] == "unmapped").count(),
+        2,
+        "one row per unpaired origin"
+    );
     assert!(
         rows.iter()
             .any(|r| r["row"] == "unmapped" && r["side"] == "b")
     );
-    assert!(rows.iter().any(|r| r["row"] == "subject"));
-    assert_eq!(rows[0]["origin_map"][0]["evidence"]["kind"], "label");
+    assert!(
+        !rows.iter().any(|r| r["row"] == "subject"),
+        "no roll-up: not compared"
+    );
+    assert_eq!(rows[0]["origin_map"][0]["evidence"]["kind"], "explicit");
+}
+
+/// The acceptance case (#220): one fleet under two deployments, every
+/// origin re-minted, aligned on its label — the map table with its
+/// evidence column, every subject identical, the clean word.
+#[test]
+fn an_aligned_snapshot_diff_draws_its_map_and_rolls_up_per_subject() {
+    assert_data_eq!(
+        table(&fx::snapshot_diff_aligned()),
+        str![[r#"
+a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
+b: 6 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
+0 added, 0 removed, 0 changed, 6 unchanged
+origins aligned: 2
+  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  label `web`
+  =  h-9b2e4c7a1d05 ↔ h-0badcafe1234  label `db`
+4 subject(s) identical on every origin, 0 not
+IDENTICAL
+
+"#]]
+    );
+    let n = notes(&fx::snapshot_diff_aligned());
+    assert!(n.contains("re-based from `stg` onto `prod`"), "{n}");
+    assert!(!n.contains("no origin alignment was asked"), "{n}");
+    assert!(!n.contains("producer set alone"), "labels paired it: {n}");
+}
+
+/// One line per subject that differs — "differs on N of M origin(s)" with
+/// the example's facets, and only-in counts — and the agreeing subjects
+/// counted, not listed.
+#[test]
+fn a_normalized_snapshot_diff_says_per_subject_on_how_many_origins() {
+    assert_data_eq!(
+        table(&fx::snapshot_diff_normalized()),
+        str![[r#"
+a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
+b: 4 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
+0 added, 2 removed, 2 changed, 2 unchanged
+  -  plain/leak
+  -  prod/v1/h-9b2e4c7a1d05/state/logs/rotated
+  ~  prod/v1/h-3fa9c2d41b7e/state/sysinfo/health  value: 1 change(s) (source: "web" → "node")
+  ~  prod/v1/h-9b2e4c7a1d05/state/sysinfo/health  value: 1 change(s) (source: "db" → "node")
+origins aligned: 2
+  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  explicit
+  =  h-9b2e4c7a1d05 ↔ h-0badcafe1234  explicit
+plain/leak            1 only in a
+state/logs/rotated    1 only in a
+state/sysinfo/health  differs on 2 of 2 origin(s)  value: 1 change(s) (source: "web" → "node")
+1 subject(s) identical on every origin, 3 not
+DIFFERENT
+
+"#]]
+    );
+    let rows: Vec<serde_json::Value> = ndjson(&fx::snapshot_diff_normalized())
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let health = rows
+        .iter()
+        .find(|r| r["row"] == "subject" && r["subject"] == "state/sysinfo/health")
+        .unwrap();
+    assert_eq!(
+        (health["compared"].as_u64(), health["differing"].as_u64()),
+        (Some(2), Some(2))
+    );
+    assert_eq!(health["example"]["value"]["changes"][0]["path"], "source");
+}
+
+/// No health documents at all: the pairing rests on producer sets alone,
+/// and the O4 note says the label was never asked rather than absent.
+#[test]
+fn a_producer_set_pairing_says_the_label_was_not_asked() {
+    let (a, b) = fx::snapshot_pair_unlabelled();
+    let plan = zenkey_fleet::plan_map(
+        &zenkey_fleet::origin_profiles(&a),
+        &zenkey_fleet::origin_profiles(&b),
+        &[],
+    )
+    .unwrap();
+    let d = zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default());
+    let t = table(&d);
+    assert!(t.contains("  producer set"), "{t}");
+    assert!(t.contains("IDENTICAL"), "{t}");
+    let n = notes(&d);
+    assert!(n.contains("paired by producer set alone"), "{n}");
+    assert!(n.contains("never asked"), "{n}");
+    assert!(n.contains("RFC 06 §6.2"), "{n}");
 }
 
 /// The two `.zsnap` files the CLI corpus diffs (`tests/cmd/snapshot-diff.trycmd`)
@@ -1297,7 +1389,19 @@ DIFFERENT
 /// must already match.
 #[test]
 fn the_zsnap_corpus_fixtures_are_the_shared_fixtures() {
-    for (name, snapshot) in [("a.zsnap", fx::snapshot()), ("b.zsnap", fx::snapshot_b())] {
+    let (renamed_a, renamed_b) = fx::snapshot_pair_renamed();
+    let (_, ambiguous_b) = fx::snapshot_pair_ambiguous();
+    let (unlabelled_a, unlabelled_b) = fx::snapshot_pair_unlabelled();
+    for (name, snapshot) in [
+        ("a.zsnap", fx::snapshot()),
+        ("b.zsnap", fx::snapshot_b()),
+        // The two-deployment pairs (#220, `snapshot-diff-normalized.trycmd`).
+        ("prod.zsnap", renamed_a),
+        ("stg.zsnap", renamed_b),
+        ("stg-ambiguous.zsnap", ambiguous_b),
+        ("prod-unlabelled.zsnap", unlabelled_a),
+        ("stg-unlabelled.zsnap", unlabelled_b),
+    ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/cmd/fixtures")
             .join(name);

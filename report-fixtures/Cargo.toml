@@ -30,3 +30,10 @@ license.workspace = true
 # above.
 zenkey-fleet = { path = "../zenkey-fleet", default-features = false }
 serde_json = { workspace = true }
+# The two-deployment snapshot pairs (#220) carry per-origin `host_id`s in
+# their health documents; a payload built per origin has to be encoded, and
+# a hand-rolled encoder would be a second base64. Not a feature request.
+base64 = { workspace = true }
+# `HostId::parse` for the explicit pairs, and nothing that needs the zenoh
+# stack — same discipline as the line above: no default features.
+zenkey = { path = "../zenkey", default-features = false }

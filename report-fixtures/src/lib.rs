@@ -2160,36 +2160,203 @@ pub fn snapshot_diff() -> SnapshotDiff {
     )
 }
 
-/// The same diff with an origin alignment asked for (chunk DD's shape,
-/// settled now): one pair on a label, one origin that could not be paired
-/// — listed, never dropped (RFC 13 §4.4) — and the per-subject roll-up.
-pub fn snapshot_diff_unmapped() -> SnapshotDiff {
-    let mut d = snapshot_diff();
-    d.origin_map = Asked::Asked(vec![OriginPair {
-        a: ORIGIN.into(),
-        b: ORIGIN.into(),
-        evidence: MapEvidence::Label {
-            source: "state/sysinfo/health.host_id".into(),
+// ─── two deployments, one diff (#220) ────────────────────────────────────
+
+/// The two origins of the *other* deployment in the pairs below: the same
+/// fleet as [`snapshot_pair_renamed`]'s `a`, every origin re-minted.
+pub const ORIGIN_C: &str = "h-c0ffee00c0de";
+pub const ORIGIN_D: &str = "h-0badcafe1234";
+
+/// One host of a two-deployment fixture: its health document (the identity
+/// bridge, `host_id` naming the origin it sits under and `source` naming
+/// the host), one telemetry key, and any extra producers.
+fn fleet_host(
+    base: &str,
+    origin: &str,
+    label: &str,
+    extra: &[&str],
+    stamp: &str,
+) -> Vec<SnapshotRow> {
+    use base64::Engine as _;
+    let b64 = |body: String| base64::engine::general_purpose::STANDARD.encode(body);
+    let key = |rel: &str| format!("{base}/v1/{origin}/{rel}");
+    let live = Holder::Live {
+        origin: origin.into(),
+        answered_by: AnsweredBy::Stamper,
+    };
+    let mut rows = vec![
+        snapshot_row(
+            &key("state/sysinfo/health"),
+            &b64(format!(
+                r#"{{"host_id":"{origin}","source":"{label}","status":"ok"}}"#
+            )),
+            live.clone(),
+        ),
+        snapshot_row(
+            &key("telemetry/sysinfo/disk/var-log/used"),
+            &b64(r#"{"value":41.0,"unit":"percent"}"#.into()),
+            live.clone(),
+        ),
+    ];
+    for p in extra {
+        rows.push(snapshot_row(
+            &key(&format!("state/{p}/rotated")),
+            &b64(r#"{"count":3}"#.into()),
+            live.clone(),
+        ));
+    }
+    for r in &mut rows {
+        r.timestamp = Some(stamp.into());
+    }
+    rows
+}
+
+/// A two-host fleet under `base`: `web` (`sysinfo` only) and `db`
+/// (`sysinfo` + `logs`), plus a leaked bus-root key both deployments carry
+/// — under no base, so it compares verbatim on both sides (O1).
+fn fleet(base: &str, web: &str, db: &str, labels: (&str, &str), stamp: &str, at: &str) -> Snapshot {
+    let mut rows = fleet_host(base, web, labels.0, &[], stamp);
+    rows.extend(fleet_host(base, db, labels.1, &["logs"], stamp));
+    rows.push(
+        snapshot_row(
+            "plain/leak",
+            "bGVha2Vk",
+            Holder::Unattributed {
+                reason: "the key names no origin: not a v1 key".into(),
+            },
+        )
+        .into_leak(),
+    );
+    rows.sort_by(|x, y| x.key.cmp(&y.key));
+    let n = rows.len() as u64;
+    Snapshot {
+        header: ZsnapHeader {
+            selectors: vec![format!("{base}/v1/**")],
+            base: base.into(),
+            ..zsnap_header(at, 0.9, n, 0)
         },
-    }]);
-    d.unmapped = vec![Unmapped {
-        origin: ORIGIN_B.into(),
-        side: Side::B,
-        reason: "no origin in a publishes the same host_id".into(),
-    }];
-    d.by_subject = Asked::Asked(vec![SubjectDelta {
-        subject: "telemetry/sysinfo/disk/var-log/used".into(),
-        compared: 1,
-        differing: 1,
-        only_in_a: 0,
-        only_in_b: 1,
-        example: d
-            .changed
-            .iter()
-            .find(|c| c.key.ends_with("disk/var-log/used"))
-            .cloned(),
-    }]);
-    d
+        rows,
+    }
+}
+
+/// The acceptance pair (#220): one fleet, two deployments. `a` is `prod`
+/// with [`ORIGIN`] (`web`) and [`ORIGIN_B`] (`db`); `b` is `stg` with
+/// [`ORIGIN_C`] and [`ORIGIN_D`] under the same labels — different base,
+/// different origins, different clocks, the same values. Verbatim they
+/// share nothing; aligned they diff to zero.
+pub fn snapshot_pair_renamed() -> (Snapshot, Snapshot) {
+    (
+        fleet(
+            "prod",
+            ORIGIN,
+            ORIGIN_B,
+            ("web", "db"),
+            "7f3b2a1c00000001/ab12",
+            "2026-09-06T00:00:00Z",
+        ),
+        fleet(
+            "stg",
+            ORIGIN_C,
+            ORIGIN_D,
+            ("web", "db"),
+            "7f3b2a1c00000009/ef56",
+            "2026-09-06T00:05:00Z",
+        ),
+    )
+}
+
+/// The pair the alignment must refuse: `b`'s two hosts both call
+/// themselves `node`, and both publish only `sysinfo` — no label and no
+/// producer set tells them apart. `a` is [`snapshot_pair_renamed`]'s.
+pub fn snapshot_pair_ambiguous() -> (Snapshot, Snapshot) {
+    let (a, _) = snapshot_pair_renamed();
+    let mut rows = fleet_host("stg", ORIGIN_C, "node", &[], "7f3b2a1c00000009/ef56");
+    rows.extend(fleet_host(
+        "stg",
+        ORIGIN_D,
+        "node",
+        &[],
+        "7f3b2a1c00000009/ef56",
+    ));
+    rows.sort_by(|x, y| x.key.cmp(&y.key));
+    let n = rows.len() as u64;
+    let b = Snapshot {
+        header: ZsnapHeader {
+            selectors: vec!["stg/v1/**".into()],
+            base: "stg".into(),
+            ..zsnap_header("2026-09-06T00:05:00Z", 0.9, n, 0)
+        },
+        rows,
+    };
+    (a, b)
+}
+
+/// The renamed pair with no health documents on either side: the label
+/// was never asked, and the two distinct producer sets are the only
+/// evidence left.
+pub fn snapshot_pair_unlabelled() -> (Snapshot, Snapshot) {
+    let (mut a, mut b) = snapshot_pair_renamed();
+    for s in [&mut a, &mut b] {
+        s.rows.retain(|r| !r.key.ends_with("/health"));
+        s.header.answered = s.rows.len() as u64;
+    }
+    (a, b)
+}
+
+/// [`snapshot_pair_renamed`] aligned: two pairs on their labels, nothing
+/// unpaired, zero differences — exit 0, with every subject rolled up.
+pub fn snapshot_diff_aligned() -> SnapshotDiff {
+    let (a, b) = snapshot_pair_renamed();
+    let plan = zenkey_fleet::plan_map(
+        &zenkey_fleet::origin_profiles(&a),
+        &zenkey_fleet::origin_profiles(&b),
+        &[],
+    )
+    .unwrap();
+    zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default())
+}
+
+/// [`snapshot_pair_ambiguous`] with one explicit `--map`: the pair the
+/// operator stated rides as `explicit`, and the alignment still cannot
+/// place `a`'s `db` or `b`'s second `node` — so the comparison is refused,
+/// the two unpaired origins listed, never dropped (RFC 13 §4.4), and the
+/// roll-up not asked. Exit 2.
+pub fn snapshot_diff_unmapped() -> SnapshotDiff {
+    let (a, b) = snapshot_pair_ambiguous();
+    let plan = zenkey_fleet::plan_map(
+        &zenkey_fleet::origin_profiles(&a),
+        &zenkey_fleet::origin_profiles(&b),
+        &[(
+            zenkey::origin::HostId::parse(ORIGIN).unwrap(),
+            zenkey::origin::HostId::parse(ORIGIN_C).unwrap(),
+        )],
+    )
+    .unwrap();
+    zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default())
+}
+
+/// [`snapshot_pair_ambiguous`] with both pairs stated: the comparison
+/// runs, and the subject roll-up says where the deployments disagree —
+/// every health document (the labels differ), and `logs` only in `a`.
+/// Exit 1.
+pub fn snapshot_diff_normalized() -> SnapshotDiff {
+    let (a, b) = snapshot_pair_ambiguous();
+    let plan = zenkey_fleet::plan_map(
+        &zenkey_fleet::origin_profiles(&a),
+        &zenkey_fleet::origin_profiles(&b),
+        &[
+            (
+                zenkey::origin::HostId::parse(ORIGIN).unwrap(),
+                zenkey::origin::HostId::parse(ORIGIN_C).unwrap(),
+            ),
+            (
+                zenkey::origin::HostId::parse(ORIGIN_B).unwrap(),
+                zenkey::origin::HostId::parse(ORIGIN_D).unwrap(),
+            ),
+        ],
+    )
+    .unwrap();
+    zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default())
 }
 
 /// [`snapshot`] against itself: the clean answer, exit 0.
