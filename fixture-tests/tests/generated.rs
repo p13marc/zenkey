@@ -533,6 +533,24 @@ fn the_probe_form_is_not_a_key() {
     );
 }
 
+/// The `[budget]` table (RFC 08 §2, v1.32) generates nothing and rides the
+/// served slice verbatim — which is the whole route by which an observer
+/// reads it, so a codegen change that dropped it would fail here first.
+#[test]
+fn the_introspect_slice_carries_the_budget_verbatim() {
+    let slice = zenkey::parse_slice(registry::registry_toml("netring").unwrap()).unwrap();
+    let budget = slice.budget.as_ref().expect("netring declares a budget");
+    assert_eq!(budget.rss_mb, Some(64));
+    let names: Vec<&str> = budget.tables.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["flows", "names"]);
+    assert_eq!(budget.tables[0].max_entries, Some(65536));
+    assert_eq!(budget.tables[0].max_bytes, Some(16_777_216));
+    assert_eq!(budget.tables[1].max_bytes, None);
+
+    let none = zenkey::parse_slice(registry::registry_toml("logs").unwrap()).unwrap();
+    assert_eq!(none.budget, None, "a file without [budget] is not asked");
+}
+
 #[test]
 fn the_introspect_slice_carries_the_blob_tiers() {
     // The stated point of modelling `@blob`: an explorer reads a producer's
