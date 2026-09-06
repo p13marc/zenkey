@@ -1463,7 +1463,10 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "scout",
         "service-info",
         "service-list",
+        "storage-check",
+        "storage-explain",
         "storage-list",
+        "storage-plan",
         "topic-info",
         "topic-list",
         "why",
@@ -1537,6 +1540,10 @@ fn every_observing_family_states_its_scope() {
     // The doctor's scope is its listen phase; the fixture ran one.
     let s = scoped(&fx::doctor_report());
     assert_eq!(s.asked, ["v1/**"]);
+    // `storage gen --check` sweeps the admin space once, no window.
+    let s = scoped(&fx::storage_check());
+    assert_eq!(s.asked, ["@/*/router/**/storage_manager/storages/**"]);
+    assert_eq!(s.window_s, None);
     // The burn-down: one asked selector per ledger entry.
     let s = scoped(&fx::retired_report());
     assert_eq!(s.asked.len(), 3);
@@ -1787,4 +1794,138 @@ fn a_cache_clear_says_whether_there_was_anything_to_clear() {
         doc.get("slices").is_none(),
         "clear counts nothing — absent, not zero (RFC 09 §5.1 O4)"
     );
+}
+
+// ── The storage-plan families (#393) ──────────────────────────────────────
+
+/// The plan as a table: one row per volume and storage, the derivation and
+/// every warning as detail lines, the refusal and the registry claim as notes
+/// — and, on the wire, the same facts under `row` tags.
+#[test]
+fn a_storage_plan_shows_its_derivations_and_names_its_refusals() {
+    assert_data_eq!(
+        table(&fx::storage_plan()),
+        str![[r#"
+storage plan for base "acme"  (registry: 3 slice(s), longest state ttl_s 900 (sysinfo/alert/{alert_key}))
+
+volumes:
+  fs        fs        durable · latest
+  influxdb  influxdb  durable · all     url="http://localhost:8086"
+
+storages:
+  catalog       acme/v1/@catalog/state/**       fs (latest)
+    strip acme/v1/@catalog/state  ·  covers 3 declared subject(s)
+    gc lifespan 172800 s (period 30 s): max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s
+    ! complete_refused: complete = true refused: it is not the fully covering latest storage (class state) — emitted as false (RFC 09 §2.2)
+    ! overlap: overlaps pdns_history (acme/v1/@catalog/state/pdns/**): a GET under both selectors is answered by both (RFC 09 §2)
+  latest        acme/v1/*/state/**              fs (latest)     replicated, complete
+    strip acme/v1  ·  covers 12 declared subject(s)
+    gc lifespan 1800 s (period 30 s): max ttl_s 900 (sysinfo/alert/{alert_key}) × 2.0 = 1800 s
+  pdns_history  acme/v1/@catalog/state/pdns/**  influxdb (all)
+    strip acme/v1/@catalog/state/pdns  ·  covers 1 declared subject(s)
+    gc lifespan 172800 s (period 30 s): max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s
+    ! retention_is_the_databases: retention is the database's policy, not zenoh config (RFC 09 §2.3)
+
+"#]]
+    );
+    let notes = notes(&fx::storage_plan());
+    assert!(notes.contains("refused storage events:"), "{notes}");
+    assert!(notes.contains("3 storage(s) on 2 volume(s) planned, 1 refused"));
+    let out = ndjson(&fx::storage_plan());
+    let mut lines = out.lines();
+    let envelope: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+    assert_eq!(envelope["report"], "storage-plan");
+    assert_eq!(envelope["registry"]["max_ttl_s"], 900);
+    assert!(
+        envelope.get("storages").is_none(),
+        "rows do not ride the envelope"
+    );
+    let kinds: Vec<String> = lines
+        .map(|l| {
+            serde_json::from_str::<serde_json::Value>(l).unwrap()["row"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "volume", "volume", "storage", "storage", "storage", "refusal"
+        ]
+    );
+}
+
+/// Without a registry the plan says so in every format — the O4 sentence is
+/// a coverage note, so it rides the json document too.
+#[test]
+fn a_storage_plan_without_a_registry_says_what_it_could_not_verify() {
+    let plan = zenkey_fleet::report::StoragePlan {
+        registry: zenkey_fleet::report::Asked::NotAsked,
+        ..fx::storage_plan()
+    };
+    assert!(table(&plan).contains("(registry: not asked)"));
+    let notes = notes(&plan);
+    assert!(notes.contains("no registry was asked"), "{notes}");
+    let out = ndjson(&plan);
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert!(envelope.get("registry").is_none(), "not asked is absence");
+    assert!(envelope["notes"].to_string().contains("RFC 09 §5.1 O4"));
+}
+
+/// The check: one line per finding, the unjudged comparison as a coverage
+/// note, and the empty admin sweep as a non-verdict rather than a pass.
+#[test]
+fn a_storage_check_draws_each_finding_and_keeps_unjudged_apart() {
+    assert_data_eq!(
+        table(&fx::storage_check()),
+        str![[r#"
+storage check for base "acme": 3 planned, 3 observed row(s) — 4 finding(s)
+  ✗ latest@aabbccdd  strip_prefix differs           planned acme/v1, observed acme
+  ✗ latest@aabbccdd  gc.lifespan below the minimum  planned 1800, observed 600
+  ✗ pdns_history     missing                        planned acme/v1/@catalog/state/pdns/**
+  ✗ blobs@aabbccdd   extra                          observed acme/v1/*/@blob/**
+
+"#]]
+    );
+    assert!(notes(&fx::storage_check()).contains("not judged, which is not the same as agreeing"));
+    let out = ndjson(&fx::storage_check());
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert_eq!(out.lines().count(), 5, "envelope + four findings");
+
+    assert_data_eq!(
+        table(&fx::storage_check_unobservable()),
+        str![[r#"
+storage check for base "acme": 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
+
+"#]]
+    );
+    assert!(notes(&fx::storage_check_unobservable()).contains("RFC 05 §3.1"));
+}
+
+/// `--explain`: the taker with its reason, or the reason there is none.
+#[test]
+fn a_storage_explain_names_the_taker_or_the_reason() {
+    assert_data_eq!(
+        table(&fx::storage_explain()),
+        str![[r#"
+acme/v1/h-3fa9c2d41b7e/state/sysinfo/health
+  → latest  acme/v1/*/state/**  includes it
+      class state under base "acme": acme/v1/*/state/** includes every key it names; stored under strip_prefix "acme/v1" on volume fs (latest)
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&fx::storage_explain_none()),
+        str![[r#"
+acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J
+  none: no planned storage's selector includes it; refused storage(s) events would have
+
+"#]]
+    );
+    let out = ndjson(&fx::storage_explain_none());
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["refused_takers"], serde_json::json!(["events"]));
+    assert_eq!(out.lines().count(), 1, "no takers, no rows");
 }

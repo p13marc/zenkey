@@ -130,6 +130,7 @@ pub async fn run() -> Result<()> {
         Command::Registry(RegistryCmd::Lint(a)) => cmd::registry::lint(a),
         Command::Registry(RegistryCmd::Lock(a)) => cmd::registry::lock(a),
         Command::Storage(StorageCmd::List(a)) => cmd::storage::list(a).await,
+        Command::Storage(StorageCmd::Gen(a)) => cmd::storage::plan(a).await,
         Command::Blob(BlobCmd::List(a)) => cmd::blob::list(a).await,
         Command::Blob(BlobCmd::Locate { target, bus }) => {
             let bus = Bus::resolve(&bus)?;
