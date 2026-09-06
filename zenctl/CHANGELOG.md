@@ -8,6 +8,33 @@ sitting.
 
 ## Unreleased
 
+**`record --on <RULE> --pre <SECS>` — trigger capture** (#218; RFC 13 §4.1
+version 2). New flags on `record`, no moved spelling: `--on` (repeatable,
+the watchdog's rule vocabulary; requires `--pre`), `--pre <SECS>` (the
+retained window's age budget), `--post <SECS>` (default 10), `--every
+<SECS>` (the one period flag, default 1), `--preamble
+absent-from-window|full|none` (default `absent-from-window`). With `--on`
+the verb arms instead of records: nothing is written until a rule
+transitions to `firing`, and then one `.zrec` version-2 file carries the
+state preamble (a bounded GET on the state-class projection of the watch
+set — the header names what it could not fetch), the pre-roll at its real
+`t`, the trigger record where it fired, and `--post` seconds more. `--for`
+keeps its passive-window meaning — give up after this long, exit 0 with a
+silence note (a rule not firing is not a finding, RFC 05 §3.1) and no
+file; `--count` stays the post-roll's stop bound. The report says the
+pre-roll covers only the watched selectors (O5), how much of `--pre` the
+ring could give, and the ring's two eviction kinds apart (O6).
+
+**`replay --seed-state`.** A version-2 capture's preamble rows are skipped
+by default and said per row — ndjson `{"row":"would","would":
+"skip-preamble",key,reason}`, table `would skip <key>  (preamble — …)` —
+with the closing count "preamble rows skipped: N (--seed-state to publish
+them)" (RFC 13 §4.2: re-stamped state-at-capture-start republishes a
+snapshot over the live fleet). `--seed-state` publishes them, counted as
+seeded apart from the observed rows. A trigger record is announced where
+it fell and never published. `timeline --from` counts preamble rows it
+did not place.
+
 Two new verbs under the `registry` noun and no moved spelling (#224).
 
 **`registry consumers <target>` — who declares a reader of a subject.** A

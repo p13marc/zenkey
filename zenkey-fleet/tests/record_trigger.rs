@@ -107,7 +107,7 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
                 None,
                 &store,
                 &spec,
-                || Ok(buf),
+                || async move { Ok(buf) },
                 |ev| {
                     if let TriggerEvent::Fired(_) = ev {
                         let _ = fired_tx.send(());
@@ -289,7 +289,7 @@ async fn a_rule_that_never_fires_leaves_no_file() {
         None,
         &store,
         &spec,
-        || {
+        || async {
             *opened.lock().expect("lock") = true;
             Ok(SharedBuf::default())
         },

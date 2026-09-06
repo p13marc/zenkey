@@ -1,0 +1,8 @@
+{"zrec":2,"selectors":["acme/v1/h-3fa9c2d41b7e/state/demo/**"],"base":"acme","captured_at":"2026-09-06T00:00:00Z","preamble":{"count":1,"collected_over_s":0.12,"selectors":["acme/v1/h-3fa9c2d41b7e/state/demo/**"],"semantics":"absent_from_window"},"pre_roll":{"asked_s":30.0,"covered_s":1.5,"watched":["acme/v1/h-3fa9c2d41b7e/state/demo/**"],"expired":2}}
+{"key":"acme/v1/h-3fa9c2d41b7e/state/demo/config","t":0,"preamble":true,"timestamp":"7f3b2a1c00000001/ab12","delete":false,"bytes":"eyJtb2RlIjoieCJ9","encoding":"application/json"}
+{"key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","t":0,"delete":false,"bytes":"eyJvayI6dHJ1ZX0=","encoding":"application/json"}
+{"key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","t":500000,"delete":false,"bytes":"eyJvayI6dHJ1ZX0=","encoding":"application/json"}
+{"key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","t":1000000,"delete":false,"bytes":"eyJvayI6dHJ1ZX0=","encoding":"application/json"}
+{"key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","t":1500000,"delete":false,"bytes":"eyJvayI6dHJ1ZX0=","encoding":"application/json"}
+{"trigger":{"rule":"silent-for acme/v1/h-3fa9c2d41b7e/state/demo/health 0.7","from":"ok","to":"firing","at":"2026-09-06T00:00:32Z","evidence":"no sample for 0.7s, on a drop-free observer"}}
+{"key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","t":2400000,"delete":false,"bytes":"eyJvayI6ZmFsc2V9","encoding":"application/json"}

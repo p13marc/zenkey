@@ -209,14 +209,18 @@ pub fn watch_cover<'s>(selectors: impl IntoIterator<Item = &'s String>) -> Vec<S
 /// Every await inside the drain is the watchdog's (#338): the sweep and the
 /// preamble fetch run *beside* the drain, never instead of it, so the drops
 /// in the file are the bus's and not this loop's own.
-pub async fn record_on<W: Write + Send + 'static>(
+pub async fn record_on<W, F>(
     fleet: &crate::Fleet<'_>,
     slices: Option<&SliceSet>,
     store: &SchemaStore,
     spec: &TriggerSpec,
-    open: impl FnOnce() -> Result<W>,
+    open: impl FnOnce() -> F,
     mut on_event: impl FnMut(TriggerEvent<'_>),
-) -> Result<RecordReport> {
+) -> Result<RecordReport>
+where
+    W: Write + Send + 'static,
+    F: std::future::Future<Output = Result<W>>,
+{
     let (session, base) = (fleet.session(), fleet.base());
     if spec.rules.is_empty() {
         return Err(Error::unaskable(
@@ -541,10 +545,10 @@ pub async fn record_on<W: Write + Send + 'static>(
         pre_roll: Some(pre_roll.clone()),
     };
     // Opened only now: a run that never fires leaves nothing behind. The
-    // open itself is the caller's (it names the path); one more drain
-    // happens around it below, so the broadcast is not left unattended for
-    // the length of a `create`.
-    let out = match open() {
+    // open itself is the caller's (it names the path) and async, so a
+    // `create` can go through `tokio::fs` (#332); the broadcast's own
+    // capacity covers its length, and the drain below picks the backlog up.
+    let out = match open().await {
         Ok(out) => out,
         Err(e) => {
             if let Err(teardown) = monitor.shutdown().await {
