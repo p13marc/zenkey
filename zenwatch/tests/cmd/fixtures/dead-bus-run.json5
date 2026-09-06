@@ -1,0 +1,7 @@
+// A runnable config against a bus that is not there: the transport half
+// of the open fork (exit 1), not the config half (exit 2).
+{
+  bus: { zenoh_config: "tests/cmd/fixtures/dead-bus.json5" },
+  rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },
+}

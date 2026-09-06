@@ -4,9 +4,10 @@
 async fn main() -> std::process::ExitCode {
     // rustls needs exactly one process-wide crypto provider, and this tree
     // links only `ring` (zenoh-link-tls; reqwest is built provider-less, see
-    // the workspace manifest). Installed once, here, before any TLS handshake
-    // — a second install is an `Err` and is harmless.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // the workspace manifest). Installed once, here, before any TLS
+    // handshake — the SMTP sink's included, which is why it is not left to
+    // the HTTP client alone.
+    zenwatch::sinks::http::ensure_crypto_provider();
 
     // Behave like a Unix filter under `zenwatch run --dry-run | head`.
     #[cfg(unix)]

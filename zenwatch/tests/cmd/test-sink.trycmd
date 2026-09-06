@@ -1,0 +1,24 @@
+`test-sink` pushes one synthetic notification through one configured sink.
+A name that is not in the config is refused (2) before anything is built;
+a delivery that fails is a 1, the act's own code.
+
+```console
+$ zenwatch test-sink --config tests/cmd/fixtures/valid.json5 pager
+? 2
+Error: sink "pager" is not in tests/cmd/fixtures/valid.json5 (which has: hook, mail, ops, page)
+
+```
+
+The exec sink, against a program that is not there: the probe says so, and
+the delivery fails.
+
+```console
+$ zenwatch test-sink --config tests/cmd/fixtures/valid.json5 page
+? 1
+test-sink page: probe — probe: /usr/local/bin/page-oncall not found
+Error: test-sink page: delivery via exec failed
+
+Caused by:
+    transport: spawn /usr/local/bin/page-oncall: No such file or directory (os error 2)
+
+```

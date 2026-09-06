@@ -8,9 +8,21 @@
 /// `zenwatch/<version>`.
 pub const USER_AGENT: &str = concat!("zenwatch/", env!("CARGO_PKG_VERSION"));
 
+/// Install the one crypto provider this tree links, once.
+///
+/// rustls 0.23 needs exactly one process-wide `CryptoProvider`; this tree
+/// links only `ring` (zenoh-link-tls), and reqwest is built provider-less so
+/// it cannot bring a second one. Idempotent: the second call's `Err` is the
+/// provider already being there. Called by [`client`] and by `main`, so a
+/// test binary that never runs `main` still has its precondition met.
+pub fn ensure_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// The shared client. Building it cannot fail on a default configuration;
 /// if it ever does, a client with no options is still a client.
 pub fn client() -> reqwest::Client {
+    ensure_crypto_provider();
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .build()

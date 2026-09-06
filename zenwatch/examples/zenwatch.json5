@@ -1,0 +1,24 @@
+// zenwatch: one process, one config, N rules, M sinks.
+//
+// Rules are the closed `zenctl watchdog` vocabulary plus `alerts <SEL>` and
+// `liveliness-gone <SEL>`; selectors are full wire form (prefix your base).
+// Secrets are never inline: `{ env: "NAME" }` or `{ file: "/path" }`, and a
+// bare string in a secret position does not parse. `zenwatch check-config`
+// refuses exactly what `run` would.
+{
+  bus: { context: "lab" },            // or base/connect/listen/scouting/timeout_s/zenoh_config/registry
+  tick_s: 5,
+  rules: [
+    { name: "sysinfo-quiet", rule: "silent-for v1/*/telemetry/sysinfo/** 30", severity: "warning", labels: { team: "infra" }, sinks: ["ops"] },
+    { name: "fleet-alerts", rule: "alerts v1/*/state/*/alert/*", sinks: ["ops", "mail"] },
+    { name: "hosts-gone", rule: "liveliness-gone v1/*/state/*/alive", severity: "error", sinks: ["ops", "page"] },
+    { name: "observer-drops", rule: "dropped", severity: "info", sinks: ["hook"] },
+  ],
+  sinks: {
+    ops: { kind: "ntfy", url: "https://ntfy.example.org", topic: "fleet", token: { env: "NTFY_TOKEN" }, priority: { error: 5, warning: 4, info: 2, resolved: 1 }, tags: ["zenoh"] },
+    hook: { kind: "webhook", url: "https://hooks.example.org/zenwatch", method: "POST", headers: { "X-Api-Key": { env: "HOOK_KEY" } }, timeout_s: 10 },
+    page: { kind: "exec", program: "/usr/local/bin/page-oncall", args: ["--source", "zenwatch"], timeout_s: 30 },
+    mail: { kind: "smtp", host: "smtp.example.org", port: 587, tls: "starttls", username: "zenwatch", password: { file: "/run/secrets/smtp-password" }, from: "zenwatch@example.org", to: ["oncall@example.org"], subject_prefix: "[zenwatch]" },
+  },
+  render: { max_message_bytes: 2048, max_structural_bytes: 512 },
+}

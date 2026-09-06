@@ -96,10 +96,8 @@ pub fn parse_rule(text: &str) -> Result<RuleKind, RuleError> {
             .map(|_| sel.to_string())
             .map_err(|e| {
                 // zenoh's message ends in the build machine's source path
-                // (`… at /home/…/borrowed.rs:777.`); the reason is the part
-                // before it.
-                let reason = e.to_string();
-                let reason = reason.split(" at /").next().unwrap_or(&reason).to_string();
+                // (`… at /home/…/borrowed.rs:777.`, #240).
+                let reason = crate::exit::without_source_locations(&e.to_string());
                 RuleError(format!("{head} {sel:?}: not a key expression: {reason}"))
             })
     };

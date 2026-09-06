@@ -60,11 +60,49 @@ pub fn code_for(err: &anyhow::Error) -> i32 {
     if refused { REFUSED } else { FAILED }
 }
 
+/// Strip zenoh's trailing ` at <path>.rs:<line>.` source locations — the
+/// same trim `zenctl/src/errors.rs` applies (#240): the path is one inside
+/// the **cargo registry of the machine that built the binary**, and passed
+/// through it is the longest part of an error that exists on nobody's
+/// computer. Conservative: only a slash-bearing `.rs` path with a line
+/// number is a source location.
+pub fn without_source_locations(text: &str) -> String {
+    text.lines().map(trim_line).collect::<Vec<_>>().join("\n")
+}
+
+fn trim_line(line: &str) -> String {
+    let mut out = line;
+    while let Some(i) = out.rfind(" at ") {
+        if is_source_location(&out[i + 4..]) {
+            out = out[..i].trim_end();
+        } else {
+            break;
+        }
+    }
+    out.to_string()
+}
+
+fn is_source_location(tail: &str) -> bool {
+    let tail = tail.strip_suffix('.').unwrap_or(tail);
+    let Some((path, line)) = tail.rsplit_once(':') else {
+        return false;
+    };
+    path.contains('/')
+        && path.ends_with(".rs")
+        && !line.is_empty()
+        && line.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// Render an error chain the way zenctl does: `Error: …`, then each cause
-/// under `Caused by:` — one shape for every exit path.
+/// under `Caused by:` — one shape for every exit path, every source
+/// location trimmed.
 pub fn render(err: &anyhow::Error) -> String {
-    let mut out = format!("Error: {err}");
-    let causes: Vec<String> = err.chain().skip(1).map(|c| c.to_string()).collect();
+    let mut out = format!("Error: {}", without_source_locations(&err.to_string()));
+    let causes: Vec<String> = err
+        .chain()
+        .skip(1)
+        .map(|c| without_source_locations(&c.to_string()))
+        .collect();
     match causes.len() {
         0 => {}
         1 => out.push_str(&format!("\n\nCaused by:\n    {}", causes[0])),
@@ -100,5 +138,18 @@ mod tests {
     fn the_rendering_is_the_explorers_shape() {
         let e = anyhow::anyhow!("inner").context("outer");
         assert_eq!(render(&e), "Error: outer\n\nCaused by:\n    inner");
+        // The build machine's registry path goes; a sentence ending in
+        // "at" and a user's own file stay (#240).
+        assert_eq!(
+            without_source_locations(
+                "Unable to connect!  at /srv/dev/cargo/registry/src/x/zenoh-1.10.0/src/net/runtime/orchestrator.rs:442."
+            ),
+            "Unable to connect!"
+        );
+        assert_eq!(without_source_locations("look at"), "look at");
+        assert_eq!(
+            without_source_locations("read at /etc/zenoh.json5"),
+            "read at /etc/zenoh.json5"
+        );
     }
 }

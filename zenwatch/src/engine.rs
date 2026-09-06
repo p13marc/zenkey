@@ -321,6 +321,10 @@ pub struct Engine<'a> {
     pub render: &'a RenderConfig,
     /// One tick, then stop.
     pub once: bool,
+    /// Fired once the monitor is subscribed — the test seam that lets a
+    /// bus test publish *after* the observer is watching (O4: a sample the
+    /// observer was not yet declared for is not a sample it missed).
+    pub ready: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// Delivery counters shared with the spawned deliveries.
@@ -467,6 +471,43 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     .await?;
     let mut events = monitor.events();
 
+    let mut alerts: Ledger<(AlertState, Option<String>)> = Ledger::new(LEDGER_CAP);
+    let mut tokens: Ledger<bool> = Ledger::new(LEDGER_CAP);
+    // The roster baseline, by an explicit ask (RFC 05 §4: the seed is the
+    // state itself). The monitor's history replay also delivers every token
+    // already up — but it can land on the broadcast before this receiver
+    // subscribed and be lost, and a token whose baseline was lost would
+    // report its retirement with no prior. A token the ask and the replay
+    // both name is set to the same value twice; a token neither names is
+    // the baseline the first time it is seen. If the ask fails, that is
+    // logged, not a verdict: nothing here says the roster is empty.
+    for selector in &e
+        .rules
+        .iter()
+        .filter_map(|r| match &r.kind {
+            RuleKind::LivelinessGone { selector } => Some(selector.clone()),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        match session.liveliness().get(selector).timeout(e.timeout).await {
+            Ok(replies) => {
+                while let Ok(reply) = replies.recv_async().await {
+                    if let Ok(sample) = reply.result() {
+                        tokens.set(sample.key_expr().as_str().to_string(), true);
+                    }
+                }
+            }
+            Err(err) => tracing::warn!(
+                selector,
+                "roster ask failed ({err}); tokens seen later are the baseline"
+            ),
+        }
+    }
+    if let Some(ready) = e.ready {
+        let _ = ready.send(());
+    }
+
     let mut sweep = tokio::time::interval(e.tick);
     sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     sweep.tick().await; // the first tick is immediate, and the prewarm was
@@ -475,8 +516,6 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     tokio::pin!(once_deadline);
     let mut stop = std::pin::pin!(stop);
 
-    let mut alerts: Ledger<(AlertState, Option<String>)> = Ledger::new(LEDGER_CAP);
-    let mut tokens: Ledger<bool> = Ledger::new(LEDGER_CAP);
     let counters = Arc::new(Counters::default());
     let mut tasks = tokio::task::JoinSet::new();
     let mut seq = 0u64;
@@ -655,6 +694,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             sinks,
             render: &cfg.render,
             once: args.once,
+            ready: None,
         },
         stop_signal(),
     )
