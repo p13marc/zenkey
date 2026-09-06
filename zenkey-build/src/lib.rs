@@ -59,7 +59,7 @@ use zenkey::grammar::{is_valid_plain_chunk, is_valid_verbatim_chunk};
 // One implementation of the registry pattern grammar (#320): the codegen
 // names `zenkey`'s types rather than keeping a second copy of the rules.
 use zenkey::pattern::{PatternChunk as Chunk, PatternError, SubjectPattern};
-use zenkey::{Fanout, SliceToken};
+use zenkey::{Fanout, SliceToken, SubjectKind};
 
 /// A codegen failure. Lint variants carry the registry file they were found
 /// in — surface them with `unwrap()` in the build script so the message
@@ -230,6 +230,9 @@ pub(crate) struct SubjectEntry {
     pub class: String,
     pub payload_type: String,
     pub unit: Option<String>,
+    /// `kind = "counter|gauge|text|bool"` — what the leaf value *is*
+    /// (RFC 08 §2, v1.32); the canonical token, already linted.
+    pub kind: Option<String>,
     pub cardinality: Option<u64>,
     pub qos: String,
     pub ttl_s: Option<u64>,
@@ -690,12 +693,17 @@ impl Config {
             }
         }
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
-        let old: std::collections::BTreeSet<&str> = existing
+        // Counted by pin (kind, producer, path), not by whole line: a line
+        // that only gained its `kind` column (v1.32) is neither added nor
+        // retired.
+        let pin = |l: &str| -> String { l.splitn(4, '\t').take(3).collect::<Vec<_>>().join("\t") };
+        let old: std::collections::BTreeSet<String> = existing
             .lines()
             .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .map(pin)
             .collect();
         let new_lines = compat_lock_lines(&files);
-        let new: std::collections::BTreeSet<&str> = new_lines.iter().map(String::as_str).collect();
+        let new: std::collections::BTreeSet<String> = new_lines.iter().map(|l| pin(l)).collect();
         let added = new.difference(&old).count();
         let retired = old.difference(&new).count();
         std::fs::write(&path, compat_lock_content(&files))
@@ -940,6 +948,28 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 .get("unit")
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
+            // RFC 08 §2 (v1.32): `kind` is a closed vocabulary — the token a
+            // judge compares the wire against, so a typo here is a lint,
+            // never a silent "unchecked".
+            let kind = match entry.get("kind").and_then(|v| v.as_str()) {
+                None => None,
+                Some(k) => match <SubjectKind as SliceToken>::from_token(k) {
+                    Some(known) => Some(known.token().to_string()),
+                    None => {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "{spath:?}: unknown kind {k:?} — one of {} (RFC 08 §2)",
+                                SubjectKind::ALL
+                                    .iter()
+                                    .map(|k| format!("`{}`", k.token()))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        ));
+                    }
+                },
+            };
             let cardinality = opt_count(&fname, entry, spath, "cardinality")?;
             let has_var = chunks.iter().any(|c| !matches!(c, Chunk::Literal(_)));
             if has_var && cardinality.is_none() {
@@ -1098,6 +1128,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 class: class.to_string(),
                 payload_type,
                 unit,
+                kind,
                 cardinality,
                 qos,
                 ttl_s,
@@ -1705,10 +1736,18 @@ fn compat_lock_lines(files: &[RegistryFile]) -> Vec<String> {
     let mut lines = Vec::new();
     for f in files.iter().filter(|f| f.compat == Compat::Backward) {
         for s in &f.subjects {
-            lines.push(format!(
+            // `kind` (RFC 08 §2, v1.32) rides as an optional sixth column:
+            // absent stays absent, so a registry that never declares one
+            // produces the lock it always did.
+            let mut line = format!(
                 "subject\t{}\t{}\t{}\t{}",
                 f.name, s.path, s.class, s.payload_type
-            ));
+            );
+            if let Some(k) = &s.kind {
+                line.push('\t');
+                line.push_str(k);
+            }
+            lines.push(line);
         }
         for p in &f.procedures {
             lines.push(format!(
@@ -1732,13 +1771,60 @@ fn compat_lock_content(files: &[RegistryFile]) -> String {
          # Regenerate with `zenctl registry lock <dir>` after additive edits;\n\
          # an incompatible edit (changed type/class/kind/shape on an existing\n\
          # path) is refused — retire through [[deprecated]] and add a sibling\n\
-         # instead (RFC 08 §3).\n",
+         # instead (RFC 08 §3). A subject line's optional sixth column is its\n\
+         # declared `kind` (RFC 08 §2, v1.32): adding one is additive,\n\
+         # changing or removing one is incompatible.\n",
     );
     for l in compat_lock_lines(files) {
         out.push_str(&l);
         out.push('\n');
     }
     out
+}
+
+/// How a pinned line differs from the line the registry would write now,
+/// once they are known to differ (RFC 08 §3.1).
+#[derive(Debug, PartialEq, Eq)]
+enum LockDrift {
+    /// One of the shape columns moved — class, type, a procedure's kind or
+    /// request/reply shape. Always incompatible.
+    Shape,
+    /// The pin had no `kind` and the registry now declares one (v1.32):
+    /// additive, so merely stale.
+    KindAdded,
+    /// The pin had a `kind` and it changed or vanished (v1.32): incompatible,
+    /// naming the column. `to` reads `-` for a removal.
+    KindChanged { from: String, to: String },
+}
+
+/// The lock line's shape columns and, for a subject, its optional trailing
+/// `kind` (RFC 08 §2, v1.32). A procedure line is all shape: its `kind` is
+/// the read/write idiom, in a fixed column.
+fn lock_line_columns(line: &str) -> (Vec<&str>, Option<&str>) {
+    let cols: Vec<&str> = line.split('\t').collect();
+    if cols.first() == Some(&"subject") && cols.len() > 5 {
+        (cols[..5].to_vec(), Some(cols[5]))
+    } else {
+        (cols, None)
+    }
+}
+
+fn lock_line_drift(pinned: &str, now: &str) -> LockDrift {
+    let (old_shape, old_kind) = lock_line_columns(pinned);
+    let (new_shape, new_kind) = lock_line_columns(now);
+    if old_shape != new_shape {
+        return LockDrift::Shape;
+    }
+    match (old_kind, new_kind) {
+        (None, Some(_)) => LockDrift::KindAdded,
+        (Some(from), to) => LockDrift::KindChanged {
+            from: from.to_string(),
+            to: to.unwrap_or("-").to_string(),
+        },
+        // Equal shape, no kind on either side, yet the lines differ — a
+        // trailing column this build does not know. Refuse to guess.
+        (None, None) => LockDrift::Shape,
+    }
 }
 
 /// Check the compatibility lock (RFC 08 §3.1): every pinned entry must still
@@ -1782,19 +1868,40 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
     for (key, line) in &old {
         match desired.get(key) {
             Some(new_line) if new_line == line => {}
-            Some(new_line) => {
-                // Same path, different shape — the exact edit §3 forbids.
-                return Err(lint_kind(
-                    fname,
-                    format!(
-                        "incompatible registry edit (RFC 08 §3.1, compat = \"backward\"):\n  \
-                         pinned:  {line}\n  now:     {new_line}\n\
-                         an existing path never changes shape — retire it through \
-                         [[deprecated]] and add a sibling (`sockets` → `sockets2`, RFC 08 §3)"
-                    ),
-                    LintKind::Incompatible,
-                ));
-            }
+            Some(new_line) => match lock_line_drift(line, new_line) {
+                LockDrift::Shape => {
+                    // Same path, different shape — the exact edit §3 forbids.
+                    return Err(lint_kind(
+                        fname,
+                        format!(
+                            "incompatible registry edit (RFC 08 §3.1, compat = \"backward\"):\n  \
+                             pinned:  {line}\n  now:     {new_line}\n\
+                             an existing path never changes shape — retire it through \
+                             [[deprecated]] and add a sibling (`sockets` → `sockets2`, RFC 08 §3)"
+                        ),
+                        LintKind::Incompatible,
+                    ));
+                }
+                LockDrift::KindAdded => {
+                    // Additive metadata (RFC 08 §3.1, v1.32): the snapshot
+                    // has to follow, nothing else changed.
+                    stale.push(line.clone());
+                }
+                LockDrift::KindChanged { from, to } => {
+                    return Err(lint_kind(
+                        fname,
+                        format!(
+                            "incompatible registry edit (RFC 08 §3.1, compat = \"backward\"):\n  \
+                             pinned:  {line}\n  now:     {new_line}\n\
+                             the `kind` column changed ({from} → {to}) — a consumer that \
+                             learned to rate() a counter is wrong the moment the same path \
+                             is a gauge; retire it through [[deprecated]] and add a sibling \
+                             (RFC 08 §2, §3)"
+                        ),
+                        LintKind::Incompatible,
+                    ));
+                }
+            },
             None => {
                 let (kind, producer, path) = key;
                 // Both kinds retire (RFC 08 §3, v1.26): this used to read
@@ -1842,9 +1949,9 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
         return Err(lint_kind(
             fname,
             format!(
-                "stale lock: {} unpinned entr(y/ies), {} retired line(s) lingering — \
-                 additive evolution is free but the snapshot must follow; run \
-                 `zenctl registry lock <dir>` (RFC 08 §3.1){}{}",
+                "stale lock: {} unpinned entr(y/ies), {} retired or metadata-only \
+                 line(s) lingering — additive evolution is free but the snapshot must \
+                 follow; run `zenctl registry lock <dir>` (RFC 08 §3.1){}{}",
                 missing.len(),
                 stale.len(),
                 if sample.is_empty() { "" } else { "\n  " },
@@ -2725,6 +2832,150 @@ mod tests {
             .write_compat_lock(OnIncompatible::ForceAndReport)
             .unwrap();
         assert!(!update.forced.is_empty(), "a forced break is never silent");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC 08 §3.1 (v1.32): `kind` is an optional trailing column of a
+    /// subject line. Declaring one on a pinned path is additive — stale,
+    /// regenerate — and the regeneration counts it as neither added nor
+    /// retired.
+    #[test]
+    fn adding_kind_to_a_pinned_subject_is_stale_not_incompatible() {
+        let dir = lock_dir("kind-added");
+        let counter = "[[subject]]\npath = \"rx/bytes_total\"\nclass = \"telemetry\"\ntype = \"TelemetryPoint\"\nunit = \"bytes\"\nsince = \"1.0\"\ndescription = \"d\"\n";
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{counter}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+        let pinned = std::fs::read_to_string(dir.join("registry.lock")).unwrap();
+        assert!(
+            pinned.contains("subject\tt\trx/bytes_total\ttelemetry\tTelemetryPoint\n"),
+            "a subject without a kind pins the five-column line it always did:\n{pinned}"
+        );
+
+        std::fs::write(
+            dir.join("t.toml"),
+            base.replace("unit = \"bytes\"", "unit = \"bytes\"\nkind = \"counter\""),
+        )
+        .unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::Lint {
+                    kind: LintKind::Stale,
+                    ..
+                }
+            ),
+            "adding a kind is stale, never incompatible: {err}"
+        );
+        assert!(err.to_string().contains("zenctl registry lock"), "{err}");
+        let update = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+        assert_eq!(
+            (update.added, update.retired),
+            (0, 0),
+            "the pin is the same pin"
+        );
+        assert!(update.forced.is_empty());
+        let pinned = std::fs::read_to_string(dir.join("registry.lock")).unwrap();
+        assert!(
+            pinned.contains("subject\tt\trx/bytes_total\ttelemetry\tTelemetryPoint\tcounter\n"),
+            "{pinned}"
+        );
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .is_ok()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC 08 §3.1 (v1.32): a pinned `kind` never changes in place, and
+    /// never disappears — a consumer that learned to `rate()` a counter is
+    /// wrong the moment the same path is a gauge. Both fail as incompatible,
+    /// naming the column.
+    #[test]
+    fn changing_or_removing_a_pinned_kind_is_incompatible() {
+        let dir = lock_dir("kind-changed");
+        let counter = "[[subject]]\npath = \"rx/bytes_total\"\nclass = \"telemetry\"\ntype = \"TelemetryPoint\"\nunit = \"bytes\"\nkind = \"counter\"\nsince = \"1.0\"\ndescription = \"d\"\n";
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{counter}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+
+        for (edit, expect) in [("kind = \"gauge\"", "counter → gauge"), ("", "counter → -")] {
+            std::fs::write(dir.join("t.toml"), base.replace("kind = \"counter\"", edit)).unwrap();
+            let err = Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::Lint {
+                        kind: LintKind::Incompatible,
+                        ..
+                    }
+                ),
+                "{edit:?}: {err}"
+            );
+            let msg = err.to_string();
+            assert!(msg.contains("`kind` column changed"), "{msg}");
+            assert!(msg.contains(expect), "{msg}");
+            assert!(msg.contains("RFC 08 §3.1"), "{msg}");
+            // The regeneration tool refuses the same edit without force…
+            let err = Config::new()
+                .registry_dir(&dir)
+                .write_compat_lock(OnIncompatible::Refuse)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("`kind` column changed"), "{err}");
+        }
+        // …and forced, it reports the break.
+        let update = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::ForceAndReport)
+            .unwrap();
+        assert!(!update.forced.is_empty(), "a forced break is never silent");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The `kind` vocabulary is closed (RFC 08 §2): a token outside it is a
+    /// lint naming the four, not an unchecked subject.
+    #[test]
+    fn an_unknown_kind_token_is_a_lint() {
+        let dir = lock_dir("kind-unknown");
+        let bad = "[[subject]]\npath = \"rx/bytes_total\"\nclass = \"telemetry\"\ntype = \"TelemetryPoint\"\nkind = \"histogram\"\nsince = \"1.0\"\ndescription = \"d\"\n";
+        std::fs::write(
+            dir.join("t.toml"),
+            format!("{HEADER}[producer]\nname = \"t\"\n\n{bad}"),
+        )
+        .unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown kind \"histogram\""), "{err}");
+        for token in ["`counter`", "`gauge`", "`text`", "`bool`"] {
+            assert!(err.contains(token), "{err}");
+        }
+        assert!(err.contains("RFC 08 §2"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

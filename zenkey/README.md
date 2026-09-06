@@ -16,7 +16,7 @@ v1/<origin>/<class>/<producer>/<subject...>        (base-relative; the base
 | `grammar` | RFC 03 — chunk charset, reserved tokens, structural assembly/parse, wire-key helpers | validation + typed builders: an invalid key does not construct |
 | `origin` | RFC 06 §1 — `h-<12hex>` minting, fallbacks | pinned to the RFC test vector |
 | `profile` | RFC 06 §1 / RFC 11 §4 — the app name + origin salt an adopter declares | `AppProfile`, one static per application |
-| `slug` | RFC 03 §2 — RFC-5952 IP canon, lossless `_xNN_` escape | pure functions, injectivity-tested |
+| `slug` | RFC 03 §2 — RFC-5952 IP canon, lossless `x-`-prefixed `_xHH` escape and its decoder | pure functions, injectivity- and round-trip-tested |
 | `qos` | RFC 04 §3 — the five named profiles | closed enum → zenoh QoS triple (behind the default `zenoh` feature) |
 | `context` | RFC 03/04/05/07 framework keys | `V1Context` — origin + producer, every framework key built through it |
 | `slice` | RFC 08 §6 — `RegistrySlice`, the `introspect` reply type + the diff | parse a served slice, diff it against ours; a disagreement is a *finding* |

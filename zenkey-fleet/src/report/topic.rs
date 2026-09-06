@@ -132,6 +132,10 @@ pub struct TopicInfo {
     pub payload_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+    /// The declared `kind` token (RFC 08 §2, v1.32), when the registry
+    /// declares one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qos: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -184,6 +188,7 @@ impl TopicInfo {
             variables: BTreeMap::new(),
             payload_type: None,
             unit: None,
+            kind: None,
             qos: None,
             ttl_s: None,
             rate: None,
@@ -220,6 +225,7 @@ impl TopicInfo {
                 info.variables = s.vars.iter().cloned().collect();
                 info.payload_type = Some(s.type_name.clone());
                 info.unit = s.unit.clone();
+                info.kind = s.kind.as_ref().map(|k| k.token().to_string());
                 info.qos = s.qos.as_ref().map(|q| q.token().to_string());
                 info.encoding = s.encoding.as_ref().map(|e| e.as_encoding_str().to_string());
                 info.ttl_s = s.ttl_s;

@@ -19,7 +19,7 @@ use std::ops::Deref;
 use zenoh_keyexpr::{OwnedKeyExpr, keyexpr};
 
 use crate::grammar::KeyError;
-use crate::slug::chunk_slug;
+use crate::slug::{chunk_slug, chunk_unslug};
 
 /// A validated, canonical, **concrete**, base-relative v1 key.
 ///
@@ -203,12 +203,21 @@ pub struct Chunk(String);
 
 impl Chunk {
     /// Slug an arbitrary foreign value into a legal chunk (RFC 03 §2's
-    /// injective `_xNN_` escape; case-sensitive domains survive, G4).
+    /// injective `x-` escape, v1.31; case-sensitive domains survive, G4).
     /// Always succeeds — this is the API boundary where application values
-    /// become grammar-legal.
+    /// become grammar-legal. [`Chunk::unslug`] is the inverse.
     #[must_use]
     pub fn slug(value: impl AsRef<str>) -> Chunk {
         Chunk(chunk_slug(value.as_ref()))
+    }
+
+    /// Decode this chunk back to the foreign value [`Chunk::slug`] was
+    /// given (RFC 03 §2). `None` when the chunk is not in the slug's image
+    /// — a spelling `slug` could not have produced; see
+    /// [`chunk_unslug`] for the rule.
+    #[must_use]
+    pub fn unslug(&self) -> Option<String> {
+        chunk_unslug(&self.0)
     }
 
     /// Accept a value that must already be a legal chunk (no slugging).
@@ -347,8 +356,20 @@ mod tests {
         assert!(Chunk::parse("").is_err());
     }
 
+    /// `Chunk::unslug` is the decoder beside the encoder (RFC 03 §2): a
+    /// slugged chunk gives the value back, and a parsed chunk that the
+    /// slug could not have produced is refused.
+    #[test]
+    fn chunk_unslug_inverts_slug() {
+        for v in ["p95_ms", "Röuter 1/ETH0", "x-foo", "", "foo@1.service"] {
+            assert_eq!(Chunk::slug(v).unslug().as_deref(), Some(v), "{v:?}");
+        }
+        // Passthrough-legal, so the slug of `abc` is `abc`, not this.
+        assert_eq!(Chunk::parse("x-abc").unwrap().unslug(), None);
+    }
+
     /// The `h-<12hex>` shape is a legal plain chunk, so the conversion is
-    /// total and lossless — never the slug's `_xNN_` escape.
+    /// total and lossless — never the slug's `x-…_xHH` escape.
     #[test]
     fn a_host_id_converts_to_a_chunk_verbatim() {
         let id = HostId::parse("h-3fa9c2d41b7e").unwrap();

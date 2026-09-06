@@ -16,6 +16,40 @@ Versions per crate, because they move independently:
 
 ---
 
+## Unreleased
+
+### `zenkey` — breaking
+
+* **The slug is injective** (#418, RFC 03 §2 v1.31). It was not, twice
+  over: the v1.4 escape produced chunks that were themselves legal values,
+  so the literal `x_x5f_myns` and the escaped `_myns` shared a key (tcgui#39,
+  found slugging Linux device names, where both are legal), and its leading
+  marker `x` was also a byte a value could start with, so `x@b` and `@b`
+  collapsed to `x_x40_b`. The v1.31 rule reserves **one prefix on both sides
+  of the boundary**: a value passes through only when it is charset-legal
+  *and* does not start with `x-`; everything else is `x-` plus a body in
+  which every byte outside `[a-z0-9]` is `_xHH` (no closing underscore),
+  `.` and `-` staying literal except as the last byte, and the empty value
+  is `x-_x`. `chunk_unslug` / `Chunk::unslug` is the decoder, shipped beside
+  the encoder with a round-trip test as the RFC now requires; it is the left
+  inverse on the slug's image and refuses everything else.
+
+  **This re-keys every value that was ever escaped**, and every legal value
+  that starts with `x-`. Clean values, IP slugs and ULID slugs are
+  byte-identical. The 0.6 → 0.7 move from the `e` sentinel to the `x`
+  marker never had a changelog line; this table is the record of all three,
+  and `slug_outputs_are_pinned` fails the build the next time a row moves.
+
+  | value | 0.6 | 0.7 | 0.8 |
+  |---|---|---|---|
+  | `ETH0` | `e_x45__x54__x48_0` | `x_x45__x54__x48_0` | `x-_x45_x54_x480` |
+  | `_myns` | `e_myns` | `x_x5f_myns` | `x-_x5fmyns` |
+  | `*` | `e_x2a_e` | `x_x2a_x` | `x-_x2a` |
+  | `foo@1.service` | `foo_x40_1.service` | `foo_x40_1.service` | `x-foo_x401.service` |
+  | `x-foo` | `x-foo` | `x-foo` | `x-x-foo` |
+
+---
+
 ## 0.7.2 — a tombstone is not a value (2026-08-30)
 
 One fix, one crate: `zenkey-fleet` 0.11.1. Nothing else is republished.

@@ -96,6 +96,7 @@ fn the_five_registration_states_render_five_distinct_glyph_word_pairs() {
             type_name: "TelemetryPoint".into(),
             vars: vec![],
             unit: None,
+            kind: None,
             qos: None,
             encoding: None,
             ttl_s: None,

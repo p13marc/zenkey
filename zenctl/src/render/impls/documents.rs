@@ -70,6 +70,7 @@ impl Render for TopicInfo {
         }
         for (k, v) in [
             ("unit", &self.unit),
+            ("kind", &self.kind),
             ("qos", &self.qos),
             ("rate", &self.rate),
             ("encoding", &self.encoding),

@@ -22,7 +22,7 @@ use crate::model::bounded::BoundedLru;
 use crate::model::registry::SliceSet;
 use zenkey::grammar::{self, BlobTier, Class, ClassOrPlane, Origin, Plane, StructuralKey};
 use zenkey::qos::QosProfile;
-use zenkey::{Declared, RateClass, WireEncoding};
+use zenkey::{Declared, RateClass, SubjectKind, WireEncoding};
 
 /// Everything zengui knows about one wire key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +123,10 @@ pub struct SubjectFacts {
     /// Variable bindings from the match, e.g. `[("mount", "var-log")]`.
     pub vars: Vec<(String, String)>,
     pub unit: Option<String>,
+    /// What the leaf value *is* (`counter | gauge | text | bool`, RFC 08 §2
+    /// v1.32), when declared — what the `kind-mismatch` judge compares the
+    /// wire against (RFC 13 §3). Absent is *not asked*.
+    pub kind: Option<Declared<SubjectKind>>,
     pub qos: Option<Declared<QosProfile>>,
     pub encoding: Option<WireEncoding>,
     pub ttl_s: Option<i64>,
@@ -229,6 +233,7 @@ impl KeyFacts {
                 type_name: decl.type_name.clone(),
                 vars,
                 unit: decl.unit.clone(),
+                kind: decl.kind.clone(),
                 qos: decl.qos.clone(),
                 encoding: decl.encoding.clone(),
                 ttl_s: decl.ttl_s,
@@ -686,6 +691,7 @@ mod tests {
             type_name: "Point".into(),
             vars: vec![],
             unit: None,
+            kind: None,
             qos: qos.map(Declared::parse),
             encoding: None,
             ttl_s: None,

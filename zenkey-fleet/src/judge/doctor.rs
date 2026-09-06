@@ -465,7 +465,7 @@ async fn observe_traffic(
     described: &[(String, zenkey::schema::SchemaSet)],
     window: Duration,
 ) -> Result<(Vec<DoctorFinding>, crate::report::ObservationSummary)> {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     let (session, base) = (fleet.session(), fleet.base());
 
@@ -475,7 +475,35 @@ async fn observe_traffic(
     // `topic list --budget` observation (#221).
     let scopes = crate::judge::common::data_plane_scopes(base, slices);
 
-    let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+    // The liveliness planes ride too (#422): a `counter` may reset across
+    // its producer's restart, and RFC 08 §2 makes the `alive` token cycling
+    // the one sanctioned reset — so the window has to see the cycle to
+    // excuse the drop. Two selectors, never one: `*` cannot reach a verbatim
+    // service origin (RFC 03 §4 D4), so `@catalog` and every service origin
+    // the slices declare are named. Zero payload by construction (RFC 04 §5).
+    let mut liveliness = vec![
+        fleet.wire(zenkey::selector::all_liveliness(
+            zenkey::selector::Scope::fleet(),
+        )),
+        fleet.wire(zenkey::selector::service_alive(
+            &zenkey::ServiceOrigin::catalog(),
+        )),
+    ];
+    for slice in slices.slices() {
+        if let Some(origin) = slice.service_origin.as_ref().and_then(|o| o.known())
+            && *origin != zenkey::ServiceOrigin::catalog()
+        {
+            liveliness.push(fleet.wire(zenkey::selector::service_alive(origin)));
+        }
+    }
+    let monitor = crate::Monitor::start(
+        session,
+        crate::MonitorSpec {
+            liveliness,
+            ..Default::default()
+        },
+    )
+    .await?;
     let mut events = monitor.events();
     // A scope that fails to declare tears the monitor down on the way out,
     // rather than leaving a `**` subscriber to `Drop` (#336).
@@ -505,6 +533,12 @@ async fn observe_traffic(
     let mut event_counts: BTreeMap<(String, String), RateWindow> = BTreeMap::new();
     // Stamping nodes that are not the publisher (#213): zid → samples.
     let mut foreign_stampers: BTreeMap<String, u64> = BTreeMap::new();
+    // Declared versus observed `kind` (#422): per key, with the producers
+    // whose `alive` token is currently down — a `NodeUp` that follows one
+    // is a cycle; a lone `NodeUp` (history replaying the tokens that are
+    // simply alive at window start) is not.
+    let mut kinds = crate::judge::kind::KindObservation::new();
+    let mut alive_down: BTreeSet<(String, String)> = BTreeSet::new();
 
     // One timer for the whole window, not one per iteration (#346).
     // `sleep_until` builds a future and registers a timer each time it
@@ -546,11 +580,15 @@ async fn observe_traffic(
                 // bounded, and the skip is counted rather than read as an
                 // absent document.
                 let bytes = s.payload.to_bytes();
+                // The structural document, read once for the field ladder
+                // and the kind judge alike; `None` for an oversized or
+                // undecodable body, which each of them counts as unread.
+                let mut doc = None;
                 if is_put {
                     if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
                         fields.observe_unread(&s.key);
                     } else {
-                        let doc = crate::model::decode::structural_value(&bytes);
+                        doc = crate::model::decode::structural_value(&bytes);
                         fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
                     }
                 }
@@ -590,6 +628,22 @@ async fn observe_traffic(
                                     seen: 0,
                                 })
                                 .seen += 1;
+                        }
+                        // Declared `kind` (#422, RFC 08 §2): judged only where
+                        // the entry declares one this build knows — absent
+                        // or foreign is not asked (RFC 13 §3).
+                        if let (Some(declared), crate::model::facts::KeyShape::V1(v)) =
+                            (sf.kind.as_ref().and_then(|k| k.known()), &facts.shape)
+                            && is_put
+                        {
+                            // The producer half of the identity spelled the
+                            // way `token_identity` reads a liveliness token,
+                            // so a cycle lands on the keys it restarted.
+                            let producer = v
+                                .producer
+                                .clone()
+                                .unwrap_or_else(|| v.origin.trim_start_matches('@').to_string());
+                            kinds.observe(&s.key, &v.origin, &producer, *declared, doc.as_ref());
                         }
                         let budget = decode_budget.entry(s.key.clone()).or_default();
                         if is_put && *budget < DECODE_BUDGET {
@@ -637,6 +691,21 @@ async fn observe_traffic(
                 }
             }
             Some(crate::StreamItem::Dropped(n)) => dropped += n,
+            Some(crate::StreamItem::Event(crate::FleetEvent::NodeDown(key))) => {
+                if let Some(id) = crate::bus::roster::token_identity(base, &key) {
+                    alive_down.insert(id);
+                }
+            }
+            Some(crate::StreamItem::Event(crate::FleetEvent::NodeUp(key))) => {
+                // A cycle is down *then* up. History replays the tokens
+                // alive at window start as bare `NodeUp`s; those excuse
+                // nothing.
+                if let Some((origin, producer)) = crate::bus::roster::token_identity(base, &key)
+                    && alive_down.remove(&(origin.clone(), producer.clone()))
+                {
+                    kinds.alive_cycled(&origin, &producer);
+                }
+            }
             Some(_) => continue,
             None => break,
         }
@@ -748,6 +817,7 @@ async fn observe_traffic(
     }
 
     findings.extend(judge_cardinality(slices, &budgets, window_s));
+    findings.extend(crate::judge::kind::judge_kind(&kinds, window_s));
 
     // Field intelligence (#223): the three field-granular checks, judged
     // with what is known per key — declared `ttl_s`/type from the resolved

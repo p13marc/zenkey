@@ -2,7 +2,9 @@
 # Regenerate with `zenctl registry lock <dir>` after additive edits;
 # an incompatible edit (changed type/class/kind/shape on an existing
 # path) is refused — retire through [[deprecated]] and add a sibling
-# instead (RFC 08 §3).
+# instead (RFC 08 §3). A subject line's optional sixth column is its
+# declared `kind` (RFC 08 §2, v1.32): adding one is additive,
+# changing or removing one is incompatible.
 procedure	catalog	introspect	read	-	RegistrySlice
 procedure	catalog	link	write	-	OperatorAssertion
 procedure	catalog	names	read	-	Vec<NameVal>
@@ -313,12 +315,12 @@ subject	netring	errors	state	ErrorReport
 subject	netring	evidence/device/{device}	state	HostEvidence
 subject	netring	evidence/names/{ip_slug}	state	NameObservation
 subject	netring	evidence/self	state	HostEvidence
-subject	netring	flow/active	telemetry	TelemetryPoint
+subject	netring	flow/active	telemetry	TelemetryPoint	gauge
 subject	netring	flow/by_l4/{proto}/bytes_total	telemetry	TelemetryPoint
 subject	netring	flow/by_l4/{proto}/flows_total	telemetry	TelemetryPoint
-subject	netring	flow/bytes_total	telemetry	TelemetryPoint
+subject	netring	flow/bytes_total	telemetry	TelemetryPoint	counter
 subject	netring	flow/ended_total	telemetry	TelemetryPoint
-subject	netring	flow/packets_total	telemetry	TelemetryPoint
+subject	netring	flow/packets_total	telemetry	TelemetryPoint	counter
 subject	netring	flow/red/{quantile}	telemetry	TelemetryPoint
 subject	netring	flow/retransmits_total	telemetry	TelemetryPoint
 subject	netring	flow/started_total	telemetry	TelemetryPoint
@@ -415,7 +417,7 @@ subject	sysinfo	memory/cached	telemetry	TelemetryPoint
 subject	sysinfo	memory/dirty	telemetry	TelemetryPoint
 subject	sysinfo	memory/edac/{controller}/correctable_total	telemetry	TelemetryPoint
 subject	sysinfo	memory/edac/{controller}/uncorrectable_total	telemetry	TelemetryPoint
-subject	sysinfo	memory/oom_kills_total	telemetry	TelemetryPoint
+subject	sysinfo	memory/oom_kills_total	telemetry	TelemetryPoint	counter
 subject	sysinfo	memory/page_faults_major_total	telemetry	TelemetryPoint
 subject	sysinfo	memory/page_faults_total	telemetry	TelemetryPoint
 subject	sysinfo	memory/paging_in_total	telemetry	TelemetryPoint
@@ -428,7 +430,7 @@ subject	sysinfo	memory/swap_total	telemetry	TelemetryPoint
 subject	sysinfo	memory/swap_used	telemetry	TelemetryPoint
 subject	sysinfo	memory/total	telemetry	TelemetryPoint
 subject	sysinfo	memory/usage_percent	telemetry	TelemetryPoint
-subject	sysinfo	memory/used	telemetry	TelemetryPoint
+subject	sysinfo	memory/used	telemetry	TelemetryPoint	gauge
 subject	sysinfo	memory/writeback	telemetry	TelemetryPoint
 subject	sysinfo	network/conntrack/count	telemetry	TelemetryPoint
 subject	sysinfo	network/conntrack/max	telemetry	TelemetryPoint

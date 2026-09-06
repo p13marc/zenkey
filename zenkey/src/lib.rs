@@ -101,7 +101,7 @@ pub use profile::{AppName, AppProfile, OriginSalt};
 pub use qos::QosProfile;
 pub use slice::{
     Declared, Fanout, ProcedureKind, RateClass, RegistrySlice, SliceFinding, SliceToken,
-    parse_slice, to_toml as slice_to_toml,
+    SubjectKind, parse_slice, to_toml as slice_to_toml,
 };
 
 /// The crate README's first snippet, compiled (#324's aftermath).

@@ -488,7 +488,7 @@ mod tests {
             crate::key::Chunk::slug("has spaces").as_str(),
         )
         .unwrap();
-        assert_eq!(slugged.producer().name(), "has_x20_spaces");
+        assert_eq!(slugged.producer().name(), "x-has_x20spaces");
     }
 
     /// …and instance 0 has no spelling. It used to be silently ignored, so

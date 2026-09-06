@@ -6,7 +6,7 @@
 use zenkey::grammar::{self, BlobTier, Class, ClassOrPlane, Plane, Producer};
 use zenkey::origin::{HostId, LocalOrigin, RemoteOrigin};
 use zenkey::selector::Scope;
-use zenkey_fixture_tests::registry::{self, netring};
+use zenkey_fixture_tests::registry::{self, netring, sysinfo};
 
 fn local() -> LocalOrigin {
     LocalOrigin::from_host_id(HostId::parse("h-3fa9c2d41b7e").unwrap())
@@ -167,6 +167,27 @@ fn subject_metadata() {
     assert_eq!(flow.ttl_s(), None);
     // vars() binds by name.
     assert_eq!(flow.vars(), vec![("quantile", "p50_ms".to_string())]);
+    // kind() (RFC 08 §2, v1.32): the declared token as a zenkey type, and
+    // `None` — unchecked, not gauge — where the registry says nothing.
+    use zenkey::SubjectKind;
+    assert_eq!(
+        netring::Subject::FlowBytesTotal.kind(),
+        Some(SubjectKind::Counter)
+    );
+    assert_eq!(
+        netring::Subject::FlowActive.kind(),
+        Some(SubjectKind::Gauge)
+    );
+    assert_eq!(flow.kind(), None);
+    assert_eq!(alert.kind(), None);
+    assert_eq!(
+        registry::AnySubject::Sysinfo(sysinfo::Subject::MemoryOomKillsTotal).kind(),
+        Some(SubjectKind::Counter)
+    );
+    assert_eq!(
+        registry::AnySubject::Sysinfo(sysinfo::Subject::MemoryUsed).kind(),
+        Some(SubjectKind::Gauge)
+    );
 }
 
 #[test]
@@ -417,7 +438,7 @@ fn blob_builders_carry_no_producer_chunk() {
 
     // G-07a regression: the canonical (uppercase) display form of the ULID
     // is lowercased at key-build time (RFC 03 §2) — one id, one key. The
-    // builder used to escape each uppercase byte into `_xNN_`, minting a
+    // builder used to escape each uppercase byte into `_xHH`, minting a
     // valid-but-different key no holder answers.
     assert_eq!(
         blob::artifact_key(&local(), "01JGXQZ4YQK8V6TXW3M9F2A7CD"),
