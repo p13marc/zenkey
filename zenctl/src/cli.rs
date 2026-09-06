@@ -1567,13 +1567,15 @@ pub(crate) struct SnapshotDiffArgs {
     pub(crate) a: String,
     /// The later snapshot.
     pub(crate) b: String,
-    /// Align origins across deployments by the labels their state
-    /// documents carry (chunk DD; not implemented in this build).
+    /// Align origins across deployments — by the `source` label their
+    /// health/sensor documents carry, then by producer set — and roll the
+    /// diff up per subject. Refuses (exit 2) over any origin it cannot
+    /// pair, and lists them.
     #[arg(long)]
     pub(crate) normalize_origins: bool,
-    /// An explicit origin pairing, `A=B`, repeatable (chunk DD; not
-    /// implemented in this build).
-    #[arg(long = "map", value_name = "A=B")]
+    /// An explicit origin pairing, `A=B` (a's origin = b's), repeatable;
+    /// decided before any automatic pairing. Requires --normalize-origins.
+    #[arg(long = "map", value_name = "A=B", requires = "normalize_origins")]
     pub(crate) maps: Vec<String>,
     /// Field-level changes listed per key before the rest are counted.
     #[arg(long, value_name = "N", default_value_t = 20)]
@@ -2195,6 +2197,26 @@ pub(crate) struct ServiceCallArgs {
     /// Send the request body verbatim: no schema lookup, no encoding.
     #[arg(long)]
     pub(crate) raw: bool,
+    /// After the reply, keep a window open on the called origin and list
+    /// what was observed there (RFC 05 §3's long-running idiom: request →
+    /// status state → events). The window is subscribed **before** the call
+    /// leaves, so nothing published between the reply and the subscription
+    /// can be missed; each sample carries Δ on the arrival clock and, where
+    /// stamped, on the HLC against the reply's, and is tagged by how the
+    /// registry relates it to the procedure — an observation, never a cause.
+    /// One act, one spelling: there is no separate `trace` verb, because the
+    /// trace is this call's own observation. Not with `*`: a trace attributes
+    /// to one origin.
+    #[arg(long)]
+    pub(crate) trace: bool,
+    /// The passive window held after the reply, seconds (with --trace).
+    #[arg(
+        long = "for",
+        value_name = "SECS",
+        default_value_t = 10.0,
+        requires = "trace"
+    )]
+    pub(crate) for_secs: f64,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }

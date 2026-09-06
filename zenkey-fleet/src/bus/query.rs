@@ -56,6 +56,11 @@ pub struct FleetAnswer {
     /// zenoh's `ReplyError` carries no attachment — a fact about the wire,
     /// not an unobserved field.
     pub attachment: Option<zenoh::bytes::ZBytes>,
+    /// The reply sample's HLC, when it carried one (#215). A reply is a
+    /// sample and is stamped like one — by the first timestamping node it
+    /// passed, not necessarily the responder (RFC 09 §5.1 O7). `None` on an
+    /// error reply, which is not a sample, and on a reply nothing stamped.
+    pub timestamp: Option<zenoh::time::Timestamp>,
     pub answer: Answer,
 }
 
@@ -315,6 +320,7 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
             key: sample.key_expr().as_str().to_string(),
             encoding: Some(sample.encoding().to_string()),
             attachment: sample.attachment().cloned(),
+            timestamp: sample.timestamp().copied(),
             answer: Answer::Value(sample.payload().clone()),
         },
         Err(err) => {
@@ -346,6 +352,7 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
                 key: String::new(),
                 encoding: None,
                 attachment: None,
+                timestamp: None,
                 answer: Answer::Error { name, message },
             }
         }

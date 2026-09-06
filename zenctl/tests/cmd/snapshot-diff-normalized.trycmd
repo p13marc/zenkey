@@ -1,0 +1,110 @@
+`snapshot diff --normalize-origins` is two deployments, one diff (#220,
+RFC 13 §4.4). "It works in staging" is unfalsifiable on a bus until two
+fleets can be compared subject by subject — and RFC 03 §1.1 makes that
+possible, because publishing identity sits at one fixed base-relative
+position, so two fleets whose hosts are entirely different `h-…` values
+can be aligned origin to origin. The fixtures are one fleet under two
+deployments: `prod.zsnap` (base `prod`, hosts `web` and `db`) and
+`stg.zsnap` (base `stg`, both hosts re-minted, a different clock, the same
+values). The alignment pairs on three kinds of evidence, in order and
+never by guessing: an explicit `--map`, a `source` label the health
+documents carry (RFC 06 §6.2) that is verified and unique on both sides,
+a producer set unique on both sides.
+
+**0 — aligned on labels, identical.** Each pair rides `origin_map` with
+its evidence, and every subject rolls up under `by_subject` — one row per
+subject across every origin, so a fleet-wide drift reads as one line, not
+N. The two clocks are not compared: a stamp that differs alone is not a
+change across deployments, and the caveat says so.
+
+```console
+$ zenctl snapshot diff --normalize-origins tests/cmd/fixtures/prod.zsnap tests/cmd/fixtures/stg.zsnap
+{"a":{"answered":6,"asked":1,"base":"prod","collected_at":"2026-09-06T00:00:00Z","collection_span_s":0.9,"roster":2,"selectors":["prod/v1/**"],"zsnap":1},"b":{"answered":6,"asked":1,"base":"stg","collected_at":"2026-09-06T00:05:00Z","collection_span_s":0.9,"roster":2,"selectors":["stg/v1/**"],"zsnap":1},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 0.90s at 2026-09-06T00:00:00Z, b: span 0.90s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant"},{"cite":"RFC 03 §1.1","text":"b's keys re-based from `stg` onto `prod` for the comparison; the two deployments' clocks are not compared, so a stamp that moved alone is not a change here"}],"origin_map":[{"a":"h-3fa9c2d41b7e","b":"h-c0ffee00c0de","evidence":{"kind":"label","source":"web"}},{"a":"h-9b2e4c7a1d05","b":"h-0badcafe1234","evidence":{"kind":"label","source":"db"}}],"report":"snapshot-diff","unchanged":6}
+{"compared":1,"differing":0,"only_in_a":0,"only_in_b":0,"row":"subject","subject":"plain/leak"}
+{"compared":1,"differing":0,"only_in_a":0,"only_in_b":0,"row":"subject","subject":"state/logs/rotated"}
+{"compared":2,"differing":0,"only_in_a":0,"only_in_b":0,"row":"subject","subject":"state/sysinfo/health"}
+{"compared":2,"differing":0,"only_in_a":0,"only_in_b":0,"row":"subject","subject":"telemetry/sysinfo/disk/var-log/used"}
+a: span 0.90s at 2026-09-06T00:00:00Z, b: span 0.90s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+b's keys re-based from `stg` onto `prod` for the comparison; the two deployments' clocks are not compared, so a stamp that moved alone is not a change here (RFC 03 §1.1)
+
+```
+
+**2 — refused: origins it could not pair.** `stg-ambiguous.zsnap`'s two
+hosts both call themselves `node` and both publish only `sysinfo`; nothing
+tells them apart, and `prod`'s hosts match neither. The comparison is
+**not made** — no `added`/`removed`/`changed`, no roll-up — and every
+unpaired origin is listed with the count it failed on (RFC 13 §4.4: MUST
+list, never drop). "I cannot map these" is the honest answer and the
+useful one; a diff that compared around them would be confident nonsense.
+
+```console
+$ zenctl snapshot diff --normalize-origins tests/cmd/fixtures/prod.zsnap tests/cmd/fixtures/stg-ambiguous.zsnap
+? 2
+{"a":{"answered":6,"asked":1,"base":"prod","collected_at":"2026-09-06T00:00:00Z","collection_span_s":0.9,"roster":2,"selectors":["prod/v1/**"],"zsnap":1},"b":{"answered":4,"asked":1,"base":"stg","collected_at":"2026-09-06T00:05:00Z","collection_span_s":0.9,"roster":2,"selectors":["stg/v1/**"],"zsnap":1},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 0.90s at 2026-09-06T00:00:00Z, b: span 0.90s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant"},{"cite":"RFC 03 §1.1","text":"b's keys re-based from `stg` onto `prod` for the comparison; the two deployments' clocks are not compared, so a stamp that moved alone is not a change here"},{"cite":"RFC 13 §4.4","text":"4 origin(s) could not be paired — listed, never dropped, and the comparison was not made over them (exit 2); pair them with --map A=B"}],"origin_map":[],"report":"snapshot-diff","unchanged":0}
+{"origin":"h-3fa9c2d41b7e","reason":"label `web` claimed by no origin in b; producer set {sysinfo} matches 2 origins in b","row":"unmapped","side":"a"}
+{"origin":"h-9b2e4c7a1d05","reason":"label `db` claimed by no origin in b; producer set {logs, sysinfo} matches no origin in b","row":"unmapped","side":"a"}
+{"origin":"h-0badcafe1234","reason":"label `node` claimed by 2 origins in b; producer set {sysinfo} shared by 2 origins in b","row":"unmapped","side":"b"}
+{"origin":"h-c0ffee00c0de","reason":"label `node` claimed by 2 origins in b; producer set {sysinfo} shared by 2 origins in b","row":"unmapped","side":"b"}
+a: span 0.90s at 2026-09-06T00:00:00Z, b: span 0.90s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+b's keys re-based from `stg` onto `prod` for the comparison; the two deployments' clocks are not compared, so a stamp that moved alone is not a change here (RFC 03 §1.1)
+4 origin(s) could not be paired — listed, never dropped, and the comparison was not made over them (exit 2); pair them with --map A=B (RFC 13 §4.4)
+
+```
+
+**1 — mapped by hand, and they differ.** `--map A=B` (a's origin = b's) is
+decided before any automatic pairing. With both stated, the comparison
+runs: every health document differs on `source` (the labels *are*
+different), and `logs` publishes only in `a` — each said once, per
+subject.
+
+```console
+$ zenctl snapshot diff --normalize-origins --map h-3fa9c2d41b7e=h-c0ffee00c0de --map h-9b2e4c7a1d05=h-0badcafe1234 tests/cmd/fixtures/prod.zsnap tests/cmd/fixtures/stg-ambiguous.zsnap
+? 1
+{"a":{"answered":6,"asked":1,"base":"prod","collected_at":"2026-09-06T00:00:00Z","collection_span_s":0.9,"roster":2,"selectors":["prod/v1/**"],"zsnap":1},"b":{"answered":4,"asked":1,"base":"stg","collected_at":"2026-09-06T00:05:00Z","collection_span_s":0.9,"roster":2,"selectors":["stg/v1/**"],"zsnap":1},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 0.90s at 2026-09-06T00:00:00Z, b: span 0.90s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant"},{"cite":"RFC 03 §1.1","text":"b's keys re-based from `stg` onto `prod` for the comparison; the two deployments' clocks are not compared, so a stamp that moved alone is not a change here"}],"origin_map":[{"a":"h-3fa9c2d41b7e","b":"h-c0ffee00c0de","evidence":{"kind":"explicit"}},{"a":"h-9b2e4c7a1d05","b":"h-0badcafe1234","evidence":{"kind":"explicit"}}],"report":"snapshot-diff","unchanged":2}
+{"key":"plain/leak","row":"removed"}
+{"key":"prod/v1/h-9b2e4c7a1d05/state/logs/rotated","row":"removed"}
+{"key":"prod/v1/h-3fa9c2d41b7e/state/sysinfo/health","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000009/ef56"],"value":{"changes":[{"new":"node","old":"web","op":"changed","path":"source"}],"truncated":0}}
+{"key":"prod/v1/h-9b2e4c7a1d05/state/sysinfo/health","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000009/ef56"],"value":{"changes":[{"new":"node","old":"db","op":"changed","path":"source"}],"truncated":0}}
+{"compared":0,"differing":0,"only_in_a":1,"only_in_b":0,"row":"subject","subject":"plain/leak"}
+{"compared":0,"differing":0,"only_in_a":1,"only_in_b":0,"row":"subject","subject":"state/logs/rotated"}
+{"compared":2,"differing":2,"example":{"key":"prod/v1/h-3fa9c2d41b7e/state/sysinfo/health","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000009/ef56"],"value":{"changes":[{"new":"node","old":"web","op":"changed","path":"source"}],"truncated":0}},"only_in_a":0,"only_in_b":0,"row":"subject","subject":"state/sysinfo/health"}
+{"compared":2,"differing":0,"only_in_a":0,"only_in_b":0,"row":"subject","subject":"telemetry/sysinfo/disk/var-log/used"}
+a: span 0.90s at 2026-09-06T00:00:00Z, b: span 0.90s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+b's keys re-based from `stg` onto `prod` for the comparison; the two deployments' clocks are not compared, so a stamp that moved alone is not a change here (RFC 03 §1.1)
+
+```
+
+**0 — no labels, paired on producer sets.** The unlabelled pair holds no
+health document at all, so the label was never *asked* (RFC 09 §5.1 O4);
+`web` (`{sysinfo}`) and `db` (`{logs, sysinfo}`) are still told apart by
+what they publish, and the note says that is all the pairing rests on.
+
+```console
+$ zenctl snapshot diff --normalize-origins tests/cmd/fixtures/prod-unlabelled.zsnap tests/cmd/fixtures/stg-unlabelled.zsnap
+{"a":{"answered":4,"asked":1,"base":"prod","collected_at":"2026-09-06T00:00:00Z","collection_span_s":0.9,"roster":2,"selectors":["prod/v1/**"],"zsnap":1},"b":{"answered":4,"asked":1,"base":"stg","collected_at":"2026-09-06T00:05:00Z","collection_span_s":0.9,"roster":2,"selectors":["stg/v1/**"],"zsnap":1},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 0.90s at 2026-09-06T00:00:00Z, b: span 0.90s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant"},{"cite":"RFC 03 §1.1","text":"b's keys re-based from `stg` onto `prod` for the comparison; the two deployments' clocks are not compared, so a stamp that moved alone is not a change here"},{"cite":"RFC 06 §6.2","text":"2 origin(s) paired by producer set alone — no verified label on both sides; labels ride `state/*/health`, and a snapshot that did not include it never asked for one"}],"origin_map":[{"a":"h-3fa9c2d41b7e","b":"h-c0ffee00c0de","evidence":{"kind":"producer_set"}},{"a":"h-9b2e4c7a1d05","b":"h-0badcafe1234","evidence":{"kind":"producer_set"}}],"report":"snapshot-diff","unchanged":4}
+{"compared":1,"differing":0,"only_in_a":0,"only_in_b":0,"row":"subject","subject":"plain/leak"}
+{"compared":1,"differing":0,"only_in_a":0,"only_in_b":0,"row":"subject","subject":"state/logs/rotated"}
+{"compared":2,"differing":0,"only_in_a":0,"only_in_b":0,"row":"subject","subject":"telemetry/sysinfo/disk/var-log/used"}
+a: span 0.90s at 2026-09-06T00:00:00Z, b: span 0.90s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+b's keys re-based from `stg` onto `prod` for the comparison; the two deployments' clocks are not compared, so a stamp that moved alone is not a change here (RFC 03 §1.1)
+2 origin(s) paired by producer set alone — no verified label on both sides; labels ride `state/*/health`, and a snapshot that did not include it never asked for one (RFC 06 §6.2)
+
+```
+
+**2 — a `--map` the files do not hold, or one that does not parse.** Both
+are the operator's input, refused whole before anything is paired: a plan
+that quietly dropped the pairing would compare the wrong keys.
+
+```console
+$ zenctl snapshot diff --normalize-origins --map h-3fa9c2d41b7e=h-000000000000 tests/cmd/fixtures/prod.zsnap tests/cmd/fixtures/stg.zsnap
+? 2
+Error: --map names h-000000000000, which is not a host origin in b
+
+```
+
+```console
+$ zenctl snapshot diff --normalize-origins --map web=db tests/cmd/fixtures/prod.zsnap tests/cmd/fixtures/stg.zsnap
+? 2
+Error: --map "web=db": a is not a host origin (invalid host origin "web": must match h-[0-9a-f]{12} (RFC 03 §1.3))
+
+```

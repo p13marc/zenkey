@@ -79,6 +79,7 @@ mod storage;
 mod tape;
 mod timeline;
 mod topic;
+mod trace;
 mod why;
 
 pub use acl::*;
@@ -114,4 +115,5 @@ pub use storage::*;
 pub use tape::*;
 pub use timeline::*;
 pub use topic::*;
+pub use trace::*;
 pub use why::*;

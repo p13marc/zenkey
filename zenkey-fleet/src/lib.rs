@@ -215,8 +215,8 @@ pub use bus::session::{
     Fleet, OPEN_TIMEOUT, OpenFailure, open, open_reporting, open_reporting_within, open_with_config,
 };
 pub use bus::write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
-    declare_publication,
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, call, call_traced,
+    check_retire, declare_publication,
 };
 pub use judge::budget::{BudgetObservation, join_budget};
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
@@ -273,11 +273,12 @@ pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
 };
 pub use model::impact::{ImpactInputs, MAX_DEPTH_CAP, attribute, entity_of};
+pub use model::origin_map::{Label, MapError, MapPlan, OriginProfile, origin_profiles, plan_map};
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use model::snapshot::{fold_latest, holder_of, registration_of, stamper_of};
-pub use model::snapshot_diff::{DiffOpts, diff_snapshots};
+pub use model::snapshot_diff::{DiffOpts, diff_normalized, diff_snapshots};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::storage::{
     check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
@@ -301,8 +302,8 @@ pub use report::{
     NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
     RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
     SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact,
-    TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, ValueSource,
-    WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
+    TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport,
+    ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
 // `CondState` and `Transition` are unconditional since v1.34: a version-2
 // `.zrec` carries the trigger record, and the reader is not decode-gated.

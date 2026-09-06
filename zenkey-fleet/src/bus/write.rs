@@ -24,8 +24,12 @@ use zenkey::qos::QosProfile;
 use zenkey::{Declared, Fanout, ProcedureKind};
 use zenoh::Session;
 
+use crate::bus::query::FleetAnswer;
 use crate::model::registry::SliceSet;
-use crate::report::{CallAnswer, CallError, CallOutcome, CallReport};
+use crate::report::{
+    CallAnswer, CallError, CallOutcome, CallReport, ConcurrentLane, HlcReference, TRACE_CHAIN_RULE,
+    TRACE_EXCLUDED, TraceReport,
+};
 
 /// A declared publisher with its QoS profile applied — the only publish path.
 pub struct Publication {
@@ -382,6 +386,18 @@ pub struct CallSpec<'a> {
 /// - Exit-code semantics stay on [`CallReport::exit_code`]: an error reply is
 ///   a failure, zero replies stay a distinct non-verdict (RFC 05 §3.1).
 pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallReport> {
+    let (key, timeout, answers) = call_answers(fleet, spec).await?;
+    Ok(project_call(key, timeout, &answers))
+}
+
+/// The GET half of [`call`]: the guard, the key, the fan-in — and the raw
+/// [`FleetAnswer`]s, which carry what the [`CallReport`] projection drops
+/// (the reply's HLC, for one). [`call_traced`] needs those; [`call`] does
+/// not, so the split keeps the report shape untouched.
+async fn call_answers(
+    fleet: &crate::Fleet<'_>,
+    spec: CallSpec<'_>,
+) -> Result<(String, Duration, Vec<FleetAnswer>)> {
     let CallSpec {
         target,
         producer,
@@ -468,8 +484,13 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
             .attachment(attachment),
     )
     .await?;
-    Ok(CallReport {
-        key: key.clone(),
+    Ok((key, timeout, answers))
+}
+
+/// The [`CallReport`] projection of a fan-in's answers.
+fn project_call(key: String, timeout: Duration, answers: &[FleetAnswer]) -> CallReport {
+    CallReport {
+        key,
         // The wait is part of the claim (R5): a silent call must be readable
         // against how long it listened.
         timeout_s: timeout.as_secs_f64(),
@@ -515,6 +536,231 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
                 }
             })
             .collect(),
+    }
+}
+
+/// How long to hold the window after a traced call (#215).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceSpec {
+    /// The passive window: how long to keep listening on the called origin
+    /// after the GET has returned. The attribution reads the same
+    /// [`CallSpec::slices`] the fan-out guard does — one registry per call,
+    /// so the guard and the chain cannot be judged against two.
+    pub window: Duration,
+}
+
+/// The broadcast bound of the origin watch: a single origin's data classes
+/// for one window, sized so that a producer's own burst after a write does
+/// not lag the drain — a drop here is a break in the *attributed* lane.
+const ORIGIN_CAPACITY: usize = 4096;
+/// The bound of the fleet-wide watch behind the concurrent lane. Its drops
+/// are counted on that lane alone; they never become breaks in the origin's.
+const FLEET_CAPACITY: usize = 8192;
+
+/// [`call`], with a window held open on the called origin **before, during
+/// and after** the GET, and everything seen there reported beside the reply
+/// (#215; RFC 05 §3's long-running idiom is a declared chain, and this is
+/// the observation of one).
+///
+/// The order is normative and the report pins it
+/// ([`TraceReport::subscribed_before_call`]): the watches are declared
+/// *first*, `t0` is taken, then the call goes out exactly as [`call`] would
+/// send it (fan-out guard included), then the window is held draining the
+/// monitors. A window opened after the call would convert "not asked" into
+/// "no" (RFC 09 §5.1 O4) for anything the producer published between the
+/// reply and the subscription.
+///
+/// Two watches, two monitors: `<base>/v1/<origin>/**` feeds the attributed
+/// and same-origin lanes, and `<base>/v1/**` feeds the concurrent count.
+/// Two rather than one so that a busy fleet's broadcast lag lands on the
+/// concurrent lane's own `dropped` and never as a break in the origin's
+/// lanes — the origin's samples reach both subscribers, and the fleet
+/// monitor ignores them. `**` never crosses an `@`-chunk (RFC 03 §4 D2), so
+/// the `@blob` bytes of the idiom's step 4 are outside both windows — stated
+/// in the report, deliberately not widened.
+///
+/// Refused: a [`CallTarget::Fleet`] target. A trace attributes effects to
+/// *one* origin; a fan-out has none to attribute to.
+pub async fn call_traced(
+    fleet: &crate::Fleet<'_>,
+    spec: CallSpec<'_>,
+    trace: TraceSpec,
+) -> Result<TraceReport> {
+    use crate::bus::monitor::{FleetEvent, Monitor, MonitorSpec, StreamItem};
+    use crate::model::examples::Examples;
+    use crate::model::facts::describe_key;
+    use crate::model::timeline::TimelineRow;
+    use crate::model::trace::{TraceTarget, idiom_of, trace_row};
+    use zenkey::selector::{Scope, all_under};
+
+    let (scope, producer) = match spec.target {
+        CallTarget::Fleet => {
+            return Err(Error::unaskable(
+                "--trace",
+                "a trace attributes what it sees to one origin, and a fleet (`*`) call \
+                 has none to attribute to — name one origin",
+            ));
+        }
+        CallTarget::Host(id) => (
+            Scope::origin(&zenkey::origin::RemoteOrigin::from_host(id.clone())),
+            Some(spec.producer.to_string()),
+        ),
+        CallTarget::Service(o) => (Scope::origin(o), None),
+    };
+    let origin = scope.chunk().to_string();
+    let slices = spec.slices;
+    let idiom = idiom_of(
+        slices
+            .and_then(|s| s.get(spec.producer))
+            .and_then(|s| s.procedures.iter().find(|p| p.path == spec.procedure)),
+    );
+    let target = TraceTarget {
+        origin: origin.clone(),
+        producer,
+        chain_chunk: spec
+            .procedure
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_string(),
+        registry_loaded: slices.is_some(),
+    };
+    let base = fleet.base();
+
+    // 1. Subscribe first. The origin's subtree through the typed scope, and
+    //    the fleet's through the same builder at fleet scope — never a
+    //    hand-glued `format!`.
+    let origin_scope = fleet.wire(all_under(scope));
+    let fleet_scope = fleet.wire(all_under(Scope::fleet()));
+    let session = fleet.session();
+    let origin_monitor = Monitor::start(
+        session,
+        MonitorSpec {
+            capacity: ORIGIN_CAPACITY,
+            ..MonitorSpec::default()
+        },
+    )
+    .await?;
+    let mut origin_events = origin_monitor.events();
+    origin_monitor.watch(&origin_scope).await?;
+    let fleet_monitor = Monitor::start(
+        session,
+        MonitorSpec {
+            capacity: FLEET_CAPACITY,
+            ..MonitorSpec::default()
+        },
+    )
+    .await?;
+    let mut fleet_events = fleet_monitor.events();
+    fleet_monitor.watch(&fleet_scope).await?;
+
+    // 2. t0, then the call — the guard, the key and the fan-in are `call`'s.
+    let t0 = std::time::Instant::now();
+    let t0_unix_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    let (key, timeout, answers) = call_answers(fleet, spec).await?;
+    let call_returned_ms = t0.elapsed().as_secs_f64() * 1_000.0;
+    let reply_hlc = answers.iter().find_map(|a| a.timestamp);
+    let call = project_call(key, timeout, &answers);
+
+    // 3. Hold the window. Every sample becomes a timeline row (its clocks
+    //    and provenance are the timeline's), then a relation, then a lane.
+    let mut attributed = Vec::new();
+    let mut same_origin = Vec::new();
+    let mut pending_attributed = 0u64;
+    let mut pending_same_origin = 0u64;
+    let mut dropped = 0u64;
+    let mut concurrent_samples = 0u64;
+    let mut concurrent_dropped = 0u64;
+    let mut concurrent_keys = std::collections::HashSet::new();
+    let mut concurrent_examples = Examples::new(crate::judge::common::EXPANSION_CAP);
+    let reply_ntp64 = reply_hlc.map(|t| t.get_time().as_u64());
+    let deadline = tokio::time::sleep(trace.window);
+    tokio::pin!(deadline);
+    let mut origin_open = true;
+    let mut fleet_open = true;
+    while origin_open || fleet_open {
+        tokio::select! {
+            () = &mut deadline => break,
+            item = origin_events.recv(), if origin_open => match item {
+                None => origin_open = false,
+                Some(StreamItem::Dropped(n)) => {
+                    dropped += n;
+                    pending_attributed += n;
+                    pending_same_origin += n;
+                }
+                Some(StreamItem::Event(FleetEvent::Sample(view))) => {
+                    let desc = describe_key(base, &view.key, slices);
+                    let Some(relation) = target.relation_of(&desc) else {
+                        // The origin watch is the origin's subtree; anything
+                        // else here is a key the grammar could not place,
+                        // and it belongs to the concurrent count.
+                        continue;
+                    };
+                    let row = TimelineRow::from_view(&view, t0, base);
+                    let (lane, pending) = match relation {
+                        crate::report::TraceRelation::DeclaredChain =>
+                            (&mut attributed, &mut pending_attributed),
+                        _ => (&mut same_origin, &mut pending_same_origin),
+                    };
+                    let break_before = (*pending > 0).then_some(*pending);
+                    *pending = 0;
+                    lane.push(trace_row(&row, relation, reply_ntp64, break_before));
+                }
+                Some(StreamItem::Event(_)) => {}
+            },
+            item = fleet_events.recv(), if fleet_open => match item {
+                None => fleet_open = false,
+                Some(StreamItem::Dropped(n)) => concurrent_dropped += n,
+                Some(StreamItem::Event(FleetEvent::Sample(view))) => {
+                    let desc = describe_key(base, &view.key, None);
+                    if target.relation_of(&desc).is_some() {
+                        // The called origin's own sample, seen a second time
+                        // through the wider watch: the origin lanes have it.
+                        continue;
+                    }
+                    concurrent_samples += 1;
+                    if concurrent_keys.insert(view.key.clone()) {
+                        concurrent_examples.push_with(|| view.key.clone());
+                    }
+                }
+                Some(StreamItem::Event(_)) => {}
+            },
+        }
+    }
+    let keys_evicted = origin_monitor.core().keys_evicted();
+    origin_monitor.stop();
+    fleet_monitor.stop();
+
+    Ok(TraceReport {
+        call,
+        scopes: vec![origin_scope, fleet_scope],
+        excluded: TRACE_EXCLUDED,
+        window_s: trace.window.as_secs_f64(),
+        subscribed_before_call: true,
+        t0_unix_s,
+        call_returned_ms,
+        hlc_reference: if reply_hlc.is_some() {
+            HlcReference::Reply
+        } else {
+            HlcReference::None
+        },
+        reply_hlc: reply_hlc.map(|t| t.to_string()),
+        chain_rule: TRACE_CHAIN_RULE,
+        registry_loaded: slices.is_some(),
+        idiom,
+        attributed,
+        same_origin,
+        concurrent: ConcurrentLane {
+            samples: concurrent_samples,
+            keys: concurrent_keys.len() as u64,
+            examples: concurrent_examples.into_vec(),
+            dropped: concurrent_dropped,
+        },
+        dropped,
+        keys_evicted,
     })
 }
 

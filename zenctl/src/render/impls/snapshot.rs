@@ -5,10 +5,19 @@
 //! went into it. `snapshot-diff` has rows, five kinds of them, and the
 //! envelope carries **both** headers whole because the section's one
 //! non-negotiable is that every rendering states both spans.
+//!
+//! Under `--normalize-origins` (#220) the diff carries three more things
+//! and the table draws each: the map, one line per pair with its evidence
+//! (`explicit` / `label <source>` / `producer set`); the unpaired, one
+//! line per origin with the reason, under a **NOT COMPARED** word when
+//! there are any, because the comparison was refused over them; and the
+//! per-subject roll-up — "`sysinfo/cpu/usage` differs on 3 of 12
+//! origins" — with the subjects that agree everywhere counted, not
+//! listed.
 
 use zenkey_fleet::report::{
-    AnsweredBy, Holder, KeyChange, RegistrationWire, SnapshotDiff, SnapshotReport, VerdictWire,
-    ZsnapHeader,
+    AnsweredBy, Holder, KeyChange, MapEvidence, RegistrationWire, Side, SnapshotDiff,
+    SnapshotReport, SubjectDelta, VerdictWire, ZsnapHeader,
 };
 
 use crate::render::{
@@ -154,13 +163,15 @@ impl Render for SnapshotDiff {
     fn table(&self, t: &mut Table) {
         t.line(format!("a: {}", side(&self.a)));
         t.line(format!("b: {}", side(&self.b)));
-        t.line(format!(
-            "{} added, {} removed, {} changed, {} unchanged",
-            self.added.len(),
-            self.removed.len(),
-            self.changed.len(),
-            self.unchanged,
-        ));
+        if !self.refused() {
+            t.line(format!(
+                "{} added, {} removed, {} changed, {} unchanged",
+                self.added.len(),
+                self.removed.len(),
+                self.changed.len(),
+                self.unchanged,
+            ));
+        }
         if !self.added.is_empty() || !self.removed.is_empty() || !self.changed.is_empty() {
             let mut g = Grid::unheaded(3);
             for k in &self.added {
@@ -176,27 +187,25 @@ impl Render for SnapshotDiff {
         }
         if let Some(pairs) = self.origin_map.as_option() {
             t.line(format!("origins aligned: {}", pairs.len()));
-            let mut g = Grid::unheaded(3);
-            for p in pairs {
-                let evidence = serde_json::to_value(&p.evidence)
-                    .ok()
-                    .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_string))
-                    .unwrap_or_default();
-                g.row([
-                    Cell::text("  ="),
-                    Cell::text(format!("{} ↔ {}", p.a, p.b)),
-                    Cell::text(evidence),
-                ]);
+            if !pairs.is_empty() {
+                let mut g = Grid::unheaded(3);
+                for p in pairs {
+                    g.row([
+                        Cell::text("  ="),
+                        Cell::text(format!("{} ↔ {}", p.a, p.b)),
+                        Cell::text(evidence(&p.evidence)),
+                    ]);
+                }
+                t.grid(g);
             }
-            t.grid(g);
         }
         if !self.unmapped.is_empty() {
             t.line(format!("origins not paired: {}", self.unmapped.len()));
             let mut g = Grid::unheaded(3);
             for u in &self.unmapped {
                 let side = match u.side {
-                    zenkey_fleet::report::Side::A => "a",
-                    zenkey_fleet::report::Side::B => "b",
+                    Side::A => "a",
+                    Side::B => "b",
                 };
                 g.row([
                     Cell::text("  ?"),
@@ -207,24 +216,30 @@ impl Render for SnapshotDiff {
             t.grid(g);
         }
         if let Some(subjects) = self.by_subject.as_option() {
-            let mut g = Grid::new(["subject", "compared", "differing", "only in a", "only in b"])
-                .right(1)
-                .right(2)
-                .right(3)
-                .right(4);
-            for s in subjects {
-                g.row([
-                    Cell::text(&s.subject),
-                    Cell::int(s.compared),
-                    Cell::int(s.differing),
-                    Cell::int(s.only_in_a),
-                    Cell::int(s.only_in_b),
-                ]);
+            let (differing, agreeing): (Vec<&SubjectDelta>, Vec<&SubjectDelta>) = subjects
+                .iter()
+                .partition(|s| s.differing > 0 || s.only_in_a > 0 || s.only_in_b > 0);
+            if !differing.is_empty() {
+                let mut g = Grid::unheaded(3);
+                for s in &differing {
+                    g.row([
+                        Cell::text(&s.subject),
+                        Cell::text(subject_line(s)),
+                        Cell::text(s.example.as_ref().map(facets).unwrap_or_default()),
+                    ]);
+                }
+                t.grid(g);
             }
-            t.grid(g);
+            t.line(format!(
+                "{} subject(s) identical on every origin, {} not",
+                agreeing.len(),
+                differing.len()
+            ));
         }
         // The word is the carrier; the colour repeats it (#200).
-        if self.differs() {
+        if self.refused() {
+            t.line_styled("NOT COMPARED", crate::render::style::UNPROVEN);
+        } else if self.differs() {
             t.line_styled("DIFFERENT", crate::render::style::ERROR);
         } else {
             t.line_styled("IDENTICAL", crate::render::style::PASS);
@@ -260,10 +275,38 @@ impl Render for SnapshotDiff {
                 .cite("RFC 09 §5.1 O4"),
             );
         }
+        if let Some(pairs) = self.origin_map.as_option() {
+            if self.a.base != self.b.base {
+                notes.push(
+                    Note::caveat(format!(
+                        "b's keys re-based from `{}` onto `{}` for the comparison; the two \
+                         deployments' clocks are not compared, so a stamp that moved alone \
+                         is not a change here",
+                        self.b.base, self.a.base
+                    ))
+                    .cite("RFC 03 §1.1"),
+                );
+            }
+            let by_set = pairs
+                .iter()
+                .filter(|p| p.evidence == MapEvidence::ProducerSet)
+                .count();
+            if by_set > 0 {
+                notes.push(
+                    Note::coverage(format!(
+                        "{by_set} origin(s) paired by producer set alone — no verified label on \
+                         both sides; labels ride `state/*/health`, and a snapshot that did not \
+                         include it never asked for one"
+                    ))
+                    .cite("RFC 06 §6.2"),
+                );
+            }
+        }
         if !self.unmapped.is_empty() {
             notes.push(
                 Note::coverage(format!(
-                    "{} origin(s) could not be paired — listed, never dropped",
+                    "{} origin(s) could not be paired — listed, never dropped, and the \
+                     comparison was not made over them (exit 2); pair them with --map A=B",
                     self.unmapped.len()
                 ))
                 .cite("RFC 13 §4.4"),
@@ -271,6 +314,35 @@ impl Render for SnapshotDiff {
         }
         notes
     }
+}
+
+/// The evidence column of the map: what a pair rests on.
+fn evidence(e: &MapEvidence) -> String {
+    match e {
+        MapEvidence::Explicit => "explicit".into(),
+        MapEvidence::Label { source } => format!("label `{source}`"),
+        MapEvidence::ProducerSet => "producer set".into(),
+    }
+}
+
+/// One subject's line: "differs on 3 of 12 origins; 1 only in a".
+fn subject_line(s: &SubjectDelta) -> String {
+    let mut parts = Vec::new();
+    if s.differing > 0 {
+        parts.push(format!(
+            "differs on {} of {} origin(s)",
+            s.differing, s.compared
+        ));
+    } else if s.compared > 0 {
+        parts.push(format!("same on {} origin(s)", s.compared));
+    }
+    if s.only_in_a > 0 {
+        parts.push(format!("{} only in a", s.only_in_a));
+    }
+    if s.only_in_b > 0 {
+        parts.push(format!("{} only in b", s.only_in_b));
+    }
+    parts.join("; ")
 }
 
 /// One side's provenance line: rows, span, moment.

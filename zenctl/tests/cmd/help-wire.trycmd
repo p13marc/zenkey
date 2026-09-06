@@ -937,10 +937,10 @@ Arguments:
 
 Options:
       --normalize-origins
-          Align origins across deployments by the labels their state documents carry (chunk DD; not implemented in this build)
+          Align origins across deployments — by the `source` label their health/sensor documents carry, then by producer set — and roll the diff up per subject. Refuses (exit 2) over any origin it cannot pair, and lists them
 
       --map <A=B>
-          An explicit origin pairing, `A=B`, repeatable (chunk DD; not implemented in this build)
+          An explicit origin pairing, `A=B` (a's origin = b's), repeatable; decided before any automatic pairing. Requires --normalize-origins
 
       --max-changes <N>
           Field-level changes listed per key before the rest are counted

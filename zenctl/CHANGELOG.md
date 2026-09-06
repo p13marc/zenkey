@@ -64,6 +64,33 @@ that survives only in the ledger still resolves, class wildcarded.
 Families `registry-consumers` and `registry-impact`; rows tagged
 `consumer` and `coverage`; the admin discriminator rides flat in the
 envelope (`admin`, `answered`, `nodes`).
+**`service call --trace [--for SECS]` — call → effect, the RPC trace
+window** (#215). RFC 05 §3's long-running idiom is a declared causal chain
+— `GET @rpc/<p>/artifact/request` → `state/<p>/artifact/<kind>` →
+`events/<p>/artifact/<ulid>` → `@blob` — and nothing followed it: you
+called a write procedure and then hunted three panes for what it did. With
+`--trace` the call keeps a window open on the called origin (default 10 s)
+and lists, after the reply, every sample observed there: Δ on the arrival
+clock always, Δ on the HLC against the reply's where both are stamped (the
+stamper named — `self`, `foreign:<id>`, `unattributable:<id>`), each
+tagged `declared-chain` (the registry refines it under the called producer
+and it shares the procedure's first chunk — a **naming heuristic**, and the
+report says so in a fixed `chain_rule` field), `same-origin, not declared`,
+or `same-origin, registry not loaded` (unjudgeable is not undeclared, O4).
+Other origins are a count and a few keys in a *concurrent, not attributed*
+lane, never rows. **Subscribe, then call, then hold** is the order and the
+report pins it (`subscribed_before_call`): a window opened after the call
+would turn "not asked" into "no". The wording is *observed after the call*
+throughout — never *caused*; no edge, no arrow, no trace-id attachment.
+`**` never crosses an `@`-chunk, so the `@blob` bytes are outside the
+window and the report says so rather than widening. Not a verb of its own:
+one act, one spelling. `--trace` with `*` exits 2 (a trace attributes to
+one origin). The exit code stays the call's — what the window saw is an
+observation, not a judgement. A zenctl-level smoke against `gen
+--serve-describe` shows naming attribution only: the generator never
+publishes *after* a reply, so the ordered chain is pinned by the engine's
+bus test (`zenkey-fleet/tests/trace.rs`). Not in this cut: the zengui hook
+(`SendForm.trace`, an Effects section) is named and left for the GUI.
 
 **`timeline` — the fleet timeline, and deliberately no edges** (#216).
 A new wire verb at the root. `zenctl timeline <SEL>… --for <SECS>
@@ -112,9 +139,35 @@ moved (`value` or `bytes`, `verdict`, `registration`, `holder`) with both
 stamps; the envelope carries both headers whole. **Exit 0** identical,
 **1** they differ (a difference *is* the finding), **2** a file could not
 be read — through the one judgement projection, never a hand-rolled
-match. `--normalize-origins` and `--map A=B` parse today and refuse (exit
-2) until chunk DD lands the alignment; when it does, an origin that could
-not be paired is listed as an `unmapped` row, never dropped.
+match.
+
+**`snapshot diff --normalize-origins` — two deployments, one diff** (#220).
+"It works in staging" is unfalsifiable on a bus until two fleets can be
+compared subject by subject; RFC 03 §1.1 makes that possible, because
+publishing identity sits at one fixed base-relative position. The engine
+profiles every host on both sides and plans the alignment on three kinds
+of evidence, in order and never by guessing: an explicit `--map A=B` (a's
+origin = b's; repeatable, requires `--normalize-origins`, refused at the
+edge when it names an origin the files do not hold), the `source` label
+the health/sensor documents carry (RFC 06 §6.2) when it is verified —
+`host_id` is the origin it sits under — and unique among the unpaired on
+both sides, and a producer set unique on both sides. `b` is then read
+through the plan (origin chunk, base, holder, the bridge document's
+`host_id`) and compared as before, and the diff **rolls up per subject**:
+one `subject` row per subject across every origin — "`state/sysinfo/health`
+differs on 2 of 2 origin(s); `state/logs/rotated` 1 only in a" — with
+one example key change; subjects identical everywhere are counted, not
+listed. Every pair rides `origin_map` with its evidence (`explicit` /
+`label <source>` / `producer set`); two deployments' clocks are not
+compared, so a stamp that moved alone is not a change here. **Exit 0**
+identical, **1** they differ, and **2 — refused**: an origin the plan
+could not pair is listed as an `unmapped` row with the count it failed on
+("label `node` claimed by 2 origins in b; producer set {sysinfo} shared by
+2 origins in b"), the comparison is *not made* — no `added`/`removed`/
+`changed`, no roll-up, the word is NOT COMPARED — and the report still
+goes out so a script sees exactly what to `--map`. A diff that compared
+around an origin it could not place would be confident nonsense; "I
+cannot map these" is the finding.
 
 ## 0.6.0 (2026-09-06) — the generators, and three rows that name a host
 

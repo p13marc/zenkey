@@ -1198,6 +1198,112 @@ fn a_timeline_on_the_hlc_axis_is_pinned() {
     );
 }
 
+/// The RPC trace window (#215): the call's own document nested whole, the
+/// window's header beside it — `subscribed_before_call` pinned `true`, the
+/// chain rule and the exclusion as fixed sentences — and three lanes: two
+/// of rows, one of counts. On a row every clock-derived field is absent when
+/// the sample carried no HLC, and `break_before` rides only the row that
+/// follows a drop.
+#[test]
+fn a_trace_report_is_pinned_with_its_call_nested_whole() {
+    assert_eq!(
+        serde_json::to_value(fx::trace_report()).unwrap(),
+        json!({
+            "call": {
+                "key": "acme/v1/h-3fa9c2d41b7e/@rpc/demo/artifact/request",
+                "timeout_s": 5.0,
+                "answers": [{"origin": "h-3fa9c2d41b7e", "ok": true, "value": {"id": "01HZY"}}]
+            },
+            "scopes": ["acme/v1/h-3fa9c2d41b7e/**", "acme/v1/*/**"],
+            "excluded": "the verbatim planes (`@rpc`, `@blob`, `@media`, `@adv`, `@catalog`): `**` never crosses an `@`-chunk (RFC 03 §4 D2), so the artifact bytes on `@blob` are outside this window — excluded, not empty",
+            "window_s": 10.0,
+            "subscribed_before_call": true,
+            "t0_unix_s": 1788000000.5,
+            "call_returned_ms": 4.2,
+            "hlc_reference": "reply",
+            "reply_hlc": "7680000000000000000/33",
+            "chain_rule": "first-chunk naming heuristic (RFC 05 §3 idiom); a naming coincidence is tagged the same way",
+            "registry_loaded": true,
+            "idiom": "long-running",
+            "attributed": [
+                {
+                    "key": "acme/v1/h-3fa9c2d41b7e/state/demo/artifact/pcap",
+                    "relation": "declared_chain",
+                    "arrival_delta_ms": 12.5,
+                    "hlc": "7680000000034359738/33",
+                    "hlc_delta_ms": 8,
+                    "stamped_by": "foreign:33",
+                    "kind": "put",
+                    "payload_bytes": 40
+                },
+                {
+                    "key": "acme/v1/h-3fa9c2d41b7e/events/demo/artifact/01HZY",
+                    "relation": "declared_chain",
+                    "arrival_delta_ms": 250.0,
+                    "hlc": "7680000001056964608/33",
+                    "hlc_delta_ms": 246,
+                    "stamped_by": "foreign:33",
+                    "kind": "put",
+                    "payload_bytes": 40,
+                    "break_before": 3
+                }
+            ],
+            "same_origin": [{
+                "key": "acme/v1/h-3fa9c2d41b7e/telemetry/other/noise",
+                "relation": "same_origin_undeclared",
+                "arrival_delta_ms": 1.0,
+                "kind": "put",
+                "payload_bytes": 40
+            }],
+            "concurrent": {
+                "samples": 40,
+                "keys": 2,
+                "examples": [
+                    "acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu",
+                    "acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem"
+                ],
+                "dropped": 0
+            },
+            "dropped": 3,
+            "keys_evicted": 0
+        })
+    );
+
+    // No registry, no reply HLC: the attributed lane is empty and the header
+    // says why in two fields — the reference is `none` and `reply_hlc` is
+    // absent, `registry_loaded` is false — rather than by a `null` anywhere.
+    let v = serde_json::to_value(fx::trace_report_no_registry()).unwrap();
+    assert_eq!(v["hlc_reference"], "none");
+    assert!(v.get("reply_hlc").is_none(), "{v}");
+    assert_eq!(v["registry_loaded"], false);
+    assert_eq!(v["idiom"], "undeclared");
+    assert_eq!(v["attributed"], json!([]));
+    for row in v["same_origin"].as_array().unwrap() {
+        assert_eq!(row["relation"], "same_origin_registry_not_loaded");
+        assert!(row.get("hlc_delta_ms").is_none(), "{row}");
+    }
+    // The exit code is the call's.
+    assert_eq!(fx::trace_report().exit_code(), 0);
+
+    // The two trace vocabularies, snake_case like the verdicts.
+    for (v, wire) in [
+        (TraceRelation::DeclaredChain, "declared_chain"),
+        (
+            TraceRelation::SameOriginUndeclared,
+            "same_origin_undeclared",
+        ),
+        (
+            TraceRelation::SameOriginRegistryNotLoaded,
+            "same_origin_registry_not_loaded",
+        ),
+    ] {
+        assert_eq!(serde_json::to_value(v).unwrap(), wire);
+    }
+    for (v, wire) in [(HlcReference::Reply, "reply"), (HlcReference::None, "none")] {
+        assert_eq!(serde_json::to_value(v).unwrap(), wire);
+    }
+}
+
 // ─── snapshots (RFC 13 §4.4, #219) ───────────────────────────────────────
 
 /// The `.zsnap` header: the span is the fact a capture header does not
@@ -1340,31 +1446,95 @@ fn a_snapshot_diff_keeps_both_spans_and_its_facets_apart() {
     );
 }
 
-/// An alignment that was asked lists what it paired *and* what it could
-/// not (RFC 13 §4.4: "MUST list, never drop"), and the roll-up rides as
-/// its own rows.
+/// An alignment that was asked and refused (#220) lists what it paired
+/// *and* what it could not (RFC 13 §4.4: "MUST list, never drop"), carries
+/// no roll-up — the comparison was not made — and projects to the reserved
+/// non-verdict.
 #[test]
-fn an_asked_alignment_lists_its_pairs_and_its_unpaired() {
-    let v = serde_json::to_value(fx::snapshot_diff_unmapped()).unwrap();
+fn a_refused_alignment_lists_its_pairs_and_its_unpaired_and_compares_nothing() {
+    let d = fx::snapshot_diff_unmapped();
+    let v = serde_json::to_value(&d).unwrap();
     assert_eq!(
         v["origin_map"],
         json!([{
             "a": "h-3fa9c2d41b7e",
-            "b": "h-3fa9c2d41b7e",
-            "evidence": {"kind": "label", "source": "state/sysinfo/health.host_id"},
+            "b": "h-c0ffee00c0de",
+            "evidence": {"kind": "explicit"},
         }])
     );
     assert_eq!(
         v["unmapped"],
-        json!([{
-            "origin": "h-9b2e4c7a1d05",
-            "side": "b",
-            "reason": "no origin in a publishes the same host_id",
-        }])
+        json!([
+            {
+                "origin": "h-9b2e4c7a1d05",
+                "side": "a",
+                "reason": "label `db` claimed by no origin in b; producer set {logs, sysinfo} matches no origin in b",
+            },
+            {
+                "origin": "h-0badcafe1234",
+                "side": "b",
+                "reason": "label `node` claimed by no origin in a; producer set {sysinfo} matches no origin in a",
+            },
+        ])
     );
-    let subject = &v["by_subject"][0];
-    assert_eq!(subject["subject"], "telemetry/sysinfo/disk/var-log/used");
-    assert_eq!(subject["compared"], 1);
-    assert_eq!(subject["only_in_b"], 1);
-    assert_eq!(subject["example"]["value"]["changes"][0]["path"], "value");
+    for absent in ["by_subject", "truncated"] {
+        assert!(v.get(absent).is_none(), "{absent}: {v}");
+    }
+    assert_eq!(v["added"], json!([]));
+    assert_eq!(v["changed"], json!([]));
+    assert_eq!(v["unchanged"], 0);
+    assert!(d.refused());
+    assert_eq!(judgement_exit_code(&d.to_judgement()), 2);
+}
+
+/// An alignment that completed carries every pair with its evidence and
+/// one `by_subject` row per subject — the acceptance case: disjoint
+/// origins, zero differences, exit 0.
+#[test]
+fn a_completed_alignment_carries_its_pairs_and_the_subject_roll_up() {
+    let d = fx::snapshot_diff_aligned();
+    let v = serde_json::to_value(&d).unwrap();
+    assert_eq!(
+        v["origin_map"],
+        json!([
+            {"a": "h-3fa9c2d41b7e", "b": "h-c0ffee00c0de", "evidence": {"kind": "label", "source": "web"}},
+            {"a": "h-9b2e4c7a1d05", "b": "h-0badcafe1234", "evidence": {"kind": "label", "source": "db"}},
+        ])
+    );
+    assert!(v.get("unmapped").is_none(), "empty is absent: {v}");
+    assert_eq!(v["added"], json!([]));
+    assert_eq!(v["removed"], json!([]));
+    assert_eq!(v["changed"], json!([]));
+    assert_eq!(v["unchanged"], 6);
+    let subjects = v["by_subject"].as_array().unwrap();
+    assert_eq!(subjects.len(), 4);
+    assert_eq!(
+        subjects[2],
+        json!({"subject": "state/sysinfo/health", "compared": 2, "differing": 0, "only_in_a": 0, "only_in_b": 0}),
+        "no example when nothing differs"
+    );
+    assert!(!d.differs() && !d.refused());
+    assert_eq!(judgement_exit_code(&d.to_judgement()), 0);
+
+    // Mapped by hand and differing: the subject carries its example.
+    let v = serde_json::to_value(fx::snapshot_diff_normalized()).unwrap();
+    assert_eq!(v["origin_map"][0]["evidence"], json!({"kind": "explicit"}));
+    let health = v["by_subject"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["subject"] == "state/sysinfo/health")
+        .unwrap();
+    assert_eq!(
+        (health["compared"].as_u64(), health["differing"].as_u64()),
+        (Some(2), Some(2))
+    );
+    assert_eq!(health["example"]["value"]["changes"][0]["path"], "source");
+    let logs = v["by_subject"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["subject"] == "state/logs/rotated")
+        .unwrap();
+    assert_eq!(logs["only_in_a"], 1);
 }
