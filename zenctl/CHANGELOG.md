@@ -112,9 +112,35 @@ moved (`value` or `bytes`, `verdict`, `registration`, `holder`) with both
 stamps; the envelope carries both headers whole. **Exit 0** identical,
 **1** they differ (a difference *is* the finding), **2** a file could not
 be read — through the one judgement projection, never a hand-rolled
-match. `--normalize-origins` and `--map A=B` parse today and refuse (exit
-2) until chunk DD lands the alignment; when it does, an origin that could
-not be paired is listed as an `unmapped` row, never dropped.
+match.
+
+**`snapshot diff --normalize-origins` — two deployments, one diff** (#220).
+"It works in staging" is unfalsifiable on a bus until two fleets can be
+compared subject by subject; RFC 03 §1.1 makes that possible, because
+publishing identity sits at one fixed base-relative position. The engine
+profiles every host on both sides and plans the alignment on three kinds
+of evidence, in order and never by guessing: an explicit `--map A=B` (a's
+origin = b's; repeatable, requires `--normalize-origins`, refused at the
+edge when it names an origin the files do not hold), the `source` label
+the health/sensor documents carry (RFC 06 §6.2) when it is verified —
+`host_id` is the origin it sits under — and unique among the unpaired on
+both sides, and a producer set unique on both sides. `b` is then read
+through the plan (origin chunk, base, holder, the bridge document's
+`host_id`) and compared as before, and the diff **rolls up per subject**:
+one `subject` row per subject across every origin — "`state/sysinfo/health`
+differs on 2 of 2 origin(s); `state/logs/rotated` 1 only in a" — with
+one example key change; subjects identical everywhere are counted, not
+listed. Every pair rides `origin_map` with its evidence (`explicit` /
+`label <source>` / `producer set`); two deployments' clocks are not
+compared, so a stamp that moved alone is not a change here. **Exit 0**
+identical, **1** they differ, and **2 — refused**: an origin the plan
+could not pair is listed as an `unmapped` row with the count it failed on
+("label `node` claimed by 2 origins in b; producer set {sysinfo} shared by
+2 origins in b"), the comparison is *not made* — no `added`/`removed`/
+`changed`, no roll-up, the word is NOT COMPARED — and the report still
+goes out so a script sees exactly what to `--map`. A diff that compared
+around an origin it could not place would be confident nonsense; "I
+cannot map these" is the finding.
 
 ## 0.6.0 (2026-09-06) — the generators, and three rows that name a host
 

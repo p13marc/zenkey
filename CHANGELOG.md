@@ -75,6 +75,24 @@ ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
   `Deserialize` (a present value is `Asked`; absence stays `NotAsked`
   through `#[serde(default)]`).
 * `SnapshotRow::payload()` decodes a row's `bytes` in one place.
+* **Origin alignment across deployments** (#220). `model::origin_map`:
+  `origin_profiles` reads every host origin's producer set and the
+  `source` label its identity-bridge documents carry (RFC 06 §6.2,
+  `state/<p>/health|sensor`; `Label::verified` when `host_id` is the
+  origin the document sits under; `Asked::NotAsked` when the snapshot
+  holds no such row), and `plan_map` pairs explicit `--map`s, then
+  verified labels unique among the unpaired on both sides, then producer
+  sets unique on both sides, listing everything else as `Unmapped` with
+  the count it failed on — never a guess. `MapError` refuses an explicit
+  pair naming an origin a snapshot does not hold. `diff_normalized` reads
+  `b` through a `MapPlan` (origin chunk, base, holder, the bridge
+  document's `host_id` re-serialised canonically on both sides), runs the
+  same comparison with `DiffOpts::stamps_alone` off — two clocks never
+  agreed — and rolls it up into `SubjectDelta`s; over an incomplete plan
+  it makes no comparison: `SnapshotDiff::refused`, `to_judgement` →
+  `Unobservable`, exit 2. `MapEvidence::Label { source }` carries the
+  label itself. `DiffOpts` gains `stamps_alone` (default `true`; build it
+  with `..DiffOpts::default()`).
 
 - **The RPC trace window** (#215): `call_traced` in `bus/write.rs` —
   subscribe first (the origin's subtree and the fleet's, on two monitors so

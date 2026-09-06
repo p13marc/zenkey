@@ -1446,31 +1446,95 @@ fn a_snapshot_diff_keeps_both_spans_and_its_facets_apart() {
     );
 }
 
-/// An alignment that was asked lists what it paired *and* what it could
-/// not (RFC 13 §4.4: "MUST list, never drop"), and the roll-up rides as
-/// its own rows.
+/// An alignment that was asked and refused (#220) lists what it paired
+/// *and* what it could not (RFC 13 §4.4: "MUST list, never drop"), carries
+/// no roll-up — the comparison was not made — and projects to the reserved
+/// non-verdict.
 #[test]
-fn an_asked_alignment_lists_its_pairs_and_its_unpaired() {
-    let v = serde_json::to_value(fx::snapshot_diff_unmapped()).unwrap();
+fn a_refused_alignment_lists_its_pairs_and_its_unpaired_and_compares_nothing() {
+    let d = fx::snapshot_diff_unmapped();
+    let v = serde_json::to_value(&d).unwrap();
     assert_eq!(
         v["origin_map"],
         json!([{
             "a": "h-3fa9c2d41b7e",
-            "b": "h-3fa9c2d41b7e",
-            "evidence": {"kind": "label", "source": "state/sysinfo/health.host_id"},
+            "b": "h-c0ffee00c0de",
+            "evidence": {"kind": "explicit"},
         }])
     );
     assert_eq!(
         v["unmapped"],
-        json!([{
-            "origin": "h-9b2e4c7a1d05",
-            "side": "b",
-            "reason": "no origin in a publishes the same host_id",
-        }])
+        json!([
+            {
+                "origin": "h-9b2e4c7a1d05",
+                "side": "a",
+                "reason": "label `db` claimed by no origin in b; producer set {logs, sysinfo} matches no origin in b",
+            },
+            {
+                "origin": "h-0badcafe1234",
+                "side": "b",
+                "reason": "label `node` claimed by no origin in a; producer set {sysinfo} matches no origin in a",
+            },
+        ])
     );
-    let subject = &v["by_subject"][0];
-    assert_eq!(subject["subject"], "telemetry/sysinfo/disk/var-log/used");
-    assert_eq!(subject["compared"], 1);
-    assert_eq!(subject["only_in_b"], 1);
-    assert_eq!(subject["example"]["value"]["changes"][0]["path"], "value");
+    for absent in ["by_subject", "truncated"] {
+        assert!(v.get(absent).is_none(), "{absent}: {v}");
+    }
+    assert_eq!(v["added"], json!([]));
+    assert_eq!(v["changed"], json!([]));
+    assert_eq!(v["unchanged"], 0);
+    assert!(d.refused());
+    assert_eq!(judgement_exit_code(&d.to_judgement()), 2);
+}
+
+/// An alignment that completed carries every pair with its evidence and
+/// one `by_subject` row per subject — the acceptance case: disjoint
+/// origins, zero differences, exit 0.
+#[test]
+fn a_completed_alignment_carries_its_pairs_and_the_subject_roll_up() {
+    let d = fx::snapshot_diff_aligned();
+    let v = serde_json::to_value(&d).unwrap();
+    assert_eq!(
+        v["origin_map"],
+        json!([
+            {"a": "h-3fa9c2d41b7e", "b": "h-c0ffee00c0de", "evidence": {"kind": "label", "source": "web"}},
+            {"a": "h-9b2e4c7a1d05", "b": "h-0badcafe1234", "evidence": {"kind": "label", "source": "db"}},
+        ])
+    );
+    assert!(v.get("unmapped").is_none(), "empty is absent: {v}");
+    assert_eq!(v["added"], json!([]));
+    assert_eq!(v["removed"], json!([]));
+    assert_eq!(v["changed"], json!([]));
+    assert_eq!(v["unchanged"], 6);
+    let subjects = v["by_subject"].as_array().unwrap();
+    assert_eq!(subjects.len(), 4);
+    assert_eq!(
+        subjects[2],
+        json!({"subject": "state/sysinfo/health", "compared": 2, "differing": 0, "only_in_a": 0, "only_in_b": 0}),
+        "no example when nothing differs"
+    );
+    assert!(!d.differs() && !d.refused());
+    assert_eq!(judgement_exit_code(&d.to_judgement()), 0);
+
+    // Mapped by hand and differing: the subject carries its example.
+    let v = serde_json::to_value(fx::snapshot_diff_normalized()).unwrap();
+    assert_eq!(v["origin_map"][0]["evidence"], json!({"kind": "explicit"}));
+    let health = v["by_subject"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["subject"] == "state/sysinfo/health")
+        .unwrap();
+    assert_eq!(
+        (health["compared"].as_u64(), health["differing"].as_u64()),
+        (Some(2), Some(2))
+    );
+    assert_eq!(health["example"]["value"]["changes"][0]["path"], "source");
+    let logs = v["by_subject"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["subject"] == "state/logs/rotated")
+        .unwrap();
+    assert_eq!(logs["only_in_a"], 1);
 }
