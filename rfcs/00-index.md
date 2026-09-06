@@ -6,13 +6,24 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.30** (2026-09-04; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.31** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.31** (2026-09-06) — the adopters' batch: three gaps filed by adopters
+  in one week, each "the text cannot say it, so no tool can judge it". The
+  slug is made injective by a reserved prefix on both sides of the
+  passthrough boundary — v1.4's marker collided twice, `_myns` with the
+  literal `x_x5f_myns` and `x@b` with `@b` — at the cost of re-keying every
+  chunk that was ever escaped (03 §2, with the decoder now stated). A bounded
+  reply is an envelope that can say "there is more" and "I stopped early",
+  with a value cursor and `covers_from` (05 §3.2, a section that did not
+  exist under the number the issue cited). Telemetry history is a computed
+  answer served by an ordinary host-origin producer, the influx storage
+  optional beside it (04 §4, 11 §2, 09 §2).
 - **v1.30** (2026-09-04) — the relationship batch: sensors publish
   `evidence/relation/{relation_id}` (a claim that two things are connected)
   and the catalog publishes `edge/{edge_id}`, the resolved conclusion, so the
@@ -37,15 +48,6 @@ what changed and what deliberately did not — is
   (06 §5, §5.5, 04 §1.4); and `alert_ref` is defined byte-precisely as
   `<origin>.<producer>.<alert_key>`, one chunk, readable rather than hashed
   (11 §3.2).
-- **v1.28** (2026-08-29) — the shipped-backend batch: the storage history
-  mode is per *volume*, not per storage — the backend v1.27 wrote down ahead
-  of time has shipped, and chose differently, because Zenoh asks the volume
-  for its capability and the storage manager decides replication and
-  outdated-sample dropping from that answer; configuring `replication` on an
-  all-mode volume is a startup refusal rather than advice, and the `redb` row
-  loses its not-yet-shipped caveat and gains the three facts a deployment
-  needs — mandatory retention, kept tombstones, `_time`-ranged reads
-  (09 §2.1–§2.3).
 
 ---
 

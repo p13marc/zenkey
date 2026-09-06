@@ -1,6 +1,6 @@
 # 03 — Canonical Grammar
 
-**Status: v1.0 (ratified)** · normative chapter · *amended in v1.1, v1.4, v1.6, v1.9 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.1, v1.4, v1.6, v1.9, v1.25 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)*
 
 This chapter defines the canonical key grammar of the convention. Everything
 else in this RFC (planes, RPC, identity, registry) hangs off this shape.
@@ -340,25 +340,75 @@ This convention narrows it:
     first be canonicalized per RFC 5952 and IPv4 to minimal dotted-quad;
     then `.`/`:` → `-` (`10.0.0.7` → `10-0-0-7`, `2001:db8::1` →
     `2001-db8--1`).
-  - systemd unit / filename: literal if already legal *per this section's
-    charset* (not merely Zenoh-legal), else each excluded character is
-    escaped losslessly as `_xNN_` (lowercase hex of the byte) — plain `-`
-    substitution is forbidden because it is not injective (`foo@1.service`
-    and `foo-1.service` must not share a key).
+  - systemd unit / filename / device name / any other foreign string: the
+    value passes through **literally** if — and only if — it is already
+    legal *per this section's charset* (not merely Zenoh-legal) **and does
+    not start with the reserved prefix `x-`**; otherwise it is escaped as
+    `x-` followed by the escaped body, in which every byte outside
+    `[a-z0-9]` is written `_xHH` (lowercase hex of the byte, **no closing
+    underscore**), except that `.` and `-` stay literal unless they are the
+    value's last byte. `_` is therefore always escaped, so inside an
+    escaped body `_` only ever opens an escape. Plain `-` substitution is
+    forbidden because it is not injective (`foo@1.service` and
+    `foo-1.service` must not share a key).
 
-  **Erratum (v1.4) — escaping must converge to an alphanumeric first
-  character.** The charset requires a chunk to *start* alphanumeric, but the
-  `_xNN_` escape itself begins with `_`. An input whose first byte is
-  charset-illegal (e.g. a namespace literal `_myns`, or any value starting
-  with `@`, `.`, or `_`) therefore escapes to a chunk that *still* fails the
-  leading-alphanumeric rule — and a naive "re-escape the illegal leading
-  char" loops forever. A conformant slug MUST guarantee an **alphanumeric
-  first character** so escaping terminates: prefix a reserved alphanumeric
-  marker before escaping (the reference slugger prepends `x` to any value
-  whose escaped form would lead with `_`, e.g. `_myns` → `x_x5f_myns`),
-  making the leading `_` interior and the chunk legal in one pass. The
-  marker is part of the injective encoding, so the original still round-trips
-  from the payload.
+    ```
+    sshd.service   → sshd.service          (legal, passes through)
+    x_x5f_myns     → x_x5f_myns            (legal, passes through)
+    x-foo          → x-x-foo               (legal but reserved-prefixed: escaped)
+    foo@1.service  → x-foo_x401.service
+    _myns          → x-_x5fmyns
+    ETH0           → x-_x45_x54_x480
+    ab.            → x-ab_x2e              (trailing `.` is a boundary byte)
+    ""             → x-_x                  (the empty value, see below)
+    ```
+
+    **Decoding** is a total function on the image: a chunk that starts with
+    `x-` is stripped of the prefix and each `_xHH` is replaced by its byte;
+    any other chunk is the value verbatim. The two sides cannot meet —
+    a passthrough never starts with `x-` and an escaped chunk always does
+    — and within the escaped class `_` is never literal, so the body
+    decodes left to right without lookahead. That is the whole injectivity
+    argument, and a conforming slugger MUST ship the decoder beside the
+    encoder with a round-trip test over both classes. The **empty value**
+    has no legal spelling by the rule alone (`x-` ends in `-`), so it is
+    spelled `x-_x` — an escape with no digits, legal only as the entire
+    body; it cannot collide, because `_` in any non-empty body is `_x5f`.
+
+  **Erratum (v1.31) — the reserved prefix, superseding v1.4.** The rule
+  above replaces two earlier ones, and the record of why matters more than
+  the rule. v1.0 escaped illegal bytes as `_xNN_` and passed every
+  charset-legal value through; v1.4 noticed that a value whose *first* byte
+  is illegal escapes to a chunk that still leads with `_` — a regress a
+  naive re-escape never exits — and fixed the termination by prefixing a
+  marker `x` whenever the escaped form would lead with `_` (`_myns` →
+  `x_x5f_myns`), asserting that the marker was "part of the injective
+  encoding". It was not, twice over. First, the escaped output was itself
+  a legal chunk, so the *literal* value `x_x5f_myns` passed through to the
+  same spelling (tcgui#39, found adopting the slug for Linux network
+  device names, where both spellings are legal names). Second — and this
+  is why a prefix rule on the *input* was not enough by itself — the marker
+  was a byte the body could also start with: `x@b` escaped to `x_x40_b`
+  (literal `x`, then the escape of `@`) and `@b` escaped to `x_x40_b`
+  (marker `x`, then the escape of `@`). A marker that can also be a literal
+  is a second unreserved prefix. The v1.31 rule reserves one prefix on
+  both sides of the boundary — refused on passthrough, mandatory on escape
+  — and drops the closing underscore so that an escape can end a chunk
+  without needing a trailing marker (which would have been the same
+  ambiguity at the other end: `a_` versus `a_x`).
+
+  **Consequence, stated plainly.** Every chunk that was ever *escaped*
+  changes spelling under v1.31 — `_myns` was `x_x5f_myns` and is
+  `x-_x5fmyns`; `foo@1.service` was `foo_x40_1.service` and is
+  `x-foo_x401.service` — and so does every legal value that happens to
+  start with `x-`. Every clean value, every IP slug (the RFC 5952 rule above
+  is untouched) and every ULID slug (lowercased, never escaped) is
+  byte-identical. A deployment whose foreign values are all charset-legal
+  sees nothing; one that slugs device names, mount points, unit names with
+  `@`, or uppercase re-keys those families once. The enforcement crate
+  records the 0.6 → 0.7 → 0.8 spellings in a table and pins them in a test,
+  so the next move fails a build instead of re-keying a fleet silently.
+
 - Wildcards (`*`, `**`) and the sub-chunk wildcard `$*` are **selector**
   syntax and MUST NOT appear in published keys. Published keys and selectors
   MUST be in Zenoh canon form.
