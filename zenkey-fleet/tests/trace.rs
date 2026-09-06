@@ -228,7 +228,7 @@ async fn a_traced_long_running_call_lists_request_then_state_then_event_on_both_
     // The other origin: a count and an example, never a row anywhere.
     assert!(report.concurrent.samples > 0);
     assert_eq!(report.concurrent.keys, 1);
-    assert_eq!(report.concurrent.examples, [other_key.clone()]);
+    assert_eq!(report.concurrent.examples, std::slice::from_ref(&other_key));
     assert!(
         report
             .attributed
