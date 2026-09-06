@@ -11,7 +11,7 @@
 //! deliberately *not* here: it carries no `Serialize`, so it is
 //! [`crate::judge::condition`]'s own working value, not a contract.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::judgement::Judgement;
 
@@ -28,7 +28,7 @@ use super::judgement::Judgement;
 /// `Unobservable` project to `unobservable`, because this wire vocabulary
 /// predates the NotAsked pole and the watchdog evaluates every declared rule
 /// every tick — it never leaves one unasked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CondState {
     /// The condition conclusively does not hold ([`Judgement::NotEstablished`]

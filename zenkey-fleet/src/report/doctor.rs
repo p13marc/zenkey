@@ -162,6 +162,29 @@ pub struct DoctorFinding {
     pub citation: Option<String>,
 }
 
+/// What one doctor run says relative to the previous one (#389): findings
+/// keyed on `(check, subject)`, so evidence and severity drift count as
+/// unchanged. Computed by [`crate::doctor_delta`]; rendered by the GUI
+/// panel and routed by a notifier's `doctor` rule.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct DoctorDelta {
+    /// Findings present now and absent from the previous run.
+    pub new: Vec<DoctorFinding>,
+    /// Findings present in the previous run and gone now.
+    pub fixed: Vec<DoctorFinding>,
+    /// Findings present in both runs.
+    pub unchanged: usize,
+}
+
+impl DoctorDelta {
+    /// Whether `f` is one of the new findings, by its key.
+    pub fn is_new(&self, f: &DoctorFinding) -> bool {
+        self.new
+            .iter()
+            .any(|n| n.check == f.check && n.subject == f.subject)
+    }
+}
+
 /// The full doctor run: findings plus the coverage summary that makes an
 /// empty findings list legible (what was checked, not just what was found —
 /// RFC 05 §3.1: silence needs attribution).

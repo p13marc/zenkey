@@ -4,45 +4,10 @@
 //! never reimplements a check (RFC 08 §6.1's argument: only a check catches
 //! a lying registry, and it must not live in only one frontend).
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use zenkey_fleet::report::{DoctorFinding, DoctorReport};
-
-/// Findings are identified by `(check id, subject)` for delta purposes;
-/// evidence and severity drift count as "unchanged" — the *fact* persists,
-/// its wording may move.
-pub type FindingKey = (zenkey_fleet::report::CheckId, String);
-
-fn key_of(f: &DoctorFinding) -> FindingKey {
-    (f.check, f.subject.clone())
-}
-
-/// One run-over-run delta.
-#[derive(Debug, Default)]
-pub struct Delta {
-    /// Findings present in the previous run and gone now.
-    pub fixed: Vec<DoctorFinding>,
-    /// Keys of findings new in the current run.
-    pub new: BTreeSet<FindingKey>,
-    /// Count of findings present in both runs.
-    pub unchanged: usize,
-}
-
-pub fn delta(previous: &DoctorReport, current: &DoctorReport) -> Delta {
-    let cur_keys: BTreeSet<FindingKey> = current.findings.iter().map(key_of).collect();
-    let prev_keys: BTreeSet<FindingKey> = previous.findings.iter().map(key_of).collect();
-    Delta {
-        fixed: previous
-            .findings
-            .iter()
-            .filter(|f| !cur_keys.contains(&key_of(f)))
-            .cloned()
-            .collect(),
-        new: cur_keys.difference(&prev_keys).cloned().collect(),
-        unchanged: cur_keys.intersection(&prev_keys).count(),
-    }
-}
+use zenkey_fleet::doctor_delta;
+use zenkey_fleet::report::{DoctorDelta, DoctorFinding, DoctorReport};
 
 /// One finished run and the base it was judged against — the staleness
 /// guard (#109). `DoctorReport` is the engine's serde type, shared with
@@ -66,7 +31,9 @@ pub struct DoctorState {
     /// The last *successful* run before `current` — a failed run keeps the
     /// baseline (deltas against nothing would misreport everything as new).
     pub previous: Option<Arc<DoctorReport>>,
-    pub delta: Option<Delta>,
+    /// The engine's run-over-run comparison (#389): keyed on `(check,
+    /// subject)`, shared with zenwatch's `doctor` rule.
+    pub delta: Option<DoctorDelta>,
     pub error: Option<crate::services::ServiceError>,
     /// How many times the schema cache has been cleared this session
     /// (issue #101) — shown so the button is visibly a thing that happened,
@@ -93,7 +60,10 @@ impl DoctorState {
         self.in_flight = false;
         match outcome {
             Ok(run) if run.base == base => {
-                self.delta = self.current.as_deref().map(|prev| delta(prev, &run.report));
+                self.delta = self
+                    .current
+                    .as_deref()
+                    .map(|prev| doctor_delta(prev, &run.report));
                 self.previous = self.current.replace(run.report);
                 self.error = None;
             }
@@ -209,32 +179,6 @@ mod tests {
             state.listen_window(),
             Some(std::time::Duration::from_secs(10))
         );
-    }
-
-    #[test]
-    fn deltas_key_on_check_and_subject() {
-        let prev = report(vec![
-            finding(zenkey_fleet::report::CheckId::SliceSync, "h-1/sysinfo"),
-            finding(
-                zenkey_fleet::report::CheckId::StaleState,
-                "v1/h-1/state/p/health",
-            ),
-        ]);
-        let mut changed = finding(zenkey_fleet::report::CheckId::SliceSync, "h-1/sysinfo");
-        changed.evidence = "different wording".into();
-        let cur = report(vec![
-            changed,
-            finding(zenkey_fleet::report::CheckId::SchemaDrift, "TelemetryPoint"),
-        ]);
-
-        let d = delta(&prev, &cur);
-        assert_eq!(d.unchanged, 1, "evidence drift is still the same finding");
-        assert_eq!(d.fixed.len(), 1);
-        assert_eq!(d.fixed[0].check, zenkey_fleet::report::CheckId::StaleState);
-        assert!(d.new.contains(&(
-            zenkey_fleet::report::CheckId::SchemaDrift,
-            "TelemetryPoint".to_string()
-        )));
     }
 
     fn run(base: &str, findings: Vec<DoctorFinding>) -> DoctorRun {
