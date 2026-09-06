@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29 and v1.30 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29, v1.30 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -556,6 +556,7 @@ Zenoh requires):
 |---|---|---|
 | latest-value | `<base>/v1/*/state/**` | LWW store honouring tombstones (fs/redb/rocksdb-class) |
 | time-series | `<base>/v1/*/telemetry/**` | append-per-key (influx-class) |
+| time-series (computed) | `<base>/v1/*/telemetry/**` subscribed by a **history application** that serves `…/<origin>/@rpc/<producer>/range` | not a storage but an ordinary host-origin producer keeping tiered, downsampled series and answering a bounded, cursor-paginated computed reply ([05 §3.2](05-control-rpc.md)); the influx-class row stays the raw-capture alternative, the two MAY coexist, and neither MAY re-publish on a telemetry key (§1.1). The reference application ships this shape ([11 §2](11-zensight-profile.md), v1.31) |
 | event log | `<base>/v1/*/events/**` | append-only; retention is the **backend database's** policy (e.g. an InfluxDB retention policy) — Zenoh's storage `garbage_collection` GCs metadata, not data |
 | catalog | `<base>/v1/@catalog/state/**` | LWW store — **explicit**, because `*` never matches `@catalog` (design property D4) |
 | catalog history | `<base>/v1/@catalog/state/pdns/**` | time-series capture of an LWW stream — see below |

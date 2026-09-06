@@ -25,6 +25,76 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.31 (2026-09-06, the adopters' batch)** — three amendments, each
+> filed by an application adopting the convention in the week after the
+> 0.7.2 tooling release, and each the same shape: the text could not *say*
+> something, so no tool could *judge* it, so the application invented a
+> local rule and the wire drifted. The fix in every case is text first.
+>
+> **The slug was not injective** ([03 §2](03-grammar.md), an erratum that
+> supersedes v1.4's). A traffic-shaper adopter (tcgui#39) found that
+> `_myns` and the literal value `x_x5f_myns` — both legal Linux device
+> names — landed on one chunk, because v1.4's escaped output was itself a
+> legal chunk that passed through. Looking for the fix found a second
+> collision the issue had not: the v1.4 marker `x` was a byte the body
+> could also start with, so `x@b` and `@b` both escaped to `x_x40_b`. A
+> marker that can also be a literal is a second unreserved prefix, and no
+> rule on the input side alone closes it. The v1.31 rule reserves one
+> prefix, `x-`, on **both** sides of the boundary — refused on passthrough,
+> mandatory on escape — writes escapes as `_xHH` with no closing underscore
+> so an escape can end a chunk without a trailing marker (the same
+> ambiguity at the other end: `a_` versus `a_x`), and states the decoder
+> beside the encoder, because an injectivity claim without a decoder is an
+> assertion. The cost is stated plainly in the chapter: every chunk that was
+> ever escaped changes spelling; every clean value, IP slug and ULID slug is
+> byte-identical. The reference application's own key boundaries — mount
+> points, container names, unit names, interfaces — all route through this
+> function citing it as injective, which is the argument for taking the
+> re-keying now rather than after a collision merges two metric streams.
+>
+> **A bounded reply could not say it stopped early** ([05 §3.2](05-control-rpc.md),
+> new). The issue that asked for it cited "RFC 05 §4's pagination text";
+> there was none — §4 is the late-joiner section, and no chapter mentioned
+> a cursor or a page. The logs example's `after_uid` was an application
+> idiom the convention had never adopted, which is exactly how four bounded
+> handlers came to return a well-formed short page at a scan cap and have
+> every caller conclude end-of-history. The envelope — `items`,
+> `next_cursor`, `partial`, `scanned`, `covers_from` — is a reply type like
+> any other, migrated by [08 §3](08-registry.md)'s deprecate-and-add
+> because a list that becomes an object is a break. Two bounds carry it:
+> a cursor MUST be a *value* (the last emitted key), never a position, or
+> a set that changes between pages skips or repeats silently; and
+> `partial` with no cursor is named a contract violation an observer MAY
+> report, so the one reply shape that means "I gave up and cannot say
+> where" is a finding rather than a page.
+>
+> **Telemetry history as a computed answer** ([04 §4](04-planes.md) gains
+> the row; [11 §2](11-zensight-profile.md) the worked example;
+> [09 §2](09-operations.md) makes the influx recipe optional;
+> [05 §2.1](05-control-rpc.md) one sentence). The reference application
+> shipped history as an ordinary producer — a historian subscribing the
+> class selector and serving `@rpc/historian/range` — after the influx
+> storage failed it four ways (no wildcard selectors, no aggregation on a
+> `_time=` GET, an external database on a 1 GB VM, and a router plugin that
+> cannot run in the CI that judges the deployment). The example is written
+> from what exists, not what was proposed, and says out loud the three
+> things the instinct gets wrong: a host origin and not a service origin,
+> because a history application writes no fleet state and two of them are
+> plain fan-in; series identity is `(origin, producer, subject)`, derivable
+> from a sample alone; and it publishes no telemetry, because it is exactly
+> the thing tempted to. Its `range` states the served `step_s` and
+> `covers_from` through the §3.2 envelope — the coverage gap and the
+> pagination gap were one defect seen twice.
+>
+> **What deliberately did not happen.** No change to the plain-chunk
+> charset, to IP or ULID slugging, or to any key built from a clean value.
+> No query language, total count or server-side session in the envelope —
+> the cursor is the whole state. No `@history` plane and no new class:
+> history is RPC. And no v1.4-style claim that a marker "is part of the
+> injective encoding" without the decoder that would make it one.
+>
+> *Amends: 03, 04, 05, 09, 11.*
+
 > **v1.30 (2026-09-04, the relationship batch)** — one addition and one
 > correction, and the correction is the one to read first.
 >

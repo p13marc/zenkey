@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27 and v1.28 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.
@@ -169,6 +169,15 @@ Notes:
 - Media is never stored (recording is a deliberate consumer, not a storage
   rule); blob chunks MAY be stored to make the router a content cache
   ([07-bulk-planes.md §2](07-bulk-planes.md)).
+- The `timeseries` storage is **optional** where a history application
+  runs (v1.31): the reference deployment answers charts from
+  `@rpc/historian/range` — an ordinary producer that subscribes the
+  telemetry class and keeps tiered series ([04 §4](04-planes.md),
+  [11 §2](11-zensight-profile.md)) — and keeps the influx capture only where
+  raw samples are wanted. The reasons recorded there: the influx backend
+  cannot serve wildcard selectors, a `_time=` GET has no aggregation, an
+  external database is the wrong shape for a 1 GB VM, and an out-of-tree
+  router plugin cannot run in the CI that judges the deployment.
 
 ### 2.1 Choosing volumes
 

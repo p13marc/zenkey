@@ -1,6 +1,6 @@
 # 11 — Reference Application Profile: ZenSight
 
-**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29 and v1.30 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29, v1.30 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)*
 
 > **Registry location note (2026-07).** The registry *data* this profile
 > describes (`registry/*.toml` for the ten producers and `@catalog`, plus
@@ -97,6 +97,13 @@ zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action                       (gated writ
 zensight/v1/h-3fa9c2d41b7e/telemetry/logs/by_severity/error
 zensight/v1/h-3fa9c2d41b7e/@rpc/logs/events?since=1720000000000;max=500
 
+# historian (host-origin; a computed history application, 04 §4 — see below)
+zensight/v1/h-3fa9c2d41b7e/@rpc/historian/range?series=h-9d02aa17c44f/sysinfo/cpu/usage;from=…;to=…;step=60
+zensight/v1/h-3fa9c2d41b7e/@rpc/historian/series?prefix=sysinfo
+zensight/v1/h-3fa9c2d41b7e/@rpc/historian/timeline?after_uid=01jgxqz4yqk8v6txw3m9f2a7cd;max=200
+zensight/v1/h-3fa9c2d41b7e/@rpc/historian/stats
+zensight/v1/h-3fa9c2d41b7e/state/historian/health                    (framework state only)
+
 # parallax (media)
 zensight/v1/h-3fa9c2d41b7e/@media/parallax/cam0/video/h264/high
 zensight/v1/h-3fa9c2d41b7e/@media/parallax/cam0/preview/jpeg
@@ -120,6 +127,44 @@ zensight/v1/@catalog/@rpc/names?ip=93.184.216.34
 # relationship claims (pve, container, probe, netlink — the inputs to the above)
 zensight/v1/h-3fa9c2d41b7e/state/pve/evidence/relation/r-f5f9a2edb9601155
 ```
+
+**The historian, stated as what shipped (v1.31).** Telemetry history in
+this application is a **computed answer**, not a storage: `zensight-historian`
+subscribes `zensight/v1/*/telemetry/**` through the advanced subscriber
+(history + recovery), keeps tiered downsampled series, and serves four read
+procedures. Four things about it are worth saying out loud because the
+instinct runs the other way on each:
+
+- **It is a host-origin producer, not a service origin.** Service origins
+  exist for single-writer fleet *state* — the reason `@catalog` and
+  `@desired` are ones — and a history application writes none; it only
+  answers RPC. Two historians (one per site, or one per host) are then
+  ordinary [05 §2.1](05-control-rpc.md) fan-in with no claim protocol,
+  each answering `range` from its own ring.
+- **Series identity is `(origin, producer, subject)`** — the wire key minus
+  the class chunk. It is derivable from a sample alone, so it survives a
+  catalog merge and a correlator outage; entity resolution is a query-time
+  join, never a storage key.
+- **It publishes no telemetry.** [04 §1.1](04-planes.md) already forbids
+  re-publishing on a data key; it is restated here because a history
+  application is exactly the thing tempted to re-emit. Its own numbers ride
+  its health document and `stats`.
+- **`range` answers through the [05 §3.2](05-control-rpc.md) envelope**:
+  `step` is clamped to a tier and the *served* `step_s` is stated in the
+  reply; `covers_from` states the oldest instant that tier could answer
+  for, so a sub-minute query over a hot ring cannot pass ten minutes off as
+  the day; `agg` defaults by the subject's kind — counter → rate, gauge →
+  avg, bool → max. `timeline` (events and alert transitions, newest first)
+  carries the `@rpc/logs/events` cursor contract, `after_uid`.
+
+A declared-but-unbuilt procedure answers `error/unsupported`
+([05 §3](05-control-rpc.md)) rather than going undeclared: an undeclared key
+times out, and a timeout is indistinguishable from a slow fleet, a dropped
+reply or a wrong key. [08 §6.1](08-registry.md)'s coverage check caught a
+real bug the first time that was got wrong. On cost, this chapter asserts
+no figure: at 10 000 series the reference implementation misses two of its
+own storage targets, measured and recorded in `zensight-historian/docs/storage.md`
+(zensight#911).
 
 **The profile's framework extension (v1.25).** The framework block above
 is the neutral set of [04-planes.md §1.4](04-planes.md) plus one
@@ -156,6 +201,7 @@ Conceptual correspondence (shipped grammar per
 | `_meta/entity/host/<id>` | `@catalog/state/entity/<id>` | |
 | *(none — GUI-local `EdgeKind` derived from `@rpc` replies)* | `@catalog/state/edge/<edge-id>` | **new in v1.30**: the topology graph was derived inside one GUI from netring's matrix, netlink's neighbours and gateways, and never left it. Sensors now claim (`evidence/relation/<relation-id>`) and the catalog concludes ([06 §5.6](06-identity.md)); §3.3 below binds both ids |
 | *(none — flow adjacency, GUI-local)* | **`@rpc/netring/matrix`, deliberately not an edge** | per-observed-peer and unbounded; [06 §5.6](06-identity.md) makes the exclusion normative |
+| *(none — GUI-local charts over the influx storage)* | `…/<origin>/@rpc/historian/range` | **new in v1.31**: telemetry history as a computed answer ([04 §4](04-planes.md)); the influx capture stays the raw alternative and is optional ([09 §2](09-operations.md)) |
 | `_meta/query/{entities,names}` | GET on entity state / `@catalog/@rpc/names` | |
 | `_meta/correlator/@/alive` | `@catalog/state/alive` | |
 | `zensight/@pdns/<ip>` | `@catalog/state/pdns/<ip>` | historical tier = storage choice ([06 §5.2](06-identity.md)) |

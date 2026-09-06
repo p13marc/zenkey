@@ -1,6 +1,6 @@
 # 05 — Control Plane: `@rpc`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2 and v1.25 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)*
 
 All interaction — questions, instructions, downloads-of-detail — happens on
 the `@rpc` plane through **queryables** (request/reply), never through
@@ -72,6 +72,10 @@ discipline does, and fleet callers MUST follow it:
   roster (`<base>/v1/*/state/*/alive`, [04-planes.md §5](04-planes.md)) to
   attribute non-replies — the reply set alone cannot say who *should* have
   answered.
+  Several instances of one read procedure — several historians, one per
+  host, each answering `range` from its own ring ([11 §2](11-zensight-profile.md))
+  — are ordinary fan-in under this rule: each replies on its own concrete
+  key and the caller joins them the same way (v1.31).
 - **Write fan-out.** A fan-out (`*`-origin) call to a `kind = "write"` /
   `fanout = "forbidden"` procedure MUST be refused — by the builder (no
   `FleetSelector` overload is generated for it), by the registry (admission
@@ -109,7 +113,8 @@ shape:
 sockets, flows, log lines) is held in bounded rings at the producer and
 served on demand; it never rides the data classes
 ([04-planes.md R3](04-planes.md)). Replies are `Vec<Record>` of the
-registered reply type.
+registered reply type — or, for a reply that is bounded and may stop
+early, the §3.2 envelope around that list (v1.31).
 
 **Write** — instructions with immediate effect (`set`, `apply`, `trigger`).
 The GET carries the instruction as its payload. **A value reply always
@@ -190,6 +195,62 @@ specific host. The discipline that makes silence attributable:
 - callers consult the liveliness roster to classify: not on roster =
   offline/unenrolled; on roster + error reply = refused; on roster + no
   reply within timeout = investigate.
+
+### 3.2 Bounded and computed answers (normative, v1.31)
+
+§4 reserves RPC for what state cannot express — parameterised,
+high-cardinality, or *computed* replies — and every such reply is bounded:
+a ring has a size, a scan has a cap, a downsampled series has a tier that
+covers some window and not another. A bounded reply has to be able to say
+two things a bare list cannot: **"there is more"** and **"I stopped
+early"**. Without the second, a search that hit its scan cap with zero
+matches, a range whose tier could not cover the window asked for, and a
+filter applied after the page cap all return a well-formed short page —
+and the caller concludes end-of-history. Four handlers of the reference
+application did exactly that before this section existed.
+
+A reply that is paginated or that MAY stop early is therefore an
+**envelope**, not a list:
+
+```json
+{
+  "items":       [ ... ],
+  "next_cursor": "<opaque>" | null,
+  "partial":     false,
+  "scanned":     4096,
+  "covers_from": "<instant>" | null
+}
+```
+
+- `items` is the page, in the order the procedure documents.
+- `next_cursor` non-null means more; `null` means the walk is complete
+  **for the filter given**. A cursor is opaque to the caller but MUST be a
+  **value** cursor — the last emitted key, id or instant — never a
+  position: a set that grows or shrinks between pages otherwise skips or
+  repeats silently, and the reference historian had exactly that defect.
+- `partial: true` means the producer stopped before completing the walk —
+  scan cap, tier coverage, time budget — and the caller MUST NOT treat a
+  short page as the end. It MAY continue from `next_cursor` when one is
+  offered. `partial: true` **with** `next_cursor: null` is a contract
+  violation: the producer says it stopped early and offers no way on. An
+  observer MAY report it as a finding ([13 §3](13-observer-conformance.md)).
+- `scanned` is advisory — what the page cost — so a caller can tell an
+  expensive empty page from a cheap one. It MAY be omitted.
+- `covers_from` states the oldest instant the answer *could* have covered,
+  for a computed answer whose coverage is narrower than what was asked: a
+  sub-minute query over a hot ring that answers ten minutes as if they were
+  the whole day is the "stopped early" gap in time rather than in count.
+  It MAY be omitted by procedures that have no notion of coverage.
+
+The envelope is a reply *type* like any other: the registry declares the
+procedure's `reply` as the application's page type (`Page<T>` in its type
+table, [08 §5](08-registry.md)), and a procedure that shipped a bare list
+migrates by [08 §3](08-registry.md)'s rule — a new procedure with the
+envelope reply beside the old one, the old one deprecated — because a
+reply shape is a contract and a list that becomes an object is a break.
+What is deliberately *not* here: a query language, a total count (a bounded
+producer cannot know it without the unbounded walk this section exists to
+avoid), and a server-side session — the cursor is the whole state.
 
 ## 4. Late-joiner seeds are state, not RPC
 
