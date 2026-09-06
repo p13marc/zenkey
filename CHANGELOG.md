@@ -17,6 +17,49 @@ Versions per crate, because they move independently:
 
 ---
 
+## Unreleased
+
+### zenkey-fleet
+
+* **The `.zsnap` snapshot** (#219, RFC 13 §4.4). `report::{ZsnapHeader,
+  SnapshotRow, Snapshot, SnapshotReport, SnapshotDiff, KeyChange}` and
+  the row's four facet vocabularies — `StamperWire` (O7), `RegistrationWire`
+  (O2, the `TopicVerdict` spellings), `VerdictWire` (three-valued, tagged
+  `state`) and `Holder` (`live {origin, answered_by}` / `storage_only` /
+  `unattributed {reason}`, tagged `kind`) — plus the origin-alignment
+  shapes (`OriginPair`, `MapEvidence`, `Unmapped`, `SubjectDelta`) settled
+  now for chunk DD. `bus::query::snapshot_get` is the third sibling of
+  `fleet_get` and `state_snapshot`: payload *and* timestamp, with the
+  replier's zid. `model::snapshot` (`fold_latest`, `holder_of`,
+  `registration_of`, `verdict_of`, `stamper_of`) and
+  `model::snapshot_diff::diff_snapshots` are session-free;
+  `tape::snapshot` carries `ZsnapWriter`/`ZsnapReader` (version 1, an
+  unknown version refused in the `.zrec` reader's words) and, under
+  `decode`, `take_snapshot` — prewarm + seal, the roster ask joined with
+  one GET per selector, the span measured over all of it.
+* **`ValueDiff`, `Change` and `ByteDiff` moved** from `model::diff` to
+  `report::diff` and gained `Serialize`/`Deserialize` (`Change` is tagged
+  `op: added | removed | changed`). The algorithms (`diff`, `byte_diff`)
+  stay in `model::diff`; the old `model::diff::{ValueDiff, Change}`
+  spelling and the root re-exports (`ValueDiff`, `Change`, `ByteDiff`,
+  `value_diff`, `byte_diff`) resolve unchanged. `Asked<T>` now implements
+  `Deserialize` (a present value is `Asked`; absence stays `NotAsked`
+  through `#[serde(default)]`).
+* `SnapshotRow::payload()` decodes a row's `bytes` in one place.
+
+### zenctl
+
+* **`snapshot`** and **`snapshot diff`** — see `zenctl/CHANGELOG.md`.
+
+### zengui
+
+* A `.zsnap` opens from the Replay tab and sits beside the live world
+  (no mode entered); the Inspector's History section compares the key's
+  newest sample against the snapshot's row, captioned by the snapshot's
+  moment and span (#219).
+
+---
+
 ## 0.8.0 — what the adopters found (2026-09-06)
 
 **Tagged `0.8.0`** (bare, per the scheme since 0.7.1) on 2026-09-06; the three
