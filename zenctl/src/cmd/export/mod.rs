@@ -94,7 +94,7 @@ pub async fn run(cli: crate::cli::ExportArgs) -> Result<()> {
     let args = &bus;
     let crate::cli::ExportArgs {
         selector,
-        listen,
+        bind,
         i_know,
         validate,
         doctor_every,
@@ -107,12 +107,12 @@ pub async fn run(cli: crate::cli::ExportArgs) -> Result<()> {
 
     // Everything this tool refuses of the input, before a session opens.
     let selector = super::selector_of(&selector, args)?;
-    let listen: SocketAddr = listen
+    let bind: SocketAddr = bind
         .parse()
-        .map_err(|e| unaskable!("--listen {listen:?} is not a socket address: {e}"))?;
-    if !listen.ip().is_loopback() && !i_know {
+        .map_err(|e| unaskable!("--bind {bind:?} is not a socket address: {e}"))?;
+    if !bind.ip().is_loopback() && !i_know {
         return Err(unaskable!(
-            "--listen {listen} is not a loopback address: the exposition names every \
+            "--bind {bind} is not a loopback address: the exposition names every \
              origin, producer and subject on the bus, which is the bus's shape. Pass \
              --i-know to serve it beyond this host."
         ));
@@ -161,9 +161,9 @@ pub async fn run(cli: crate::cli::ExportArgs) -> Result<()> {
     let listener = if once {
         None
     } else {
-        let listener = tokio::net::TcpListener::bind(listen)
+        let listener = tokio::net::TcpListener::bind(bind)
             .await
-            .with_context(|| format!("bind {listen}"))?;
+            .with_context(|| format!("bind {bind}"))?;
         let body: http::Body = Arc::new({
             let shared = Arc::clone(&shared);
             move || exposition(&shared.fold())
@@ -208,7 +208,7 @@ pub async fn run(cli: crate::cli::ExportArgs) -> Result<()> {
         if once {
             format!("observing for {for_secs}s, then one fold")
         } else {
-            format!("serving /metrics on http://{listen}")
+            format!("serving /metrics on http://{bind}")
         },
         if excluded.is_empty() {
             String::new()

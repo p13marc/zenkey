@@ -586,7 +586,7 @@ pub(crate) enum Command {
     /// series named and united by the registry, and the observer's own
     /// blind spots as first-class series beside them.
     ///
-    /// Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a
+    /// `zenctl export --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a
     /// series exists only where the registry declares the subject (names
     /// and units from `unit`/`kind`, never sniffed from the leaf; every
     /// `{var}` a label; the declared `cardinality` bounds the population
@@ -1498,11 +1498,12 @@ pub(crate) struct TimelineArgs {
 pub(crate) struct ExportArgs {
     #[command(flatten)]
     pub(crate) selector: SelectorArgs,
-    /// Address to serve `/metrics` on. Loopback by default; a non-loopback
-    /// address exposes the bus's shape to the network and needs --i-know.
+    /// Address to serve `/metrics` on (`--listen` is the zenoh transport's).
+    /// Loopback by default; a non-loopback address exposes the bus's shape
+    /// to the network and needs --i-know.
     #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:9184")]
-    pub(crate) listen: String,
-    /// Bind a non-loopback --listen address. The refusal you are overriding
+    pub(crate) bind: String,
+    /// Bind a non-loopback --bind address. The refusal you are overriding
     /// names its reason.
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
@@ -1528,7 +1529,12 @@ pub(crate) struct ExportArgs {
     #[arg(long)]
     pub(crate) once: bool,
     /// With --once: how long to observe before the one fold, seconds.
-    #[arg(long = "for", value_name = "SECS", default_value_t = 5.0, requires = "once")]
+    #[arg(
+        long = "for",
+        value_name = "SECS",
+        default_value_t = 5.0,
+        requires = "once"
+    )]
     pub(crate) for_secs: f64,
     /// With --once: print the Prometheus exposition text instead of a
     /// report — a foreign schema, so not with --format.

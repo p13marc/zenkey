@@ -25,9 +25,7 @@ async fn bound() -> (String, tokio::task::JoinHandle<()>) {
 
 /// One raw HTTP/1.0 exchange: the status line, the headers, the body.
 async fn exchange(addr: &str, request: &str) -> (String, Vec<(String, String)>, String) {
-    let mut stream = tokio::net::TcpStream::connect(addr)
-        .await
-        .expect("connect");
+    let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
     stream
         .write_all(request.as_bytes())
         .await

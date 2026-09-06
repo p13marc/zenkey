@@ -9,7 +9,7 @@ sitting.
 ## Unreleased
 
 **`export` — a metrics surface that exports its own blind spots** (#228).
-A root wire verb: `zenctl export --listen 127.0.0.1:9184` serves
+A root wire verb: `zenctl export --bind 127.0.0.1:9184` serves
 `/metrics` as Prometheus text (RFC 13 §3 *Exporter obligations*, v1.34),
 two families deliberately apart. **Observer and contract metrics**:
 `zenkey_observer_dropped_total`, `zenkey_observer_evicted_total{population=
@@ -33,8 +33,8 @@ loses its value line — absence is named, never a flat line; `quiet` is
 judged only for `state` subjects against `ttl_s`; every series carries
 `zenkey_key_last_seen_timestamp_seconds` (constant between scrapes, so an
 idle scrape is byte-identical) and `zenkey_series_drop_exposed_total`.
-Flags: the `SelectorArgs` (default `<base>/v1/*/**`), `--listen`
-(non-loopback needs `--i-know`), `--validate` (2 decodes per key per
+Flags: the `SelectorArgs` (default `<base>/v1/*/**`), `--bind`
+(non-loopback needs `--i-know`; `--listen` stays the transport's), `--validate` (2 decodes per key per
 second), `--doctor-every SECS` (off by default — it costs the control
 plane), `--max-series N` (10 000), `--once` (observe `--for` seconds, fold
 once, print the `export` report through `--format`; `--prom` prints the

@@ -111,8 +111,7 @@ impl Render for ExportSnapshot {
         }
         if self.doctor.is_not_asked() {
             notes.push(
-                Note::coverage("doctor not asked — pass --doctor-every")
-                    .cite("RFC 09 §5.1 O4"),
+                Note::coverage("doctor not asked — pass --doctor-every").cite("RFC 09 §5.1 O4"),
             );
         }
         let stopped = self
@@ -127,11 +126,7 @@ impl Render for ExportSnapshot {
                  rather than a flat line"
             )));
         }
-        if self
-            .series
-            .iter()
-            .any(|s| s.state == SeriesState::Quiet)
-        {
+        if self.series.iter().any(|s| s.state == SeriesState::Quiet) {
             notes.push(Note::caveat(
                 "quiet is judged only for `state` subjects against their declared ttl_s; \
                  telemetry declares no period and is never called quiet",
