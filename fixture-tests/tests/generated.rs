@@ -375,7 +375,7 @@ fn blob_builders_carry_no_producer_chunk() {
 
     // G-07a regression: the canonical (uppercase) display form of the ULID
     // is lowercased at key-build time (RFC 03 §2) — one id, one key. The
-    // builder used to escape each uppercase byte into `_xNN_`, minting a
+    // builder used to escape each uppercase byte into `_xHH`, minting a
     // valid-but-different key no holder answers.
     assert_eq!(
         blob::artifact_key(&local(), "01JGXQZ4YQK8V6TXW3M9F2A7CD"),
