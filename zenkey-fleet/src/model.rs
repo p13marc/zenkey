@@ -53,3 +53,5 @@ pub mod tree;
 
 #[cfg(feature = "decode")]
 pub mod decode;
+#[cfg(feature = "decode")]
+pub mod infer;

@@ -77,6 +77,10 @@ toml = { workspace = true }
 # *is* (#201). A dev-dependency cycle — this crate depends on that one — which
 # cargo permits because the dev edge is cut when building the dependency.
 zenkey-report-fixtures = { workspace = true }
+# The draft a `registry infer` run writes must be refused by the build lint
+# and admitted by `allow_drafts` (RFC 08 §6.1, #225) — the loop the tests
+# close with the real lint rather than a re-statement of it.
+zenkey-build = { workspace = true }
 # `test-util` on top of the workspace features: paused time, so a cancellation
 # window is an exact number of milliseconds rather than a race (#328).
 tokio = { workspace = true, features = ["test-util"] }

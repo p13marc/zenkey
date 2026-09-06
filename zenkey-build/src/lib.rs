@@ -944,9 +944,9 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
         // pinning entries nobody has reviewed would lock guesses in.
         let draft = match header.get("draft") {
             None => false,
-            Some(v) => v.as_bool().ok_or_else(|| {
-                lint(&fname, "[registry] draft must be a boolean (RFC 08 §6.1)")
-            })?,
+            Some(v) => v
+                .as_bool()
+                .ok_or_else(|| lint(&fname, "[registry] draft must be a boolean (RFC 08 §6.1)"))?,
         };
         if draft && compat != Compat::None {
             return Err(lint(

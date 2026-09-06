@@ -232,6 +232,14 @@ pub use model::tree::{TreeNode, TreeRow, TreeRows};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{OBSERVE_LIMIT, structural, structural_value};
+// Registry inference (#225, RFC 08 §6.1): the observation, the inference,
+// and the draft emitter a frontend writes files from.
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use model::infer::{
+    InferObservation, Provenance, draft_file_names, draft_schema_files, infer, to_draft_toml,
+    to_draft_types_toml,
+};
 pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
@@ -293,12 +301,13 @@ pub use report::{
     ConsumerRow, ConsumersReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities,
     DeclaredEntity, DiscoveredBase, DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd,
     EdgeKind, EntityDoc, EntityKind, ExpectReport, Fault, FieldReport, Freshness, GenPlanEntry,
-    GenReport, HelloView, ImpactReport, Judgement, LatencyReport, LatencySummary, MeshLink,
-    NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
-    RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
-    SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact,
-    TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport,
-    ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
+    GenReport, HelloView, ImpactReport, InferReport, InferredProducer, InferredSubject,
+    InferredType, Judgement, LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment,
+    ProducerInfo, RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung,
+    RungAnswer, SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot, SnapshotDiff,
+    SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact, TimelineReport, TopologyEdge,
+    TopologyNode, TopologyReport, TotalityGap, TraceReport, ValueSource, WhyReport, WhyVerdict,
+    ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]

@@ -8439,6 +8439,7 @@ dependencies = [
  "tracing",
  "zblob",
  "zenkey",
+ "zenkey-build",
  "zenkey-report-fixtures",
  "zenoh",
  "zenoh-ext",
