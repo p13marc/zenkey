@@ -19,7 +19,7 @@
 //!   `schema`, `registry`, `storage`, `blob`, `admin`, `key`;
 //! * a **wire verb** is an act or an observation on live traffic, and hangs
 //!   off the root — `get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`,
-//!   `replay`, `timeline`, `serve`, `gen`, `scout`;
+//!   `replay`, `timeline`, `export`, `serve`, `gen`, `scout`;
 //! * a **judgement** is exit-coded under the one contract in [`crate::exit`],
 //!   and the exit-coded assertions live together under `check`.
 //!
@@ -582,6 +582,31 @@ pub(crate) enum Command {
     /// zenoh, not empty. `--from <FILE>` reads a .zrec through the same
     /// projection, so live and replay render identically.
     Timeline(TimelineArgs),
+    /// Serve the bus and its contract as Prometheus metrics (#228): key
+    /// series named and united by the registry, and the observer's own
+    /// blind spots as first-class series beside them.
+    ///
+    /// Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a
+    /// series exists only where the registry declares the subject (names
+    /// and units from `unit`/`kind`, never sniffed from the leaf; every
+    /// `{var}` a label; the declared `cardinality` bounds the population
+    /// and what it refuses is counted). What every other exporter hides is
+    /// exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`, the
+    /// four evicted populations (never summed), coalesced and unstamped
+    /// samples; a series that stopped keeps its labels and state — evicted,
+    /// origin_down, retired — and loses its value, so absence and silence
+    /// are different bytes; payload verdicts are three populations, the
+    /// third `not_validated`; the selectors watched and the planes `**`
+    /// cannot reach ride `zenkey_scope_info`. Killing a producer turns its
+    /// series `origin_down`; forcing drops moves the counter and marks the
+    /// series fed meanwhile; scraping twice with no traffic is
+    /// byte-identical. A foreground observer, explicitly launched, one
+    /// process per invocation, sharing nothing, caching no discovery,
+    /// serving nothing another zenctl reads — the permitted second kind
+    /// (`docs/redesign-2026-07.md` §6.1). REFUSED up front: OTLP,
+    /// histograms and summaries, push gateways and remote write —
+    /// `/metrics` over plain HTTP is the whole surface.
+    Export(ExportArgs),
     /// Stand up a mock queryable: answer every query on a keyexpr with one
     /// static body, and log every ask (#121).
     ///
@@ -1200,8 +1225,8 @@ pub(crate) struct BusArgs {
 
 /// `--format` selects among **zenkey's own three renderings** of a report. A
 /// foreign document format — `--as toml|jsonschema|asyncapi`, `--dot`,
-/// `--json5` — is somebody else's schema, so the two are mutually exclusive
-/// (#243).
+/// `--json5`, `export --prom` — is somebody else's schema, so the two are
+/// mutually exclusive (#243).
 ///
 /// ## Why this is not `conflicts_with`
 ///
@@ -1233,7 +1258,12 @@ pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
     if !typed("format") {
         return;
     }
-    for (id, flag) in [("target", "--as"), ("dot", "--dot"), ("json5", "--json5")] {
+    for (id, flag) in [
+        ("target", "--as"),
+        ("dot", "--dot"),
+        ("json5", "--json5"),
+        ("prom", "--prom"),
+    ] {
         if typed(id) {
             // A clap error, not an `anyhow` one: this is a usage error, and
             // usage errors in this tool exit 2 and print a usage line. The
@@ -1459,6 +1489,51 @@ pub(crate) struct TimelineArgs {
     /// identical. Keys are read under the capture's stated base.
     #[arg(long, value_name = "FILE", conflicts_with_all = ["selectors", "for_secs"])]
     pub(crate) from: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `export` verb's flags (#228) — one struct, the `GenArgs` pattern.
+#[derive(clap::Args)]
+pub(crate) struct ExportArgs {
+    #[command(flatten)]
+    pub(crate) selector: SelectorArgs,
+    /// Address to serve `/metrics` on. Loopback by default; a non-loopback
+    /// address exposes the bus's shape to the network and needs --i-know.
+    #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:9184")]
+    pub(crate) listen: String,
+    /// Bind a non-loopback --listen address. The refusal you are overriding
+    /// names its reason.
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
+    /// Validate payloads against their served schemas (RFC 08 §7), budgeted
+    /// per key per second so the exporter never becomes a load test; the
+    /// `valid`/`invalid` populations move only with this. Without it every
+    /// sample is `not_validated`, and the surface says so.
+    #[arg(long)]
+    pub(crate) validate: bool,
+    /// Run the doctor every SECS and expose its findings as
+    /// `zenkey_doctor_finding{check_id,severity}`. Off by default: a doctor
+    /// run costs the control plane (RFC 13 §3, frugality). Without it
+    /// `zenkey_doctor_info{state="not_asked"}` is the honest series.
+    #[arg(long, value_name = "SECS")]
+    pub(crate) doctor_every: Option<f64>,
+    /// Bound on distinct series; overflow is counted under
+    /// `zenkey_series_suppressed_total{reason="max_series"}`.
+    #[arg(long, value_name = "N", default_value_t = 10_000)]
+    pub(crate) max_series: usize,
+    /// Observe for --for seconds, fold once, print the snapshot as a report
+    /// (`--format`) and exit — no listener. For a script that wants one
+    /// scrape's worth of the surface as JSON.
+    #[arg(long)]
+    pub(crate) once: bool,
+    /// With --once: how long to observe before the one fold, seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 5.0, requires = "once")]
+    pub(crate) for_secs: f64,
+    /// With --once: print the Prometheus exposition text instead of a
+    /// report — a foreign schema, so not with --format.
+    #[arg(long, requires = "once")]
+    pub(crate) prom: bool,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }

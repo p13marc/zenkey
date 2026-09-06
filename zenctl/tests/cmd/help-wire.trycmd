@@ -803,6 +803,9 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
+$ zenctl export --help
+placeholder
+
 $ zenctl serve --help
 Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121).
 

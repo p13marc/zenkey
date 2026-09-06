@@ -26,6 +26,7 @@ pub mod cutover;
 pub mod doctor;
 pub mod echo;
 pub mod expect;
+pub mod export;
 pub mod field;
 pub mod generate;
 pub mod get;

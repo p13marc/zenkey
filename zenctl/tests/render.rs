@@ -1721,6 +1721,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cutover",
         "doctor",
         "expect",
+        "export",
         "field",
         "gen",
         "gen-plan",
@@ -1826,6 +1827,11 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::timeline_report_arrival());
     assert_eq!(s.asked, ["acme/v1/**"]);
     assert_eq!(s.window_s, Some(10.0));
+    // The exporter's scope is its selector, over the span it has been
+    // watching (taken_at - started_at).
+    let s = scoped(&fx::export_snapshot());
+    assert_eq!(s.asked, ["acme/v1/*/**"]);
+    assert_eq!(s.window_s, Some(120.0));
     // The doctor's scope is its listen phase; the fixture ran one.
     let s = scoped(&fx::doctor_report());
     assert_eq!(s.asked, ["v1/**"]);
@@ -2420,4 +2426,62 @@ fn the_consumer_families_never_speak_of_matching_or_listening() {
             );
         }
     }
+}
+
+// ── The metrics surface (#228) ───────────────────────────────────────────────
+
+/// `export --once`: series grouped by producer, an empty value cell where
+/// the state says the series stopped, and the state beside every row.
+#[test]
+fn an_export_snapshot_groups_series_by_producer_and_blanks_a_stopped_value() {
+    assert_data_eq!(table(&fx::export_snapshot()), str![[""]]);
+}
+
+/// The ndjson leads with the envelope — scopes, exclusions, the observer's
+/// counters as separate fields — then one tagged row per series.
+#[test]
+fn an_export_snapshots_ndjson_leads_with_the_envelope_then_tags_every_series() {
+    assert_data_eq!(ndjson(&fx::export_snapshot()), str![[""]]);
+}
+
+/// The honesty floor for the surface, asserted rather than snapshotted:
+/// every O6 population is its own bound note, never a sum; the three
+/// payload populations stay three; the unasked poles are coverage notes.
+#[test]
+fn an_export_snapshot_states_every_bound_by_kind_and_never_sums_them() {
+    let n = notes(&fx::export_snapshot());
+    for expected in [
+        "3 sample(s) dropped while behind",
+        "5 key(s) retired at the stats-table bound",
+        "7 retained sample(s) dropped at the byte budget",
+        "11 retained sample(s) aged out",
+        "13 key(s) retired because their watch was released",
+        "17 sample(s) coalesced between scrapes",
+        "4 sample(s) refused a series past the declared `cardinality` budget",
+        "1 field(s) refused a series past the per-subject field cap",
+    ] {
+        assert!(n.contains(expected), "missing `{expected}` in:\n{n}");
+    }
+    assert!(
+        !n.contains(" 23 ") && !n.contains(" 36 ") && !n.contains(" 56 "),
+        "no sum of the kinds:\n{n}"
+    );
+    assert!(
+        n.contains("128 sample(s) not validated") && n.contains("200 valid and 1 invalid"),
+        "{n}"
+    );
+    assert!(n.contains("2 series stopped"), "{n}");
+    assert!(n.contains("@rpc, @media, @blob, @adv, service origins are excluded"), "{n}");
+
+    // The unasked poles, on a snapshot that asked for nothing.
+    let mut bare = fx::export_snapshot();
+    bare.doctor = zenkey_fleet::report::Asked::NotAsked;
+    bare.registry = zenkey_fleet::report::Asked::NotAsked;
+    bare.contract.payload_valid = 0;
+    bare.contract.payload_invalid = 0;
+    let n = notes(&bare);
+    assert!(n.contains("doctor not asked"), "{n}");
+    assert!(n.contains("no registry loaded"), "{n}");
+    assert!(n.contains("payload verdicts not asked"), "{n}");
+    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
 }

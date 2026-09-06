@@ -32,6 +32,9 @@ pub mod report;
 pub(crate) mod resolve;
 
 mod cmd;
+/// The one HTTP route `export` serves (#228), reachable so its test can bind
+/// it around a fixed body without a bus.
+pub use cmd::export::http as export_http;
 mod completion;
 mod context;
 
@@ -160,6 +163,7 @@ pub async fn run() -> Result<()> {
         Command::Record(a) => cmd::record::run(a).await,
         Command::Replay(a) => cmd::replay::run(a).await,
         Command::Timeline(a) => cmd::timeline::run(a).await,
+        Command::Export(a) => cmd::export::run(a).await,
         Command::Serve(a) => cmd::serve::run(a).await,
         Command::Gen(a) => cmd::generate::run(a, gen_target_typed).await,
         Command::Scout(a) => cmd::scout::run(a).await,

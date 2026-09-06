@@ -19,6 +19,21 @@ Versions per crate, because they move independently:
 
 ## Unreleased
 
+**The exporter — a metrics surface that exports its own blind spots**
+(#228, RFC 13 §3 *Exporter obligations*, v1.34). `zenkey-fleet` gains the
+pure ledger `model::export` (`ExportLedger::{ingest, fold}` — series
+identity `(origin, producer, declared pattern, {var} bindings, field)`,
+values from a structural number, the RFC 11 `{type, value}` tag or
+top-level numeric fields; every refusal counted by reason; drops taint the
+series fed meanwhile; coalescing counted as the third O6 kind), the
+exposition `model::prom::exposition` (a pure function of the snapshot,
+names and units from the registry, deterministic bytes) and the wire shape
+`report::ExportSnapshot` with `SeriesRow`/`SeriesState`/`ObserverCounters`/
+`ContractCounters`/`DoctorSummary`, pinned; `report-fixtures::
+export_snapshot` and `tests/fixtures/export.prom`. `zenctl export` serves it
+(see `zenctl/CHANGELOG.md`); `docs/redesign-2026-07.md` §6.1's Daemon row
+records it as the third of the permitted second kind.
+
 **Consumers and blast radius — the admin space answers who reads this**
 (#224). `zenkey-fleet` gains the consumers join: `consumers` and
 `subject_impact` under `bus/admin.rs` (one pass over the admin space —

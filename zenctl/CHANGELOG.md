@@ -8,6 +8,41 @@ sitting.
 
 ## Unreleased
 
+**`export` — a metrics surface that exports its own blind spots** (#228).
+A root wire verb: `zenctl export --listen 127.0.0.1:9184` serves
+`/metrics` as Prometheus text (RFC 13 §3 *Exporter obligations*, v1.34),
+two families deliberately apart. **Observer and contract metrics**:
+`zenkey_observer_dropped_total`, `zenkey_observer_evicted_total{population=
+keys|retained_bytes|retained_age|unwatched}` (four lines, never summed),
+`zenkey_observer_coalesced_total` (between two scrapes only the newest
+value per series is exposed; the rest are counted), `zenkey_observer_
+unstamped_total`, `zenkey_qos_judged_total` and `zenkey_qos_mismatch_total
+{producer,subject}`, `zenkey_payload_verdict_total{verdict=valid|invalid|
+not_validated}` (three lines, never a ratio; without `--validate` everything
+is `not_validated`), `zenkey_doctor_finding{check_id,severity,subject}` and
+`zenkey_doctor_info{state=not_asked|ran}`, `zenkey_scope_info{selector,
+excluded}` naming the planes a wildcard cannot reach, `zenkey_registry_info
+{state=loaded|not_loaded}`, `zenkey_series_suppressed_total{reason}`,
+`zenkey_unregistered_keys`. **Key metrics from the contract**:
+`zenkey_subject_<producer>_<literal chunks>[_<unit>][_total]` — name and
+unit from the registry's `unit` and `kind`, never sniffed; every `{var}` a
+label by its declared name; the declared `cardinality` bounds the
+population and the refusals are counted. A series that stopped keeps its
+labels and `zenkey_series_state{state=evicted|origin_down|retired}` and
+loses its value line — absence is named, never a flat line; `quiet` is
+judged only for `state` subjects against `ttl_s`; every series carries
+`zenkey_key_last_seen_timestamp_seconds` (constant between scrapes, so an
+idle scrape is byte-identical) and `zenkey_series_drop_exposed_total`.
+Flags: the `SelectorArgs` (default `<base>/v1/*/**`), `--listen`
+(non-loopback needs `--i-know`), `--validate` (2 decodes per key per
+second), `--doctor-every SECS` (off by default — it costs the control
+plane), `--max-series N` (10 000), `--once` (observe `--for` seconds, fold
+once, print the `export` report through `--format`; `--prom` prints the
+exposition instead and is refused with `--format`). Refused up front: OTLP,
+histograms and summaries, push gateways and remote write. The HTTP server
+is hand-rolled (`cmd/export/http.rs`): `hyper` is not in zenctl's graph and
+one route does not earn a framework; the switch point is a second endpoint.
+
 Two new verbs under the `registry` noun and no moved spelling (#224).
 
 **`registry consumers <target>` — who declares a reader of a subject.** A
