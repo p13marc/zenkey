@@ -8,6 +8,35 @@ sitting.
 
 ## Unreleased
 
+Two new verbs under the `registry` noun and no moved spelling (#224).
+
+**`registry consumers <target>` — who declares a reader of a subject.** A
+join over the admin space: every declared subscriber and querier with its
+verbatim keyexpr, related to the target by key algebra (`exact` <
+`narrower` < `wider` < `intersects` < `total`), one row per declaring
+session on the admin `sources` (reported-only when they name none), joined
+to the origin its alive token attaches (#131) and the topology's `whatami`.
+`<target>` is `<producer>/<subject-path>` resolved through the slices to
+the family's wire selector, or a raw key/selector (anything with `*`/`@`,
+or starting at the base or `v1/`). The honesty is the product: an admin
+space that does not answer is `admin: not_available` with no rows — *not
+asked*, never an empty set (RFC 13 §3 O4); a declaration is not proof of
+use; a `**` declaration is `total` and flagged `total_wildcard` rather than
+read as a consumer of this subject; the tool's own session appears and is
+named `(this zenctl session)`; the answering admin spaces are counted. It
+is not matching status (RFC 12 §9), and the render corpus greps the
+family for "matching", "listening", "unmatched" and "no consumers".
+
+**`registry impact <producer>/<path>` — the blast radius of changing one
+declared subject.** The consumers above, plus the RFC 04 §2 storage
+coverage row (made only when an admin space answered — an empty storage
+list would read "uncovered"), the distinct sessions declaring a publisher
+or queryable on the family, and the `[[deprecated]]` ledger entry. A path
+that survives only in the ledger still resolves, class wildcarded.
+
+Families `registry-consumers` and `registry-impact`; rows tagged
+`consumer` and `coverage`; the admin discriminator rides flat in the
+envelope (`admin`, `answered`, `nodes`).
 **`service call --trace [--for SECS]` — call → effect, the RPC trace
 window** (#215). RFC 05 §3's long-running idiom is a declared causal chain
 — `GET @rpc/<p>/artifact/request` → `state/<p>/artifact/<kind>` →

@@ -92,6 +92,7 @@
 pub mod activity;
 pub mod admin;
 pub mod blob;
+pub mod consumers;
 pub mod contexts;
 pub mod detail;
 pub mod doctor;

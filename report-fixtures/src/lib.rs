@@ -1373,6 +1373,97 @@ pub fn topology() -> zenkey_fleet::TopologyReport {
     }
 }
 
+/// The consumers join (#224) with an admin space answering: one narrow
+/// subscriber attributed to a session and its origin, one `**` subscriber
+/// known only through its reporter, and the tool's own querier — named.
+pub fn consumers_report() -> ConsumersReport {
+    ConsumersReport {
+        target: "acme/v1/*/state/sysinfo/health".into(),
+        asked: vec![
+            "@/*/*".into(),
+            "@/*/*/subscriber/**".into(),
+            "@/*/*/publisher/**".into(),
+            "@/*/*/queryable/**".into(),
+            "@/*/*/querier/**".into(),
+            "@/*/*/token/**".into(),
+        ],
+        self_zid: "ffffffff".into(),
+        admin: AdminAnswer::Answered {
+            answered: 1,
+            nodes: 2,
+        },
+        rows: vec![
+            ConsumerRow {
+                zid: "eeff0011".into(),
+                whatami: Some("peer".into()),
+                origins: vec![ORIGIN.into()],
+                attribution: Attribution::Session,
+                kind: EntityKind::Subscriber,
+                keyexpr: format!("acme/v1/{ORIGIN}/state/sysinfo/health"),
+                relation: Relation::Narrower,
+                is_self: false,
+                total_wildcard: false,
+            },
+            ConsumerRow {
+                zid: "ffffffff".into(),
+                whatami: Some("peer".into()),
+                origins: vec![],
+                attribution: Attribution::Session,
+                kind: EntityKind::Querier,
+                keyexpr: "acme/v1/*/state/sysinfo/health".into(),
+                relation: Relation::Exact,
+                is_self: true,
+                total_wildcard: false,
+            },
+            ConsumerRow {
+                zid: "aabbccdd".into(),
+                whatami: Some("router".into()),
+                origins: vec![],
+                attribution: Attribution::ReportedOnly,
+                kind: EntityKind::Subscriber,
+                keyexpr: "**".into(),
+                relation: Relation::Total,
+                is_self: false,
+                total_wildcard: true,
+            },
+        ],
+        reply_elided: 0,
+    }
+}
+
+/// The same ask with no admin space answering: *not asked*, no rows.
+pub fn consumers_not_available() -> ConsumersReport {
+    ConsumersReport {
+        admin: AdminAnswer::NotAvailable,
+        rows: vec![],
+        ..consumers_report()
+    }
+}
+
+/// The blast radius of one state subject (#224): the consumers above, its
+/// coverage row, what else declares on it, and a ledger entry.
+pub fn subject_impact() -> SubjectImpact {
+    SubjectImpact {
+        producer: "sysinfo".into(),
+        path: "health".into(),
+        class: "state".into(),
+        selector: "acme/v1/*/state/sysinfo/health".into(),
+        consumers: consumers_report(),
+        coverage: Some(vec![CoverageRow {
+            producer: "sysinfo".into(),
+            path: "health".into(),
+            ttl_s: Some(120),
+            coverage: Coverage::Covered("main@aabbccdd".into()),
+        }]),
+        declared_publishers: Some(2),
+        declared_queryables: Some(0),
+        deprecated: Some(DeprecationFact {
+            since: Some("2.0".into()),
+            replaced_by: Some("status".into()),
+        }),
+    }
+}
+
 pub fn attachments() -> Vec<zenkey_fleet::OriginAttachment> {
     vec![
         zenkey_fleet::OriginAttachment {

@@ -19,6 +19,7 @@ mod bench;
 mod blobs;
 mod calls;
 mod closing;
+mod consumers;
 mod documents;
 mod fields;
 mod findings;

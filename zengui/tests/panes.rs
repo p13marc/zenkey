@@ -840,6 +840,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             node_detail,
             fields: Box::leak(Box::default()),
             why: Box::leak(Box::default()),
+            consumers: Box::leak(Box::default()),
             base: "",
             observed,
         }
@@ -3042,6 +3043,7 @@ fn projection_inspector<'a>(
         node_detail,
         fields: Box::leak(Box::default()),
         why: Box::leak(Box::default()),
+        consumers: Box::leak(Box::default()),
         base: "",
         observed,
         sp: sp(),
@@ -3512,4 +3514,109 @@ fn the_why_section_renders_not_asked_and_never_no() {
         .is_ok(),
         "impaired refuses to over-claim"
     );
+}
+
+/// The Consumers section (#224) never draws matching status (RFC 12 §9):
+/// never-run reads "not asked", an admin space that did not answer reads
+/// "not asked, never none", a landed join names the tool's own session and
+/// flags the whole-base wildcard — and none of it says "listening",
+/// "matching", "unmatched" or "no consumers".
+#[test]
+fn the_consumers_section_renders_not_asked_and_never_matching_status() {
+    use std::sync::Arc;
+    use zengui::view::consumers::{ConsumersState, section};
+    use zenkey_fleet::report::{
+        AdminAnswer, Attribution, ConsumerRow, ConsumersReport, EntityKind, Relation,
+    };
+
+    const FORBIDDEN: &[&str] = &["matching", "listening", "unmatched", "no consumers"];
+    let find_none = |ui: &mut iced_test::Simulator<'_, Message>, words: &[&str]| {
+        for w in words {
+            assert!(
+                ui.find(*w).is_err(),
+                "{w:?} is matching-status vocabulary (RFC 12 §9)"
+            );
+        }
+    };
+
+    // Never run: not asked, and the cost stated.
+    let state = ConsumersState::default();
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        zengui::message::SlotId::FOLLOW,
+        sp(),
+    ))));
+    assert!(ui.find("consumers?").is_ok(), "the one button");
+    assert!(
+        ui.find(
+            "not asked yet — \"consumers?\" sweeps the admin space once for every \
+             declared subscriber and querier related to this subject; a \
+             declaration is not proof of use (RFC 12 §9)"
+        )
+        .is_ok()
+    );
+    find_none(&mut ui, FORBIDDEN);
+
+    // No admin space answered: not asked, never an empty set.
+    let report = ConsumersReport {
+        target: "v1/h-3fa9c2d41b7e/state/sysinfo/health".into(),
+        asked: vec!["@/*/*".into()],
+        self_zid: "ffffffff".into(),
+        admin: AdminAnswer::NotAvailable,
+        rows: vec![],
+        reply_elided: 0,
+    };
+    let state = ConsumersState {
+        report: Some(Ok(Arc::new(report.clone()))),
+        ..ConsumersState::default()
+    };
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        zengui::message::SlotId::FOLLOW,
+        sp(),
+    ))));
+    assert!(
+        ui.find(
+            "no admin space answered — zenoh's adminspace.enabled is off by \
+             default; the declared readers are not asked, never none (RFC 13 §3 O4)"
+        )
+        .is_ok()
+    );
+    find_none(&mut ui, FORBIDDEN);
+
+    // A landed join: the self row named, the wildcard flagged as total.
+    let row = ConsumerRow {
+        zid: "ffffffff".into(),
+        whatami: Some("peer".into()),
+        origins: vec![],
+        attribution: Attribution::Session,
+        kind: EntityKind::Subscriber,
+        keyexpr: "**".into(),
+        relation: Relation::Total,
+        is_self: true,
+        total_wildcard: true,
+    };
+    let state = ConsumersState {
+        report: Some(Ok(Arc::new(ConsumersReport {
+            admin: AdminAnswer::Answered {
+                answered: 1,
+                nodes: 2,
+            },
+            rows: vec![row],
+            ..report
+        }))),
+        ..ConsumersState::default()
+    };
+    let mut ui = simulator::<Message, _, _>(iced::Element::from(iced::widget::container(section(
+        &state,
+        zengui::message::SlotId::FOLLOW,
+        sp(),
+    ))));
+    assert!(ui.find("ffffffff  (this zengui session) · peer").is_ok());
+    assert!(ui.find("session only, unattributed").is_ok());
+    assert!(
+        ui.find("  subscriber ** — total — a whole-base `**`, intersects everything")
+            .is_ok()
+    );
+    find_none(&mut ui, FORBIDDEN);
 }

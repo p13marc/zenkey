@@ -464,6 +464,9 @@ pub enum PaneMsg {
     /// Inspector Why-section interactions (#214): the why ladder on the
     /// slot's key (#257).
     Why(SlotId, crate::view::why::WhyMsg),
+    /// Inspector Consumers-section interactions (#224): the declared
+    /// readers of the slot's subject, one admin sweep per click.
+    Consumers(SlotId, crate::view::consumers::ConsumersMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
     /// Echo pane interactions (issue #72, echo v2).
@@ -497,7 +500,8 @@ impl PaneMsg {
             | PaneMsg::Blob(_)
             | PaneMsg::Media(_)
             | PaneMsg::Fields(..)
-            | PaneMsg::Why(..) => RightPane::Inspector,
+            | PaneMsg::Why(..)
+            | PaneMsg::Consumers(..) => RightPane::Inspector,
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
             // The Activity dock's streams (#183), and the Connect (#185),
