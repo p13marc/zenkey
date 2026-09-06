@@ -123,6 +123,27 @@ pub fn load(path: String) -> Task<Message> {
     )
 }
 
+/// Load a `.zsnap` (#219), off the update thread like [`load`]: the parse
+/// is bounded only by the file. Lands on [`ReplayMsg::SnapshotLoaded`],
+/// whose handler clears the loading claim the `SnapshotOpen` handler
+/// raised.
+pub fn load_snapshot(path: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            let parsed = std::fs::File::open(&path)
+                .map_err(ServiceError::of)
+                .and_then(|f| {
+                    zenkey_fleet::ZsnapReader::new(std::io::BufReader::new(f))
+                        .and_then(zenkey_fleet::ZsnapReader::read_all)
+                        .map_err(ServiceError::of)
+                })
+                .map(Arc::new);
+            (path, parsed)
+        },
+        |(path, r)| Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::SnapshotLoaded(path, r))),
+    )
+}
+
 /// Write a retained window through the ordinary `.zrec` writer (#217): the
 /// header names the watches the ring was fed under (O4/O5), and the epoch
 /// is the window's own start, so every row keeps the arrival offset the

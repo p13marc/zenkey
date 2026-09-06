@@ -49,9 +49,10 @@ consumers|impact` render it (see `zenctl/CHANGELOG.md`); zengui's
 Inspector gains a Consumers section — one admin sweep per click, never
 ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
 `declared_entities_within` keeps the elided count, `EntityKind::ALL`.
+
 ### `zenkey-fleet`
 
-- **The fleet timeline** (#216): `model/timeline.rs`, a pure projection
+* **The fleet timeline** (#216): `model/timeline.rs`, a pure projection
   from a window of samples — live `SampleView`s or `.zrec` lines — to one
   merged ordering on a stated clock, lanes per origin/producer, and the
   three provenances of a position kept apart. `Placed<HlcAxis>::new` is the
@@ -64,10 +65,68 @@ ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
   unavailable with a fixed reason. `ZrecItem::Sample` gains `source`, so a
   replayed window classifies its stampers exactly as the live one did.
   Deliberately no edges.
+* **The `.zsnap` snapshot** (#219, RFC 13 §4.4). `report::{ZsnapHeader,
+  SnapshotRow, Snapshot, SnapshotReport, SnapshotDiff, KeyChange}` and
+  the row's four facet vocabularies — `StamperWire` (O7), `RegistrationWire`
+  (O2, the `TopicVerdict` spellings), `VerdictWire` (three-valued, tagged
+  `state`) and `Holder` (`live {origin, answered_by}` / `storage_only` /
+  `unattributed {reason}`, tagged `kind`) — plus the origin-alignment
+  shapes (`OriginPair`, `MapEvidence`, `Unmapped`, `SubjectDelta`) settled
+  now for chunk DD. `bus::query::snapshot_get` is the third sibling of
+  `fleet_get` and `state_snapshot`: payload *and* timestamp, with the
+  replier's zid. `model::snapshot` (`fold_latest`, `holder_of`,
+  `registration_of`, `verdict_of`, `stamper_of`) and
+  `model::snapshot_diff::diff_snapshots` are session-free;
+  `tape::snapshot` carries `ZsnapWriter`/`ZsnapReader` (version 1, an
+  unknown version refused in the `.zrec` reader's words) and, under
+  `decode`, `take_snapshot` — prewarm + seal, the roster ask joined with
+  one GET per selector, the span measured over all of it.
+* **`ValueDiff`, `Change` and `ByteDiff` moved** from `model::diff` to
+  `report::diff` and gained `Serialize`/`Deserialize` (`Change` is tagged
+  `op: added | removed | changed`). The algorithms (`diff`, `byte_diff`)
+  stay in `model::diff`; the old `model::diff::{ValueDiff, Change}`
+  spelling and the root re-exports (`ValueDiff`, `Change`, `ByteDiff`,
+  `value_diff`, `byte_diff`) resolve unchanged. `Asked<T>` now implements
+  `Deserialize` (a present value is `Asked`; absence stays `NotAsked`
+  through `#[serde(default)]`).
+* `SnapshotRow::payload()` decodes a row's `bytes` in one place.
+
+- **The RPC trace window** (#215): `call_traced` in `bus/write.rs` —
+  subscribe first (the origin's subtree and the fleet's, on two monitors so
+  a busy fleet's lag lands on the concurrent lane's own `dropped` and never
+  as a break in the origin's lanes), take `t0`, call exactly as `call`
+  does, hold the window. `model/trace.rs` relates each sample to the
+  procedure from values in hand (`TraceTarget::relation_of`, a first-chunk
+  naming heuristic stated as one); the rows take their clocks and
+  provenance from `TimelineRow`, not a second vocabulary. `report/trace.rs`
+  pins `TraceReport` — `subscribed_before_call` always `true` and pinned so
+  an inverted order changes the document — and the exit code is the
+  call's. Additive: `FleetAnswer` carries the reply sample's HLC, and
+  `Responder::reply_stamped` lets a producer stamp its reply, which is what
+  gives a trace its HLC reference (zenoh's timestamping stamps
+  publications, not replies).
+
+### `zenkey`
+
+- `selector::all_under(scope)` — `v1/<scope>/**`, the data-class firehose
+  of one origin or the fleet, typed (#215).
 
 ### `zenctl`
 
+* `timeline`, a new wire verb at the root — see `zenctl/CHANGELOG.md`.
+* **`snapshot`** and **`snapshot diff`** — see `zenctl/CHANGELOG.md`.
+
+### `zengui`
+
+* A `.zsnap` opens from the Replay tab and sits beside the live world
+  (no mode entered); the Inspector's History section compares the key's
+  newest sample against the snapshot's row, captioned by the snapshot's
+  moment and span (#219).
+
+---
 - `timeline`, a new wire verb at the root — see `zenctl/CHANGELOG.md`.
+- `service call --trace [--for SECS]`, the RPC trace window — see
+  `zenctl/CHANGELOG.md`.
 
 ## 0.8.0 — what the adopters found (2026-09-06)
 

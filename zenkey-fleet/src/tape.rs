@@ -13,6 +13,8 @@
 //! * [`generate`] — traffic that never happened, on purpose: mock producers
 //!   and fault patterns, every sample carrying the synthetic marker so that
 //!   nothing downstream can mistake a rehearsal for a fleet.
+//! * [`snapshot`] — `.zsnap`, a fan-in GET kept on disk (RFC 13 §4.4): the
+//!   sibling of a capture, collected *over* a span and saying so.
 //! * [`synth`] — payload bodies for the above, synthesized from a schema.
 //! * [`bench`](mod@bench) — traffic manufactured to be timed, and the timing.
 //!
@@ -25,6 +27,7 @@
 pub mod bench;
 pub mod ingest;
 pub mod record;
+pub mod snapshot;
 
 #[cfg(feature = "decode")]
 pub mod generate;

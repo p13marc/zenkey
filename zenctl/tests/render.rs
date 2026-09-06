@@ -888,6 +888,95 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
     assert_eq!(envelope["timeout_s"], 5.0);
 }
 
+/// `service call --trace` (#215): the reply block first, exactly as `service
+/// call` draws it, then the three lanes — the declared chain with both
+/// clocks and the stamper, the same-origin lane, and the concurrent count
+/// as one line — with a drop rendered as a break before the row it
+/// preceded. The ndjson stream is the call's answers, then every effect
+/// tagged with its lane, then the concurrent lane as one row.
+#[test]
+fn a_traced_call_draws_the_reply_then_three_lanes_and_never_an_edge() {
+    assert_data_eq!(
+        table(&fx::trace_report()),
+        str![[r#"
+h-3fa9c2d41b7e:
+{
+  "id": "01HZY"
+}
+observed after the call · declared chain (long-running) · Δarrival · ΔHLC (stamper) · key
+ +12.500ms    +8ms (foreign:33)  acme/v1/h-3fa9c2d41b7e/state/demo/artifact/pcap    declared-chain
+                                 ⋯ 3 sample(s) dropped while behind
++250.000ms  +246ms (foreign:33)  acme/v1/h-3fa9c2d41b7e/events/demo/artifact/01HZY  declared-chain
+
+observed after the call · same origin, not declared · Δarrival · ΔHLC (stamper) · key
+  +1.000ms                       acme/v1/h-3fa9c2d41b7e/telemetry/other/noise       same-origin, not declared
+
+concurrent, not attributed
+40 sample(s) on 2 key(s) from other origins during the window — e.g. acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu, acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&fx::trace_report()),
+        str![[r#"
+{"answers":1,"attributed":2,"call_returned_ms":4.2,"chain_rule":"first-chunk naming heuristic (RFC 05 §3 idiom); a naming coincidence is tagged the same way","dropped":3,"excluded":"the verbatim planes (`@rpc`, `@blob`, `@media`, `@adv`, `@catalog`): `**` never crosses an `@`-chunk (RFC 03 §4 D2), so the artifact bytes on `@blob` are outside this window — excluded, not empty","hlc_reference":"reply","idiom":"long-running","key":"acme/v1/h-3fa9c2d41b7e/@rpc/demo/artifact/request","keys_evicted":0,"notes":[{"cite":"RFC 05 §3","text":"chain rule: first-chunk naming heuristic (RFC 05 §3 idiom); a naming coincidence is tagged the same way"},{"cite":"RFC 09 §5.1 O7","text":"ΔHLC is measured against the reply's HLC (7680000000000000000/33) — the stamping node's clock, which is not necessarily the responder's and is never this caller's (it mints none); a different stamper on a row is a different clock"},{"cite":"RFC 03 §4 D2","text":"the verbatim planes (`@rpc`, `@blob`, `@media`, `@adv`, `@catalog`): `**` never crosses an `@`-chunk (RFC 03 §4 D2), so the artifact bytes on `@blob` are outside this window — excluded, not empty"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind on the origin's window — each is a break before the next row of every lane"}],"registry_loaded":true,"reply_hlc":"7680000000000000000/33","report":"trace","same_origin":1,"scopes":["acme/v1/h-3fa9c2d41b7e/**","acme/v1/*/**"],"subscribed_before_call":true,"t0_unix_s":1788000000.5,"timeout_s":5.0,"window_s":10.0}
+{"ok":true,"origin":"h-3fa9c2d41b7e","row":"answer","value":{"id":"01HZY"}}
+{"arrival_delta_ms":12.5,"hlc":"7680000000034359738/33","hlc_delta_ms":8,"key":"acme/v1/h-3fa9c2d41b7e/state/demo/artifact/pcap","kind":"put","lane":"attributed","payload_bytes":40,"relation":"declared_chain","row":"effect","stamped_by":"foreign:33"}
+{"arrival_delta_ms":250.0,"break_before":3,"hlc":"7680000001056964608/33","hlc_delta_ms":246,"key":"acme/v1/h-3fa9c2d41b7e/events/demo/artifact/01HZY","kind":"put","lane":"attributed","payload_bytes":40,"relation":"declared_chain","row":"effect","stamped_by":"foreign:33"}
+{"arrival_delta_ms":1.0,"key":"acme/v1/h-3fa9c2d41b7e/telemetry/other/noise","kind":"put","lane":"same_origin","payload_bytes":40,"relation":"same_origin_undeclared","row":"effect"}
+{"dropped":0,"examples":["acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu","acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem"],"keys":2,"row":"concurrent","samples":40}
+
+"#]]
+    );
+    let n = notes(&fx::trace_report());
+    assert!(
+        n.contains("chain rule: first-chunk naming heuristic"),
+        "{n}"
+    );
+    assert!(n.contains("never crosses an `@`-chunk"), "{n}");
+    assert!(n.contains("never caused"), "{n}");
+    assert!(n.contains("3 sample(s) dropped while behind"), "{n}");
+    assert!(!n.contains("registry not loaded"), "{n}");
+    assert!(
+        !n.contains("→") && !n.contains("caused by"),
+        "no edge, no arrow: {n}"
+    );
+
+    // No registry, no reply HLC: an empty attributed lane is a *coverage*
+    // sentence, never a silent header; the chain is unjudgeable and says so;
+    // ΔHLC is absent, so the stamped rows show `—` (not asked) rather than
+    // an empty cell that would read as unstamped.
+    let report = fx::trace_report_no_registry();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+h-3fa9c2d41b7e:
+{
+  "id": "01HZY"
+}
+observed after the call · same origin — registry not loaded, chain unjudgeable · Δarrival · ΔHLC (stamper) · key
+ +12.500ms  —  acme/v1/h-3fa9c2d41b7e/state/demo/artifact/pcap    same-origin, registry not loaded
++250.000ms  —  acme/v1/h-3fa9c2d41b7e/events/demo/artifact/01HZY  same-origin, registry not loaded
+  +1.000ms     acme/v1/h-3fa9c2d41b7e/telemetry/other/noise       same-origin, registry not loaded
+
+concurrent, not attributed
+40 sample(s) on 2 key(s) from other origins during the window — e.g. acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu, acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem
+
+"#]]
+    );
+    let n = notes(&report);
+    assert!(n.contains("registry not loaded — chain unjudgeable"), "{n}");
+    assert!(
+        n.contains("nothing in the declared chain was observed"),
+        "{n}"
+    );
+    assert!(n.contains("the reply carried no HLC"), "{n}");
+    assert!(
+        !n.contains("dropped while behind"),
+        "zero costs emit nothing: {n}"
+    );
+}
+
 /// RFC 05 §3.2 (#424): a bounded reply that stopped early says so on the
 /// line — a caller MUST NOT read a short page as the end — and `partial:
 /// true` with `next_cursor: null` is the contract violation the RFC says an
@@ -1182,6 +1271,142 @@ would replay 4800 put(s) and 20 tombstone(s) from acme/v1/** (captured 2026-08-2
 "#]]
     );
     assert!(notes(&fx::replay_report()).contains("partial view of a partial view"));
+}
+
+/// A snapshot states its span in every format (RFC 13 §4.4, #219): the
+/// table's second line, and a caveat note the machine formats carry.
+#[test]
+fn a_snapshot_states_its_span_and_its_holders() {
+    assert_data_eq!(
+        table(&fx::snapshot_report()),
+        str![[r#"
+snapshot of acme/v1/**: 5 key(s) — 2 live, 2 storage-only, 1 unattributed → fleet.zsnap
+collected over 1.25s from 2026-09-06T00:00:00Z (1 asked, 6 answered)
+
+"#]]
+    );
+    let n = notes(&fx::snapshot_report());
+    assert!(n.contains("not at an instant"), "{n}");
+    assert!(n.contains("`**` cannot cross"), "{n}");
+    assert!(n.contains("lost last-writer-wins"), "{n}");
+    assert!(
+        !n.contains("roster not asked"),
+        "the fixture asked the roster: {n}"
+    );
+    assert_data_eq!(
+        ndjson(&fx::snapshot_report()),
+        str![[r#"
+{"header":{"answered":6,"asked":1,"base":"acme","collected_at":"2026-09-06T00:00:00Z","collection_span_s":1.25,"roster":2,"selectors":["acme/v1/**"],"superseded":1,"zsnap":1},"live":2,"notes":[{"cite":"RFC 13 §4.4","text":"collected over 1.25s, not at an instant — a fan-in GET has no single moment"},{"cite":"RFC 03 §4 D2","text":"`**` cannot cross `@`-planes; they are excluded, not empty"},{"cite":"RFC 09 §5.1 O6","text":"1 answer(s) lost last-writer-wins to a newer reply on the same key"}],"out":"fleet.zsnap","report":"snapshot","storage_only":2,"unattributed":1}
+
+"#]]
+    );
+}
+
+/// A diff states both spans, keeps the facets apart in its rows, and its
+/// human verdict word is the exit code's carrier (#219).
+#[test]
+fn a_snapshot_diff_states_both_spans_and_tags_every_row() {
+    assert_data_eq!(
+        table(&fx::snapshot_diff()),
+        str![[r#"
+a: 5 key(s), span 1.25s at 2026-09-06T00:00:00Z (acme/v1/**)
+b: 5 key(s), span 0.80s at 2026-09-06T00:05:00Z (acme/v1/**)
+1 added, 1 removed, 2 changed, 2 unchanged
+  +  acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used
+  -  acme/v1/h-9b2e4c7a1d05/state/logs/rotated
+  ~  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used  value: 1 change(s) (value: 41.0 → 42.0)
+  ~  acme/v1/h-9b2e4c7a1d05/state/sysinfo/health                 value: 1 change(s) (status: "degraded" → "ok"); holder: storage_only → live(unknown)
+DIFFERENT
+
+"#]]
+    );
+    let n = notes(&fx::snapshot_diff());
+    assert!(n.contains("a: span 1.25s"), "{n}");
+    assert!(n.contains("b: span 0.80s"), "{n}");
+    assert!(n.contains("no origin alignment was asked"), "{n}");
+    assert_data_eq!(
+        ndjson(&fx::snapshot_diff()),
+        str![[r#"
+{"a":{"answered":6,"asked":1,"base":"acme","collected_at":"2026-09-06T00:00:00Z","collection_span_s":1.25,"roster":2,"selectors":["acme/v1/**"],"superseded":1,"zsnap":1},"b":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-09-06T00:05:00Z","collection_span_s":0.8,"roster":2,"selectors":["acme/v1/**"],"zsnap":1},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-09-06T00:00:00Z, b: span 0.80s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant"},{"cite":"RFC 09 §5.1 O4","text":"keys compared verbatim — no origin alignment was asked, so the same host under a different origin reads as removed and added"}],"report":"snapshot-diff","unchanged":2}
+{"key":"acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used","row":"added"}
+{"key":"acme/v1/h-9b2e4c7a1d05/state/logs/rotated","row":"removed"}
+{"key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/ab12"],"value":{"changes":[{"new":42.0,"old":41.0,"op":"changed","path":"value"}],"truncated":0}}
+{"holder":[{"kind":"storage_only","origin":"h-9b2e4c7a1d05"},{"answered_by":"unknown","kind":"live","origin":"h-9b2e4c7a1d05"}],"key":"acme/v1/h-9b2e4c7a1d05/state/sysinfo/health","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/cd34"],"value":{"changes":[{"new":"ok","old":"degraded","op":"changed","path":"status"}],"truncated":0}}
+
+"#]]
+    );
+    // Identity: the clean word, and nothing listed.
+    let same = table(&fx::snapshot_diff_identity());
+    assert!(same.contains("IDENTICAL"), "{same}");
+    assert!(!same.contains("  ~"), "{same}");
+}
+
+/// An alignment that was asked shows its pairs and — the RFC 13 §4.4 MUST —
+/// lists the origin it could not pair, in the table and as its own row.
+#[test]
+fn a_snapshot_diff_lists_an_unpaired_origin_rather_than_dropping_it() {
+    assert_data_eq!(
+        table(&fx::snapshot_diff_unmapped()),
+        str![[r#"
+a: 5 key(s), span 1.25s at 2026-09-06T00:00:00Z (acme/v1/**)
+b: 5 key(s), span 0.80s at 2026-09-06T00:05:00Z (acme/v1/**)
+1 added, 1 removed, 2 changed, 2 unchanged
+  +  acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used
+  -  acme/v1/h-9b2e4c7a1d05/state/logs/rotated
+  ~  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used  value: 1 change(s) (value: 41.0 → 42.0)
+  ~  acme/v1/h-9b2e4c7a1d05/state/sysinfo/health                 value: 1 change(s) (status: "degraded" → "ok"); holder: storage_only → live(unknown)
+origins aligned: 1
+  =  h-3fa9c2d41b7e ↔ h-3fa9c2d41b7e  label
+origins not paired: 1
+  ?  h-9b2e4c7a1d05 (in b)  no origin in a publishes the same host_id
+subject                              compared  differing  only in a  only in b
+telemetry/sysinfo/disk/var-log/used         1          1          0          1
+DIFFERENT
+
+"#]]
+    );
+    let n = notes(&fx::snapshot_diff_unmapped());
+    assert!(n.contains("could not be paired"), "{n}");
+    let rows: Vec<serde_json::Value> = ndjson(&fx::snapshot_diff_unmapped())
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(
+        rows.iter()
+            .any(|r| r["row"] == "unmapped" && r["side"] == "b")
+    );
+    assert!(rows.iter().any(|r| r["row"] == "subject"));
+    assert_eq!(rows[0]["origin_map"][0]["evidence"]["kind"], "label");
+}
+
+/// The two `.zsnap` files the CLI corpus diffs (`tests/cmd/snapshot-diff.trycmd`)
+/// are the shared fixtures, written through the engine's own writer — so a
+/// change to the fixture or the dialect moves both corpora together.
+/// `SNAPSHOTS=overwrite` (`just snapshots`) rewrites them; otherwise they
+/// must already match.
+#[test]
+fn the_zsnap_corpus_fixtures_are_the_shared_fixtures() {
+    for (name, snapshot) in [("a.zsnap", fx::snapshot()), ("b.zsnap", fx::snapshot_b())] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/cmd/fixtures")
+            .join(name);
+        let mut bytes = Vec::new();
+        let mut w = zenkey_fleet::ZsnapWriter::new(&mut bytes, &snapshot.header).unwrap();
+        for row in &snapshot.rows {
+            w.write_row(row).unwrap();
+        }
+        w.finish().unwrap();
+        if std::env::var("SNAPSHOTS").as_deref() == Ok("overwrite") {
+            std::fs::write(&path, &bytes).unwrap();
+        }
+        let on_disk = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("{}: {e} — run `just snapshots`", path.display()));
+        assert_eq!(
+            String::from_utf8(on_disk).unwrap(),
+            String::from_utf8(bytes).unwrap(),
+            "{name} drifted from the shared fixture — run `just snapshots`"
+        );
+    }
 }
 
 /// The O6 eviction count leads, so `| head -5` cannot lose it.
@@ -1747,6 +1972,8 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "scout",
         "service-info",
         "service-list",
+        "snapshot",
+        "snapshot-diff",
         "storage-check",
         "storage-explain",
         "storage-list",
@@ -1754,6 +1981,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "timeline",
         "topic-info",
         "topic-list",
+        "trace",
         "why",
     ];
 
@@ -1827,6 +2055,13 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::timeline_report_arrival());
     assert_eq!(s.asked, ["acme/v1/**"]);
     assert_eq!(s.window_s, Some(10.0));
+
+    // A snapshot's window is its collection span — the RFC 13 §4.4 fact
+    // every rendering states (#219).
+    let s = scoped(&fx::snapshot_report());
+    assert_eq!(s.asked, ["acme/v1/**"]);
+    assert_eq!(s.window_s, Some(1.25));
+
     // The exporter's scope is its selector, over the span it has been
     // watching (taken_at - started_at).
     let s = scoped(&fx::export_snapshot());
@@ -1849,6 +2084,11 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, Some(5.0));
     let s = scoped(&fx::probe_report());
     assert_eq!(s.window_s, Some(5.0), "the probe's observation IS the call");
+    // The trace's scope is both watches over the window — the origin's
+    // subtree and the fleet's; the GET's own ask is inside `call`.
+    let s = scoped(&fx::trace_report());
+    assert_eq!(s.asked, ["acme/v1/h-3fa9c2d41b7e/**", "acme/v1/*/**"]);
+    assert_eq!(s.window_s, Some(10.0));
     let s = scoped(&zenctl::render::GetReport {
         selector: "acme/v1/**/state/**".into(),
         timeout_s: 5.0,
@@ -1889,9 +2129,11 @@ fn every_observing_family_states_its_scope() {
         "probe wide: both selectors state themselves"
     );
 
-    // And the deliberate negative: replay *publishes*; it observes nothing,
-    // so a scope claim would be an invented observation.
+    // And the deliberate negatives: replay *publishes*; it observes nothing,
+    // so a scope claim would be an invented observation — and a snapshot
+    // diff opens no session at all (its two spans ride the envelope).
     assert!(fx::replay_report().scope().is_none());
+    assert!(fx::snapshot_diff().scope().is_none());
 }
 
 /// The context family, which until #242 had no machine surface at all.

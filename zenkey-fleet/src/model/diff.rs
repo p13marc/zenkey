@@ -20,6 +20,11 @@
 
 use serde_json::Value;
 
+// The shapes are wire contracts since #219 (`zenctl snapshot diff`), so they
+// live under `report/` per the placement rule; re-exported here so the
+// historical spelling `model::diff::{Change, ValueDiff}` keeps resolving.
+pub use crate::report::{ByteDiff, Change, ValueDiff};
+
 /// How deep a value is walked before the diff stops descending.
 ///
 /// A bus carries whatever a foreign publisher sends, including deeply nested
@@ -27,51 +32,6 @@ use serde_json::Value;
 /// same reason `zenkey`'s CDR resolver is. Past the bound, the subtree is
 /// compared whole and reported as one change.
 const MAX_DEPTH: usize = 32;
-
-/// One field-level difference, addressed by a dotted path (`disk.used`,
-/// `items.0.name`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Change {
-    /// The path is present in the new value and absent from the old.
-    Added { path: String, new: Value },
-    /// The path is present in the old value and absent from the new.
-    Removed { path: String, old: Value },
-    /// The path is in both and its value moved.
-    Changed {
-        path: String,
-        old: Value,
-        new: Value,
-    },
-}
-
-impl Change {
-    pub fn path(&self) -> &str {
-        match self {
-            Change::Added { path, .. }
-            | Change::Removed { path, .. }
-            | Change::Changed { path, .. } => path,
-        }
-    }
-}
-
-/// The result of comparing two structural values.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ValueDiff {
-    pub changes: Vec<Change>,
-    /// Changes found past `max_changes` and therefore not listed.
-    ///
-    /// Counted rather than silently cut: a bounded view that reports what it
-    /// dropped is the RFC 09 §5.1 O6 rule, and a diff that quietly stops at
-    /// twenty entries reads as "and nothing else changed".
-    pub truncated: usize,
-}
-
-impl ValueDiff {
-    /// No change at all — distinct from "we did not look".
-    pub fn is_empty(&self) -> bool {
-        self.changes.is_empty() && self.truncated == 0
-    }
-}
 
 /// Structurally compare two values, listing at most `max_changes` differences
 /// and counting the rest.
@@ -195,32 +155,6 @@ fn walk(
                 new: new.clone(),
             },
         ),
-    }
-}
-
-/// What a byte comparison can honestly say when neither side is structural.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ByteDiff {
-    pub common_prefix: usize,
-    pub common_suffix: usize,
-    pub old_len: usize,
-    pub new_len: usize,
-}
-
-impl ByteDiff {
-    /// True when the two byte strings are identical.
-    pub fn is_empty(&self) -> bool {
-        self.old_len == self.new_len && self.common_prefix == self.old_len
-    }
-
-    /// The half-open byte range that differs on each side: `(old, new)`.
-    ///
-    /// Both start at `common_prefix`; both end where the common suffix begins.
-    pub fn ranges(&self) -> (std::ops::Range<usize>, std::ops::Range<usize>) {
-        (
-            self.common_prefix..self.old_len - self.common_suffix,
-            self.common_prefix..self.new_len - self.common_suffix,
-        )
     }
 }
 

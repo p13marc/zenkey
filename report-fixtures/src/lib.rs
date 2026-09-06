@@ -20,7 +20,7 @@
 
 use zenkey_fleet::report::*;
 use zenkey_fleet::{
-    Coverage, CoverageRow, RecordReport, ReplayReport, StorageInfo, TimelineReport,
+    Coverage, CoverageRow, RecordReport, ReplayReport, StorageInfo, TimelineReport, TraceReport,
 };
 
 pub const ORIGIN: &str = "h-3fa9c2d41b7e";
@@ -947,6 +947,112 @@ pub fn call_report_partial_page() -> CallReport {
                 attachment_bytes: None,
             },
         ],
+    }
+}
+
+/// A traced long-running call (#215): the reply, then the idiom's two
+/// declared-chain effects with both clocks, one same-origin sample that is
+/// not in the chain, a break before the second attributed row, and a
+/// concurrent lane with a count and two examples.
+pub fn trace_report() -> TraceReport {
+    let row =
+        |key: &str, relation, arrival_delta_ms, hlc: Option<(u64, i64)>, break_before| TraceRow {
+            key: key.into(),
+            relation,
+            arrival_delta_ms,
+            hlc: hlc.map(|(ntp, _)| format!("{ntp}/33")),
+            hlc_delta_ms: hlc.map(|(_, d)| d),
+            stamped_by: hlc.map(|_| "foreign:33".to_string()),
+            kind: RowKind::Put,
+            payload_bytes: 40,
+            break_before,
+        };
+    TraceReport {
+        call: CallReport {
+            key: format!("acme/v1/{ORIGIN}/@rpc/demo/artifact/request"),
+            timeout_s: 5.0,
+            answers: vec![CallAnswer {
+                origin: ORIGIN.into(),
+                outcome: CallOutcome::Ok {
+                    value: Some(serde_json::json!({"id": "01HZY"})),
+                    text: None,
+                },
+                attachment: None,
+                attachment_bytes: None,
+            }],
+        },
+        scopes: vec![format!("acme/v1/{ORIGIN}/**"), "acme/v1/*/**".into()],
+        excluded: TRACE_EXCLUDED,
+        window_s: 10.0,
+        subscribed_before_call: true,
+        t0_unix_s: 1_788_000_000.5,
+        call_returned_ms: 4.2,
+        hlc_reference: HlcReference::Reply,
+        reply_hlc: Some("7680000000000000000/33".into()),
+        chain_rule: TRACE_CHAIN_RULE,
+        registry_loaded: true,
+        idiom: "long-running".into(),
+        attributed: vec![
+            row(
+                &format!("acme/v1/{ORIGIN}/state/demo/artifact/pcap"),
+                TraceRelation::DeclaredChain,
+                12.5,
+                Some((7680000000034359738, 8)),
+                None,
+            ),
+            row(
+                &format!("acme/v1/{ORIGIN}/events/demo/artifact/01HZY"),
+                TraceRelation::DeclaredChain,
+                250.0,
+                Some((7680000001056964608, 246)),
+                Some(3),
+            ),
+        ],
+        same_origin: vec![row(
+            &format!("acme/v1/{ORIGIN}/telemetry/other/noise"),
+            TraceRelation::SameOriginUndeclared,
+            1.0,
+            None,
+            None,
+        )],
+        concurrent: ConcurrentLane {
+            samples: 40,
+            keys: 2,
+            examples: vec![
+                "acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu".into(),
+                "acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem".into(),
+            ],
+            dropped: 0,
+        },
+        dropped: 3,
+        keys_evicted: 0,
+    }
+}
+
+/// The same call with no registry loaded: the chain is unjudgeable, so the
+/// attributed lane is empty and every same-origin row says why (O4) — and
+/// the reply carried no HLC, so no ΔHLC exists to show.
+pub fn trace_report_no_registry() -> TraceReport {
+    let base = trace_report();
+    TraceReport {
+        hlc_reference: HlcReference::None,
+        reply_hlc: None,
+        registry_loaded: false,
+        idiom: "undeclared".into(),
+        attributed: vec![],
+        same_origin: base
+            .attributed
+            .iter()
+            .chain(&base.same_origin)
+            .map(|r| TraceRow {
+                relation: TraceRelation::SameOriginRegistryNotLoaded,
+                hlc_delta_ms: None,
+                break_before: None,
+                ..r.clone()
+            })
+            .collect(),
+        dropped: 0,
+        ..base
     }
 }
 
@@ -1982,6 +2088,219 @@ pub fn timeline_report_hlc() -> TimelineReport {
             timeline_sample(OrderLabel::Hlc, 1, lane, TL_A, 1_000, Some((200, "33"))),
         ],
     }
+}
+
+// ─── snapshots (RFC 13 §4.4, #219) ───────────────────────────────────────
+
+/// The second origin the two-origin snapshots below carry.
+pub const ORIGIN_B: &str = "h-9b2e4c7a1d05";
+
+fn zsnap_header(collected_at: &str, span: f64, answered: u64, superseded: u64) -> ZsnapHeader {
+    ZsnapHeader {
+        zsnap: 1,
+        selectors: vec!["acme/v1/**".into()],
+        base: "acme".into(),
+        collected_at: collected_at.into(),
+        collection_span_s: span,
+        asked: 1,
+        answered,
+        elided: 0,
+        errors: 0,
+        superseded,
+        roster: Asked::Asked(2),
+    }
+}
+
+fn snapshot_row(key: &str, bytes: &str, holder: Holder) -> SnapshotRow {
+    SnapshotRow {
+        key: key.into(),
+        delete: false,
+        bytes: Some(bytes.into()),
+        encoding: Some("application/json".into()),
+        timestamp: Some("7f3b2a1c00000001/ab12".into()),
+        stamper: Some(StamperWire::Unattributable { id: "ab12".into() }),
+        source: None,
+        source_zid: Some("ab12".into()),
+        registration: RegistrationWire::Registered,
+        verdict: VerdictWire::Valid,
+        holder,
+    }
+}
+
+/// Two origins under `acme`, five rows: a live host answering its own
+/// health, a live host's telemetry answered by a storage, a second host
+/// remembered only by a storage, a tombstone, and a leaked non-v1 key
+/// (O1). The `state/sysinfo/health` bodies carry `source` and `host_id` —
+/// the labels an origin alignment can read (chunk DD).
+pub fn snapshot() -> Snapshot {
+    Snapshot {
+        header: zsnap_header("2026-09-06T00:00:00Z", 1.25, 6, 1),
+        rows: vec![
+            snapshot_row(
+                "acme/plain/leak",
+                "bGVha2Vk",
+                Holder::Unattributed {
+                    reason: "the key names no origin: not a v1 key".into(),
+                },
+            )
+            .into_leak(),
+            snapshot_row(
+                "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health",
+                "eyJzb3VyY2UiOiJub2RlLWEiLCJob3N0X2lkIjoiaC0zZmE5YzJkNDFiN2UiLCJzdGF0dXMiOiJvayJ9",
+                Holder::Live {
+                    origin: ORIGIN.into(),
+                    answered_by: AnsweredBy::Stamper,
+                },
+            ),
+            snapshot_row(
+                "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used",
+                "eyJ2YWx1ZSI6NDEuMCwidW5pdCI6InBlcmNlbnQifQ==",
+                Holder::Live {
+                    origin: ORIGIN.into(),
+                    answered_by: AnsweredBy::Other,
+                },
+            ),
+            SnapshotRow {
+                delete: true,
+                bytes: None,
+                encoding: None,
+                verdict: VerdictWire::NotValidated {
+                    reason: "tombstone".into(),
+                },
+                ..snapshot_row(
+                    "acme/v1/h-9b2e4c7a1d05/state/logs/rotated",
+                    "",
+                    Holder::StorageOnly {
+                        origin: ORIGIN_B.into(),
+                    },
+                )
+            },
+            snapshot_row(
+                "acme/v1/h-9b2e4c7a1d05/state/sysinfo/health",
+                "eyJzb3VyY2UiOiJub2RlLWIiLCJob3N0X2lkIjoiaC05YjJlNGM3YTFkMDUiLCJzdGF0dXMiOiJkZWdyYWRlZCJ9",
+                Holder::StorageOnly {
+                    origin: ORIGIN_B.into(),
+                },
+            ),
+        ],
+    }
+}
+
+/// The leaked row's non-v1 facets, applied after the shared constructor.
+trait IntoLeak {
+    fn into_leak(self) -> SnapshotRow;
+}
+
+impl IntoLeak for SnapshotRow {
+    fn into_leak(mut self) -> SnapshotRow {
+        self.encoding = Some("text/plain".into());
+        self.timestamp = None;
+        self.stamper = None;
+        self.registration = RegistrationWire::NotV1;
+        self.verdict = VerdictWire::NotValidated {
+            reason: "no_schema".into(),
+        };
+        self
+    }
+}
+
+/// The same fleet five minutes on: the disk value moved, the second host
+/// came up and recovered, the tombstoned key is gone, and the second host
+/// grew a telemetry key. The leaked key is untouched.
+pub fn snapshot_b() -> Snapshot {
+    let mut b = snapshot();
+    b.header = zsnap_header("2026-09-06T00:05:00Z", 0.8, 5, 0);
+    b.rows.retain(|r| !r.delete);
+    for row in &mut b.rows {
+        match row.key.as_str() {
+            "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used" => {
+                row.bytes = Some("eyJ2YWx1ZSI6NDIuMCwidW5pdCI6InBlcmNlbnQifQ==".into());
+                row.timestamp = Some("7f3b2a1c00000002/ab12".into());
+            }
+            "acme/v1/h-9b2e4c7a1d05/state/sysinfo/health" => {
+                row.bytes = Some(
+                    "eyJzb3VyY2UiOiJub2RlLWIiLCJob3N0X2lkIjoiaC05YjJlNGM3YTFkMDUiLCJzdGF0dXMiOiJvayJ9"
+                        .into(),
+                );
+                row.timestamp = Some("7f3b2a1c00000002/cd34".into());
+                row.holder = Holder::Live {
+                    origin: ORIGIN_B.into(),
+                    answered_by: AnsweredBy::Unknown,
+                };
+            }
+            _ => {}
+        }
+    }
+    b.rows.push(snapshot_row(
+        "acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used",
+        "eyJ2YWx1ZSI6Ny41LCJ1bml0IjoicGVyY2VudCJ9",
+        Holder::Live {
+            origin: ORIGIN_B.into(),
+            answered_by: AnsweredBy::Unknown,
+        },
+    ));
+    b.rows.sort_by(|x, y| x.key.cmp(&y.key));
+    b
+}
+
+/// What taking [`snapshot`] reported: written to a file, every holder
+/// counted.
+pub fn snapshot_report() -> SnapshotReport {
+    SnapshotReport {
+        header: snapshot().header,
+        out: Some("fleet.zsnap".into()),
+        live: 2,
+        storage_only: 2,
+        unattributed: 1,
+        incomplete: Vec::new(),
+    }
+}
+
+/// [`snapshot`] against [`snapshot_b`], through the engine's own comparison
+/// at its default bounds — no origin alignment asked.
+pub fn snapshot_diff() -> SnapshotDiff {
+    zenkey_fleet::diff_snapshots(
+        &snapshot(),
+        &snapshot_b(),
+        zenkey_fleet::DiffOpts::default(),
+    )
+}
+
+/// The same diff with an origin alignment asked for (chunk DD's shape,
+/// settled now): one pair on a label, one origin that could not be paired
+/// — listed, never dropped (RFC 13 §4.4) — and the per-subject roll-up.
+pub fn snapshot_diff_unmapped() -> SnapshotDiff {
+    let mut d = snapshot_diff();
+    d.origin_map = Asked::Asked(vec![OriginPair {
+        a: ORIGIN.into(),
+        b: ORIGIN.into(),
+        evidence: MapEvidence::Label {
+            source: "state/sysinfo/health.host_id".into(),
+        },
+    }]);
+    d.unmapped = vec![Unmapped {
+        origin: ORIGIN_B.into(),
+        side: Side::B,
+        reason: "no origin in a publishes the same host_id".into(),
+    }];
+    d.by_subject = Asked::Asked(vec![SubjectDelta {
+        subject: "telemetry/sysinfo/disk/var-log/used".into(),
+        compared: 1,
+        differing: 1,
+        only_in_a: 0,
+        only_in_b: 1,
+        example: d
+            .changed
+            .iter()
+            .find(|c| c.key.ends_with("disk/var-log/used"))
+            .cloned(),
+    }]);
+    d
+}
+
+/// [`snapshot`] against itself: the clean answer, exit 0.
+pub fn snapshot_diff_identity() -> SnapshotDiff {
+    zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
 }
 
 // ── The metrics surface (#228) ──────────────────────────────────────────────

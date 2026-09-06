@@ -10,7 +10,10 @@
 //! rendering ([`decode`]), a sample on the alert plane becomes an alert
 //! transition ([`alert`]), the admin space's declared readers become a
 //! ranked consumer list ([`consumers`]), a window of samples becomes a
-//! lane-partitioned ordering on a stated clock ([`timeline`]), a stream of
+//! lane-partitioned ordering on a stated clock ([`timeline`]), a fan-in's
+//! replies become snapshot rows ([`snapshot`]) and two snapshots become one
+//! comparison ([`snapshot_diff`]), a sample seen after a call becomes a
+//! *relation* to that call's procedure ([`trace`]), and a stream of
 //! described samples becomes a metrics surface whose blind spots are series
 //! of their own ([`export`], [`prom`]).
 //!
@@ -44,9 +47,12 @@ pub mod prom;
 pub mod registry;
 pub mod retain;
 pub mod skeleton;
+pub mod snapshot;
+pub mod snapshot_diff;
 pub mod stats;
 pub mod storage;
 pub mod timeline;
+pub mod trace;
 pub mod tree;
 
 #[cfg(feature = "decode")]

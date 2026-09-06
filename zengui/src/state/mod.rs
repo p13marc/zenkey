@@ -190,6 +190,10 @@ mod tests {
                     // The declared readers (#224): evidence about one
                     // subject, dropped when the slot's subject moves.
                     "consumers",
+                    // Whether the history section compares the key against
+                    // the loaded snapshot (#219): a view toggle on one
+                    // slot, dropped with the slot.
+                    "compare_snapshot",
                 ],
             ),
             // The rows, how they are grouped, and what is open. `flat` and
@@ -275,6 +279,13 @@ mod tests {
                     "replay_note",
                     "recording",
                     "recorded",
+                    // A loaded `.zsnap` (#219) and its open row: mode-shaped
+                    // like the replay file — invalidated by a load landing
+                    // or the user closing it, by nothing the bus does.
+                    "snapshot",
+                    "snapshot_open",
+                    "snapshot_loading",
+                    "snapshot_note",
                 ],
             ),
         ];
@@ -320,7 +331,9 @@ mod tests {
         // (#221) and the subject's fields and why sections (#223, #214).
         // Then #257: the 11 subject fields moved into `sub.slot` and gained
         // the slot's `id`; the container keeps the id mint — 72 became 74.
-        // Then #224: the Consumers section, 75.
-        assert_eq!(leaves, 75, "the split must place every field exactly once");
+        // Then #224: the Consumers section, 75. Then #219: the loaded
+        // snapshot and its open row (four under `work.replay`) and the
+        // slot's compare toggle — 75 became 80.
+        assert_eq!(leaves, 80, "the split must place every field exactly once");
     }
 }

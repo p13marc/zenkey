@@ -19,7 +19,7 @@
 //!   `schema`, `registry`, `storage`, `blob`, `admin`, `key`;
 //! * a **wire verb** is an act or an observation on live traffic, and hangs
 //!   off the root — `get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`,
-//!   `replay`, `timeline`, `export`, `serve`, `gen`, `scout`;
+//!   `replay`, `timeline`, `snapshot`, `export`, `serve`, `gen`, `scout`;
 //! * a **judgement** is exit-coded under the one contract in [`crate::exit`],
 //!   and the exit-coded assertions live together under `check`.
 //!
@@ -582,6 +582,21 @@ pub(crate) enum Command {
     /// zenoh, not empty. `--from <FILE>` reads a .zrec through the same
     /// projection, so live and replay render identically.
     Timeline(TimelineArgs),
+    /// Take a fleet snapshot to a .zsnap file (RFC 13 §4.4) — or, with
+    /// `diff`, compare two.
+    ///
+    /// One fan-in GET per selector, folded last-writer-wins per key, each
+    /// row carrying what the observer could establish: the exact payload,
+    /// whose clock stamped it (O7), the registry rung (O2), the three-valued
+    /// verdict, and who HOLDS it — `live` (its origin held an alive token
+    /// during the collection, and whether the replier was the stamper),
+    /// `storage_only` (a value answered, nobody is saying it now), or
+    /// `unattributed` (the roster was not asked, or the key names no
+    /// origin). A snapshot is collected OVER a span, never at an instant,
+    /// and every rendering says so. Read, never replayed: seeding a fleet
+    /// from a file is `replay --seed-state`. Exit 0 wrote the file, 2
+    /// nobody answered (silence is not a snapshot).
+    Snapshot(SnapshotArgs),
     /// Serve the bus and its contract as Prometheus metrics (#228): key
     /// series named and united by the registry, and the observer's own
     /// blind spots as first-class series beside them.
@@ -1547,6 +1562,59 @@ pub(crate) struct ExportArgs {
 /// The `replay` verb's flags — one struct the dispatcher hands over whole,
 /// destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
+pub(crate) struct SnapshotArgs {
+    #[command(flatten)]
+    pub(crate) selector: SelectorArgs,
+    /// Output file. Refused (exit 2) when nobody answered: a file of
+    /// silence would read as an empty fleet (RFC 05 §3.1).
+    #[arg(long, short = 'o', value_name = "FILE", required = true)]
+    pub(crate) out: Option<String>,
+    /// Replies kept per selector; past it they are drained, counted, and
+    /// the header says how many (RFC 09 §5.1 O6).
+    #[arg(long, value_name = "N", default_value_t = zenkey_fleet::DEFAULT_MAX_REPLIES)]
+    pub(crate) max_replies: usize,
+    /// Skip the liveliness roster. Cheaper, and every holder is then
+    /// `unattributed` — the file says so rather than guessing.
+    #[arg(long)]
+    pub(crate) no_roster: bool,
+    #[command(subcommand)]
+    pub(crate) cmd: Option<SnapshotSub>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum SnapshotSub {
+    /// Compare two .zsnap files — no bus. Both spans are stated, the
+    /// facets (value, verdict, registration, holder) stay apart, and an
+    /// origin an alignment could not pair is listed, never dropped.
+    /// Exit 0 identical, 1 they differ, 2 a file could not be read.
+    Diff(SnapshotDiffArgs),
+}
+
+#[derive(clap::Args)]
+pub(crate) struct SnapshotDiffArgs {
+    /// The earlier snapshot.
+    pub(crate) a: String,
+    /// The later snapshot.
+    pub(crate) b: String,
+    /// Align origins across deployments by the labels their state
+    /// documents carry (chunk DD; not implemented in this build).
+    #[arg(long)]
+    pub(crate) normalize_origins: bool,
+    /// An explicit origin pairing, `A=B`, repeatable (chunk DD; not
+    /// implemented in this build).
+    #[arg(long = "map", value_name = "A=B")]
+    pub(crate) maps: Vec<String>,
+    /// Field-level changes listed per key before the rest are counted.
+    #[arg(long, value_name = "N", default_value_t = 20)]
+    pub(crate) max_changes: usize,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
+}
+
+#[derive(clap::Args)]
 pub(crate) struct ReplayArgs {
     /// The .zrec file to replay.
     pub(crate) file: String,
@@ -2152,6 +2220,26 @@ pub(crate) struct ServiceCallArgs {
     /// Send the request body verbatim: no schema lookup, no encoding.
     #[arg(long)]
     pub(crate) raw: bool,
+    /// After the reply, keep a window open on the called origin and list
+    /// what was observed there (RFC 05 §3's long-running idiom: request →
+    /// status state → events). The window is subscribed **before** the call
+    /// leaves, so nothing published between the reply and the subscription
+    /// can be missed; each sample carries Δ on the arrival clock and, where
+    /// stamped, on the HLC against the reply's, and is tagged by how the
+    /// registry relates it to the procedure — an observation, never a cause.
+    /// One act, one spelling: there is no separate `trace` verb, because the
+    /// trace is this call's own observation. Not with `*`: a trace attributes
+    /// to one origin.
+    #[arg(long)]
+    pub(crate) trace: bool,
+    /// The passive window held after the reply, seconds (with --trace).
+    #[arg(
+        long = "for",
+        value_name = "SECS",
+        default_value_t = 10.0,
+        requires = "trace"
+    )]
+    pub(crate) for_secs: f64,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }

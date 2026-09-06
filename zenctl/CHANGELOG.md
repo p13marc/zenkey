@@ -72,6 +72,34 @@ that survives only in the ledger still resolves, class wildcarded.
 Families `registry-consumers` and `registry-impact`; rows tagged
 `consumer` and `coverage`; the admin discriminator rides flat in the
 envelope (`admin`, `answered`, `nodes`).
+**`service call --trace [--for SECS]` — call → effect, the RPC trace
+window** (#215). RFC 05 §3's long-running idiom is a declared causal chain
+— `GET @rpc/<p>/artifact/request` → `state/<p>/artifact/<kind>` →
+`events/<p>/artifact/<ulid>` → `@blob` — and nothing followed it: you
+called a write procedure and then hunted three panes for what it did. With
+`--trace` the call keeps a window open on the called origin (default 10 s)
+and lists, after the reply, every sample observed there: Δ on the arrival
+clock always, Δ on the HLC against the reply's where both are stamped (the
+stamper named — `self`, `foreign:<id>`, `unattributable:<id>`), each
+tagged `declared-chain` (the registry refines it under the called producer
+and it shares the procedure's first chunk — a **naming heuristic**, and the
+report says so in a fixed `chain_rule` field), `same-origin, not declared`,
+or `same-origin, registry not loaded` (unjudgeable is not undeclared, O4).
+Other origins are a count and a few keys in a *concurrent, not attributed*
+lane, never rows. **Subscribe, then call, then hold** is the order and the
+report pins it (`subscribed_before_call`): a window opened after the call
+would turn "not asked" into "no". The wording is *observed after the call*
+throughout — never *caused*; no edge, no arrow, no trace-id attachment.
+`**` never crosses an `@`-chunk, so the `@blob` bytes are outside the
+window and the report says so rather than widening. Not a verb of its own:
+one act, one spelling. `--trace` with `*` exits 2 (a trace attributes to
+one origin). The exit code stays the call's — what the window saw is an
+observation, not a judgement. A zenctl-level smoke against `gen
+--serve-describe` shows naming attribution only: the generator never
+publishes *after* a reply, so the ordered chain is pinned by the engine's
+bus test (`zenkey-fleet/tests/trace.rs`). Not in this cut: the zengui hook
+(`SendForm.trace`, an Effects section) is named and left for the GUI.
+
 **`timeline` — the fleet timeline, and deliberately no edges** (#216).
 A new wire verb at the root. `zenctl timeline <SEL>… --for <SECS>
 [--order arrival|hlc]` watches the selectors for the window and emits one
@@ -93,6 +121,35 @@ the engine's identity test is what makes "the same window from the
 file" a claim. No line is ever drawn between lanes: a merged ordering
 shows when things were seen on which clock, never that one caused
 another.
+
+**`snapshot` — a fleet moment you can keep, verify and diff** (#219,
+RFC 13 §4.4). A new wire verb off the root, no spelling moved. `zenctl
+snapshot [SELECTOR] --out fleet.zsnap` runs one fan-in GET per selector
+(the `--origin/--class/--producer` composition every watcher has), folds
+the replies per key last-writer-wins, and writes one row per key: the
+exact payload as base64 `bytes`, whose clock stamped it (`stamper`, O7),
+the registry rung (`registration`, the `topic info` vocabulary — including
+`registry_not_loaded`, which is not `unregistered`), the three-valued
+`verdict`, and who **holds** it — `live {origin, answered_by}` (its origin
+held an `alive` token during the collection, and whether the replier was
+the stamping entity), `storage_only {origin}` (a value answered, nobody is
+saying it now) or `unattributed {reason}` (`--no-roster`, or a key that
+names no origin). The header states the **collection span**: a fan-in GET
+is collected *over* a span, never at an instant, and every rendering of a
+snapshot says so. `--max-replies` bounds what is kept; what the bound cost
+rides the header as `elided`, beside `superseded` (LWW losers) and
+`errors`. **Exit 0** wrote the file; **exit 2** nobody answered — silence
+is not a snapshot, and no file is written for it (`exit.rs`).
+
+`zenctl snapshot diff a.zsnap b.zsnap` opens no session. Rows tagged
+`added | removed | changed`, a `changed` row carrying only the facets that
+moved (`value` or `bytes`, `verdict`, `registration`, `holder`) with both
+stamps; the envelope carries both headers whole. **Exit 0** identical,
+**1** they differ (a difference *is* the finding), **2** a file could not
+be read — through the one judgement projection, never a hand-rolled
+match. `--normalize-origins` and `--map A=B` parse today and refuse (exit
+2) until chunk DD lands the alignment; when it does, an origin that could
+not be paired is listed as an `unmapped` row, never dropped.
 
 ## 0.6.0 (2026-09-06) — the generators, and three rows that name a host
 

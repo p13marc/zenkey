@@ -832,6 +832,8 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             history: None,
             history_scroll: Default::default(),
             watched: false,
+            snapshot: None,
+            compare_snapshot: false,
             latency: None,
             blob,
             media,
@@ -1509,6 +1511,8 @@ fn the_history_pane_says_why_it_is_empty() {
         recorder: None,
         watched: false,
         scroll: Default::default(),
+        snapshot: None,
+        compare_snapshot: false,
     }));
     assert!(ui.find("Nothing selected").is_ok());
 
@@ -1521,6 +1525,8 @@ fn the_history_pane_says_why_it_is_empty() {
         recorder: Some(&rec),
         watched: false,
         scroll: Default::default(),
+        snapshot: None,
+        compare_snapshot: false,
     }));
     assert!(
         ui.find("Not watched — nothing is being recorded").is_ok(),
@@ -1539,6 +1545,8 @@ fn the_history_pane_says_why_it_is_empty() {
         recorder: Some(&rec),
         watched: true,
         scroll: Default::default(),
+        snapshot: None,
+        compare_snapshot: false,
     }));
     assert!(ui.find("No samples yet").is_ok());
     assert!(
@@ -1571,6 +1579,8 @@ fn the_history_pane_diffs_consecutive_payloads() {
         recorder: Some(&rec),
         watched: true,
         scroll: Default::default(),
+        snapshot: None,
+        compare_snapshot: false,
     }));
     assert!(
         ui.find("~ value  41.0 → 42.0").is_ok(),
@@ -1613,6 +1623,8 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
             recorder: Some(&rec),
             watched: true,
             scroll: Default::default(),
+            snapshot: None,
+            compare_snapshot: false,
         }));
         assert!(ui.find("▸ t-1").is_ok(), "the focused row is marked");
         assert!(
@@ -1635,6 +1647,8 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
             recorder: Some(&rec),
             watched: true,
             scroll: Default::default(),
+            snapshot: None,
+            compare_snapshot: false,
         }));
         assert!(
             ui.find("new value after retirement — not a change to the previous value")
@@ -1664,6 +1678,8 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
         recorder: Some(&rec),
         watched: true,
         scroll: Default::default(),
+        snapshot: None,
+        compare_snapshot: false,
     }));
     assert!(
         ui.find("neither sample has a structural form — compared as bytes, not as fields")
@@ -1689,6 +1705,8 @@ fn the_history_pane_counts_what_it_evicted() {
         recorder: Some(&rec),
         watched: true,
         scroll: Default::default(),
+        snapshot: None,
+        compare_snapshot: false,
     }));
     assert!(
         ui.find("recording since selection · 3 retained · 7 evicted (ring full)")
@@ -3035,6 +3053,8 @@ fn projection_inspector<'a>(
         history: None,
         history_scroll: Default::default(),
         watched: false,
+        snapshot: None,
+        compare_snapshot: false,
         latency: None,
         blob,
         media,

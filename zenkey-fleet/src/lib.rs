@@ -196,9 +196,9 @@ pub use bus::monitor::{
 pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use bus::query::{
     Answer, DEFAULT_MAX_REPLIES, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts,
-    RepeatingQuery, RepeatingRegistry, ServedSlice, StateSample, declare_repeating,
-    declare_repeating_any, fetch_stored, fetch_value, fleet_get, fleet_registry,
-    fleet_registry_by_origin, fleet_registry_raw, state_snapshot,
+    RepeatingQuery, RepeatingRegistry, ServedSlice, SnapshotReplies, StateSample,
+    declare_repeating, declare_repeating_any, fetch_stored, fetch_value, fleet_get, fleet_registry,
+    fleet_registry_by_origin, fleet_registry_raw, snapshot_get, state_snapshot,
 };
 pub use bus::roster::{
     BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, node_info, node_rows,
@@ -211,8 +211,8 @@ pub use bus::session::{
     Fleet, OPEN_TIMEOUT, OpenFailure, open, open_reporting, open_reporting_within, open_with_config,
 };
 pub use bus::write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, call, check_retire,
-    declare_publication,
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, call, call_traced,
+    check_retire, declare_publication,
 };
 pub use judge::budget::{BudgetObservation, join_budget};
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
@@ -277,6 +277,8 @@ pub use model::prom::{exposition, metric_name};
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
+pub use model::snapshot::{fold_latest, holder_of, registration_of, stamper_of};
+pub use model::snapshot_diff::{DiffOpts, diff_snapshots};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::storage::{
     check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
@@ -299,9 +301,9 @@ pub use report::{
     GenPlanEntry, GenReport, HelloView, ImpactReport, Judgement, LatencyReport, LatencySummary,
     MeshLink, NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
     RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
-    SeedCoverage, StorageInfo, SubjectImpact, TimelineReport, TopologyEdge, TopologyNode,
-    TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
-    judgement_exit_code,
+    SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact,
+    TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport,
+    ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -312,6 +314,10 @@ pub use tape::record::{
     RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, ZREC_VERSION, ZrecItem, ZrecReader,
     ZrecSink, ZrecSource, ZrecWriter, record, replay,
 };
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use tape::snapshot::{SnapshotSpec, Taken, take_snapshot};
+pub use tape::snapshot::{ZSNAP_VERSION, ZsnapReader, ZsnapWriter, report_of as snapshot_report};
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.
 #[cfg(feature = "blob")]

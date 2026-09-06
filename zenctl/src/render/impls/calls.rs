@@ -1,4 +1,5 @@
-//! `service call` and `check probe`: one answer rendering, used twice.
+//! `service call`, `check probe` and `service call --trace`: one answer
+//! rendering, used three times.
 //!
 //! `output::call` took the answer rendering as a closure, and both call sites
 //! wrote their own. They drifted: `service call`'s appended the reply
@@ -12,9 +13,14 @@
 //! `Format::Table` — which is what `table(&self, t: &mut Table)` taking a sink
 //! is for.
 
-use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport, PageSignal, ProbeReport};
+use zenkey_fleet::report::{
+    CallAnswer, CallOutcome, CallReport, HlcReference, PageSignal, ProbeReport, TraceRelation,
+    TraceReport, TraceRow,
+};
 
-use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
+use crate::render::{
+    BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without,
+};
 
 /// One answer, as a person reads it: the value if it is JSON-shaped, the raw
 /// text otherwise, and the reply's attachment when the wire carried one.
@@ -200,5 +206,214 @@ impl Render for ProbeReport {
     /// Delegated, like the rendering: the probe's observation *is* the call.
     fn scope(&self) -> Option<ObservedScope> {
         self.call.scope()
+    }
+}
+
+// ── `service call --trace` (#215) ─────────────────────────────────────────
+
+/// The relation, as a person reads it in the table.
+fn relation_text(r: TraceRelation) -> &'static str {
+    match r {
+        TraceRelation::DeclaredChain => "declared-chain",
+        TraceRelation::SameOriginUndeclared => "same-origin, not declared",
+        TraceRelation::SameOriginRegistryNotLoaded => "same-origin, registry not loaded",
+    }
+}
+
+/// `+12.345ms` — an arrival offset from `t0`.
+fn arrival(ms: f64) -> String {
+    format!("+{ms:.3}ms")
+}
+
+/// One lane's rows into the grid under its heading, a break line before any
+/// row that carries one. The lanes share the shape, so they share the code.
+fn lane_rows(g: &mut Grid, rows: &[TraceRow]) {
+    for r in rows {
+        if let Some(n) = r.break_before {
+            g.row([
+                Cell::text(""),
+                Cell::text(""),
+                Cell::text(format!("⋯ {n} sample(s) dropped while behind")),
+                Cell::text(""),
+            ]);
+        }
+        let hlc = match (&r.hlc_delta_ms, &r.stamped_by) {
+            (Some(d), Some(by)) => Cell::text(format!("{d:+}ms ({by})")),
+            // Stamped, but there is no reply HLC to measure against: the
+            // question could not be asked of this row — not asked, never
+            // an empty cell that would read as "unstamped".
+            (None, Some(_)) => Cell::asked(None::<String>),
+            // Unstamped: asked, and there is nothing — an empty cell.
+            _ => Cell::text(""),
+        };
+        g.row([
+            Cell::text(arrival(r.arrival_delta_ms)),
+            hlc,
+            Cell::text(&r.key),
+            Cell::text(relation_text(r.relation)),
+        ]);
+    }
+}
+
+/// A trace row as an ndjson line, tagged `effect` and carrying its lane —
+/// the lane is a fact about where the row sits in the document, and a line
+/// cut out of the stream must still say which one.
+fn effect_row(lane: &'static str, r: &TraceRow) -> Row {
+    let mut v = serde_json::to_value(r).expect("a trace row serializes");
+    if let serde_json::Value::Object(o) = &mut v {
+        o.insert("lane".into(), lane.into());
+    }
+    Row::tagged("effect", v)
+}
+
+impl Render for TraceReport {
+    const FAMILY: &'static str = "trace";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        // The call's own envelope facts ride first (a trace *is* a call),
+        // then the trace's header — the lanes become rows.
+        let mut e = self.call.envelope();
+        for (k, v) in envelope_without(self, &["call", "attributed", "same_origin", "concurrent"]) {
+            e.insert(k, v);
+        }
+        e.insert("attributed".into(), self.attributed.len().into());
+        e.insert("same_origin".into(), self.same_origin.len().into());
+        e
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        self.call.rows(out);
+        for r in &self.attributed {
+            out(effect_row("attributed", r));
+        }
+        for r in &self.same_origin {
+            out(effect_row("same_origin", r));
+        }
+        out(Row::of("concurrent", &self.concurrent));
+    }
+
+    fn table(&self, t: &mut Table) {
+        // The reply block, exactly as `service call` draws it.
+        self.call.table(t);
+        // An empty lane draws no heading: the sentence that explains it is
+        // a note, which is what reaches json and ndjson too.
+        let mut g = Grid::unheaded(4).right(0).right(1);
+        if !self.attributed.is_empty() {
+            g.group(format!(
+                "observed after the call · declared chain ({}) · Δarrival · ΔHLC (stamper) · key",
+                self.idiom
+            ));
+            lane_rows(&mut g, &self.attributed);
+        }
+        if !self.same_origin.is_empty() {
+            g.group(if self.registry_loaded {
+                "observed after the call · same origin, not declared · Δarrival · ΔHLC (stamper) · key"
+            } else {
+                "observed after the call · same origin — registry not loaded, chain \
+                 unjudgeable · Δarrival · ΔHLC (stamper) · key"
+            });
+            lane_rows(&mut g, &self.same_origin);
+        }
+        g.group("concurrent, not attributed");
+        let c = &self.concurrent;
+        let mut line = format!(
+            "{} sample(s) on {} key(s) from other origins during the window",
+            c.samples, c.keys
+        );
+        if !c.examples.is_empty() {
+            line.push_str(&format!(" — e.g. {}", c.examples.join(", ")));
+        }
+        g.detail([line]);
+        t.grid(g);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = self.call.notes();
+        notes.push(Note::summary(format!(
+            "{} in the declared chain, {} same-origin, {} concurrent within {}s of t0 (the \
+             call returned at +{:.1}ms)",
+            self.attributed.len(),
+            self.same_origin.len(),
+            self.concurrent.samples,
+            self.window_s,
+            self.call_returned_ms
+        )));
+        if self.attributed.is_empty() {
+            notes.push(
+                Note::coverage(
+                    "nothing in the declared chain was observed within the window — not \
+                     evidence the procedure had no effect: the window covers the data \
+                     classes only, and a producer may publish after it or not at all",
+                )
+                .cite("RFC 09 §5.1 O4"),
+            );
+        }
+        notes.push(Note::caveat(format!("chain rule: {}", self.chain_rule)).cite("RFC 05 §3"));
+        if !self.registry_loaded {
+            notes.push(
+                Note::coverage(
+                    "registry not loaded — chain unjudgeable: every same-origin sample is \
+                     tagged so, and none can be `declared-chain`; load one with --registry \
+                     or let introspect serve it",
+                )
+                .cite("RFC 09 §5.1 O4"),
+            );
+        }
+        match (self.hlc_reference, &self.reply_hlc) {
+            (HlcReference::Reply, Some(hlc)) => notes.push(
+                Note::caveat(format!(
+                    "ΔHLC is measured against the reply's HLC ({hlc}) — the stamping node's \
+                     clock, which is not necessarily the responder's and is never this \
+                     caller's (it mints none); a different stamper on a row is a different \
+                     clock"
+                ))
+                .cite("RFC 09 §5.1 O7"),
+            ),
+            _ => notes.push(
+                Note::coverage(
+                    "the reply carried no HLC, so no ΔHLC is computed — the column is \
+                     absent, never defaulted to arrival; Δarrival is this observer's clock",
+                )
+                .cite("RFC 09 §5.1 O4"),
+            ),
+        }
+        notes.push(Note::coverage(self.excluded).cite("RFC 03 §4 D2"));
+        notes.push(Note::rendering(
+            "observed after the call, in arrival order — never caused: no edge is drawn \
+             between the reply and any sample, and a relation is a statement about names \
+             in the registry",
+        ));
+        notes
+    }
+
+    fn bounds(&self) -> Vec<BoundCost> {
+        vec![
+            BoundCost::new(
+                BoundKind::Missed,
+                self.dropped,
+                "sample(s) dropped while behind on the origin's window — each is a break \
+                 before the next row of every lane",
+            ),
+            BoundCost::new(
+                BoundKind::Missed,
+                self.concurrent.dropped,
+                "sample(s) dropped on the fleet-wide window — the concurrent count is a \
+                 lower bound",
+            ),
+            BoundCost::new(
+                BoundKind::Retired,
+                self.keys_evicted,
+                "key(s) retired at the origin watch's stats-table bound during the window",
+            ),
+        ]
+    }
+
+    /// Both watches, over the window: the origin's subtree and the fleet's.
+    /// The GET's own ask is inside `call`, and the window subsumes its wait.
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: self.scopes.clone(),
+            window_s: Some(self.window_s),
+        })
     }
 }

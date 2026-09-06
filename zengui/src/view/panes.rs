@@ -263,6 +263,8 @@ fn inspector<'a>(
             .current
             .key()
             .is_some_and(|k| key_is_watched(&obs.watched, k)),
+        snapshot: work.replay.snapshot.as_deref(),
+        compare_snapshot: slot.compare_snapshot,
         latency: slot.selected_latency.clone(),
         blob: &work.verdicts.blob,
         media: &work.bench.media,

@@ -46,7 +46,7 @@ use anyhow::Result;
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
     AclCmd, AdminCmd, BaseCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, InterfaceCmd, KeyCmd,
-    NodeCmd, RegistryCmd, SchemaCmd, ServiceCmd, StorageCmd, TopicCmd,
+    NodeCmd, RegistryCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd, TopicCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -163,6 +163,10 @@ pub async fn run() -> Result<()> {
         Command::Record(a) => cmd::record::run(a).await,
         Command::Replay(a) => cmd::replay::run(a).await,
         Command::Timeline(a) => cmd::timeline::run(a).await,
+        Command::Snapshot(a) => match a.cmd {
+            Some(SnapshotSub::Diff(d)) => cmd::snapshot::diff(d),
+            None => cmd::snapshot::take(a).await,
+        },
         Command::Export(a) => cmd::export::run(a).await,
         Command::Serve(a) => cmd::serve::run(a).await,
         Command::Gen(a) => cmd::generate::run(a, gen_target_typed).await,

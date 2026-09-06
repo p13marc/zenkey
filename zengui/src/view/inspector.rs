@@ -80,6 +80,11 @@ pub struct InspectorData<'a> {
     /// Whether an active watch covers the subject key — the distinction the
     /// History section rests on.
     pub watched: bool,
+    /// The loaded `.zsnap` (#219), when one is: the History section offers
+    /// a comparison against its row for the subject key.
+    pub snapshot: Option<&'a zenkey_fleet::Snapshot>,
+    /// Whether that comparison is showing, on this slot.
+    pub compare_snapshot: bool,
     pub latency: Option<(LatencyReport, u64)>,
     pub blob: &'a BlobState,
     pub media: &'a MediaState,
@@ -210,6 +215,10 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         recorder: d.history,
         watched: d.watched,
         scroll: d.history_scroll,
+        snapshot: d
+            .snapshot
+            .and_then(|s| s.rows.iter().find(|r| r.key == key).map(|r| (r, &s.header))),
+        compare_snapshot: d.compare_snapshot,
         sp: d.sp,
     }))
 }
