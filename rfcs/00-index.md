@@ -6,13 +6,22 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.33** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.34** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.34** (2026-09-06) — the state artifacts: `.zrec` version 2 carries a
+  state preamble (rows marked, at `t: 0`, original HLCs kept as provenance)
+  and a trigger record, with replay skipping the preamble unless told to seed
+  state; a `.zsnap` snapshot is a fan-in GET on disk that states the span it
+  was collected *over* and holds per-key evidence (stamper, registration
+  rung, verdict, holder); exporters owe the observer rules in their own
+  medium — bounds as separate series, a stopped series named, provenance on
+  the surface; and an observation-derived registry draft carries a marker
+  the build refuses unless admitted (13 §4.1, §4.4, §3; 08 §6.1).
 - **v1.33** (2026-09-06) — the generators: a fifth ACL fact — interest is
   evaluated on egress against the responding face's subject, so own-origin
   grants starve a peer-mode publisher of interest and it publishes to nobody;
@@ -26,17 +35,6 @@ what changed and what deliberately did not — is
   — a counter that decreased without an `alive` cycle is a finding, a
   producer that publishes no `self_stats` is *unobservable* and says so, an
   entry with no `kind` is *not asked* (08 §2, 04 §1.2, 11 §4, 13 §3).
-- **v1.31** (2026-09-06) — the adopters' batch: three gaps filed by adopters
-  in one week, each "the text cannot say it, so no tool can judge it". The
-  slug is made injective by a reserved prefix on both sides of the
-  passthrough boundary — v1.4's marker collided twice, `_myns` with the
-  literal `x_x5f_myns` and `x@b` with `@b` — at the cost of re-keying every
-  chunk that was ever escaped (03 §2, with the decoder now stated). A bounded
-  reply is an envelope that can say "there is more" and "I stopped early",
-  with a value cursor and `covers_from` (05 §3.2, a section that did not
-  exist under the number the issue cited). Telemetry history is a computed
-  answer served by an ordinary host-origin producer, the influx storage
-  optional beside it (04 §4, 11 §2, 09 §2).
 
 ---
 

@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26 and v1.32 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32 and v1.34 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -872,6 +872,20 @@ append-only: a line leaves when its condition does, and a subject that
 became unconditional re-enters the emitted-surface check by deletion —
 which is the honest direction of travel, and the mechanical form of the
 decay warning above.
+
+**Observation-derived drafts (v1.34).** A registry file MAY be produced by
+observing a bus rather than by the producer's author — the reference
+tooling's `registry infer` does exactly that — and such a file is the
+inverse of the lie this section forbids: it describes surfaces that *were*
+served, by an author who cannot vouch that they *will* be. It therefore
+MUST carry `draft = true` in its `[registry]` header and `compat = "none"`,
+MUST NOT carry `since` (it has no version stream), and MUST say in its own
+text that every field is inferred. The build lint MUST refuse a draft unless
+explicitly told to admit one, so a draft cannot become a fleet's
+`introspect` truth by being copied into place; promoting it is a review
+that removes the marker and assigns `since`. Everything the observation
+could not establish is absent, not defaulted — the
+[13 §3](13-observer-conformance.md) O4 rule, applied to a file.
 
 ## 7. Payload self-description (v1.5)
 
