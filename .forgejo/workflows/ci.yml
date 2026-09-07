@@ -26,7 +26,7 @@ jobs:
   fmt:
     runs-on: ubuntu-24.04
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       - uses: https://github.com/dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -61,7 +61,7 @@ jobs:
   type-scale:
     runs-on: ubuntu-24.04
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       - run: ./scripts/check-type-scale.sh
       # Interactive elements route through kit:: (#193): the button statuses
       # and the focus ring are handled once, and a raw widget constructor at
@@ -75,11 +75,11 @@ jobs:
   clippy:
     runs-on: ubuntu-24.04
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       - uses: https://github.com/dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: https://github.com/Swatinem/rust-cache@v2
+      - uses: https://github.com/Swatinem/rust-cache@v2.9.2
         with:
           cache-targets: false
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
@@ -98,9 +98,9 @@ jobs:
     env:
       WGPU_BACKEND: gl
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       - uses: https://github.com/dtolnay/rust-toolchain@stable
-      - uses: https://github.com/Swatinem/rust-cache@v2
+      - uses: https://github.com/Swatinem/rust-cache@v2.9.2
         with:
           cache-targets: false
       - run: cargo build --workspace --all-targets --locked
@@ -120,9 +120,9 @@ jobs:
   features:
     runs-on: ubuntu-24.04
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       - uses: https://github.com/dtolnay/rust-toolchain@stable
-      - uses: https://github.com/Swatinem/rust-cache@v2
+      - uses: https://github.com/Swatinem/rust-cache@v2.9.2
         with:
           cache-targets: false
       - run: cargo check -p zenkey-fleet --no-default-features --locked
@@ -144,11 +144,11 @@ jobs:
   msrv:
     runs-on: ubuntu-24.04
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       - uses: https://github.com/dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.97"
-      - uses: https://github.com/Swatinem/rust-cache@v2
+          toolchain: "1.98"
+      - uses: https://github.com/Swatinem/rust-cache@v2.9.2
         with:
           cache-targets: false
       - run: cargo check --workspace --all-targets --all-features --locked
@@ -158,9 +158,9 @@ jobs:
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       - uses: https://github.com/dtolnay/rust-toolchain@stable
-      - uses: https://github.com/Swatinem/rust-cache@v2
+      - uses: https://github.com/Swatinem/rust-cache@v2.9.2
         with:
           cache-targets: false
       - run: cargo doc --workspace --no-deps --locked
@@ -168,10 +168,10 @@ jobs:
   deny:
     runs-on: ubuntu-24.04
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       - uses: https://github.com/dtolnay/rust-toolchain@stable
       # the docker cargo-deny action cannot see deny.toml -> install directly
-      - uses: https://github.com/taiki-e/install-action@v2.85.11
+      - uses: https://github.com/taiki-e/install-action@v2.87.7
         with:
           tool: cargo-deny
       - run: cargo deny check
