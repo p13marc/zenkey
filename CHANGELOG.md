@@ -43,6 +43,13 @@ release: `zenctl get` prints the responder's HLC on a reply when the
 responder stamped it (it printed nothing before), and the README names
 the new verbs.
 
+**Toolchain and dependencies**: the MSRV moves from 1.97 to **1.98**
+(the toolchain file, the workspace `rust-version` and the CI msrv job
+move together, as the fleet policy says). `json5` 1, `jsonschema` 0.55,
+`sipper` 0.2 and `dirs` 7 — no source change beyond two `zenwatch
+check-config` snapshots, which now show the source position json5 1.x
+puts on a config error.
+
 The per-verb and per-shape record follows, as the chunks wrote it.
 
 **The exporter — a metrics surface that exports its own blind spots**
