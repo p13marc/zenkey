@@ -22,7 +22,7 @@ jobs:
   rfc-status:
     runs-on: ubuntu-24.04
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v7
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
       # RFC chapter headers agree with rfcs/CHANGELOG.md's Amends ledger
       # (v1.25 S6), and the three places that state the set's version
       # (00-index.md, CLAUDE.md, README.md) name the newest entry.
