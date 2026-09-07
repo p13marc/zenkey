@@ -6,7 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased
+## 0.7.0 (2026-09-07) — the explorer suite, executed
+
+Eight new observation surfaces and no moved spelling: a script written
+against 0.6.0 runs unchanged. `snapshot` (+ `snapshot diff`, with
+`--normalize-origins`/`--map`), `timeline`, `export`, `service call
+--trace`, `record --on/--pre/--post/--every/--preamble`, `replay
+--seed-state`, `registry consumers|impact|infer`, `registry lint
+--allow-drafts`. And one row that was empty: `get` prints the responder's
+HLC on a reply when the responder stamped it.
 
 **`export` — a metrics surface that exports its own blind spots** (#228).
 A root wire verb: `zenctl export --bind 127.0.0.1:9184` serves
