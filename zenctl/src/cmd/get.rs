@@ -162,6 +162,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
                             continue;
                         }
                         let v = sample::value_of(&d.rendering);
+                        let stamp = a.timestamp.map(|t| t.to_string());
                         if let Some(fmt) = fmt {
                             println!(
                                 "{}",
@@ -175,11 +176,12 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
                                         encoding: encoding.unwrap_or(""),
                                         payload_len: bytes.len(),
                                         // A reply is not a subscribe-path
-                                        // sample: `FleetAnswer` carries no
-                                        // arrival stamp, no QoS axes and no
+                                        // sample: no QoS axes and no
                                         // SourceInfo, and an empty field is
-                                        // honest (#120).
-                                        timestamp: None,
+                                        // honest (#120). The HLC is the one
+                                        // thing a reply may carry — only when
+                                        // the responder stamped it (#215).
+                                        timestamp: stamp.as_deref(),
                                         value: &v.text,
                                         attachment: a
                                             .attachment

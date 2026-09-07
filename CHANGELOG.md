@@ -6,18 +6,44 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 |
-|---|---|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** |
-| `zenwatch` | — | — | — | — | **0.1.0** (new) |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 |
+|---|---|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** |
+| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged |
 
 ---
 
-## Unreleased
+## 0.9.0 — the explorer suite, executed (2026-09-07)
+
+**Tagged `0.9.0`** on 2026-09-07; `zenkey` 0.8.1, `zenkey-build` 0.8.1 and
+`zenkey-fleet` 0.13.0 published to crates.io the same day.
+
+The nine `later` features of the explorer epic (#174) were filed on
+2026-08-20 as the questions no other tool has the *data* to ask. Eight of
+them ship here, on two RFC amendments: **v1.34** (the `.zrec` state
+preamble and trigger record, the `.zsnap` snapshot, the exporter
+obligations, observation-derived drafts) and **v1.35** (the `when` field
+for conditional surfaces and the conformance-suite obligation — text only
+in this release; the code is 0.10.0's). The ninth, `check conform`
+(#222), waits on that code.
+
+`zenkey` and `zenkey-build` are **additive** (0.8.1): `selector::all_under`,
+`slice::toml_quote`, `Config::allow_drafts` and `LintKind::Draft`.
+`zenkey-fleet` is **breaking** (0.13.0): `.zrec` is version 2 — the reader
+still reads version 1 — and `ZrecItem` gained `Preamble` and `Trigger`,
+`FleetAnswer` gained the reply's `timestamp`, and `ValueDiff`/`Change`/
+`ByteDiff` moved under `report/` (the root paths are unchanged). `zenctl`
+0.7.0 and `zengui` 0.5.0 gain verbs and sections without moving any
+spelling; `zenwatch` is rebuilt on the new engine at 0.1.0. Also in this
+release: `zenctl get` prints the responder's HLC on a reply when the
+responder stamped it (it printed nothing before), and the README names
+the new verbs.
+
+The per-verb and per-shape record follows, as the chunks wrote it.
 
 **The exporter — a metrics surface that exports its own blind spots**
 (#228, RFC 13 §3 *Exporter obligations*, v1.34). `zenkey-fleet` gains the
