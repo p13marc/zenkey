@@ -1,0 +1,22 @@
+# DRAFT type table — inferred from fixture.zrec on [..] (RFC 08 §5, §6.1); every schema here is
+# the shape of what was observed, not a declaration. Review beside the producer files.
+
+# demo: bound by 1 subject(s)
+[types.DemoBoom]
+kind = "json-schema"
+schema = "schemas/DemoBoom.json"
+
+# demo: bound by 1 subject(s)
+[types.DemoHealth]
+kind = "json-schema"
+schema = "schemas/DemoHealth.json"
+
+# demo: bound by 1 subject(s)
+[types.DemoCpuUsagePercent]
+kind = "json-schema"
+schema = "schemas/DemoCpuUsagePercent.json"
+
+# demo: bound by 2 subject(s)
+[types.DemoMemory]
+kind = "json-schema"
+schema = "schemas/DemoMemory.json"

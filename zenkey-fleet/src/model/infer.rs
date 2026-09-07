@@ -719,7 +719,11 @@ fn infer_view(view: &View<'_>, prefix: &[Chunk], keys: &[KeyObs]) -> Vec<Family>
             let leaf_only = members
                 .iter()
                 .all(|(_, nodes)| nodes.iter().all(|n| n.children.values().all(Node::is_leaf)));
-            let comment = if leaf_only {
+            // Failure mode 2 is the uniform case: every origin published
+            // the same members. A population that varies by origin is the
+            // dimension evidence E2 reads, whatever the depth.
+            let uniform = pop.members.values().collect::<BTreeSet<_>>().len() <= 1;
+            let comment = if leaf_only && uniform {
                 format!(
                     "inferred {{var}} from siblings: {} — a literal pair with one shape looks \
                      the same; review",
@@ -876,7 +880,9 @@ pub fn infer(
     }
 
     let mut producers: BTreeMap<Owner, InferredProducer> = BTreeMap::new();
-    let mut type_shapes: BTreeMap<Owner, Vec<(String, Option<Value>, usize)>> = BTreeMap::new();
+    // Per owner, each subject's inferred schema, in subject order; named
+    // and deduplicated by `assign_types` once the producer is whole.
+    let mut type_shapes: BTreeMap<Owner, Vec<Option<Value>>> = BTreeMap::new();
     let mut caveats = Vec::new();
     if origins <= 1 {
         caveats.push(
@@ -912,9 +918,9 @@ pub fn infer(
             });
         let shapes = type_shapes.entry(owner.clone()).or_default();
         for fam in families {
-            let subject = draft_subject(
-                &fam, class, &key_obs, &key_names, obs, span_s, hint_slice, &name, shapes,
-            );
+            let (subject, schema) =
+                draft_subject(&fam, class, &key_obs, &key_names, obs, span_s, hint_slice);
+            shapes.push(schema);
             producer.subjects.push(subject);
         }
     }
@@ -922,14 +928,7 @@ pub fn infer(
     let mut out: Vec<InferredProducer> = Vec::new();
     for (owner, mut producer) in producers {
         let shapes = type_shapes.remove(&owner).unwrap_or_default();
-        producer.types = shapes
-            .into_iter()
-            .map(|(name, schema, subjects)| InferredType {
-                name,
-                schema,
-                subjects,
-            })
-            .collect();
+        producer.types = assign_types(&mut producer.subjects, shapes, &producer.name);
         producer
             .subjects
             .sort_by(|a, b| (&a.class, &a.path).cmp(&(&b.class, &b.path)));
@@ -1016,7 +1015,90 @@ fn assign_variants(subjects: &mut [InferredSubject]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Name the types and bind the subjects to them, deduplicated per producer
+/// by schema identity. A shape one subject carries is named after that
+/// subject's literal chunks (`DemoCpuUsagePercent`); a shape several share
+/// is named after their common leading literals (`DemoMemory`), or
+/// `<Producer>Shape<n>` when they share none — never after whichever
+/// member happened to come first. A subject with no structural sample
+/// binds an `…Opaque` type with no schema.
+fn assign_types(
+    subjects: &mut [InferredSubject],
+    schemas: Vec<Option<Value>>,
+    producer: &str,
+) -> Vec<InferredType> {
+    let canonical: Vec<String> = schemas
+        .iter()
+        .map(|s| {
+            s.as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_default())
+                .unwrap_or_default()
+        })
+        .collect();
+    let mut groups: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (i, c) in canonical.iter().enumerate() {
+        groups.entry(c.as_str()).or_default().push(i);
+    }
+    // Deterministic order: by first member, which follows subject order.
+    let mut ordered: Vec<(&str, Vec<usize>)> = groups.into_iter().collect();
+    ordered.sort_by_key(|(_, members)| members[0]);
+    let literal_chunks = |path: &str| -> Vec<String> {
+        path.split('/')
+            .take_while(|c| !c.starts_with('{'))
+            .map(str::to_string)
+            .collect()
+    };
+    let mut taken: BTreeSet<String> = BTreeSet::new();
+    let mut types = Vec::new();
+    let mut shape_n = 0usize;
+    for (_, members) in ordered {
+        let schema = schemas[members[0]].clone();
+        let mut stem = if members.len() == 1 {
+            subjects[members[0]]
+                .path
+                .split('/')
+                .filter(|c| !c.starts_with('{'))
+                .map(camel)
+                .collect::<String>()
+        } else {
+            let mut common = literal_chunks(&subjects[members[0]].path);
+            for &i in &members[1..] {
+                let other = literal_chunks(&subjects[i].path);
+                let shared = common
+                    .iter()
+                    .zip(&other)
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                common.truncate(shared);
+            }
+            common.iter().map(|c| camel(c)).collect()
+        };
+        if stem.is_empty() {
+            shape_n += 1;
+            stem = format!("Shape{shape_n}");
+        }
+        let mut name = format!("{}{stem}", camel(producer));
+        if schema.is_none() {
+            name.push_str("Opaque");
+        }
+        let base = name.clone();
+        let mut n = 2;
+        while !taken.insert(name.clone()) {
+            name = format!("{base}{n}");
+            n += 1;
+        }
+        for &i in &members {
+            subjects[i].type_name = name.clone();
+        }
+        types.push(InferredType {
+            name,
+            schema,
+            subjects: members.len(),
+        });
+    }
+    types
+}
+
 fn draft_subject(
     fam: &Family,
     class: &str,
@@ -1025,9 +1107,7 @@ fn draft_subject(
     obs: &InferObservation,
     span_s: f64,
     hint: Option<&zenkey::RegistrySlice>,
-    producer: &str,
-    shapes: &mut Vec<(String, Option<Value>, usize)>,
-) -> InferredSubject {
+) -> (InferredSubject, Option<Value>) {
     let members: Vec<&KeyObs> = fam.members.iter().map(|&i| &keys[i]).collect();
     let mut comments = fam.comments.clone();
 
@@ -1135,13 +1215,12 @@ fn draft_subject(
 
     // ── unit / kind (RFC 08 §4) ───────────────────────────────────────────
     let mut unit = None;
+    let suffix_counter =
+        matches!(fam.chunks.last(), Some(Chunk::Literal(l)) if l.ends_with("_total"));
     if let Some(Chunk::Literal(leaf)) = fam.chunks.last() {
         unit = unit_of(leaf).map(str::to_string);
-        if leaf.ends_with("_total") {
-            comments.push("kind guess: counter (the `_total` suffix, RFC 08 §4)".to_string());
-        }
     }
-    if let Some(guess) = kind_guess(&members) {
+    if let Some(guess) = kind_guess(&members, suffix_counter) {
         comments.push(guess);
     }
 
@@ -1217,48 +1296,11 @@ fn draft_subject(
              {documents} that were"
         ));
     }
-    let literals: String = fam
-        .chunks
-        .iter()
-        .filter_map(|c| match c {
-            Chunk::Literal(l) => Some(camel(l)),
-            _ => None,
-        })
-        .collect();
-    let type_name = {
-        let canonical = schema
-            .as_ref()
-            .map(|s| serde_json::to_string(s).unwrap_or_default());
-        match shapes.iter_mut().find(|(_, s, _)| {
-            s.as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_default())
-                == canonical
-        }) {
-            Some(existing) => {
-                existing.2 += 1;
-                existing.0.clone()
-            }
-            None => {
-                let mut name = format!("{}{literals}", camel(producer));
-                if schema.is_none() {
-                    name.push_str("Opaque");
-                }
-                let mut candidate = name.clone();
-                let mut n = 2;
-                while shapes.iter().any(|(existing, _, _)| *existing == candidate) {
-                    candidate = format!("{name}{n}");
-                    n += 1;
-                }
-                shapes.push((candidate.clone(), schema, 1));
-                candidate
-            }
-        }
-    };
-
-    InferredSubject {
+    let subject = InferredSubject {
         path,
         class: class.to_string(),
-        type_name,
+        // Named once the producer is whole (`assign_types`).
+        type_name: String::new(),
         variant: None,
         unit,
         qos: qos_field,
@@ -1270,7 +1312,8 @@ fn draft_subject(
         origins: origins.len(),
         keys: members.len(),
         samples,
-    }
+    };
+    (subject, schema)
 }
 
 /// A hint slice's var names, when one of its declared patterns of this
@@ -1317,18 +1360,35 @@ fn hint_var_names(
     None
 }
 
-fn kind_guess(members: &[&KeyObs]) -> Option<String> {
+/// The `kind` guess (RFC 08 §2, v1.32) — a comment, never a field. The
+/// `_total` suffix (RFC 08 §4) says counter; the samples say whether the
+/// series ever decreased; the two fold into one line.
+fn kind_guess(members: &[&KeyObs], suffix_counter: bool) -> Option<String> {
     let numeric: u64 = members.iter().map(|k| k.numeric).sum();
     let text: u64 = members.iter().map(|k| k.text).sum();
     let boolean: u64 = members.iter().map(|k| k.boolean).sum();
     let total = numeric + text + boolean;
     if total == 0 {
-        return None;
+        return suffix_counter
+            .then(|| "kind guess: counter (the `_total` suffix, RFC 08 §4)".to_string());
     }
     if numeric == total {
         let decreased = members.iter().any(|k| k.decreased);
         let negative = members.iter().any(|k| k.negative);
         let enough = members.iter().any(|k| k.numeric >= 2);
+        if suffix_counter {
+            return Some(if decreased || negative {
+                format!(
+                    "kind: the `_total` suffix says counter (RFC 08 §4) but a decrease or a \
+                     negative was seen over {numeric} numeric sample(s) — review"
+                )
+            } else {
+                format!(
+                    "kind guess: counter (the `_total` suffix, RFC 08 §4; never decreased over \
+                     {numeric} numeric sample(s))"
+                )
+            });
+        }
         return Some(if decreased || negative {
             format!(
                 "kind guess: gauge ({numeric} numeric sample(s); a decrease or a negative was seen)"
@@ -1973,11 +2033,13 @@ mod tests {
                 .iter()
                 .any(|c| c.contains("ttl_s not established"))
         );
-        // The schema: an object with both fields required, one boolean, one number.
+        // The schema: an object with both fields required, one boolean, one
+        // number. `health` and `sensor` share the shape and no literal, so
+        // the type is named for neither.
         let t = r.producers[0]
             .types
             .iter()
-            .find(|t| t.name == "DemoHealth")
+            .find(|t| t.name == "DemoShape1")
             .unwrap();
         assert_eq!(
             t.schema,

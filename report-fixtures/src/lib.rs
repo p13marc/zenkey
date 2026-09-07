@@ -2302,3 +2302,93 @@ pub fn snapshot_diff_unmapped() -> SnapshotDiff {
 pub fn snapshot_diff_identity() -> SnapshotDiff {
     zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
 }
+
+/// `registry infer`'s draft (#225): two subjects on one producer — a
+/// `{var}` family with a unit and an established cardinality, and a state
+/// subject whose ttl could not be established and is absent — one shared
+/// type, one run-level caveat.
+pub fn infer_report() -> InferReport {
+    InferReport {
+        source: "v1/**".into(),
+        window_s: Some(60.0),
+        span_s: 59.2,
+        samples: 120,
+        dropped: 0,
+        keys_seen: 4,
+        keys_refused: 0,
+        origins: 2,
+        unparsed_keys: 1,
+        off_plane_keys: 1,
+        undocumented: 0,
+        unread: 0,
+        paths_refused: 0,
+        hinted_by_registry: false,
+        caveats: vec!["no registry hinted the inference: {var}s are named by position".into()],
+        producers: vec![InferredProducer {
+            name: "demo".into(),
+            service_origin: None,
+            subjects: vec![
+                InferredSubject {
+                    path: "health".into(),
+                    class: "state".into(),
+                    type_name: "DemoHealth".into(),
+                    variant: None,
+                    unit: None,
+                    qos: None,
+                    ttl_s: None,
+                    rate: None,
+                    cardinality: None,
+                    encoding: Some("application/json".into()),
+                    comments: vec![
+                        "ttl_s not established: no refresh observed within 59.2 s; the lint \
+                         requires one — set it from the producer's cadence"
+                            .into(),
+                        "qos observed: transition — what rode, not a declaration".into(),
+                    ],
+                    origins: 2,
+                    keys: 2,
+                    samples: 2,
+                },
+                InferredSubject {
+                    path: "cpu/{v1}/usage_percent".into(),
+                    class: "telemetry".into(),
+                    type_name: "DemoCpuUsagePercent".into(),
+                    variant: None,
+                    unit: Some("percent".into()),
+                    qos: None,
+                    ttl_s: None,
+                    rate: None,
+                    cardinality: Some(10),
+                    encoding: Some("application/json".into()),
+                    comments: vec![
+                        "inferred {var} from siblings: cpu0, cpu1 (2 values on 2 origin(s))".into(),
+                        "qos observed: sampled — what rode, not a declaration".into(),
+                    ],
+                    origins: 2,
+                    keys: 2,
+                    samples: 118,
+                },
+            ],
+            types: vec![
+                InferredType {
+                    name: "DemoHealth".into(),
+                    schema: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {"ok": {"type": "boolean"}},
+                        "required": ["ok"],
+                    })),
+                    subjects: 1,
+                },
+                InferredType {
+                    name: "DemoCpuUsagePercent".into(),
+                    schema: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {"value": {"type": "number"}},
+                        "required": ["value"],
+                    })),
+                    subjects: 1,
+                },
+            ],
+        }],
+    }
+}

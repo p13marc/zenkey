@@ -1962,6 +1962,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "registry-consumers",
         "registry-diff",
         "registry-impact",
+        "registry-infer",
         "registry-lint",
         "registry-lock",
         "registry-retired",
@@ -2287,6 +2288,54 @@ fn a_registry_lint_reports_the_build_s_warnings_and_still_passes() {
             .unwrap()
             .contains("compat = \"none\"")
     );
+}
+
+/// A draft (#225, RFC 08 §6.1) draws one row per inferred subject with the
+/// fields it established and nothing it did not; the ndjson rows carry the
+/// producer they land in; the caveats ride as notes in every format.
+#[test]
+fn a_registry_infer_draws_what_it_established_and_names_its_file() {
+    assert_eq!(
+        table(&fx::infer_report()),
+        "\
+demo.toml — 2 subject(s), 2 type(s)
+state      health                  DemoHealth · application/json                                             2 key(s) / 2 origin(s) / 2 sample(s)
+telemetry  cpu/{v1}/usage_percent  DemoCpuUsagePercent · unit percent · cardinality 10 · application/json  2 key(s) / 2 origin(s) / 118 sample(s)
+"
+    );
+    let n = notes(&fx::infer_report());
+    assert!(
+        n.contains("drafted 2 subject(s) across 1 producer(s)"),
+        "{n}"
+    );
+    assert!(n.contains("marked draft = true"), "{n}");
+    assert!(n.contains("named by position"), "{n}");
+    assert!(
+        n.contains("1 key(s) did not parse as v1 and 1 sat on a verbatim plane"),
+        "{n}"
+    );
+    let out = ndjson(&fx::infer_report());
+    let lines: Vec<serde_json::Value> = out
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[0]["report"], "registry-infer");
+    assert_eq!(lines[0]["origins"], 2);
+    assert!(
+        lines[0].get("producers").is_none(),
+        "rows carry the producers"
+    );
+    assert_eq!(lines[1]["row"], "subject");
+    assert_eq!(lines[1]["producer"], "demo");
+    assert!(
+        lines[1].get("ttl_s").is_none(),
+        "unestablished is absent: {}",
+        lines[1]
+    );
+    assert_eq!(lines[2]["cardinality"], 10);
+    assert_eq!(lines[3]["row"], "type");
+    assert_eq!(lines[3]["name"], "DemoHealth");
+    assert_eq!(lines.len(), 5);
 }
 
 /// A forced break is loud by contract (RFC 08 §3.1): every broken pin is a row

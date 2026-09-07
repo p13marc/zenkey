@@ -17,7 +17,7 @@
 
 use crate::cli::ExportAs;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context as _, Result, anyhow};
 use zenkey::RegistrySlice;
 
 use crate::Bus;
@@ -189,11 +189,17 @@ pub async fn retired(for_secs: Option<f64>, args: &Bus) -> Result<()> {
 
 /// `registry lint <dir>` — the consumer's build lints, without the build.
 pub fn lint(cli: crate::cli::RegistryLintArgs) -> Result<()> {
-    let crate::cli::RegistryLintArgs { dir, ledger, out } = cli;
+    let crate::cli::RegistryLintArgs {
+        dir,
+        ledger,
+        allow_drafts,
+        out,
+    } = cli;
     let (dir, ledger) = (dir.as_path(), ledger.as_ref());
     let mut config = zenkey_build::Config::new()
         .registry_dir(dir)
-        .no_rerun_if_changed();
+        .no_rerun_if_changed()
+        .allow_drafts(allow_drafts);
     if let Some(l) = ledger {
         config = config.ledger(l);
     }
@@ -244,6 +250,248 @@ pub fn lock(cli: crate::cli::RegistryLockArgs) -> Result<()> {
         out.format,
         out.color,
     )
+}
+
+/// `registry infer` (#225, RFC 08 §6.1) — draft a registry from the wire,
+/// marked as a draft.
+///
+/// Thin, the `field` shape: the window (live through the monitor, or a
+/// `.zrec` read under its own base) feeds `zenkey_fleet::InferObservation`,
+/// `infer` drafts the report, and what only a CLI has is here — the
+/// output directory, the files, the rendering. Slices are a *hint* only
+/// (`{var}` names where a declared pattern binds, a service's name), so
+/// they degrade through `slices_optional`; the draft comes out without them
+/// and the report says so.
+///
+/// The output directory is checked **before** anything is written: it must
+/// be creatable and must not already hold any file this run would write —
+/// all-or-nothing, and a refusal is exit 2 (nothing was drafted, so there
+/// is no finding). A draft never overwrites: the file a reviewer is halfway
+/// through is exactly the one an overwrite would destroy.
+pub async fn infer(cli: crate::cli::RegistryInferArgs) -> Result<()> {
+    use std::io::BufReader;
+
+    use zenkey_fleet::{FleetEvent, InferObservation, StreamItem, ZrecItem, ZrecReader};
+
+    let bus = Bus::resolve(&cli.bus)?;
+    let args = &bus;
+    let crate::cli::RegistryInferArgs {
+        from,
+        for_secs,
+        out,
+        app,
+        max_keys,
+        max_paths,
+        bus: _,
+    } = cli;
+    if max_keys == 0 || max_paths == 0 {
+        return Err(crate::exit::unaskable!(
+            "--max-keys and --max-paths must be at least 1 — a zero bound observes nothing"
+        ));
+    }
+    let app = app.unwrap_or_else(|| "unknown".to_string());
+
+    // A capture is a path that exists and ends in `.zrec`; anything else
+    // is a selector. The two never collide: a selector is a key
+    // expression, and a key expression that names an existing file with
+    // that suffix is a coincidence this tool refuses to guess about.
+    let capture = from
+        .as_deref()
+        .filter(|f| f.ends_with(".zrec") && std::path::Path::new(f).is_file())
+        .map(std::path::PathBuf::from);
+
+    // The QoS label the observation records: the profile the wire's axes
+    // match, else the axes spelled out. A comment in the draft, never a
+    // field.
+    fn qos_label(s: &zenkey_fleet::SampleView) -> String {
+        zenkey::QosProfile::ALL
+            .iter()
+            .find(|p| s.qos_matches(**p))
+            .map(|p| p.name().to_string())
+            .unwrap_or_else(|| {
+                format!(
+                    "no profile: {:?}/{:?}/{:?}{}",
+                    s.priority,
+                    s.congestion_control,
+                    s.reliability,
+                    if s.express { "/express" } else { "" }
+                )
+            })
+    }
+
+    // Hints are a registry the operator already has. A capture is read
+    // without a session — the bus it came from may be long gone — so its
+    // hints come from `--registry` dirs alone; a live window asks the bus
+    // too, degrading through the one door (#210).
+    let slices = match (&capture, args.registry_dirs()) {
+        (Some(_), dirs) if dirs.is_empty() => None,
+        (Some(_), dirs) => Some(zenkey_fleet::SliceSet::from_dirs(&dirs)?),
+        (None, _) => args.slices_optional().await?,
+    };
+    // "Hinted" means a slice bound: an empty set names no var and no
+    // service, and saying it hinted would be a false claim (O4).
+    let hints = slices.as_ref().filter(|s| !s.slices().is_empty());
+    let (obs, source, window_s, dropped) = match capture {
+        Some(path) => {
+            if for_secs.is_some() {
+                return Err(crate::exit::unaskable!(
+                    "--for is a live window; a capture's span is in its rows — drop one of the two"
+                ));
+            }
+            let file =
+                std::fs::File::open(&path).with_context(|| format!("open {}", path.display()))?;
+            let mut reader = ZrecReader::new(BufReader::new(file))
+                .with_context(|| format!("read {} as a .zrec", path.display()))?;
+            let base = reader.header().base.clone();
+            let mut obs = InferObservation::new(&base, max_keys, max_paths);
+            let mut dropped = 0u64;
+            let mut malformed = 0u64;
+            while let Some(item) = reader.next() {
+                match item {
+                    Ok(ZrecItem::Sample { row, t_us, .. }) => {
+                        let at_s = t_us.map_or(0.0, |t| t as f64 / 1e6);
+                        let doc = (!row.delete)
+                            .then(|| zenkey_fleet::structural_value(&row.payload))
+                            .flatten();
+                        obs.observe(
+                            &row.key,
+                            at_s,
+                            row.encoding.as_deref(),
+                            row.qos.as_deref(),
+                            doc.as_ref(),
+                        );
+                    }
+                    Ok(ZrecItem::Dropped(n)) => dropped += n,
+                    Err(_) => malformed += 1,
+                }
+            }
+            if malformed > 0 {
+                eprintln!("infer: {malformed} malformed row(s) in the capture skipped");
+            }
+            (obs, path.display().to_string(), None, dropped)
+        }
+        None => {
+            let selector = match from.as_deref() {
+                Some(sel) => super::raw_selector(sel)?.to_string(),
+                None => zenkey::grammar::with_base(args.base(), "v1/**"),
+            };
+            let secs = for_secs.unwrap_or(60.0);
+            let window = super::positive_secs("--for", secs)?;
+            let session = args.session().await?;
+            let monitor =
+                zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default())
+                    .await?;
+            let mut events = monitor.events();
+            // Declared before the window opens (O4).
+            let monitor = monitor.watching([selector.as_str()]).await?;
+            let opened = std::time::Instant::now();
+            eprintln!(
+                "infer: watching {selector} for {secs}s — subscriber declared before the window opened (RFC 09 §5.1 O4)"
+            );
+            let mut obs = InferObservation::new(args.base(), max_keys, max_paths);
+            let mut dropped = 0u64;
+            let window_over = tokio::time::sleep(window);
+            tokio::pin!(window_over);
+            loop {
+                let item = tokio::select! {
+                    item = events.recv() => item,
+                    () = &mut window_over => break,
+                };
+                match item {
+                    Some(StreamItem::Event(FleetEvent::Sample(s))) => {
+                        let at_s = s.received.duration_since(opened).as_secs_f64();
+                        let qos = qos_label(&s);
+                        let bytes = s.payload.to_bytes();
+                        if bytes.len() > zenkey_fleet::OBSERVE_LIMIT {
+                            obs.observe_unread(&s.key, at_s, Some(&s.encoding), Some(&qos));
+                        } else {
+                            let doc = (s.kind == zenoh::sample::SampleKind::Put)
+                                .then(|| zenkey_fleet::structural_value(&bytes))
+                                .flatten();
+                            obs.observe(&s.key, at_s, Some(&s.encoding), Some(&qos), doc.as_ref());
+                        }
+                    }
+                    Some(StreamItem::Dropped(n)) => dropped += n,
+                    Some(_) => continue,
+                    None => break,
+                }
+            }
+            monitor.shutdown().await?;
+            (obs, selector, Some(secs), dropped)
+        }
+    };
+
+    let mut report = zenkey_fleet::infer(&obs, &source, window_s, hints);
+    report.dropped = dropped;
+    if report.producers.is_empty() {
+        // Silence under a window is exit 2, not a draft of nothing: an
+        // empty directory would read as "this fleet has no subjects".
+        return Err(crate::exit::unaskable!(
+            "nothing to draft: {} sample(s) on {} v1 key(s) under {source} — no draft written",
+            report.samples,
+            report.keys_seen
+        ));
+    }
+
+    // The output directory, checked whole before a byte is written.
+    let names = zenkey_fleet::draft_file_names(&report);
+    if out.exists() && !out.is_dir() {
+        return Err(crate::exit::unaskable!(
+            "--out {} exists and is not a directory",
+            out.display()
+        ));
+    }
+    let occupied: Vec<&String> = names.iter().filter(|n| out.join(n).exists()).collect();
+    if !occupied.is_empty() {
+        return Err(crate::exit::unaskable!(
+            "--out {} already holds {} file(s) this run would write ({}…) — a draft never overwrites; pick an empty directory",
+            out.display(),
+            occupied.len(),
+            occupied
+                .iter()
+                .take(3)
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    std::fs::create_dir_all(out.join("schemas"))
+        .with_context(|| format!("create {}", out.join("schemas").display()))?;
+    let prov = zenkey_fleet::Provenance {
+        app,
+        source: source.clone(),
+        span_s: report.span_s,
+        at: zenkey_fleet::rfc3339_now(),
+        keys: report.keys_seen,
+        samples: report.samples,
+        dropped: report.dropped,
+    };
+    let mut written = Vec::new();
+    for p in &report.producers {
+        let path = out.join(format!("{}.toml", p.name));
+        std::fs::write(&path, zenkey_fleet::to_draft_toml(p, &prov))
+            .with_context(|| format!("write {}", path.display()))?;
+        written.push(path);
+    }
+    let types = out.join("types.toml");
+    std::fs::write(
+        &types,
+        zenkey_fleet::to_draft_types_toml(&report.producers, &prov),
+    )
+    .with_context(|| format!("write {}", types.display()))?;
+    written.push(types);
+    for (rel, body) in zenkey_fleet::draft_schema_files(&report.producers) {
+        let path = out.join(rel);
+        std::fs::write(&path, body).with_context(|| format!("write {}", path.display()))?;
+        written.push(path);
+    }
+    eprintln!(
+        "infer: wrote {} file(s) under {} — run `zenctl registry lint --allow-drafts {}` to check the draft; review it, drop `draft = true` and add `since` to promote it",
+        written.len(),
+        out.display(),
+        out.display()
+    );
+    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
 }
 
 /// Whether a `registry consumers` target is already a wire key or selector

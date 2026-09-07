@@ -37,6 +37,20 @@ ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
 
 ### `zenkey-fleet`
 
+* **Registry inference** (#225, RFC 08 §6.1): `model::infer` (decode-gated,
+  pure) — `InferObservation` folds samples into one chunk trie per
+  (producer, class) spanning every origin, `infer` drafts `[[subject]]`s
+  from it, and `to_draft_toml`/`to_draft_types_toml`/`draft_schema_files`
+  emit the draft. The literal-vs-`{var}` heuristic is three kinds of
+  evidence (interior siblings with one sub-structure after recursive
+  inference of the merged subtree, leaf siblings whose membership varies
+  by origin, write-once leaves under `events`) plus a rest rule for
+  device-defined trees; the module doc names six failure modes and each
+  rides the entry it produces as a comment. Wire shapes `InferReport`,
+  `InferredProducer`, `InferredSubject`, `InferredType` under `report/`,
+  pinned. `PathStats` gains `all_integral`. `tests/infer.rs` round-trips
+  `sysinfo.toml` and `gnmi.toml` as shapes from synthetic rows, and two
+  `zenctl gen` runs over a real bus.
 * **The fleet timeline** (#216): `model/timeline.rs`, a pure projection
   from a window of samples — live `SampleView`s or `.zrec` lines — to one
   merged ordering on a stated clock, lanes per origin/producer, and the
@@ -95,11 +109,26 @@ ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
 
 - `selector::all_under(scope)` — `v1/<scope>/**`, the data-class firehose
   of one origin or the fleet, typed (#215).
+- `toml_quote` — the TOML basic-string quoting `slice_to_toml` always
+  used, public so the draft emitter escapes identically (#225).
+
+### `zenkey-build`
+
+- **`draft = true` is a refusal, not a comment** (#225, RFC 08 §6.1
+  v1.34). A registry file may declare `draft = true` in its `[registry]`
+  header — the marker an observation-derived draft carries. `checked`
+  refuses one with the new `LintKind::Draft` (never forceable, never
+  resolved by writing a lock) unless `Config::allow_drafts(true)` admits
+  it, in which case its subjects may omit `since` and every draft file
+  comes back as a `RegistryWarning`. A draft MUST be `compat = "none"` and
+  MUST NOT carry `since` (`Invalid` otherwise).
 
 ### `zenctl`
 
 * `timeline`, a new wire verb at the root — see `zenctl/CHANGELOG.md`.
 * **`snapshot`** and **`snapshot diff`** — see `zenctl/CHANGELOG.md`.
+* **`registry infer`** and `registry lint --allow-drafts` (#225) — see
+  `zenctl/CHANGELOG.md`.
 
 ### `zengui`
 

@@ -1,0 +1,251 @@
+`registry infer` (#225, RFC 08 §6.1) drafts a registry from what rode the
+wire — here from a `.zrec` capture, read under the capture's own base. The
+report is the draft: every `{var}` was inferred from sibling structure or a
+per-origin population, every unit from RFC 08 §4's suffix rule, and every
+field the observation could not establish is **absent** — `health` refreshed
+every second so its `ttl_s` is a hint of 2, the telemetry entries carry no
+`ttl_s` and no `rate`. Observed QoS is a comment (`transition` rode on
+`health`) and never a field. The `@rpc` key and the stray non-v1 key are
+counted, not drafted.
+
+```console
+$ zenctl registry infer --from fixture.zrec --out draft --format json
+infer: wrote 6 file(s) under draft — run `zenctl registry lint --allow-drafts draft` to check the draft; review it, drop `draft = true` and add `since` to promote it
+{
+  "caveats": [
+    "no registry hinted the inference: {var}s are named by position"
+  ],
+  "dropped": 0,
+  "hinted_by_registry": false,
+  "keys_refused": 0,
+  "keys_seen": 12,
+  "notes": [
+    {
+      "cite": "RFC 03 §1.4",
+      "text": "1 key(s) did not parse as v1 and 1 sat on a verbatim plane — nothing to draft for them"
+    },
+    {
+      "cite": "RFC 08 §6.1",
+      "text": "no registry hinted the inference: {var}s are named by position"
+    }
+  ],
+  "off_plane_keys": 1,
+  "origins": 2,
+  "report": "registry-infer",
+  "rows": [
+    {
+      "cardinality": 10,
+      "class": "events",
+      "comments": [
+        "inferred {var} from 2 leaf sibling(s): 01h0000000000000000000001, 01h0000000000000000000002 — each seen once under events — write-once keys (RFC 04 §1.3); review",
+        "cardinality: the largest distinct member count one origin published, rounded up to a power of ten",
+        "rate: 2 event(s) from the busiest origin over 2.0 s",
+        "qos observed: transition — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here"
+      ],
+      "encoding": "application/json",
+      "keys": 2,
+      "origins": 1,
+      "path": "boom/{v1}",
+      "producer": "demo",
+      "rate": "burst(10000/h)",
+      "row": "subject",
+      "samples": 2,
+      "type_name": "DemoBoom"
+    },
+    {
+      "class": "state",
+      "comments": [
+        "ttl_s: a hint — twice the longest median inter-arrival (1.0 s) among 2 expansion(s)",
+        "qos observed: transition — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here"
+      ],
+      "encoding": "application/json",
+      "keys": 2,
+      "origins": 2,
+      "path": "health",
+      "producer": "demo",
+      "row": "subject",
+      "samples": 6,
+      "ttl_s": 2,
+      "type_name": "DemoHealth"
+    },
+    {
+      "cardinality": 10,
+      "class": "telemetry",
+      "comments": [
+        "inferred {var} from siblings: cpu0, cpu1, cpu2 (3 values on 2 origin(s))",
+        "cardinality: the largest distinct member count one origin published, rounded up to a power of ten",
+        "kind guess: counter or gauge — never decreased over 12 numeric sample(s) on 2 origin(s); a gauge that only rose looks the same",
+        "qos observed: sampled — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here"
+      ],
+      "encoding": "application/json",
+      "keys": 4,
+      "origins": 2,
+      "path": "cpu/{v1}/usage_percent",
+      "producer": "demo",
+      "row": "subject",
+      "samples": 12,
+      "type_name": "DemoCpuUsagePercent",
+      "unit": "percent"
+    },
+    {
+      "class": "telemetry",
+      "comments": [
+        "kind guess: counter (the `_total` suffix, RFC 08 §4; never decreased over 6 numeric sample(s))",
+        "qos observed: sampled — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here"
+      ],
+      "encoding": "application/json",
+      "keys": 2,
+      "origins": 2,
+      "path": "memory/oom_kills_total",
+      "producer": "demo",
+      "row": "subject",
+      "samples": 6,
+      "type_name": "DemoMemory"
+    },
+    {
+      "class": "telemetry",
+      "comments": [
+        "kind guess: counter or gauge — never decreased over 6 numeric sample(s) on 2 origin(s); a gauge that only rose looks the same",
+        "qos observed: sampled — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here"
+      ],
+      "encoding": "application/json",
+      "keys": 2,
+      "origins": 2,
+      "path": "memory/used_bytes",
+      "producer": "demo",
+      "row": "subject",
+      "samples": 6,
+      "type_name": "DemoMemory",
+      "unit": "bytes"
+    },
+    {
+      "name": "DemoBoom",
+      "producer": "demo",
+      "row": "type",
+      "schema": {
+        "properties": {
+          "why": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "why"
+        ],
+        "type": "object"
+      },
+      "subjects": 1
+    },
+    {
+      "name": "DemoHealth",
+      "producer": "demo",
+      "row": "type",
+      "schema": {
+        "properties": {
+          "load": {
+            "type": "number"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "load",
+          "ok"
+        ],
+        "type": "object"
+      },
+      "subjects": 1
+    },
+    {
+      "name": "DemoCpuUsagePercent",
+      "producer": "demo",
+      "row": "type",
+      "schema": {
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "type",
+          "value"
+        ],
+        "type": "object"
+      },
+      "subjects": 1
+    },
+    {
+      "name": "DemoMemory",
+      "producer": "demo",
+      "row": "type",
+      "schema": {
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "value"
+        ],
+        "type": "object"
+      },
+      "subjects": 2
+    }
+  ],
+  "samples": 34,
+  "source": "fixture.zrec",
+  "span_s": 2.0,
+  "undocumented": 0,
+  "unparsed_keys": 1
+}
+1 key(s) did not parse as v1 and 1 sat on a verbatim plane — nothing to draft for them (RFC 03 §1.4)
+no registry hinted the inference: {var}s are named by position (RFC 08 §6.1)
+
+```
+
+The files are the report, written: one `demo.toml` marked `draft = true`
+with `compat = "none"` and no `since`, a `types.toml` and the schema sidecars.
+A draft never overwrites — the file a reviewer is halfway through is exactly
+the one an overwrite would destroy — so a second run into the same directory
+is refused whole, exit 2, before a byte is written.
+
+```console
+$ zenctl registry infer --from fixture.zrec --out draft --format json
+? 2
+Error: --out draft already holds 6 file(s) this run would write (demo.toml, types.toml, schemas/DemoBoom.json…) — a draft never overwrites; pick an empty directory
+
+```
+
+`--for` is a live window; a capture's span is in its rows.
+
+```console
+$ zenctl registry infer --from fixture.zrec --for 5 --out draft2 --format json
+? 2
+Error: --for is a live window; a capture's span is in its rows — drop one of the two
+
+```
+
+The loop closes on `registry lint`: the build lint refuses a draft (exit 1,
+a finding — `zenkey-build` says the same), and `--allow-drafts` admits it
+for prototyping, as a warning every build sees.
+
+```console
+$ zenctl registry lint draft
+? 1
+Error: registry lint failed [demo]: declares draft = true — an observation-derived, unreviewed registry (RFC 08 §6.1). Review it, drop the marker and add `since` to promote it; or build with Config::allow_drafts() to prototype against it
+
+```
+
+```console
+$ zenctl registry lint --allow-drafts draft
+{"dir":"draft","notes":[{"text":"demo draft — observation-derived and unreviewed (RFC 08 §6.1): admitted by allow_drafts, unpinned, every field a guess; promote it by review"}],"passed":true,"report":"registry-lint","warnings":["demo draft — observation-derived and unreviewed (RFC 08 §6.1): admitted by allow_drafts, unpinned, every field a guess; promote it by review"]}
+demo draft — observation-derived and unreviewed (RFC 08 §6.1): admitted by allow_drafts, unpinned, every field a guess; promote it by review
+
+```

@@ -1,0 +1,75 @@
+# DRAFT — inferred from fixture.zrec over 2.0 s on [..], 12 keys, 34 samples, dropped 0;
+# observation-derived and unreviewed (RFC 08 §6.1). Every field below is a guess a
+# human has not confirmed. `draft = true` makes zenkey-build refuse this file until
+# a review removes the marker and assigns `since`; `registry lint --allow-drafts`
+# checks it meanwhile.
+
+[registry]
+version = "0.1"
+app = "unknown"
+convention = 1
+compat = "none"
+draft = true
+
+[producer]
+name = "demo"
+
+# inferred {var} from 2 leaf sibling(s): 01h0000000000000000000001, 01h0000000000000000000002 — each seen once under events — write-once keys (RFC 04 §1.3); review
+# cardinality: the largest distinct member count one origin published, rounded up to a power of ten
+# rate: 2 event(s) from the busiest origin over 2.0 s
+# qos observed: transition — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here
+# observed: 2 key(s) on 1 origin(s), 2 sample(s)
+[[subject]]
+path = "boom/{v1}"
+class = "events"
+type = "DemoBoom"
+rate = "burst(10000/h)"
+cardinality = 10
+encoding = "application/json"
+description = "inferred; unreviewed"
+
+# ttl_s: a hint — twice the longest median inter-arrival (1.0 s) among 2 expansion(s)
+# qos observed: transition — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here
+# observed: 2 key(s) on 2 origin(s), 6 sample(s)
+[[subject]]
+path = "health"
+class = "state"
+type = "DemoHealth"
+ttl_s = 2
+encoding = "application/json"
+description = "inferred; unreviewed"
+
+# inferred {var} from siblings: cpu0, cpu1, cpu2 (3 values on 2 origin(s))
+# cardinality: the largest distinct member count one origin published, rounded up to a power of ten
+# kind guess: counter or gauge — never decreased over 12 numeric sample(s) on 2 origin(s); a gauge that only rose looks the same
+# qos observed: sampled — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here
+# observed: 4 key(s) on 2 origin(s), 12 sample(s)
+[[subject]]
+path = "cpu/{v1}/usage_percent"
+class = "telemetry"
+type = "DemoCpuUsagePercent"
+unit = "percent"
+cardinality = 10
+encoding = "application/json"
+description = "inferred; unreviewed"
+
+# kind guess: counter (the `_total` suffix, RFC 08 §4; never decreased over 6 numeric sample(s))
+# qos observed: sampled — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here
+# observed: 2 key(s) on 2 origin(s), 6 sample(s)
+[[subject]]
+path = "memory/oom_kills_total"
+class = "telemetry"
+type = "DemoMemory"
+encoding = "application/json"
+description = "inferred; unreviewed"
+
+# kind guess: counter or gauge — never decreased over 6 numeric sample(s) on 2 origin(s); a gauge that only rose looks the same
+# qos observed: sampled — what rode, not a declaration; a wrong profile on the wire would be laundered into a contract by writing it here
+# observed: 2 key(s) on 2 origin(s), 6 sample(s)
+[[subject]]
+path = "memory/used_bytes"
+class = "telemetry"
+type = "DemoMemory"
+unit = "bytes"
+encoding = "application/json"
+description = "inferred; unreviewed"

@@ -863,6 +863,17 @@ pub(crate) enum RegistryCmd {
     /// consumers, its storage coverage, what else declares on its family,
     /// and its `[[deprecated]]` entry — in one document.
     Impact(RegistryImpactArgs),
+    /// Draft a registry from the wire, marked as a draft (#225, RFC 08
+    /// §6.1): one `<producer>.toml` per producer seen, a `types.toml` with
+    /// inferred JSON Schemas, `compat = "none"`, `draft = true`, no `since`.
+    ///
+    /// Every field is a guess — `{var}`s from sibling structure and
+    /// per-origin populations, units from RFC 08 §4's suffixes, rates and
+    /// ttl hints from counts over the window — and what could not be
+    /// established is absent, never defaulted. Observed QoS is a comment.
+    /// zenkey-build REFUSES the draft until a review drops the marker;
+    /// `registry lint --allow-drafts <dir>` checks it meanwhile.
+    Infer(RegistryInferArgs),
 }
 
 #[derive(Subcommand)]
@@ -1823,8 +1834,46 @@ pub(crate) struct RegistryLintArgs {
     /// Deprecation ledger; defaults to `<dir>/deprecated.lock`.
     #[arg(long, value_name = "FILE")]
     pub(crate) ledger: Option<PathBuf>,
+    /// Admit `draft = true` files (RFC 08 §6.1) — what `registry infer`
+    /// writes — instead of refusing them, as a build with
+    /// `Config::allow_drafts()` would. Each draft is still a warning.
+    #[arg(long)]
+    pub(crate) allow_drafts: bool,
     #[command(flatten)]
     pub(crate) out: OutputArgs,
+}
+
+/// The `registry infer` verb's flags — one struct the dispatcher hands over
+/// whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct RegistryInferArgs {
+    /// What to infer from: a full wire selector to watch for `--for`
+    /// seconds (default `<base>/v1/**`), or a `.zrec` capture to read —
+    /// a path that exists and ends in `.zrec` is a capture, anything else
+    /// a selector. A capture is read under its own stated base.
+    #[arg(long, value_name = "SELECTOR|FILE", add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) from: Option<String>,
+    /// The passive window, seconds (default 60). Not with a capture: its
+    /// span is in its rows.
+    #[arg(long = "for", value_name = "SECS")]
+    pub(crate) for_secs: Option<f64>,
+    /// Output directory. Created if missing; refused whole if it already
+    /// holds any file this run would write.
+    #[arg(long, value_name = "DIR")]
+    pub(crate) out: PathBuf,
+    /// The `app` the draft header names (default `"unknown"` — a draft
+    /// cannot know the owning application).
+    #[arg(long, value_name = "NAME")]
+    pub(crate) app: Option<String>,
+    /// Bound on distinct keys retained (O6); the draft covers the retained
+    /// set and reports the refused count.
+    #[arg(long, value_name = "N", default_value_t = zenkey_fleet::model::infer::DEFAULT_MAX_KEYS)]
+    pub(crate) max_keys: usize,
+    /// Bound on the per-path table across every key's documents (O6).
+    #[arg(long, value_name = "N", default_value_t = zenkey_fleet::model::infer::DEFAULT_MAX_PATHS)]
+    pub(crate) max_paths: usize,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
 }
 
 /// The `registry lock` verb's flags — one struct the dispatcher hands over whole,

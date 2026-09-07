@@ -23,6 +23,7 @@ mod consumers;
 mod documents;
 mod fields;
 mod findings;
+mod infer;
 pub mod observations;
 mod rate;
 pub use rate::RateView;
