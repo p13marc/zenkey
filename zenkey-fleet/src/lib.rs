@@ -138,7 +138,8 @@ pub use bus::describe::{DescribeSweep, describe_sweep};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
-    CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, watchdog,
+    CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome, WatchdogSpec,
+    watchdog,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -173,6 +174,9 @@ pub use tape::generate::{
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use tape::synth::Synth;
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]
@@ -306,14 +310,18 @@ pub use report::{
     TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport,
     ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
+// `CondState` and `Transition` are unconditional since v1.34: a version-2
+// `.zrec` carries the trigger record, and the reader is not decode-gated.
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use report::{CondState, Transition, WatchdogSummary};
+pub use report::WatchdogSummary;
+pub use report::{CondState, PreRollInfo, PreambleInfo, PreambleSemantics, Transition};
 pub use tape::bench::{BenchSpec, run_bench};
 pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
 pub use tape::record::{
-    RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, ZREC_VERSION, ZrecItem, ZrecReader,
-    ZrecSink, ZrecSource, ZrecWriter, record, replay,
+    PREAMBLE_SKIP_REASON, RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, SinkCounts,
+    ZREC_READS, ZREC_VERSION, ZrecItem, ZrecReader, ZrecSink, ZrecSource, ZrecWriter, record,
+    replay,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]

@@ -1471,14 +1471,63 @@ pub(crate) struct RecordArgs {
     /// Output file.
     #[arg(long, short = 'o', value_name = "FILE")]
     pub(crate) out: String,
-    /// Stop after this many seconds.
+    /// Stop after this many seconds. With --on: give up waiting for a
+    /// rule after this long (nothing is written; a rule not firing is
+    /// not a finding).
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
-    /// Stop after this many samples (0 = until ctrl-c or --for).
+    /// Stop after this many samples (0 = until ctrl-c or --for). With
+    /// --on: the post-roll's stop bound.
     #[arg(long, value_name = "N", default_value_t = 0)]
     pub(crate) count: u64,
+    /// Arm instead of record (#218): write a file only when this rule
+    /// transitions to `firing`, with `--pre` seconds of retained traffic
+    /// before it. Repeatable; the watchdog's vocabulary — `rate-above
+    /// <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
+    /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `doctor <CHECK-ID>`,
+    /// `origin-down <ORIGIN>`, `dropped`. The file is `.zrec` version 2
+    /// (RFC 13 §4.1): a state preamble, the pre-roll, the trigger record
+    /// where it fired, then `--post` seconds more.
+    #[arg(long, value_name = "RULE", requires = "pre")]
+    pub(crate) on: Vec<String>,
+    /// Seconds of traffic to retain before the trigger — the ring's age
+    /// budget. The pre-roll covers only the watched selectors (O5), and
+    /// the header says how much of it the ring could give (O6).
+    #[arg(long, value_name = "SECS", requires = "on")]
+    pub(crate) pre: Option<f64>,
+    /// Seconds to keep recording after the trigger.
+    #[arg(long, value_name = "SECS", default_value_t = 10.0, requires = "on")]
+    pub(crate) post: f64,
+    /// Seconds between rule evaluations — the one period flag (#307).
+    #[arg(long, value_name = "SECS", default_value_t = 1.0, requires = "on")]
+    pub(crate) every: f64,
+    /// What the state preamble is a snapshot of (RFC 13 §4.3): the
+    /// current state of only the keys the ring cannot show, the full
+    /// current state under the watched selectors, or none at all.
+    #[arg(
+        long,
+        value_enum,
+        default_value = "absent-from-window",
+        requires = "on"
+    )]
+    pub(crate) preamble: PreambleMode,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
+}
+
+/// `record --preamble`: what a triggered capture's state preamble is a
+/// snapshot of — the RFC 13 §4.3 semantics plus "none" (#218).
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum PreambleMode {
+    /// Only the state keys absent from the retained window, fetched at
+    /// trigger time: what the ring cannot tell you.
+    AbsentFromWindow,
+    /// Every state key under the watched selectors, fetched at trigger
+    /// time, ring or no ring.
+    Full,
+    /// No preamble — the pre-roll's `state` rows are then deltas with no
+    /// base, and the file says nothing to the contrary.
+    None,
 }
 
 /// The `timeline` verb's flags (#216) — one struct, the `GenArgs` pattern.
@@ -1635,6 +1684,13 @@ pub(crate) struct ReplayArgs {
     /// same operator price as `retire` (RFC 04 §1.2, v1.12).
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
+    /// Publish a version-2 capture's preamble rows too — state at capture
+    /// start, re-stamped now (RFC 13 §4.1). Off by default: re-stamped
+    /// state wins last-writer-wins, so the preamble republishes a whole
+    /// snapshot over the live fleet with no pacing between the rows
+    /// (§4.2); the rows are skipped and counted instead.
+    #[arg(long)]
+    pub(crate) seed_state: bool,
     /// QoS profile for rows that recorded none.
     #[arg(long, default_value = "refreshed",
           add = ArgValueCandidates::new(completion::qos_profiles))]

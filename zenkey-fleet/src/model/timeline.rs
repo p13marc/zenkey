@@ -231,6 +231,19 @@ pub struct PlacedBreak {
 pub enum Ingested {
     Row(TimelineRow),
     Break(Break),
+    /// A version-2 preamble row (RFC 13 §4.1): state at capture start,
+    /// not an arrival — it has no place on either axis, and a reader
+    /// counts it apart from observed rows (O6). The key, so a consumer can
+    /// say which.
+    Preamble {
+        key: String,
+    },
+    /// A version-2 trigger record: what fired, and to what. A marker the
+    /// consumer may place where it fell; never a row.
+    Trigger {
+        rule: String,
+        to: crate::report::CondState,
+    },
 }
 
 impl Ingested {
@@ -248,6 +261,13 @@ impl Ingested {
     pub fn from_zrec(item: &ZrecItem, base: &str) -> Ingested {
         match item {
             ZrecItem::Dropped(n) => Ingested::Break(Break::Dropped(*n)),
+            ZrecItem::Preamble { row, .. } => Ingested::Preamble {
+                key: row.key.clone(),
+            },
+            ZrecItem::Trigger(t) => Ingested::Trigger {
+                rule: t.rule.clone(),
+                to: t.to,
+            },
             ZrecItem::Sample {
                 row,
                 t_us,

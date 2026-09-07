@@ -1,0 +1,63 @@
+`replay --dry-run` over a version-2 capture (#218; RFC 13 §4.1): the file
+carries a **state preamble** — the value of a `state` key fetched at trigger
+time, marked `"preamble": true` at `t: 0` — and the trigger record where the
+rule fired. A preamble row is state at capture start, and re-stamping it
+republishes a snapshot over the live fleet with no pacing (§4.2), so the
+replayer skips it by default and says why **on the row**, then counts what
+it skipped in the closing report. The trigger is announced where it fell and
+is never a put. The fixture is hand-written against the dialect the engine's
+own writer tests pin.
+
+```console
+$ zenctl replay --dry-run --base acme tests/cmd/fixtures/trigger.zrec
+tests/cmd/fixtures/trigger.zrec: captured acme/v1/h-3fa9c2d41b7e/state/demo/** under base "acme" (2026-09-06T00:00:00Z)
+{"key":"acme/v1/h-3fa9c2d41b7e/state/demo/config","reason":"state at capture start; re-stamping it republishes a snapshot over live state (RFC 13 §4.2) — pass --seed-state to mean it","row":"would","would":"skip-preamble"}
+{"bytes":11,"encoding":"application/json","key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","row":"would","would":"put"}
+{"bytes":11,"encoding":"application/json","key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","row":"would","would":"put"}
+{"bytes":11,"encoding":"application/json","key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","row":"would","would":"put"}
+{"bytes":11,"encoding":"application/json","key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","row":"would","would":"put"}
+-- trigger: silent-for acme/v1/h-3fa9c2d41b7e/state/demo/health 0.7 ok → firing at 2026-09-06T00:00:32Z — no sample for 0.7s, on a drop-free observer --
+{"bytes":12,"encoding":"application/json","key":"acme/v1/h-3fa9c2d41b7e/state/demo/health","row":"would","would":"put"}
+{"capture_dropped":0,"dry_run":true,"header":{"base":"acme","captured_at":"2026-09-06T00:00:00Z","pre_roll":{"asked_s":30.0,"covered_s":1.5,"expired":2,"watched":["acme/v1/h-3fa9c2d41b7e/state/demo/**"]},"preamble":{"collected_over_s":0.12,"count":1,"selectors":["acme/v1/h-3fa9c2d41b7e/state/demo/**"],"semantics":"absent_from_window"},"selectors":["acme/v1/h-3fa9c2d41b7e/state/demo/**"],"zrec":2},"malformed":0,"notes":[{"cite":"RFC 13 §4.2","text":"1 preamble row(s) not published — state at capture start, re-stamped, would overwrite live state; --seed-state to mean it"}],"preamble_skipped":1,"published":5,"refused":0,"report":"replay","speed":1.0,"tombstones":0,"triggers":1}
+1 preamble row(s) not published — state at capture start, re-stamped, would overwrite live state; --seed-state to mean it (RFC 13 §4.2)
+
+```
+
+The human rendering says the same thing in the same order — the reason on
+the row, the count at the close.
+
+```console
+$ zenctl replay --dry-run --base acme --format table --color never tests/cmd/fixtures/trigger.zrec
+tests/cmd/fixtures/trigger.zrec: captured acme/v1/h-3fa9c2d41b7e/state/demo/** under base "acme" (2026-09-06T00:00:00Z)
+would skip acme/v1/h-3fa9c2d41b7e/state/demo/config  (preamble — state at capture start; re-stamping it republishes a snapshot over live state (RFC 13 §4.2) — pass --seed-state to mean it)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+-- trigger: silent-for acme/v1/h-3fa9c2d41b7e/state/demo/health 0.7 ok → firing at 2026-09-06T00:00:32Z — no sample for 0.7s, on a drop-free observer --
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (12 B, application/json)
+would replay 5 put(s) and 0 tombstone(s) from acme/v1/h-3fa9c2d41b7e/state/demo/** (captured 2026-09-06T00:00:00Z)
+preamble rows skipped: 1 (--seed-state to publish them)
+trigger record(s) met: 1 — markers, never published
+1 preamble row(s) not published — state at capture start, re-stamped, would overwrite live state; --seed-state to mean it (RFC 13 §4.2)
+
+```
+
+`--seed-state` is the opt-in: the preamble row becomes a would-be put, and
+is counted as seeded — apart from the observed rows, never added to them.
+
+```console
+$ zenctl replay --dry-run --seed-state --base acme --format table --color never tests/cmd/fixtures/trigger.zrec
+tests/cmd/fixtures/trigger.zrec: captured acme/v1/h-3fa9c2d41b7e/state/demo/** under base "acme" (2026-09-06T00:00:00Z)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/config  (12 B, application/json)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+-- trigger: silent-for acme/v1/h-3fa9c2d41b7e/state/demo/health 0.7 ok → firing at 2026-09-06T00:00:32Z — no sample for 0.7s, on a drop-free observer --
+would put acme/v1/h-3fa9c2d41b7e/state/demo/health  (12 B, application/json)
+would replay 5 put(s) and 0 tombstone(s) from acme/v1/h-3fa9c2d41b7e/state/demo/** (captured 2026-09-06T00:00:00Z)
+preamble rows would be seeded: 1
+trigger record(s) met: 1 — markers, never published
+
+```

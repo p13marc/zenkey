@@ -28,6 +28,15 @@ impl Render for RecordReport {
     fn rows(&self, _out: &mut dyn FnMut(Row)) {}
 
     fn table(&self, t: &mut Table) {
+        // A triggered run that never fired (#218): nothing was written, and
+        // the line says so rather than "recorded 0 sample(s)".
+        if self.pre_roll.is_none() && self.trigger.is_none() && self.out.is_none() {
+            t.line(format!(
+                "no rule fired in {:.1}s; nothing recorded",
+                self.duration_ms as f64 / 1000.0
+            ));
+            return;
+        }
         t.line(format!(
             "recorded {} sample(s) in {:.1}s{}",
             self.samples,
@@ -37,22 +46,104 @@ impl Render for RecordReport {
                 .map(|o| format!(" to {o}"))
                 .unwrap_or_default(),
         ));
+        if let Some(trigger) = &self.trigger {
+            t.line(format!(
+                "fired on {} at {} — {}",
+                trigger.rule, trigger.at, trigger.evidence
+            ));
+        }
+        if let Some(pre) = &self.pre_roll {
+            t.line(format!(
+                "pre-roll: {:.1}s of {:.1}s asked",
+                pre.covered_s, pre.asked_s
+            ));
+        }
+        if let Some(p) = &self.preamble {
+            t.line(format!(
+                "preamble: {} state row(s) ({}) over {:.2}s{}",
+                p.count,
+                match p.semantics {
+                    zenkey_fleet::report::PreambleSemantics::AbsentFromWindow =>
+                        "keys absent from the window",
+                    zenkey_fleet::report::PreambleSemantics::Full => "full current state",
+                },
+                p.collected_over_s,
+                if p.failed.is_empty() {
+                    String::new()
+                } else {
+                    format!("; no state fetched for {}", p.failed.join(" + "))
+                }
+            ));
+        }
     }
 
     fn bounds(&self) -> Vec<BoundCost> {
-        vec![BoundCost::new(
-            BoundKind::Missed,
-            self.dropped,
-            "sample(s) dropped while behind — recorded as in-file drop records \
-             where the gaps happened; the capture is a partial view and says so",
-        )]
+        let (evicted, expired) = self
+            .pre_roll
+            .as_ref()
+            .map_or((0, 0), |p| (p.evicted, p.expired));
+        vec![
+            BoundCost::new(
+                BoundKind::Missed,
+                self.dropped,
+                "sample(s) dropped while behind — recorded as in-file drop records \
+                 where the gaps happened; the capture is a partial view and says so",
+            ),
+            // The ring's two eviction kinds, apart (v1.18 R1): the byte
+            // budget biting narrows the pre-roll below what --pre claims;
+            // ageing out is the window sliding as declared.
+            BoundCost::new(
+                BoundKind::Retired,
+                evicted,
+                "sample(s) evicted from the retained window by its byte budget — the \
+                 pre-roll is narrower than --pre claims",
+            ),
+            BoundCost::new(
+                BoundKind::Unwatched,
+                expired,
+                "sample(s) aged out of the retained window before the trigger — the \
+                 pre-roll slid as declared",
+            ),
+            BoundCost::new(
+                BoundKind::Refused,
+                self.preamble.as_ref().map_or(0, |p| p.incomplete),
+                "preamble reply(ies) not kept — error envelopes and replies past the \
+                 bound; the state preamble is incomplete and says so",
+            ),
+        ]
     }
 
     fn scope(&self) -> Option<ObservedScope> {
         Some(ObservedScope {
             asked: self.header.selectors.clone(),
+            // A triggered capture's window is what the ring covered plus the
+            // post-roll — `duration_ms` is exactly that sum, never the
+            // asked-for pre-roll.
             window_s: Some(self.duration_ms as f64 / 1000.0),
         })
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = Vec::new();
+        if self.pre_roll.is_some() {
+            notes.push(
+                Note::coverage(
+                    "the pre-roll covers only the watched selectors — the retained window is \
+                     fed by the watch set, not the bus",
+                )
+                .cite("RFC 09 §5.1 O5"),
+            );
+        }
+        if self.pre_roll.is_none() && self.trigger.is_none() && self.out.is_none() {
+            notes.push(
+                Note::silence(
+                    "no rule fired within the wait — a rule not firing is not a finding, and \
+                     silence is not a verdict",
+                )
+                .cite("RFC 05 §3.1"),
+            );
+        }
+        notes
     }
 }
 
@@ -85,6 +176,27 @@ impl Render for ReplayReport {
             }
             t.grid(g);
         }
+        // The version-2 kinds, counted apart (RFC 13 §4.1): what the replay
+        // did not publish and why, what it seeded, and what merely fired.
+        if self.preamble_skipped > 0 {
+            t.line(format!(
+                "preamble rows skipped: {} (--seed-state to publish them)",
+                self.preamble_skipped
+            ));
+        }
+        if self.preamble_seeded > 0 {
+            t.line(format!(
+                "preamble rows {}seeded: {}",
+                if self.dry_run { "would be " } else { "" },
+                self.preamble_seeded
+            ));
+        }
+        if self.triggers > 0 {
+            t.line(format!(
+                "trigger record(s) met: {} — markers, never published",
+                self.triggers
+            ));
+        }
     }
 
     fn bounds(&self) -> Vec<BoundCost> {
@@ -106,6 +218,18 @@ impl Render for ReplayReport {
                  skipped",
                 self.malformed, self.refused
             )));
+        }
+        if self.preamble_skipped > 0 {
+            // Skipped is not lost: the row is in the file, and the reason it
+            // stayed there is the section's whole argument.
+            notes.push(
+                Note::coverage(format!(
+                    "{} preamble row(s) not published — state at capture start, \
+                     re-stamped, would overwrite live state; --seed-state to mean it",
+                    self.preamble_skipped
+                ))
+                .cite("RFC 13 §4.2"),
+            );
         }
         notes
     }

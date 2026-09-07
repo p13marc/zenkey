@@ -33,6 +33,35 @@ names and units from the registry, deterministic bytes) and the wire shape
 export_snapshot` and `tests/fixtures/export.prom`. `zenctl export` serves it
 (see `zenctl/CHANGELOG.md`); `docs/redesign-2026-07.md` §6.1's Daemon row
 records it as the third of the permitted second kind.
+**Trigger capture — the thirty seconds before it fired** (#218; RFC 13
+§4.1 version 2). `zenkey-fleet`'s `ZREC_VERSION` is **2** and the reader
+speaks `ZREC_READS = [1, 2]`: a version-1 file reads exactly as before, a
+version-1 reader refuses version 2 by the rule it already had, and
+`{"zrec": 3}` is refused with what this reader does speak. The dialect
+gains the **state preamble** — rows marked `"preamble": true` at `t: 0`,
+each keeping the fetched value's HLC as provenance — and the **trigger
+record** `{"trigger": {rule, from, to, at, evidence}}` interleaved where
+the transition was observed; the header MAY carry `preamble`
+(`PreambleInfo`: count, collected_over_s, selectors, `semantics`
+absent_from_window|full, incomplete, failed) and `pre_roll`
+(`PreRollInfo`: asked_s, covered_s, watched, evicted, expired — the ring's
+two eviction kinds apart, O6). `ZrecItem::{Preamble, Trigger}`,
+`ZrecWriter`/`ZrecSink::{write_preamble, write_trigger}`, `SinkCounts`
+(the kinds never folded), `Transition: Deserialize`. Replay skips preamble
+rows unless `ReplaySpec.seed_state`, saying why per row
+(`ReplayEvent::PreambleSkipped`, `PREAMBLE_SKIP_REASON`, RFC 13 §4.2) and
+counting `preamble_skipped`/`preamble_seeded`/`triggers` in
+`ReplayReport`. The new `tape/trigger.rs` (`record_on`, `TriggerSpec`,
+`TriggerEvent`, `state_projection`, `watch_cover`) arms a `RuleSet` over
+the retained window and writes a file only when a rule fires: preamble →
+pre-roll at its real `t` → trigger → post-roll, over **one** event stream
+and one drop ledger. `RuleSet` is the watchdog's per-tick body lifted out
+of `watchdog()`, which is now a driver over it; `SweepOutcome` is the
+sweep as the rules see it. `RecordReport` gains `trigger`, `preamble`,
+`pre_roll`, `preamble_rows`. zengui's pane replay seeds its session-less
+fold from the preamble rows and marks the triggers on the scrubber. See
+`zenctl/CHANGELOG.md` for `record --on/--pre/--post/--every/--preamble`
+and `replay --seed-state`.
 
 **Consumers and blast radius — the admin space answers who reads this**
 (#224). `zenkey-fleet` gains the consumers join: `consumers` and

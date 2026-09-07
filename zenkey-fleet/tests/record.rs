@@ -70,6 +70,8 @@ fn header(selector: &str) -> ZrecHeader {
         selectors: vec![selector.to_string()],
         base: String::new(),
         captured_at: "2026-08-12T00:00:00Z".to_string(),
+        preamble: None,
+        pre_roll: None,
     }
 }
 
@@ -129,7 +131,8 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     )
     .await
     .expect("record");
-    let (samples, dropped) = sink.finish().await.expect("finish");
+    let counts = sink.finish().await.expect("finish");
+    let (samples, dropped) = (counts.samples, counts.dropped);
     assert_eq!(samples, 3, "two puts and a tombstone");
     assert_eq!(dropped, 0);
     let file = buf.take();
@@ -169,6 +172,7 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
             speed: 1000.0,
             i_know: false,
             default_qos: zenkey::qos::QosProfile::Refreshed,
+            seed_state: false,
         },
         |_| {},
     )
@@ -263,7 +267,8 @@ async fn a_lossy_capture_says_so_at_both_ends() {
     )
     .await
     .expect("record");
-    let (samples, dropped) = sink.finish().await.expect("finish");
+    let counts = sink.finish().await.expect("finish");
+    let (samples, dropped) = (counts.samples, counts.dropped);
     assert!(dropped > 0, "a capacity-4 channel under 32 sends must lag");
     assert!(samples > 0);
     let file = buf.take();
@@ -284,6 +289,7 @@ async fn a_lossy_capture_says_so_at_both_ends() {
             speed: 1.0,
             i_know: false,
             default_qos: zenkey::qos::QosProfile::Refreshed,
+            seed_state: false,
         },
         |_| {},
     )
@@ -389,7 +395,8 @@ async fn a_slow_writer_does_not_become_the_captures_drops() {
     producer.await.expect("producer");
 
     let draining = std::time::Instant::now();
-    let (samples, dropped) = sink.finish().await.expect("finish");
+    let counts = sink.finish().await.expect("finish");
+    let (samples, dropped) = (counts.samples, counts.dropped);
     let drain_took = draining.elapsed();
 
     assert_eq!(dropped, 0, "the writer's latency is not the bus's loss");
