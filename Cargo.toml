@@ -143,7 +143,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls", "rustls-tls"] }
 # zenwatch's config dialect (#388): comments and trailing commas in a file an
 # operator edits by hand. Already in the lock — zenoh's own config is JSON5.
-json5 = "0.4"
+json5 = "1.0"
 
 # Internal
 zenkey = { version = "0.8.0", path = "zenkey" }
