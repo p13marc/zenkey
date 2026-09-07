@@ -16,7 +16,7 @@ An unknown field is a rule that silently pages nobody, refused at parse:
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/unknown-field.json5
 ? 2
-Error: tests/cmd/fixtures/unknown-field.json5: unknown field `methd`, expected one of `url`, `method`, `headers`, `timeout_s`
+Error: tests/cmd/fixtures/unknown-field.json5: unknown field `methd`, expected one of `url`, `method`, `headers`, `timeout_s` at line 3 column 10
 
 ```
 
@@ -27,7 +27,7 @@ by accident:
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/inline-secret.json5
 ? 2
-Error: tests/cmd/fixtures/inline-secret.json5: secrets are never inline — write { env: "NAME" } or { file: "/path" }
+Error: tests/cmd/fixtures/inline-secret.json5: secrets are never inline — write { env: "NAME" } or { file: "/path" } at line 3 column 10
 
 ```
 

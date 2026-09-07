@@ -63,7 +63,7 @@ futures-util = { version = "0.3", default-features = false }
 # thing `Stream` cannot say. Its own deps (`futures` 0.3, `pin-project-lite`)
 # are already here, and `iced` re-exports it behind an off-by-default feature,
 # so a zengui watchdog surface would drive one with `Task::sip` and no bridge.
-sipper = "0.1"
+sipper = "0.2"
 dirs = "7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -71,7 +71,7 @@ ciborium = "0.2"
 schemars = "1"
 # default-features off on purpose: a served SchemaSet is self-contained
 # (RFC 08 §7), so remote $ref resolution must not exist to fail.
-jsonschema = { version = "0.49", default-features = false }
+jsonschema = { version = "0.55", default-features = false }
 base64 = "0.23"
 prost = "0.14"
 prost-reflect = { version = "0.16", features = ["serde"] }
@@ -143,7 +143,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls", "rustls-tls"] }
 # zenwatch's config dialect (#388): comments and trailing commas in a file an
 # operator edits by hand. Already in the lock — zenoh's own config is JSON5.
-json5 = "0.4"
+json5 = "1.0"
 
 # Internal
 zenkey = { version = "0.8.0", path = "zenkey" }
