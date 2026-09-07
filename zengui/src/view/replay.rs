@@ -171,6 +171,55 @@ pub fn retained_evicted_note(taken: &RetentionStats) -> Option<String> {
     })
 }
 
+/// What the banner says about a version-2 capture's preamble (#218;
+/// RFC 13 §4.1): the rows that seed the fold, counted apart from observed
+/// rows, and — when the file states a pre-roll — that it covers only the
+/// watched selectors and how much of the asked-for window the ring could
+/// give (O5/O6). `None` on a version-1 file, which has neither.
+pub fn preamble_note(state: &ReplayState) -> Option<String> {
+    let (ReplaySource::File { header, .. }, true) = (
+        &state.source,
+        state.preamble_rows > 0 || header_pre_roll(state).is_some(),
+    ) else {
+        return None;
+    };
+    let mut parts = Vec::new();
+    if state.preamble_rows > 0 {
+        parts.push(format!(
+            "{} seed the state (a pane replay seeds its own fold; nothing is published)",
+            kit::plural(state.preamble_rows as usize, "preamble row"),
+        ));
+    }
+    if let Some(pre) = &header.pre_roll {
+        parts.push(format!(
+            "pre-roll {:.1}s of {:.1}s asked, watched selectors only",
+            pre.covered_s, pre.asked_s
+        ));
+    }
+    Some(parts.join(" · "))
+}
+
+fn header_pre_roll(state: &ReplayState) -> Option<&zenkey_fleet::PreRollInfo> {
+    match &state.source {
+        ReplaySource::File { header, .. } => header.pre_roll.as_ref(),
+        ReplaySource::Retained { .. } => None,
+    }
+}
+
+/// A trigger marker's label (#218): where on the capture clock a rule
+/// fired, which rule, and to what.
+pub fn trigger_label(t_us: u64, t: &zenkey_fleet::Transition) -> String {
+    format!(
+        "▲ {:.1}s {} → {}",
+        t_us as f64 / 1e6,
+        t.rule,
+        serde_json::to_value(t.to)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default()
+    )
+}
+
 /// The REPLAY/RETAINED banner. Rendered only in replay mode, directly
 /// under the location bar — the panes below it are showing the window,
 /// not the bus.
@@ -227,6 +276,9 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
             }),
         );
     }
+    if let Some(note) = preamble_note(state) {
+        meta = meta.push(kit::caption(note));
+    }
     meta = meta.push(iced::widget::space::horizontal());
     meta = meta.push(kit::muted("live link off"));
     meta = meta.push(
@@ -279,8 +331,25 @@ pub fn scrubber(state: &ReplayState, sp: Spacing) -> Element<'_, Message> {
                 .padding(sp.xs),
         );
     }
-
-    transport.into()
+    if state.triggers.is_empty() {
+        return transport.into();
+    }
+    // The trigger markers (#218): one per record, on the capture clock,
+    // each a jump to where the rule fired — the scrubber's axis has no
+    // notion of a marker, so they ride under it, labelled.
+    let mut markers = row![kit::muted("triggers")]
+        .spacing(sp.sm)
+        .align_y(iced::Alignment::Center);
+    for (t_us, t) in &state.triggers {
+        markers = markers.push(
+            kit::action(kit::caption(trigger_label(*t_us, t)))
+                .on_press(msg(ReplayMsg::Scrubbed(*t_us)))
+                .padding(sp.xs),
+        );
+    }
+    iced::widget::column![transport, markers]
+        .spacing(sp.xs)
+        .into()
 }
 
 /// What the replay tab says while a `.zrec` parses (#255). A pinned string,
@@ -422,6 +491,51 @@ mod tests {
         let note = loading_note("cap.zrec");
         assert!(note.starts_with("loading cap.zrec"), "{note}");
         assert!(note.contains("still show live"), "{note}");
+    }
+
+    /// A version-2 capture (#218) loads with its preamble seeding the fold
+    /// and its trigger kept: `scrub_to(0)` already holds the preamble key
+    /// (a pane replay seeds its own fold — nothing is published), the
+    /// trigger sits at the last pre-roll row's instant, and the banner says
+    /// how many rows seed and what the pre-roll covers.
+    #[test]
+    fn a_version_two_capture_seeds_the_fold_and_keeps_its_trigger() {
+        let body = [
+            r#"{"zrec":2,"selectors":["v1/**"],"base":"","captured_at":"x","preamble":{"count":1,"collected_over_s":0.1,"selectors":["v1/*/state/**"],"semantics":"absent_from_window"},"pre_roll":{"asked_s":30.0,"covered_s":1.0,"watched":["v1/**"]}}"#,
+            r#"{"key":"v1/h-0123456789ab/state/p/config","t":0,"preamble":true,"bytes":"MQ=="}"#,
+            r#"{"key":"v1/h-0123456789ab/state/p/health","t":0,"bytes":"Mg=="}"#,
+            r#"{"key":"v1/h-0123456789ab/state/p/health","t":1000000,"bytes":"Mw=="}"#,
+            r#"{"trigger":{"rule":"silent-for v1/h-0123456789ab/state/p/health 0.7","from":"ok","to":"firing","at":"x","evidence":"e"}}"#,
+            r#"{"key":"v1/h-0123456789ab/state/p/health","t":2000000,"bytes":"NA=="}"#,
+        ]
+        .join("\n");
+        let mut state = ReplayState::load("t.zrec", body.as_bytes()).unwrap();
+        assert_eq!(state.preamble_rows, 1);
+        assert_eq!(state.rows.len(), 4, "the preamble row is a row to the fold");
+        assert_eq!(state.triggers.len(), 1);
+        assert_eq!(state.triggers[0].0, 1_000_000, "at the last pre-roll row");
+
+        let at_start = state.scrub_to(0);
+        // Walk the tree by chunk: the preamble key is a leaf at t=0.
+        let node = ["v1", "h-0123456789ab", "state", "p", "config"]
+            .iter()
+            .try_fold(&at_start.tree.root, |n, chunk| n.children.get(*chunk));
+        assert!(
+            node.is_some_and(|n| n.count == 1),
+            "the preamble key is in the tree at t=0: {:?}",
+            at_start.tree.root.children.keys().collect::<Vec<_>>()
+        );
+
+        let note = preamble_note(&state).unwrap();
+        assert!(note.contains("1 preamble row"), "{note}");
+        assert!(note.contains("nothing is published"), "{note}");
+        assert!(note.contains("1.0s of 30.0s"), "{note}");
+        assert!(note.contains("watched selectors only"), "{note}");
+        let label = trigger_label(state.triggers[0].0, &state.triggers[0].1);
+        assert!(
+            label.contains("1.0s") && label.contains("silent-for") && label.ends_with("firing"),
+            "{label}"
+        );
     }
 
     /// One spelling of the budget for every surface.

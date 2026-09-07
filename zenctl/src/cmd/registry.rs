@@ -361,6 +361,22 @@ pub async fn infer(cli: crate::cli::RegistryInferArgs) -> Result<()> {
                             doc.as_ref(),
                         );
                     }
+                    // A preamble row is state at capture start (RFC 13 §4.1 v2):
+                    // its shape is exactly what a draft wants, observed at
+                    // the window's origin; a trigger record is not a sample.
+                    Ok(ZrecItem::Preamble { row, .. }) => {
+                        let doc = (!row.delete)
+                            .then(|| zenkey_fleet::structural_value(&row.payload))
+                            .flatten();
+                        obs.observe(
+                            &row.key,
+                            0.0,
+                            row.encoding.as_deref(),
+                            row.qos.as_deref(),
+                            doc.as_ref(),
+                        );
+                    }
+                    Ok(ZrecItem::Trigger(_)) => {}
                     Ok(ZrecItem::Dropped(n)) => dropped += n,
                     Err(_) => malformed += 1,
                 }

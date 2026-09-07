@@ -68,6 +68,8 @@ fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
         selectors: vec!["acme/v1/**".into()],
         base: BASE.into(),
         captured_at: "2026-09-06T00:00:00Z".into(),
+        preamble: None,
+        pre_roll: None,
     };
     (items, header)
 }
@@ -123,6 +125,7 @@ fn through_zrec(
                 lane: None,
                 kind,
             }),
+            Ingested::Preamble { .. } | Ingested::Trigger { .. } => {}
         }
     }
     (rows, breaks)

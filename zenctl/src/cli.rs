@@ -19,7 +19,7 @@
 //!   `schema`, `registry`, `storage`, `blob`, `admin`, `key`;
 //! * a **wire verb** is an act or an observation on live traffic, and hangs
 //!   off the root — `get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`,
-//!   `replay`, `timeline`, `snapshot`, `serve`, `gen`, `scout`;
+//!   `replay`, `timeline`, `snapshot`, `export`, `serve`, `gen`, `scout`;
 //! * a **judgement** is exit-coded under the one contract in [`crate::exit`],
 //!   and the exit-coded assertions live together under `check`.
 //!
@@ -597,6 +597,31 @@ pub(crate) enum Command {
     /// from a file is `replay --seed-state`. Exit 0 wrote the file, 2
     /// nobody answered (silence is not a snapshot).
     Snapshot(SnapshotArgs),
+    /// Serve the bus and its contract as Prometheus metrics (#228): key
+    /// series named and united by the registry, and the observer's own
+    /// blind spots as first-class series beside them.
+    ///
+    /// `zenctl export --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a
+    /// series exists only where the registry declares the subject (names
+    /// and units from `unit`/`kind`, never sniffed from the leaf; every
+    /// `{var}` a label; the declared `cardinality` bounds the population
+    /// and what it refuses is counted). What every other exporter hides is
+    /// exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`, the
+    /// four evicted populations (never summed), coalesced and unstamped
+    /// samples; a series that stopped keeps its labels and state — evicted,
+    /// origin_down, retired — and loses its value, so absence and silence
+    /// are different bytes; payload verdicts are three populations, the
+    /// third `not_validated`; the selectors watched and the planes `**`
+    /// cannot reach ride `zenkey_scope_info`. Killing a producer turns its
+    /// series `origin_down`; forcing drops moves the counter and marks the
+    /// series fed meanwhile; scraping twice with no traffic is
+    /// byte-identical. A foreground observer, explicitly launched, one
+    /// process per invocation, sharing nothing, caching no discovery,
+    /// serving nothing another zenctl reads — the permitted second kind
+    /// (`docs/redesign-2026-07.md` §6.1). REFUSED up front: OTLP,
+    /// histograms and summaries, push gateways and remote write —
+    /// `/metrics` over plain HTTP is the whole surface.
+    Export(ExportArgs),
     /// Stand up a mock queryable: answer every query on a keyexpr with one
     /// static body, and log every ask (#121).
     ///
@@ -1226,8 +1251,8 @@ pub(crate) struct BusArgs {
 
 /// `--format` selects among **zenkey's own three renderings** of a report. A
 /// foreign document format — `--as toml|jsonschema|asyncapi`, `--dot`,
-/// `--json5` — is somebody else's schema, so the two are mutually exclusive
-/// (#243).
+/// `--json5`, `export --prom` — is somebody else's schema, so the two are
+/// mutually exclusive (#243).
 ///
 /// ## Why this is not `conflicts_with`
 ///
@@ -1259,7 +1284,12 @@ pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
     if !typed("format") {
         return;
     }
-    for (id, flag) in [("target", "--as"), ("dot", "--dot"), ("json5", "--json5")] {
+    for (id, flag) in [
+        ("target", "--as"),
+        ("dot", "--dot"),
+        ("json5", "--json5"),
+        ("prom", "--prom"),
+    ] {
         if typed(id) {
             // A clap error, not an `anyhow` one: this is a usage error, and
             // usage errors in this tool exit 2 and print a usage line. The
@@ -1452,14 +1482,63 @@ pub(crate) struct RecordArgs {
     /// Output file.
     #[arg(long, short = 'o', value_name = "FILE")]
     pub(crate) out: String,
-    /// Stop after this many seconds.
+    /// Stop after this many seconds. With --on: give up waiting for a
+    /// rule after this long (nothing is written; a rule not firing is
+    /// not a finding).
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
-    /// Stop after this many samples (0 = until ctrl-c or --for).
+    /// Stop after this many samples (0 = until ctrl-c or --for). With
+    /// --on: the post-roll's stop bound.
     #[arg(long, value_name = "N", default_value_t = 0)]
     pub(crate) count: u64,
+    /// Arm instead of record (#218): write a file only when this rule
+    /// transitions to `firing`, with `--pre` seconds of retained traffic
+    /// before it. Repeatable; the watchdog's vocabulary — `rate-above
+    /// <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
+    /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `doctor <CHECK-ID>`,
+    /// `origin-down <ORIGIN>`, `dropped`. The file is `.zrec` version 2
+    /// (RFC 13 §4.1): a state preamble, the pre-roll, the trigger record
+    /// where it fired, then `--post` seconds more.
+    #[arg(long, value_name = "RULE", requires = "pre")]
+    pub(crate) on: Vec<String>,
+    /// Seconds of traffic to retain before the trigger — the ring's age
+    /// budget. The pre-roll covers only the watched selectors (O5), and
+    /// the header says how much of it the ring could give (O6).
+    #[arg(long, value_name = "SECS", requires = "on")]
+    pub(crate) pre: Option<f64>,
+    /// Seconds to keep recording after the trigger.
+    #[arg(long, value_name = "SECS", default_value_t = 10.0, requires = "on")]
+    pub(crate) post: f64,
+    /// Seconds between rule evaluations — the one period flag (#307).
+    #[arg(long, value_name = "SECS", default_value_t = 1.0, requires = "on")]
+    pub(crate) every: f64,
+    /// What the state preamble is a snapshot of (RFC 13 §4.3): the
+    /// current state of only the keys the ring cannot show, the full
+    /// current state under the watched selectors, or none at all.
+    #[arg(
+        long,
+        value_enum,
+        default_value = "absent-from-window",
+        requires = "on"
+    )]
+    pub(crate) preamble: PreambleMode,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
+}
+
+/// `record --preamble`: what a triggered capture's state preamble is a
+/// snapshot of — the RFC 13 §4.3 semantics plus "none" (#218).
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum PreambleMode {
+    /// Only the state keys absent from the retained window, fetched at
+    /// trigger time: what the ring cannot tell you.
+    AbsentFromWindow,
+    /// Every state key under the watched selectors, fetched at trigger
+    /// time, ring or no ring.
+    Full,
+    /// No preamble — the pre-roll's `state` rows are then deltas with no
+    /// base, and the file says nothing to the contrary.
+    None,
 }
 
 /// The `timeline` verb's flags (#216) — one struct, the `GenArgs` pattern.
@@ -1485,6 +1564,57 @@ pub(crate) struct TimelineArgs {
     /// identical. Keys are read under the capture's stated base.
     #[arg(long, value_name = "FILE", conflicts_with_all = ["selectors", "for_secs"])]
     pub(crate) from: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `export` verb's flags (#228) — one struct, the `GenArgs` pattern.
+#[derive(clap::Args)]
+pub(crate) struct ExportArgs {
+    #[command(flatten)]
+    pub(crate) selector: SelectorArgs,
+    /// Address to serve `/metrics` on (`--listen` is the zenoh transport's).
+    /// Loopback by default; a non-loopback address exposes the bus's shape
+    /// to the network and needs --i-know.
+    #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:9184")]
+    pub(crate) bind: String,
+    /// Bind a non-loopback --bind address. The refusal you are overriding
+    /// names its reason.
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
+    /// Validate payloads against their served schemas (RFC 08 §7), budgeted
+    /// per key per second so the exporter never becomes a load test; the
+    /// `valid`/`invalid` populations move only with this. Without it every
+    /// sample is `not_validated`, and the surface says so.
+    #[arg(long)]
+    pub(crate) validate: bool,
+    /// Run the doctor every SECS and expose its findings as
+    /// `zenkey_doctor_finding{check_id,severity}`. Off by default: a doctor
+    /// run costs the control plane (RFC 13 §3, frugality). Without it
+    /// `zenkey_doctor_info{state="not_asked"}` is the honest series.
+    #[arg(long, value_name = "SECS")]
+    pub(crate) doctor_every: Option<f64>,
+    /// Bound on distinct series; overflow is counted under
+    /// `zenkey_series_suppressed_total{reason="max_series"}`.
+    #[arg(long, value_name = "N", default_value_t = 10_000)]
+    pub(crate) max_series: usize,
+    /// Observe for --for seconds, fold once, print the snapshot as a report
+    /// (`--format`) and exit — no listener. For a script that wants one
+    /// scrape's worth of the surface as JSON.
+    #[arg(long)]
+    pub(crate) once: bool,
+    /// With --once: how long to observe before the one fold, seconds.
+    #[arg(
+        long = "for",
+        value_name = "SECS",
+        default_value_t = 5.0,
+        requires = "once"
+    )]
+    pub(crate) for_secs: f64,
+    /// With --once: print the Prometheus exposition text instead of a
+    /// report — a foreign schema, so not with --format.
+    #[arg(long, requires = "once")]
+    pub(crate) prom: bool,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }
@@ -1529,13 +1659,15 @@ pub(crate) struct SnapshotDiffArgs {
     pub(crate) a: String,
     /// The later snapshot.
     pub(crate) b: String,
-    /// Align origins across deployments by the labels their state
-    /// documents carry (chunk DD; not implemented in this build).
+    /// Align origins across deployments — by the `source` label their
+    /// health/sensor documents carry, then by producer set — and roll the
+    /// diff up per subject. Refuses (exit 2) over any origin it cannot
+    /// pair, and lists them.
     #[arg(long)]
     pub(crate) normalize_origins: bool,
-    /// An explicit origin pairing, `A=B`, repeatable (chunk DD; not
-    /// implemented in this build).
-    #[arg(long = "map", value_name = "A=B")]
+    /// An explicit origin pairing, `A=B` (a's origin = b's), repeatable;
+    /// decided before any automatic pairing. Requires --normalize-origins.
+    #[arg(long = "map", value_name = "A=B", requires = "normalize_origins")]
     pub(crate) maps: Vec<String>,
     /// Field-level changes listed per key before the rest are counted.
     #[arg(long, value_name = "N", default_value_t = 20)]
@@ -1563,6 +1695,13 @@ pub(crate) struct ReplayArgs {
     /// same operator price as `retire` (RFC 04 §1.2, v1.12).
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
+    /// Publish a version-2 capture's preamble rows too — state at capture
+    /// start, re-stamped now (RFC 13 §4.1). Off by default: re-stamped
+    /// state wins last-writer-wins, so the preamble republishes a whole
+    /// snapshot over the live fleet with no pacing between the rows
+    /// (§4.2); the rows are skipped and counted instead.
+    #[arg(long)]
+    pub(crate) seed_state: bool,
     /// QoS profile for rows that recorded none.
     #[arg(long, default_value = "refreshed",
           add = ArgValueCandidates::new(completion::qos_profiles))]

@@ -8,6 +8,66 @@ sitting.
 
 ## Unreleased
 
+**`export` — a metrics surface that exports its own blind spots** (#228).
+A root wire verb: `zenctl export --bind 127.0.0.1:9184` serves
+`/metrics` as Prometheus text (RFC 13 §3 *Exporter obligations*, v1.34),
+two families deliberately apart. **Observer and contract metrics**:
+`zenkey_observer_dropped_total`, `zenkey_observer_evicted_total{population=
+keys|retained_bytes|retained_age|unwatched}` (four lines, never summed),
+`zenkey_observer_coalesced_total` (between two scrapes only the newest
+value per series is exposed; the rest are counted), `zenkey_observer_
+unstamped_total`, `zenkey_qos_judged_total` and `zenkey_qos_mismatch_total
+{producer,subject}`, `zenkey_payload_verdict_total{verdict=valid|invalid|
+not_validated}` (three lines, never a ratio; without `--validate` everything
+is `not_validated`), `zenkey_doctor_finding{check_id,severity,subject}` and
+`zenkey_doctor_info{state=not_asked|ran}`, `zenkey_scope_info{selector,
+excluded}` naming the planes a wildcard cannot reach, `zenkey_registry_info
+{state=loaded|not_loaded}`, `zenkey_series_suppressed_total{reason}`,
+`zenkey_unregistered_keys`. **Key metrics from the contract**:
+`zenkey_subject_<producer>_<literal chunks>[_<unit>][_total]` — name and
+unit from the registry's `unit` and `kind`, never sniffed; every `{var}` a
+label by its declared name; the declared `cardinality` bounds the
+population and the refusals are counted. A series that stopped keeps its
+labels and `zenkey_series_state{state=evicted|origin_down|retired}` and
+loses its value line — absence is named, never a flat line; `quiet` is
+judged only for `state` subjects against `ttl_s`; every series carries
+`zenkey_key_last_seen_timestamp_seconds` (constant between scrapes, so an
+idle scrape is byte-identical) and `zenkey_series_drop_exposed_total`.
+Flags: the `SelectorArgs` (default `<base>/v1/*/**`), `--bind`
+(non-loopback needs `--i-know`; `--listen` stays the transport's), `--validate` (2 decodes per key per
+second), `--doctor-every SECS` (off by default — it costs the control
+plane), `--max-series N` (10 000), `--once` (observe `--for` seconds, fold
+once, print the `export` report through `--format`; `--prom` prints the
+exposition instead and is refused with `--format`). Refused up front: OTLP,
+histograms and summaries, push gateways and remote write. The HTTP server
+is hand-rolled (`cmd/export/http.rs`): `hyper` is not in zenctl's graph and
+one route does not earn a framework; the switch point is a second endpoint.
+**`record --on <RULE> --pre <SECS>` — trigger capture** (#218; RFC 13 §4.1
+version 2). New flags on `record`, no moved spelling: `--on` (repeatable,
+the watchdog's rule vocabulary; requires `--pre`), `--pre <SECS>` (the
+retained window's age budget), `--post <SECS>` (default 10), `--every
+<SECS>` (the one period flag, default 1), `--preamble
+absent-from-window|full|none` (default `absent-from-window`). With `--on`
+the verb arms instead of records: nothing is written until a rule
+transitions to `firing`, and then one `.zrec` version-2 file carries the
+state preamble (a bounded GET on the state-class projection of the watch
+set — the header names what it could not fetch), the pre-roll at its real
+`t`, the trigger record where it fired, and `--post` seconds more. `--for`
+keeps its passive-window meaning — give up after this long, exit 0 with a
+silence note (a rule not firing is not a finding, RFC 05 §3.1) and no
+file; `--count` stays the post-roll's stop bound. The report says the
+pre-roll covers only the watched selectors (O5), how much of `--pre` the
+ring could give, and the ring's two eviction kinds apart (O6).
+
+**`replay --seed-state`.** A version-2 capture's preamble rows are skipped
+by default and said per row — ndjson `{"row":"would","would":
+"skip-preamble",key,reason}`, table `would skip <key>  (preamble — …)` —
+with the closing count "preamble rows skipped: N (--seed-state to publish
+them)" (RFC 13 §4.2: re-stamped state-at-capture-start republishes a
+snapshot over the live fleet). `--seed-state` publishes them, counted as
+seeded apart from the observed rows. A trigger record is announced where
+it fell and never published. `timeline --from` counts preamble rows it
+did not place.
 **`registry infer --from <selector|capture.zrec> --for SECS --out DIR` —
 draft a registry from the wire, marked as a draft** (#225, RFC 08 §6.1
 v1.34). The registry is the adoption cliff: a fleet without one gets nothing
@@ -142,9 +202,35 @@ moved (`value` or `bytes`, `verdict`, `registration`, `holder`) with both
 stamps; the envelope carries both headers whole. **Exit 0** identical,
 **1** they differ (a difference *is* the finding), **2** a file could not
 be read — through the one judgement projection, never a hand-rolled
-match. `--normalize-origins` and `--map A=B` parse today and refuse (exit
-2) until chunk DD lands the alignment; when it does, an origin that could
-not be paired is listed as an `unmapped` row, never dropped.
+match.
+
+**`snapshot diff --normalize-origins` — two deployments, one diff** (#220).
+"It works in staging" is unfalsifiable on a bus until two fleets can be
+compared subject by subject; RFC 03 §1.1 makes that possible, because
+publishing identity sits at one fixed base-relative position. The engine
+profiles every host on both sides and plans the alignment on three kinds
+of evidence, in order and never by guessing: an explicit `--map A=B` (a's
+origin = b's; repeatable, requires `--normalize-origins`, refused at the
+edge when it names an origin the files do not hold), the `source` label
+the health/sensor documents carry (RFC 06 §6.2) when it is verified —
+`host_id` is the origin it sits under — and unique among the unpaired on
+both sides, and a producer set unique on both sides. `b` is then read
+through the plan (origin chunk, base, holder, the bridge document's
+`host_id`) and compared as before, and the diff **rolls up per subject**:
+one `subject` row per subject across every origin — "`state/sysinfo/health`
+differs on 2 of 2 origin(s); `state/logs/rotated` 1 only in a" — with
+one example key change; subjects identical everywhere are counted, not
+listed. Every pair rides `origin_map` with its evidence (`explicit` /
+`label <source>` / `producer set`); two deployments' clocks are not
+compared, so a stamp that moved alone is not a change here. **Exit 0**
+identical, **1** they differ, and **2 — refused**: an origin the plan
+could not pair is listed as an `unmapped` row with the count it failed on
+("label `node` claimed by 2 origins in b; producer set {sysinfo} shared by
+2 origins in b"), the comparison is *not made* — no `added`/`removed`/
+`changed`, no roll-up, the word is NOT COMPARED — and the report still
+goes out so a script sees exactly what to `--map`. A diff that compared
+around an origin it could not place would be confident nonsense; "I
+cannot map these" is the finding.
 
 ## 0.6.0 (2026-09-06) — the generators, and three rows that name a host
 

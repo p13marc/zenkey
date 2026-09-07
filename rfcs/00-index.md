@@ -6,13 +6,21 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.34** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.35** (2026-09-06; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.35** (2026-09-06) — the conditional field: v1.20's deferral ends;
+  a subject or procedure declares `when = ["feature:…", "config:…",
+  "capability:…"]` (ANDed, three kinds, a `gate_note` for the human), the
+  kinds bind the error a gated procedure answers, `introspect` carries the
+  condition, the `conditional.lock` ledger becomes the legacy spelling for
+  one cycle, a gate is not a shape in the lock, and 13 §3 gains the `when`
+  judgement plus the conformance-suite obligation (three states, unknowable
+  never failed) (08 §2, §3.1, §6.1; 13 §3).
 - **v1.34** (2026-09-06) — the state artifacts: `.zrec` version 2 carries a
   state preamble (rows marked, at `t: 0`, original HLCs kept as provenance)
   and a trigger record, with replay skipping the preamble unless told to seed
@@ -28,13 +36,6 @@ what changed and what deliberately did not — is
   a shared egress-only `interest-prop` row fixes it — and the two 09 recipes
   become `zenctl storage gen` and `zenctl acl gen`, with the running ACL
   recorded as unobservable in zenoh 1.10 (09 §2, §3).
-- **v1.32** (2026-09-06) — the declaration batch: a subject declares its
-  `kind` (counter, gauge, text, bool) and a producer declares its `[budget]`
-  (resident set, per-table bounds), the health document MAY carry the
-  matching `self_stats`, and 13 §3 says how each is judged on the four poles
-  — a counter that decreased without an `alive` cycle is a finding, a
-  producer that publishes no `self_stats` is *unobservable* and says so, an
-  entry with no `kind` is *not asked* (08 §2, 04 §1.2, 11 §4, 13 §3).
 
 ---
 

@@ -15,6 +15,9 @@
 //!   nothing downstream can mistake a rehearsal for a fleet.
 //! * [`snapshot`] — `.zsnap`, a fan-in GET kept on disk (RFC 13 §4.4): the
 //!   sibling of a capture, collected *over* a span and saying so.
+//! * [`trigger`] — the retained window as a capture: armed on a condition,
+//!   written only when it fires, with the state preamble that makes a
+//!   pre-roll of `state` deltas readable (RFC 13 §4.1 version 2).
 //! * [`synth`] — payload bodies for the above, synthesized from a schema.
 //! * [`bench`](mod@bench) — traffic manufactured to be timed, and the timing.
 //!
@@ -33,3 +36,5 @@ pub mod snapshot;
 pub mod generate;
 #[cfg(feature = "decode")]
 pub mod synth;
+#[cfg(feature = "decode")]
+pub mod trigger;

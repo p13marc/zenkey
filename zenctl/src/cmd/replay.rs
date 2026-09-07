@@ -23,6 +23,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         dry_run,
         force_base,
         i_know,
+        seed_state,
         qos,
         bus: _,
     } = cli;
@@ -115,6 +116,38 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         ReplayEvent::CaptureDropped(n) => {
             eprintln!("-- the capture itself dropped {n} sample(s) here --");
         }
+        // A version-2 preamble row, not published (RFC 13 §4.1/§4.2): listed
+        // on stdout like a would-be put, because it is one the operator has
+        // to decide about — and the reason rides every line, so a preview
+        // cut down to one row still says why.
+        ReplayEvent::PreambleSkipped { key, reason } => {
+            if ndjson {
+                println!(
+                    "{}",
+                    crate::render::Row::tagged(
+                        "would",
+                        serde_json::json!({
+                            "would": "skip-preamble", "key": key, "reason": reason,
+                        })
+                    )
+                    .into_line()
+                );
+            } else {
+                println!("would skip {key}  (preamble — {reason})");
+            }
+        }
+        ReplayEvent::Trigger(t) => {
+            eprintln!(
+                "-- trigger: {} {} at {} — {} --",
+                t.rule,
+                match t.from {
+                    Some(from) => format!("{from:?} → {:?}", t.to).to_lowercase(),
+                    None => format!("{:?}", t.to).to_lowercase(),
+                },
+                t.at,
+                t.evidence
+            );
+        }
     };
 
     let report = if dry_run {
@@ -125,6 +158,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
                 speed,
                 i_know,
                 default_qos,
+                seed_state,
             },
             &mut on_event,
         )
@@ -142,6 +176,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
                 speed,
                 i_know,
                 default_qos,
+                seed_state,
             },
             &mut on_event,
         )

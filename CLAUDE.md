@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 
-- `rfcs/` — the **normative RFC set** (v1.34; ratified at v1.18, 2026-08-15). Chapters 02–10
+- `rfcs/` — the **normative RFC set** (v1.35; ratified at v1.18, 2026-08-15). Chapters 02–10
   and 13 (observer conformance, v1.24) are application-neutral; chapter 11 is the
   ZenSight reference profile. Wire-contract
   changes go through these RFCs, amendment-style (see `rfcs/CHANGELOG.md` —
@@ -120,8 +120,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `storage`, `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
   verb** is an act or observation on live traffic and hangs off the root
   (`get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`, `replay`,
-  `timeline`, `snapshot`, `serve`, `gen`, `scout`); a **judgement** is
-  exit-coded (`check
+  `timeline`, `snapshot`, `export`, `serve`, `gen`, `scout`); a **judgement**
+  is exit-coded (`check
   expect|cutover|retired|probe|schema`, `doctor`, `why`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`

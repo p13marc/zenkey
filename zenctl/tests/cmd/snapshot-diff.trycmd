@@ -50,13 +50,19 @@ snapshot diff: the question could not be asked — exit 2, the reserved non-verd
 
 ```
 
-The origin-alignment flags parse today so the shape is stable, and refuse
-until chunk DD lands the alignment — a diff that silently ignored `--map`
-would compare the wrong keys.
+Two deployments, one diff — `--normalize-origins` and `--map A=B` — are
+`snapshot-diff-normalized.trycmd`'s. A `--map` without the alignment is a
+usage error (clap's 2): a pairing the diff would not read is not an input
+it accepts.
 
 ```console
-$ zenctl snapshot diff --normalize-origins tests/cmd/fixtures/a.zsnap tests/cmd/fixtures/b.zsnap
+$ zenctl snapshot diff --map h-3fa9c2d41b7e=h-c0ffee00c0de tests/cmd/fixtures/prod.zsnap tests/cmd/fixtures/stg.zsnap
 ? 2
-Error: --normalize-origins / --map: origin alignment is not implemented in this build (chunk DD)
+error: the following required arguments were not provided:
+  --normalize-origins
+
+Usage: zenctl snapshot diff --normalize-origins --map <A=B> <A> <B>
+
+For more information, try '--help'.
 
 ```

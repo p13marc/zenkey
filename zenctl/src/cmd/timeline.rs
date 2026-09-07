@@ -129,6 +129,7 @@ fn from_zrec(path: &std::path::Path) -> Result<Window> {
     let mut rows = Vec::new();
     let mut breaks = Vec::new();
     let mut malformed = 0u64;
+    let mut preamble = 0u64;
     while let Some(item) = reader.next() {
         match item {
             Ok(item) => match Ingested::from_zrec(&item, &header.base) {
@@ -138,6 +139,12 @@ fn from_zrec(path: &std::path::Path) -> Result<Window> {
                     lane: None,
                     kind,
                 }),
+                // A version-2 preamble row is state at capture start, not an
+                // arrival: it sits on neither axis, and is counted rather
+                // than placed (RFC 13 §4.1). A trigger record is a marker
+                // the timeline has no lane for.
+                Ingested::Preamble { .. } => preamble += 1,
+                Ingested::Trigger { .. } => {}
             },
             Err(reason) => {
                 // Counted, never skipped in silence (`tape::ingest`'s rule).
@@ -145,6 +152,13 @@ fn from_zrec(path: &std::path::Path) -> Result<Window> {
                 eprintln!("{}: {reason}", path.display());
             }
         }
+    }
+    if preamble > 0 {
+        eprintln!(
+            "{}: {preamble} preamble row(s) not placed — state at capture start is not \
+             an arrival (RFC 13 §4.1)",
+            path.display()
+        );
     }
     if malformed > 0 {
         eprintln!(

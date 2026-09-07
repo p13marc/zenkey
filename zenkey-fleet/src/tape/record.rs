@@ -50,11 +50,28 @@ use zenoh::sample::SampleKind;
 
 use crate::bus::monitor::{EventStream, FleetEvent, SampleView, StreamItem};
 use crate::model::registry::SliceSet;
-use crate::report::{ReplayReport, SampleRow, ZrecHeader};
+use crate::report::{ReplayReport, SampleRow, Transition, ZrecHeader};
 use crate::tape::ingest::{IngestRow, parse_row};
 
 /// The current `.zrec` format version, written into every header.
-pub const ZREC_VERSION: u32 = 1;
+///
+/// Version 2 (RFC 13 §4.1, v1.34; #218) adds the state preamble — rows
+/// marked `"preamble": true` at `t: 0` ahead of the first observed row —
+/// and the interleaved `{"trigger": …}` record. A version-1 file is a
+/// version-2 file with neither, which is why [`ZREC_READS`] names both.
+pub const ZREC_VERSION: u32 = 2;
+
+/// The versions [`ZrecReader`] speaks: the current one and every earlier
+/// one whose lines it still reads verbatim. A version outside this list is
+/// refused, never guessed at (RFC 13 §4.1's unknown-version rule) — and
+/// the list is what lets a version-2 reader read version 1 while a
+/// version-1 reader refuses version 2, both by the rule they already had.
+pub const ZREC_READS: [u32; 2] = [1, 2];
+
+/// Why a replayer skips a preamble row unless told otherwise — one sentence,
+/// spelled once, carried on every [`ReplayEvent::PreambleSkipped`].
+pub const PREAMBLE_SKIP_REASON: &str = "state at capture start; re-stamping it republishes a \
+     snapshot over live state (RFC 13 §4.2) — pass --seed-state to mean it";
 
 /// RFC 3339 UTC "now", seconds precision — the header's provenance stamp.
 /// A hand-rolled civil-date conversion (Hinnant's days algorithm) beats a
@@ -98,8 +115,22 @@ pub struct ZrecWriter<W: Write> {
     /// received before the writer existed saturates to 0 rather than
     /// underflowing.
     epoch: Instant,
-    samples: u64,
-    dropped: u64,
+    counts: SinkCounts,
+}
+
+/// What a writer or sink has put on the file so far, by kind — and the
+/// kinds are never folded (RFC 13 §4.1: a reader counts preamble rows
+/// apart from observed rows, so the writer does too).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SinkCounts {
+    /// Observed sample rows.
+    pub samples: u64,
+    /// Samples the capture missed, summed from the drop records it wrote.
+    pub dropped: u64,
+    /// Preamble rows (version 2).
+    pub preamble: u64,
+    /// Trigger records (version 2).
+    pub triggers: u64,
 }
 
 impl<W: Write> ZrecWriter<W> {
@@ -129,9 +160,38 @@ impl<W: Write> ZrecWriter<W> {
         Ok(ZrecWriter {
             out,
             epoch,
-            samples: 0,
-            dropped: 0,
+            counts: SinkCounts::default(),
         })
+    }
+
+    fn line(&mut self, line: &str) -> Result<()> {
+        self.out.write_all(line.as_bytes()).map_err(|e| Error::Io {
+            path: std::path::PathBuf::new(),
+            source: e,
+        })?;
+        self.out.write_all(b"\n").map_err(|e| Error::Io {
+            path: std::path::PathBuf::new(),
+            source: e,
+        })
+    }
+
+    /// The row a sample becomes, minus its pacing: the wire facts, the
+    /// lossless payload unless it is a tombstone, the attachment.
+    fn row_of(view: &SampleView) -> SampleRow {
+        let mut row = SampleRow {
+            key: view.key.clone(),
+            ..SampleRow::default()
+        }
+        .with_wire(view);
+        // A tombstone has no payload to store: `delete` is the whole fact
+        // (RFC 04 §1.2), and an empty `bytes` would read as an empty put.
+        if view.kind != SampleKind::Delete {
+            row = row.with_payload_bytes(&view.payload.to_bytes());
+        }
+        if let Some(a) = &view.attachment {
+            row.attachment_b64 = Some(crate::tape::ingest::b64(&a.to_bytes()));
+        }
+        row
     }
 
     /// Write one observed sample as a row.
@@ -157,53 +217,63 @@ impl<W: Write> ZrecWriter<W> {
                 .as_micros(),
         )
         .unwrap_or(u64::MAX);
-        let mut row = SampleRow {
-            key: view.key.clone(),
-            t: Some(t_us),
-            ..SampleRow::default()
-        }
-        .with_wire(view);
-        // A tombstone has no payload to store: `delete` is the whole fact
-        // (RFC 04 §1.2), and an empty `bytes` would read as an empty put.
-        if view.kind != SampleKind::Delete {
-            row = row.with_payload_bytes(&view.payload.to_bytes());
-        }
-        if let Some(a) = &view.attachment {
-            row.attachment_b64 = Some(crate::tape::ingest::b64(&a.to_bytes()));
-        }
-        self.out
-            .write_all(row.to_line().as_bytes())
-            .map_err(|e| Error::Io {
-                path: std::path::PathBuf::new(),
-                source: e,
-            })?;
-        self.out.write_all(b"\n").map_err(|e| Error::Io {
-            path: std::path::PathBuf::new(),
-            source: e,
-        })?;
-        self.samples += 1;
+        let mut row = ZrecWriter::<W>::row_of(view);
+        row.t = Some(t_us);
+        self.line(&row.to_line())?;
+        self.counts.samples += 1;
+        Ok(())
+    }
+
+    /// Write one **preamble** row (version 2, RFC 13 §4.1; #218): a value
+    /// fetched at trigger time, written ahead of the first observed row.
+    ///
+    /// `t` is 0 — the row precedes the window, and a preamble is state, not
+    /// pacing — and `"preamble": true` marks it so a reader counts it apart
+    /// from observed rows (O6 applied to rows). The `timestamp` is the HLC
+    /// the fetched value carried, kept as provenance: it says when the
+    /// value was published, which is the one thing a pre-roll of `state`
+    /// deltas cannot say for itself.
+    pub fn write_preamble(&mut self, view: &SampleView) -> Result<()> {
+        let mut row = ZrecWriter::<W>::row_of(view);
+        row.t = Some(0);
+        row.preamble = Some(true);
+        self.line(&row.to_line())?;
+        self.counts.preamble += 1;
         Ok(())
     }
 
     /// Write a drop record where the gap happened (O6 on a file).
     pub fn write_dropped(&mut self, n: u64) -> Result<()> {
-        serde_json::to_writer(&mut self.out, &serde_json::json!({ "dropped": n })).map_err(
-            |e| Error::Io {
+        let line =
+            serde_json::to_string(&serde_json::json!({ "dropped": n })).map_err(|e| Error::Io {
                 path: std::path::PathBuf::new(),
                 source: e.into(),
-            },
-        )?;
-        self.out.write_all(b"\n").map_err(|e| Error::Io {
-            path: std::path::PathBuf::new(),
-            source: e,
-        })?;
-        self.dropped += n;
+            })?;
+        self.line(&line)?;
+        self.counts.dropped += n;
         Ok(())
     }
 
-    /// Samples and drops written so far — the progress line's numbers.
-    pub fn counts(&self) -> (u64, u64) {
-        (self.samples, self.dropped)
+    /// Write the trigger record where the transition was observed (version
+    /// 2, RFC 13 §4.1): `{"trigger": {rule, from, to, at, evidence}}` — no
+    /// `key`, like a drop record — so a reader can say what fired and where
+    /// in the file it did.
+    pub fn write_trigger(&mut self, transition: &Transition) -> Result<()> {
+        let line =
+            serde_json::to_string(&serde_json::json!({ "trigger": transition })).map_err(|e| {
+                Error::Io {
+                    path: std::path::PathBuf::new(),
+                    source: e.into(),
+                }
+            })?;
+        self.line(&line)?;
+        self.counts.triggers += 1;
+        Ok(())
+    }
+
+    /// What has been written so far, by kind — the progress line's numbers.
+    pub fn counts(&self) -> SinkCounts {
+        self.counts
     }
 
     /// Flush and hand the sink back.
@@ -233,6 +303,8 @@ const SINK_QUEUE: usize = 4096;
 enum ZrecLine {
     Sample(Arc<SampleView>),
     Dropped(u64),
+    Preamble(Arc<SampleView>),
+    Trigger(Box<Transition>),
 }
 
 /// What the sink's async half can see of a writer that lives on the
@@ -241,6 +313,8 @@ enum ZrecLine {
 struct SinkState {
     samples: AtomicU64,
     dropped: AtomicU64,
+    preamble: AtomicU64,
+    triggers: AtomicU64,
     /// The writer's error, kept where the async half can name it: a `send`
     /// that fails says only "the writer is gone", and the reason is what the
     /// operator needs.
@@ -259,7 +333,7 @@ struct SinkState {
 pub struct ZrecSink {
     tx: tokio::sync::mpsc::Sender<ZrecLine>,
     state: Arc<SinkState>,
-    writer: tokio::task::JoinHandle<Result<(u64, u64)>>,
+    writer: tokio::task::JoinHandle<Result<SinkCounts>>,
 }
 
 impl ZrecSink {
@@ -303,6 +377,8 @@ impl ZrecSink {
                 let wrote = match line {
                     ZrecLine::Sample(view) => writer.write_sample(&view),
                     ZrecLine::Dropped(n) => writer.write_dropped(n),
+                    ZrecLine::Preamble(view) => writer.write_preamble(&view),
+                    ZrecLine::Trigger(t) => writer.write_trigger(&t),
                 };
                 if let Err(e) = wrote {
                     *task_state.failure.lock().expect("sink failure lock") =
@@ -341,6 +417,21 @@ impl ZrecSink {
         Ok(())
     }
 
+    /// Queue one preamble row ([`ZrecWriter::write_preamble`]).
+    pub async fn write_preamble(&self, view: Arc<SampleView>) -> Result<()> {
+        self.send(ZrecLine::Preamble(view)).await?;
+        self.state.preamble.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Queue the trigger record at this position
+    /// ([`ZrecWriter::write_trigger`]).
+    pub async fn write_trigger(&self, transition: Transition) -> Result<()> {
+        self.send(ZrecLine::Trigger(Box::new(transition))).await?;
+        self.state.triggers.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
     async fn send(&self, line: ZrecLine) -> Result<()> {
         if self.tx.send(line).await.is_ok() {
             return Ok(());
@@ -358,26 +449,29 @@ impl ZrecSink {
         ))
     }
 
-    /// Samples and drops **accepted** so far — the progress line's numbers.
+    /// What has been **accepted** so far, by kind — the progress line's
+    /// numbers.
     ///
     /// Accepted, not yet written: the queue is what stands between the two,
     /// and [`finish`](Self::finish) drains it, so the final counts are the
     /// file's. A progress line that waited for the disk would be reporting
     /// the disk, not the capture.
-    pub fn counts(&self) -> (u64, u64) {
-        (
-            self.state.samples.load(Ordering::Relaxed),
-            self.state.dropped.load(Ordering::Relaxed),
-        )
+    pub fn counts(&self) -> SinkCounts {
+        SinkCounts {
+            samples: self.state.samples.load(Ordering::Relaxed),
+            dropped: self.state.dropped.load(Ordering::Relaxed),
+            preamble: self.state.preamble.load(Ordering::Relaxed),
+            triggers: self.state.triggers.load(Ordering::Relaxed),
+        }
     }
 
     /// Close the queue, wait for the writer to drain it, flush, and report
-    /// what reached the file: (samples, dropped).
+    /// what reached the file, by kind.
     ///
     /// This is where a write error surfaces if the capture did not already
     /// trip over it. The counts come from the writer rather than the queue,
     /// so a report built on them is a report about the file.
-    pub async fn finish(self) -> Result<(u64, u64)> {
+    pub async fn finish(self) -> Result<SinkCounts> {
         let ZrecSink { tx, state, writer } = self;
         drop(tx);
         drop(state);
@@ -423,7 +517,7 @@ pub async fn record(
     let deadline = bounds.max_duration.map(|d| Instant::now() + d);
 
     loop {
-        let (samples, _) = sink.counts();
+        let samples = sink.counts().samples;
         if bounds.max_samples.is_some_and(|max| samples >= max) {
             return Ok(());
         }
@@ -450,8 +544,8 @@ pub async fn record(
             Some(_) => continue,
             None => return Ok(()),
         }
-        let (samples, dropped) = sink.counts();
-        on_progress(samples, dropped);
+        let counts = sink.counts();
+        on_progress(counts.samples, counts.dropped);
     }
 }
 
@@ -474,6 +568,19 @@ pub enum ZrecItem {
     },
     /// Samples the capture itself missed at this position (O6).
     Dropped(u64),
+    /// A version-2 preamble row (RFC 13 §4.1; #218): state fetched at
+    /// trigger time, ahead of the first observed row. `timestamp` is the
+    /// HLC the fetched value carried — provenance, not pacing; the row's
+    /// `t` is 0 by construction and is not repeated here. A replayer
+    /// publishes these only when told to (§4.2); a pane replay seeds its
+    /// fold from them.
+    Preamble {
+        row: IngestRow,
+        timestamp: Option<String>,
+    },
+    /// The transition that fired a triggered capture, at the position it
+    /// was observed (version 2).
+    Trigger(Box<Transition>),
 }
 
 /// A `.zrec` reader over any buffered byte source: header up front, then
@@ -500,12 +607,18 @@ impl<R: BufRead> ZrecReader<R> {
             })?;
         let header: ZrecHeader = serde_json::from_str(&first)
             .map_err(|e| Error::malformed_with(".zrec line 1", "is not a header", e))?;
-        if header.zrec != ZREC_VERSION {
+        if !ZREC_READS.contains(&header.zrec) {
             return Err(Error::malformed(
                 ".zrec",
                 format!(
-                    "unsupported version {} (this reader speaks {ZREC_VERSION})",
-                    header.zrec
+                    "unsupported version {} (this reader speaks {ZREC_VERSION} and reads {})",
+                    header.zrec,
+                    ZREC_READS
+                        .iter()
+                        .filter(|v| **v != ZREC_VERSION)
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             ));
         }
@@ -537,28 +650,42 @@ impl<R: BufRead> ZrecReader<R> {
             if line.trim().is_empty() {
                 continue;
             }
-            // A drop record is `{"dropped": n}` — no key, not a row.
+            // A drop record is `{"dropped": n}` and a trigger record
+            // `{"trigger": {..}}` — no key, not rows (RFC 13 §4.1).
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line)
                 && v.get("key").is_none()
-                && let Some(n) = v.get("dropped").and_then(serde_json::Value::as_u64)
             {
-                return Some(Ok(ZrecItem::Dropped(n)));
+                if let Some(n) = v.get("dropped").and_then(serde_json::Value::as_u64) {
+                    return Some(Ok(ZrecItem::Dropped(n)));
+                }
+                if let Some(t) = v.get("trigger") {
+                    return Some(
+                        serde_json::from_value::<Transition>(t.clone())
+                            .map(|t| ZrecItem::Trigger(Box::new(t)))
+                            .map_err(|e| format!("line {}: trigger record: {e}", self.line)),
+                    );
+                }
             }
             return Some(match parse_row(&line) {
                 Ok(row) => {
                     let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
-                    Ok(ZrecItem::Sample {
-                        row,
-                        t_us: v.get("t").and_then(serde_json::Value::as_u64),
-                        timestamp: v
-                            .get("timestamp")
-                            .and_then(serde_json::Value::as_str)
-                            .map(str::to_string),
-                        source: v
-                            .get("source")
-                            .and_then(serde_json::Value::as_str)
-                            .map(str::to_string),
-                    })
+                    let timestamp = v
+                        .get("timestamp")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string);
+                    if v.get("preamble").and_then(serde_json::Value::as_bool) == Some(true) {
+                        Ok(ZrecItem::Preamble { row, timestamp })
+                    } else {
+                        Ok(ZrecItem::Sample {
+                            row,
+                            t_us: v.get("t").and_then(serde_json::Value::as_u64),
+                            timestamp,
+                            source: v
+                                .get("source")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string),
+                        })
+                    }
                 }
                 Err(e) => Err(format!("line {}: {e}", self.line)),
             });
@@ -663,6 +790,11 @@ pub struct ReplaySpec<'a> {
     pub i_know: bool,
     /// The profile a row that recorded none is published under.
     pub default_qos: QosProfile,
+    /// Publish the version-2 preamble rows too (`--seed-state`). Off, they
+    /// are skipped and counted, with the reason stated per row: re-stamped
+    /// state-at-capture-start republishes a snapshot over the live fleet
+    /// with no pacing between the rows (RFC 13 §4.2).
+    pub seed_state: bool,
 }
 
 /// Replay events, surfaced as they happen so a frontend can render them —
@@ -684,6 +816,12 @@ pub enum ReplayEvent<'a> {
     /// The capture itself missed this many samples here (O6): the replay
     /// is a partial view of a partial view, and both halves are counted.
     CaptureDropped(u64),
+    /// A version-2 preamble row this replay did **not** publish, and why
+    /// ([`PREAMBLE_SKIP_REASON`]) — the default without `seed_state`.
+    PreambleSkipped { key: &'a str, reason: &'static str },
+    /// The transition that fired the capture, at its position in the file.
+    /// Never published: a marker for the operator, not a row.
+    Trigger(&'a Transition),
 }
 
 /// The publishers one [`replay`] has declared, and the promise that every way
@@ -774,6 +912,7 @@ pub async fn replay(
         speed,
         i_know,
         default_qos,
+        seed_state,
     } = spec;
     if !(speed.is_finite() && speed > 0.0) {
         return Err(Error::unaskable(
@@ -792,6 +931,9 @@ pub async fn replay(
         refused: 0,
         capture_dropped: 0,
         first_errors: Vec::new(),
+        preamble_skipped: 0,
+        preamble_seeded: 0,
+        triggers: 0,
     };
     let record_err = |report: &mut ReplayReport, reason: String, refused: bool| {
         if refused {
@@ -810,12 +952,33 @@ pub async fn replay(
     // caller (#327).
     let mut fatal: Option<Error> = None;
     while let Some(item) = reader.next().await {
-        let (row, t_us) = match item {
-            Ok(ZrecItem::Sample { row, t_us, .. }) => (row, t_us),
+        let (row, t_us, seeding) = match item {
+            Ok(ZrecItem::Sample { row, t_us, .. }) => (row, t_us, false),
             Ok(ZrecItem::Dropped(n)) => {
                 report.capture_dropped += n;
                 on_event(ReplayEvent::CaptureDropped(n));
                 continue;
+            }
+            Ok(ZrecItem::Trigger(t)) => {
+                report.triggers += 1;
+                on_event(ReplayEvent::Trigger(&t));
+                continue;
+            }
+            // A preamble row is state at capture start (RFC 13 §4.1). Without
+            // the opt-in it is skipped and *said* — a snapshot republished
+            // over a live fleet is the sharpest form of §4.2's hazard. With
+            // it, the row is a sample at `t: 0`: same retire gate, same
+            // publisher, no pacing (there is none to keep).
+            Ok(ZrecItem::Preamble { row, .. }) => {
+                if !seed_state {
+                    report.preamble_skipped += 1;
+                    on_event(ReplayEvent::PreambleSkipped {
+                        key: &row.key,
+                        reason: PREAMBLE_SKIP_REASON,
+                    });
+                    continue;
+                }
+                (row, Some(0), true)
             }
             Err(reason) => {
                 on_event(ReplayEvent::Malformed {
@@ -840,19 +1003,26 @@ pub async fn replay(
             record_err(&mut report, format!("{}: {reason}", row.key), true);
             continue;
         }
+        // A seeded preamble row is counted as what it is, never as an
+        // observed row (O6 applied to rows); the dry-run listing still names
+        // it as the put it would be.
+        let count_put = |report: &mut ReplayReport, delete: bool| match (seeding, delete) {
+            (true, _) => report.preamble_seeded += 1,
+            (false, true) => report.tombstones += 1,
+            (false, false) => report.published += 1,
+        };
         match &target {
             ReplayTarget::DryRun => {
                 if row.delete {
                     on_event(ReplayEvent::WouldRetire { key: &row.key });
-                    report.tombstones += 1;
                 } else {
                     on_event(ReplayEvent::WouldPut {
                         key: &row.key,
                         bytes: row.payload.len(),
                         encoding: row.encoding.as_deref(),
                     });
-                    report.published += 1;
                 }
+                count_put(&mut report, row.delete);
             }
             ReplayTarget::Bus { session, .. } => {
                 // Original pacing, scaled — the observer's arrival clock is
@@ -911,10 +1081,9 @@ pub async fn replay(
                 } else {
                     publication.send(row.payload, row.attachment).await
                 };
-                match (sent, delete) {
-                    (Ok(()), true) => report.tombstones += 1,
-                    (Ok(()), false) => report.published += 1,
-                    (Err(e), _) => {
+                match sent {
+                    Ok(()) => count_put(&mut report, delete),
+                    Err(e) => {
                         fatal = Some(e);
                         break;
                     }
@@ -951,6 +1120,8 @@ mod tests {
             selectors: vec!["v1/**".into()],
             base: String::new(),
             captured_at: "2026-08-12T00:00:00Z".into(),
+            preamble: None,
+            pre_roll: None,
         }
     }
 
@@ -972,12 +1143,16 @@ mod tests {
         let reader = ZrecReader::new(sink.as_slice()).unwrap();
         assert_eq!(reader.header(), &header());
 
-        let future = r#"{"zrec":99,"selectors":[],"base":"","captured_at":"x"}"#;
+        // The version after this one is refused, never guessed at (RFC 13
+        // §4.1's unknown-version rule) — and the refusal says what this
+        // reader does speak.
+        let future = r#"{"zrec":3,"selectors":[],"base":"","captured_at":"x"}"#;
         let err = ZrecReader::new(future.as_bytes())
             .err()
             .unwrap()
             .to_string();
-        assert!(err.contains("version 99"), "{err}");
+        assert!(err.contains("version 3"), "{err}");
+        assert!(err.contains("speaks 2 and reads 1"), "{err}");
 
         let not_zrec = r#"{"key":"v1/x","value":1}"#;
         let err = ZrecReader::new(not_zrec.as_bytes())
@@ -985,6 +1160,194 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(err.contains("header"), "{err}");
+    }
+
+    /// A version-1 file — no `preamble`, no `pre_roll`, plain rows and drop
+    /// records — reads under the version-2 reader exactly as it did (RFC 13
+    /// §4.1: a version-2 reader MUST read version 1), and the header comes
+    /// back with the two blocks absent rather than defaulted.
+    #[test]
+    fn a_version_one_body_reads_under_the_version_two_reader() {
+        let body = concat!(
+            r#"{"zrec":1,"selectors":["v1/**"],"base":"","captured_at":"2026-08-12T00:00:00Z"}"#,
+            "\n",
+            r#"{"key":"v1/h/state/p/a","t":0,"bytes":"AQ=="}"#,
+            "\n",
+            r#"{"dropped":2}"#,
+            "\n",
+            r#"{"key":"v1/h/state/p/a","t":1000,"delete":true}"#,
+            "\n",
+        );
+        let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
+        assert_eq!(reader.header().zrec, 1);
+        assert_eq!(reader.header().preamble, None);
+        assert_eq!(reader.header().pre_roll, None);
+        assert!(matches!(
+            reader.next(),
+            Some(Ok(ZrecItem::Sample { t_us: Some(0), .. }))
+        ));
+        assert!(matches!(reader.next(), Some(Ok(ZrecItem::Dropped(2)))));
+        assert!(matches!(
+            reader.next(),
+            Some(Ok(ZrecItem::Sample {
+                t_us: Some(1000),
+                ..
+            }))
+        ));
+        assert!(reader.next().is_none());
+    }
+
+    /// The version-2 lines read back as what they are: a preamble row is
+    /// `Preamble` (at `t: 0`, keeping its HLC as provenance), a trigger
+    /// record is the same `Transition` that was written — and a version-2
+    /// header round-trips both blocks.
+    #[test]
+    fn version_two_lines_read_back_by_kind() {
+        use crate::report::{CondState, PreRollInfo, PreambleInfo, PreambleSemantics};
+        let epoch = Instant::now();
+        let header = ZrecHeader {
+            preamble: Some(PreambleInfo {
+                count: 1,
+                collected_over_s: 0.25,
+                selectors: vec!["v1/*/state/**".into()],
+                semantics: PreambleSemantics::AbsentFromWindow,
+                incomplete: 0,
+                failed: vec!["v1/*/telemetry/**".into()],
+            }),
+            pre_roll: Some(PreRollInfo {
+                asked_s: 30.0,
+                covered_s: 12.5,
+                watched: vec!["v1/**".into()],
+                evicted: 0,
+                expired: 40,
+            }),
+            ..header()
+        };
+        let stamp = zenoh::time::Timestamp::new(
+            zenoh::time::NTP64::from(Duration::from_secs(1_700_000_000)),
+            zenoh::time::TimestampId::try_from([7u8; 16]).unwrap(),
+        );
+        let fetched = crate::bus::monitor::SampleView {
+            key: "v1/h-0123456789ab/state/p/config".into(),
+            payload: zenoh::bytes::ZBytes::from(vec![9u8]),
+            encoding: String::new(),
+            kind: SampleKind::Put,
+            timestamp: Some(stamp),
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            // Received "after" the epoch: a preamble row still writes t: 0.
+            received: epoch + Duration::from_secs(5),
+        };
+        let fired = Transition {
+            rule: "silent-for v1/h-0123456789ab/state/p/health 0.7".into(),
+            from: Some(CondState::Ok),
+            to: CondState::Firing,
+            at: "2026-09-06T00:00:00Z".into(),
+            evidence: "no sample for 0.7s, on a drop-free observer".into(),
+        };
+
+        let mut sink = Vec::new();
+        let mut w = ZrecWriter::new_at(&mut sink, &header, epoch).unwrap();
+        w.write_preamble(&fetched).unwrap();
+        w.write_trigger(&fired).unwrap();
+        assert_eq!(
+            w.counts(),
+            SinkCounts {
+                samples: 0,
+                dropped: 0,
+                preamble: 1,
+                triggers: 1
+            },
+            "the kinds are counted apart"
+        );
+        let _ = w.finish().unwrap();
+        let text = String::from_utf8(sink.clone()).unwrap();
+        assert!(text.contains(r#""preamble":true"#), "{text}");
+        assert!(text.contains(r#""t":0"#), "{text}");
+        assert!(text.contains(r#"{"trigger":{"#), "{text}");
+
+        let mut reader = ZrecReader::new(sink.as_slice()).unwrap();
+        assert_eq!(reader.header(), &header);
+        match reader.next() {
+            Some(Ok(ZrecItem::Preamble { row, timestamp })) => {
+                assert_eq!(row.key, fetched.key);
+                assert_eq!(row.payload, vec![9u8]);
+                assert_eq!(timestamp.as_deref(), Some(stamp.to_string().as_str()));
+            }
+            other => panic!("expected a preamble row, got {other:?}"),
+        }
+        match reader.next() {
+            Some(Ok(ZrecItem::Trigger(t))) => assert_eq!(*t, fired),
+            other => panic!("expected the trigger record, got {other:?}"),
+        }
+        assert!(reader.next().is_none());
+    }
+
+    /// A version-2 capture as the CLI replays it: without `--seed-state`
+    /// the preamble row is skipped and *said* (RFC 13 §4.2's hazard), the
+    /// trigger is a marker and never a put, and the observed row still
+    /// counts; with it, the preamble row is a would-be put counted as
+    /// seeded, apart from the observed rows.
+    #[tokio::test]
+    async fn a_dry_run_skips_the_preamble_by_default_and_seeds_it_on_request() {
+        let body = format!(
+            "{}\n{}\n{}\n{}\n",
+            serde_json::to_string(&header()).unwrap(),
+            r#"{"key":"v1/h-0123456789ab/state/p/config","t":0,"preamble":true,"bytes":"CQ=="}"#,
+            r#"{"key":"v1/h-0123456789ab/state/p/health","t":250000,"bytes":"eyJvayI6dHJ1ZX0="}"#,
+            r#"{"trigger":{"rule":"silent-for k 0.7","from":"ok","to":"firing","at":"x","evidence":"e"}}"#,
+        );
+        let spec = |seed_state| ReplaySpec {
+            target: ReplayTarget::DryRun,
+            speed: 1.0,
+            i_know: false,
+            default_qos: QosProfile::Refreshed,
+            seed_state,
+        };
+
+        let mut reader = source_of(&body).await;
+        let mut skipped = Vec::new();
+        let mut triggers = 0;
+        let report = replay(&mut reader, spec(false), |ev| match ev {
+            ReplayEvent::PreambleSkipped { key, reason } => {
+                skipped.push((key.to_string(), reason));
+            }
+            ReplayEvent::Trigger(t) => {
+                assert_eq!(t.to, crate::report::CondState::Firing);
+                triggers += 1;
+            }
+            _ => {}
+        })
+        .await
+        .unwrap();
+        assert_eq!(report.preamble_skipped, 1);
+        assert_eq!(report.preamble_seeded, 0);
+        assert_eq!(report.published, 1);
+        assert_eq!(report.triggers, 1);
+        assert_eq!(triggers, 1);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].0, "v1/h-0123456789ab/state/p/config");
+        assert!(skipped[0].1.contains("--seed-state"), "{}", skipped[0].1);
+        assert!(skipped[0].1.contains("RFC 13 §4.2"), "{}", skipped[0].1);
+
+        let mut reader = source_of(&body).await;
+        let mut would_put = 0;
+        let report = replay(&mut reader, spec(true), |ev| {
+            if matches!(ev, ReplayEvent::WouldPut { .. }) {
+                would_put += 1;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(report.preamble_seeded, 1);
+        assert_eq!(report.preamble_skipped, 0);
+        assert_eq!(report.published, 1, "the observed row, not the seed");
+        assert_eq!(would_put, 2, "both rows are listed as puts");
     }
 
     /// A retained window written through `new_at` keeps its real pacing
@@ -1089,6 +1452,7 @@ mod tests {
                 speed: 1.0,
                 i_know: false,
                 default_qos: QosProfile::Refreshed,
+                seed_state: false,
             },
             |ev| {
                 would.push(format!("{ev:?}"));
@@ -1121,6 +1485,7 @@ mod tests {
                 speed: 1.0,
                 i_know: false,
                 default_qos: QosProfile::Refreshed,
+                seed_state: false,
             },
             |_| {},
         )
@@ -1148,6 +1513,7 @@ mod tests {
                     speed: bad,
                     i_know: false,
                     default_qos: QosProfile::Refreshed,
+                    seed_state: false,
                 },
                 |_| {},
             )
@@ -1199,6 +1565,7 @@ mod tests {
                 speed: 1000.0,
                 i_know: false,
                 default_qos: QosProfile::Transition,
+                seed_state: false,
             },
             |_| {},
         )

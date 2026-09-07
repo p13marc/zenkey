@@ -63,7 +63,11 @@ impl From<Judgement> for CondState {
 }
 
 /// One genuine state change — the only thing the watchdog ever emits.
-#[derive(Debug, Clone, Serialize)]
+///
+/// `Deserialize` too, since v1.34: a version-2 `.zrec` interleaves the
+/// transition that fired a trigger capture as a `{"trigger": …}` record
+/// (RFC 13 §4.1), and a reader hands it back as this same shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transition {
     /// The rule, in its canonical spelling ([`Condition`](crate::judge::condition::Condition)'s `Display`).
     pub rule: String,

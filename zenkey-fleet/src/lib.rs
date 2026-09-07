@@ -138,7 +138,8 @@ pub use bus::describe::{DescribeSweep, describe_sweep};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
-    CondWindow, Condition, DoctorWatch, Eval, RuleState, WatchdogSpec, watchdog,
+    CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome, WatchdogSpec,
+    watchdog,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -173,6 +174,9 @@ pub use tape::generate::{
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use tape::synth::Synth;
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]
@@ -273,15 +277,21 @@ pub use model::acl::{AclOptions, check_acl, explain_acl, plan_acl, to_json5 as a
 pub use model::alert::alert_transition;
 pub use model::consumers::{SubjectTarget, declaring_sessions, join_consumers, subject_target};
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
+pub use model::export::{
+    DEFAULT_MAX_SERIES, DoctorRun, ExportLedger, FIELD_CAP, FoldInputs, Observed, PayloadVerdict,
+    WILDCARD_EXCLUDES, excluded_by,
+};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
 };
 pub use model::impact::{ImpactInputs, MAX_DEPTH_CAP, attribute, entity_of};
+pub use model::origin_map::{Label, MapError, MapPlan, OriginProfile, origin_profiles, plan_map};
+pub use model::prom::{exposition, metric_name};
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
 pub use model::snapshot::{fold_latest, holder_of, registration_of, stamper_of};
-pub use model::snapshot_diff::{DiffOpts, diff_snapshots};
+pub use model::snapshot_diff::{DiffOpts, diff_normalized, diff_snapshots};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::storage::{
     check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
@@ -300,23 +310,27 @@ pub use report::{
     AdminAnswer, AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
     ConsumerRow, ConsumersReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities,
     DeclaredEntity, DiscoveredBase, DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd,
-    EdgeKind, EntityDoc, EntityKind, ExpectReport, Fault, FieldReport, Freshness, GenPlanEntry,
-    GenReport, HelloView, ImpactReport, InferReport, InferredProducer, InferredSubject,
-    InferredType, Judgement, LatencyReport, LatencySummary, MeshLink, NodeInfo, OriginAttachment,
-    ProducerInfo, RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung,
-    RungAnswer, SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot, SnapshotDiff,
-    SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact, TimelineReport, TopologyEdge,
-    TopologyNode, TopologyReport, TotalityGap, TraceReport, ValueSource, WhyReport, WhyVerdict,
-    ZrecHeader, ZsnapHeader, judgement_exit_code,
+    EdgeKind, EntityDoc, EntityKind, ExpectReport, ExportSnapshot, Fault, FieldReport, Freshness,
+    GenPlanEntry, GenReport, HelloView, ImpactReport, InferReport, InferredProducer,
+    InferredSubject, InferredType, Judgement, LatencyReport, LatencySummary, MeshLink, NodeInfo,
+    OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport, RetiredReport,
+    RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot,
+    SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact, TimelineReport,
+    TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport, ValueSource, WhyReport,
+    WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
+// `CondState` and `Transition` are unconditional since v1.34: a version-2
+// `.zrec` carries the trigger record, and the reader is not decode-gated.
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use report::{CondState, Transition, WatchdogSummary};
+pub use report::WatchdogSummary;
+pub use report::{CondState, PreRollInfo, PreambleInfo, PreambleSemantics, Transition};
 pub use tape::bench::{BenchSpec, run_bench};
 pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
 pub use tape::record::{
-    RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, ZREC_VERSION, ZrecItem, ZrecReader,
-    ZrecSink, ZrecSource, ZrecWriter, record, replay,
+    PREAMBLE_SKIP_REASON, RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, SinkCounts,
+    ZREC_READS, ZREC_VERSION, ZrecItem, ZrecReader, ZrecSink, ZrecSource, ZrecWriter, record,
+    replay,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]

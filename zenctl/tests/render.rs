@@ -1341,42 +1341,134 @@ DIFFERENT
     assert!(!same.contains("  ~"), "{same}");
 }
 
-/// An alignment that was asked shows its pairs and — the RFC 13 §4.4 MUST —
-/// lists the origin it could not pair, in the table and as its own row.
+/// An alignment that was asked and could not place every origin is
+/// **refused** (#220): the pairs it had and — the RFC 13 §4.4 MUST — every
+/// origin it could not pair, each with its reason, under NOT COMPARED
+/// rather than a count line that would read as a comparison; and as rows.
 #[test]
-fn a_snapshot_diff_lists_an_unpaired_origin_rather_than_dropping_it() {
+fn a_refused_snapshot_diff_lists_every_unpaired_origin_and_compares_nothing() {
     assert_data_eq!(
         table(&fx::snapshot_diff_unmapped()),
         str![[r#"
-a: 5 key(s), span 1.25s at 2026-09-06T00:00:00Z (acme/v1/**)
-b: 5 key(s), span 0.80s at 2026-09-06T00:05:00Z (acme/v1/**)
-1 added, 1 removed, 2 changed, 2 unchanged
-  +  acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used
-  -  acme/v1/h-9b2e4c7a1d05/state/logs/rotated
-  ~  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used  value: 1 change(s) (value: 41.0 → 42.0)
-  ~  acme/v1/h-9b2e4c7a1d05/state/sysinfo/health                 value: 1 change(s) (status: "degraded" → "ok"); holder: storage_only → live(unknown)
+a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
+b: 4 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
 origins aligned: 1
-  =  h-3fa9c2d41b7e ↔ h-3fa9c2d41b7e  label
-origins not paired: 1
-  ?  h-9b2e4c7a1d05 (in b)  no origin in a publishes the same host_id
-subject                              compared  differing  only in a  only in b
-telemetry/sysinfo/disk/var-log/used         1          1          0          1
-DIFFERENT
+  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  explicit
+origins not paired: 2
+  ?  h-9b2e4c7a1d05 (in a)  label `db` claimed by no origin in b; producer set {logs, sysinfo} matches no origin in b
+  ?  h-0badcafe1234 (in b)  label `node` claimed by no origin in a; producer set {sysinfo} matches no origin in a
+NOT COMPARED
 
 "#]]
     );
     let n = notes(&fx::snapshot_diff_unmapped());
     assert!(n.contains("could not be paired"), "{n}");
+    assert!(n.contains("--map A=B"), "{n}");
     let rows: Vec<serde_json::Value> = ndjson(&fx::snapshot_diff_unmapped())
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
+    assert_eq!(
+        rows.iter().filter(|r| r["row"] == "unmapped").count(),
+        2,
+        "one row per unpaired origin"
+    );
     assert!(
         rows.iter()
             .any(|r| r["row"] == "unmapped" && r["side"] == "b")
     );
-    assert!(rows.iter().any(|r| r["row"] == "subject"));
-    assert_eq!(rows[0]["origin_map"][0]["evidence"]["kind"], "label");
+    assert!(
+        !rows.iter().any(|r| r["row"] == "subject"),
+        "no roll-up: not compared"
+    );
+    assert_eq!(rows[0]["origin_map"][0]["evidence"]["kind"], "explicit");
+}
+
+/// The acceptance case (#220): one fleet under two deployments, every
+/// origin re-minted, aligned on its label — the map table with its
+/// evidence column, every subject identical, the clean word.
+#[test]
+fn an_aligned_snapshot_diff_draws_its_map_and_rolls_up_per_subject() {
+    assert_data_eq!(
+        table(&fx::snapshot_diff_aligned()),
+        str![[r#"
+a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
+b: 6 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
+0 added, 0 removed, 0 changed, 6 unchanged
+origins aligned: 2
+  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  label `web`
+  =  h-9b2e4c7a1d05 ↔ h-0badcafe1234  label `db`
+4 subject(s) identical on every origin, 0 not
+IDENTICAL
+
+"#]]
+    );
+    let n = notes(&fx::snapshot_diff_aligned());
+    assert!(n.contains("re-based from `stg` onto `prod`"), "{n}");
+    assert!(!n.contains("no origin alignment was asked"), "{n}");
+    assert!(!n.contains("producer set alone"), "labels paired it: {n}");
+}
+
+/// One line per subject that differs — "differs on N of M origin(s)" with
+/// the example's facets, and only-in counts — and the agreeing subjects
+/// counted, not listed.
+#[test]
+fn a_normalized_snapshot_diff_says_per_subject_on_how_many_origins() {
+    assert_data_eq!(
+        table(&fx::snapshot_diff_normalized()),
+        str![[r#"
+a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
+b: 4 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
+0 added, 2 removed, 2 changed, 2 unchanged
+  -  plain/leak
+  -  prod/v1/h-9b2e4c7a1d05/state/logs/rotated
+  ~  prod/v1/h-3fa9c2d41b7e/state/sysinfo/health  value: 1 change(s) (source: "web" → "node")
+  ~  prod/v1/h-9b2e4c7a1d05/state/sysinfo/health  value: 1 change(s) (source: "db" → "node")
+origins aligned: 2
+  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  explicit
+  =  h-9b2e4c7a1d05 ↔ h-0badcafe1234  explicit
+plain/leak            1 only in a
+state/logs/rotated    1 only in a
+state/sysinfo/health  differs on 2 of 2 origin(s)  value: 1 change(s) (source: "web" → "node")
+1 subject(s) identical on every origin, 3 not
+DIFFERENT
+
+"#]]
+    );
+    let rows: Vec<serde_json::Value> = ndjson(&fx::snapshot_diff_normalized())
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let health = rows
+        .iter()
+        .find(|r| r["row"] == "subject" && r["subject"] == "state/sysinfo/health")
+        .unwrap();
+    assert_eq!(
+        (health["compared"].as_u64(), health["differing"].as_u64()),
+        (Some(2), Some(2))
+    );
+    assert_eq!(health["example"]["value"]["changes"][0]["path"], "source");
+}
+
+/// No health documents at all: the pairing rests on producer sets alone,
+/// and the O4 note says the label was never asked rather than absent.
+#[test]
+fn a_producer_set_pairing_says_the_label_was_not_asked() {
+    let (a, b) = fx::snapshot_pair_unlabelled();
+    let plan = zenkey_fleet::plan_map(
+        &zenkey_fleet::origin_profiles(&a),
+        &zenkey_fleet::origin_profiles(&b),
+        &[],
+    )
+    .unwrap();
+    let d = zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default());
+    let t = table(&d);
+    assert!(t.contains("  producer set"), "{t}");
+    assert!(t.contains("IDENTICAL"), "{t}");
+    let n = notes(&d);
+    assert!(n.contains("paired by producer set alone"), "{n}");
+    assert!(n.contains("never asked"), "{n}");
+    assert!(n.contains("RFC 06 §6.2"), "{n}");
 }
 
 /// The two `.zsnap` files the CLI corpus diffs (`tests/cmd/snapshot-diff.trycmd`)
@@ -1386,7 +1478,19 @@ DIFFERENT
 /// must already match.
 #[test]
 fn the_zsnap_corpus_fixtures_are_the_shared_fixtures() {
-    for (name, snapshot) in [("a.zsnap", fx::snapshot()), ("b.zsnap", fx::snapshot_b())] {
+    let (renamed_a, renamed_b) = fx::snapshot_pair_renamed();
+    let (_, ambiguous_b) = fx::snapshot_pair_ambiguous();
+    let (unlabelled_a, unlabelled_b) = fx::snapshot_pair_unlabelled();
+    for (name, snapshot) in [
+        ("a.zsnap", fx::snapshot()),
+        ("b.zsnap", fx::snapshot_b()),
+        // The two-deployment pairs (#220, `snapshot-diff-normalized.trycmd`).
+        ("prod.zsnap", renamed_a),
+        ("stg.zsnap", renamed_b),
+        ("stg-ambiguous.zsnap", ambiguous_b),
+        ("prod-unlabelled.zsnap", unlabelled_a),
+        ("stg-unlabelled.zsnap", unlabelled_b),
+    ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/cmd/fixtures")
             .join(name);
@@ -1946,6 +2050,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cutover",
         "doctor",
         "expect",
+        "export",
         "field",
         "gen",
         "gen-plan",
@@ -2061,6 +2166,12 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::snapshot_report());
     assert_eq!(s.asked, ["acme/v1/**"]);
     assert_eq!(s.window_s, Some(1.25));
+
+    // The exporter's scope is its selector, over the span it has been
+    // watching (taken_at - started_at).
+    let s = scoped(&fx::export_snapshot());
+    assert_eq!(s.asked, ["acme/v1/*/**"]);
+    assert_eq!(s.window_s, Some(120.0));
     // The doctor's scope is its listen phase; the fixture ran one.
     let s = scoped(&fx::doctor_report());
     assert_eq!(s.asked, ["v1/**"]);
@@ -2710,4 +2821,91 @@ fn the_consumer_families_never_speak_of_matching_or_listening() {
             );
         }
     }
+}
+
+// ── The metrics surface (#228) ───────────────────────────────────────────────
+
+/// `export --once`: series grouped by producer, an empty value cell where
+/// the state says the series stopped, and the state beside every row.
+#[test]
+fn an_export_snapshot_groups_series_by_producer_and_blanks_a_stopped_value() {
+    assert_data_eq!(
+        table(&fx::export_snapshot()),
+        str![[r#"
+series                                       labels                                        value  state        last seen   samples
+
+sysinfo  (telemetry)
+zenkey_subject_sysinfo_cpu_usage_percent     origin=h-3fa9c2d41b7e                        12.500  live         1700000119      240
+zenkey_subject_sysinfo_disk_used_bytes       origin=h-0000deadbeef mount=var-log                  origin_down  1700000040       80
+
+netlink  (telemetry)
+zenkey_subject_netlink_iface_rx_bytes_total  origin=h-3fa9c2d41b7e iface=eth0 field=rx            evicted      1700000100        5
+
+sysinfo  (state)
+zenkey_subject_sysinfo_health                origin=h-3fa9c2d41b7e field=uptime_s       4242.000  quiet        1700000060        4
+
+"#]]
+    );
+}
+
+/// The ndjson leads with the envelope — scopes, exclusions, the observer's
+/// counters as separate fields — then one tagged row per series.
+#[test]
+fn an_export_snapshots_ndjson_leads_with_the_envelope_then_tags_every_series() {
+    assert_data_eq!(
+        ndjson(&fx::export_snapshot()),
+        str![[r#"
+{"contract":{"payload_invalid":1,"payload_not_validated":128,"payload_valid":200,"qos_judged":320,"qos_mismatch":2,"qos_mismatch_by_subject":[{"n":2,"producer":"sysinfo","subject":"cpu/usage"}]},"doctor":{"findings":[{"check":"stale-state","severity":"warning","subject":"h-3fa9c2d41b7e/sysinfo"}],"ran_at_unix_s":1700000090},"excluded":["@rpc","@media","@blob","@adv","service origins"],"max_series":10000,"notes":[{"cite":"RFC 03 §4 D2","text":"a wildcard selector never crosses an `@`-chunk: @rpc, @media, @blob, @adv, service origins are excluded from this surface, not empty"},{"cite":"RFC 09 §5.1 O4","text":"3 distinct key(s) the registry does not declare are counted, never exported — the contract is the registry"},{"text":"128 sample(s) not validated (past the decode budget, or no schema) — a third population beside 200 valid and 1 invalid, never folded into a ratio"},{"text":"2 series stopped (evicted, origin_down or retired): each keeps its labels and state and exposes no value, so a scraper sees a named absence rather than a flat line"},{"text":"quiet is judged only for `state` subjects against their declared ttl_s; telemetry declares no period and is never called quiet"},{"cite":"RFC 09 §5.1 O7","text":"last seen is this observer's wall clock at arrival, never the producer's"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — every value is a lower bound while this moves"},{"cite":"RFC 09 §5.1 O6","text":"5 key(s) retired at the stats-table bound; their series read `evicted`"},{"cite":"RFC 09 §5.1 O6","text":"7 retained sample(s) dropped at the byte budget"},{"cite":"RFC 09 §5.1 O6","text":"11 retained sample(s) aged out of the retention window"},{"cite":"RFC 09 §5.1 O6","text":"13 key(s) retired because their watch was released"},{"cite":"RFC 09 §5.1 O6","text":"17 sample(s) coalesced between scrapes — only the newest value per series is exposed"},{"cite":"RFC 09 §5.1 O6","text":"4 sample(s) refused a series past the declared `cardinality` budget"},{"cite":"RFC 09 §5.1 O6","text":"1 field(s) refused a series past the per-subject field cap"}],"observer":{"coalesced":17,"dropped":3,"evicted_bytes":7,"evicted_keys":5,"expired":11,"unstamped":19,"unwatched":13},"registry":{"producers":2},"report":"export","scopes":["acme/v1/*/**"],"started_at_unix_s":1700000000,"suppressed":{"cardinality":4,"fields":1},"taken_at_unix_s":1700000120,"unregistered_keys":3}
+{"class":"telemetry","drop_exposed":2,"key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage","kind":"gauge","last_seen_unix_s":1700000119,"name":"zenkey_subject_sysinfo_cpu_usage_percent","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":240,"state":"live","subject":"cpu/usage","unit":"percent","value":12.5}
+{"class":"telemetry","key":"acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used","labels":{"mount":"var-log"},"last_seen_unix_s":1700000040,"name":"zenkey_subject_sysinfo_disk_used_bytes","origin":"h-0000deadbeef","producer":"sysinfo","row":"series","samples":80,"state":"origin_down","subject":"disk/{mount}/used","unit":"bytes"}
+{"class":"telemetry","field":"rx","key":"acme/v1/h-3fa9c2d41b7e/telemetry/netlink/iface/eth0/rx_bytes","kind":"counter","labels":{"iface":"eth0"},"last_seen_unix_s":1700000100,"name":"zenkey_subject_netlink_iface_rx_bytes_total","origin":"h-3fa9c2d41b7e","producer":"netlink","row":"series","samples":5,"state":"evicted","subject":"iface/{iface}/rx_bytes","unit":"bytes"}
+{"class":"state","field":"uptime_s","key":"acme/v1/h-3fa9c2d41b7e/state/sysinfo/health","last_seen_unix_s":1700000060,"name":"zenkey_subject_sysinfo_health","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":4,"state":"quiet","subject":"health","value":4242.0}
+
+"#]]
+    );
+}
+
+/// The honesty floor for the surface, asserted rather than snapshotted:
+/// every O6 population is its own bound note, never a sum; the three
+/// payload populations stay three; the unasked poles are coverage notes.
+#[test]
+fn an_export_snapshot_states_every_bound_by_kind_and_never_sums_them() {
+    let n = notes(&fx::export_snapshot());
+    for expected in [
+        "3 sample(s) dropped while behind",
+        "5 key(s) retired at the stats-table bound",
+        "7 retained sample(s) dropped at the byte budget",
+        "11 retained sample(s) aged out",
+        "13 key(s) retired because their watch was released",
+        "17 sample(s) coalesced between scrapes",
+        "4 sample(s) refused a series past the declared `cardinality` budget",
+        "1 field(s) refused a series past the per-subject field cap",
+    ] {
+        assert!(n.contains(expected), "missing `{expected}` in:\n{n}");
+    }
+    assert!(
+        !n.contains(" 23 ") && !n.contains(" 36 ") && !n.contains(" 56 "),
+        "no sum of the kinds:\n{n}"
+    );
+    assert!(
+        n.contains("128 sample(s) not validated") && n.contains("200 valid and 1 invalid"),
+        "{n}"
+    );
+    assert!(n.contains("2 series stopped"), "{n}");
+    assert!(
+        n.contains("@rpc, @media, @blob, @adv, service origins are excluded"),
+        "{n}"
+    );
+
+    // The unasked poles, on a snapshot that asked for nothing.
+    let mut bare = fx::export_snapshot();
+    bare.doctor = zenkey_fleet::report::Asked::NotAsked;
+    bare.registry = zenkey_fleet::report::Asked::NotAsked;
+    bare.contract.payload_valid = 0;
+    bare.contract.payload_invalid = 0;
+    let n = notes(&bare);
+    assert!(n.contains("doctor not asked"), "{n}");
+    assert!(n.contains("no registry loaded"), "{n}");
+    assert!(n.contains("payload verdicts not asked"), "{n}");
+    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
 }

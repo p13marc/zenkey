@@ -1446,33 +1446,215 @@ fn a_snapshot_diff_keeps_both_spans_and_its_facets_apart() {
     );
 }
 
-/// An alignment that was asked lists what it paired *and* what it could
-/// not (RFC 13 §4.4: "MUST list, never drop"), and the roll-up rides as
-/// its own rows.
+/// An alignment that was asked and refused (#220) lists what it paired
+/// *and* what it could not (RFC 13 §4.4: "MUST list, never drop"), carries
+/// no roll-up — the comparison was not made — and projects to the reserved
+/// non-verdict.
 #[test]
-fn an_asked_alignment_lists_its_pairs_and_its_unpaired() {
-    let v = serde_json::to_value(fx::snapshot_diff_unmapped()).unwrap();
+fn a_refused_alignment_lists_its_pairs_and_its_unpaired_and_compares_nothing() {
+    let d = fx::snapshot_diff_unmapped();
+    let v = serde_json::to_value(&d).unwrap();
     assert_eq!(
         v["origin_map"],
         json!([{
             "a": "h-3fa9c2d41b7e",
-            "b": "h-3fa9c2d41b7e",
-            "evidence": {"kind": "label", "source": "state/sysinfo/health.host_id"},
+            "b": "h-c0ffee00c0de",
+            "evidence": {"kind": "explicit"},
         }])
     );
     assert_eq!(
         v["unmapped"],
-        json!([{
-            "origin": "h-9b2e4c7a1d05",
-            "side": "b",
-            "reason": "no origin in a publishes the same host_id",
-        }])
+        json!([
+            {
+                "origin": "h-9b2e4c7a1d05",
+                "side": "a",
+                "reason": "label `db` claimed by no origin in b; producer set {logs, sysinfo} matches no origin in b",
+            },
+            {
+                "origin": "h-0badcafe1234",
+                "side": "b",
+                "reason": "label `node` claimed by no origin in a; producer set {sysinfo} matches no origin in a",
+            },
+        ])
     );
-    let subject = &v["by_subject"][0];
-    assert_eq!(subject["subject"], "telemetry/sysinfo/disk/var-log/used");
-    assert_eq!(subject["compared"], 1);
-    assert_eq!(subject["only_in_b"], 1);
-    assert_eq!(subject["example"]["value"]["changes"][0]["path"], "value");
+    for absent in ["by_subject", "truncated"] {
+        assert!(v.get(absent).is_none(), "{absent}: {v}");
+    }
+    assert_eq!(v["added"], json!([]));
+    assert_eq!(v["changed"], json!([]));
+    assert_eq!(v["unchanged"], 0);
+    assert!(d.refused());
+    assert_eq!(judgement_exit_code(&d.to_judgement()), 2);
+}
+
+/// An alignment that completed carries every pair with its evidence and
+/// one `by_subject` row per subject — the acceptance case: disjoint
+/// origins, zero differences, exit 0.
+#[test]
+fn a_completed_alignment_carries_its_pairs_and_the_subject_roll_up() {
+    let d = fx::snapshot_diff_aligned();
+    let v = serde_json::to_value(&d).unwrap();
+    assert_eq!(
+        v["origin_map"],
+        json!([
+            {"a": "h-3fa9c2d41b7e", "b": "h-c0ffee00c0de", "evidence": {"kind": "label", "source": "web"}},
+            {"a": "h-9b2e4c7a1d05", "b": "h-0badcafe1234", "evidence": {"kind": "label", "source": "db"}},
+        ])
+    );
+    assert!(v.get("unmapped").is_none(), "empty is absent: {v}");
+    assert_eq!(v["added"], json!([]));
+    assert_eq!(v["removed"], json!([]));
+    assert_eq!(v["changed"], json!([]));
+    assert_eq!(v["unchanged"], 6);
+    let subjects = v["by_subject"].as_array().unwrap();
+    assert_eq!(subjects.len(), 4);
+    assert_eq!(
+        subjects[2],
+        json!({"subject": "state/sysinfo/health", "compared": 2, "differing": 0, "only_in_a": 0, "only_in_b": 0}),
+        "no example when nothing differs"
+    );
+    assert!(!d.differs() && !d.refused());
+    assert_eq!(judgement_exit_code(&d.to_judgement()), 0);
+
+    // Mapped by hand and differing: the subject carries its example.
+    let v = serde_json::to_value(fx::snapshot_diff_normalized()).unwrap();
+    assert_eq!(v["origin_map"][0]["evidence"], json!({"kind": "explicit"}));
+    let health = v["by_subject"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["subject"] == "state/sysinfo/health")
+        .unwrap();
+    assert_eq!(
+        (health["compared"].as_u64(), health["differing"].as_u64()),
+        (Some(2), Some(2))
+    );
+    assert_eq!(health["example"]["value"]["changes"][0]["path"], "source");
+    let logs = v["by_subject"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["subject"] == "state/logs/rotated")
+        .unwrap();
+    assert_eq!(logs["only_in_a"], 1);
+}
+
+// ── The metrics surface (#228) ───────────────────────────────────────────────
+
+/// The exporter fold, whole: a stopped series has no `value`, a zero
+/// `drop_exposed` is absent, every observer counter is present, the doctor
+/// and registry poles are present because they were asked.
+#[test]
+fn an_export_snapshot_is_pinned() {
+    assert_eq!(
+        serde_json::to_value(fx::export_snapshot()).unwrap(),
+        json!({
+            "scopes": ["acme/v1/*/**"],
+            "excluded": ["@rpc", "@media", "@blob", "@adv", "service origins"],
+            "registry": {"producers": 2},
+            "max_series": 10000,
+            "started_at_unix_s": 1_700_000_000,
+            "taken_at_unix_s": 1_700_000_120,
+            "series": [
+                {
+                    "name": "zenkey_subject_sysinfo_cpu_usage_percent",
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage",
+                    "origin": "h-3fa9c2d41b7e",
+                    "producer": "sysinfo",
+                    "class": "telemetry",
+                    "subject": "cpu/usage",
+                    "kind": "gauge",
+                    "unit": "percent",
+                    "value": 12.5,
+                    "last_seen_unix_s": 1_700_000_119,
+                    "state": "live",
+                    "samples": 240,
+                    "drop_exposed": 2,
+                },
+                {
+                    "name": "zenkey_subject_sysinfo_disk_used_bytes",
+                    "key": "acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used",
+                    "origin": "h-0000deadbeef",
+                    "producer": "sysinfo",
+                    "class": "telemetry",
+                    "subject": "disk/{mount}/used",
+                    "labels": {"mount": "var-log"},
+                    "unit": "bytes",
+                    "last_seen_unix_s": 1_700_000_040,
+                    "state": "origin_down",
+                    "samples": 80,
+                },
+                {
+                    "name": "zenkey_subject_netlink_iface_rx_bytes_total",
+                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/netlink/iface/eth0/rx_bytes",
+                    "origin": "h-3fa9c2d41b7e",
+                    "producer": "netlink",
+                    "class": "telemetry",
+                    "subject": "iface/{iface}/rx_bytes",
+                    "labels": {"iface": "eth0"},
+                    "field": "rx",
+                    "kind": "counter",
+                    "unit": "bytes",
+                    "last_seen_unix_s": 1_700_000_100,
+                    "state": "evicted",
+                    "samples": 5,
+                },
+                {
+                    "name": "zenkey_subject_sysinfo_health",
+                    "key": "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health",
+                    "origin": "h-3fa9c2d41b7e",
+                    "producer": "sysinfo",
+                    "class": "state",
+                    "subject": "health",
+                    "field": "uptime_s",
+                    "value": 4242.0,
+                    "last_seen_unix_s": 1_700_000_060,
+                    "state": "quiet",
+                    "samples": 4,
+                },
+            ],
+            "observer": {
+                "dropped": 3,
+                "evicted_keys": 5,
+                "evicted_bytes": 7,
+                "expired": 11,
+                "unwatched": 13,
+                "coalesced": 17,
+                "unstamped": 19,
+            },
+            "contract": {
+                "qos_judged": 320,
+                "qos_mismatch": 2,
+                "qos_mismatch_by_subject": [{"producer": "sysinfo", "subject": "cpu/usage", "n": 2}],
+                "payload_valid": 200,
+                "payload_invalid": 1,
+                "payload_not_validated": 128,
+            },
+            "suppressed": {"cardinality": 4, "fields": 1},
+            "unregistered_keys": 3,
+            "doctor": {
+                "ran_at_unix_s": 1_700_000_090,
+                "findings": [
+                    {"check": "stale-state", "severity": "warning", "subject": "h-3fa9c2d41b7e/sysinfo"}
+                ],
+            },
+        })
+    );
+}
+
+/// The exposition is a pure function of the snapshot, pinned whole: the
+/// four evicted populations are four lines, the three verdicts three, a
+/// stopped series keeps its state line and has no value line, and nothing
+/// in it moves without traffic (no scrape time).
+#[test]
+fn the_exposition_of_the_fixture_is_pinned() {
+    let text = zenkey_fleet::exposition(&fx::export_snapshot());
+    let expected = include_str!("fixtures/export.prom");
+    assert_eq!(text, expected, "--- got ---\n{text}");
+    assert!(
+        !text.contains("1700000120"),
+        "the scrape time is the scraper's"
+    );
 }
 
 /// `registry infer`'s draft (#225, RFC 08 §6.1): every field the observation

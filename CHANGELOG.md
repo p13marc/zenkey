@@ -19,6 +19,50 @@ Versions per crate, because they move independently:
 
 ## Unreleased
 
+**The exporter — a metrics surface that exports its own blind spots**
+(#228, RFC 13 §3 *Exporter obligations*, v1.34). `zenkey-fleet` gains the
+pure ledger `model::export` (`ExportLedger::{ingest, fold}` — series
+identity `(origin, producer, declared pattern, {var} bindings, field)`,
+values from a structural number, the RFC 11 `{type, value}` tag or
+top-level numeric fields; every refusal counted by reason; drops taint the
+series fed meanwhile; coalescing counted as the third O6 kind), the
+exposition `model::prom::exposition` (a pure function of the snapshot,
+names and units from the registry, deterministic bytes) and the wire shape
+`report::ExportSnapshot` with `SeriesRow`/`SeriesState`/`ObserverCounters`/
+`ContractCounters`/`DoctorSummary`, pinned; `report-fixtures::
+export_snapshot` and `tests/fixtures/export.prom`. `zenctl export` serves it
+(see `zenctl/CHANGELOG.md`); `docs/redesign-2026-07.md` §6.1's Daemon row
+records it as the third of the permitted second kind.
+**Trigger capture — the thirty seconds before it fired** (#218; RFC 13
+§4.1 version 2). `zenkey-fleet`'s `ZREC_VERSION` is **2** and the reader
+speaks `ZREC_READS = [1, 2]`: a version-1 file reads exactly as before, a
+version-1 reader refuses version 2 by the rule it already had, and
+`{"zrec": 3}` is refused with what this reader does speak. The dialect
+gains the **state preamble** — rows marked `"preamble": true` at `t: 0`,
+each keeping the fetched value's HLC as provenance — and the **trigger
+record** `{"trigger": {rule, from, to, at, evidence}}` interleaved where
+the transition was observed; the header MAY carry `preamble`
+(`PreambleInfo`: count, collected_over_s, selectors, `semantics`
+absent_from_window|full, incomplete, failed) and `pre_roll`
+(`PreRollInfo`: asked_s, covered_s, watched, evicted, expired — the ring's
+two eviction kinds apart, O6). `ZrecItem::{Preamble, Trigger}`,
+`ZrecWriter`/`ZrecSink::{write_preamble, write_trigger}`, `SinkCounts`
+(the kinds never folded), `Transition: Deserialize`. Replay skips preamble
+rows unless `ReplaySpec.seed_state`, saying why per row
+(`ReplayEvent::PreambleSkipped`, `PREAMBLE_SKIP_REASON`, RFC 13 §4.2) and
+counting `preamble_skipped`/`preamble_seeded`/`triggers` in
+`ReplayReport`. The new `tape/trigger.rs` (`record_on`, `TriggerSpec`,
+`TriggerEvent`, `state_projection`, `watch_cover`) arms a `RuleSet` over
+the retained window and writes a file only when a rule fires: preamble →
+pre-roll at its real `t` → trigger → post-roll, over **one** event stream
+and one drop ledger. `RuleSet` is the watchdog's per-tick body lifted out
+of `watchdog()`, which is now a driver over it; `SweepOutcome` is the
+sweep as the rules see it. `RecordReport` gains `trigger`, `preamble`,
+`pre_roll`, `preamble_rows`. zengui's pane replay seeds its session-less
+fold from the preamble rows and marks the triggers on the scrubber. See
+`zenctl/CHANGELOG.md` for `record --on/--pre/--post/--every/--preamble`
+and `replay --seed-state`.
+
 **Consumers and blast radius — the admin space answers who reads this**
 (#224). `zenkey-fleet` gains the consumers join: `consumers` and
 `subject_impact` under `bus/admin.rs` (one pass over the admin space —
@@ -89,6 +133,24 @@ ambient. Also: `origin_attachments` goes through the pure `attach_tokens`,
   `Deserialize` (a present value is `Asked`; absence stays `NotAsked`
   through `#[serde(default)]`).
 * `SnapshotRow::payload()` decodes a row's `bytes` in one place.
+* **Origin alignment across deployments** (#220). `model::origin_map`:
+  `origin_profiles` reads every host origin's producer set and the
+  `source` label its identity-bridge documents carry (RFC 06 §6.2,
+  `state/<p>/health|sensor`; `Label::verified` when `host_id` is the
+  origin the document sits under; `Asked::NotAsked` when the snapshot
+  holds no such row), and `plan_map` pairs explicit `--map`s, then
+  verified labels unique among the unpaired on both sides, then producer
+  sets unique on both sides, listing everything else as `Unmapped` with
+  the count it failed on — never a guess. `MapError` refuses an explicit
+  pair naming an origin a snapshot does not hold. `diff_normalized` reads
+  `b` through a `MapPlan` (origin chunk, base, holder, the bridge
+  document's `host_id` re-serialised canonically on both sides), runs the
+  same comparison with `DiffOpts::stamps_alone` off — two clocks never
+  agreed — and rolls it up into `SubjectDelta`s; over an incomplete plan
+  it makes no comparison: `SnapshotDiff::refused`, `to_judgement` →
+  `Unobservable`, exit 2. `MapEvidence::Label { source }` carries the
+  label itself. `DiffOpts` gains `stamps_alone` (default `true`; build it
+  with `..DiffOpts::default()`).
 
 - **The RPC trace window** (#215): `call_traced` in `bus/write.rs` —
   subscribe first (the origin's subtree and the fleet's, on two monitors so

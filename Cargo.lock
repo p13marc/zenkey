@@ -8449,7 +8449,9 @@ dependencies = [
 name = "zenkey-report-fixtures"
 version = "0.8.0"
 dependencies = [
+ "base64 0.23.1",
  "serde_json",
+ "zenkey",
  "zenkey-fleet",
 ]
 
