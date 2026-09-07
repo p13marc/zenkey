@@ -25,6 +25,55 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.35 (2026-09-06, the conditional field)** — the deferral of v1.20
+> ends, because the second adopter it waited for arrived.
+>
+> **`when`** ([08 §2](08-registry.md), on subjects and procedures;
+> [08 §6.1](08-registry.md) rewritten around it). v1.20 mandated two honest
+> spellings for a surface that exists only sometimes — a procedure answers
+> `error/unsupported`/`error/gated`, a subject is excused in a ledger — and
+> deferred the schema field until a second adopter showed real conditions,
+> so that a conditionality *language* would not be designed against one
+> application. The second adopter's conditions are a runtime flag and a
+> kernel capability; the first's were a cargo feature, a config knob and a
+> host capability, often all three on one entry. Three kinds, always
+> ANDed, is the whole language: `feature`, `config`, `capability`, each
+> with a free name, plus a `gate_note` for the sentence a human needs. The
+> kinds also bind the error: a `feature:` predicate false is
+> `unsupported` (rebuild), a `config:` or `capability:` one false is
+> `gated` (the host) — the systemd sentinel had already answered that way.
+> `introspect` now carries the condition, which the ledger never could,
+> and the consumer §6.1 exists to protect finally learns which families a
+> build can never emit.
+>
+> **The ledger becomes the legacy spelling.** `conditional.lock` stays
+> accepted for one cycle; a line on an entry that carries `when` is a lint
+> error (one spelling per entry); the validated set is the union with the
+> field as truth; removal is announced for the release after. **A gate is
+> not a shape** ([08 §3.1](08-registry.md)): adding, changing or removing
+> a `when` is stale, never incompatible — no consumer may rely on a
+> conditional subject's presence — and it is pinned at all so a gate that
+> moves stays a reviewable moment.
+>
+> **The judgement** ([13 §3](13-observer-conformance.md)). `unsupported` or
+> `gated` from a `when` procedure is *exempt* and says so; the same from
+> a procedure not declared `when` is a finding; the kind binding is judged;
+> an unobserved `when` subject is exempt, an observed one is judged like
+> any other. And the conformance suite the registry was always meant to
+> be gets its obligation paragraph: three states per declared surface,
+> unknowable never folded into not-met, skipped rather than failed in any
+> test-report medium, and rostered silence a finding under §2.
+>
+> **What deliberately did not happen.** No `when` on `[[media]]` or
+> `[[blob]]`. No OR, no NOT, no expression grammar — a predicate set is a
+> conjunction and nothing else. No runtime evaluation of predicates by any
+> tool: a judge reads the *effects* (the error name, the silence), never
+> the host's feature flags. `slice::diff` stays presence-only — a served
+> and a local slice disagreeing about a gate is not a `slice-sync`
+> finding.
+>
+> *Amends: 08, 13.*
+
 > **v1.34 (2026-09-06, the state artifacts)** — one chapter mostly, two
 > artifacts that carry *state* rather than traffic, and the two obligations
 > that keep an artifact as honest as a window.

@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32 and v1.34 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34 and v1.35 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -235,6 +235,8 @@ Normative field table (`[[subject]]`; `[[procedure]]`/`[[media]]` analogous):
 | `detect_s` | integer | no (`state` only; default = `ttl_s`) | max latency to detect a missed transition; values ≪ `ttl_s` require the advanced tier ([04-planes.md §3.3](04-planes.md)) |
 | `replay` | `none` \| `window(t)` | `events` only | how far back events must stay queryable (met by the events storage) |
 | `delivery` | `full` (default) \| `invalidate` | no | oversized-state pattern ([04-planes.md §1.2](04-planes.md)) |
+| `when` | array of `"<kind>:<name>"` | no (v1.35) | the conditions under which this surface exists, **ANDed**. Closed kind vocabulary: `feature` — a build-time feature of the producer's build (a cargo feature, a compile flag); `config` — an operator-set knob (a config key, an environment switch); `capability` — something the host must expose (a kernel family, a device, a privilege). `<name>` is free text without whitespace, meaningful to the producer's operator. Examples from the adopters: `["feature:ebpf", "config:collect.ebpf", "capability:CAP_BPF"]` (a socket-latency gauge), `["config:container.upstream.enabled"]`, `["capability:net_shaper"]` (a kernel ≥ 6.13 interface). Semantics in §6.1 |
+| `gate_note` | string | no (only with `when`) | one line for the human deciding whether the gate still exists — the prose the v1.25 ledger carried |
 | `encoding` | MIME-ish string (`application/cbor`, `application/json`, `application/protobuf`, `application/cdr`) | no (RECOMMENDED, v1.5) | the payload encoding a consumer should expect; resolution order is sample `Encoding` > this field > sniff on read, and declared > this field > the schema kind's own on write ([04-planes.md §3](04-planes.md), §7) |
 | `since` / `gone` / `replaced_by` | registry versions / path | `since` yes | lifecycle (§3) |
 | `description` | string | yes | one line, human |
@@ -392,6 +394,8 @@ they too have their own normative field table:
 | `idempotent` | bool | `write`/`long-running` only | whether a retried call is safe; documented per 05 §3 |
 | `fanout` | enum `forbidden \| allowed` | no (default: `write` → `forbidden`, `read`/`long-running` → `allowed`) | may a `*`-origin fan-out call target this procedure? A `write` that broadcasts actuates the whole fleet, so `forbidden` is the default and the only sound value for a side-effecting write ([05-control-rpc.md §2.1](05-control-rpc.md)) |
 | `cardinality` | integer | yes if `path` has any `{var}` | key-population bound, budget-reviewed — same rule as `[[subject]]` |
+| `when` | array of `"<kind>:<name>"` | no (v1.35) | as for `[[subject]]`, and binding: a `when` procedure MUST still be declared, and MUST answer `error/unsupported` when a `feature:` predicate is false and `error/gated` when a `config:` or `capability:` one is — a missing kernel family or privilege is fixed on the host, not by a rebuild; the reply's `message` SHOULD name the predicate (§6.1) |
+| `gate_note` | string | no (only with `when`) | as for `[[subject]]` |
 | `encoding` | MIME-ish string | no (RECOMMENDED, v1.5) | request/reply payload encoding — same semantics as the `[[subject]]` field (§7) |
 | `since` / `gone` / `replaced_by` | registry versions / path | `since` yes | lifecycle (§3) |
 | `description` | string | yes | one line, human |
@@ -549,6 +553,12 @@ disagree because they run the same check.
   a suffixed sibling, §3).
 - An **additive** edit fails only as *stale*, with a different message:
   regenerate the snapshot (`zenctl registry lock <dir>`) and commit it.
+  A **gate is not a shape** (v1.35): a `when` predicate set is pinned on
+  its own line kind, and adding, changing or removing one is *stale*, never
+  incompatible — no consumer may rely on a conditional subject's presence
+  (§6.1's idle-host argument), so a gate changes nothing a consumer
+  compiled against; it is pinned at all so the moment a gate moves stays
+  reviewable, which is what the ledger used to give.
   Since v1.32 a subject line carries `kind` (§2) as an optional trailing
   column: adding a `kind` to a pinned path is additive — the line is stale,
   regenerate — while changing or removing one is incompatible, because a
@@ -784,34 +794,50 @@ against, and a check that passes such a producer silently is asserting
 something it has not verified. An implementation SHOULD say so rather than
 report coverage it does not have.
 
-#### Conditional surfaces (v1.20, normative)
+#### Conditional surfaces (v1.20; the field, v1.35 — normative)
 
-The registry has no way to say *"this surface exists only in builds with
-feature X, or only when the operator enables Y"*. That gap is the single
-largest source of §6.1 violations in practice: the reference
-implementation found conditional surfaces in **six** producers, gated
-variously by a compile-time feature, a config flag, and a host capability
-the process could not obtain.
+The registry could not say *"this surface exists only in builds with
+feature X, or only when the operator enables Y"*. That gap was the single
+largest source of §6.1 violations in practice: the reference implementation
+found conditional surfaces in **six** producers, gated variously by a
+compile-time feature, a config flag, and a host capability the process could
+not obtain — and the second adopter's conditions turned out to be a runtime
+flag and a kernel capability, the same three kinds. Since v1.35 the entry
+carries the condition itself: the `when` column of §2, an ANDed set of
+`<kind>:<name>` predicates over the closed vocabulary `feature`, `config`,
+`capability`, with `gate_note` for the sentence a human needs.
 
-Until the schema carries a conditionality field, such a surface has
-exactly two honest spellings, and **silence is not one of them**:
+What follows from a `when`, and **silence is still not one of the
+spellings**:
 
-> A **procedure** whose implementation is conditional MUST still be
-> declared by every build that registers it, and MUST answer with a
-> namespaced error ([05-control-rpc.md §3](05-control-rpc.md)) when it
-> cannot do its work: `error/unsupported` when the capability is absent
-> from the build, `error/gated` when it is present but disabled.
+> A **procedure** declared `when` MUST still be declared by every build
+> that registers it, and MUST answer with a namespaced error
+> ([05-control-rpc.md §3](05-control-rpc.md)) when it cannot do its work:
+> `error/unsupported` when a `feature:` predicate is false (the capability
+> is absent from the build), `error/gated` when a `config:` or
+> `capability:` predicate is false (present, but disabled or unavailable
+> on this host). The kinds bind the error name: a missing kernel family or
+> privilege is fixed on the host, not by rebuilding, and the reference
+> application's systemd sentinel already answered `gated` for exactly that.
 >
-> A **subject** whose emission is conditional MUST be recorded, with the
-> condition that gates it, in a ledger the build-time check reads.
+> A **subject** declared `when` MAY be silent while any predicate is
+> false; the build-time coverage check of "Checking the two halves" MUST
+> exempt it **and say why**, naming the predicates. A `when` subject that
+> *is* observed is judged like any other — the gate excuses absence, never
+> a wrong payload.
 
-The asymmetry is forced, not stylistic. A procedure that cannot answer can
-still *reply* — "unavailable" is a value on the wire. A gauge that has no
-reading cannot publish anything: a sentinel value corrupts every consumer
-downstream, and publishing nothing is indistinguishable from a host that
-is simply quiet. There is no honest wire representation of "this subject
-does not exist in this build", which is precisely why the subject case
-needs an out-of-band ledger and the procedure case does not.
+`introspect` therefore carries the condition, which is the whole point: a
+consumer that asks a producer what it publishes learns which families that
+build can never emit, and why — the audience §6.1 exists to protect.
+
+The asymmetry between the two is forced, not stylistic. A procedure that
+cannot answer can still *reply* — "unavailable" is a value on the wire. A
+gauge that has no reading cannot publish anything: a sentinel value
+corrupts every consumer downstream, and publishing nothing is
+indistinguishable from a host that is simply quiet. There is no honest
+wire representation of "this subject does not exist in this build", which
+is precisely why the subject case is excused at build time and the
+procedure case answers at run time.
 
 Note also what an error reply buys that a missing declaration does not. A
 caller distinguishes four outcomes, and the middle two are the actionable
@@ -821,57 +847,36 @@ ones:
 |---|---|
 | no reply at all | no such producer on the bus |
 | `error/unsupported` | producer present, capability not in this build → rebuild |
-| `error/gated` | capability built in, disabled here → reconfigure |
+| `error/gated` | capability built in, disabled or unavailable here → reconfigure the host |
 | an empty value reply | capability live, nothing to report |
 
 Skipping the declaration collapses the middle two into the first; replying
 with an empty value collapses them into the fourth. Both discard the only
 information the caller actually needed.
 
-A ledger is a weaker instrument than a schema field and MUST be checked in
-both directions to stay honest: an entry the build now emits, and an entry
-the registry no longer declares, are both errors. Without that, the ledger
-decays into a standing excuse for whatever happened to be unimplemented on
-the day it was written. A future `feature`/`when` field on the subject and
-procedure declarations would let the slice carry this itself, and is the
-right eventual answer; it is deliberately deferred here rather than
-designed in the abstract.
+A foreign slice may carry a predicate kind this build does not know. Such
+an entry is conditional all the same — any predicate makes it so — and the
+kind's error binding is *not asked* rather than guessed
+([13 §3](13-observer-conformance.md)).
 
-**The ledger, specified (v1.25).** v1.20 wrote the MUST above and stopped
-there; its siblings (`deprecated.lock`, §3; `registry.lock`, §3.1) are
-specified to the byte, and a ledger the check reads deserves the same. The
-file is **`conditional.lock`**, in the registry directory beside
-`deprecated.lock`, and shaped like it: `#` comment lines, then one
-tab-separated line per conditional subject —
+**The ledger, now the legacy spelling.** From v1.20 to v1.34 a conditional
+*subject* was recorded out of band, in **`conditional.lock`** beside
+`deprecated.lock`: `#` comment lines, then one tab-separated line per
+conditional subject —
 
 ```
 <producer>	<path>	<condition>
 ```
 
-`<producer>` and `<path>` name the registry entry exactly as a
-`deprecated.lock` line does. `<condition>` is the gating condition as
-**free text** — `feature wireguard`, `operator enables flow export`,
-`host exposes a TPM` — prose for the human deciding whether the gate
-still exists, deliberately not a machine-readable expression: the
-field-level `feature`/`when` design stays deferred (above; zenkey #171),
-and a ledger that grew its own condition grammar would be that design
-landing by the back door.
-
-The two-direction check of the paragraph above, concretely:
-
-- a subject listed in the ledger is **exempt** from the emitted-surface
-  check — the build- or test-time check of "Checking the two halves" MUST
-  NOT require the build's mappers to cover it;
-- a ledger line whose `<producer>`/`<path>` names no registry entry is an
-  **error** — the entry was retired or renamed, and the line must follow
-  it or leave.
-
-Both directions fail the consumer's build (reference implementation:
-`zenkey-build`). Unlike `deprecated.lock`, this ledger is **not**
-append-only: a line leaves when its condition does, and a subject that
-became unconditional re-enters the emitted-surface check by deletion —
-which is the honest direction of travel, and the mechanical form of the
-decay warning above.
+— `<condition>` being free text for the human. The ledger stays accepted
+by the reference codegen for one release cycle (0.9), under three rules:
+a ledger line naming an entry that carries `when` is a lint **error** — one
+spelling per entry; the validated conditional set is the union of the two
+spellings with the field as the source of truth; and a ledger line whose
+`<producer>`/`<path>` names no registry entry stays an error, as before.
+The ledger is **not** append-only — a line leaves when its condition
+does, and it should now leave for the field. Its removal is announced for
+the release after.
 
 **Observation-derived drafts (v1.34).** A registry file MAY be produced by
 observing a bus rather than by the producer's author — the reference

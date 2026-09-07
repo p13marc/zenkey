@@ -1,7 +1,7 @@
 # 13 — Observer Conformance
 
 **Status: v1.24 (ratified)** · normative chapter · *created in v1.24 and
-amended in v1.32 and v1.34 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
+amended in v1.32, v1.34 and v1.35 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
 §6; the moved material entered the set in v1.2, v1.9, v1.13 and v1.19
 and was amended there in v1.18 and v1.21
 
@@ -406,6 +406,33 @@ ids being the reference engine's:
   *Established(yes)* otherwise, for the sample read. A fetch of health
   documents costs the data plane, so it is asked for explicitly (the
   frugality note below), never folded into an ambient render.
+
+**A surface's `when` (v1.35).** [08 §2](08-registry.md)'s `when` column
+is a declaration a judge can hold a producer to, on the same four poles:
+
+- A judge that sees `error/unsupported` or `error/gated` from a procedure
+  declared `when` files *exempt: <predicates>* — the same
+  Established(no)-of-the-gate shape as the rest-variable exemption above,
+  said out loud, never a pass by omission. The same error from a procedure
+  **not** declared `when` is Established(no) of [08 §6.1](08-registry.md):
+  a conditional surface declares its condition. The kind binding is judged
+  too — `unsupported` from a procedure with no `feature:` predicate, or
+  `gated` from one with only `feature:` predicates, is a finding.
+- A `when` subject unobserved in a window is exempt and says so; observed,
+  it is judged like any other subject.
+- A predicate kind this build does not know makes the entry conditional
+  all the same, and its binding is *not asked*.
+
+**A conformance suite over the registry (v1.35).** A tool that executes
+the registry as a test suite asserts, per declared surface, one of three
+states — *met*, *not met*, and *unknowable* with its reason — and never
+folds the third into the second: a window proves presence, never absence,
+so a declared subject that did not speak is unknowable, not failed. In
+any test-report medium an unknowable assertion is *skipped*, not failed,
+and a build MUST NOT go red on one. The suite is a projection of the
+observer's own checks — it can find nothing the observer cannot — and
+silence from a procedure whose origin the roster shows alive is a finding
+under §2 (*alive ⇒ callable*), not an unknowable.
 
 **Exporter obligations (v1.34).** A tool that re-publishes its
 observations as a metrics surface — a Prometheus exposition, a status page
