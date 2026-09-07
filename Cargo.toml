@@ -64,7 +64,7 @@ futures-util = { version = "0.3", default-features = false }
 # are already here, and `iced` re-exports it behind an off-by-default feature,
 # so a zengui watchdog surface would drive one with `Task::sip` and no bridge.
 sipper = "0.1"
-dirs = "6"
+dirs = "7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ciborium = "0.2"
