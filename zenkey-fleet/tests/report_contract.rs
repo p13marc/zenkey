@@ -1656,3 +1656,37 @@ fn the_exposition_of_the_fixture_is_pinned() {
         "the scrape time is the scraper's"
     );
 }
+
+/// `registry infer`'s draft (#225, RFC 08 §6.1): every field the observation
+/// could not establish is absent — `ttl_s`, `unit`, `rate`, `cardinality`,
+/// `variant`, `qos` — never null. A draft that defaulted one would be the
+/// lie §6.1 forbids, in JSON instead of TOML.
+#[test]
+fn an_inferred_subject_omits_every_field_it_could_not_establish() {
+    let report = fx::infer_report();
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(
+        json["producers"][0]["subjects"][0],
+        json!({
+            "path": "health",
+            "class": "state",
+            "type_name": "DemoHealth",
+            "encoding": "application/json",
+            "comments": [
+                "ttl_s not established: no refresh observed within 59.2 s; the lint requires one — set it from the producer's cadence",
+                "qos observed: transition — what rode, not a declaration",
+            ],
+            "origins": 2,
+            "keys": 2,
+            "samples": 2,
+        })
+    );
+    assert_eq!(
+        json["producers"][0]["subjects"][1]["cardinality"],
+        json!(10),
+        "an established field is present"
+    );
+    assert!(json.get("unread").is_none() && json.get("paths_refused").is_none());
+    assert_eq!(json["window_s"], json!(60.0));
+    assert_eq!(json["hinted_by_registry"], json!(false));
+}

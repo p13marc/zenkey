@@ -18,6 +18,7 @@ Commands:
   lock       Write or update the RFC 08 §3.1 compatibility lock (registry.lock)
   consumers  Who declares a reader of a subject (#224): every declared subscriber and querier the admin space serves, related to the target by key algebra and ranked, one row per session, joined to the origin its alive token attaches
   impact     The blast radius of changing one declared subject (#224): its consumers, its storage coverage, what else declares on its family, and its `[[deprecated]]` entry — in one document
+  infer      Draft a registry from the wire, marked as a draft (#225, RFC 08 §6.1): one `<producer>.toml` per producer seen, a `types.toml` with inferred JSON Schemas, `compat = "none"`, `draft = true`, no `since`
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -172,6 +173,9 @@ Arguments:
 Options:
       --ledger <FILE>
           Deprecation ledger; defaults to `<dir>/deprecated.lock`
+
+      --allow-drafts
+          Admit `draft = true` files (RFC 08 §6.1) — what `registry infer` writes — instead of refusing them, as a build with `Config::allow_drafts()` would. Each draft is still a warning
 
       --format <FORMAT>
           Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped

@@ -134,6 +134,7 @@ pub async fn run() -> Result<()> {
         Command::Registry(RegistryCmd::Lock(a)) => cmd::registry::lock(a),
         Command::Registry(RegistryCmd::Consumers(a)) => cmd::registry::consumers(a).await,
         Command::Registry(RegistryCmd::Impact(a)) => cmd::registry::impact(a).await,
+        Command::Registry(RegistryCmd::Infer(a)) => cmd::registry::infer(a).await,
         Command::Storage(StorageCmd::List(a)) => cmd::storage::list(a).await,
         Command::Storage(StorageCmd::Gen(a)) => cmd::storage::plan(a).await,
         Command::Acl(AclCmd::Gen(a)) => cmd::acl::run(a).await,

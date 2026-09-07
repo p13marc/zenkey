@@ -159,6 +159,10 @@ pub struct PathStats {
     pub num_min: Option<f64>,
     pub num_max: Option<f64>,
     pub num_last: Option<f64>,
+    /// Whether every number seen was integral — what lets a schema
+    /// inference say `integer` rather than `number` (#225). Vacuously true
+    /// until a fractional value arrives.
+    pub all_integral: bool,
     /// Small-domain distinct values (canonical JSON), until the domain
     /// overflows [`DISTINCT_CAP`].
     pub distinct: BTreeSet<String>,
@@ -182,6 +186,7 @@ impl PathStats {
             num_min: None,
             num_max: None,
             num_last: None,
+            all_integral: true,
             distinct: BTreeSet::new(),
             distinct_overflow: false,
             last_fingerprint: None,
@@ -210,6 +215,9 @@ impl PathStats {
             self.num_min = Some(self.num_min.map_or(n, |m| m.min(n)));
             self.num_max = Some(self.num_max.map_or(n, |m| m.max(n)));
             self.num_last = Some(n);
+            if n.fract() != 0.0 {
+                self.all_integral = false;
+            }
         }
         if !self.distinct_overflow {
             if canonical.len() > DISTINCT_VALUE_CAP {

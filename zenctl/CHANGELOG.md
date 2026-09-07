@@ -68,6 +68,35 @@ snapshot over the live fleet). `--seed-state` publishes them, counted as
 seeded apart from the observed rows. A trigger record is announced where
 it fell and never published. `timeline --from` counts preamble rows it
 did not place.
+**`registry infer --from <selector|capture.zrec> --for SECS --out DIR` —
+draft a registry from the wire, marked as a draft** (#225, RFC 08 §6.1
+v1.34). The registry is the adoption cliff: a fleet without one gets nothing
+from this suite's best half, and hand-writing two hundred entries is why it
+never gets one. This verb watches a selector for `--for` seconds (default
+60; `--from` defaults to `<base>/v1/**`) or reads a `.zrec` capture under
+its own base, and writes one `<producer>.toml` per producer seen, a
+`types.toml` with inferred JSON Schemas and their `schemas/*.json`
+sidecars. Every file carries `draft = true`, `compat = "none"`, no `since`
+and a header saying every field is a guess; `zenkey-build` **refuses** the
+marker until a review removes it, and `registry lint --allow-drafts <dir>`
+closes the loop meanwhile. `{var}`s come from sibling structure and
+per-origin populations (the heuristic and its six named failure modes are
+in `zenkey_fleet::model::infer`'s doc; each rides the entry it produces as
+a `#` comment), units from RFC 08 §4's suffix rule, `rate` and a `ttl_s`
+hint from counts over the window, `cardinality` from the largest
+population one origin published — and every field the observation could
+not establish is **absent**, never defaulted. Observed QoS is a comment
+and never a field (writing it would launder a current publisher bug into a
+contract); the one `qos` written is the alert family's `"alert"`, which
+RFC 08 §5 requires and the entry says so. `--out` must not already hold any
+file the run would write: refused whole, exit 2, before a byte is written.
+`--app` names the owning application (default `"unknown"`); `--max-keys`
+and `--max-paths` bound the observation (O6) and the report states what
+each refused. Family `registry-infer`: the ndjson rows are the subjects
+and types, each naming the file it lands in.
+
+**`registry lint --allow-drafts`** admits `draft = true` files as a build
+with `Config::allow_drafts(true)` would; each draft is still a warning.
 
 Two new verbs under the `registry` noun and no moved spelling (#224).
 

@@ -1,0 +1,18 @@
+{
+  "$comment": "DRAFT — inferred from observed samples (RFC 08 §6.1); unreviewed",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "load": {
+      "type": "number"
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "load",
+    "ok"
+  ],
+  "title": "DemoHealth",
+  "type": "object"
+}
