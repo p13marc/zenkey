@@ -29,7 +29,11 @@ and two of zenwatch's own, one state per *key* rather than per rule:
   `…/state/*/alert/*` (RFC 04 §1.2): a `put` is firing, a `delete` is
   resolved, and severity, rule and labels are lifted from the document into
   the notification. An identical re-put is the refresh the RFC asks for, not
-  a new firing.
+  a new firing. The watch is **seeded** (RFC 04 §3.2): an alert already
+  firing when zenwatch starts is delivered at start, baseline stated, and its
+  later resolve is delivered too — a sensor republishes a firing alert only
+  on a content change, so a plain subscriber started mid-incident would
+  never learn of it.
 - `liveliness-gone <SEL>` — the dead-man's switch on `…/state/*/alive`
   (RFC 04 §5): a token that disappears is firing, one that comes back is ok.
   Tokens already up when zenwatch joins are the baseline, never "came back".

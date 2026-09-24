@@ -635,7 +635,6 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let monitor = Monitor::start(
         session,
         MonitorSpec {
-            selectors: alert_selectors,
             liveliness: liveliness_selectors,
             ..Default::default()
         },
@@ -643,19 +642,40 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     .await?;
     let mut events = monitor.events();
 
+    // The `alerts` selectors are SEEDED watches (#464), like the catalog feed
+    // below and every other consumer of the alert plane. A plain subscriber
+    // sees only what is published after it; a sensor republishes a firing
+    // alert only on a content change (RFC 04 §1.2's refresh is the
+    // document's, not a heartbeat) — so a notifier started at hour three of
+    // an outage would never learn of it, and would drop the resolve too,
+    // for an alert it never saw. The seed replays the documents up now as
+    // ordinary samples through the same transition path: a restart
+    // mid-incident re-fires, with the baseline stated (`prior: None`).
+    let seed_policy = SeedPolicy {
+        timeout: e.timeout,
+        ..SeedPolicy::default()
+    };
+    for selector in &alert_selectors {
+        if let Err(err) = monitor.watch_seeded(selector, seed_policy).await {
+            // Announced, and degraded to the live subscription: a seed that
+            // will not come up is not a reason for a notifier not to run.
+            tracing::warn!(selector, "alert seed failed ({err}); watching live only");
+            monitor.watch(selector).await?;
+        }
+    }
+
     // The catalog feed (RFC 06 §5.1, §5.6): three seeded watches, each
     // GET-seeded on its own selector (storage-shaped: one reply per
     // document). A feed that will not come up degrades inhibition to
     // nothing, announced — it is not a reason for a notifier not to run.
     let mut catalog: Option<Catalog> = None;
     if inhibiting {
-        let policy = SeedPolicy {
-            timeout: e.timeout,
-            ..SeedPolicy::default()
-        };
         let mut watched = true;
         for (selector, _) in inhibit::SELECTORS {
-            if let Err(err) = monitor.watch_seeded(&e.fleet.wire(selector), policy).await {
+            if let Err(err) = monitor
+                .watch_seeded(&e.fleet.wire(selector), seed_policy)
+                .await
+            {
                 tracing::warn!(selector, "catalog watch failed ({err}); inhibition is off");
                 watched = false;
                 break;

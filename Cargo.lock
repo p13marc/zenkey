@@ -9040,6 +9040,7 @@ dependencies = [
  "zenkey-explorer-config",
  "zenkey-fleet",
  "zenoh",
+ "zenoh-ext",
 ]
 
 [[package]]
