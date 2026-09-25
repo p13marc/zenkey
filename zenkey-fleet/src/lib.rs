@@ -138,8 +138,8 @@ pub use bus::describe::{DescribeSweep, describe_sweep};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
-    CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome, WatchdogSpec,
-    watchdog,
+    AlertAsk, AlertFloor, CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState,
+    SweepOutcome, WatchdogSpec, watchdog,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -249,7 +249,9 @@ pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // structs among them).
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use judge::condition::{SilenceEvidence, TickEvidence, judge_doctor_check, judge_origin_down};
+pub use judge::condition::{
+    SilenceEvidence, TickEvidence, judge_alert_firing, judge_doctor_check, judge_origin_down,
+};
 pub use judge::retired::EntryEvidence;
 // The remaining items a frontend actually calls. Every one of these was
 // reachable only by module path (#350) — which said nothing about whether it

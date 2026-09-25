@@ -233,11 +233,13 @@ where
     // down (#336).
     let mut rules = RuleSet::new(&spec.rules, base, slices)?;
     let watched = watch_cover(spec.selectors.iter().chain(rules.watched()));
-    let (wants_doctor, wants_roster, wants_decode) = (
+    let (wants_doctor, wants_roster, wants_decode, wants_alerts) = (
         rules.wants_doctor(),
         rules.wants_roster(),
         rules.wants_decode(),
+        rules.wants_alerts(),
     );
+    let alert_selectors = rules.alert_selectors();
     if wants_decode {
         crate::model::decode::prewarm(fleet, store, slices).await;
     }
@@ -294,10 +296,31 @@ where
             } else {
                 None
             };
+            // The alert plane (#463): one bounded GET per distinct selector,
+            // the same ask the watchdog makes.
+            let alerts = if wants_alerts {
+                let mut asks = Vec::with_capacity(alert_selectors.len());
+                for selector in &alert_selectors {
+                    let outcome = crate::bus::query::fleet_get(
+                        fleet,
+                        selector,
+                        &crate::bus::query::GetOpts::new(spec.timeout),
+                    )
+                    .await
+                    .map_err(|e| e.to_string());
+                    asks.push(crate::judge::condition::AlertAsk {
+                        selector: selector.clone(),
+                        outcome,
+                    });
+                }
+                Some(asks)
+            } else {
+                None
+            };
             if wants_decode {
                 crate::model::decode::prewarm(fleet, store, slices).await;
             }
-            (doctor, roster)
+            (doctor, roster, alerts)
         };
         let mut sweep = std::pin::pin!(sweep);
         let mut swept = None;
@@ -358,7 +381,7 @@ where
             // stream that is gone, and nothing was written.
             break 'armed None;
         }
-        let (doctor_outcome, roster_outcome) = match swept {
+        let (doctor_outcome, roster_outcome, alert_asks) = match swept {
             Some(outcome) => outcome,
             None => sweep.await,
         };
@@ -374,6 +397,7 @@ where
                 roster: roster_outcome
                     .as_ref()
                     .map(|o| o.as_ref().map_err(String::as_str)),
+                alerts: alert_asks.as_deref(),
             },
         );
         for t in transitions {

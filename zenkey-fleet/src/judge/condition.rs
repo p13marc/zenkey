@@ -33,6 +33,7 @@ use std::time::Duration;
 use crate::{Error, Result};
 
 use crate::bus::monitor::SampleView;
+use crate::bus::query::FleetAnswer;
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
 use crate::report::{CheckId, DoctorReport};
@@ -80,12 +81,76 @@ pub enum Condition {
     /// The observer itself dropped samples this window (RFC 09 §5.1 O6) —
     /// self-knowledge, so never unobservable.
     Dropped,
+    /// At least one alert document at or above `min` is firing under
+    /// `selector` on the alert plane (RFC 04 §1.2, `…/state/*/alert/*`) —
+    /// what the sensors already judged, seen by the watchdog (#463). Asked
+    /// by a GET once per tick, never a subscription: a firing alert is
+    /// republished only on a content change, so a subscribe-only rule
+    /// started mid-outage would report `ok` forever — the bug this rule
+    /// exists to catch, rebuilt inside it. One state per rule (a count and
+    /// the first), like [`Condition::DoctorCheck`]; a notifier that routes
+    /// each alert is `zenwatch`'s `alerts` rule. Content-agnostic: the
+    /// sensor made the judgement, this reports that one exists. An ask that
+    /// failed is unobservable — silence is not a verdict.
+    AlertFiring { selector: String, min: AlertFloor },
+}
+
+/// The severity floor of an [`Condition::AlertFiring`] rule: an ordered
+/// compare over the three severities the alert plane speaks
+/// (`info < warning < critical`), default `warning`. A document whose
+/// `severity` is missing or outside the three is counted only under the
+/// `info` floor — the lowest bar admits every firing document; a higher one
+/// admits only what says it clears it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AlertFloor {
+    Info,
+    Warning,
+    Critical,
+}
+
+impl AlertFloor {
+    pub const ALL: [AlertFloor; 3] = [AlertFloor::Info, AlertFloor::Warning, AlertFloor::Critical];
+
+    pub fn parse(token: &str) -> Option<AlertFloor> {
+        AlertFloor::ALL.into_iter().find(|f| f.as_str() == token)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AlertFloor::Info => "info",
+            AlertFloor::Warning => "warning",
+            AlertFloor::Critical => "critical",
+        }
+    }
+
+    /// Whether a document's `severity` clears this floor.
+    fn admits(self, severity: Option<&str>) -> bool {
+        match severity.and_then(AlertFloor::parse) {
+            Some(s) => s >= self,
+            None => self == AlertFloor::Info,
+        }
+    }
+}
+
+impl std::fmt::Display for AlertFloor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One tick's ask of the alert plane for one `alert-firing` selector
+/// (#463): the answers, or why there are none.
+#[derive(Debug, Clone)]
+pub struct AlertAsk {
+    pub selector: String,
+    pub outcome: std::result::Result<Vec<FleetAnswer>, String>,
 }
 
 /// The rule grammar, spelled once for the parse error and the docs.
 const VOCABULARY: &str = "rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | \
      silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | \
-     doctor <CHECK-ID> | origin-down <ORIGIN> | dropped";
+     doctor <CHECK-ID> | origin-down <ORIGIN> | dropped | \
+     alert-firing <SEL> [<MIN-SEVERITY>]";
 
 impl Condition {
     /// Parse one rule: whitespace-separated, kind first (Zenoh key
@@ -153,6 +218,29 @@ impl Condition {
                 origin: origin.to_string(),
             },
             ["dropped"] => Condition::Dropped,
+            ["alert-firing", sel] => Condition::AlertFiring {
+                selector: sel.to_string(),
+                min: AlertFloor::Warning,
+            },
+            ["alert-firing", sel, floor] => {
+                let Some(min) = AlertFloor::parse(floor) else {
+                    return Err(Error::unaskable(
+                        format!("alert-firing {floor:?}"),
+                        format!(
+                            "is not a severity floor — one of {}",
+                            AlertFloor::ALL
+                                .iter()
+                                .map(|f| f.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    ));
+                };
+                Condition::AlertFiring {
+                    selector: sel.to_string(),
+                    min,
+                }
+            }
             _ => {
                 return Err(Error::unaskable(
                     format!("{rule:?}"),
@@ -192,6 +280,9 @@ impl Condition {
         match self {
             Condition::DoctorCheck { check } => judge_doctor_check(*check, ev.doctor),
             Condition::OriginDown { origin } => judge_origin_down(origin, ev.roster),
+            Condition::AlertFiring { selector, min } => {
+                judge_alert_firing(ev.base, selector, *min, ev.alerts)
+            }
             _ => self.judge_window_total(ev.window),
         }
     }
@@ -308,7 +399,9 @@ impl Condition {
                     w.dropped, w.window_s
                 ),
             },
-            Condition::DoctorCheck { .. } | Condition::OriginDown { .. } => return None,
+            Condition::DoctorCheck { .. }
+            | Condition::OriginDown { .. }
+            | Condition::AlertFiring { .. } => return None,
         })
     }
 
@@ -411,6 +504,9 @@ impl std::fmt::Display for Condition {
             Condition::DoctorCheck { check } => write!(f, "doctor {check}"),
             Condition::OriginDown { origin } => write!(f, "origin-down {origin}"),
             Condition::Dropped => write!(f, "dropped"),
+            Condition::AlertFiring { selector, min } => {
+                write!(f, "alert-firing {selector} {min}")
+            }
         }
     }
 }
@@ -516,6 +612,11 @@ pub struct TickEvidence<'e> {
     pub window: &'e CondWindow,
     pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
     pub roster: Option<Result<&'e BTreeMap<String, Vec<String>>, &'e str>>,
+    /// This tick's alert-plane asks, one per distinct `alert-firing`
+    /// selector; `None` when no rule wanted one (#463).
+    pub alerts: Option<&'e [AlertAsk]>,
+    /// The deployment base the alert keys are read under.
+    pub base: &'e str,
 }
 
 /// Judge one doctor check against this tick's run — total, and total in the
@@ -548,6 +649,107 @@ pub fn judge_origin_down(
     }
     .judge_roster(roster)
     .expect("an OriginDown is judged by the roster")
+}
+
+/// Judge one `alert-firing` rule against this tick's alert-plane asks
+/// (#463) — likewise total. Each answer is one live alert document (a GET
+/// returns no tombstones, so a resolved alert simply stops answering);
+/// its `severity`, `rule` and `summary` are lifted the way `zenwatch`'s
+/// `alerts` rule lifts them ([`crate::alert_transition`]), and nothing else
+/// in it is read. The state is a count against the floor; the evidence
+/// names the count and the first, so the line says what is wrong without
+/// the watchdog knowing what a unit or a port is.
+pub fn judge_alert_firing(
+    base: &str,
+    selector: &str,
+    min: AlertFloor,
+    asks: Option<&[AlertAsk]>,
+) -> Eval {
+    let Some(asks) = asks else {
+        return Eval {
+            state: CondState::Unobservable,
+            evidence: "the alert plane was not asked this tick".into(),
+        };
+    };
+    let Some(ask) = asks.iter().find(|a| a.selector == selector) else {
+        return Eval {
+            state: CondState::Unobservable,
+            evidence: format!("no ask ran for {selector} this tick"),
+        };
+    };
+    let answers = match &ask.outcome {
+        Err(e) => {
+            return Eval {
+                state: CondState::Unobservable,
+                evidence: format!("the alert plane could not be asked: {e}"),
+            };
+        }
+        Ok(a) => a,
+    };
+    let mut documents = 0usize;
+    let mut unreadable = 0usize;
+    let mut firing = 0usize;
+    let mut first: Option<String> = None;
+    for answer in answers {
+        let crate::bus::query::Answer::Value(bytes) = &answer.answer else {
+            unreadable += 1;
+            continue;
+        };
+        let doc = crate::model::decode::structural_value(&bytes.to_bytes());
+        let transition = crate::model::alert::alert_transition(
+            base,
+            &answer.key,
+            zenoh::sample::SampleKind::Put,
+            doc.as_ref()
+                .map(|v| (crate::report::RenderSource::Structural, v)),
+            None,
+            "",
+        );
+        let Some(t) = transition else {
+            // Not an alert key at all — the selector was wider than the
+            // plane. Counted, not judged.
+            unreadable += 1;
+            continue;
+        };
+        documents += 1;
+        if !min.admits(t.severity.as_deref()) {
+            continue;
+        }
+        firing += 1;
+        if first.is_none() {
+            let mut line = format!("{}/{}", t.origin, t.producer);
+            if let Some(rule) = &t.rule {
+                line.push(' ');
+                line.push_str(rule);
+            }
+            if let Some(summary) = &t.summary {
+                line.push_str(" — ");
+                line.push_str(summary);
+            }
+            first = Some(line);
+        }
+    }
+    let skipped = if unreadable > 0 {
+        format!("; {unreadable} answer(s) not alert documents")
+    } else {
+        String::new()
+    };
+    if firing == 0 {
+        Eval {
+            state: CondState::Ok,
+            evidence: format!(
+                "no alert firing at >= {min} ({documents} document(s) read{skipped})"
+            ),
+        }
+    } else {
+        Eval {
+            state: CondState::Firing,
+            evidence: format!(
+                "{firing} alert(s) firing at >= {min}; first: {}{skipped}",
+                first.unwrap_or_default()
+            ),
+        }
+    }
 }
 
 // ─── observations and evaluations ───────────────────────────────────────────
@@ -746,6 +948,9 @@ struct RuleRuntime {
 pub struct SweepOutcome<'e> {
     pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
     pub roster: Option<Result<&'e BTreeMap<String, Vec<String>>, &'e str>>,
+    /// The alert-plane asks, one per distinct `alert-firing` selector
+    /// (#463); `None` when no rule wanted one.
+    pub alerts: Option<&'e [AlertAsk]>,
 }
 
 /// A set of rules judged tick by tick over **one** event stream — the
@@ -855,6 +1060,28 @@ impl<'a> RuleSet<'a> {
         self.rules
             .iter()
             .any(|r| matches!(r.rule, Condition::OriginDown { .. }))
+    }
+
+    /// Some rule judges the alert plane, so the driver owes one GET per
+    /// distinct selector per tick (#463).
+    pub fn wants_alerts(&self) -> bool {
+        self.rules
+            .iter()
+            .any(|r| matches!(r.rule, Condition::AlertFiring { .. }))
+    }
+
+    /// The distinct `alert-firing` selectors, in rule order — what the
+    /// driver asks each tick.
+    pub fn alert_selectors(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for r in &self.rules {
+            if let Condition::AlertFiring { selector, .. } = &r.rule
+                && !out.iter().any(|s| s == selector)
+            {
+                out.push(selector.clone());
+            }
+        }
+        out
     }
 
     /// Some rule judges payload validity, so the driver owes a warmed,
@@ -985,6 +1212,8 @@ impl<'a> RuleSet<'a> {
                 window: &window,
                 doctor: sweep.doctor,
                 roster: sweep.roster,
+                alerts: sweep.alerts,
+                base: self.base,
             });
             if let Some(transition) = rt.state.observe(eval, at) {
                 out.push(transition);
@@ -1065,11 +1294,13 @@ pub fn watchdog<'a>(
         // Compiled *before* the monitor exists, so the `?` has nothing to tear
         // down (#336).
         let mut rules = RuleSet::new(&spec.rules, base, slices)?;
-        let (wants_doctor, wants_roster, wants_decode) = (
+        let (wants_doctor, wants_roster, wants_decode, wants_alerts) = (
             rules.wants_doctor(),
             rules.wants_roster(),
             rules.wants_decode(),
+            rules.wants_alerts(),
         );
+        let alert_selectors = rules.alert_selectors();
 
         // Warmed before the first tick and sealed for the run (#337): a decode
         // inside the drain loop must never become a `describe` GET, because
@@ -1136,13 +1367,35 @@ pub fn watchdog<'a>(
                 } else {
                     None
                 };
+                // The alert plane (#463): one bounded GET per distinct
+                // selector, beside the roster ask. A GET, not a subscription
+                // — a firing alert is republished only on a content change.
+                let alerts = if wants_alerts {
+                    let mut asks = Vec::with_capacity(alert_selectors.len());
+                    for selector in &alert_selectors {
+                        let outcome = crate::bus::query::fleet_get(
+                            fleet,
+                            selector,
+                            &crate::bus::query::GetOpts::new(spec.timeout),
+                        )
+                        .await
+                        .map_err(|e| e.to_string());
+                        asks.push(AlertAsk {
+                            selector: selector.clone(),
+                            outcome,
+                        });
+                    }
+                    Some(asks)
+                } else {
+                    None
+                };
                 // The schema warming rides here too (#337): still-unserved
                 // producers are re-asked at the store's own backoff, off the
                 // drain loop.
                 if wants_decode {
                     crate::model::decode::prewarm(fleet, store, slices).await;
                 }
-                (doctor, roster)
+                (doctor, roster, alerts)
             };
             let mut sweep = std::pin::pin!(sweep);
             let mut swept = None;
@@ -1192,7 +1445,7 @@ pub fn watchdog<'a>(
             // changed. The sweep has already landed unless the stream closed
             // under it — in which case there is nothing left to drain, and
             // awaiting it here costs the tick nothing.
-            let (doctor_outcome, roster_outcome) = match swept {
+            let (doctor_outcome, roster_outcome, alert_asks) = match swept {
                 Some(outcome) => outcome,
                 None => sweep.await,
             };
@@ -1208,6 +1461,7 @@ pub fn watchdog<'a>(
                     roster: roster_outcome
                         .as_ref()
                         .map(|o| o.as_ref().map_err(String::as_str)),
+                    alerts: alert_asks.as_deref(),
                 },
             );
             for transition in transitions {
@@ -1275,11 +1529,27 @@ mod tests {
             "doctor slice-sync",
             "origin-down h-aaaaaaaaaaaa",
             "dropped",
+            "alert-firing v1/*/state/*/alert/* critical",
         ];
         for rule in rules {
             let parsed = Condition::parse(rule).expect(rule);
             assert_eq!(parsed.to_string(), rule, "canonical spelling round-trips");
         }
+        // The floor defaults to `warning`, and the canonical spelling says so.
+        let bare = Condition::parse("alert-firing v1/*/state/*/alert/*").expect("bare");
+        assert_eq!(
+            bare,
+            Condition::AlertFiring {
+                selector: "v1/*/state/*/alert/*".into(),
+                min: AlertFloor::Warning
+            }
+        );
+        assert_eq!(
+            bare.to_string(),
+            "alert-firing v1/*/state/*/alert/* warning"
+        );
+        let err = Condition::parse("alert-firing v1/*/state/*/alert/* urgent").unwrap_err();
+        assert!(err.to_string().contains("info, warning, critical"), "{err}");
         let err = Condition::parse("if rate > 5 then page").unwrap_err();
         assert!(err.to_string().contains("closed"), "{err}");
         assert!(err.to_string().contains("rate-above"), "{err}");
@@ -1287,6 +1557,103 @@ mod tests {
         // parse, naming the vocabulary.
         let err = Condition::parse("doctor no-such-check").unwrap_err();
         assert!(err.to_string().contains("slice-sync"), "{err}");
+    }
+
+    fn alert_answer(key: &str, doc: &str) -> FleetAnswer {
+        FleetAnswer {
+            origin: key.split('/').nth(1).unwrap_or("").to_string(),
+            key: key.to_string(),
+            encoding: Some("application/json".into()),
+            attachment: None,
+            timestamp: None,
+            answer: crate::bus::query::Answer::Value(zenoh::bytes::ZBytes::from(doc.as_bytes())),
+        }
+    }
+
+    /// #463: one state per rule — a count against the floor and the first
+    /// document named; a tombstone never answers a GET, so "resolved" is
+    /// simply an answer that stopped coming.
+    #[test]
+    fn alert_firing_counts_against_the_floor_and_names_the_first() {
+        let sel = "v1/*/state/*/alert/*";
+        let asks = [AlertAsk {
+            selector: sel.into(),
+            outcome: Ok(vec![
+                alert_answer(
+                    "v1/h-3fa9c2d41b7e/state/systemd/alert/aaaaaaaaaaaaaaaa",
+                    r#"{"severity":"critical","rule":"expect-service-active","summary":"expected service forgejo.service active"}"#,
+                ),
+                alert_answer(
+                    "v1/h-3fa9c2d41b7e/state/netlink/alert/bbbbbbbbbbbbbbbb",
+                    r#"{"severity":"info","rule":"link_flap","message":"eth0 flapped"}"#,
+                ),
+                // Not an alert document at all: the selector was wider than the plane.
+                alert_answer("v1/h-3fa9c2d41b7e/state/netlink/health", r#"{"ok":true}"#),
+            ]),
+        }];
+        let e = judge_alert_firing("", sel, AlertFloor::Critical, Some(&asks));
+        assert_eq!(e.state, CondState::Firing);
+        assert!(
+            e.evidence.starts_with(
+                "1 alert(s) firing at >= critical; first: h-3fa9c2d41b7e/systemd \
+                 expect-service-active — expected service forgejo.service active"
+            ),
+            "{}",
+            e.evidence
+        );
+        assert!(
+            e.evidence.contains("1 answer(s) not alert documents"),
+            "{}",
+            e.evidence
+        );
+        // The default floor admits the critical one only; `info` admits both.
+        assert_eq!(
+            judge_alert_firing("", sel, AlertFloor::Warning, Some(&asks)).state,
+            CondState::Firing
+        );
+        let all = judge_alert_firing("", sel, AlertFloor::Info, Some(&asks));
+        assert!(
+            all.evidence.starts_with("2 alert(s) firing at >= info"),
+            "{}",
+            all.evidence
+        );
+        // Nothing firing above the floor is `ok`, with the documents counted.
+        let quiet = [AlertAsk {
+            selector: sel.into(),
+            outcome: Ok(vec![alert_answer(
+                "v1/h-3fa9c2d41b7e/state/netlink/alert/bbbbbbbbbbbbbbbb",
+                r#"{"severity":"info","rule":"link_flap"}"#,
+            )]),
+        }];
+        let e = judge_alert_firing("", sel, AlertFloor::Warning, Some(&quiet));
+        assert_eq!(e.state, CondState::Ok);
+        assert_eq!(
+            e.evidence,
+            "no alert firing at >= warning (1 document(s) read)"
+        );
+        // Not asked, or asked and failed: unobservable, never ok.
+        assert_eq!(
+            judge_alert_firing("", sel, AlertFloor::Warning, None).state,
+            CondState::Unobservable
+        );
+        let failed = [AlertAsk {
+            selector: sel.into(),
+            outcome: Err("timed out".into()),
+        }];
+        let e = judge_alert_firing("", sel, AlertFloor::Warning, Some(&failed));
+        assert_eq!(e.state, CondState::Unobservable);
+        assert!(e.evidence.contains("timed out"), "{}", e.evidence);
+    }
+
+    /// A document with no readable severity clears only the `info` floor.
+    #[test]
+    fn a_severity_the_plane_does_not_speak_clears_only_the_lowest_floor() {
+        assert!(AlertFloor::Info.admits(None));
+        assert!(AlertFloor::Info.admits(Some("weird")));
+        assert!(!AlertFloor::Warning.admits(None));
+        assert!(AlertFloor::Warning.admits(Some("warning")));
+        assert!(AlertFloor::Warning.admits(Some("critical")));
+        assert!(!AlertFloor::Critical.admits(Some("warning")));
     }
 
     /// The acceptance rule of #227: a drop under a completeness claim yields

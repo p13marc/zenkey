@@ -47,7 +47,7 @@ spells all ten kinds:
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/bad-rule.json5
 ? 2
-  rules[0].rule: "if rate(v1/**) > 5 then page": is not a rule — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | origin-down <ORIGIN> | dropped | alerts <SEL> | liveliness-gone <SEL>
+  rules[0].rule: "if rate(v1/**) > 5 then page": is not a rule — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | origin-down <ORIGIN> | dropped | alert-firing <SEL> [<MIN-SEVERITY>] | alerts <SEL> | liveliness-gone <SEL>
 Error: tests/cmd/fixtures/bad-rule.json5: 1 problem(s) — nothing was run
 
 ```

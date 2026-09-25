@@ -1496,7 +1496,8 @@ pub(crate) struct RecordArgs {
     /// before it. Repeatable; the watchdog's vocabulary — `rate-above
     /// <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
     /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `doctor <CHECK-ID>`,
-    /// `origin-down <ORIGIN>`, `dropped`. The file is `.zrec` version 2
+    /// `origin-down <ORIGIN>`, `dropped`, `alert-firing <SEL>
+    /// [<MIN-SEVERITY>]`. The file is `.zrec` version 2
     /// (RFC 13 §4.1): a state preamble, the pre-roll, the trigger record
     /// where it fired, then `--post` seconds more.
     #[arg(long, value_name = "RULE", requires = "pre")]
@@ -1774,9 +1775,11 @@ pub(crate) struct WatchdogArgs {
     /// One rule (repeatable): `rate-above <SEL> <HZ>`,
     /// `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
     /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`,
-    /// `doctor <CHECK-ID>`, `origin-down <ORIGIN>`, `dropped`.
-    /// Selectors are full wire form (this session is un-namespaced,
-    /// RFC 09 §5); a doctor rule runs the doctor once per tick.
+    /// `doctor <CHECK-ID>`, `origin-down <ORIGIN>`, `dropped`,
+    /// `alert-firing <SEL> [<MIN-SEVERITY>]` (info | warning | critical,
+    /// default warning). Selectors are full wire form (this session is
+    /// un-namespaced, RFC 09 §5); a doctor rule runs the doctor once per
+    /// tick, an alert-firing rule asks the alert plane once per tick.
     #[arg(long = "rule", value_name = "RULE", required = true)]
     pub(crate) rules: Vec<String>,
     /// Seconds between evaluations — the one period flag (#307).

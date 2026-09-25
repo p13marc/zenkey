@@ -20,7 +20,8 @@ use clap::{Args, Parser, Subcommand};
     about = "Notify when something is wrong on a keyspace-v2 Zenoh bus (#388)",
     long_about = "Watch N rules and route every genuine state change to M sinks.\n\n\
         Rules are the closed `zenctl watchdog` vocabulary — rate-above, rate-below, \
-        silent-for, invalid-payload, qos-mismatch, doctor, origin-down, dropped — plus \
+        silent-for, invalid-payload, qos-mismatch, doctor, origin-down, dropped, \
+        alert-firing — plus \
         `alerts <SEL>` (the producers' own alert documents: a put is firing, a delete is \
         resolved) and `liveliness-gone <SEL>` (the dead-man's switch on alive tokens). \
         Three states ride every notification, never two: ok / firing / unobservable, \
