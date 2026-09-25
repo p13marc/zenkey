@@ -1,6 +1,6 @@
 # 11 — Reference Application Profile: ZenSight
 
-**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29, v1.30, v1.31, v1.32 and v1.36 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29, v1.30, v1.31, v1.32, v1.36 and v1.37 — see [CHANGELOG.md](CHANGELOG.md)*
 
 > **Registry location note (2026-07).** The registry *data* this profile
 > describes (`registry/*.toml` for the ten producers and `@catalog`, plus
@@ -443,11 +443,29 @@ Prometheus `TYPE` and the OTLP instrument from `kind`, not from the
 variant — which is what turns "a sensor published `oom_kills_total` as a
 gauge and nothing could have caught it" into a build failure.
 
-The `histogram` kind (v1.36) has no `TelemetryValue` variant yet. Its
-payload shape — the tag `histogram`, the buckets, the counts, the sum — is
-this profile's to define, and will be, in the amendment that ships the
-variant and its exporters (the reference application's issue #1151);
-08 §2 fixes only the tag and that stated boundaries equal the declared ones.
+The `histogram` kind (v1.36) is the `TelemetryValue::Histogram` variant
+(v1.37; the reference application's issue #1151), and its payload is this
+profile's shape — 08 §2 fixes only the tag and that stated boundaries equal
+the declared ones:
+
+```json
+{"type": "histogram",
+ "value": {"buckets": [0.005, 0.01, 0.025],
+           "counts":  [3, 10, 2, 1],
+           "count": 16, "sum": 0.19}}
+```
+
+`buckets` restates the declared upper bounds bit for bit, `+Inf` implicit.
+`counts` is **per bucket, not cumulative**, one longer than `buckets`, the
+overflow last: `counts[i]` falls in `(buckets[i-1], buckets[i]]` — the OTLP
+explicit-bucket layout, from which the Prometheus classic `le` series are
+derived. `count` is the sum of `counts`, `sum` the sum of every observed
+value. The whole value is **cumulative since the producer started**, the
+same temporality as a `counter`: every count only grows, and the reset a
+consumer sees is the one §2 sanctions for counters, a producer restart
+visible as its `alive` token cycling. The profile's `checked_point` guard
+refuses, at build time, a histogram over any other bounds than the declared
+ones and one whose `count` is not the sum of its `counts`.
 
 ## 5. Mapping the incumbent control channels (moved from 05 §5 in v1.25)
 

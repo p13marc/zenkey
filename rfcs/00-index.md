@@ -6,13 +6,17 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.36** (2026-09-25; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.37** (2026-09-25; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.37** (2026-09-25) — the profile's histogram: the reference
+  application's `TelemetryValue::Histogram` shape — declared `buckets`,
+  per-bucket `counts` with the overflow last, `count`, `sum`, cumulative
+  since the producer started (11 §4).
 - **v1.36** (2026-09-25) — the distribution and the hint: a fifth
   subject `kind`, `histogram` (fixed-bucket, tag `histogram`), with
   `buckets` required iff it is declared and stated boundaries required to
@@ -26,15 +30,6 @@ what changed and what deliberately did not — is
   one cycle, a gate is not a shape in the lock, and 13 §3 gains the `when`
   judgement plus the conformance-suite obligation (three states, unknowable
   never failed) (08 §2, §3.1, §6.1; 13 §3).
-- **v1.34** (2026-09-06) — the state artifacts: `.zrec` version 2 carries a
-  state preamble (rows marked, at `t: 0`, original HLCs kept as provenance)
-  and a trigger record, with replay skipping the preamble unless told to seed
-  state; a `.zsnap` snapshot is a fan-in GET on disk that states the span it
-  was collected *over* and holds per-key evidence (stamper, registration
-  rung, verdict, holder); exporters owe the observer rules in their own
-  medium — bounds as separate series, a stopped series named, provenance on
-  the surface; and an observation-derived registry draft carries a marker
-  the build refuses unless admitted (13 §4.1, §4.4, §3; 08 §6.1).
 
 ---
 
