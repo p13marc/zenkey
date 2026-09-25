@@ -25,6 +25,27 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.37 (2026-09-25, the profile's histogram)** — the reference
+> profile defines the payload v1.36 left to it.
+>
+> **[11 §4](11-zensight-profile.md).** v1.36 ratified `kind = "histogram"`
+> and said the payload shape was the application profile's, to be written
+> when the variant shipped. It has: `{"type": "histogram", "value":
+> {"buckets", "counts", "count", "sum"}}`, `buckets` restating the declared
+> bounds, `counts` per bucket and not cumulative (overflow last — the OTLP
+> explicit-bucket layout; the Prometheus `le` series are derived), the whole
+> value cumulative since the producer started, with a counter's reset rule.
+>
+> **What deliberately did not happen.** Nothing in 08 or 13 moves: the tag
+> and the boundary equality were already normative, and the judge already
+> reads a `buckets` array. No `min`/`max` in the value — a fixed-bucket
+> distribution does not carry them, and an exporter that invents them from
+> the buckets would be publishing values nobody observed. No exemplars: an
+> exemplar is a trace id, and the reference application observes no traced
+> request; the field waits for a producer that does.
+>
+> *Amends: 11.*
+
 > **v1.36 (2026-09-25, the distribution and the hint)** — two additive
 > fields on `[[subject]]`, both filed by the reference application's
 > consumers before their consuming work started.
