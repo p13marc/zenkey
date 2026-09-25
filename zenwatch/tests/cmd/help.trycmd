@@ -6,7 +6,7 @@ question could not be asked (`zenwatch/src/exit.rs`).
 $ zenwatch --help
 Watch N rules and route every genuine state change to M sinks.
 
-Rules are the closed `zenctl watchdog` vocabulary — rate-above, rate-below, silent-for, invalid-payload, qos-mismatch, doctor, origin-down, dropped — plus `alerts <SEL>` (the producers' own alert documents: a put is firing, a delete is resolved) and `liveliness-gone <SEL>` (the dead-man's switch on alive tokens). Three states ride every notification, never two: ok / firing / unobservable, and a drop in the observer is unobservable, never ok (RFC 13 §3 O6).
+Rules are the closed `zenctl watchdog` vocabulary — rate-above, rate-below, silent-for, invalid-payload, qos-mismatch, doctor, origin-down, dropped, alert-firing — plus `alerts <SEL>` (the producers' own alert documents: a put is firing, a delete is resolved) and `liveliness-gone <SEL>` (the dead-man's switch on alive tokens). Three states ride every notification, never two: ok / firing / unobservable, and a drop in the observer is unobservable, never ok (RFC 13 §3 O6).
 
 Exit codes: 0 clean, 1 the act failed, 2 refused input (`zenwatch/src/exit.rs`).
 

@@ -299,3 +299,63 @@ async fn a_consumer_that_stops_sipping_still_gets_the_summary_and_the_teardown()
         "and the summary counts what it produced, read or not: {summary:?}"
     );
 }
+
+/// #463: an alert already firing before the watchdog starts is seen on the
+/// first tick — the ask is a GET, not a subscription — and the rule goes
+/// back to `ok` once the document stops answering. The producer's side is a
+/// queryable on the alert key, the seed seam every sensor exposes for its
+/// alert documents (RFC 04 §3.2).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alert_firing_sees_an_alert_that_was_firing_before_it_started() {
+    let (a, b) = peer_pair().await;
+    let slices = zenkey_fleet::SliceSet::default();
+    let key = "v1/h-eeeeeeeeeeee/state/systemd/alert/aaaaaaaaaaaaaaaa";
+    let doc = br#"{"severity":"critical","rule":"expect-service-active","labels":{"unit":"forgejo.service"},"summary":"expected service forgejo.service active"}"#;
+    let serving = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let flag = std::sync::Arc::clone(&serving);
+    let _queryable = a
+        .declare_queryable(key)
+        .callback(move |query| {
+            if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                // On the document's own key, as a sensor answers — a reply on
+                // the query's selector would carry `v1/*/…`, which is no
+                // alert key and counts as "not an alert document".
+                let doc = doc.to_vec();
+                tokio::spawn(async move {
+                    let _ = query.reply(key, doc).encoding("application/json").await;
+                });
+            }
+        })
+        .await
+        .expect("alert queryable");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let spec = WatchdogSpec {
+        rules: vec![Condition::parse("alert-firing v1/*/state/*/alert/* critical").expect("rule")],
+        tick: Duration::from_millis(400),
+        ticks: Some(4),
+        timeout: Duration::from_millis(300),
+    };
+    // Resolve the alert after the second tick: the queryable stops answering.
+    let stop = std::sync::Arc::clone(&serving);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        stop.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+    let (transitions, summary) = drain(&b, &slices, &spec).await.expect("run");
+    assert_eq!(summary.ticks, 4);
+    assert_eq!(
+        transitions.len(),
+        2,
+        "firing on the first tick, ok after the resolve: {transitions:#?}"
+    );
+    assert_eq!(transitions[0].to, CondState::Firing);
+    assert!(
+        transitions[0].evidence.contains(
+            "1 alert(s) firing at >= critical; first: h-eeeeeeeeeeee/systemd expect-service-active"
+        ),
+        "{}",
+        transitions[0].evidence
+    );
+    assert_eq!(transitions[1].to, CondState::Ok);
+}

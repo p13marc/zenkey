@@ -20,8 +20,16 @@ templating. The eight from `zenctl watchdog`, judged by the engine every
 ```
 rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> |
 invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> |
-origin-down <ORIGIN> | dropped
+origin-down <ORIGIN> | dropped | alert-firing <SEL> [<MIN-SEVERITY>]
 ```
+
+`alert-firing` is the one engine rule that reads the alert plane: a GET per
+tick (never a subscription — a firing alert is republished only on a content
+change), one state per rule, `firing` while any document at or above the
+floor (`info` | `warning` | `critical`, default `warning`) is up, with the
+count and the first named in the evidence. It is what lets a watchdog page on
+what the sensors already judged; `alerts <SEL>` below is the per-alert
+notifier.
 
 and two of zenwatch's own, one state per *key* rather than per rule:
 

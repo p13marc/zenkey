@@ -1,4 +1,4 @@
-//! The rule vocabulary: the engine's closed eight, plus the two this daemon
+//! The rule vocabulary: the engine's closed nine, plus the two this daemon
 //! owns.
 //!
 //! `alerts <SEL>` and `liveliness-gone <SEL>` are **not** new
@@ -19,12 +19,13 @@ use zenkey_fleet::Condition;
 pub const VOCABULARY: &str = "rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | \
      silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | \
      doctor <CHECK-ID> | origin-down <ORIGIN> | dropped | \
+     alert-firing <SEL> [<MIN-SEVERITY>] | \
      alerts <SEL> | liveliness-gone <SEL>";
 
 /// What one rule watches.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuleKind {
-    /// One of the engine's eight, judged by the watchdog every tick.
+    /// One of the engine's nine, judged by the watchdog every tick.
     Engine(Condition),
     /// The producers' own alert documents under `selector` (RFC 04 §1.2):
     /// a `put` is firing, a `delete` is resolved, one state per key.
@@ -52,6 +53,7 @@ impl RuleKind {
                 Condition::DoctorCheck { .. } => "doctor",
                 Condition::OriginDown { .. } => "origin-down",
                 Condition::Dropped => "dropped",
+                Condition::AlertFiring { .. } => "alert-firing",
             },
             RuleKind::Alerts { .. } => "alerts",
             RuleKind::LivelinessGone { .. } => "liveliness-gone",
