@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## 0.8.0 (2026-09-25) — the watchdog reads the alert plane
+
+One new rule and no moved spelling: a script written against 0.7.0 runs
+unchanged. `zenctl watchdog --rule` and `record --on` accept
+**`alert-firing <SEL> [<MIN-SEVERITY>]`** (#463): `firing` while any alert
+document at or above the floor (`info | warning | critical`, default
+`warning`) answers a per-tick GET under `<SEL>`, with the count and the
+first alert in the evidence; `ok` at zero; `unobservable` when the ask
+failed. A GET, not a subscription, so an alert already firing when the
+watchdog starts is seen on the first tick. The exit contract is unchanged.
+
+| 0.7.0 | 0.8.0 |
+|---|---|
+| — | `zenctl watchdog --rule "alert-firing v1/*/state/*/alert/* critical"` |
+
 ## 0.7.0 (2026-09-07) — the explorer suite, executed
 
 Eight new observation surfaces and no moved spelling: a script written

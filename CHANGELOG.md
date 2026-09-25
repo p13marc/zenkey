@@ -6,14 +6,111 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 |
-|---|---|---|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** |
-| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 |
+|---|---|---|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged |
+| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** |
+
+---
+
+## 0.10.0 — what the sensors already judged (2026-09-25)
+
+**Tagged `0.10.0`** on 2026-09-25; `zenkey` 0.9.0, `zenkey-build` 0.9.0 and
+`zenkey-fleet` 0.14.0 published to crates.io the same day.
+
+Four issues that were ready, filed by the reference application's
+consumers against gaps a real outage and a waiting feature exposed. The
+0.10.0 epic's own chunks — `when`, `check conform`, the KDL spelling —
+moved to **0.11.0** (#458) untouched. On **RFC v1.36**.
+
+The motivation for the first two is one incident (zensight#1286): a
+`forgejo.service` down on a live host for 22 hours, a sensor correctly
+reporting it as a critical alert the whole time, and every observer that
+could have said so either not reading the alert plane (the watchdog: five
+`origin-down` rules, all truthfully `ok`, because the host *was* alive)
+or reading it with a plain subscription it started after the alert fired
+(zenwatch).
+
+`zenkey` is **breaking** (0.9.0): `SubjectKind` gained a fifth member, so
+an exhaustive match over it must add the arm. `zenkey-build` 0.9.0 follows
+it. `zenkey-fleet` is **breaking** (0.14.0): a new `Condition` variant, and
+new fields on `SweepOutcome`, `TickEvidence` and `SubjectFacts` that
+struct literals must add. `zenctl` 0.8.0 and `zenwatch` 0.2.0 gain a rule
+and fix a bug without moving any spelling; `zengui` is unchanged.
+
+**zenwatch: the `alerts` rule seeds** (#464, PR #465). The `alerts <SEL>`
+selectors were a plain subscription while the catalog feed beside them was
+seeded, so a notifier started mid-incident never learned of an alert that
+was already firing — a sensor republishes a firing alert only on a content
+change — and dropped its resolve too. They are now seeded watches with the
+engine's timeout as the budget: the documents up at start replay through
+the same transition path (baseline stated, `prior: None`), a later
+tombstone resolves, and a seed that will not come up is announced and
+degrades to the live subscription. Found after zensight#1286's 22-hour
+outage.
+
+**A ninth watchdog condition: `alert-firing <SEL> [<MIN-SEVERITY>]`**
+(#463, PR #467). The watchdog judged stream behaviour, bus conformance and
+presence, and never read the alert plane — so a fleet where a sensor
+correctly reported a critical alert for 22 hours was `ok` for 22 hours
+(zensight#1286: five `origin-down` rules, all truthfully `ok`, because the
+host was alive). The new rule asks the alert plane with one bounded GET
+per distinct selector per tick, beside the roster ask — never a
+subscription, since a firing alert is republished only on a content
+change and a subscribe-only rule started mid-outage would report `ok`
+forever. One state per rule, like `doctor <CHECK-ID>`: `firing` while any
+document at or above the floor (`info < warning < critical`, default
+`warning`) answers, with the count and the first named in the evidence;
+`ok` at zero; `unobservable` when the ask failed or did not run. It is
+content-agnostic — severity, rule and summary are lifted as
+`alert_transition` lifts them, and nothing else is read. `zenkey-fleet`
+gains `Condition::AlertFiring`, `AlertFloor`, `AlertAsk`,
+`judge_alert_firing`, `RuleSet::{wants_alerts, alert_selectors}`, and
+`alerts`/`base` on `SweepOutcome`/`TickEvidence` (breaking: struct
+literals of both must add the fields); the watchdog and `record --on`'s
+trigger both run the ask. zenctl's `watchdog --rule` and `record --on`
+help, zenwatch's vocabulary, help and README name the spelling.
+
+**rustls 0.23.45** (RUSTSEC-2026-0285, PR #466) — lockfile only.
+
+**`RegistrySlice::bind(class, tail)`** (#460, PR #468). A consumer holding only a
+producer's slice binds a live subject tail to its declaration and reads
+the `{var}` bindings, with the generated parse's grammar and precedence
+(`pattern::best_match`). `Bound { decl, vars }`, `Bound::var`. Additive.
+
+**RFC v1.36 — the distribution and the hint** (#459, #461, PR
+#469). A fifth
+subject `kind`, `histogram`: a fixed-bucket distribution (Prometheus
+classic / OTLP explicit-bucket) with payload tag `histogram`, over the
+boundaries a new `buckets` field declares — required iff the kind is
+`histogram`, refused otherwise, strictly ascending and finite, `+Inf`
+implicit — and stated boundaries must equal the declared ones. And
+`semantic`, an optional closed presentation hint (`temperature`, `power`,
+`bytes`, `duration`, `ratio`, `count`, `identity`, `state`) for what
+`kind` and `unit` leave ambiguous; absent changes nothing and no judge
+reads it. Deliberately not: exponential histograms, summaries, optional
+buckets, `buckets` as a `registry.lock` column.
+
+- `zenkey` (**breaking**): `SubjectKind::Histogram` — an exhaustive match
+  over `SubjectKind` must add the arm; `ALL` has five members. Additive:
+  `Semantic`, `Buckets` (bit-equality, so `SubjectDecl` keeps `Eq`),
+  `SubjectDecl::{buckets, semantic}` (the struct is `#[non_exhaustive]`),
+  parsed from and emitted to TOML bit for bit.
+- `zenkey-build`: the lint refuses `histogram` without `buckets`, `buckets`
+  on any other kind, a malformed list, and an unknown `semantic`, each
+  naming RFC 08 §2; generated `Subject::{buckets, semantic}` and their
+  `AnySubject` dispatch, and `kind()` maps `histogram`.
+- `zenkey-fleet`: the `kind-mismatch` judge judges a histogram — the value
+  must be an object, and stated boundaries (a `buckets` array of numbers
+  or of `{le}` objects, trailing `+Inf` dropped) must equal the declared
+  ones, the first differing bound named. `SubjectFacts.buckets` (breaking
+  for struct literals); `KindObservation::observe_declared` takes the
+  declared bounds, `observe` keeps its signature. A `histogram` payload tag
+  on a non-histogram subject is now a disagreement, where it was foreign.
 
 ---
 
