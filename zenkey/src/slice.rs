@@ -310,16 +310,21 @@ pub enum SubjectKind {
     /// A boolean. A self-describing payload spells the tag `boolean`
     /// (RFC 11 §4).
     Bool,
+    /// A fixed-bucket distribution (RFC 08 §2, v1.36) over the boundaries
+    /// the entry's `buckets` declares — the Prometheus classic / OTLP
+    /// explicit-bucket shape. Stated boundaries must equal the declared ones.
+    Histogram,
 }
 
 impl SubjectKind {
     /// Every kind, in declaration order — the closed vocabulary a lint
     /// names when it refuses a token.
-    pub const ALL: [SubjectKind; 4] = [
+    pub const ALL: [SubjectKind; 5] = [
         SubjectKind::Counter,
         SubjectKind::Gauge,
         SubjectKind::Text,
         SubjectKind::Bool,
+        SubjectKind::Histogram,
     ];
 
     /// The tag a self-describing `{"type": …, "value": …}` payload carries
@@ -334,7 +339,7 @@ impl SubjectKind {
     }
 
     /// The kind a payload tag names, if any — the inverse of
-    /// [`payload_tag`](Self::payload_tag). A tag that is not one of the four
+    /// [`payload_tag`](Self::payload_tag). A tag that is not one of the kinds
     /// is `None`: an unknown tag is not a disagreement.
     #[must_use]
     pub fn from_payload_tag(tag: &str) -> Option<Self> {
@@ -349,9 +354,111 @@ impl SubjectKind {
             SubjectKind::Gauge => "gauge",
             SubjectKind::Text => "text",
             SubjectKind::Bool => "bool",
+            SubjectKind::Histogram => "histogram",
         }
     }
 }
+
+/// A subject's presentation hint (`[[subject]] semantic`, RFC 08 §2,
+/// v1.36): what `kind` and `unit` leave ambiguous — a `1`-unit gauge that
+/// is a ratio versus a count, a text subject that is an identity versus a
+/// state. Closed; absent changes nothing, and no judge reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Semantic {
+    Temperature,
+    Power,
+    Bytes,
+    Duration,
+    /// A fraction in 0–1 (render as a bar).
+    Ratio,
+    /// A count of something (render as a number).
+    Count,
+    /// A name that identifies — a hostname, a serial. Never truncated.
+    Identity,
+    /// An enumerated state (render as a chip).
+    State,
+}
+
+impl Semantic {
+    /// Every hint, in the RFC's order — the vocabulary a lint names.
+    pub const ALL: [Semantic; 8] = [
+        Semantic::Temperature,
+        Semantic::Power,
+        Semantic::Bytes,
+        Semantic::Duration,
+        Semantic::Ratio,
+        Semantic::Count,
+        Semantic::Identity,
+        Semantic::State,
+    ];
+
+    const fn token_str(self) -> &'static str {
+        match self {
+            Semantic::Temperature => "temperature",
+            Semantic::Power => "power",
+            Semantic::Bytes => "bytes",
+            Semantic::Duration => "duration",
+            Semantic::Ratio => "ratio",
+            Semantic::Count => "count",
+            Semantic::Identity => "identity",
+            Semantic::State => "state",
+        }
+    }
+}
+
+impl SliceToken for Semantic {
+    fn from_token(token: &str) -> Option<Self> {
+        Semantic::ALL.into_iter().find(|k| k.token_str() == token)
+    }
+
+    fn token(&self) -> &str {
+        self.token_str()
+    }
+}
+
+/// A histogram's declared upper bounds (`[[subject]] buckets`, RFC 08 §2,
+/// v1.36), as the slice carried them — `+Inf` implicit, never written.
+///
+/// A newtype so [`SubjectDecl`] keeps `Eq`: equality compares the bit
+/// patterns, which is reflexive even for a NaN a foreign slice could carry
+/// (the strict ascending-and-finite check is the declaring build's lint).
+#[derive(Debug, Clone)]
+pub struct Buckets(Vec<f64>);
+
+impl Buckets {
+    #[must_use]
+    pub fn new(bounds: Vec<f64>) -> Self {
+        Buckets(bounds)
+    }
+
+    /// The bounds, in declaration order.
+    #[must_use]
+    pub fn as_slice(&self) -> &[f64] {
+        &self.0
+    }
+
+    /// Strictly ascending, finite and non-empty — what RFC 08 §2 requires of
+    /// a declaration. A foreign slice is read either way; a build refuses.
+    #[must_use]
+    pub fn is_well_formed(&self) -> bool {
+        !self.0.is_empty()
+            && self.0.iter().all(|b| b.is_finite())
+            && self.0.windows(2).all(|w| w[0] < w[1])
+    }
+}
+
+impl PartialEq for Buckets {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.len() == other.0.len()
+            && self
+                .0
+                .iter()
+                .zip(&other.0)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+    }
+}
+
+impl Eq for Buckets {}
 
 impl SliceToken for SubjectKind {
     fn from_token(token: &str) -> Option<Self> {
@@ -414,6 +521,11 @@ pub struct SubjectDecl {
     /// `WireEncoding` carries its own `Other` arm, so it needs no
     /// [`Declared`] wrapper — it has been this shape since v1.5.
     pub encoding: Option<WireEncoding>,
+    /// A `histogram` subject's declared upper bounds (v1.36). Present iff
+    /// `kind = "histogram"` in a well-formed registry.
+    pub buckets: Option<Buckets>,
+    /// The presentation hint (v1.36), when declared.
+    pub semantic: Option<Declared<Semantic>>,
 }
 
 /// One `[[procedure]]` entry of a served registry slice.
@@ -684,6 +796,8 @@ impl SubjectDecl {
             rate: None,
             cardinality: None,
             encoding: None,
+            buckets: None,
+            semantic: None,
         }
     }
 }
@@ -1061,6 +1175,15 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             rate: e.get("rate").and_then(|v| v.as_str()).map(RateClass::parse),
             cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
             encoding: enc(e.get("encoding")),
+            // A list with any non-number is not a boundary list this build
+            // can read; the strict check is the declaring build's lint.
+            buckets: e.get("buckets").and_then(|v| v.as_array()).and_then(|a| {
+                a.iter()
+                    .map(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                    .collect::<Option<Vec<f64>>>()
+                    .map(Buckets::new)
+            }),
+            semantic: tok(e.get("semantic")),
         });
     }
 
@@ -1277,6 +1400,13 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         );
         opt_int(&mut out, "cardinality", d.cardinality);
         opt_enc(&mut out, "encoding", d.encoding.as_ref());
+        if let Some(b) = &d.buckets {
+            // `{:?}` spells an f64 as a TOML float (`1.0`, `0.005`, `1e21`),
+            // so the list reads back as the same bits.
+            let items: Vec<String> = b.as_slice().iter().map(|v| format!("{v:?}")).collect();
+            out.push_str(&format!("buckets = [{}]\n", items.join(", ")));
+        }
+        opt_tok(&mut out, "semantic", d.semantic.as_ref());
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -1521,6 +1651,76 @@ mod tests {
             slice.subjects.push(SubjectDecl::new(path, class));
         }
         slice
+    }
+
+    /// v1.36: `kind = "histogram"`, `buckets` and `semantic` parse and
+    /// round-trip through `to_toml`, bit for bit; integers read as floats.
+    #[test]
+    fn histogram_buckets_and_semantic_round_trip() {
+        let src = r#"
+[registry]
+version = "1.0.0"
+app = "test"
+convention = 1
+
+[producer]
+name = "probe"
+
+[[subject]]
+path = "{target}/rtt"
+class = "telemetry"
+type = "TelemetryPoint"
+kind = "histogram"
+buckets = [0.005, 0.01, 1, 2.5, 10]
+semantic = "duration"
+description = "round-trip time"
+
+[[subject]]
+path = "{target}/ok"
+class = "telemetry"
+type = "TelemetryPoint"
+kind = "bool"
+semantic = "state"
+description = "reachable"
+"#;
+        let parsed = parse_slice(src).unwrap();
+        let rtt = &parsed.subjects[0];
+        assert_eq!(rtt.kind, Some(Declared::Known(SubjectKind::Histogram)));
+        assert_eq!(
+            rtt.buckets.as_ref().map(Buckets::as_slice),
+            Some(&[0.005, 0.01, 1.0, 2.5, 10.0][..])
+        );
+        assert!(rtt.buckets.as_ref().unwrap().is_well_formed());
+        assert_eq!(rtt.semantic, Some(Declared::Known(Semantic::Duration)));
+        assert_eq!(parsed.subjects[1].buckets, None);
+        let back = parse_slice(&to_toml(&parsed)).unwrap();
+        assert_eq!(back, parsed, "parse → emit → parse is the identity");
+        // The payload tag is the token, by the same rule as the scalar four.
+        assert_eq!(SubjectKind::Histogram.payload_tag(), "histogram");
+        assert_eq!(
+            SubjectKind::from_payload_tag("histogram"),
+            Some(SubjectKind::Histogram)
+        );
+        // An unknown hint is kept, not dropped (a foreign slice), and round-trips.
+        let odd = parse_slice(&src.replace("\"duration\"", "\"loudness\"")).unwrap();
+        assert_eq!(
+            odd.subjects[0].semantic,
+            Some(Declared::Other("loudness".into()))
+        );
+    }
+
+    #[test]
+    fn buckets_well_formedness_is_strictly_ascending_finite_and_non_empty() {
+        assert!(Buckets::new(vec![0.1, 1.0]).is_well_formed());
+        assert!(!Buckets::new(vec![]).is_well_formed());
+        assert!(!Buckets::new(vec![1.0, 1.0]).is_well_formed());
+        assert!(!Buckets::new(vec![2.0, 1.0]).is_well_formed());
+        assert!(
+            !Buckets::new(vec![1.0, f64::INFINITY]).is_well_formed(),
+            "+Inf is implicit"
+        );
+        let nan = Buckets::new(vec![f64::NAN]);
+        assert_eq!(nan, nan.clone(), "bit equality is reflexive, NaN included");
     }
 
     /// #460: one declaration per live tail, its bindings in path order.

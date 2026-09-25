@@ -1,7 +1,7 @@
 # 13 — Observer Conformance
 
 **Status: v1.24 (ratified)** · normative chapter · *created in v1.24 and
-amended in v1.32, v1.34 and v1.35 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
+amended in v1.32, v1.34, v1.35 and v1.36 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
 §6; the moved material entered the set in v1.2, v1.9, v1.13 and v1.19
 and was amended there in v1.18 and v1.21
 
@@ -393,7 +393,10 @@ ids being the reference engine's:
   tag disagrees with the declared kind, or when a `counter` decreased
   between two samples of one origin with no `alive` cycle of that origin in
   between — the restart is the one sanctioned reset, and it is on the wire.
-  *Unobservable* when the payload could not be decoded, said with the
+  For a `histogram` (v1.36), additionally *established(no)* when the value
+  is not a distribution-shaped object, or when a payload that states its
+  bucket boundaries states any other list than the declared `buckets` — the
+  first differing bound named. *Unobservable* when the payload could not be decoded, said with the
   reason. Per origin, never pooled across hosts, with the window stated
   (O5, O6) — a window in which a counter did not decrease has not
   established that it is one.

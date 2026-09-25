@@ -240,6 +240,12 @@ pub(crate) struct SubjectEntry {
     /// `kind = "counter|gauge|text|bool"` — what the leaf value *is*
     /// (RFC 08 §2, v1.32); the canonical token, already linted.
     pub kind: Option<String>,
+    /// `buckets = [..]` — a `histogram` subject's upper bounds (RFC 08 §2,
+    /// v1.36); linted strictly ascending, finite and non-empty, present iff
+    /// `kind = "histogram"`.
+    pub buckets: Option<Vec<f64>>,
+    /// `semantic = "..."` — the presentation hint (v1.36), linted closed.
+    pub semantic: Option<String>,
     pub cardinality: Option<u64>,
     pub qos: String,
     pub ttl_s: Option<u64>,
@@ -1113,6 +1119,81 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                     }
                 },
             };
+            // RFC 08 §2 (v1.36): `buckets` is required iff `kind =
+            // "histogram"`, and refused otherwise — two producers of one
+            // subject are comparable only if their boundaries are.
+            let buckets = match entry.get("buckets") {
+                None => None,
+                Some(v) => {
+                    let Some(items) = v.as_array() else {
+                        return Err(lint(
+                            &fname,
+                            format!("{spath:?}: buckets must be an array of numbers (RFC 08 §2)"),
+                        ));
+                    };
+                    let bounds: Option<Vec<f64>> = items
+                        .iter()
+                        .map(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                        .collect();
+                    let Some(bounds) = bounds else {
+                        return Err(lint(
+                            &fname,
+                            format!("{spath:?}: buckets must be an array of numbers (RFC 08 §2)"),
+                        ));
+                    };
+                    if !zenkey::slice::Buckets::new(bounds.clone()).is_well_formed() {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "{spath:?}: buckets must be non-empty, finite and strictly \
+                                 ascending, `+Inf` implicit (RFC 08 §2)"
+                            ),
+                        ));
+                    }
+                    Some(bounds)
+                }
+            };
+            match (kind.as_deref(), &buckets) {
+                (Some("histogram"), None) => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: kind = \"histogram\" needs buckets — its declared \
+                             upper bounds (RFC 08 §2)"
+                        ),
+                    ));
+                }
+                (k, Some(_)) if k != Some("histogram") => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: buckets is declared only with kind = \"histogram\" \
+                             (RFC 08 §2)"
+                        ),
+                    ));
+                }
+                _ => {}
+            }
+            // RFC 08 §2 (v1.36): `semantic` is a closed presentation hint.
+            let semantic = match entry.get("semantic").and_then(|v| v.as_str()) {
+                None => None,
+                Some(k) => match <zenkey::slice::Semantic as SliceToken>::from_token(k) {
+                    Some(known) => Some(known.token().to_string()),
+                    None => {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "{spath:?}: unknown semantic {k:?} — one of {} (RFC 08 §2)",
+                                zenkey::slice::Semantic::ALL
+                                    .iter()
+                                    .map(|k| format!("`{}`", k.token()))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        ));
+                    }
+                },
+            };
             let cardinality = opt_count(&fname, entry, spath, "cardinality")?;
             let has_var = chunks.iter().any(|c| !matches!(c, Chunk::Literal(_)));
             if has_var && cardinality.is_none() {
@@ -1286,6 +1367,8 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 payload_type,
                 unit,
                 kind,
+                buckets,
+                semantic,
                 cardinality,
                 qos,
                 ttl_s,
@@ -3167,11 +3250,11 @@ mod tests {
     }
 
     /// The `kind` vocabulary is closed (RFC 08 §2): a token outside it is a
-    /// lint naming the four, not an unchecked subject.
+    /// lint naming all five, not an unchecked subject.
     #[test]
     fn an_unknown_kind_token_is_a_lint() {
         let dir = lock_dir("kind-unknown");
-        let bad = "[[subject]]\npath = \"rx/bytes_total\"\nclass = \"telemetry\"\ntype = \"TelemetryPoint\"\nkind = \"histogram\"\nsince = \"1.0\"\ndescription = \"d\"\n";
+        let bad = "[[subject]]\npath = \"rx/bytes_total\"\nclass = \"telemetry\"\ntype = \"TelemetryPoint\"\nkind = \"summary\"\nsince = \"1.0\"\ndescription = \"d\"\n";
         std::fs::write(
             dir.join("t.toml"),
             format!("{HEADER}[producer]\nname = \"t\"\n\n{bad}"),
@@ -3183,12 +3266,64 @@ mod tests {
             .lint()
             .unwrap_err()
             .to_string();
-        assert!(err.contains("unknown kind \"histogram\""), "{err}");
-        for token in ["`counter`", "`gauge`", "`text`", "`bool`"] {
+        assert!(err.contains("unknown kind \"summary\""), "{err}");
+        for token in ["`counter`", "`gauge`", "`text`", "`bool`", "`histogram`"] {
             assert!(err.contains(token), "{err}");
         }
-        assert!(err.contains("RFC 08 §2"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v1.36: `buckets` is required iff `kind = "histogram"`, and must be
+    /// non-empty, finite and strictly ascending; `semantic` is closed.
+    #[test]
+    fn histogram_buckets_and_semantic_are_linted() {
+        let lint_of = |name: &str, fields: &str| -> Result<(), String> {
+            let dir = lock_dir(name);
+            let entry = format!(
+                "[[subject]]\npath = \"rtt\"\nclass = \"telemetry\"\ntype = \"TelemetryPoint\"\n{fields}since = \"1.0\"\ndescription = \"d\"\n"
+            );
+            std::fs::write(
+                dir.join("t.toml"),
+                format!("{HEADER}[producer]\nname = \"t\"\n\n{entry}"),
+            )
+            .unwrap();
+            // The snapshot the build demands; a lint failure surfaces here or
+            // in the lint below, whichever runs it first.
+            let _ = Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .write_compat_lock(OnIncompatible::ForceAndReport);
+            let out = Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+            let _ = std::fs::remove_dir_all(&dir);
+            out
+        };
+        lint_of(
+            "hist-ok",
+            "kind = \"histogram\"\nbuckets = [0.005, 0.01, 1, 10]\nsemantic = \"duration\"\n",
+        )
+        .expect("a well-formed histogram passes");
+        let err = lint_of("hist-nob", "kind = \"histogram\"\n").unwrap_err();
+        assert!(err.contains("needs buckets"), "{err}");
+        let err = lint_of("hist-gauge", "kind = \"gauge\"\nbuckets = [1, 2]\n").unwrap_err();
+        assert!(err.contains("only with kind = \"histogram\""), "{err}");
+        let err = lint_of("hist-nokind", "buckets = [1, 2]\n").unwrap_err();
+        assert!(err.contains("only with kind = \"histogram\""), "{err}");
+        for bad in ["[]", "[2, 1]", "[1, 1]", "[1, inf]", "[\"a\"]", "3"] {
+            let err = lint_of(
+                "hist-bad",
+                &format!("kind = \"histogram\"\nbuckets = {bad}\n"),
+            )
+            .unwrap_err();
+            assert!(err.contains("buckets must"), "{bad}: {err}");
+        }
+        let err = lint_of("sem-bad", "semantic = \"loudness\"\n").unwrap_err();
+        assert!(err.contains("unknown semantic \"loudness\""), "{err}");
+        assert!(err.contains("`identity`"), "{err}");
     }
 
     /// Additive evolution is free: a new subject passes after regeneration,

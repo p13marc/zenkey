@@ -33,7 +33,7 @@ storages:
     ! retention_is_the_databases: retention is the database's policy (an InfluxDB retention policy), not zenoh config: garbage_collection prunes metadata and never drops a value, so this storage's data grows until the database prunes it — size the volume against the write rate (RFC 09 §2.3)
     ! overlap: overlaps catalog (zensight/v1/@catalog/state/**): a GET under both selectors is answered by both, duplicate and possibly divergent — accept it (subscribers are unaffected; GET consumers consolidate) or carve one selector out of the other (RFC 09 §2)
   timeseries    zensight/v1/*/telemetry/**          influxdb (all)
-    strip zensight/v1  ·  covers 356 declared subject(s)
+    strip zensight/v1  ·  covers 357 declared subject(s)
     gc lifespan 86400 s (period 30 s): no state subject under this selector: RFC 09 §2.3 default 86400 s
     ! retention_is_the_databases: retention is the database's policy (an InfluxDB retention policy), not zenoh config: garbage_collection prunes metadata and never drops a value, so this storage's data grows until the database prunes it — size the volume against the write rate (RFC 09 §2.3)
 4 storage(s) on 2 volume(s) planned, 0 refused
@@ -85,7 +85,7 @@ plugins: {
         volume: { id: "influxdb", db: "pdns" },
         garbage_collection: { period: 30, lifespan: 172800 },  // max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s (RFC 09 §2.3)
       },
-      // timeseries: class telemetry; 356 declared subject(s) under it
+      // timeseries: class telemetry; 357 declared subject(s) under it
       // ! retention_is_the_databases: retention is the database's policy (an InfluxDB retention policy), not zenoh config: garbage_collection prunes metadata and never drops a value, so this storage's data grows until the database prunes it — size the volume against the write rate (RFC 09 §2.3)
       timeseries: {
         key_expr: "zensight/v1/*/telemetry/**",

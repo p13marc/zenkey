@@ -99,6 +99,57 @@ fn leaf(doc: &Value) -> &Value {
     }
 }
 
+/// The boundaries a histogram value states, when it states them: a
+/// `buckets` array of numbers, or of objects each carrying an `le` bound
+/// (the two common spellings; the shape is the profile's). A trailing
+/// `+Inf` is the implicit bound and is dropped. `None` when the value states
+/// none this rule can read — silence is not a disagreement.
+fn stated_bounds(v: &Value) -> Option<Vec<f64>> {
+    let items = v.get("buckets")?.as_array()?;
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let bound = match item {
+            Value::Number(n) => n.as_f64()?,
+            Value::Object(o) => match o.get("le")? {
+                Value::Number(n) => n.as_f64()?,
+                Value::String(s) if s == "+Inf" || s == "inf" || s == "Infinity" => f64::INFINITY,
+                _ => return None,
+            },
+            Value::String(s) if s == "+Inf" || s == "inf" || s == "Infinity" => f64::INFINITY,
+            _ => return None,
+        };
+        out.push(bound);
+    }
+    if out.last().is_some_and(|b| b.is_infinite()) {
+        out.pop();
+    }
+    Some(out)
+}
+
+/// The first disagreement between declared and stated bounds, spelled for
+/// the evidence line; `None` when they are equal.
+fn bounds_disagree(declared: &[f64], stated: &[f64]) -> Option<String> {
+    if let Some(i) = declared
+        .iter()
+        .zip(stated)
+        .position(|(d, s)| d.to_bits() != s.to_bits())
+    {
+        return Some(format!(
+            "histogram bound {} is {}, registry declares {}",
+            i + 1,
+            stated[i],
+            declared[i]
+        ));
+    }
+    (declared.len() != stated.len()).then(|| {
+        format!(
+            "histogram states {} bound(s), registry declares {}",
+            stated.len(),
+            declared.len()
+        )
+    })
+}
+
 /// A short spelling of a JSON value for the evidence line.
 fn describe(v: &Value) -> String {
     match v {
@@ -136,6 +187,22 @@ impl KindObservation {
         origin: &str,
         producer: &str,
         declared: SubjectKind,
+        doc: Option<&Value>,
+    ) {
+        self.observe_declared(key, origin, producer, declared, None, doc);
+    }
+
+    /// [`observe`](Self::observe), with a `histogram` entry's declared
+    /// `buckets` (RFC 08 §2, v1.36): a payload that states its boundaries
+    /// must state these. `None` for every other kind, and for a histogram
+    /// declared by a slice this build could not read the bounds of.
+    pub fn observe_declared(
+        &mut self,
+        key: &str,
+        origin: &str,
+        producer: &str,
+        declared: SubjectKind,
+        declared_buckets: Option<&[f64]>,
         doc: Option<&Value>,
     ) {
         let producer_id = (origin.to_string(), producer.to_string());
@@ -199,6 +266,24 @@ impl KindObservation {
                     entry
                         .examples
                         .push_with(|| format!("text value is {}", describe(v)));
+                }
+            }
+            SubjectKind::Histogram => {
+                // The payload shape is the application profile's (RFC 11 §4);
+                // 08 §2 fixes only that it is a distribution and that stated
+                // boundaries equal the declared ones.
+                if !v.is_object() {
+                    entry.value_mismatches += 1;
+                    entry
+                        .examples
+                        .push_with(|| format!("histogram value is {}", describe(v)));
+                    return;
+                }
+                if let (Some(declared), Some(stated)) = (declared_buckets, stated_bounds(v))
+                    && let Some(why) = bounds_disagree(declared, &stated)
+                {
+                    entry.value_mismatches += 1;
+                    entry.examples.push_with(|| why);
                 }
             }
             SubjectKind::Counter => {
@@ -342,6 +427,63 @@ mod tests {
         obs.observe(KEY, "h-aaaaaaaaaaaa", "sysinfo", declared, Some(&doc));
     }
 
+    /// v1.36: a histogram is an object, and the boundaries it states —
+    /// as numbers or as `le` objects, `+Inf` implicit — equal the declared.
+    #[test]
+    fn a_histogram_is_judged_by_its_shape_and_its_stated_bounds() {
+        let key = "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/system/runqlat";
+        let declared = [0.001, 0.01, 0.1];
+        let judge = |doc: Value| {
+            let mut obs = KindObservation::new();
+            obs.observe_declared(
+                key,
+                "h-aaaaaaaaaaaa",
+                "sysinfo",
+                SubjectKind::Histogram,
+                Some(&declared),
+                Some(&doc),
+            );
+            judge_kind(&obs, 10.0)
+                .into_iter()
+                .filter(|f| f.check == CheckId::KindMismatch)
+                .map(|f| f.evidence)
+                .collect::<Vec<_>>()
+        };
+        // Equal bounds, both spellings, the tag agreeing: no finding.
+        assert!(judge(json!({"type": "histogram", "value": {"buckets": [0.001, 0.01, 0.1], "counts": [1, 2, 3, 4]}})).is_empty());
+        assert!(
+            judge(json!({"buckets": [{"le": 0.001}, {"le": 0.01}, {"le": 0.1}, {"le": "+Inf"}]}))
+                .is_empty()
+        );
+        // A distribution that states no bounds is not a disagreement.
+        assert!(judge(json!({"count": 4, "sum": 0.3})).is_empty());
+        // A different bound names the first that differs.
+        let f = judge(json!({"buckets": [0.001, 0.05, 0.1]}));
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert!(
+            f[0].contains("histogram bound 2 is 0.05, registry declares 0.01"),
+            "{}",
+            f[0]
+        );
+        // A missing bound is a count disagreement.
+        let f = judge(json!({"buckets": [0.001, 0.01]}));
+        assert!(
+            f[0].contains("states 2 bound(s), registry declares 3"),
+            "{}",
+            f[0]
+        );
+        // A scalar where a distribution was declared.
+        let f = judge(json!(12.5));
+        assert!(f[0].contains("histogram value is number 12.5"), "{}", f[0]);
+        // A tag naming another kind is the tag finding, not a value one.
+        let f = judge(json!({"type": "gauge", "value": 1.0}));
+        assert!(
+            f[0].contains("payload tags itself `gauge`, registry declares `histogram`"),
+            "{}",
+            f[0]
+        );
+    }
+
     fn mismatches(obs: &KindObservation) -> Vec<DoctorFinding> {
         judge_kind(obs, 10.0)
             .into_iter()
@@ -442,12 +584,24 @@ mod tests {
             SubjectKind::Bool,
             json!({"type": "boolean", "value": true}),
         );
+        // A tag outside the vocabulary is foreign, not a disagreement.
+        // (`histogram` was this test's foreign tag until v1.36 made it a
+        // kind; `summary` is one v1.36 deliberately did not ratify.)
         observe(
             &mut obs,
             SubjectKind::Bool,
-            json!({"type": "histogram", "value": true}),
+            json!({"type": "summary", "value": true}),
         );
         assert!(mismatches(&obs).is_empty());
+
+        // …and since v1.36 a `histogram` tag on a `bool` subject disagrees.
+        let mut obs = KindObservation::new();
+        observe(
+            &mut obs,
+            SubjectKind::Bool,
+            json!({"type": "histogram", "value": {}}),
+        );
+        assert_eq!(mismatches(&obs).len(), 1);
     }
 
     /// The value itself: a `text` that is a number, a `bool` that is a

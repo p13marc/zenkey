@@ -97,6 +97,7 @@ fn the_five_registration_states_render_five_distinct_glyph_word_pairs() {
             vars: vec![],
             unit: None,
             kind: None,
+            buckets: None,
             qos: None,
             encoding: None,
             ttl_s: None,

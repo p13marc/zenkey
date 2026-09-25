@@ -25,6 +25,50 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.36 (2026-09-25, the distribution and the hint)** — two additive
+> fields on `[[subject]]`, both filed by the reference application's
+> consumers before their consuming work started.
+>
+> **`kind = "histogram"` and `buckets`** ([08 §2](08-registry.md); the
+> judgement in [13 §3](13-observer-conformance.md)). v1.32 ratified four
+> scalar kinds, and a distribution was none of them: a producer publishing
+> one could declare `gauge` and fail `kind-mismatch` for behaving
+> correctly, or declare nothing and lose the check — and a latency
+> distribution otherwise has nowhere to go but N separate quantile gauges,
+> which cannot be aggregated (averaging quantiles is the classic wrong
+> answer) and whose boundaries are declared nowhere. The fifth kind is a
+> fixed-bucket distribution (Prometheus classic, OTLP explicit-bucket); the
+> payload tag is `histogram`, by the same `payload_tag` rule as the four.
+> `buckets` — strictly ascending, finite, `+Inf` implicit — is **required
+> iff** `kind = "histogram"` and refused otherwise. The judge's new
+> obligation is one it can actually meet: stated boundaries equal the
+> declared ones, the first differing bound named.
+>
+> **`semantic`** (08 §2). An optional, closed presentation hint —
+> `temperature`, `power`, `bytes`, `duration`, `ratio`, `count`,
+> `identity`, `state` — for the cases `kind` and `unit` leave ambiguous
+> (a `1`-unit ratio versus a count; an identity string versus an enum
+> state), after Home Assistant's `device_class`. An unknown value is a
+> lint; absent changes nothing.
+>
+> [11 §4](11-zensight-profile.md) records that the reference profile has
+> no `histogram` variant yet and owns its payload shape.
+>
+> **What deliberately did not happen.** No native or exponential
+> histograms: they declare a scale and an offset, not a bucket list, and
+> folding them in would make `buckets` conditional on a sub-kind before any
+> producer needs one — `kind = "exponential-histogram"` can land beside
+> this without colliding. No summaries or precomputed quantiles: they are
+> what the reference tree does today by accident, and ratifying them would
+> make the accident a contract. `buckets` is never optional. `buckets` is
+> not a column of `registry.lock`: the lock pins a subject's shape (class,
+> type, kind), and a changed boundary list is caught by the judge on the
+> wire, not by the build — a later amendment may pin it if an adopter
+> needs the build to refuse it. No judge reads `semantic`; it is never
+> load-bearing for conformance.
+>
+> *Amends: 08, 11, 13.*
+
 > **v1.35 (2026-09-06, the conditional field)** — the deferral of v1.20
 > ends, because the second adopter it waited for arrived.
 >
