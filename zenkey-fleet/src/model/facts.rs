@@ -127,6 +127,9 @@ pub struct SubjectFacts {
     /// v1.32), when declared — what the `kind-mismatch` judge compares the
     /// wire against (RFC 13 §3). Absent is *not asked*.
     pub kind: Option<Declared<SubjectKind>>,
+    /// A `histogram` subject's declared upper bounds (RFC 08 §2, v1.36) —
+    /// what the `kind-mismatch` judge holds stated boundaries to.
+    pub buckets: Option<zenkey::slice::Buckets>,
     pub qos: Option<Declared<QosProfile>>,
     pub encoding: Option<WireEncoding>,
     pub ttl_s: Option<i64>,
@@ -234,6 +237,7 @@ impl KeyFacts {
                 vars,
                 unit: decl.unit.clone(),
                 kind: decl.kind.clone(),
+                buckets: decl.buckets.clone(),
                 qos: decl.qos.clone(),
                 encoding: decl.encoding.clone(),
                 ttl_s: decl.ttl_s,
@@ -692,6 +696,7 @@ mod tests {
             vars: vec![],
             unit: None,
             kind: None,
+            buckets: None,
             qos: qos.map(Declared::parse),
             encoding: None,
             ttl_s: None,

@@ -687,7 +687,14 @@ async fn observe_traffic(
                                 .producer
                                 .clone()
                                 .unwrap_or_else(|| v.origin.trim_start_matches('@').to_string());
-                            kinds.observe(&s.key, &v.origin, &producer, *declared, doc.as_ref());
+                            kinds.observe_declared(
+                                &s.key,
+                                &v.origin,
+                                &producer,
+                                *declared,
+                                sf.buckets.as_ref().map(zenkey::slice::Buckets::as_slice),
+                                doc.as_ref(),
+                            );
                         }
                         let budget = decode_budget.entry(s.key.clone()).or_default();
                         if is_put && *budget < DECODE_BUDGET {

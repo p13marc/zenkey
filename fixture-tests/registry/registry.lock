@@ -483,6 +483,7 @@ subject	sysinfo	system/processes_total	telemetry	TelemetryPoint
 subject	sysinfo	system/processes_zombie	telemetry	TelemetryPoint
 subject	sysinfo	system/procs_blocked	telemetry	TelemetryPoint
 subject	sysinfo	system/procs_running	telemetry	TelemetryPoint
+subject	sysinfo	system/runqlat	telemetry	TelemetryPoint	histogram
 subject	sysinfo	system/saturation_score	telemetry	TelemetryPoint
 subject	sysinfo	system/uptime	telemetry	TelemetryPoint
 subject	sysinfo	tcp/{state}	telemetry	TelemetryPoint

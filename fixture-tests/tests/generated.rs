@@ -188,6 +188,26 @@ fn subject_metadata() {
         registry::AnySubject::Sysinfo(sysinfo::Subject::MemoryUsed).kind(),
         Some(SubjectKind::Gauge)
     );
+    // v1.36: a histogram carries its declared bounds, bit for bit; every
+    // other subject has none. `semantic` is the declared hint or `None`.
+    assert_eq!(
+        sysinfo::Subject::SystemRunqlat.kind(),
+        Some(SubjectKind::Histogram)
+    );
+    assert_eq!(
+        sysinfo::Subject::SystemRunqlat.buckets(),
+        Some(&[0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0][..])
+    );
+    assert_eq!(sysinfo::Subject::MemoryUsed.buckets(), None);
+    assert_eq!(
+        registry::AnySubject::Sysinfo(sysinfo::Subject::SystemUptime).semantic(),
+        Some(zenkey::slice::Semantic::Duration)
+    );
+    assert_eq!(
+        registry::AnySubject::Sysinfo(sysinfo::Subject::SystemRunqlat).buckets(),
+        sysinfo::Subject::SystemRunqlat.buckets()
+    );
+    assert_eq!(sysinfo::Subject::MemoryUsed.semantic(), None);
 }
 
 #[test]

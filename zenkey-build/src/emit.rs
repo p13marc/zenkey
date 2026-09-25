@@ -224,7 +224,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         // registry declares it; `None` is "unchecked", never "gauge".
         let _ = writeln!(
             out,
-            "        /// What the leaf value *is* — counter, gauge, text or bool — when\n        /// the registry declares it (RFC 08 §2, v1.32). `None` means unchecked."
+            "        /// What the leaf value *is* — counter, gauge, text, bool or histogram\n        /// — when the registry declares it (RFC 08 §2). `None` means unchecked."
         );
         let _ = writeln!(
             out,
@@ -237,12 +237,68 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 Some("gauge") => format!("Some({zk}::slice::SubjectKind::Gauge)"),
                 Some("text") => format!("Some({zk}::slice::SubjectKind::Text)"),
                 Some("bool") => format!("Some({zk}::slice::SubjectKind::Bool)"),
-                // The lint admits only the four tokens above.
+                Some("histogram") => format!("Some({zk}::slice::SubjectKind::Histogram)"),
+                // The lint admits only the five tokens above.
                 _ => "None".to_string(),
             };
             let _ = writeln!(
                 out,
                 "                Self::{} {{ .. }} => {kind},",
+                s.variant
+            );
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
+
+        // v1.36: a histogram's declared upper bounds, and the presentation hint.
+        let _ = writeln!(
+            out,
+            "        /// A `histogram` subject's declared upper bounds, `+Inf` implicit\n        /// (RFC 08 §2, v1.36). `None` for every other kind."
+        );
+        let _ = writeln!(
+            out,
+            "        pub fn buckets(&self) -> Option<&'static [f64]> {{"
+        );
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let b = match &s.buckets {
+                Some(b) => format!(
+                    "Some(&[{}])",
+                    b.iter()
+                        .map(|v| format!("{v:?}_f64"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                None => "None".to_string(),
+            };
+            let _ = writeln!(out, "                Self::{} {{ .. }} => {b},", s.variant);
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
+        let _ = writeln!(
+            out,
+            "        /// The declared presentation hint (RFC 08 §2, v1.36). `None` when\n        /// the registry declares none — consumers derive the obvious ones from `unit`."
+        );
+        let _ = writeln!(
+            out,
+            "        pub fn semantic(&self) -> Option<{zk}::slice::Semantic> {{"
+        );
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let sem = match s.semantic.as_deref() {
+                Some(tok) => {
+                    let v = zenkey::slice::Semantic::ALL
+                        .iter()
+                        .find(|k| {
+                            <zenkey::slice::Semantic as zenkey::slice::SliceToken>::token(k) == tok
+                        })
+                        .map(|k| format!("{k:?}"))
+                        .expect("the lint admits only the closed vocabulary");
+                    format!("Some({zk}::slice::Semantic::{v})")
+                }
+                None => "None".to_string(),
+            };
+            let _ = writeln!(
+                out,
+                "                Self::{} {{ .. }} => {sem},",
                 s.variant
             );
         }
@@ -1094,6 +1150,16 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             "kind",
             format!("Option<{zk}::slice::SubjectKind>"),
             "s.kind()",
+        ),
+        (
+            "buckets",
+            "Option<&'static [f64]>".to_string(),
+            "s.buckets()",
+        ),
+        (
+            "semantic",
+            format!("Option<{zk}::slice::Semantic>"),
+            "s.semantic()",
         ),
         ("cardinality", "Option<u64>".to_string(), "s.cardinality()"),
         ("qos", format!("{zk}::qos::QosProfile"), "s.qos()"),

@@ -1,6 +1,6 @@
 # 11 — Reference Application Profile: ZenSight
 
-**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29, v1.30, v1.31 and v1.32 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · informative chapter · *amended in v1.25, v1.26, v1.29, v1.30, v1.31, v1.32 and v1.36 — see [CHANGELOG.md](CHANGELOG.md)*
 
 > **Registry location note (2026-07).** The registry *data* this profile
 > describes (`registry/*.toml` for the ten producers and `@catalog`, plus
@@ -442,6 +442,12 @@ against the declared kind at build time, and the exporters derive
 Prometheus `TYPE` and the OTLP instrument from `kind`, not from the
 variant — which is what turns "a sensor published `oom_kills_total` as a
 gauge and nothing could have caught it" into a build failure.
+
+The `histogram` kind (v1.36) has no `TelemetryValue` variant yet. Its
+payload shape — the tag `histogram`, the buckets, the counts, the sum — is
+this profile's to define, and will be, in the amendment that ships the
+variant and its exporters (the reference application's issue #1151);
+08 §2 fixes only the tag and that stated boundaries equal the declared ones.
 
 ## 5. Mapping the incumbent control channels (moved from 05 §5 in v1.25)
 
