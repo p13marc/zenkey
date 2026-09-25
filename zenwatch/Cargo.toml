@@ -1,6 +1,6 @@
 [package]
 name = "zenwatch"
-version = "0.1.0"
+version = "0.2.0"
 # Publication policy (docs/redesign-2026-07.md §15, as zenctl and zengui):
 # a Forgejo release binary, never a crates.io crate.
 publish = false
