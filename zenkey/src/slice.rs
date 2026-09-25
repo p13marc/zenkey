@@ -788,6 +788,81 @@ impl DeprecationDecl {
     }
 }
 
+/// A live subject tail bound to the declaration it belongs to (#460): the
+/// declared entry, and what each `{var}` of its path bound to.
+///
+/// `vars` is in path order, a rest variable (`{name...}`) last with the
+/// remaining chunks joined by `/`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bound<'s> {
+    pub decl: &'s SubjectDecl,
+    pub vars: Vec<(&'s str, String)>,
+}
+
+impl Bound<'_> {
+    /// The value one variable bound to, when the path declares it.
+    #[must_use]
+    pub fn var(&self, name: &str) -> Option<&str> {
+        self.vars
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+impl RegistrySlice {
+    /// Bind a live subject tail — the chunks after
+    /// `v1/<origin>/<class>/<producer>/` — to the declared subject of
+    /// `class` it belongs to, and return its `{var}` bindings (#460).
+    ///
+    /// The grammar is the generated `parse`'s, so a runtime consumer holding
+    /// only a slice (from `introspect`) reads live keys exactly as a
+    /// compiled-in producer's own parser would: a literal chunk must be
+    /// equal, `{name}` binds one chunk, `{name...}` binds the one-or-more
+    /// remaining chunks. When several declarations match, **the most literal
+    /// wins** — per-position literal < var < rest, ties by path text
+    /// ([`crate::pattern::best_match`], the order the generated arms are
+    /// emitted in) — so `targets/total` binds to `targets/total` and not to
+    /// `{target}/total` when a slice declares both. `None` for a tail no
+    /// declaration of `class` matches. A declared path that does not parse
+    /// as a pattern (a foreign slice this build cannot read) never matches;
+    /// it is not an error to hold one.
+    #[must_use]
+    pub fn bind(&self, class: Class, tail: &[&str]) -> Option<Bound<'_>> {
+        let (decls, patterns): (Vec<&SubjectDecl>, Vec<crate::pattern::SubjectPattern>) = self
+            .subjects
+            .iter()
+            .filter(|s| s.class == Declared::Known(class))
+            .filter_map(|s| {
+                crate::pattern::SubjectPattern::parse(&s.path)
+                    .ok()
+                    .map(|p| (s, p))
+            })
+            .unzip();
+        let (idx, binds) = crate::pattern::best_match(&patterns, tail)?;
+        let decl = decls[idx];
+        // `best_match` borrows the variable names from the parsed patterns,
+        // which are local; re-borrow them from the declaration's own path so
+        // the result lives as long as the slice.
+        let vars = binds
+            .into_iter()
+            .map(|(name, value)| (var_name_in(&decl.path, name), value))
+            .collect();
+        Some(Bound { decl, vars })
+    }
+}
+
+/// The `{name}` / `{name...}` spelling of `name` inside `path`, as a slice of
+/// `path` — so a [`Bound`] can borrow its variable names from the
+/// declaration rather than from a pattern parsed for the lookup.
+fn var_name_in<'p>(path: &'p str, name: &str) -> &'p str {
+    path.split('/')
+        .filter_map(|c| c.strip_prefix('{'))
+        .map(|c| c.trim_end_matches('}').trim_end_matches("..."))
+        .find(|c| *c == name)
+        .expect("a bound variable is spelled in the path it was parsed from")
+}
+
 impl RegistrySlice {
     /// An empty slice with its required header. `convention` is the
     /// keyspace-v2 major version, `1`; the collections start empty and are
@@ -1429,6 +1504,119 @@ pub fn diff(served: &RegistrySlice, local: &RegistrySlice) -> Vec<SliceFinding> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bind_fixture() -> RegistrySlice {
+        let mut slice = RegistrySlice::new("1.0.0", "test", "bmc");
+        for (path, class) in [
+            ("{chassis}/thermal/{sensor}/celsius", Class::Telemetry),
+            (
+                "{chassis}/thermal/{sensor}/upper_warning_c",
+                Class::Telemetry,
+            ),
+            ("{target}/total", Class::Telemetry),
+            ("targets/total", Class::Telemetry),
+            ("{device}/{metric...}", Class::Telemetry),
+            ("chassis/{chassis}", Class::State),
+        ] {
+            slice.subjects.push(SubjectDecl::new(path, class));
+        }
+        slice
+    }
+
+    /// #460: one declaration per live tail, its bindings in path order.
+    #[test]
+    fn bind_finds_the_declaration_and_its_vars() {
+        let slice = bind_fixture();
+        let b = slice
+            .bind(
+                Class::Telemetry,
+                &["rack-a-1", "thermal", "inlet", "celsius"],
+            )
+            .expect("declared");
+        assert_eq!(b.decl.path, "{chassis}/thermal/{sensor}/celsius");
+        assert_eq!(
+            b.vars,
+            vec![
+                ("chassis", "rack-a-1".to_string()),
+                ("sensor", "inlet".to_string())
+            ]
+        );
+        assert_eq!(
+            b.var("sensor"),
+            Some("inlet"),
+            "a value with `-` binds whole"
+        );
+        // A sibling field of the same family binds to its own declaration.
+        let w = slice
+            .bind(
+                Class::Telemetry,
+                &["rack-a-1", "thermal", "inlet", "upper_warning_c"],
+            )
+            .unwrap();
+        assert_eq!(w.decl.path, "{chassis}/thermal/{sensor}/upper_warning_c");
+    }
+
+    /// Most literal wins, exactly as the generated parse orders its arms.
+    #[test]
+    fn bind_prefers_the_most_literal_declaration() {
+        let slice = bind_fixture();
+        let lit = slice.bind(Class::Telemetry, &["targets", "total"]).unwrap();
+        assert_eq!(lit.decl.path, "targets/total");
+        assert!(lit.vars.is_empty());
+        let var = slice.bind(Class::Telemetry, &["web-1", "total"]).unwrap();
+        assert_eq!(var.decl.path, "{target}/total");
+        assert_eq!(var.var("target"), Some("web-1"));
+    }
+
+    /// A rest variable binds the remaining chunks, joined; it needs at least one.
+    #[test]
+    fn bind_joins_a_rest_variable() {
+        let slice = bind_fixture();
+        let b = slice
+            .bind(Class::Telemetry, &["x-sw1", "if", "ge-0", "in_octets"])
+            .unwrap();
+        assert_eq!(b.decl.path, "{device}/{metric...}");
+        assert_eq!(
+            b.var("device"),
+            Some("x-sw1"),
+            "a slugged `x-…` chunk is just a value"
+        );
+        assert_eq!(b.var("metric"), Some("if/ge-0/in_octets"));
+        assert_eq!(b.vars.last().map(|(n, _)| *n), Some("metric"));
+        assert!(slice.bind(Class::Telemetry, &["lonely"]).is_none());
+    }
+
+    /// Undeclared, or declared under another class, is `None`.
+    #[test]
+    fn bind_is_none_for_an_undeclared_tail_or_another_class() {
+        let slice = bind_fixture();
+        assert!(
+            slice
+                .bind(Class::Events, &["rack-a-1", "thermal", "inlet", "celsius"])
+                .is_none()
+        );
+        assert!(slice.bind(Class::State, &["targets", "total"]).is_none());
+        let state = slice.bind(Class::State, &["chassis", "rack-a-1"]).unwrap();
+        assert_eq!(state.var("chassis"), Some("rack-a-1"));
+        assert!(slice.bind(Class::Telemetry, &[]).is_none());
+    }
+
+    /// A declared path this build cannot parse never matches, and never panics.
+    #[test]
+    fn bind_skips_an_unparsable_declaration() {
+        let mut slice = RegistrySlice::new("1.0.0", "test", "odd");
+        slice
+            .subjects
+            .push(SubjectDecl::new("{rest...}/after", Class::Telemetry));
+        slice
+            .subjects
+            .push(SubjectDecl::new("ok/{x}", Class::Telemetry));
+        assert!(slice.bind(Class::Telemetry, &["a", "after"]).is_none());
+        assert_eq!(
+            slice.bind(Class::Telemetry, &["ok", "1"]).unwrap().var("x"),
+            Some("1")
+        );
+    }
 
     // Corpus-level coverage ("every compiled slice parses") lives in
     // zenkey-build's fixture tests — this crate no longer bundles a registry.
