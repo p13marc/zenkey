@@ -48,6 +48,8 @@ lettre = { workspace = true }
 zenkey-build = { workspace = true }
 
 [dev-dependencies]
+# The seeding test (#464) publishes through an advanced publisher's cache.
+zenoh-ext = { workspace = true }
 trycmd = { workspace = true }
 snapbox = { workspace = true }
 tempfile = { workspace = true }

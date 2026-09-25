@@ -7,11 +7,13 @@
 
 mod util;
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
 use zenkey_fleet::{CondState, Fleet, RenderSource, declare_publication};
+use zenoh_ext::AdvancedPublisherBuilderExt;
 use zenwatch::config::DisciplineConfig;
 use zenwatch::engine::{Engine, run_on};
 use zenwatch::render::RenderConfig;
@@ -212,5 +214,121 @@ async fn an_alert_put_is_one_firing_per_sink_a_re_put_is_nothing_and_a_delete_re
     );
     assert_eq!(summary.delivered, 6, "two sinks, three changes");
     assert_eq!(summary.failed, 0);
+    assert_eq!(summary.dropped, 0);
+}
+
+/// An alert already firing when zenwatch starts is delivered without any
+/// further put (#464): the `alerts` selector is a SEEDED watch, so the
+/// document a producer's cache still holds replays through the same
+/// transition path — one firing per sink, the baseline stated — and the
+/// tombstone that follows is delivered as the resolve it is. Before the
+/// fix, a notifier restarted mid-incident learned nothing until the next
+/// content change, and dropped the resolve too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_alert_firing_before_the_engine_starts_is_seeded_and_then_resolved() {
+    let (a, b) = util::timestamping_pair().await;
+    // The producer's side, FIRST: a cached advanced publisher — the `@adv`
+    // cache is what the history seed asks — with the alert already put.
+    let publisher = a
+        .declare_publisher(KEY)
+        .cache(zenoh_ext::CacheConfig::default().max_samples(1))
+        .encoding("application/json")
+        .await
+        .expect("advanced publisher");
+    let doc = br#"{"severity":"critical","rule":"expect-service-active","labels":{"unit":"forgejo.service","host":"h-3fa9c2d41b7e"},"message":"expected service forgejo.service active"}"#;
+    publisher.put(doc.to_vec()).await.expect("cached put");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let ops = Arc::new(Mutex::new(Vec::new()));
+    let sinks = Arc::new(vec![Sink::capturing("ops", Arc::clone(&ops))]);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let engine = tokio::spawn(async move {
+        let rules = vec![
+            Rule::from_config(&zenwatch::config::RuleConfig {
+                name: "fleet-alerts".into(),
+                rule: "alerts v1/*/state/*/alert/*".into(),
+                severity: None,
+                labels: BTreeMap::new(),
+                sinks: vec!["ops".into()],
+                for_s: None,
+            })
+            .unwrap(),
+        ];
+        let render = RenderConfig::default();
+        let discipline = DisciplineConfig {
+            group_window_s: 0.0,
+            ..DisciplineConfig::default()
+        };
+        run_on(
+            Engine {
+                fleet: Fleet::new(&b, ""),
+                slices: None,
+                timeout: Duration::from_secs(2),
+                tick: Duration::from_secs(1),
+                rules: &rules,
+                sinks,
+                render: &render,
+                once: false,
+                ready: Some(ready_tx),
+                discipline: &discipline,
+                state_file: None,
+                state_max_entries: 4096,
+                publish: false,
+                doctor: None,
+            },
+            async move {
+                let _ = stop_rx.await;
+            },
+        )
+        .await
+    });
+    tokio::time::timeout(util::SETTLE, ready_rx)
+        .await
+        .expect("the engine came up")
+        .expect("ready");
+
+    // 1. Nothing is put after the engine started, and the firing arrives.
+    let got = settled(&[Arc::clone(&ops)], 1).await;
+    let n = &got[0][0].notification;
+    assert_eq!(
+        n.state,
+        CondState::Firing,
+        "seeded from the producer's cache"
+    );
+    assert_eq!(
+        n.prior, None,
+        "first sight after a restart: the baseline is stated"
+    );
+    assert_eq!(n.kind, NoticeKind::Alert);
+    assert_eq!(
+        n.severity, "critical",
+        "the producer's severity, lifted from the seed"
+    );
+    assert!(
+        n.evidence.contains("rule=expect-service-active"),
+        "{}",
+        n.evidence
+    );
+    assert_eq!(
+        n.labels.get("unit").map(String::as_str),
+        Some("forgejo.service")
+    );
+
+    // 2. The tombstone resolves an alert this process never saw put live.
+    publisher.delete().await.expect("tombstone");
+    let got = settled(&[Arc::clone(&ops)], 2).await;
+    let n = &got[0][1].notification;
+    assert_eq!(n.state, CondState::Ok);
+    assert_eq!(n.prior, Some(CondState::Firing));
+    assert_eq!(n.kind, NoticeKind::Resolved);
+
+    let _ = stop_tx.send(());
+    let summary = tokio::time::timeout(util::SETTLE, engine)
+        .await
+        .expect("the engine stopped")
+        .expect("no panic")
+        .expect("a clean run");
+    assert_eq!(summary.notices, 2, "one firing from the seed, one resolve");
     assert_eq!(summary.dropped, 0);
 }
