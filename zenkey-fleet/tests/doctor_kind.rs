@@ -44,6 +44,22 @@ type = "TelemetryPoint"
 kind = "counter"
 "#;
 
+/// A counter under a device subject (RFC 06 §3), for the device-token reset.
+const DEVICE_SLICE: &str = r#"
+[registry]
+version = "1.0"
+app = "t"
+convention = 1
+[producer]
+name = "demo"
+[[subject]]
+path = "{device}/rx_octets_total"
+class = "telemetry"
+type = "TelemetryPoint"
+kind = "counter"
+cardinality = 4
+"#;
+
 /// …and the same subject declaring nothing about its kind.
 const UNKINDED_SLICE: &str = r#"
 [registry]
@@ -262,6 +278,77 @@ async fn a_counter_reset_across_an_alive_cycle_is_not_a_finding() {
     assert!(
         kind_findings(&report).is_empty(),
         "a reset across an alive cycle is the sanctioned one: {:?}",
+        report.findings
+    );
+}
+
+/// The second sanctioned reset (RFC 08 §2, v1.39): a counter under a device
+/// subject drops to zero right after that *device's* token cycled — the
+/// producer's own token never moved — and it is not a finding. The listen
+/// phase subscribes the device tokens' own selector to see it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_counter_reset_across_a_device_token_cycle_is_not_a_finding() {
+    let (a, b) = peer_pair().await;
+    let local = zenkey::parse_slice(DEVICE_SLICE).expect("slice");
+
+    const DEVICE_KEY: &str = "v1/h-abababababab/telemetry/demo/rf0/rx_octets_total";
+    const PRODUCER_ALIVE: &str = "v1/h-abababababab/state/demo/alive";
+    const DEVICE_ALIVE: &str = "v1/h-abababababab/state/demo/device/rf0/alive";
+    let publication = declare_publication(&a, DEVICE_KEY, QosProfile::Sampled, None)
+        .await
+        .expect("declare");
+    let session = a.clone();
+    let t = tokio::spawn(async move {
+        // The producer stays up for the whole window: only the device cycles.
+        let _producer = session
+            .liveliness()
+            .declare_token(PRODUCER_ALIVE)
+            .await
+            .expect("producer token");
+        let mut device = session
+            .liveliness()
+            .declare_token(DEVICE_ALIVE)
+            .await
+            .expect("device token");
+        for _ in 0..20 {
+            for _ in 0..3 {
+                if publication.send(b"10".to_vec(), None).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            // The device re-enumerates: its token cycles, the series restarts.
+            device.undeclare().await.expect("undeclare device token");
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            device = session
+                .liveliness()
+                .declare_token(DEVICE_ALIVE)
+                .await
+                .expect("device token again");
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            for _ in 0..3 {
+                if publication.send(b"0".to_vec(), None).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    });
+
+    let report = run_doctor(
+        &Fleet::new(&b, ""),
+        Some(&zenkey_fleet::SliceSet::from_slices(vec![local])),
+        &spec(3),
+    )
+    .await
+    .expect("run_doctor");
+    t.abort();
+
+    let obs = report.observation.as_ref().expect("observation ran");
+    assert!(obs.samples > 0, "the window saw the fixture's traffic");
+    assert!(
+        kind_findings(&report).is_empty(),
+        "a reset across the device's own token cycle is sanctioned (v1.39): {:?}",
         report.findings
     );
 }

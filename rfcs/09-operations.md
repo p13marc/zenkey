@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31 and v1.33 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33 and v1.38 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.
@@ -368,8 +368,26 @@ the convention's own algebra:
    corollary: `**` cannot cross `@catalog` any more than `@adv` (fact 2 and
    fact 1 together), so a catalog on the advanced tier needs
    `@catalog/**/@adv/**` spelled out.
+6. **Deny is by inclusion, so a deny rule stops only a caller who spells a
+   key at least as narrow as it** (v1.38). Fact 1 read from the other side:
+   the router denies a message when a deny rule's key expression *includes*
+   the message's, and a query on `…/v1/*/@rpc/**` is not included by a rule
+   on `…/v1/*/@rpc/<producer>/**`, however literal the rule. Under a
+   permissive default that query is forwarded to every queryable it
+   intersects, and only the concrete-keyed *replies* are denied — after the
+   query has crossed the face and been served; under `default_permission:
+   "deny"` it crosses whenever an allow rule includes it, which the
+   console's fleet grant (`…/v1/*/@rpc/**`, below) does. Two consequences.
+   A constrained face (§4) denies a plane by the *widest* pattern that can
+   reach it — `**/@rpc/**`: the verbatim chunk must be spelled by any query
+   that reaches the plane, and `**` on either side includes every spelling
+   around it — never by a producer-scoped literal. And no ACL refuses a
+   broadcast *write*: that refusal is the server's
+   ([05 §2.1](05-control-rpc.md), `error/fanout-forbidden`), and
+   `no-remote-actions` below is the second lock on the door, for the
+   callers who spell the key.
 
-Five facts, ~30 rules, 8 subjects and a policy list for a six-host fleet,
+Six facts, ~30 rules, 8 subjects and a policy list for a six-host fleet,
 every `key_exprs` entry carrying an `h-<12hex>` no human can proofread —
 which is why the recipe went undeployed for a year. Since v1.33 the
 reference tooling generates it: `zenctl acl gen --enrollment <file>` expands
@@ -483,8 +501,8 @@ access_control: {
                   "zensight/v1/**/@adv/**"] },
 
     // dangerous procedures deniable per-key, because the key IS the target
-    // (deny wins; sound under default-deny — an origin-`**` query that would
-    // sidestep this literal also matches no allow rule):
+    // (deny wins for a caller who spells this key; a broader `…/@rpc/**`
+    // query is forwarded — fact 6 — and the server refuses it, 05 §2.1):
     { id: "no-remote-actions", permission: "deny",
       messages: ["query"],
       key_exprs: ["zensight/v1/*/@rpc/systemd/action"] },

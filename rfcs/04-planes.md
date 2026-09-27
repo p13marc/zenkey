@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29, v1.30, v1.31 and v1.32 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29, v1.30, v1.31, v1.32 and v1.39 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -669,6 +669,14 @@ like data selectors:
 - The token *key* is the identity record (origin + producer + device) —
   the pattern proven by rmw_zenoh's `@ros2_lv` discovery space and
   Keelson's presence tokens ([10-prior-art.md](10-prior-art.md)).
+- **A device token SHOULD cycle on that device's own discontinuity**
+  (v1.39): the device re-enumerated, its counters observed to restart, the
+  producer reopened it. A producer that tracks devices restarts none of
+  itself when one of them does, so its own token cannot say so — and the
+  cycle of `…/device/<device>/alive` is the one reset
+  [08 §2](08-registry.md) sanctions for the counters under that device's
+  subject, which is what puts a device's restart on the wire the way a
+  producer's is.
 - Richer "who am I" registration (versions, capabilities, config hash)
   is ordinary state: `state/<producer>/sensor` (a registration document),
   refreshed on the state cadence.

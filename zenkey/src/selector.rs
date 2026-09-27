@@ -117,6 +117,20 @@ pub fn all_liveliness(scope: Scope) -> Selector {
     ))
 }
 
+/// Device liveliness tokens in scope (RFC 04 §5):
+/// `v1/<scope>/state/*/device/*/alive` — the tokens a producer declares for
+/// the downstream devices it tracks. A different arity from
+/// [`all_liveliness`]'s set, so neither includes the other. Read by a judge
+/// that needs a device's own restart: a counter under a device subject may
+/// reset across it (RFC 08 §2, v1.39).
+#[must_use]
+pub fn all_device_liveliness(scope: Scope) -> Selector {
+    Selector::from_canonical(format!(
+        "{VERSION_CHUNK}/{}/{CLASS_STATE}/*/device/*/{SUBJECT_ALIVE}",
+        scope.chunk()
+    ))
+}
+
 /// One producer's state subtree in scope:
 /// `v1/<scope>/state/<producer>[/<prefix…>]/**`.
 #[must_use]
@@ -283,6 +297,10 @@ mod tests {
         assert_eq!(all_telemetry(Scope::fleet()), "v1/*/telemetry/**");
         assert_eq!(all_events(Scope::fleet()), "v1/*/events/**");
         assert_eq!(all_liveliness(Scope::fleet()), "v1/*/state/*/alive");
+        assert_eq!(
+            all_device_liveliness(Scope::fleet()),
+            "v1/*/state/*/device/*/alive"
+        );
         let o = RemoteOrigin::parse("h-3fa9c2d41b7e").unwrap();
         assert_eq!(all_state(Scope::origin(&o)), "v1/h-3fa9c2d41b7e/state/**");
         assert_eq!(all_under(Scope::origin(&o)), "v1/h-3fa9c2d41b7e/**");
