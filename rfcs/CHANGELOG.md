@@ -25,6 +25,36 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.43 (2026-09-27, where a value may go)** — the two markers a
+> constrained link needs, and the grant the sub-host paragraph promised.
+>
+> **[08 §2](08-registry.md).** `exposure = "host" | "link" | "fleet"` on
+> `[[subject]]` and `[[procedure]]`, default `fleet`: how far a surface may
+> travel, as a property of the entry — the same counter is `host` on every
+> node that carries it. `sensitive = true` on a write procedure: the
+> request carries a secret, and a generated ACL denies it to every
+> principal until a grant names it (RFC 8341's `default-deny-all`, as
+> data; the ACL half of 05 §5.1's sensitive parameter).
+>
+> **[09 §3](09-operations.md).** `writes = […]` on a principal: per-resource
+> write grants, `<producer>/<procedure>` patterns under `@rpc/`, one allow
+> and a **carved** deny — the declared writes a grant does not include and
+> nothing else, because deny wins and a carve-out has to be an absence.
+> Needs the registry; without one the deny stays whole and the generator
+> says why. A sensitive procedure stays denied, `remote_actions` or not,
+> unless a pattern includes it.
+>
+> **[09 §4](09-operations.md).** The constrained-face profile, generated:
+> `acl gen --face constrained --link-protocol … --link-interval …` emits
+> the face's `access_control` (a permissive default, because the
+> permission is node-global; a deny per `host` subject or per wholly-host
+> class; the planes denied by their widest spelling) and its
+> `downsampling` (one rule per `link` subject, none intersecting), and
+> names what still crosses. Written down after the reference adopter kept
+> the same facts as 300 lines of comments in three router configs.
+>
+> *Amends: 08, 09.*
+
 > **v1.42 (2026-09-27, the rest of the config pattern)** — §5's
 > skeleton grows into a configuration convention.
 >

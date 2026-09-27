@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33, v1.38 and v1.42 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33, v1.38, v1.42 and v1.43 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.
@@ -567,6 +567,34 @@ per-message-data ban ([03-grammar.md §2](03-grammar.md)) does not bite
 [08 §2](08-registry.md)'s cardinality budget covers it. Put the discriminator
 where the ACL can see it: in the key.
 
+**Per-resource grants (v1.43).** The write story above is one switch —
+`remote_actions` drops `no-remote-actions`, otherwise every declared write
+is denied — and the sub-host paragraph promised a rule that allows
+`…/config/*/eth1/set` and denies `…/config/*/mgmt0/set` without saying how
+an enrollment asks for one. It asks with `writes`:
+
+```toml
+[[principal]]
+cn = "radio-ops"
+role = "console"
+writes = ["modem/config/*/power/set", "modem/config/*/confirm"]
+```
+
+Each pattern is `<producer>/<procedure>` relative to `@rpc/`, spelled as the
+registry spells the procedure with every `{var}` a `*`, or narrower. The
+generator emits one allow (`writes-<subject>`: `query`, both flows, every
+pattern lifted under `v1/*/@rpc/`) and **carves the deny**: the principal's
+`no-remote-actions` lists the declared writes a grant does not include, and
+nothing else — because deny wins, a carve-out has to be an absence (fact 6),
+which is also why a grant needs the registry: without one the deny is the
+unnarrowed `set` leaf, nothing can be subtracted from it, and the generator
+keeps the deny whole and says why rather than emit a grant that would never
+decide. A `sensitive` procedure ([08 §2](08-registry.md)) is in the deny for
+every principal, including one with `remote_actions = true`, unless a
+`writes` pattern includes it. A watch refuses `writes` as it refuses
+`remote_actions`. `--explain` answers a per-resource question the same way
+it answers any other — which rule, which direction.
+
 **A configuration resource, worked (v1.42).** [05 §5.1](05-control-rpc.md)'s
 convention as a producer registers it and an ACL then grants it — a radio
 driver, one device chunk as the resource, the group as the next chunk, so
@@ -689,6 +717,44 @@ two real mechanisms, both selecting on the same class prefixes:
   `zensight/v1/*/state/*/alert/*` to
   `{ priority: "interactive_high", congestion_control: "block" }`. The
   interceptor ignores API-level QoS — deployment policy wins.
+
+**The reference tooling generates the face (v1.43).** `zenctl acl gen
+--enrollment <file> --registry <dir> --face constrained --link-protocol
+unixsock-stream --link-interval 60` emits the two blocks above for one
+constrained face, from the registry's `exposure` markers
+([08 §2](08-registry.md)) rather than from a hand-kept list:
+
+- `access_control` with **`default_permission: "allow"`**, because the
+  permission is node-global — a face-scoped deny under a `deny` default
+  would black-hole every other face, so a carve-out on a constrained link
+  has to be a *deny* under a permissive default, and the host bus keeps
+  flowing by absence. One subject, selected by the link (`link_protocols`
+  or `interfaces` — a unixsock-stream link reports no interface name in
+  zenoh 1.10, so a modem lane is selected by protocol).
+- A deny per `host`-exposed subject, by its pattern (`{var}` as `*`) — or,
+  when every subject of a class under a producer is `host`, one deny on
+  `v1/*/<class>/<producer>/**`, which also covers the framework keys under
+  it; every message kind the class can carry, both flows spelled.
+- The planes denied by the **widest** spelling — `**/@rpc/**` when any
+  procedure is `host`, `**/@media/**` and `**/@blob/**` always — and the
+  admin space and the sidecars (`@/**`, `**/@adv/**`) always: fact 6, a
+  plane deny that names a producer is crossed by a broader query.
+- `downsampling`, **egress**, `put`, one rule per `link`-exposed subject at
+  `1 / --link-interval` Hz; one rule per key and never two that intersect,
+  because zenoh resolves a key to the first intersecting rule and gives
+  each rule one timer. `--link-interval none` keeps the `link` subjects
+  home too — the link where no rate is affordable, a billed satellite
+  channel — and emits no downsampling block.
+- A note naming what still **crosses**: every `fleet` entry and every
+  unmarked one. The default is `fleet`, so an unmarked registry crosses
+  whole, and the profile says so rather than deny what nobody classified —
+  the registry is where the classification belongs.
+
+`--check --against` compares a face plan as it compares the principal
+plan; `--explain <face-id> <key> <message>` answers over it. The two blocks
+merge at the router config's top level beside the principal block's: they
+are separate policies on separate subjects, and neither reads the other's
+rules.
 
 Advanced-tier traffic deserves a thought on constrained links: per-key
 miss-detection heartbeats and declare-time history bursts are real bytes

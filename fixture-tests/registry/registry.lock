@@ -8,7 +8,12 @@
 # declared error name (RFC 08 §2, v1.40), which retires like a subject.
 # A `when-subject` / `when-procedure` line pins an entry's gate (v1.35):
 # a gate is not a shape, so its every change is stale, never incompatible.
+# An `exposure-*` or `sensitive-procedure` line pins a marker (v1.43),
+# stale on every change for the same reason.
 error	systemd	unit-not-found
+exposure-procedure	systemd	expectations/set	host
+exposure-subject	netlink	sockets/tcp/connlat_us_p50	host
+exposure-subject	sysinfo	memory/used	link
 procedure	catalog	introspect	read	-	RegistrySlice
 procedure	catalog	link	write	-	OperatorAssertion
 procedure	catalog	names	read	-	Vec<NameVal>

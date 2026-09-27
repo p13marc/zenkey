@@ -244,6 +244,7 @@ path = "memory/used"
 class = "telemetry"
 type = "TelemetryPoint"
 kind = "gauge"
+exposure = "link"
 since = "1.1"
 description = "used RAM (bytes)"
 

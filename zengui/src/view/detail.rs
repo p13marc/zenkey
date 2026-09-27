@@ -530,6 +530,10 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
                 let tokens: Vec<String> = w.iter().map(zenkey::slice::Predicate::token).collect();
                 meta.push_str(&format!(" · when {}", tokens.join(" and ")));
             }
+            if let Some(e) = &s.exposure {
+                // RFC 08 §2 (v1.43): how far the value may travel.
+                meta.push_str(&format!(" · exposure {}", e.token()));
+            }
             col = col.push(kit::muted(meta));
             if let Some(n) = &s.gate_note {
                 col = col.push(kit::muted(format!("gate: {n}")));

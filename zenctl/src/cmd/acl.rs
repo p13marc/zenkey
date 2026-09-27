@@ -1,5 +1,8 @@
 //! `zenctl acl gen` (#392): RFC 09 §3's grant matrix, generated from an
-//! enrollment file — and checked, and explained.
+//! enrollment file — and checked, and explained. With `--face`, RFC 09 §4's
+//! constrained-face profile instead (v1.43): the enrollment still names the
+//! base, but the two blocks are planned from the registry's `exposure`
+//! markers, because a face is selected by its transport, not enrolled.
 //!
 //! Thin by design. The matrix, the four facts and the fifth, the registry
 //! narrowing, the check and the explanation are all judgement over values
@@ -103,9 +106,10 @@ pub(crate) fn warning_note(w: &zenkey_fleet::report::AclWarning) -> Note {
         .map_or(String::new(), |p| format!("{p}: "));
     let text = format!("{}{} ({})", who, w.text, w.cite);
     match w.kind {
-        AclWarningKind::WriteSetNotNarrowed | AclWarningKind::PlaneNotDeclared => {
-            Note::coverage(text)
-        }
+        AclWarningKind::WriteSetNotNarrowed
+        | AclWarningKind::PlaneNotDeclared
+        | AclWarningKind::GrantNotNarrowed
+        | AclWarningKind::FaceCrosses => Note::coverage(text),
         _ => Note::caveat(text),
     }
 }
@@ -125,6 +129,10 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
         against,
         explain,
         allow_zid_subjects,
+        face,
+        link_protocol,
+        link_interface,
+        link_interval,
         bus,
     } = cli;
 
@@ -154,12 +162,48 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
     } else {
         bus.slices_optional().await?
     };
-    let plan = zenkey_fleet::plan_acl(
-        &enrollment,
-        &base,
-        slices.as_ref(),
-        zenkey_fleet::AclOptions { allow_zid_subjects },
-    );
+    let plan = match face {
+        None => zenkey_fleet::plan_acl(
+            &enrollment,
+            &base,
+            slices.as_ref(),
+            zenkey_fleet::AclOptions { allow_zid_subjects },
+        ),
+        Some(crate::cli::Face::Constrained) => {
+            // The face is the registry's exposure markers made into two
+            // blocks (RFC 09 §4): without a registry there is nothing to
+            // plan from, and a face planned from nothing would deny only the
+            // planes and call the rest "crossing".
+            let Some(slices) = slices.as_ref() else {
+                return Err(unaskable!(
+                    "--face plans from the registry's `exposure` markers (RFC 08 §2); pass \
+                     --registry <dir> (or a context that names one)"
+                ));
+            };
+            if link_protocol.is_empty() && link_interface.is_empty() {
+                return Err(unaskable!(
+                    "--face needs the transport that selects it: --link-protocol \
+                     <PROTOCOL> (a unixsock-stream modem lane) or --link-interface <IFACE>"
+                ));
+            }
+            let interval = match link_interval.expect("clap: --face requires --link-interval") {
+                crate::cli::LinkIntervalArg::None => zenkey_fleet::report::LinkInterval::None,
+                crate::cli::LinkIntervalArg::EverySecs(n) => {
+                    zenkey_fleet::report::LinkInterval::EverySecs(n)
+                }
+            };
+            zenkey_fleet::plan_face(
+                slices,
+                &base,
+                &zenkey_fleet::report::FaceSpec {
+                    id: "constrained-link".into(),
+                    link_protocols: link_protocol,
+                    interfaces: link_interface,
+                    interval,
+                },
+            )
+        }
+    };
 
     if check {
         let against = against.expect("clap: --check requires --against");

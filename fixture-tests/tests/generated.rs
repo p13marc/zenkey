@@ -742,6 +742,45 @@ fn error_names_are_constants() {
 /// predicates as typed `(kind, name)` pairs, empty where unconditional, and
 /// the note beside them — on subjects, through `AnySubject`, and on
 /// procedures.
+/// `exposure` and `sensitive` (RFC 08 §2, v1.43) are accessors on subjects,
+/// procedures and the `AnySubject` table; an undeclared exposure is `None`,
+/// which a reader treats as `fleet`.
+#[test]
+fn exposure_and_sensitive_are_accessors() {
+    use zenkey::slice::Exposure;
+    use zenkey_fixture_tests::registry::{netlink, systemd};
+    assert_eq!(
+        netlink::Subject::SocketsTcpConnlatUsP50.exposure(),
+        Some(Exposure::Host)
+    );
+    assert_eq!(
+        sysinfo::Subject::MemoryUsed.exposure(),
+        Some(Exposure::Link)
+    );
+    assert_eq!(sysinfo::Subject::MemoryAvailable.exposure(), None);
+    assert_eq!(
+        registry::AnySubject::Sysinfo(sysinfo::Subject::MemoryUsed).exposure(),
+        Some(Exposure::Link)
+    );
+    assert_eq!(
+        systemd::ProcedureId::ExpectationsSet.exposure(),
+        Some(Exposure::Host)
+    );
+    assert!(!systemd::ProcedureId::ExpectationsSet.sensitive());
+    assert_eq!(systemd::ProcedureId::Introspect.exposure(), None);
+    // And the slice a consumer reads carries the same.
+    let slice = zenkey::parse_slice(systemd::REGISTRY_TOML).expect("slice");
+    let set = slice
+        .procedures
+        .iter()
+        .find(|p| p.path == "expectations/set")
+        .unwrap();
+    assert_eq!(
+        set.exposure,
+        Some(zenkey::slice::Declared::Known(Exposure::Host))
+    );
+}
+
 #[test]
 fn when_predicates_are_accessors() {
     use zenkey::slice::PredicateKind;

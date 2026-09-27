@@ -137,6 +137,13 @@ pub struct PrincipalSpec {
     /// refuses this.
     #[serde(default)]
     pub remote_actions: bool,
+    /// Per-resource write grants (RFC 09 §3, v1.43): `<producer>/<procedure>`
+    /// patterns under `@rpc/`, every `{var}` a `*` or narrower. Each is
+    /// allowed, and the deny is **carved** to the declared writes no grant
+    /// includes — which needs the registry; without one the deny stays
+    /// whole and the plan says so. A watch refuses this.
+    #[serde(default)]
+    pub writes: Vec<String>,
 }
 
 /// The roles RFC 09 §3's grant matrix knows.
@@ -150,6 +157,10 @@ pub enum Role {
     Catalog,
     /// The operator console: reads every plane, acts only through RPC.
     Console,
+    /// A constrained link's face (RFC 09 §4, v1.43): selected by transport,
+    /// never enrolled — an enrollment naming it is refused; `acl gen --face`
+    /// plans it from the registry's exposure markers.
+    Link,
     /// A desired-state author: writes one service origin's `state`
     /// subtree and nothing else (RFC 07 §3).
     DesiredAuthor,
@@ -167,6 +178,7 @@ impl Role {
             Role::Console => "console",
             Role::DesiredAuthor => "desired-author",
             Role::Watch => "watch",
+            Role::Link => "link",
         }
     }
 }
@@ -264,8 +276,11 @@ impl AclPermission {
 pub struct AclPlan {
     /// The base every key expression below was composed under.
     pub base: String,
-    /// Always `deny` — the recipe has no allow-by-default form (RFC 09 §3
-    /// fact 4).
+    /// `deny` for the principal plan — the recipe has no allow-by-default
+    /// form (RFC 09 §3 fact 4). `allow` for a constrained face (RFC 09 §4,
+    /// v1.43): the permission is node-global, so a face-scoped deny has to
+    /// live under a permissive default or it would black-hole every other
+    /// face.
     pub default_permission: AclPermission,
     /// What the registry said, when one was asked. **Absent** when none
     /// was: the planes are then what the enrollment claims and the write set
@@ -275,6 +290,10 @@ pub struct AclPlan {
     pub rules: Vec<AclRule>,
     pub subjects: Vec<AclSubject>,
     pub policies: Vec<AclPolicy>,
+    /// A constrained face's `downsampling` rules (RFC 09 §4, v1.43); empty
+    /// for the principal plan, whose subjects are identities.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub downsampling: Vec<AclDownsample>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<AclWarning>,
     /// Principals the plan left out, and why. A refused principal is
@@ -294,6 +313,10 @@ pub struct AclRegistryFacts {
     pub blob_producers: Vec<String>,
     /// Every `kind = "write"` procedure, as `producer/path`.
     pub write_procedures: Vec<String>,
+    /// The writes declared `sensitive = true` (RFC 08 §2, v1.43), as
+    /// `producer/path`: denied to every principal until a grant names one.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub sensitive_procedures: Vec<String>,
 }
 
 /// One rule, as `AclConfigRule` will carry it.
@@ -322,6 +345,47 @@ pub struct AclSubject {
     /// Prototyping only (`--allow-zid-subjects`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub zids: Vec<String>,
+    /// A constrained face (RFC 09 §4, v1.43) is selected by its transport,
+    /// never by an identity: the link protocols and interfaces that pick it.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub link_protocols: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub interfaces: Vec<String>,
+}
+
+/// One `downsampling` rule of a constrained face (RFC 09 §4, v1.43): a
+/// `link`-exposed subject crossing at most `freq` times a second, egress
+/// puts only — dropping on ingress saves no airtime.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AclDownsample {
+    pub key_expr: String,
+    pub freq: f64,
+}
+
+/// A constrained face to plan (RFC 09 §4, v1.43): which transport selects
+/// it, and what a `link`-exposed subject may cost on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FaceSpec {
+    /// The subject id the face is emitted under.
+    pub id: String,
+    /// `link_protocols` of the zenoh subject — a unixsock-stream link
+    /// reports no interface name in zenoh 1.10, so a modem lane is selected
+    /// by protocol.
+    pub link_protocols: Vec<String>,
+    /// `interfaces` of the zenoh subject.
+    pub interfaces: Vec<String>,
+    /// What a `link`-exposed subject may cost.
+    pub interval: LinkInterval,
+}
+
+/// The rate a constrained face affords a `link`-exposed subject.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkInterval {
+    /// No rate is affordable (a billed satellite channel): `link` subjects
+    /// are denied like `host` ones, and no downsampling block is emitted.
+    None,
+    /// At most one sample every this many seconds, per subject.
+    EverySecs(u64),
 }
 
 /// One policy, as `AclConfigPolicyEntry` will carry it.
@@ -360,6 +424,21 @@ pub enum AclWarningKind {
     /// A role the fleet has none of — a console-less or catalog-less fleet
     /// is legal, but rarely what was meant.
     RoleAbsent,
+    /// A principal's `writes` grant was asked without a registry: the deny
+    /// is the unnarrowed leaf, nothing can be carved from it, so the grant
+    /// is not emitted and the deny stays whole (v1.43).
+    GrantNotNarrowed,
+    /// A `writes` pattern includes no declared write procedure (v1.43).
+    GrantMatchesNothing,
+    /// On a constrained face: entries that cross because they are `fleet`
+    /// or declare no exposure — said, not denied (v1.43).
+    FaceCrosses,
+    /// On a constrained face: a `link`- or `fleet`-exposed procedure is cut
+    /// with the plane, because a plane is denied whole (fact 6) (v1.43).
+    FaceCutsPlane,
+    /// On a constrained face: two `link` subjects' patterns intersect and
+    /// would share one downsampling timer (v1.43).
+    FaceRulesIntersect,
 }
 
 impl AclWarningKind {
@@ -370,6 +449,11 @@ impl AclWarningKind {
             AclWarningKind::PlaneNotDeclared => "plane_not_declared",
             AclWarningKind::ZidSubject => "zid_subject",
             AclWarningKind::RoleAbsent => "role_absent",
+            AclWarningKind::GrantNotNarrowed => "grant_not_narrowed",
+            AclWarningKind::GrantMatchesNothing => "grant_matches_nothing",
+            AclWarningKind::FaceCrosses => "face_crosses",
+            AclWarningKind::FaceCutsPlane => "face_cuts_plane",
+            AclWarningKind::FaceRulesIntersect => "face_rules_intersect",
         }
     }
 }
@@ -587,6 +671,9 @@ pub enum AclDecision {
     Denied,
     /// No rule of the principal's includes it: `default_permission: deny`.
     DeniedByDefault,
+    /// No rule of the face's includes it, and the face's block runs
+    /// `default_permission: allow` (RFC 09 §4, v1.43): it crosses.
+    AllowedByDefault,
 }
 
 impl AclDecision {
@@ -595,6 +682,7 @@ impl AclDecision {
             AclDecision::Allowed => "allowed",
             AclDecision::Denied => "denied",
             AclDecision::DeniedByDefault => "denied by default",
+            AclDecision::AllowedByDefault => "allowed by default",
         }
     }
 }
@@ -724,7 +812,10 @@ origin = "@desired"
                 role: Role::Host,
                 cert_common_names: vec!["h-3fa9c2d41b7e".into()],
                 zids: vec![],
+                link_protocols: vec![],
+                interfaces: vec![],
             }],
+            downsampling: vec![],
             policies: vec![AclPolicy {
                 id: "h-3fa9c2d41b7e".into(),
                 rules: vec!["host-data-h-3fa9c2d41b7e".into(), "interest-prop".into()],
@@ -788,6 +879,7 @@ origin = "@desired"
             media_producers: vec!["parallax".into()],
             blob_producers: vec![],
             write_procedures: vec!["systemd/action/set".into()],
+            sensitive_procedures: vec![],
         });
         plan.rules[0].flows = None;
         plan.warnings.clear();

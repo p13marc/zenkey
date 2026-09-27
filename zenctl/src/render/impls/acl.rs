@@ -47,19 +47,34 @@ impl Render for AclPlan {
         for r in &self.refusals {
             out(Row::of("refusal", r));
         }
+        for d in &self.downsampling {
+            out(Row::of("downsampling", d));
+        }
     }
 
     fn table(&self, t: &mut Table) {
         if !self.subjects.is_empty() {
             t.line(format!(
-                "principals under base {:?} (default deny):",
-                self.base
+                "principals under base {:?} (default {}):",
+                self.base,
+                self.default_permission.as_str()
             ))
             .blank();
             let mut g = Grid::new(["  subject", "role", "bound by", "rules"]);
             for s in &self.subjects {
+                // An identity, or — for a face (v1.43) — the transport that
+                // selects it.
                 let bound = if !s.cert_common_names.is_empty() {
                     format!("cn {}", s.cert_common_names.join(", "))
+                } else if !s.link_protocols.is_empty() || !s.interfaces.is_empty() {
+                    let mut parts = Vec::new();
+                    if !s.link_protocols.is_empty() {
+                        parts.push(format!("link_protocols {}", s.link_protocols.join(", ")));
+                    }
+                    if !s.interfaces.is_empty() {
+                        parts.push(format!("interfaces {}", s.interfaces.join(", ")));
+                    }
+                    parts.join("; ")
                 } else {
                     format!("zid {}", s.zids.join(", "))
                 };
@@ -103,6 +118,19 @@ impl Render for AclPlan {
             }
             t.grid(g);
         }
+        if !self.downsampling.is_empty() {
+            t.blank()
+                .line("downsampling (egress puts, one timer per rule):")
+                .blank();
+            let mut g = Grid::new(["  key_expr", "freq (Hz)"]).right(1);
+            for d in &self.downsampling {
+                g.row([
+                    Cell::text(format!("  {}", d.key_expr)),
+                    Cell::num(d.freq, 4),
+                ]);
+            }
+            t.grid(g);
+        }
     }
 
     fn notes(&self) -> Vec<Note> {
@@ -114,12 +142,19 @@ impl Render for AclPlan {
                 "no principal enrolled: the block would deny everything to everybody",
             ));
         }
-        notes.push(Note::summary(format!(
+        let mut summary = format!(
             "{} rule(s), {} subject(s), {} polic(y/ies)",
             self.rules.len(),
             self.subjects.len(),
             self.policies.len()
-        )));
+        );
+        if !self.downsampling.is_empty() {
+            summary.push_str(&format!(
+                ", {} downsampling rule(s)",
+                self.downsampling.len()
+            ));
+        }
+        notes.push(Note::summary(summary));
         notes.push(Note::next_step(
             "write the block: `zenctl acl gen --enrollment … --json5 > router-acl.json5`, \
              merge it at the router config's top level, restart the router — ACL config \
@@ -225,6 +260,7 @@ impl Render for AclExplain {
                 AclDecision::Allowed => "ALLOWED",
                 AclDecision::Denied => "DENIED",
                 AclDecision::DeniedByDefault => "denied by default",
+                AclDecision::AllowedByDefault => "allowed by default",
             };
             g.row([
                 Cell::text(format!("  {flow}")),

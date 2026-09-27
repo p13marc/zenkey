@@ -2117,8 +2117,59 @@ pub(crate) struct AclGenArgs {
     /// authentication, and zenoh's own config says so.
     #[arg(long)]
     pub(crate) allow_zid_subjects: bool,
+    /// Plan a constrained face instead of the principals (RFC 09 §4): the
+    /// `access_control` and `downsampling` blocks that keep the registry's
+    /// `host`-exposed surfaces off one link and cap the `link`-exposed ones.
+    /// Needs `--registry` — the markers are the registry's — and a
+    /// `--link-protocol` or `--link-interface` to select the face.
+    #[arg(long, value_name = "constrained", requires = "link_interval")]
+    pub(crate) face: Option<Face>,
+    /// With --face: a link protocol that selects the face (`unixsock-stream`,
+    /// `tcp`, …), repeatable. A unixsock-stream link reports no interface
+    /// name in zenoh 1.10, so a modem lane is selected this way.
+    #[arg(long, value_name = "PROTOCOL", requires = "face")]
+    pub(crate) link_protocol: Vec<String>,
+    /// With --face: an interface that selects the face (`wlan0`), repeatable.
+    #[arg(long, value_name = "IFACE", requires = "face")]
+    pub(crate) link_interface: Vec<String>,
+    /// With --face: what a `link`-exposed subject may cost — at most one
+    /// sample every SECS per subject (a `downsampling` rule each), or `none`
+    /// when no rate is affordable (a billed channel), which keeps the `link`
+    /// subjects home too. Required with --face, because the default is allow.
+    #[arg(long, value_name = "SECS|none", requires = "face")]
+    pub(crate) link_interval: Option<LinkIntervalArg>,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
+}
+
+/// The one face profile RFC 09 §4 describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Face {
+    /// A bandwidth-limited leaf: radio, cell, tactical, satellite.
+    Constrained,
+}
+
+/// `--link-interval`: seconds, or `none`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinkIntervalArg {
+    None,
+    EverySecs(u64),
+}
+
+impl std::str::FromStr for LinkIntervalArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("none") {
+            return Ok(LinkIntervalArg::None);
+        }
+        match s.parse::<u64>() {
+            Ok(n) if n > 0 => Ok(LinkIntervalArg::EverySecs(n)),
+            _ => Err(format!(
+                "{s:?}: a positive number of seconds, or `none` when no rate is affordable"
+            )),
+        }
+    }
 }
 
 /// The `storage list` verb's flags — one struct the dispatcher hands over whole,

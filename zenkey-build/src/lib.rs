@@ -273,6 +273,47 @@ fn parse_when(fname: &str, entry: &toml::Value, path: &str) -> Result<Gate, Erro
     Ok((Some(out), gate_note))
 }
 
+/// `exposure` (RFC 08 §2, v1.43) on a subject or procedure entry: the
+/// closed vocabulary `host | link | fleet`, returned canonical; absent is
+/// absent (the reader treats it as `fleet`).
+fn parse_exposure(fname: &str, entry: &toml::Value, path: &str) -> Result<Option<String>, Error> {
+    match entry.get("exposure") {
+        None => Ok(None),
+        Some(v) => {
+            let Some(k) = v.as_str() else {
+                return Err(lint(
+                    fname,
+                    format!("{path:?}: exposure must be a string (RFC 08 §2)"),
+                ));
+            };
+            match <zenkey::slice::Exposure as SliceToken>::from_token(k) {
+                Some(known) => Ok(Some(known.token().to_string())),
+                None => Err(lint(
+                    fname,
+                    format!(
+                        "{path:?}: unknown exposure {k:?} — one of {} (RFC 08 §2)",
+                        zenkey::slice::Exposure::ALL
+                            .iter()
+                            .map(|e| format!("`{}`", e.token()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                )),
+            }
+        }
+    }
+}
+
+/// A lock line that pins a marker rather than an entry — a gate (`when-*`,
+/// v1.35), an exposure or a sensitive flag (v1.43). A marker is not a
+/// shape: its every change is *stale*, never incompatible, and it is
+/// neither an entry added nor one retired.
+fn is_marker(line: &str) -> bool {
+    ["when-", "exposure-", "sensitive-"]
+        .iter()
+        .any(|p| line.starts_with(p))
+}
+
 fn lint(file: &str, message: impl Into<String>) -> Error {
     lint_kind(file, message, LintKind::Invalid)
 }
@@ -333,6 +374,9 @@ pub(crate) struct SubjectEntry {
     pub when: Option<Vec<(String, String)>>,
     /// `gate_note`, present only with `when`.
     pub gate_note: Option<String>,
+    /// `exposure = "host|link|fleet"` (RFC 08 §2, v1.43), linted closed;
+    /// absent means `fleet`.
+    pub exposure: Option<String>,
     pub cardinality: Option<u64>,
     pub qos: String,
     pub ttl_s: Option<u64>,
@@ -369,6 +413,11 @@ pub(crate) struct ProcedureEntry {
     pub when: Option<Vec<(String, String)>>,
     /// `gate_note`, present only with `when`.
     pub gate_note: Option<String>,
+    /// `exposure` (RFC 08 §2, v1.43), linted closed; absent means `fleet`.
+    pub exposure: Option<String>,
+    /// `sensitive = true` (RFC 08 §2, v1.43): the request carries a secret;
+    /// linted to `kind = "write"` only.
+    pub sensitive: bool,
 }
 
 /// One `[[error]]` entry (RFC 08 §2, v1.40): a producer's own error name,
@@ -898,9 +947,10 @@ impl Config {
         // that only gained its `kind` column (v1.32) is neither added nor
         // retired.
         let pin = |l: &str| -> String { l.splitn(4, '\t').take(3).collect::<Vec<_>>().join("\t") };
-        // Gate lines (`when-*`, v1.35) are not entries: a gate appearing or
-        // moving is neither an entry added nor one retired.
-        let is_entry = |l: &&str| !l.starts_with("when-");
+        // Marker lines (`when-*` v1.35, `exposure-*`/`sensitive-*` v1.43)
+        // are not entries: a marker appearing or moving is neither an entry
+        // added nor one retired.
+        let is_entry = |l: &&str| !is_marker(l);
         let old: std::collections::BTreeSet<String> = existing
             .lines()
             .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
@@ -1479,6 +1529,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 None => variant_name(&chunks),
             };
             let (when, gate_note) = parse_when(&fname, entry, spath)?;
+            let exposure = parse_exposure(&fname, entry, spath)?;
             subjects.push(SubjectEntry {
                 path: spath.to_string(),
                 variant,
@@ -1491,6 +1542,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 semantic,
                 when,
                 gate_note,
+                exposure,
                 cardinality,
                 qos,
                 ttl_s,
@@ -1613,12 +1665,40 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             }
             let refs: Vec<&str> = ppath.split('/').collect();
             let (when, gate_note) = parse_when(&fname, entry, ppath)?;
+            let exposure = parse_exposure(&fname, entry, ppath)?;
+            // `sensitive` (RFC 08 §2, v1.43): a write whose request carries a
+            // secret. A read cannot be sensitive — a procedure that reads a
+            // secret back contradicts 05 §5.1, which makes the value write-only.
+            let sensitive = match entry.get("sensitive") {
+                None => false,
+                Some(v) => {
+                    let Some(b) = v.as_bool() else {
+                        return Err(lint(
+                            &fname,
+                            format!("procedure {ppath:?}: sensitive must be a boolean (RFC 08 §2)"),
+                        ));
+                    };
+                    if b && kind != "write" {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "procedure {ppath:?}: sensitive = true on a {kind:?} — only a write \
+                                 carries a secret; a read that returned one would contradict \
+                                 RFC 05 §5.1"
+                            ),
+                        ));
+                    }
+                    b
+                }
+            };
             procedures.push(ProcedureEntry {
                 path: ppath.to_string(),
                 variant: camel(&refs),
                 chunks,
                 when,
                 gate_note,
+                exposure,
+                sensitive,
                 kind: kind.to_string(),
                 request: entry
                     .get("request")
@@ -2235,6 +2315,23 @@ fn compat_lock_lines(files: &[RegistryFile]) -> Vec<String> {
                 ));
             }
         }
+        // Exposure and sensitivity (RFC 08 §2, v1.43) are markers like a
+        // gate: not a shape, so their every change is stale, and reviewable
+        // on a line of their own — a counter that stops being `host` is a
+        // counter that starts crossing a radio.
+        for s in &f.subjects {
+            if let Some(e) = &s.exposure {
+                lines.push(format!("exposure-subject\t{}\t{}\t{e}", f.name, s.path));
+            }
+        }
+        for p in &f.procedures {
+            if let Some(e) = &p.exposure {
+                lines.push(format!("exposure-procedure\t{}\t{}\t{e}", f.name, p.path));
+            }
+            if p.sensitive {
+                lines.push(format!("sensitive-procedure\t{}\t{}", f.name, p.path));
+            }
+        }
     }
     lines.sort();
     lines
@@ -2252,7 +2349,9 @@ fn compat_lock_content(files: &[RegistryFile]) -> String {
          # changing or removing one is incompatible. An `error` line pins a\n\
          # declared error name (RFC 08 §2, v1.40), which retires like a subject.\n\
          # A `when-subject` / `when-procedure` line pins an entry's gate (v1.35):\n\
-         # a gate is not a shape, so its every change is stale, never incompatible.\n",
+         # a gate is not a shape, so its every change is stale, never incompatible.\n\
+         # An `exposure-*` or `sensitive-procedure` line pins a marker (v1.43),\n\
+         # stale on every change for the same reason.\n",
     );
     for l in compat_lock_lines(files) {
         out.push_str(&l);
@@ -2345,9 +2444,9 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
 
     let mut stale = Vec::new();
     for (key, line) in &old {
-        // A gate line (`when-*`, v1.35) is never incompatible, whichever way
-        // it moved: a gate is not a shape.
-        if key.0.starts_with("when-") {
+        // A marker line (`when-*` v1.35, `exposure-*`/`sensitive-*` v1.43) is
+        // never incompatible, whichever way it moved: a marker is not a shape.
+        if is_marker(&key.0) {
             if desired.get(key) != Some(line) {
                 stale.push(line.clone());
             }
@@ -4092,6 +4191,35 @@ mod tests {
             "{base}[[procedure]]\npath = \"probe\"\nkind = \"read\"\nreply = \"R\"\nwhen = [\"capability:CAP_BPF\"]\nsince = \"1.0\"\ndescription = \"d\"\n"
         );
         assert!(lint_one(&procedure).is_ok());
+    }
+
+    /// `exposure` (RFC 08 §2, v1.43) is a closed vocabulary on subjects and
+    /// procedures; `sensitive` is a boolean a write may carry and a read may
+    /// not.
+    #[test]
+    fn exposure_and_sensitive_are_linted() {
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n");
+        let subject = |fields: &str| {
+            format!(
+                "{base}[[subject]]\npath = \"rtt\"\nclass = \"telemetry\"\ntype = \"T\"\n{fields}since = \"1.0\"\ndescription = \"d\"\n"
+            )
+        };
+        let procedure = |kind: &str, fields: &str| {
+            format!(
+                "{base}[[procedure]]\npath = \"knob/set\"\nkind = \"{kind}\"\nreply = \"R\"\n{fields}since = \"1.0\"\ndescription = \"d\"\n"
+            )
+        };
+        let refused = |c: String| lint_one(&c).unwrap_err().to_string();
+        for e in ["host", "link", "fleet"] {
+            assert!(lint_one(&subject(&format!("exposure = \"{e}\"\n"))).is_ok());
+            assert!(lint_one(&procedure("read", &format!("exposure = \"{e}\"\n"))).is_ok());
+        }
+        assert!(refused(subject("exposure = \"orbit\"\n")).contains("unknown exposure"));
+        assert!(refused(subject("exposure = 3\n")).contains("must be a string"));
+        assert!(lint_one(&procedure("write", "sensitive = true\n")).is_ok());
+        assert!(lint_one(&procedure("read", "sensitive = false\n")).is_ok());
+        assert!(refused(procedure("read", "sensitive = true\n")).contains("only a write"));
+        assert!(refused(procedure("write", "sensitive = \"yes\"\n")).contains("boolean"));
     }
 
     /// One spelling per entry (RFC 08 §6.1, v1.35): a ledger line naming an

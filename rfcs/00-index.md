@@ -6,13 +6,18 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.42** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.43** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.43** (2026-09-27) — where a value may go: `exposure` on subjects
+  and procedures and `sensitive` on writes (08 §2); per-resource `writes`
+  grants with a carved deny, and the constrained-face profile generated
+  from the markers — a permissive default, the planes by their widest
+  spelling, `downsampling` for what crosses (09 §3, §4).
 - **v1.42** (2026-09-27) — the rest of the config pattern: §5's skeleton
   grows into a configuration convention — a served schema, groups as the
   resource of a write, hot/reach/contract classes, sensitive parameters,
@@ -23,10 +28,6 @@ what changed and what deliberately did not — is
   ships in the reference codegen, and the `sensor` document's
   `capabilities` map says, per device, which `capability:` predicates hold
   on this instance (04 §5; 08 §6.1).
-- **v1.40** (2026-09-27) — the errors nobody registered: `[[error]]`, an
-  entry kind for a producer's own error names — linted, pinned, served by
-  `introspect`, retired through `[[deprecated]]`, one generated constant
-  per name (08 §2, §3, §6; 05 §3).
 
 ---
 

@@ -79,6 +79,7 @@ impl Render for TopicInfo {
             ("encoding", &self.encoding),
             ("when", &when),
             ("gate", &self.gate_note),
+            ("exposure", &self.exposure),
             ("since", &self.since),
             ("about", &self.description),
         ] {
