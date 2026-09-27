@@ -17,6 +17,124 @@ Versions per crate, because they move independently:
 
 ---
 
+## 0.11.0 — what a second adopter needed (unreleased)
+
+**Unreleased.** The versions below are the ones the release commit should
+cut; nothing is tagged or published yet, and the table above gains its
+column then.
+
+Six pull requests on six RFC amendments, **v1.38 → v1.43**, every one
+asked for by the convention's second adopter — a driver for radios and
+satellite terminals (marcpardo/zenoh-modem#111) whose devices are
+configured over the links they carry, whose counters reset when a modem
+re-enumerates under a driver that never restarted, and whose routers kept
+three hundred lines of ACL comments that a thousand-line test guarded by
+hand. Plus chunk DK of the 0.11.0 epic (#458): the `when` field, which
+the same adopter turned out to need twice over.
+
+`zenkey` is **breaking** (0.10.0): `DeprecatedKind` gained `Error`, so an
+exhaustive match must add the arm; `SubjectDecl` and `ProcedureDecl` are
+`#[non_exhaustive]` and gained fields, which a struct literal outside the
+crate could never have written anyway. `zenkey-build` is **breaking**
+(0.10.0): `ConditionalSubject` gained `predicates`. `zenkey-fleet` is
+**breaking** (0.15.0): `ReservedError` has a seventh member and
+`Responder` a different shape; `SubjectFacts`, `TopicInfo`, `AclSubject`,
+`AclPlan`, `AclRegistryFacts` and `PrincipalSpec` gained fields that
+struct literals must add; `AclDecision`, `AclWarningKind` and `Role`
+gained variants. `zenctl` 0.9.0 gains a noun and a flag family without
+moving any spelling; `zengui` 0.5.1 shows two new registry facts;
+`zenwatch` is unchanged.
+
+**RFC v1.38 — a broadcast write is refused at the server** (#472, PR #478).
+RFC 05 §2.1 refused a fan-out write at the builder and at the registry and
+left the third layer to the ACL — and Zenoh ACL denies by *inclusion*, so
+a query on `v1/*/@rpc/**` walks past a deny rule on
+`v1/*/@rpc/<producer>/**` however literal the rule, and under a permissive
+default is forwarded to every queryable it intersects before the concrete
+replies are denied. The refusal is now the server's: `BringUp::serve_write`
+marks a responder exact, and `next()`/`stream()` answer a non-exact query
+`error/fanout-forbidden` before the handler runs. `zenkey::require_exact`
+and `ExactKeyError`; `ReservedError::FanoutForbidden`, `ALL` seven. RFC 09
+§3 gains fact 6 — deny is by inclusion, a constrained face denies a plane
+by its widest spelling — and the `no-remote-actions` cite says which lock
+it is.
+
+**RFC v1.39 — a counter may reset when its device's token cycles** (#476,
+PR #478). A `counter` was allowed to reset across the *producer's* `alive`
+cycle only; a modem re-enumerating under a driver that never restarted
+resets the counters under that device and no other. RFC 04 §5 makes the
+device token SHOULD-cycle on a discontinuity, RFC 08 §2 and 13 §3 say the
+judge accepts it. `zenkey::selector::all_device_liveliness`, the doctor
+subscribes device tokens, `judge::kind` keys cycles by `(origin,
+producer, device)` and excuses a reset under exactly that device.
+
+**RFC v1.40 — `[[error]]`, the fifth entry kind** (#474, PR #479). RFC 05
+§3 had said since v1.0 that a producer's error names are registered like
+subjects; nothing registered them. `[[error]]` with `name`, `procedures`,
+`since`, `description`; retired through `[[deprecated]]` with `kind =
+"error"`; served by `introspect`; pinned as `error\t<producer>\t<name>` in
+`registry.lock`; one generated `&str` constant per name under `pub mod
+error`. `zenkey::rpc_error` holds the reserved vocabulary once, and an
+`[[error]]` that spells a reserved name is refused rather than shadowed.
+
+**The `when` field, and RFC v1.41 — which conditions hold here** (#171,
+PR #480; chunk DK of #458). v1.35's text, implemented: `when = ["<kind>:
+<name>", …]` and `gate_note` on subjects and procedures, the closed kind
+vocabulary linted, `when-subject`/`when-procedure` lock lines that are
+*stale* on every change and never incompatible, the one-spelling lint
+(a `conditional.lock` line naming an entry that declares `when` is an
+error), `when()`/`gate_note()` in codegen, the field on `SubjectFacts`
+and `TopicInfo`, `topic info` and zengui showing the gate. And the half
+v1.35 could not say: the `sensor` document MAY carry `capabilities`, a map
+from device chunks to the `capability:` names that hold on each — one
+driver, three modems, `capability:rssi` true on `rf0` and false on `sat0`
+at the same moment (04 §5).
+
+**RFC v1.42 — the configuration convention** (#473, PR #482). RFC 05 §5
+sanctioned `<topic>/set`, a read and a `state` echo, and every adopter
+invented the rest. 05 §5.1 is the rest, once, for a producer that declares
+a configuration resource: the keys (a read, a per-group `set`,
+`confirm`/`cancel`/`extend` with `{token}`, `persist` on its own key so an
+ACL can allow a change and deny making it survive a restart, the
+`transition` echo, the change event); the schema **served** beside the
+values; **groups** as the resource of a write; three **classes** declared
+per group — `hot`, `reach` (can cut the link: accepted only with a
+rollback armed, answered before it is applied, never carried by desired
+state), `contract` (refused with the restart named); the **sensitive**
+flag, write-only by rule; `expected_revision`, `idempotency_key`,
+`dry_run`, `confirm_s`; confirmed commit with the undo applied once; one
+pending change per resource; the change event after RFC 6470 with `actor`
+and `request_id` defined as caller-claimed. 09 §3 works it as a registry
+slice with the grant table that falls out of the key shape. `zenkey::
+config` is the reference types and the one validator, so every producer
+refuses the same input in the same words; `Sensitive<T>` can be received
+and can never leave. `zenctl config get|set|confirm|cancel|extend|persist`
+draws the read-back as the document it is, types a change against the
+declared kind, runs the producer's validator here, and asks before sending
+a reach change. The zengui form is #481.
+
+**RFC v1.43 — where a value may go** (#475, PR #483). `exposure = "host" |
+"link" | "fleet"` on subjects and procedures (08 §2) — a property of the
+entry, never of a router — and `sensitive = true` on a write, denied to
+every principal until a grant names it (RFC 8341's `default-deny-all` as
+data). `writes = […]` on a principal (09 §3): per-resource write grants,
+one allow and a **carved** deny, because deny wins and a carve-out has to
+be an absence; needs the registry, and says so without one. And the
+constrained-face profile, generated (09 §4): `acl gen --face constrained
+--link-protocol … --link-interval <SECS|none>` emits the face's
+`access_control` under a permissive default — the permission is
+node-global — with a deny per `host` subject or per wholly-`host` class,
+the planes by their widest spelling, and its `downsampling`, one rule per
+`link` subject; what still crosses is said, never denied on the planner's
+initiative. `--check` compares a face, `--explain` answers `allowed by
+default` over it. The fixture registry marks three entries; the
+reference adopter's rf0 and sat0 shapes are the oracle in the tests.
+
+**After this release.** zenoh-modem's epic continues from its #116 on the
+published crates; the 0.11.0 epic's remaining chunks (DL–DO: `check
+conform`, the KDL spelling) are unchanged by any of this and still queued
+under #458.
+
 ## 0.10.0 — what the sensors already judged (2026-09-25)
 
 **Tagged `0.10.0`** on 2026-09-25; `zenkey` 0.9.0, `zenkey-build` 0.9.0 and
