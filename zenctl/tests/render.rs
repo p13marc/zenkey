@@ -1824,6 +1824,156 @@ zensight-console  query  zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action/set
 // cannot see a `KeyRelation`, and it must not enable the `decode` feature
 // `GenReport` lives behind (#204).
 
+/// A read-back as a modem serves it: two groups of different classes, a
+/// write-only parameter, a value the producer has not read yet, one that
+/// differs from its startup file, and a change pending on the reach group.
+/// Built here: `zenkey-report-fixtures` pins `zenkey-fleet`'s report
+/// shapes, and this document is `zenkey::config`'s (RFC 05 §5.1).
+fn config_report() -> zenctl::render::ConfigReport {
+    use zenkey::config::{
+        ConfigGroup, ConfigSchema, ConfigView, ParamClass, ParamKind, ParamSpec, ParamValue,
+        PendingChange, ValueSource,
+    };
+    let dbm = ParamKind::Integer {
+        min: Some(0),
+        max: Some(30),
+        unit: Some("dBm".into()),
+    };
+    let schema = ConfigSchema::new()
+        .with(
+            ConfigGroup::new("radio", ParamClass::Reach, "the carrier")
+                .with(ParamSpec::new(
+                    "frequency_khz",
+                    ParamKind::Integer {
+                        min: Some(863_000),
+                        max: Some(870_000),
+                        unit: Some("kHz".into()),
+                    },
+                    "centre frequency",
+                ))
+                .with(ParamSpec::new("tx_power", dbm, "transmit power")),
+        )
+        .with(
+            ConfigGroup::new("access", ParamClass::Hot, "who may join")
+                .with(ParamSpec::new(
+                    "open",
+                    ParamKind::Bool,
+                    "accept unknown peers",
+                ))
+                .with(ParamSpec::new("psk", ParamKind::Text, "the shared key").sensitive()),
+        );
+    let mut view = ConfigView::of("rf0", &schema);
+    view.revision = 7;
+    view.pending = Some(PendingChange::new("chg-01j9", ["radio"]).until("2026-09-27T10:15:00Z"));
+    let radio = &mut view.groups[0];
+    radio.parameters[0].value = Some(ParamValue::Integer(868_100));
+    radio.parameters[0].source = Some(ValueSource::Runtime);
+    radio.parameters[0].startup = Some(ParamValue::Integer(868_300));
+    radio.parameters[1].value = Some(ParamValue::Integer(14));
+    radio.parameters[1].source = Some(ValueSource::File);
+    let access = &mut view.groups[1];
+    access.parameters[1].source = Some(ValueSource::File);
+    zenctl::render::ConfigReport {
+        key: "acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0".into(),
+        timeout_s: 5.0,
+        documents: vec![zenctl::render::ConfigDocument {
+            origin: "h-3fa9c2d41b7e".into(),
+            view,
+        }],
+        other: vec![],
+    }
+}
+
+#[test]
+fn a_config_read_back_draws_the_schema_beside_every_value() {
+    assert_data_eq!(
+        table(&config_report()),
+        str![[r#"
+h-3fa9c2d41b7e  rf0  revision 7  pending chg-01j9 on radio until 2026-09-27T10:15:00Z
+parameter      value                    source   kind                         description
+
+radio  (reach) the carrier
+frequency_khz  868100 (startup 868300)  runtime  integer 863000..=870000 kHz  centre frequency
+tx_power       14                       file     integer 0..=30 dBm           transmit power
+
+access  (hot) who may join
+open           —                        —        bool                         accept unknown peers
+psk            (write-only)             file     text                         the shared key
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&config_report()),
+        str![[r#"
+{"documents":1,"key":"acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0","other":0,"report":"config","timeout_s":5.0}
+{"class":"reach","description":"centre frequency","group":"radio","kind":"integer","max":870000,"min":863000,"name":"frequency_khz","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","source":"runtime","startup":868300,"unit":"kHz","value":868100}
+{"class":"reach","description":"transmit power","group":"radio","kind":"integer","max":30,"min":0,"name":"tx_power","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","source":"file","unit":"dBm","value":14}
+{"class":"hot","description":"accept unknown peers","group":"access","kind":"bool","name":"open","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter"}
+{"class":"hot","description":"the shared key","group":"access","kind":"text","name":"psk","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","sensitive":true,"source":"file"}
+{"deadline":"2026-09-27T10:15:00Z","groups":["radio"],"origin":"h-3fa9c2d41b7e","resource":"rf0","row":"pending","token":"chg-01j9"}
+
+"#]]
+    );
+}
+
+/// The reply that is not a document is kept and drawn as a reply, and the
+/// caveat says so in every format; an empty report says silence.
+#[test]
+fn a_config_report_keeps_a_reply_that_is_not_a_document() {
+    use zenkey_fleet::report::{CallAnswer, CallError, CallOutcome};
+    let mut r = config_report();
+    r.documents.clear();
+    r.other.push(CallAnswer {
+        origin: "h-3fa9c2d41b7e".into(),
+        outcome: CallOutcome::Ok {
+            value: Some(
+                serde_json::json!({"token": "chg-01j9", "apply_at": "2026-09-27T10:14:30Z"}),
+            ),
+            text: None,
+        },
+        attachment: None,
+        attachment_bytes: None,
+    });
+    r.other.push(CallAnswer {
+        origin: "h-5c1d2e3f4a5b".into(),
+        outcome: CallOutcome::Err(CallError {
+            name: "error/busy".into(),
+            message: "a change is pending on this resource (token chg-0ff1)".into(),
+        }),
+        attachment: None,
+        attachment_bytes: None,
+    });
+    assert_data_eq!(
+        table(&r),
+        str![[r#"
+h-3fa9c2d41b7e:
+{
+  "apply_at": "2026-09-27T10:14:30Z",
+  "token": "chg-01j9"
+}
+h-5c1d2e3f4a5b: ✗ error/busy — a change is pending on this resource (token chg-0ff1)
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&r),
+        str![[r#"
+2 repl(y|ies) not shaped as a read-back document, shown as sent (RFC 05 §5.1)
+
+"#]]
+    );
+    let silent = zenctl::render::ConfigReport {
+        documents: vec![],
+        other: vec![],
+        ..config_report()
+    };
+    assert!(
+        notes(&silent).contains("no replies to"),
+        "{}",
+        notes(&silent)
+    );
+}
+
 #[test]
 fn a_key_relation_carries_its_convention_note_once() {
     let no = zenctl::render::KeyRelation {
@@ -2044,6 +2194,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cache",
         "cache-action",
         "call",
+        "config",
         "context",
         "context-action",
         "context-list",
@@ -2203,6 +2354,10 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.asked, ["acme/v1/**/state/**"]);
     scoped(&fx::bench_report());
     scoped(&fx::why_report());
+    // A config read is a GET: its key, over its wait.
+    let s = scoped(&config_report());
+    assert_eq!(s.asked, ["acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0"]);
+    assert_eq!(s.window_s, Some(5.0));
 
     // Sweeps: asked is the claim; a one-shot sweep has no window.
     scoped(&fx::scout_report());

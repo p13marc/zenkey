@@ -45,8 +45,8 @@ use anyhow::Result;
 /// past every way resolution can fail (#209).
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
-    AclCmd, AdminCmd, BaseCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, InterfaceCmd, KeyCmd,
-    NodeCmd, RegistryCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd, TopicCmd,
+    AclCmd, AdminCmd, BaseCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, ConfigCmd, InterfaceCmd,
+    KeyCmd, NodeCmd, RegistryCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd, TopicCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -119,6 +119,12 @@ pub async fn run() -> Result<()> {
         }
         Command::Service(ServiceCmd::Info(a)) => cmd::service::info(a).await,
         Command::Service(ServiceCmd::Call(a)) => cmd::call::run(a).await,
+        Command::Config(ConfigCmd::Get(a)) => cmd::config::get(a).await,
+        Command::Config(ConfigCmd::Set(a)) => cmd::config::set(a).await,
+        Command::Config(ConfigCmd::Confirm(a)) => cmd::config::confirm(a).await,
+        Command::Config(ConfigCmd::Cancel(a)) => cmd::config::cancel(a).await,
+        Command::Config(ConfigCmd::Extend(a)) => cmd::config::extend(a).await,
+        Command::Config(ConfigCmd::Persist(a)) => cmd::config::persist(a).await,
         Command::Interface(InterfaceCmd::List { bus }) => {
             let bus = Bus::resolve(&bus)?;
             cmd::interface::list(&bus).await

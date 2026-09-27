@@ -55,6 +55,7 @@ pub use impls::local::{
 };
 pub use impls::observations::TopologyView;
 pub use impls::storage::refusal_notes;
+pub use impls::{ConfigDocument, ConfigReport};
 pub mod style;
 pub mod table;
 

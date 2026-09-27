@@ -1,6 +1,6 @@
 # 05 — Control Plane: `@rpc`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38 and v1.40 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38, v1.40 and v1.42 — see [CHANGELOG.md](CHANGELOG.md)*
 
 All interaction — questions, instructions, downloads-of-detail — happens on
 the `@rpc` plane through **queryables** (request/reply), never through
@@ -321,3 +321,132 @@ Two systematic effects of the mapping:
 - **Status keys stop being a third mechanism.** What was
   command/status/query triples becomes: writes (RPC), reads (RPC), and
   observable state — each in its native plane.
+
+### 5.1 Configuration (normative, v1.42)
+
+The first bullet of §5 is the skeleton every adopter starts from — a
+`set`, a read, a `state` echo — and every adopter has then invented the
+rest for itself, because the thing being configured is often the thing
+the call travels through. This section is the rest, once. It is normative
+for a producer that declares a **configuration resource**; a producer
+that has nothing to configure declares none and owes nothing here.
+
+**Keys.** A resource `<r>` — a device, an interface, a namespace: the
+chunk an ACL grants by ([09 §3](09-operations.md)) — has:
+
+| Key | Kind | Carries |
+|---|---|---|
+| `@rpc/<producer>/config/<r>` | read | the read-back document (below) |
+| `@rpc/<producer>/config/<r>/<group>/set` | write, `fanout = "forbidden"` | a change to one group |
+| `@rpc/<producer>/config/<r>/confirm`, `/cancel`, `/extend` | write | `{token}` — the pending change's; `extend` adds `confirm_s`, the new window from now |
+| `@rpc/<producer>/config/<r>/persist` | write | `{token}` — the pending or last confirmed change's; **its own key**, so an ACL can allow a change and deny making it survive a restart |
+| `state/<producer>/config/<r>` | state, `transition` or stronger ([04 §3](04-planes.md)) | the read-back document, refreshed on every change |
+| `events/<producer>/config_change/<ulid>` | events, `low` | the change event (below) |
+
+**The schema is served, not documented.** The read-back document
+carries, beside every value, the declaration it satisfies: the resource's
+**groups**, each with a **class** and its **parameters** — name, kind
+(`bool` | `integer` with optional `min`/`max`/`unit` | `text`), a
+one-line description, and whether it is **sensitive**. A tool renders a
+form from it without being compiled against the producer, and `describe`
+([08 §7](08-registry.md)) covers the document's own shape. The reference
+types are `zenkey::config`.
+
+**Groups are the resource of a write.** A group is the set of parameters
+that change together — a frequency with its bandwidth, a spreading
+factor with its coding rate — because a single-parameter intermediate
+state of a coupled pair can be unsafe, and because a group is the unit
+that has a class and that an ACL sees in the key. A `set` addresses one
+group; a subset of its parameters is a change of those alone.
+
+**Three classes, and the class belongs to the producer's declaration.**
+
+- **hot** — takes effect at once and nothing above the producer needs to
+  know: a transmit power, a poll interval, a queue length. The reply to a
+  `set` is the read-back document, never an echo of the request.
+- **reach** — decides whether the producer can reach the bus at all: a
+  frequency, a network id, an APN. A `set` on a reach group MUST carry a
+  confirm window (`confirm_s`) and is answered `{token, apply_at}`
+  **before** it is applied, because the read-back would cross the link
+  being changed: the caller observes `state/<producer>/config/<r>` over the
+  new link, then confirms. This is §3's long-running idiom, and the reach
+  class is why it exists here. A reach group MUST NOT be carried by
+  desired state ([12 §3](12-open-questions.md)): one bad desired publish
+  would lock the node out of its own supervision.
+- **contract** — part of what the producer's transport was started
+  against: an SDU size, a reliability claim. Refused at runtime with the
+  restart named (`error/<producer>/restart-required`, an `[[error]]` entry);
+  changed in the producer's own startup configuration.
+
+The same parameter can be `hot` on one producer and `contract` on
+another — an MTU is hot where the transport sizes itself from the link and
+contract where the transport was started against it — so the class is
+declared per group, never inferred from a name.
+
+**A sensitive parameter is write-only.** Declared `sensitive`, it is never
+read back, published, logged or carried in an event: its read-back entry
+has no value, and its edit in a change event is `redacted`. This is
+[RFC 8341](https://www.rfc-editor.org/rfc/rfc8341.html)'s
+`default-deny-all` as data, and the companion marker for ACL generation.
+
+**A change request** (`set`'s body) carries the group's values and, each
+optional: `expected_revision`, refused if the document has since moved;
+an `idempotency_key`, so a retried request returns the first answer
+instead of applying twice — a lost reply is otherwise a doubled write;
+`dry_run`, which validates and reports what would change without
+touching the device; and `confirm_s`, which arms a rollback.
+
+**Validation is the producer's, before its device sees anything**, and
+the reference validator (`zenkey::config::ConfigSchema::validate`) is
+what makes every producer refuse the same input in the same words: an
+unknown group or parameter is `error/not-found`; a wrong kind, an
+out-of-bounds value, a reach change without a window or a stale
+`expected_revision` is `error/invalid-args`; a contract group is the
+producer's `restart-required`; the device's own refusal is the producer's
+`device-refused`, with the device's words as the message.
+
+**Confirmed commit.** A change with `confirm_s` is applied and a
+deadline armed. `confirm` makes it permanent, `cancel` undoes it now,
+`extend` moves the deadline; each carries the change's token. At the
+deadline the producer applies the undo **once** — never retried, never
+escalated: an undo that fails ends at outcome `partial`, and the
+read-back is the truth. This is
+[RFC 6241 §8.4](https://www.rfc-editor.org/rfc/rfc6241.html), MikroTik's
+Safe Mode and airOS's test mode, and it is the whole reason a reach change
+is survivable. A restart during a pending change is a rollback by
+construction, because a runtime change is not persisted.
+
+**One pending change per resource.** A second writer is answered
+`error/busy` naming the pending token, unless it carries that token.
+This is [03 §1.5](03-grammar.md)'s single-writer rule, for configuration.
+
+**Persistence is a separate, deniable act.** `persist` writes a confirmed
+change into the producer's own persisted layer — where and how is the
+producer's; that it is explicit and separately authorised is this
+section's. The read-back names each value's **source** (`default`,
+`file`, `overlay`, `runtime`) and its startup value where the two differ,
+so divergence is visible without a second document.
+
+**Every change is an event**, shaped after
+[RFC 6470](https://www.rfc-editor.org/rfc/rfc6470.html)'s
+`netconf-config-change`: the resource, the new `revision`, the `token`
+if any, an `outcome` (`applied` | `confirmed` | `rolled-back` |
+`partial`), the `edits` as `{parameter, old, new}` with sensitive values
+redacted, and the attribution — `actor` and `request_id` as the caller
+spelled them in the selector, and `claimed_source` as the transport
+reported it. **None of that authenticates.** [06 §5.5](06-identity.md)
+names an *actor* without defining it; this is the definition: a
+caller-claimed label, carried for the record. The ACL is the authority,
+and the reference tooling spells the two parameters `?actor=` and
+`?request_id=`.
+
+**The server's own guards stay at the server** (§3): a write refuses a
+query whose key expression is not its own concrete key (§2.1,
+`error/fanout-forbidden`), and a producer MAY keep a startup allowlist of
+writable groups, answering `error/gated` for the rest — so an operator
+switches remote writes off per group without touching a router.
+
+**Deliberately not here.** A datastore model beyond running plus an
+explicit persisted layer; a coordinated change across producers at an
+agreed time, which needs a clock both trust; and any schema kind beyond
+the three — a fourth arrives with the first producer that needs it.

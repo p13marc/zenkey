@@ -20,7 +20,7 @@ name = "zenctl"
 path = "src/main.rs"
 
 [dependencies]
-zenkey = { workspace = true }
+zenkey = { workspace = true, features = ["serde"] }
 # The codec matrix is enabled in the *binary*, not the library (issues #97,
 # #98): the dynamic protobuf decoder existed since v1.5 and was compiled out
 # of every shipped explorer, so a protobuf subject rendered as a hex sniff and

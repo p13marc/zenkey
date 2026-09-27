@@ -31,6 +31,9 @@
 //!   where a fetch prefix is expected (RFC 07 §2.5/§3).
 //! - [`mod@slice`] — [`RegistrySlice`], the `introspect` reply type + diff
 //!   (RFC 08 §6).
+//! - [`config`] — the configuration convention's wire shapes and validator
+//!   (RFC 05 §5.1, v1.42): schema, groups, classes, the change request, the
+//!   read-back, the change event, [`Sensitive`](config::Sensitive).
 //!
 //! The subject vocabulary itself is governed by the registry (RFC 08). It is
 //! **application-owned**: each application checks its `registry/*.toml` into
@@ -69,6 +72,7 @@
 
 pub mod alert;
 pub mod common_state;
+pub mod config;
 pub mod context;
 pub mod encoding;
 pub mod grammar;
