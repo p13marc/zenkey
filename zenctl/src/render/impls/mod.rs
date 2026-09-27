@@ -19,6 +19,8 @@ mod bench;
 mod blobs;
 mod calls;
 mod closing;
+mod config;
+pub use config::{ConfigDocument, ConfigReport};
 mod consumers;
 mod documents;
 mod export;

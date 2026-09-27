@@ -6,13 +6,19 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.41** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.42** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.42** (2026-09-27) — the rest of the config pattern: §5's skeleton
+  grows into a configuration convention — a served schema, groups as the
+  resource of a write, hot/reach/contract classes, sensitive parameters,
+  revision and idempotency, confirmed commit, a deniable `persist`, the
+  change event, and the actor defined as a caller-claimed label (05 §5.1);
+  the convention worked as a registry slice with its grant table (09 §3).
 - **v1.41** (2026-09-27) — which conditions hold here: the `when` field
   ships in the reference codegen, and the `sensor` document's
   `capabilities` map says, per device, which `capability:` predicates hold
@@ -21,10 +27,6 @@ what changed and what deliberately did not — is
   entry kind for a producer's own error names — linted, pinned, served by
   `introspect`, retired through `[[deprecated]]`, one generated constant
   per name (08 §2, §3, §6; 05 §3).
-- **v1.39** (2026-09-27) — the device's own restart: a counter under a
-  device subject may reset when that device's `device/<device>/alive`
-  token cycles, and a device token SHOULD cycle on the device's own
-  discontinuity (08 §2; 04 §5; 13 §3).
 
 ---
 

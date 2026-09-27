@@ -28,6 +28,7 @@ Commands:
   node         Producers: who is alive on the bus
   base         Deployment bases discovered from the wire (needs no --base)
   service      Procedures on the `@rpc` plane
+  config       Configuration resources on the `@rpc` plane (RFC 05 §5.1)
   interface    Payload types declared by the registry slices
   schema       Payload schemas as producers serve them (RFC 08 §7)
   registry     The registry as a document: export it, diff it, lint it, lock it
@@ -84,6 +85,7 @@ Commands:
   node         Producers: who is alive on the bus
   base         Deployment bases discovered from the wire (needs no --base)
   service      Procedures on the `@rpc` plane
+  config       Configuration resources on the `@rpc` plane (RFC 05 §5.1)
   interface    Payload types declared by the registry slices
   schema       Payload schemas as producers serve them (RFC 08 §7)
   registry     The registry as a document: export it, diff it, lint it, lock it

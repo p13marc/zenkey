@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 
-- `rfcs/` — the **normative RFC set** (v1.41; ratified at v1.18, 2026-08-15). Chapters 02–10
+- `rfcs/` — the **normative RFC set** (v1.42; ratified at v1.18, 2026-08-15). Chapters 02–10
   and 13 (observer conformance, v1.24) are application-neutral; chapter 11 is the
   ZenSight reference profile. Wire-contract
   changes go through these RFCs, amendment-style (see `rfcs/CHANGELOG.md` —
@@ -116,8 +116,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (the base-less bus-root deployment, the RFC v1.6 default).
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`topic list|info`,
-  `node`, `base`, `service`, `interface`, `schema show`, `registry`,
-  `storage`, `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
+  `node`, `base`, `service`, `config get|set|confirm|cancel|extend|persist`,
+  `interface`, `schema show`, `registry`, `storage`, `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
   verb** is an act or observation on live traffic and hangs off the root
   (`get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`, `replay`,
   `timeline`, `snapshot`, `export`, `serve`, `gen`, `scout`); a **judgement**

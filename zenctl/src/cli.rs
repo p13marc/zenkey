@@ -467,6 +467,12 @@ pub(crate) enum Command {
     /// Procedures on the `@rpc` plane.
     #[command(subcommand)]
     Service(ServiceCmd),
+    /// Configuration resources on the `@rpc` plane (RFC 05 §5.1).
+    ///
+    /// Read the served schema beside every running value, change one group
+    /// typed against it, and drive a confirmed change to its end.
+    #[command(subcommand)]
+    Config(ConfigCmd),
     /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
@@ -2352,6 +2358,120 @@ pub(crate) struct ServiceCallArgs {
     pub(crate) for_secs: f64,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ConfigCmd {
+    /// Read a resource's configuration: the served schema beside every
+    /// running value, its source, and any pending change (on-bus).
+    Get(ConfigGetArgs),
+    /// Change one group of a resource, typed against the served schema
+    /// (on-bus).
+    ///
+    /// The read-back is fetched first, so a value is read as the kind the
+    /// producer declares and refused here — in the producer's own words —
+    /// when the producer would refuse it. A `reach` group needs `--confirm`
+    /// and a yes; a `contract` group is refused with the restart named.
+    Set(ConfigSetArgs),
+    /// Make a pending change permanent (on-bus).
+    Confirm(ConfigTokenArgs),
+    /// Undo a pending change now (on-bus).
+    Cancel(ConfigTokenArgs),
+    /// Move a pending change's deadline (on-bus).
+    Extend(ConfigExtendArgs),
+    /// Write a confirmed change into the producer's persisted layer — its
+    /// own key, so an ACL grants it apart from the change (on-bus).
+    Persist(ConfigTokenArgs),
+}
+
+/// The `config get` verb's flags.
+#[derive(clap::Args)]
+pub(crate) struct ConfigGetArgs {
+    /// Origin to target: a host id (`h-3fa9c2d41b7e`) or `*` for the fleet.
+    pub(crate) origin: String,
+    /// Producer name.
+    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// The resource — the chunk an ACL grants by: a device, an interface.
+    pub(crate) resource: String,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `config set` verb's flags.
+#[derive(clap::Args)]
+pub(crate) struct ConfigSetArgs {
+    /// Origin to target: one host id — a change never fans out.
+    pub(crate) origin: String,
+    /// Producer name.
+    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// The resource the group belongs to.
+    pub(crate) resource: String,
+    /// The group to change — the unit that has a class and that the write
+    /// key names.
+    pub(crate) group: String,
+    /// The values, `name=value`, one or more; a subset of the group changes
+    /// those alone.
+    #[arg(value_name = "NAME=VALUE", required = true)]
+    pub(crate) values: Vec<String>,
+    /// Validate and report what would change, without touching the device.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Arm a rollback: the change is undone after SECS unless confirmed.
+    /// Required for a `reach` group.
+    #[arg(long, value_name = "SECS")]
+    pub(crate) confirm: Option<u64>,
+    /// Refuse the change if the document's revision has moved past this.
+    #[arg(long, value_name = "N")]
+    pub(crate) expect_revision: Option<u64>,
+    /// A key a retry carries, so a lost reply is not a doubled write.
+    #[arg(long, value_name = "KEY")]
+    pub(crate) idempotency_key: Option<String>,
+    /// Who is asking, for the change event's record — a claimed label,
+    /// never an authentication (RFC 06 §5.5).
+    #[arg(long, value_name = "NAME")]
+    pub(crate) actor: Option<String>,
+    /// A request id for the change event's record, likewise claimed.
+    #[arg(long, value_name = "ID")]
+    pub(crate) request_id: Option<String>,
+    /// Send a `reach` change without being asked (for a script that has
+    /// decided).
+    #[arg(long)]
+    pub(crate) yes: bool,
+    /// Skip the read-back: values ride by their spelling and the producer
+    /// judges the rest.
+    #[arg(long)]
+    pub(crate) no_validate: bool,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `config confirm|cancel|persist` verbs' flags: a change named by its
+/// token.
+#[derive(clap::Args)]
+pub(crate) struct ConfigTokenArgs {
+    /// Origin to target: one host id.
+    pub(crate) origin: String,
+    /// Producer name.
+    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// The resource the change is on.
+    pub(crate) resource: String,
+    /// The change's token, as `set` answered it.
+    pub(crate) token: String,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `config extend` verb's flags.
+#[derive(clap::Args)]
+pub(crate) struct ConfigExtendArgs {
+    #[command(flatten)]
+    pub(crate) change: ConfigTokenArgs,
+    /// The new rollback window, seconds from now.
+    #[arg(long, value_name = "SECS")]
+    pub(crate) by: u64,
 }
 
 /// The `interface show` verb's flags — one struct the dispatcher hands over whole,

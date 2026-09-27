@@ -22,6 +22,7 @@ pub mod blob;
 pub mod budget;
 pub mod cache;
 pub mod call;
+pub mod config;
 pub mod cutover;
 pub mod doctor;
 pub mod echo;

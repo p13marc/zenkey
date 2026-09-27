@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33 and v1.38 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33, v1.38 and v1.42 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.
@@ -566,6 +566,100 @@ per-message-data ban ([03-grammar.md §2](03-grammar.md)) does not bite
 (an interface is an observed-population chunk, not a request id), and
 [08 §2](08-registry.md)'s cardinality budget covers it. Put the discriminator
 where the ACL can see it: in the key.
+
+**A configuration resource, worked (v1.42).** [05 §5.1](05-control-rpc.md)'s
+convention as a producer registers it and an ACL then grants it — a radio
+driver, one device chunk as the resource, the group as the next chunk, so
+that every authority an operator will want to express is a literal prefix.
+The registry slice, with the four entry kinds it takes:
+
+```toml
+[[procedure]]
+path = "config/{device}"
+kind = "read"
+reply = "ConfigView"
+idempotent = true
+since = "1.0"
+description = "the read-back: the served schema beside every running value, its source, the revision, any pending change (RFC 05 §5.1)"
+
+[[procedure]]
+path = "config/{device}/{group}/set"
+kind = "write"
+fanout = "forbidden"
+request = "ConfigChange"
+reply = "ConfigView"
+since = "1.0"
+description = "one group's change; hot: applied and read back — reach: answered {token, apply_at} before it is applied, and only with confirm_s — contract: refused, restart-required"
+
+[[procedure]]
+path = "config/{device}/confirm"
+kind = "write"
+fanout = "forbidden"
+request = "ControlRequest"
+reply = "ConfigView"
+since = "1.0"
+description = "make the pending change permanent; cancel and extend are its siblings"
+
+[[procedure]]
+path = "config/{device}/persist"
+kind = "write"
+fanout = "forbidden"
+request = "ControlRequest"
+reply = "Ack"
+since = "1.0"
+description = "write the confirmed change into the persisted layer — its own key, so it is its own grant"
+
+[[subject]]
+path = "config/{device}"
+class = "state"
+type = "ConfigView"
+qos = "transition"
+cardinality = 8
+ttl_s = 0
+since = "1.0"
+description = "the read-back, refreshed on every change (RFC 05 §5.1)"
+
+[[subject]]
+path = "config_change/{event_id}"
+class = "events"
+type = "ConfigChangeEvent"
+rate = "low"
+replay = "window(24h)"
+cardinality = 1000
+since = "1.0"
+description = "every change, after RFC 6470: the edits with sensitive values redacted, the outcome, the claimed actor"
+
+[[error]]
+name = "restart-required"
+procedures = ["config/{device}/{group}/set"]
+since = "1.0"
+description = "the group is contract: set it in the startup configuration and restart"
+
+[[error]]
+name = "device-refused"
+procedures = ["config/{device}/{group}/set"]
+since = "1.0"
+description = "the device refused, in its own words"
+```
+
+The grants that fall out of the key shape, each one a literal prefix a
+person can proofread:
+
+| Who | May | Rule (`…/v1/h-xxx/@rpc/modem/`) |
+|---|---|---|
+| anyone the console trusts | read the document | `config/**`, `query` in — and `state/modem/config/**` as any state |
+| the field operator | change `rf0`'s hot groups, arm and confirm a reach change | `config/rf0/*/set`, `config/rf0/confirm`, `config/rf0/cancel`, `config/rf0/extend` |
+| the field operator | **not** make it survive a restart | deny `config/rf0/persist` — the reason `persist` has its own key |
+| the same operator | nothing on `sat0` | no rule names it; under `default_permission: "deny"`, absent is denied |
+| a script with a stale spelling | nothing by accident | the server's exact-key check ([05 §2.1](05-control-rpc.md)) refuses `config/*/radio/set`, whatever the ACL forwarded |
+
+`zenctl config get h-xxx modem rf0` renders the first row's answer as the
+document it is; `zenctl config set h-xxx modem rf0 radio frequency_khz=868100
+--confirm 60` is the second row's, typed against the served schema, and it
+asks before sending, because `radio` is a reach group and the reply may not
+come back the way the request went. The sensitive marker's ACL half —
+`acl gen` denying a sensitive procedure by default — is [08 §2](08-registry.md)'s
+`sensitive = true`, separate work.
 
 ## 4. Constrained links
 

@@ -25,6 +25,46 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.42 (2026-09-27, the rest of the config pattern)** — §5's
+> skeleton grows into a configuration convention.
+>
+> **[05 §5.1](05-control-rpc.md).** §5 has sanctioned `<topic>/set`, a
+> read and a `state` echo since v1.0, and every adopter then invented the
+> rest for itself, because the thing being configured is often the thing
+> the call travels through. The new subsection is the rest, once, and it
+> is normative for a producer that declares a configuration resource: the
+> keys (a read, a per-group `set`, `confirm`/`cancel`/`extend`, `persist`
+> on its own key, the `transition` echo, the change event); the schema
+> served beside the values, so a tool renders a form it was not compiled
+> for; **groups** as the resource of a write, because coupled parameters
+> are unsafe one at a time; three **classes** declared per group — `hot`,
+> whose reply is the read-back; `reach`, which can cut the link and is
+> accepted only with a rollback armed, answered before it is applied, and
+> never carried by desired state; `contract`, refused at runtime with the
+> restart named; the **sensitive** flag, write-only by rule; the change
+> request's `expected_revision`, `idempotency_key`, `dry_run` and
+> `confirm_s`; confirmed commit with an undo applied once and never
+> escalated; one pending change per resource, `error/busy` for a second
+> writer; the read-back's per-value `source`; the change event after
+> RFC 6470, with `actor` and `request_id` defined as caller-claimed labels
+> — 06 §5.5's actor, finally defined, and defined as unauthenticated. The
+> reference types are `zenkey::config`, and its validator is what makes
+> every producer refuse the same input in the same words.
+>
+> **[09 §3](09-operations.md).** The convention worked as a registry slice
+> — four entry kinds, the device and the group as chunks — and the grant
+> table that falls out of that key shape: a field operator who may change
+> `rf0` and confirm a reach change but not `persist` it, and nothing on
+> `sat0` because no rule names it.
+>
+> **What deliberately did not happen.** No datastore model beyond running
+> plus an explicit persisted layer; no coordinated change across producers
+> at an agreed time; no fourth value kind. Nothing in 04 moves: the echo's
+> QoS rule was already there. Asked for by zenoh-modem (#473), whose
+> radios are configured over the links they carry.
+>
+> *Amends: 05, 09.*
+
 > **v1.41 (2026-09-27, which conditions hold here)** — the `when` field
 > ships, and the `sensor` document says, per device, which predicates hold.
 >
