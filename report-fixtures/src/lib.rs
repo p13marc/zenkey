@@ -229,6 +229,8 @@ pub fn topic_info() -> TopicInfo {
         rate: None,
         cardinality: None,
         encoding: None,
+        when: Vec::new(),
+        gate_note: None,
         since: Some("1.0".into()),
         description: None,
     }
@@ -260,6 +262,8 @@ pub fn topic_info_full() -> TopicInfo {
         rate: Some("low".into()),
         cardinality: Some(16),
         encoding: Some("application/cbor".into()),
+        when: vec!["capability:disk".into()],
+        gate_note: Some("only a host with a mounted disk".into()),
         since: Some("1.0".into()),
         description: Some("bytes used per mount".into()),
     }

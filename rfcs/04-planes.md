@@ -1,6 +1,6 @@
 # 04 — Data Classes and Planes
 
-**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29, v1.30, v1.31, v1.32 and v1.39 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.0 (ratified)** · normative chapter · *amended in v1.4, v1.5, v1.12, v1.25, v1.26, v1.29, v1.30, v1.31, v1.32, v1.39 and v1.41 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The `<class>` position ([03-grammar.md §1.4](03-grammar.md)) splits the
 keyspace into three **data classes** — `telemetry`, `state`, `events` —
@@ -679,4 +679,15 @@ like data selectors:
   producer's is.
 - Richer "who am I" registration (versions, capabilities, config hash)
   is ordinary state: `state/<producer>/sensor` (a registration document),
-  refreshed on the state cadence.
+  refreshed on the state cadence. **Its `capabilities` member is the
+  instance surface of [08 §6.1](08-registry.md)'s `when` predicates**
+  (v1.41): a map from the producer's device chunks ([06 §3](06-identity.md))
+  to the `capability:<name>` names that hold for each —
+  `{"capabilities": {"rf0": ["sdu", "rssi"], "sat0": ["sdu", "signal_bars"]}}`,
+  with the producer's own, device-less capabilities under `"*"`. The
+  registry says which surfaces are conditional and on what; this document
+  says which of those conditions hold *here*, per device, which is what a
+  consumer needs to read a gated subject's silence as honest and what a
+  conformance suite needs to judge it. It is optional, and its absence
+  means *not asked* ([13 §3](13-observer-conformance.md) O4), never that
+  no capability holds.

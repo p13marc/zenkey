@@ -416,6 +416,130 @@ impl SliceToken for Semantic {
     }
 }
 
+/// The kind of a `when` predicate (RFC 08 §2, v1.35): what has to hold for
+/// a declared surface to exist in a given build, on a given host.
+///
+/// Three kinds and no expression language, on purpose: the ANDed list of
+/// `<kind>:<name>` tokens is the whole vocabulary, and each kind binds the
+/// error a gated procedure answers (RFC 08 §6.1) — see
+/// [`gated_error`](PredicateKind::gated_error).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PredicateKind {
+    /// A build-time feature of the producer's build: a cargo feature, a
+    /// compile flag. False means *absent from this build* — `error/unsupported`.
+    Feature,
+    /// An operator-set knob: a config key, an environment switch. False means
+    /// *present, disabled here* — `error/gated`.
+    Config,
+    /// Something the host must expose: a kernel family, a device, a
+    /// privilege. False means *present, unavailable here* — `error/gated`.
+    Capability,
+}
+
+impl PredicateKind {
+    /// Every kind, in the RFC's order — the vocabulary a lint names.
+    pub const ALL: [PredicateKind; 3] = [
+        PredicateKind::Feature,
+        PredicateKind::Config,
+        PredicateKind::Capability,
+    ];
+
+    const fn token_str(self) -> &'static str {
+        match self {
+            PredicateKind::Feature => "feature",
+            PredicateKind::Config => "config",
+            PredicateKind::Capability => "capability",
+        }
+    }
+
+    /// The reserved error a procedure declared `when` answers while a
+    /// predicate of this kind is false (RFC 08 §6.1): a missing feature is
+    /// fixed by a rebuild, a missing config or capability on the host.
+    #[must_use]
+    pub const fn gated_error(self) -> &'static str {
+        match self {
+            PredicateKind::Feature => "error/unsupported",
+            PredicateKind::Config | PredicateKind::Capability => "error/gated",
+        }
+    }
+}
+
+impl SliceToken for PredicateKind {
+    fn from_token(token: &str) -> Option<Self> {
+        PredicateKind::ALL
+            .into_iter()
+            .find(|k| k.token_str() == token)
+    }
+
+    fn token(&self) -> &str {
+        self.token_str()
+    }
+}
+
+/// One `when` predicate, `<kind>:<name>` (RFC 08 §2, v1.35).
+///
+/// The kind is a [`Declared`] column: a foreign slice may carry a kind this
+/// build does not know, and RFC 08 §6.1 says such an entry is conditional
+/// all the same — carried verbatim, its error binding *not asked*. A token
+/// with no colon at all is kept whole as an unknown kind with an empty
+/// name, so it too round-trips byte for byte.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Predicate {
+    pub kind: Declared<PredicateKind>,
+    /// Free text without whitespace, meaningful to the producer's operator:
+    /// `ebpf`, `collect.ebpf`, `CAP_BPF`, `rssi`.
+    pub name: String,
+}
+
+impl Predicate {
+    /// A predicate of a known kind.
+    #[must_use]
+    pub fn new(kind: PredicateKind, name: impl Into<String>) -> Self {
+        Predicate {
+            kind: Declared::Known(kind),
+            name: name.into(),
+        }
+    }
+
+    /// Read a `<kind>:<name>` token as a slice spells it.
+    #[must_use]
+    pub fn parse(token: &str) -> Self {
+        match token.split_once(':') {
+            Some((kind, name)) => Predicate {
+                kind: Declared::parse(kind),
+                name: name.to_string(),
+            },
+            None => Predicate {
+                kind: Declared::Other(token.to_string()),
+                name: String::new(),
+            },
+        }
+    }
+
+    /// The token as the slice spells it — byte-equal to what was parsed.
+    #[must_use]
+    pub fn token(&self) -> String {
+        match (&self.kind, self.name.is_empty()) {
+            (Declared::Other(raw), true) => raw.clone(),
+            (kind, _) => format!("{}:{}", kind.token(), self.name),
+        }
+    }
+}
+
+impl fmt::Display for Predicate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.token())
+    }
+}
+
+/// Render an ANDed predicate list as the registry TOML spells it.
+fn when_toml(out: &mut String, when: Option<&[Predicate]>) {
+    if let Some(preds) = when {
+        let items: Vec<String> = preds.iter().map(|p| toml_quote(&p.token())).collect();
+        out.push_str(&format!("when = [{}]\n", items.join(", ")));
+    }
+}
+
 /// A histogram's declared upper bounds (`[[subject]] buckets`, RFC 08 §2,
 /// v1.36), as the slice carried them — `+Inf` implicit, never written.
 ///
@@ -526,6 +650,14 @@ pub struct SubjectDecl {
     pub buckets: Option<Buckets>,
     /// The presentation hint (v1.36), when declared.
     pub semantic: Option<Declared<Semantic>>,
+    /// The conditions under which this surface exists, ANDed (RFC 08 §2,
+    /// v1.35). `None` means unconditional; `Some` means the subject MAY be
+    /// silent while any predicate is false, and a build-time coverage check
+    /// exempts it naming them (§6.1).
+    pub when: Option<Vec<Predicate>>,
+    /// One line for the human deciding whether the gate still exists —
+    /// present only with `when`.
+    pub gate_note: Option<String>,
 }
 
 /// One `[[procedure]]` entry of a served registry slice.
@@ -559,6 +691,13 @@ pub struct ProcedureDecl {
     /// foreign slices, and the strict check belongs to that build's own
     /// zenkey-build).
     pub cardinality: Option<i64>,
+    /// The conditions under which this procedure can do its work, ANDed
+    /// (RFC 08 §2, v1.35). It is declared regardless, and answers
+    /// `error/unsupported` or `error/gated` — [`PredicateKind::gated_error`]
+    /// — while a predicate is false (§6.1).
+    pub when: Option<Vec<Predicate>>,
+    /// One line for the human, present only with `when`.
+    pub gate_note: Option<String>,
     pub since: Option<String>,
     pub description: Option<String>,
 }
@@ -845,6 +984,8 @@ impl SubjectDecl {
             encoding: None,
             buckets: None,
             semantic: None,
+            when: None,
+            gate_note: None,
         }
     }
 }
@@ -862,6 +1003,8 @@ impl ProcedureDecl {
             fanout: None,
             idempotent: None,
             cardinality: None,
+            when: None,
+            gate_note: None,
             since: None,
             description: None,
         }
@@ -1207,6 +1350,18 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             .unwrap_or_default()
     };
 
+    // `when` (RFC 08 §2, v1.35): an ANDed list of `<kind>:<name>` tokens,
+    // read leniently — a foreign kind is carried, not refused; the closed
+    // vocabulary is the declaring build's lint.
+    let when_of = |e: &toml::Value| -> Option<Vec<Predicate>> {
+        e.get("when").and_then(|v| v.as_array()).map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str())
+                .map(Predicate::parse)
+                .collect()
+        })
+    };
+
     let mut subjects = Vec::new();
     for e in array("subject") {
         subjects.push(SubjectDecl {
@@ -1232,6 +1387,8 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
                     .map(Buckets::new)
             }),
             semantic: tok(e.get("semantic")),
+            when: when_of(e),
+            gate_note: s(e.get("gate_note")),
         });
     }
 
@@ -1246,6 +1403,8 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             idempotent: e.get("idempotent").and_then(|v| v.as_bool()),
             cardinality: e.get("cardinality").and_then(|v| v.as_integer()),
             encoding: enc(e.get("encoding")),
+            when: when_of(e),
+            gate_note: s(e.get("gate_note")),
             since: s(e.get("since")),
             description: s(e.get("description")),
         });
@@ -1476,6 +1635,8 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
             out.push_str(&format!("buckets = [{}]\n", items.join(", ")));
         }
         opt_tok(&mut out, "semantic", d.semantic.as_ref());
+        when_toml(&mut out, d.when.as_deref());
+        opt(&mut out, "gate_note", d.gate_note.as_deref());
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -1492,6 +1653,8 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
             out.push_str(&format!("idempotent = {i}\n"));
         }
         opt_int(&mut out, "cardinality", d.cardinality);
+        when_toml(&mut out, d.when.as_deref());
+        opt(&mut out, "gate_note", d.gate_note.as_deref());
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -1927,6 +2090,40 @@ description = "reachable"
         let bare = parse_slice("[registry]\nversion = \"1.0\"\napp = \"a\"\nconvention = 1\n[producer]\nname = \"p\"\n").expect("parses");
         assert!(bare.errors.is_empty());
         assert!(!to_toml(&bare).contains("[[error]]"));
+    }
+
+    /// `when` and `gate_note` (v1.35) round-trip on subjects and procedures,
+    /// a foreign kind and a colon-less token are carried verbatim, a slice
+    /// without any stays byte-identical, and each kind binds its error.
+    #[test]
+    fn when_predicates_round_trip_and_bind_their_error() {
+        let source = "[registry]\nversion = \"2.0\"\napp = \"acme\"\nconvention = 1\n\n[producer]\nname = \"modem\"\n\n[[subject]]\npath = \"{device}/radio/rssi\"\nclass = \"telemetry\"\ntype = \"Gauge\"\ncardinality = 4\nwhen = [\"capability:rssi\", \"config:collect.radio\", \"weather:sunny\", \"nocolon\"]\ngate_note = \"only a device that measures dBm\"\n\n[[procedure]]\npath = \"device/{device}/sdu/lanes\"\nkind = \"read\"\nreply = \"LaneTable\"\ncardinality = 4\nwhen = [\"feature:mgmt\"]\n";
+        let slice = parse_slice(source).expect("parses");
+        let when = slice.subjects[0].when.as_ref().expect("declared");
+        assert_eq!(when.len(), 4);
+        assert_eq!(when[0], Predicate::new(PredicateKind::Capability, "rssi"));
+        assert_eq!(when[1].name, "collect.radio");
+        assert_eq!(when[2].kind, Declared::Other("weather".into()));
+        assert_eq!(when[2].token(), "weather:sunny");
+        assert_eq!(
+            when[3].token(),
+            "nocolon",
+            "a colon-less token is kept whole"
+        );
+        assert_eq!(
+            slice.subjects[0].gate_note.as_deref(),
+            Some("only a device that measures dBm")
+        );
+        let pw = slice.procedures[0].when.as_ref().expect("declared");
+        assert_eq!(pw, &[Predicate::new(PredicateKind::Feature, "mgmt")]);
+        assert_eq!(PredicateKind::Feature.gated_error(), "error/unsupported");
+        assert_eq!(PredicateKind::Config.gated_error(), "error/gated");
+        assert_eq!(PredicateKind::Capability.gated_error(), "error/gated");
+        let again = parse_slice(&to_toml(&slice)).expect("the export parses");
+        assert_eq!(again, slice);
+        let bare = parse_slice("[registry]\nversion = \"1.0\"\napp = \"a\"\nconvention = 1\n[producer]\nname = \"p\"\n[[subject]]\npath = \"x\"\nclass = \"state\"\ntype = \"T\"\n").expect("parses");
+        assert!(bare.subjects[0].when.is_none());
+        assert!(!to_toml(&bare).contains("when"));
     }
 
     #[test]

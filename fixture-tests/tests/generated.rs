@@ -737,3 +737,44 @@ fn error_names_are_constants() {
         "error/systemd/unit-not-found"
     );
 }
+
+/// `when`/`gate_note` (RFC 08 §2, v1.35) reach the generated accessors: the
+/// predicates as typed `(kind, name)` pairs, empty where unconditional, and
+/// the note beside them — on subjects, through `AnySubject`, and on
+/// procedures.
+#[test]
+fn when_predicates_are_accessors() {
+    use zenkey::slice::PredicateKind;
+    use zenkey_fixture_tests::registry::netlink;
+    assert_eq!(
+        netlink::Subject::SocketsTcpConnlatUsP50.when(),
+        &[(PredicateKind::Feature, "ebpf")]
+    );
+    assert_eq!(netlink::Subject::SocketsTcpConnlatUsP50.gate_note(), None);
+    let wg = netlink::Subject::wireguard_peers("wg0");
+    assert_eq!(wg.when(), &[(PredicateKind::Capability, "wireguard")]);
+    assert_eq!(wg.gate_note(), Some("host exposes a WireGuard interface"));
+    assert!(sysinfo::Subject::MemoryUsed.when().is_empty());
+    assert_eq!(
+        registry::AnySubject::Netlink(netlink::Subject::SocketsTcpConnlatUsP95).when(),
+        &[(PredicateKind::Feature, "ebpf")]
+    );
+    assert!(netring::ProcedureId::Introspect.when().is_empty());
+    assert_eq!(netring::ProcedureId::Introspect.gate_note(), None);
+    // And the slice a consumer reads carries the same.
+    let slice = zenkey::parse_slice(netlink::REGISTRY_TOML).expect("slice");
+    let peers = slice
+        .subjects
+        .iter()
+        .find(|s| s.path == "wireguard/{iface}/peers")
+        .unwrap();
+    assert_eq!(
+        peers.when.as_deref(),
+        Some(
+            &[zenkey::slice::Predicate::new(
+                PredicateKind::Capability,
+                "wireguard"
+            )][..]
+        )
+    );
+}
