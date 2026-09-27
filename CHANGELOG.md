@@ -6,22 +6,23 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 |
-|---|---|---|---|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged |
-| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 |
+|---|---|---|---|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** |
+| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged |
 
 ---
 
-## 0.11.0 — what a second adopter needed (unreleased)
+## 0.11.0 — what a second adopter needed (2026-09-27)
 
-**Unreleased.** The versions below are the ones the release commit should
-cut; nothing is tagged or published yet, and the table above gains its
-column then.
+**Release commit** on 2026-09-27: `zenkey` 0.10.0, `zenkey-build` 0.10.0
+and `zenkey-fleet` 0.15.0 to crates.io by the manual `publish-crates`
+dispatch, the `0.11.0` tag for the binaries — both the maintainer's act,
+after this commit.
 
 Six pull requests on six RFC amendments, **v1.38 → v1.43**, every one
 asked for by the convention's second adopter — a driver for radios and
