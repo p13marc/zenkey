@@ -25,6 +25,41 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.38 (2026-09-27, the third refusal)** — a broadcast write is
+> refused at the server, because the ACL never could.
+>
+> **[05 §2.1](05-control-rpc.md).** The write fan-out bullet named three
+> refusals "in order of preference": the builder, the registry, the ACL. The
+> first two are the caller's, and a raw `get` has neither. The third does not
+> exist: zenoh denies a message when a deny rule's key expression *includes*
+> the message's, so a query on `…/v1/*/@rpc/**` is not included by any
+> producer-scoped rule and reaches every queryable it intersects — for a
+> write, after the side effect. Found by a second adopter designing remote
+> configuration over a permissive-default router (zenoh-modem#111): its
+> shipped `deny-rpc` rule protected the radio from every `zenctl` that spelled
+> a key, and from none that did not. The bullet now names the server: a
+> `kind = "write"` procedure whose entry is not `fanout = "allowed"` MUST
+> answer `error/fanout-forbidden` to any query whose key expression is not
+> exactly its own concrete key, before its handler runs. The checklist table
+> gains the row; §3's reserved vocabulary gains the name.
+>
+> **[09 §3](09-operations.md).** Fact 6, deny is by inclusion: a deny rule
+> stops only a caller who spells a key at least as narrow as it. Its two
+> consequences are stated where the recipes are: a constrained face denies a
+> plane by the widest pattern that can reach it (`**/@rpc/**`), and
+> `no-remote-actions` is the second lock, not the first. The recipe's sketch
+> comment that called the literal deny "sound under default-deny" is
+> corrected — the console's own fleet grant includes the broader query.
+>
+> **What deliberately did not happen.** `fanout = "forbidden"` keeps its
+> meaning and its default; the builder and registry layers stand. Reads are
+> untouched: a fan-in read is *supposed* to answer a wildcard, and the
+> server-side refusal is bound to write procedures only. No ACL is asked to
+> do what it cannot, and the reference generator's `no-remote-actions` rule
+> stays in every plan it was in.
+>
+> *Amends: 05, 09.*
+
 > **v1.37 (2026-09-25, the profile's histogram)** — the reference
 > profile defines the payload v1.36 left to it.
 >

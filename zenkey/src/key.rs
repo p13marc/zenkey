@@ -75,6 +75,75 @@ fn is_wild(ke: &keyexpr) -> bool {
     ke.as_str().contains('*')
 }
 
+/// A query that is not an exact call on a procedure's own key (RFC 05 §2.1).
+///
+/// Returned by [`require_exact`]. Its [`Display`](fmt::Display) text is
+/// written to go back verbatim as the `message` of an
+/// `error/fanout-forbidden` reply, so it names both keys and says which way
+/// they differ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExactKeyError {
+    /// The key expression the query carried.
+    pub query: String,
+    /// The concrete key the procedure is declared on.
+    pub own: String,
+    /// Whether the query carried a wildcard — the broadcast case, which is
+    /// the one the rule exists for. `false` is a concrete key that is not
+    /// ours, which a router never delivers and a test double might.
+    pub wild: bool,
+}
+
+impl fmt::Display for ExactKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.wild {
+            write!(
+                f,
+                "query `{}` carries a wildcard, and this procedure answers only its own \
+                 concrete key `{}` (RFC 05 §2.1: a broadcast write is refused at the server)",
+                self.query, self.own
+            )
+        } else {
+            write!(
+                f,
+                "query `{}` is not this procedure's own concrete key `{}` (RFC 05 §2.1)",
+                self.query, self.own
+            )
+        }
+    }
+}
+
+impl std::error::Error for ExactKeyError {}
+
+/// The server-side half of RFC 05 §2.1's write fan-out rule (v1.38): a
+/// `kind = "write"` procedure whose entry is not `fanout = "allowed"` answers
+/// only a query whose key expression **is** its own concrete key.
+///
+/// The builder and the registry refuse a broadcast write on the *caller's*
+/// side, and a raw `get` has neither. The ACL is not a layer at all: a deny
+/// rule fires only when it *includes* the query's key expression (RFC 09 §3
+/// fact 6), so `v1/*/@rpc/**` walks past a rule on `v1/*/@rpc/<p>/**` and
+/// reaches every queryable it intersects. This check is the one every caller
+/// passes through, which is why it runs at the server, before the handler.
+///
+/// Both arguments are borrowed [`keyexpr`]s rather than [`Key`]s because a
+/// producer's session is namespaced (its keys are base-relative) while an
+/// un-namespaced explorer serves full wire keys; the comparison is the same
+/// either way, and a [`Key`] derefs to `keyexpr`.
+///
+/// # Errors
+///
+/// [`ExactKeyError`], carrying the message to send back.
+pub fn require_exact(query: &keyexpr, own: &keyexpr) -> Result<(), ExactKeyError> {
+    if query == own {
+        return Ok(());
+    }
+    Err(ExactKeyError {
+        query: query.as_str().to_string(),
+        own: own.as_str().to_string(),
+        wild: is_wild(query),
+    })
+}
+
 impl Selector {
     /// Wrap a builder-produced, already-canonical selector string. Wildcards
     /// are the point here; see [`Key::from_canonical`] for the rest.
@@ -417,5 +486,38 @@ mod tests {
                 wild
             );
         }
+    }
+
+    /// RFC 05 §2.1 (v1.38): the server-side refusal answers only the exact
+    /// key. A broadcast is the case it exists for, and the message names both
+    /// keys so it can be sent back verbatim.
+    #[test]
+    fn a_write_answers_only_its_own_concrete_key() {
+        let own = grammar::rpc_key(
+            &host(),
+            Some(&Producer::new("actuator").unwrap()),
+            &["knob", "set"],
+        )
+        .unwrap();
+        assert_eq!(require_exact(own.as_keyexpr(), &own), Ok(()));
+
+        let broadcast = keyexpr::new("v1/*/@rpc/actuator/knob/set").unwrap();
+        let err = require_exact(broadcast, &own).unwrap_err();
+        assert!(err.wild);
+        assert_eq!(err.own, own.as_str());
+        let text = err.to_string();
+        assert!(
+            text.contains("v1/*/@rpc/actuator/knob/set") && text.contains(own.as_str()),
+            "{text}"
+        );
+        assert!(text.contains("RFC 05 §2.1"), "{text}");
+
+        // A concrete key that is not ours: a router never delivers one, a
+        // test double might, and the answer is the same refusal without the
+        // wildcard wording.
+        let other = keyexpr::new("v1/h-3fa9c2d41b7e/@rpc/actuator/other/set").unwrap();
+        let err = require_exact(other, &own).unwrap_err();
+        assert!(!err.wild);
+        assert!(!err.to_string().contains("wildcard"), "{err}");
     }
 }

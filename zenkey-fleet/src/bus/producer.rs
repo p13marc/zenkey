@@ -11,7 +11,7 @@
 //! presence), and folding the strict API into the permissive one would
 //! give every mock a way to claim it is a producer.
 //!
-//! Three rules, three shapes:
+//! Four rules, four shapes:
 //!
 //! - **Order** ([`BringUp`]): a producer declares its queryables
 //!   (`introspect`, `describe`, its procedures) **first**, and its `alive`
@@ -32,7 +32,16 @@
 //!   §2.1: consolidation keeps one reply *per reply key*, so a fleet
 //!   echoing a shared wildcard selector consolidates down to one
 //!   survivor). The responder holds its declared key and replies on it;
-//!   the query's key is never consulted.
+//!   the query's key is never consulted for the *reply*.
+//! - **Target** ([`BringUp::serve_write`]): a `kind = "write"` procedure
+//!   whose entry is not `fanout = "allowed"` answers only a query whose key
+//!   expression **is** its own concrete key, and refuses every other with
+//!   `error/fanout-forbidden` before the handler sees it (RFC 05 §2.1,
+//!   v1.38). The builder and the registry refuse a broadcast write on the
+//!   caller's side; a raw `get` has neither, and the ACL cannot stand in —
+//!   deny is by inclusion (RFC 09 §3 fact 6), so `v1/*/@rpc/**` walks past
+//!   any producer-scoped rule. The query's key *is* consulted here, and only
+//!   here.
 
 use crate::{Error, Result};
 use zenoh::Session;
@@ -42,7 +51,7 @@ use zenoh::query::{Query, Queryable};
 
 /// The RFC 05 §3 reserved error vocabulary — the names every conforming
 /// caller understands, as a closed enum. Producer-specific names live under
-/// `error/<producer>/…` and are registered like subjects; these six are the
+/// `error/<producer>/…` and are registered like subjects; these seven are the
 /// convention's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReservedError {
@@ -65,17 +74,24 @@ pub enum ReservedError {
     /// the server; RFC 08 §6.1: "capability built in, disabled here →
     /// reconfigure").
     Gated,
+    /// `error/fanout-forbidden` — the query's key expression is not this
+    /// procedure's own concrete key: a broadcast reached a write whose entry
+    /// is not `fanout = "allowed"` (RFC 05 §2.1, v1.38). Sent by a
+    /// [`Responder`] declared through [`BringUp::serve_write`], before the
+    /// handler sees the query; the message is [`zenkey::ExactKeyError`]'s.
+    FanoutForbidden,
 }
 
 impl ReservedError {
     /// Every reserved name, for iteration (renderers, doctors).
-    pub const ALL: [ReservedError; 6] = [
+    pub const ALL: [ReservedError; 7] = [
         ReservedError::InvalidArgs,
         ReservedError::Unauthorized,
         ReservedError::NotFound,
         ReservedError::Unsupported,
         ReservedError::Busy,
         ReservedError::Gated,
+        ReservedError::FanoutForbidden,
     ];
 
     /// The wire name, namespaced like a key (RFC 05 §3).
@@ -87,6 +103,7 @@ impl ReservedError {
             ReservedError::Unsupported => "error/unsupported",
             ReservedError::Busy => "error/busy",
             ReservedError::Gated => "error/gated",
+            ReservedError::FanoutForbidden => "error/fanout-forbidden",
         }
     }
 
@@ -104,9 +121,15 @@ impl ReservedError {
 }
 
 /// One declared `@rpc` queryable, bound to its own concrete key — the only
-/// key it will ever reply on.
+/// key it will ever reply on, and (for a write) the only key it will answer.
 pub struct Responder {
     key: String,
+    /// The same key, parsed once, for [`zenkey::require_exact`].
+    own: zenoh::key_expr::KeyExpr<'static>,
+    /// Whether this responder answers only its own concrete key
+    /// ([`BringUp::serve_write`]) or any query that intersects it
+    /// ([`BringUp::serve`]).
+    exact: bool,
     queryable: Queryable<FifoChannelHandler<Query>>,
 }
 
@@ -114,6 +137,7 @@ impl std::fmt::Debug for Responder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Responder")
             .field("key", &self.key)
+            .field("exact", &self.exact)
             .finish_non_exhaustive()
     }
 }
@@ -125,17 +149,41 @@ impl Responder {
     }
 
     /// The next query, or `None` once the queryable is gone.
+    ///
+    /// On a responder declared through [`BringUp::serve_write`], a query
+    /// whose key expression is not this responder's own concrete key never
+    /// comes out of here: it is answered `error/fanout-forbidden` on the
+    /// spot, with [`zenkey::ExactKeyError`]'s text as the message, and the
+    /// wait continues (RFC 05 §2.1, v1.38). A refusal that could not be sent
+    /// is dropped with the query — the caller was a broadcast, and there is
+    /// nobody to report to.
     pub async fn next(&self) -> Option<Query> {
-        self.queryable.recv_async().await.ok()
+        loop {
+            let query = self.queryable.recv_async().await.ok()?;
+            if !self.exact {
+                return Some(query);
+            }
+            match zenkey::require_exact(query.key_expr(), &self.own) {
+                Ok(()) => return Some(query),
+                Err(e) => {
+                    let _ = self
+                        .reply_err(&query, ReservedError::FanoutForbidden, &e.to_string())
+                        .await;
+                }
+            }
+        }
     }
 
     /// The queries as a [`Stream`](futures_core::Stream) (#343).
     ///
     /// Borrows, which is the point: `reply` and `reply_err` take `&self`, so
     /// a query pulled from this stream can still be answered while the stream
-    /// is held — the same receive/answer split [`next`](Self::next) has.
+    /// is held — the same receive/answer split [`next`](Self::next) has, and
+    /// the same refusal of a non-exact query on a write responder.
     pub fn stream(&self) -> impl futures_core::Stream<Item = Query> + '_ {
-        self.queryable.stream()
+        futures_util::stream::unfold((), move |()| async move {
+            self.next().await.map(|query| (query, ()))
+        })
     }
 
     /// Reply a value on this responder's **own concrete key** (RFC 05
@@ -250,6 +298,23 @@ impl<'a> BringUp<'a> {
     ///   **never** declared complete (RFC 05 §2.1 — one complete queryable
     ///   short-circuits `BestMatching` callers to a single reply).
     pub async fn serve(&mut self, key: &str) -> Result<&Responder> {
+        self.declare(key, false).await
+    }
+
+    /// Declare a `kind = "write"` procedure whose entry is not
+    /// `fanout = "allowed"`: everything [`serve`](Self::serve) does, and the
+    /// responder answers **only** a query whose key expression is its own
+    /// concrete key — any other is refused `error/fanout-forbidden` inside
+    /// [`Responder::next`], before the handler sees it (RFC 05 §2.1, v1.38).
+    ///
+    /// Reads keep [`serve`](Self::serve): a fan-in read (`introspect`,
+    /// `describe`, a per-host `range`) is *supposed* to answer a wildcard
+    /// query, and refusing it would break every fleet-wide `get`.
+    pub async fn serve_write(&mut self, key: &str) -> Result<&Responder> {
+        self.declare(key, true).await
+    }
+
+    async fn declare(&mut self, key: &str, exact: bool) -> Result<&Responder> {
         let parsed = zenoh::key_expr::KeyExpr::try_from(key.to_string())
             .map_err(|e| Error::bus("declare queryable", key, e))?;
         if parsed.is_wild() {
@@ -264,11 +329,15 @@ impl<'a> BringUp<'a> {
         let queryable = crate::bus::teardown::declared(
             "declare queryable",
             key,
-            self.session.declare_queryable(parsed).complete(false),
+            self.session
+                .declare_queryable(parsed.clone())
+                .complete(false),
         )
         .await?;
         self.responders.push(Responder {
             key: key.to_string(),
+            own: parsed,
+            exact,
             queryable,
         });
         Ok(self.responders.last().expect("just pushed"))

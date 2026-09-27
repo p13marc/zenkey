@@ -1,6 +1,6 @@
 # 05 — Control Plane: `@rpc`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25 and v1.31 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31 and v1.38 — see [CHANGELOG.md](CHANGELOG.md)*
 
 All interaction — questions, instructions, downloads-of-detail — happens on
 the `@rpc` plane through **queryables** (request/reply), never through
@@ -76,15 +76,25 @@ discipline does, and fleet callers MUST follow it:
   host, each answering `range` from its own ring ([11 §2](11-zensight-profile.md))
   — are ordinary fan-in under this rule: each replies on its own concrete
   key and the caller joins them the same way (v1.31).
-- **Write fan-out.** A fan-out (`*`-origin) call to a `kind = "write"` /
-  `fanout = "forbidden"` procedure MUST be refused — by the builder (no
-  `FleetSelector` overload is generated for it), by the registry (admission
-  rejects the shape), or by the ACL, in that order of preference. Fan-in is
-  safe for *reads* — collect every host's answer — but a broadcast *write*
-  is a fleet-wide side effect, and one mistargeted `*` actuates every host
-  at once. The `*` origin stays legal only for `read`/`long-running` and for
-  writes explicitly marked `fanout = "allowed"`
-  ([08-registry.md §2](08-registry.md)).
+- **Write fan-out.** A fan-out call — a `*` origin, or any wildcard — to a
+  `kind = "write"` procedure whose entry is not `fanout = "allowed"` MUST be
+  refused three times over: by the builder (no `FleetSelector` overload is
+  generated for it), by the registry (admission rejects the shape), and
+  **by the server** (v1.38) — the procedure answers `error/fanout-forbidden`
+  on `reply_err` to any query whose key expression is not exactly its own
+  concrete key, before its handler runs, with a message naming both keys.
+  The first two layers are the *caller's*, and a raw `get` has neither; the
+  third is the one every caller passes through. The ACL is **not** a layer
+  here, and until v1.38 this bullet said it was: a deny rule fires only when
+  it *includes* the query's key expression ([09 §3](09-operations.md)
+  fact 6), so under `default_permission: "allow"` a query broader than the
+  rule is forwarded to every queryable it intersects, and under `"deny"` it
+  crosses whenever an allow rule includes it — which the console's fleet
+  grant does. Fan-in is safe for *reads* — collect every host's answer —
+  but a broadcast *write* is a fleet-wide side effect, and one mistargeted
+  `*` actuates every host at once. The `*` origin stays legal only for
+  `read`/`long-running` and for writes explicitly marked
+  `fanout = "allowed"` ([08-registry.md §2](08-registry.md)).
 
 Checklist, because every one of these has been shipped wrong at least once:
 
@@ -95,6 +105,7 @@ Checklist, because every one of these has been shipped wrong at least once:
 | `complete` | — | **never** on an `@rpc` queryable |
 | consolidation | `None` for belt and braces | — |
 | missing replies | join against the liveliness roster | — |
+| a write's target | the concrete key, never a wildcard | refuse any other query: `error/fanout-forbidden` (v1.38) |
 
 > **Editorial note (v1.2).** This section is **correct as written** and was
 > deliberately left unchanged by the v1.2 amendments. Both of its MUSTs were
@@ -103,6 +114,11 @@ Checklist, because every one of these has been shipped wrong at least once:
 > "rediscovered" from Zenoh's API docs, which said exactly what §2.1 already
 > said. Recorded here so that a future reader who arrives via those bugs does
 > not conclude the spec was silent and "fix" a section that was right.
+>
+> **Editorial note (v1.38).** One thing in it *was* wrong: the write
+> fan-out bullet named the ACL as the third refusal, and an ACL cannot
+> refuse a query broader than its rule. The bullet now names the server,
+> and the reserved vocabulary in §3 gained the name it answers with.
 
 ## 3. Read, write, and long-running procedures
 
@@ -130,7 +146,9 @@ is:
 
 where `<name>` is machine-readable and namespaced like a key. The
 convention reserves `error/invalid-args`, `error/unauthorized`,
-`error/not-found`, `error/unsupported`, `error/busy`, `error/gated`;
+`error/not-found`, `error/unsupported`, `error/busy`, `error/gated`, and
+(v1.38) `error/fanout-forbidden` — a broadcast reached a write whose entry is
+not `fanout = "allowed"`, refused at the server (§2.1);
 producer-specific names live under `error/<producer>/…` and are registered
 like subjects — deprecate-never-reuse applies
 ([08-registry.md](08-registry.md)). A successful write replies with an

@@ -34,6 +34,14 @@
 //! `@catalog` any more than `@adv`, so `@catalog/**/@adv/**` needs spelling
 //! out wherever the catalog runs the advanced tier.
 //!
+//! And a sixth (RFC 09 §3 fact 6, v1.38): **deny is by inclusion**, so
+//! [`NO_REMOTE_ACTIONS`] binds only a caller who spells a write's key at
+//! least as narrowly as the rule. A query on `…/v1/*/@rpc/**` — which the
+//! console's own fleet grant includes — is not included by the literal, and
+//! crosses to every queryable it intersects. The rule stays, as the second
+//! lock on the door; the refusal of a broadcast write is the *server's*
+//! (RFC 05 §2.1, `BringUp::serve_write`), and the rule's cite says so.
+//!
 //! Pure, like everything in [`crate::model`]: values in hand, no session.
 //! [`plan_acl`] takes an *optional* registry and says what it could not
 //! narrow without one rather than guessing (RFC 13 §3 O4); [`check_acl`]
@@ -773,7 +781,8 @@ pub fn plan_acl(
                         write_set.clone(),
                         "no-remote-actions",
                         "RFC 09 §3: the write procedures are deniable per key because the key \
-                         IS the target; deny wins, and is sound under default-deny",
+                         IS the target; deny wins for a caller who spells it, and fact 6 \
+                         leaves a broader query to the server (RFC 05 §2.1)",
                     )));
                 }
             }
@@ -824,7 +833,8 @@ pub fn plan_acl(
                         write_set.clone(),
                         "no-remote-actions",
                         "RFC 09 §3: the write procedures are deniable per key because the key \
-                         IS the target; deny wins, and is sound under default-deny",
+                         IS the target; deny wins for a caller who spells it, and fact 6 \
+                         leaves a broader query to the server (RFC 05 §2.1)",
                     )));
                 }
             }

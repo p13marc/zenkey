@@ -95,7 +95,7 @@ pub use grammar::{
 /// its own builder output (issue #312). Nothing here is covered by semver.
 #[doc(hidden)]
 pub use key::__private;
-pub use key::{Chunk, Key, Selector};
+pub use key::{Chunk, ExactKeyError, Key, Selector, require_exact};
 pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};
 pub use profile::{AppName, AppProfile, OriginSalt};
 pub use qos::QosProfile;
