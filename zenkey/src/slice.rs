@@ -416,6 +416,49 @@ impl SliceToken for Semantic {
     }
 }
 
+/// How far a declared surface may travel (RFC 08 §2, v1.43): a property of
+/// the entry, never of a router — the same counter is `host` on every node
+/// that carries it.
+///
+/// Read by the constrained-face profile the reference tooling generates
+/// (RFC 09 §4) and by nothing else: it says where a value may go, never
+/// what it must be, and no judge reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Exposure {
+    /// Never leaves the node: the detail an operator reads on the host bus
+    /// and nowhere else. Denied on every constrained face.
+    Host,
+    /// May cross a constrained link, at that face's rate limit — the few
+    /// values a far-side operator acts on.
+    Link,
+    /// Everywhere, unconditioned. The default for an entry that declares
+    /// nothing.
+    Fleet,
+}
+
+impl Exposure {
+    /// Every value, in the RFC's order — the vocabulary a lint names.
+    pub const ALL: [Exposure; 3] = [Exposure::Host, Exposure::Link, Exposure::Fleet];
+
+    const fn token_str(self) -> &'static str {
+        match self {
+            Exposure::Host => "host",
+            Exposure::Link => "link",
+            Exposure::Fleet => "fleet",
+        }
+    }
+}
+
+impl SliceToken for Exposure {
+    fn from_token(token: &str) -> Option<Self> {
+        Exposure::ALL.into_iter().find(|e| e.token_str() == token)
+    }
+
+    fn token(&self) -> &str {
+        self.token_str()
+    }
+}
+
 /// The kind of a `when` predicate (RFC 08 §2, v1.35): what has to hold for
 /// a declared surface to exist in a given build, on a given host.
 ///
@@ -658,6 +701,9 @@ pub struct SubjectDecl {
     /// One line for the human deciding whether the gate still exists —
     /// present only with `when`.
     pub gate_note: Option<String>,
+    /// How far the subject may travel (RFC 08 §2, v1.43), when declared;
+    /// absent means [`Exposure::Fleet`].
+    pub exposure: Option<Declared<Exposure>>,
 }
 
 /// One `[[procedure]]` entry of a served registry slice.
@@ -698,6 +744,12 @@ pub struct ProcedureDecl {
     pub when: Option<Vec<Predicate>>,
     /// One line for the human, present only with `when`.
     pub gate_note: Option<String>,
+    /// How far the procedure may travel (RFC 08 §2, v1.43), when declared;
+    /// absent means [`Exposure::Fleet`].
+    pub exposure: Option<Declared<Exposure>>,
+    /// The request carries a secret (RFC 08 §2, v1.43): a generated ACL
+    /// denies the procedure to every principal until a grant names it.
+    pub sensitive: Option<bool>,
     pub since: Option<String>,
     pub description: Option<String>,
 }
@@ -986,6 +1038,7 @@ impl SubjectDecl {
             semantic: None,
             when: None,
             gate_note: None,
+            exposure: None,
         }
     }
 }
@@ -1005,6 +1058,8 @@ impl ProcedureDecl {
             cardinality: None,
             when: None,
             gate_note: None,
+            exposure: None,
+            sensitive: None,
             since: None,
             description: None,
         }
@@ -1389,6 +1444,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             semantic: tok(e.get("semantic")),
             when: when_of(e),
             gate_note: s(e.get("gate_note")),
+            exposure: tok(e.get("exposure")),
         });
     }
 
@@ -1405,6 +1461,8 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             encoding: enc(e.get("encoding")),
             when: when_of(e),
             gate_note: s(e.get("gate_note")),
+            exposure: tok(e.get("exposure")),
+            sensitive: e.get("sensitive").and_then(|v| v.as_bool()),
             since: s(e.get("since")),
             description: s(e.get("description")),
         });
@@ -1637,6 +1695,7 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         opt_tok(&mut out, "semantic", d.semantic.as_ref());
         when_toml(&mut out, d.when.as_deref());
         opt(&mut out, "gate_note", d.gate_note.as_deref());
+        opt_tok(&mut out, "exposure", d.exposure.as_ref());
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -1655,6 +1714,10 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         opt_int(&mut out, "cardinality", d.cardinality);
         when_toml(&mut out, d.when.as_deref());
         opt(&mut out, "gate_note", d.gate_note.as_deref());
+        opt_tok(&mut out, "exposure", d.exposure.as_ref());
+        if let Some(s) = d.sensitive {
+            out.push_str(&format!("sensitive = {s}\n"));
+        }
         opt(&mut out, "since", d.since.as_deref());
         opt(&mut out, "description", d.description.as_deref());
     }
@@ -2124,6 +2187,34 @@ description = "reachable"
         let bare = parse_slice("[registry]\nversion = \"1.0\"\napp = \"a\"\nconvention = 1\n[producer]\nname = \"p\"\n[[subject]]\npath = \"x\"\nclass = \"state\"\ntype = \"T\"\n").expect("parses");
         assert!(bare.subjects[0].when.is_none());
         assert!(!to_toml(&bare).contains("when"));
+    }
+
+    /// `exposure` and `sensitive` (RFC 08 §2, v1.43) round-trip and read
+    /// leniently: a foreign exposure token is carried as `Other`.
+    #[test]
+    fn exposure_and_sensitive_round_trip() {
+        let source = "[registry]\nversion = \"2.0\"\napp = \"acme\"\nconvention = 1\n\n[producer]\nname = \"modem\"\n\n[[subject]]\npath = \"{device}/tx_sdus_total\"\nclass = \"telemetry\"\ntype = \"Counter\"\ncardinality = 4\nexposure = \"host\"\n\n[[subject]]\npath = \"{device}/queue_depth\"\nclass = \"telemetry\"\ntype = \"Gauge\"\ncardinality = 4\nexposure = \"orbit\"\n\n[[procedure]]\npath = \"config/{device}/access/set\"\nkind = \"write\"\nrequest = \"ConfigChange\"\nreply = \"ConfigView\"\ncardinality = 4\nexposure = \"host\"\nsensitive = true\n";
+        let slice = parse_slice(source).expect("parses");
+        assert_eq!(
+            slice.subjects[0].exposure,
+            Some(Declared::Known(Exposure::Host))
+        );
+        assert_eq!(
+            slice.subjects[1].exposure,
+            Some(Declared::Other("orbit".into()))
+        );
+        assert_eq!(
+            slice.procedures[0].exposure,
+            Some(Declared::Known(Exposure::Host))
+        );
+        assert_eq!(slice.procedures[0].sensitive, Some(true));
+        let again = parse_slice(&to_toml(&slice)).expect("the export parses");
+        assert_eq!(again, slice);
+        assert_eq!(Exposure::from_token("link"), Some(Exposure::Link));
+        assert_eq!(Exposure::Fleet.token(), "fleet");
+        let bare = parse_slice("[registry]\nversion = \"1.0\"\napp = \"a\"\nconvention = 1\n[producer]\nname = \"p\"\n[[subject]]\npath = \"x\"\nclass = \"state\"\ntype = \"T\"\n").expect("parses");
+        assert!(bare.subjects[0].exposure.is_none());
+        assert!(!to_toml(&bare).contains("exposure"));
     }
 
     #[test]

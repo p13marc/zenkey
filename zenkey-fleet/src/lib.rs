@@ -275,7 +275,9 @@ pub use judge::retired::scope_note as retired_scope_note;
 pub use judge::why::{StoredLookup, StoredValue, WhyInputs, WhySpec, WireWatch, run_why};
 // `diff` is `value_diff` at the root: a bare `diff` beside `byte_diff` in a
 // crate that also has `schema_drift` and `slice::diff` reads as *the* diff.
-pub use model::acl::{AclOptions, check_acl, explain_acl, plan_acl, to_json5 as acl_plan_json5};
+pub use model::acl::{
+    AclOptions, check_acl, explain_acl, plan_acl, plan_face, to_json5 as acl_plan_json5,
+};
 pub use model::alert::alert_transition;
 pub use model::consumers::{SubjectTarget, declaring_sessions, join_consumers, subject_target};
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};

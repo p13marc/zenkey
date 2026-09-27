@@ -231,6 +231,7 @@ pub fn topic_info() -> TopicInfo {
         encoding: None,
         when: Vec::new(),
         gate_note: None,
+        exposure: None,
         since: Some("1.0".into()),
         description: None,
     }
@@ -264,6 +265,7 @@ pub fn topic_info_full() -> TopicInfo {
         encoding: Some("application/cbor".into()),
         when: vec!["capability:disk".into()],
         gate_note: Some("only a host with a mounted disk".into()),
+        exposure: Some("link".into()),
         since: Some("1.0".into()),
         description: Some("bytes used per mount".into()),
     }

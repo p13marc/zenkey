@@ -346,6 +346,25 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             );
         }
         let _ = writeln!(out, "            }}\n        }}\n");
+        // exposure() — how far the subject may travel (RFC 08 §2, v1.43).
+        let _ = writeln!(
+            out,
+            "        /// How far this subject may travel (RFC 08 §2, v1.43), when declared;\n        /// `None` means `Exposure::Fleet`. Read by the constrained-face profile\n        /// (RFC 09 §4), never by a judge."
+        );
+        let _ = writeln!(
+            out,
+            "        pub fn exposure(&self) -> Option<{zk}::slice::Exposure> {{"
+        );
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let _ = writeln!(
+                out,
+                "                Self::{} {{ .. }} => {},",
+                s.variant,
+                exposure_literal(zk, s.exposure.as_deref())
+            );
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
 
         // encoding() — the declared payload framing (RFC 08 §2, v1.5).
         let _ = writeln!(
@@ -921,6 +940,40 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 let _ = writeln!(out, "                Self::{} => {note},", p.variant);
             }
             let _ = writeln!(out, "            }}\n        }}\n");
+            // exposure()/sensitive() (RFC 08 §2, v1.43): where a call may travel,
+            // and whether its request carries a secret an ACL denies by default.
+            let _ = writeln!(
+                out,
+                "        /// How far this procedure may travel (RFC 08 §2, v1.43), when declared;\n        /// `None` means `Exposure::Fleet`."
+            );
+            let _ = writeln!(
+                out,
+                "        pub fn exposure(self) -> Option<{zk}::slice::Exposure> {{"
+            );
+            let _ = writeln!(out, "            match self {{");
+            for p in &f.procedures {
+                let _ = writeln!(
+                    out,
+                    "                Self::{} => {},",
+                    p.variant,
+                    exposure_literal(zk, p.exposure.as_deref())
+                );
+            }
+            let _ = writeln!(out, "            }}\n        }}\n");
+            let _ = writeln!(
+                out,
+                "        /// The request carries a secret (RFC 08 §2, v1.43): a generated ACL\n        /// denies the procedure to every principal until a grant names it."
+            );
+            let _ = writeln!(out, "        pub fn sensitive(self) -> bool {{");
+            let _ = writeln!(out, "            match self {{");
+            for p in &f.procedures {
+                let _ = writeln!(
+                    out,
+                    "                Self::{} => {},",
+                    p.variant, p.sensitive
+                );
+            }
+            let _ = writeln!(out, "            }}\n        }}\n");
             let _ = writeln!(out, "    }}\n");
 
             // FleetProcedureId — the fanout-allowed subset. A forbidden-fanout
@@ -1281,6 +1334,11 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             "gate_note",
             "Option<&'static str>".to_string(),
             "s.gate_note()",
+        ),
+        (
+            "exposure",
+            format!("Option<{zk}::slice::Exposure>"),
+            "s.exposure()",
         ),
     ] {
         let _ = writeln!(out, "    pub fn {method}(&self) -> {ret} {{");
@@ -1699,6 +1757,23 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
 /// A `when` predicate list as a `&'static [(PredicateKind, &str)]` literal
 /// (RFC 08 §2, v1.35); `&[]` when the entry declares none. The kind tokens
 /// were linted closed, so the variant lookup cannot miss.
+/// The `exposure` accessor's literal (RFC 08 §2, v1.43): `None` when the
+/// entry declares nothing. The token was linted closed, so the variant
+/// lookup cannot miss.
+fn exposure_literal(zk: &str, exposure: Option<&str>) -> String {
+    match exposure {
+        None => "None".to_string(),
+        Some(token) => {
+            let v = zenkey::slice::Exposure::ALL
+                .iter()
+                .find(|e| <zenkey::slice::Exposure as zenkey::slice::SliceToken>::token(e) == token)
+                .map(|e| format!("{e:?}"))
+                .expect("the lint admits only the closed vocabulary");
+            format!("Some({zk}::slice::Exposure::{v})")
+        }
+    }
+}
+
 fn when_literal(zk: &str, when: Option<&[(String, String)]>) -> String {
     let Some(preds) = when else {
         return "&[]".to_string();

@@ -102,6 +102,7 @@ fn the_five_registration_states_render_five_distinct_glyph_word_pairs() {
             encoding: None,
             when: None,
             gate_note: None,
+            exposure: None,
             ttl_s: None,
             rate: None,
             cardinality: None,

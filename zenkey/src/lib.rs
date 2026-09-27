@@ -105,7 +105,7 @@ pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, Servi
 pub use profile::{AppName, AppProfile, OriginSalt};
 pub use qos::QosProfile;
 pub use slice::{
-    Bound, Buckets, Declared, ErrorDecl, Fanout, Predicate, PredicateKind, ProcedureKind,
+    Bound, Buckets, Declared, ErrorDecl, Exposure, Fanout, Predicate, PredicateKind, ProcedureKind,
     RateClass, RegistrySlice, Semantic, SliceFinding, SliceToken, SubjectKind, parse_slice,
     to_toml as slice_to_toml, toml_quote,
 };

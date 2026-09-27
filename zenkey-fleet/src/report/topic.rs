@@ -153,6 +153,10 @@ pub struct TopicInfo {
     /// The one-line note beside a `when`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gate_note: Option<String>,
+    /// How far the subject may travel (RFC 08 §2, v1.43), as declared;
+    /// absent when the entry declares nothing (which reads as `fleet`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -203,6 +207,7 @@ impl TopicInfo {
             encoding: None,
             when: Vec::new(),
             gate_note: None,
+            exposure: None,
             since: None,
             description: None,
         };
@@ -244,6 +249,7 @@ impl TopicInfo {
                     .map(zenkey::slice::Predicate::token)
                     .collect();
                 info.gate_note = s.gate_note.clone();
+                info.exposure = s.exposure.as_ref().map(|e| e.token().to_string());
                 info.ttl_s = s.ttl_s;
                 // Declared since v1.0, dropped on this path until #221 — the
                 // field existed and was never filled.

@@ -138,6 +138,9 @@ pub struct SubjectFacts {
     pub when: Option<Vec<zenkey::slice::Predicate>>,
     /// The one-line note beside a `when`.
     pub gate_note: Option<String>,
+    /// How far the subject may travel (RFC 08 §2, v1.43), when declared;
+    /// absent means `fleet`.
+    pub exposure: Option<Declared<zenkey::slice::Exposure>>,
     pub ttl_s: Option<i64>,
     /// The declared events rate class (`rare` | `low` | `burst(n/h)`,
     /// RFC 04 §1.3) — carried so observers can judge over-rate (#161).
@@ -248,6 +251,7 @@ impl KeyFacts {
                 encoding: decl.encoding.clone(),
                 when: decl.when.clone(),
                 gate_note: decl.gate_note.clone(),
+                exposure: decl.exposure.clone(),
                 ttl_s: decl.ttl_s,
                 rate: decl.rate.clone(),
                 cardinality: decl.cardinality,
@@ -709,6 +713,7 @@ mod tests {
             encoding: None,
             when: None,
             gate_note: None,
+            exposure: None,
             ttl_s: None,
             rate: None,
             cardinality: None,

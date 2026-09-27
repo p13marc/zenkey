@@ -108,6 +108,7 @@ fn the_topic_verdict_vocabulary_is_snake_case_and_partial_reports_omit() {
         encoding: None,
         when: Vec::new(),
         gate_note: None,
+        exposure: None,
         since: None,
         description: None,
     };
@@ -155,6 +156,7 @@ fn no_topic_info_field_is_dead_the_constructor_reaches_them_all() {
         encoding = "application/cbor"
         when = ["capability:disk"]
         gate_note = "only a host with a mounted disk"
+        exposure = "link"
         since = "1.0"
         description = "bytes used per mount"
     "#;

@@ -267,6 +267,7 @@ description = "receiver RTT p95 (us)"
 
 [[subject]]
 path = "sockets/tcp/connlat_us_p50"
+exposure = "host"
 class = "telemetry"
 type = "TelemetryPoint"
 when = ["feature:ebpf"]

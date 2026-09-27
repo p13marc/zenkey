@@ -391,6 +391,7 @@ path = "expectations/set"
 kind = "write"
 request = "ExpectationsConfig"
 reply = "Ack"
+exposure = "host"
 since = "1.0"
 description = "apply expectations configuration (sentinel expectations hot-swap)"
 [[procedure]]

@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39, v1.40 and v1.41 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39, v1.40, v1.41 and v1.43 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -239,6 +239,7 @@ Normative field table (`[[subject]]`; `[[procedure]]`/`[[media]]` analogous):
 | `delivery` | `full` (default) \| `invalidate` | no | oversized-state pattern ([04-planes.md §1.2](04-planes.md)) |
 | `when` | array of `"<kind>:<name>"` | no (v1.35) | the conditions under which this surface exists, **ANDed**. Closed kind vocabulary: `feature` — a build-time feature of the producer's build (a cargo feature, a compile flag); `config` — an operator-set knob (a config key, an environment switch); `capability` — something the host must expose (a kernel family, a device, a privilege). `<name>` is free text without whitespace, meaningful to the producer's operator. Examples from the adopters: `["feature:ebpf", "config:collect.ebpf", "capability:CAP_BPF"]` (a socket-latency gauge), `["config:container.upstream.enabled"]`, `["capability:net_shaper"]` (a kernel ≥ 6.13 interface). Semantics in §6.1 |
 | `gate_note` | string | no (only with `when`) | one line for the human deciding whether the gate still exists — the prose the v1.25 ledger carried |
+| `exposure` | enum `host \| link \| fleet` | no (default `fleet`, v1.43) | how far this surface may travel, as a property of the *subject* — the same counter is `host` on every node that carries it, never a fact about one router. **host** — never leaves the node: the detail an operator reads on the host bus and nowhere else, denied on every constrained face ([09 §4](09-operations.md)); **link** — may cross a constrained link, at that face's rate — the few values a far-side operator acts on; **fleet** — everywhere, unconditioned. Read by the router profile 09 §4 generates and by nothing else: it says where a value may go, never what it must be, and no judge reads it |
 | `encoding` | MIME-ish string (`application/cbor`, `application/json`, `application/protobuf`, `application/cdr`) | no (RECOMMENDED, v1.5) | the payload encoding a consumer should expect; resolution order is sample `Encoding` > this field > sniff on read, and declared > this field > the schema kind's own on write ([04-planes.md §3](04-planes.md), §7) |
 | `since` / `gone` / `replaced_by` | registry versions / path | `since` yes | lifecycle (§3) |
 | `description` | string | yes | one line, human |
@@ -398,6 +399,8 @@ they too have their own normative field table:
 | `cardinality` | integer | yes if `path` has any `{var}` | key-population bound, budget-reviewed — same rule as `[[subject]]` |
 | `when` | array of `"<kind>:<name>"` | no (v1.35) | as for `[[subject]]`, and binding: a `when` procedure MUST still be declared, and MUST answer `error/unsupported` when a `feature:` predicate is false and `error/gated` when a `config:` or `capability:` one is — a missing kernel family or privilege is fixed on the host, not by a rebuild; the reply's `message` SHOULD name the predicate (§6.1) |
 | `gate_note` | string | no (only with `when`) | as for `[[subject]]` |
+| `exposure` | enum `host \| link \| fleet` | no (default `fleet`, v1.43) | as for `[[subject]]`. A constrained face that carries any `host` procedure denies the **plane** — `**/@rpc/**`, the widest spelling — never the procedure by name, because deny is by inclusion ([09 §3 fact 6](09-operations.md)) and a query on the plane would cross before its concrete reply was denied |
+| `sensitive` | bool | no (`write` only, v1.43) | the request carries a secret — a PIN, a key, the parameter [05 §5.1](05-control-rpc.md) marks `sensitive`. A generated ACL ([09 §3](09-operations.md)) denies the procedure to **every** principal, `remote_actions` or not, and lifts the deny only for a `writes` grant that names it: RFC 8341's `default-deny-all`, as data. Refused on a `read`: a procedure that reads a secret back contradicts 05 §5.1 |
 | `encoding` | MIME-ish string | no (RECOMMENDED, v1.5) | request/reply payload encoding — same semantics as the `[[subject]]` field (§7) |
 | `since` / `gone` / `replaced_by` | registry versions / path | `since` yes | lifecycle (§3) |
 | `description` | string | yes | one line, human |

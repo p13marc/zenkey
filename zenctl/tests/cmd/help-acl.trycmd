@@ -78,6 +78,21 @@ Options:
       --allow-zid-subjects
           Admit `zid = "…"` subjects. Prototyping only: a ZID is not backed by authentication, and zenoh's own config says so
 
+      --face <constrained>
+          Plan a constrained face instead of the principals (RFC 09 §4): the `access_control` and `downsampling` blocks that keep the registry's `host`-exposed surfaces off one link and cap the `link`-exposed ones. Needs `--registry` — the markers are the registry's — and a `--link-protocol` or `--link-interface` to select the face
+
+          Possible values:
+          - constrained: A bandwidth-limited leaf: radio, cell, tactical, satellite
+
+      --link-protocol <PROTOCOL>
+          With --face: a link protocol that selects the face (`unixsock-stream`, `tcp`, …), repeatable. A unixsock-stream link reports no interface name in zenoh 1.10, so a modem lane is selected this way
+
+      --link-interface <IFACE>
+          With --face: an interface that selects the face (`wlan0`), repeatable
+
+      --link-interval <SECS|none>
+          With --face: what a `link`-exposed subject may cost — at most one sample every SECS per subject (a `downsampling` rule each), or `none` when no rate is affordable (a billed channel), which keeps the `link` subjects home too. Required with --face, because the default is allow
+
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.
           
