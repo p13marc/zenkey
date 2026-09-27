@@ -278,6 +278,17 @@ pub(crate) struct ProcedureEntry {
     pub encoding: Option<String>,
 }
 
+/// One `[[error]]` entry (RFC 08 §2, v1.40): a producer's own error name,
+/// `error/<producer>/<name>` on the wire (RFC 05 §3).
+pub(crate) struct ErrorEntry {
+    pub name: String,
+    /// `SCREAMING_SNAKE` of the name, the generated constant's identifier.
+    pub constant: String,
+    /// The procedures that may answer with it, each a declared path.
+    #[allow(dead_code)] // linted here; served verbatim through introspect
+    pub procedures: Vec<String>,
+}
+
 /// One `[[media]]` entry (RFC 08 §2; modeled since v1.5 — H2 delivers the
 /// v1.3 builder-codegen promise).
 #[allow(dead_code)] // consumed by the media-codegen commit (#10)
@@ -355,6 +366,8 @@ pub(crate) struct RegistryFile {
     pub procedures: Vec<ProcedureEntry>,
     pub media: Vec<MediaEntry>,
     pub blob: Vec<BlobEntry>,
+    /// The producer's own error names (RFC 08 §2, v1.40).
+    pub errors: Vec<ErrorEntry>,
     pub deprecated: Vec<Deprecated>,
     /// The file's compatibility level (RFC 08 §3.1): `backward` (default)
     /// pins its entries in `registry.lock`; `none` opts out, loudly.
@@ -388,6 +401,8 @@ pub(crate) struct Deprecated {
 pub(crate) enum EntryKind {
     Subject,
     Procedure,
+    /// An `[[error]]` name (RFC 08 §2, v1.40).
+    Error,
 }
 
 impl EntryKind {
@@ -396,6 +411,7 @@ impl EntryKind {
         match self {
             EntryKind::Subject => "subject",
             EntryKind::Procedure => "procedure",
+            EntryKind::Error => "error",
         }
     }
 
@@ -403,6 +419,7 @@ impl EntryKind {
         match s {
             "subject" => Some(EntryKind::Subject),
             "procedure" => Some(EntryKind::Procedure),
+            "error" => Some(EntryKind::Error),
             _ => None,
         }
     }
@@ -1510,6 +1527,82 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             });
         }
 
+        // [[error]] entries (RFC 08 §2, v1.40): the producer's own error
+        // names. Linted like a subject — a plain-chunk name, no collision with
+        // the reserved vocabulary, no duplicate, `procedures` naming declared
+        // paths — because RFC 05 §3 said they were "registered like subjects"
+        // and, until this, nothing registered them.
+        let mut errors: Vec<ErrorEntry> = Vec::new();
+        if let Some(arr) = doc.get("error").and_then(|v| v.as_array()) {
+            for entry in arr {
+                let ename = entry
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| lint(&fname, "[[error]] missing name"))?;
+                if !zenkey::rpc_error::is_valid_error_name(ename) {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "error {ename:?}: a name is one or more of [a-z0-9-], neither \
+                             starting nor ending with `-` — it is spelled on the wire as \
+                             `error/{name}/{ename}` (RFC 05 §3)"
+                        ),
+                    ));
+                }
+                let wire = zenkey::rpc_error::producer_error(&name, ename);
+                if zenkey::rpc_error::is_reserved(&format!("error/{ename}")) {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "error {ename:?} spells a reserved name — `error/{ename}` is the \
+                             convention's own (RFC 05 §3); a producer's names live under \
+                             `error/{name}/…` and this one would be read as that"
+                        ),
+                    ));
+                }
+                if errors.iter().any(|e| e.name == ename) {
+                    return Err(lint(&fname, format!("error {ename:?} declared twice")));
+                }
+                if entry.get("description").and_then(|v| v.as_str()).is_none() {
+                    return Err(lint(
+                        &fname,
+                        format!("error {ename:?}: missing description"),
+                    ));
+                }
+                if !draft && entry.get("since").and_then(|v| v.as_str()).is_none() {
+                    return Err(lint(
+                        &fname,
+                        format!("error {ename:?}: missing since (RFC 08 §3)"),
+                    ));
+                }
+                let answered_by: Vec<String> = entry
+                    .get("procedures")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for p in &answered_by {
+                    if !procedures.iter().any(|d| &d.path == p) {
+                        return Err(lint(
+                            &fname,
+                            format!(
+                                "error {ename:?} ({wire}) names procedure {p:?}, which this \
+                                 file does not declare"
+                            ),
+                        ));
+                    }
+                }
+                errors.push(ErrorEntry {
+                    name: ename.to_string(),
+                    constant: ename.to_uppercase().replace('-', "_"),
+                    procedures: answered_by,
+                });
+            }
+        }
+
         // [[media]] entries (RFC 08 §2): patterns validated; a `{var}`-bearing
         // media path MUST declare a `cardinality` (the highest-bandwidth plane
         // must bound its fan-out — the `{tier}` chunk multiplies it), and every
@@ -1797,7 +1890,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                             &fname,
                             format!(
                                 "[[deprecated]] {path:?} has kind = {k:?} — it is \
-                                 `subject` (the default) or `procedure` (RFC 08 §3)"
+                                 `subject` (the default), `procedure` or `error` (RFC 08 §3)"
                             ),
                         )
                     })?,
@@ -1811,6 +1904,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             let live = match d.kind {
                 EntryKind::Subject => subjects.iter().any(|s| s.path == d.path),
                 EntryKind::Procedure => procedures.iter().any(|p| p.path == d.path),
+                EntryKind::Error => errors.iter().any(|e| e.name == d.path),
             };
             if live {
                 return Err(lint(
@@ -1836,6 +1930,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
             procedures,
             media: media_entries,
             blob: blob_entries,
+            errors,
             deprecated,
             compat,
             budget,
@@ -2001,6 +2096,12 @@ fn compat_lock_lines(files: &[RegistryFile]) -> Vec<String> {
                 p.reply.as_deref().unwrap_or("-"),
             ));
         }
+        // An error name has no shape to pin, only its existence (RFC 08 §2,
+        // v1.40): a line says it was declared, and removing it without a
+        // `[[deprecated]]` entry is the vanished-without-retirement lint.
+        for e in &f.errors {
+            lines.push(format!("error\t{}\t{}", f.name, e.name));
+        }
     }
     lines.sort();
     lines
@@ -2015,7 +2116,8 @@ fn compat_lock_content(files: &[RegistryFile]) -> String {
          # path) is refused — retire through [[deprecated]] and add a sibling\n\
          # instead (RFC 08 §3). A subject line's optional sixth column is its\n\
          # declared `kind` (RFC 08 §2, v1.32): adding one is additive,\n\
-         # changing or removing one is incompatible.\n",
+         # changing or removing one is incompatible. An `error` line pins a\n\
+         # declared error name (RFC 08 §2, v1.40), which retires like a subject.\n",
     );
     for l in compat_lock_lines(files) {
         out.push_str(&l);
@@ -2332,8 +2434,8 @@ fn parse_ledger_line(l: &str) -> Result<(EntryKind, &str, &str), Error> {
                 "deprecated.lock",
                 format!(
                     "ledger line {l:?} starts with {kind:?} — a three-field line \
-                     is `<kind>\\t<producer>\\t<path>`, kind `subject` or \
-                     `procedure` (RFC 08 §3)"
+                     is `<kind>\\t<producer>\\t<path>`, kind `subject`, \
+                     `procedure` or `error` (RFC 08 §3)"
                 ),
             )),
         },
@@ -3388,6 +3490,76 @@ mod tests {
         );
         std::fs::write(dir.join("t.toml"), &retired).unwrap();
         std::fs::write(dir.join("deprecated.lock"), "procedure\tt\trotate\n").unwrap();
+        let update = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+        assert_eq!(update.retired, 1);
+        assert!(update.forced.is_empty(), "retirement is not a break");
+        assert!(
+            Config::new()
+                .registry_dir(&dir)
+                .no_rerun_if_changed()
+                .lint()
+                .is_ok()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `[[error]]` (RFC 08 §2, v1.40): a name is a plain chunk, never a
+    /// reserved one, declared once, with `procedures` naming declared paths,
+    /// and it carries a description like every other entry.
+    #[test]
+    fn error_entries_are_linted() {
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{PROCEDURE_V1}\n");
+        let entry = |name: &str, extra: &str| {
+            format!(
+                "{base}[[error]]\nname = \"{name}\"\n{extra}since = \"1.0\"\ndescription = \"d\"\n"
+            )
+        };
+        assert!(
+            lint_one(&entry("restart-required", "procedures = [\"rotate\"]\n")).is_ok(),
+            "a well-formed entry naming a declared procedure lints"
+        );
+        let refused = |content: String| lint_one(&content).unwrap_err().to_string();
+        assert!(refused(entry("Restart", "")).contains("[a-z0-9-]"));
+        assert!(refused(entry("gated", "")).contains("reserved"));
+        assert!(refused(entry("x", "procedures = [\"nope\"]\n")).contains("does not declare"));
+        let twice = format!(
+            "{}[[error]]\nname = \"x\"\nsince = \"1.0\"\ndescription = \"d\"\n",
+            entry("x", "")
+        );
+        assert!(refused(twice).contains("declared twice"));
+        assert!(
+            refused(format!("{base}[[error]]\nname = \"x\"\nsince = \"1.0\"\n"))
+                .contains("missing description")
+        );
+    }
+
+    /// An error name pins its existence, and retires through the ledger with
+    /// `kind = "error"` (RFC 08 §3, v1.40) the way a procedure does.
+    #[test]
+    fn an_error_retires_through_the_same_ledger_a_procedure_does() {
+        let dir = lock_dir("retire-error");
+        let error = "[[error]]\nname = \"x\"\nsince = \"1.0\"\ndescription = \"d\"\n";
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}\n{error}");
+        std::fs::write(dir.join("t.toml"), &base).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(dir.join("registry.lock"))
+                .unwrap()
+                .contains("error\tt\tx"),
+            "the name is pinned"
+        );
+
+        let retired = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}\n[[deprecated]]\nkind = \"error\"\npath = \"x\"\ngone = \"1.1\"\n"
+        );
+        std::fs::write(dir.join("t.toml"), &retired).unwrap();
+        std::fs::write(dir.join("deprecated.lock"), "error\tt\tx\n").unwrap();
         let update = Config::new()
             .registry_dir(&dir)
             .write_compat_lock(OnIncompatible::Refuse)

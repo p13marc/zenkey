@@ -563,6 +563,44 @@ pub struct ProcedureDecl {
     pub description: Option<String>,
 }
 
+/// One `[[error]]` entry of a served registry slice (RFC 08 §2, v1.40): a
+/// producer-specific error name, `error/<producer>/<name>` on the wire
+/// (RFC 05 §3), declared so it is linted, pinned and introspected like a
+/// subject — and retired like one.
+///
+/// `#[non_exhaustive]` for the reason every other declaration is: the next
+/// column must not be a break.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ErrorDecl {
+    /// The name after the producer: `restart-required`, `device-refused`.
+    pub name: String,
+    /// The procedures that may answer with it, by path — empty when the
+    /// entry does not say.
+    pub procedures: Vec<String>,
+    pub since: Option<String>,
+    pub description: Option<String>,
+}
+
+impl ErrorDecl {
+    /// An error declaration with its one required column.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        ErrorDecl {
+            name: name.into(),
+            procedures: Vec::new(),
+            since: None,
+            description: None,
+        }
+    }
+
+    /// The wire name (RFC 05 §3): `error/<producer>/<name>`.
+    #[must_use]
+    pub fn wire_name(&self, producer: &str) -> String {
+        crate::rpc_error::producer_error(producer, &self.name)
+    }
+}
+
 /// One `[[blob]]` entry of a served registry slice (RFC 08 §2, v1.8).
 ///
 /// Unlike the other declarations this one has no `path`: RFC 07 §2 fixes the
@@ -713,6 +751,9 @@ pub enum DeprecatedKind {
     #[default]
     Subject,
     Procedure,
+    /// An `[[error]]` name (RFC 08 §2, v1.40) — deprecate-never-reuse
+    /// applies to it as RFC 05 §3 always said it did.
+    Error,
 }
 
 impl DeprecatedKind {
@@ -721,6 +762,7 @@ impl DeprecatedKind {
         match self {
             DeprecatedKind::Subject => "subject",
             DeprecatedKind::Procedure => "procedure",
+            DeprecatedKind::Error => "error",
         }
     }
 }
@@ -732,6 +774,7 @@ impl std::str::FromStr for DeprecatedKind {
         match s {
             "subject" => Ok(DeprecatedKind::Subject),
             "procedure" => Ok(DeprecatedKind::Procedure),
+            "error" => Ok(DeprecatedKind::Error),
             _ => Err(()),
         }
     }
@@ -769,6 +812,10 @@ pub struct RegistrySlice {
     /// closing the asymmetry v1.8 recorded). Same tolerance as `blob`:
     /// empty for non-media producers and for every slice written earlier.
     pub media: Vec<MediaDecl>,
+    /// The producer's own error names (RFC 05 §3, RFC 08 §2, v1.40). Empty
+    /// for every slice that declares none, and for every slice written
+    /// earlier — the same tolerance as `blob` and `media`.
+    pub errors: Vec<ErrorDecl>,
     pub deprecated: Vec<DeprecationDecl>,
     /// The producer's declared cost (RFC 08 §2, v1.32). `None` for every
     /// slice that declares none, and for every slice written earlier —
@@ -1001,6 +1048,7 @@ impl RegistrySlice {
             procedures: Vec::new(),
             blob: Vec::new(),
             media: Vec::new(),
+            errors: Vec::new(),
             deprecated: Vec::new(),
             budget: None,
         }
@@ -1247,6 +1295,26 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         });
     }
 
+    // `[[error]]` (RFC 08 §2, v1.40): the name is the one required column;
+    // the rest is read leniently, like every other entry kind here.
+    let mut errors = Vec::new();
+    for e in array("error") {
+        errors.push(ErrorDecl {
+            name: s(e.get("name")).ok_or_else(|| err("[[error]] missing name"))?,
+            procedures: e
+                .get("procedures")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            since: s(e.get("since")),
+            description: s(e.get("description")),
+        });
+    }
+
     let mut deprecated = Vec::new();
     for e in array("deprecated") {
         let path = s(e.get("path")).ok_or_else(|| err("[[deprecated]] missing path"))?;
@@ -1255,7 +1323,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
             Some(k) => k.parse().map_err(|()| {
                 err(&format!(
                     "[[deprecated]] {path:?} has kind = {k:?} — it is `subject` \
-                     (the default) or `procedure`"
+                     (the default), `procedure` or `error`"
                 ))
             })?,
         };
@@ -1278,6 +1346,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         procedures,
         blob,
         media,
+        errors,
         deprecated,
         budget,
     })
@@ -1453,6 +1522,17 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
         opt(&mut out, "description", d.description.as_deref());
     }
 
+    for d in &slice.errors {
+        out.push_str("\n[[error]]\n");
+        out.push_str(&format!("name = {}\n", s(&d.name)));
+        if !d.procedures.is_empty() {
+            let items: Vec<String> = d.procedures.iter().map(|p| s(p)).collect();
+            out.push_str(&format!("procedures = [{}]\n", items.join(", ")));
+        }
+        opt(&mut out, "since", d.since.as_deref());
+        opt(&mut out, "description", d.description.as_deref());
+    }
+
     for d in &slice.deprecated {
         out.push_str("\n[[deprecated]]\n");
         out.push_str(&format!("path = {}\n", s(&d.path)));
@@ -1620,6 +1700,7 @@ pub fn diff(served: &RegistrySlice, local: &RegistrySlice) -> Vec<SliceFinding> 
         let still_served = match d.kind {
             DeprecatedKind::Subject => served.serves_subject(&d.path),
             DeprecatedKind::Procedure => served.serves_procedure(&d.path),
+            DeprecatedKind::Error => served.errors.iter().any(|e| e.name == d.path),
         };
         if still_served {
             out.push(SliceFinding::ServesDeprecated {
@@ -1825,6 +1906,29 @@ description = "reachable"
     /// carries: parse → emit → parse yields the identical slice. Without this,
     /// `zenctl registry export --as toml` would be a formatter nobody could
     /// trust to feed back in (#50's own acceptance).
+    /// `[[error]]` entries (v1.40) round-trip like every other entry kind,
+    /// a slice without any stays byte-identical, and the deprecated kind
+    /// admits `error`.
+    #[test]
+    fn error_entries_round_trip() {
+        let source = "[registry]\nversion = \"2.0\"\napp = \"acme\"\nconvention = 1\n\n[producer]\nname = \"modem\"\n\n[[error]]\nname = \"restart-required\"\nprocedures = [\"config/{device}/{group}/set\"]\nsince = \"2.0\"\ndescription = \"the parameter is part of what the transport was started against\"\n\n[[error]]\nname = \"device-refused\"\n\n[[deprecated]]\npath = \"not-ready\"\nkind = \"error\"\nsince = \"2.0\"\n";
+        let slice = parse_slice(source).expect("parses");
+        assert_eq!(slice.errors.len(), 2);
+        assert_eq!(slice.errors[0].name, "restart-required");
+        assert_eq!(slice.errors[0].procedures, ["config/{device}/{group}/set"]);
+        assert_eq!(
+            slice.errors[0].wire_name("modem"),
+            "error/modem/restart-required"
+        );
+        assert!(slice.errors[1].procedures.is_empty());
+        assert_eq!(slice.deprecated[0].kind, DeprecatedKind::Error);
+        let again = parse_slice(&to_toml(&slice)).expect("the export parses");
+        assert_eq!(again, slice);
+        let bare = parse_slice("[registry]\nversion = \"1.0\"\napp = \"a\"\nconvention = 1\n[producer]\nname = \"p\"\n").expect("parses");
+        assert!(bare.errors.is_empty());
+        assert!(!to_toml(&bare).contains("[[error]]"));
+    }
+
     #[test]
     fn toml_export_round_trips_every_carried_field() {
         let source = r#"

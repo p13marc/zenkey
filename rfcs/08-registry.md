@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36 and v1.39 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39 and v1.40 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -410,6 +410,25 @@ effect. `fanout = "forbidden"` on a `kind = "write"` procedure makes the
 ([05-control-rpc.md §2.1](05-control-rpc.md)). Procedure key builders are
 generated from these entries exactly as subject/media builders are.
 
+`[[error]]` entries (v1.40) are the fifth shape: a producer's own error
+names, which [05 §3](05-control-rpc.md) has always said are "registered
+like subjects" and which, until this amendment, nothing registered. One
+entry per name; the wire name is `error/<producer>/<name>`.
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `name` | string | yes | one or more of `[a-z0-9-]`, neither starting nor ending with `-`: the chunk after the producer in `error/<producer>/<name>`. A name that spells a reserved one (`gated`, `busy`, … — [05 §3](05-control-rpc.md)) is refused, because a caller would read it as the convention's |
+| `procedures` | array of procedure paths | no | which of this file's procedures may answer with it; each MUST be a declared `[[procedure]]` path of the same file |
+| `since` / `gone` / `replaced_by` | registry versions / name | `since` yes | lifecycle (§3): an error is retired through `[[deprecated]]` with `kind = "error"`, never deleted |
+| `description` | string | yes | one line, human — what the caller's next step is, since that is what an error name exists to decide |
+
+An error entry has no shape to pin, so §3.1 pins its existence:
+`error\t<producer>\t<name>` in `registry.lock`, and removing one without
+retiring it is the vanished-without-retirement lint. Codegen emits one
+constant per name (`error::RESTART_REQUIRED`), spelled as the wire carries
+it, so a responder can no more misspell its own error than it can a key;
+`introspect` serves the entries with the rest of the slice (§6).
+
 Variable rules:
 
 - `{var}` = exactly one chunk; MUST document its domain (device name, unit
@@ -508,7 +527,10 @@ registry version to coordinate.
   `<producer>\t<path>` line remains valid and means `subject`, so no
   existing ledger is rewritten. Kind is part of the identity: retiring the
   subject `dual` says nothing about a procedure of the same name, and
-  neither releases the other's pin.
+  neither releases the other's pin. *`error`, added in v1.40:* an
+  `[[error]]` name retires the same way, `kind = "error"`, and its `path`
+  is the name — the `error/<producer>/` prefix is the wire's, not the
+  registry's.
 - **A subject's payload type may evolve compatibly** (additive fields) under
   the payload format's own rules (self-describing encodings — CBOR/JSON —
   tolerate additive change). An incompatible payload change is a **new
@@ -706,7 +728,8 @@ The static TOML is the *authority*; a running fleet additionally serves
 the *observation* of it. Every producer MUST serve
 `@rpc/<producer>/introspect` (read, idempotent) returning the registry
 slice it was **compiled against** — its subjects, procedures, blob tiers
-(v1.8), media streams (v1.16), and registry file version. (Through v1.7
+(v1.8), media streams (v1.16), error names (v1.40), and registry file
+version. (Through v1.7
 this sentence claimed "media shapes" while the slice never carried them;
 v1.8 corrected the claim rather than quietly widening it, and v1.16
 delivers it — see the asymmetry note in §2.) The reply is generated from the same
