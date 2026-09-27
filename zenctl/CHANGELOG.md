@@ -6,6 +6,30 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## 0.9.0 (2026-09-27) — a noun for configuration, a face for a link
+
+One new noun and one new flag family, and no moved spelling: a script
+written against 0.8.0 runs unchanged. **`config get|set|confirm|cancel|
+extend|persist`** (marcpardo/zenkey#473, RFC 05 §5.1) reads a resource's
+served schema beside its values, changes one group typed against that
+schema — the producer's own validator runs here, so a refusal reads the
+same as it would on the wire — refuses a `reach` group without
+`--confirm`, and asks before sending one (`--yes` for a script); `*` is
+refused at the edge. **`acl gen --face constrained --link-protocol … |
+--link-interface … --link-interval <SECS|none>`** (marcpardo/zenkey#475,
+RFC 09 §4) plans one constrained face from the registry's `exposure`
+markers instead of the enrollment's principals — the `access_control`
+and `downsampling` blocks under a permissive default — and needs
+`--registry`. `topic info` gains an `exposure` row. The exit contract is
+unchanged.
+
+| 0.8.0 | 0.9.0 |
+|---|---|
+| — | `zenctl config get h-3fa9c2d41b7e modem rf0` |
+| — | `zenctl config set h-3fa9c2d41b7e modem rf0 radio frequency_khz=868100 --confirm 60` |
+| — | `zenctl config confirm h-3fa9c2d41b7e modem rf0 <TOKEN>` |
+| — | `zenctl acl gen --enrollment e.toml --registry registry --face constrained --link-protocol unixsock-stream --link-interval 60 --json5` |
+
 ## 0.8.0 (2026-09-25) — the watchdog reads the alert plane
 
 One new rule and no moved spelling: a script written against 0.7.0 runs
