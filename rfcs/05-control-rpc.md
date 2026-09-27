@@ -1,6 +1,6 @@
 # 05 — Control Plane: `@rpc`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31 and v1.38 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38 and v1.40 — see [CHANGELOG.md](CHANGELOG.md)*
 
 All interaction — questions, instructions, downloads-of-detail — happens on
 the `@rpc` plane through **queryables** (request/reply), never through
@@ -149,9 +149,12 @@ convention reserves `error/invalid-args`, `error/unauthorized`,
 `error/not-found`, `error/unsupported`, `error/busy`, `error/gated`, and
 (v1.38) `error/fanout-forbidden` — a broadcast reached a write whose entry is
 not `fanout = "allowed"`, refused at the server (§2.1);
-producer-specific names live under `error/<producer>/…` and are registered
-like subjects — deprecate-never-reuse applies
-([08-registry.md](08-registry.md)). A successful write replies with an
+producer-specific names live under `error/<producer>/…` and are declared
+as `[[error]]` entries ([08 §2](08-registry.md), v1.40) — linted, pinned
+in the lock, served by `introspect`, and retired through `[[deprecated]]`
+with `kind = "error"`, so deprecate-never-reuse applies to them exactly as
+it does to a subject. (Through v1.39 this sentence said they were
+"registered like subjects", and no entry kind existed to register them.) A successful write replies with an
 empty or result-bearing value. (Envelopes are shown as JSON for
 readability; the wire encoding is the deployment's payload default,
 CBOR in the reference application.)

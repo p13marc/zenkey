@@ -455,3 +455,12 @@ reply = "CgroupNode"
 idempotent = true
 since = "1.0"
 description = "cgroup subtree (?path=<rel>)"
+
+# An `[[error]]` entry (RFC 08 §2, v1.40): the producer's own error name,
+# `error/systemd/unit-not-found` on the wire, declared so it is linted, pinned
+# and introspected like a subject. `procedures` names what may answer with it.
+[[error]]
+name = "unit-not-found"
+procedures = ["action/set"]
+since = "1.1"
+description = "the named unit does not exist on this host — distinct from the reserved error/not-found, so a caller can tell a missing unit from a missing procedure"

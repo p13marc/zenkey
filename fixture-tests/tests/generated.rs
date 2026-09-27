@@ -715,3 +715,25 @@ fn encoding_defaults_to_none_in_the_fixture_corpus() {
     assert_eq!(netring::Subject::Health.encoding(), None);
     assert_eq!(netring::ProcedureId::Introspect.encoding(), None);
 }
+
+/// `[[error]]` entries (RFC 08 §2, v1.40) generate one constant per name,
+/// spelled as the wire carries it, plus the list a renderer iterates.
+#[test]
+fn error_names_are_constants() {
+    assert_eq!(
+        zenkey_fixture_tests::registry::systemd::error::UNIT_NOT_FOUND,
+        "error/systemd/unit-not-found"
+    );
+    assert!(
+        zenkey_fixture_tests::registry::systemd::error::ALL
+            .contains(&("unit-not-found", "error/systemd/unit-not-found"))
+    );
+    // And the slice a consumer reads off `introspect` carries the entry.
+    let slice =
+        zenkey::parse_slice(zenkey_fixture_tests::registry::systemd::REGISTRY_TOML).expect("slice");
+    assert_eq!(slice.errors.len(), 1);
+    assert_eq!(
+        slice.errors[0].wire_name("systemd"),
+        "error/systemd/unit-not-found"
+    );
+}

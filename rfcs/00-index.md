@@ -6,13 +6,17 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.39** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.40** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.40** (2026-09-27) — the errors nobody registered: `[[error]]`, an
+  entry kind for a producer's own error names — linted, pinned, served by
+  `introspect`, retired through `[[deprecated]]`, one generated constant
+  per name (08 §2, §3, §6; 05 §3).
 - **v1.39** (2026-09-27) — the device's own restart: a counter under a
   device subject may reset when that device's `device/<device>/alive`
   token cycles, and a device token SHOULD cycle on the device's own
@@ -21,10 +25,6 @@ what changed and what deliberately did not — is
   at the server with `error/fanout-forbidden`, because a deny rule fires
   only when it *includes* the query's key expression and so never stops a
   query broader than itself (05 §2.1, §3; 09 §3 fact 6).
-- **v1.37** (2026-09-25) — the profile's histogram: the reference
-  application's `TelemetryValue::Histogram` shape — declared `buckets`,
-  per-bucket `counts` with the overflow last, `count`, `sum`, cumulative
-  since the producer started (11 §4).
 
 ---
 

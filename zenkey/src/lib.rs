@@ -77,6 +77,7 @@ pub mod origin;
 pub mod pattern;
 pub mod profile;
 pub mod qos;
+pub mod rpc_error;
 #[cfg(feature = "schema")]
 #[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
 pub mod schema;
@@ -100,7 +101,7 @@ pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, Servi
 pub use profile::{AppName, AppProfile, OriginSalt};
 pub use qos::QosProfile;
 pub use slice::{
-    Bound, Buckets, Declared, Fanout, ProcedureKind, RateClass, RegistrySlice, Semantic,
+    Bound, Buckets, Declared, ErrorDecl, Fanout, ProcedureKind, RateClass, RegistrySlice, Semantic,
     SliceFinding, SliceToken, SubjectKind, parse_slice, to_toml as slice_to_toml, toml_quote,
 };
 

@@ -4,7 +4,9 @@
 # path) is refused — retire through [[deprecated]] and add a sibling
 # instead (RFC 08 §3). A subject line's optional sixth column is its
 # declared `kind` (RFC 08 §2, v1.32): adding one is additive,
-# changing or removing one is incompatible.
+# changing or removing one is incompatible. An `error` line pins a
+# declared error name (RFC 08 §2, v1.40), which retires like a subject.
+error	systemd	unit-not-found
 procedure	catalog	introspect	read	-	RegistrySlice
 procedure	catalog	link	write	-	OperatorAssertion
 procedure	catalog	names	read	-	Vec<NameVal>

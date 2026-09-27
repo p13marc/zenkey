@@ -25,6 +25,38 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.40 (2026-09-27, the errors nobody registered)** — `[[error]]`, an
+> entry kind for a producer's own error names.
+>
+> **[08 §2](08-registry.md).** 05 §3 has said since v1.0 that a
+> producer's error names "are registered like subjects — deprecate-never-
+> reuse applies", and the registry had no entry kind to register them in:
+> nothing linted a name, nothing pinned one, `introspect` could not serve
+> one, and the one implementation of the reserved vocabulary lived in a
+> crate a producer without it could not reach. The fifth shape is one entry
+> per name — `name`, optional `procedures` that must name declared ones,
+> `since`, `description` — refused when the name is not a plain chunk or
+> spells a reserved one. It pins its existence in `registry.lock` (`error`
+> lines), retires through `[[deprecated]]` with `kind = "error"` (§3), and
+> generates one constant per name, spelled as the wire carries it. §6's
+> slice-contents sentence names error entries among what `introspect`
+> serves.
+>
+> **[05 §3](05-control-rpc.md).** The sentence points at the entry kind
+> that now exists, and records what it used to say.
+>
+> **What deliberately did not happen.** The reserved vocabulary is not a
+> registry: the six-plus-one names stay the convention's, spelled once in
+> the runtime crate, and an `[[error]]` that spells one is refused rather
+> than shadowed. No `request`/`reply` typing attaches to an error — the
+> envelope is `{error, message}` and stays so; a producer that wants
+> structured detail puts it in a state document, as 05 §3's long-running
+> pattern already does. Asked for by zenoh-modem (#474), which needs
+> `error/modem/restart-required` and `error/modem/device-refused` to mean
+> something a caller can branch on.
+>
+> *Amends: 05, 08.*
+
 > **v1.39 (2026-09-27, the device's own restart)** — a counter under a
 > device subject may reset when that device's token cycles.
 >

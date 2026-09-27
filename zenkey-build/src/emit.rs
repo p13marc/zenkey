@@ -692,6 +692,32 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
             let _ = writeln!(out, "        }}\n        key_from_canonical(k)\n    }}");
         }
 
+        // The producer's own error names (RFC 05 §3, RFC 08 §2, v1.40): one
+        // constant per name, spelled as the wire carries it, so a responder can
+        // no more misspell `error/<producer>/<name>` than it can a key.
+        if !f.errors.is_empty() {
+            let _ = writeln!(
+                out,
+                "\n    /// The error names this registry declares (RFC 05 §3, RFC 08 §2), \
+                 spelled `error/{}/<name>` on the wire.",
+                f.name
+            );
+            let _ = writeln!(out, "    pub mod error {{");
+            for e in &f.errors {
+                let wire = format!("error/{}/{}", f.name, e.name);
+                let _ = writeln!(out, "        /// `{wire}`");
+                let _ = writeln!(out, "        pub const {}: &str = {wire:?};", e.constant);
+            }
+            let _ = writeln!(out, "        /// Every declared name, as `(name, wire)`.");
+            let _ = writeln!(out, "        pub const ALL: &[(&str, &str)] = &[");
+            for e in &f.errors {
+                let wire = format!("error/{}/{}", f.name, e.name);
+                let _ = writeln!(out, "            ({:?}, {wire:?}),", e.name);
+            }
+            let _ = writeln!(out, "        ];");
+            let _ = writeln!(out, "    }}");
+        }
+
         // Procedures.
         if !f.procedures.is_empty() {
             let _ = writeln!(out, "\n    #[derive(Debug, Clone, Copy, PartialEq, Eq)]");
